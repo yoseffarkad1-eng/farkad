@@ -1033,11 +1033,15 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('the continue button opens the first unfilled worker',
     (await page.textContent('#assignSheetTitle')) === 'דוד');
+  check('opening the sheet is calm, with no advance animation',
+    (await page.locator('#assignSheet .sheet-content.sheet-swap').count()) === 0);
 
   await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
   await page.waitForTimeout(250);
   check('picking a site advances to the next unfilled worker',
     (await page.textContent('#assignSheetTitle')) === 'שרה');
+  check('and the move to a new name announces itself',
+    (await page.locator('#assignSheet .sheet-content.sheet-swap').count()) === 1);
   check('the sheet stays open through the run', await page.isVisible('#assignSheet'));
 
   await page.locator('.sheet-place').filter({ hasText: 'תל אביב' }).click();

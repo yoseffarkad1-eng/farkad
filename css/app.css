@@ -1419,8 +1419,22 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding-bottom: 10px;
     border-bottom: 1px solid var(--line-soft);
 }
-.sheet-head h3 { margin: 0; font-size: 19px; }
+/* The name is the whole question on this screen - "where did THIS one work?" - so it
+   gets headline size, not heading size. The sheet is answered thirty times an evening
+   and the name is the only thing that changes between answers. */
+.sheet-head h3 { margin: 0; font-size: 26px; line-height: 1.15; }
 .sheet-meta { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* Advancing to the next worker slides the whole card in and flashes the name line.
+   The layout is identical from worker to worker, so without a visible move the advance
+   reads as nothing happening - and a site gets tapped against the wrong name. The card
+   enters from the left: in a right-to-left page that is the forward direction. */
+.sheet-swap { animation: sheetSwap .35s ease-out 1; }
+.sheet-swap .sheet-head { animation: nowFlash .9s ease-out 1; }
+@keyframes sheetSwap {
+    0% { transform: translateX(-18px); opacity: .25; }
+    100% { transform: none; opacity: 1; }
+}
 
 .sheet-places {
     display: grid;
@@ -1550,7 +1564,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .undo-bar .btn-icon, .roster-actions .btn-icon { min-width: 44px; min-height: 44px; }
 
     /* the sheet: one big finger target per site */
-    .sheet-head h3 { font-size: 22px; }
+    .sheet-head h3 { font-size: 30px; }
     .sheet-place { min-height: 62px; font-size: 17.5px; }
     .sheet-actions button { min-height: 54px; font-size: 16.5px; }
     .chip-on, .chip-off { font-size: 14.5px; padding: 8px 14px; }

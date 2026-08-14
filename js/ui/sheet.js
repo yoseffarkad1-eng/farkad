@@ -14,7 +14,11 @@ let sheetWorkerId = null;
 function openAssignSheet(workerId) {
     sheetWorkerId = workerId;
     renderAssignSheet();
-    document.getElementById('assignSheet').style.display = 'flex';
+    const sheet = document.getElementById('assignSheet');
+    // Opening is calm; only an ADVANCE animates. A leftover swap class from the last
+    // run would replay the slide on open and dilute what it signals.
+    sheet.querySelector('.sheet-content').classList.remove('sheet-swap');
+    sheet.style.display = 'flex';
     document.addEventListener('keydown', sheetKeydown);
 }
 
@@ -68,6 +72,14 @@ function advanceSheet() {
     }
     sheetWorkerId = next;
     renderAssignSheet();
+
+    // The sheet looks the same from worker to worker, so without a visible move the
+    // only sign of the advance is a name changing in the corner - and the next tap
+    // records a site against the wrong worker.
+    const content = document.querySelector('#assignSheet .sheet-content');
+    content.classList.remove('sheet-swap');
+    void content.offsetWidth;   // restart the animation when advances come back to back
+    content.classList.add('sheet-swap');
 }
 
 function renderAssignSheet() {
