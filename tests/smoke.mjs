@@ -237,10 +237,8 @@ async function seedRoster(page) {
 
   check('the week has eight columns',
     (await page.locator('.week-table thead th').count()) === 8);
-  check('the week starts on Saturday, the way the accounts run',
-    (await page.locator('.week-table thead th').nth(1).textContent()).includes('שבת'));
-  check('and closes on Friday, the last working day',
-    (await page.locator('.week-table thead th').nth(7).textContent()).includes('שישי'));
+  check('the week starts on Friday, the way the accounts run',
+    (await page.locator('.week-table thead th').nth(1).textContent()).includes('שישי'));
   check('and Saturday rests, greyed but keeping its place',
     (await page.locator('.week-table thead th.col-rest').count()) === 1);
   check('a cell shows both sites rather than hiding one',
@@ -1038,14 +1036,18 @@ async function seedRoster(page) {
 
   await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
   await page.waitForTimeout(250);
-  check('picking a site advances to the next unfilled worker',
+  check('picking a site shows the ✓ land before anything moves',
+    (await page.textContent('#assignSheetTitle')) === 'דוד' &&
+    (await page.locator('#assignSheet .sheet-place-on').count()) === 1);
+  await page.waitForTimeout(1100);
+  check('then the sheet advances to the next unfilled worker by itself',
     (await page.textContent('#assignSheetTitle')) === 'שרה');
   check('and the move to a new name announces itself',
     (await page.locator('#assignSheet .sheet-content.sheet-swap').count()) === 1);
   check('the sheet stays open through the run', await page.isVisible('#assignSheet'));
 
   await page.locator('.sheet-place').filter({ hasText: 'תל אביב' }).click();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(1350);
   check('and again', (await page.textContent('#assignSheetTitle')) === 'עלי');
 
   // absence also advances - it is a complete answer for that worker
@@ -1082,7 +1084,8 @@ async function seedRoster(page) {
   for (let i = 0; i < 12; i++) {
     await page.locator('.sheet-place').first().click();
     taps++;
-    await page.waitForTimeout(90);
+    // the beat before the sheet moves itself along - see SHEET_ADVANCE_DELAY
+    await page.waitForTimeout(1150);
   }
   await page.waitForTimeout(200);
 
@@ -1101,7 +1104,7 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
 
   await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(1350);
   check('a first site moves the run along',
     (await page.textContent('#assignSheetTitle')) === 'שרה');
 
@@ -1260,9 +1263,9 @@ async function seedRoster(page) {
   const totals = await page.locator('.week-table tfoot td')
     .evaluateAll(nodes => nodes.map(n => n.textContent.trim()));
   check('the week counts how many people were out each day',
-    totals[3] === '2' && totals[4] === '1', JSON.stringify(totals));
+    totals[4] === '2' && totals[5] === '1', JSON.stringify(totals));
   check('and an absence is not counted as a day worked',
-    totals[4] === '1', JSON.stringify(totals));
+    totals[5] === '1', JSON.stringify(totals));
   await page.context().close();
 }
 
@@ -1393,11 +1396,12 @@ async function seedRoster(page) {
   check('a digit picks the site in that position',
     (await page.evaluate(() =>
       entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual')[0].placeId)) === 'p_02');
+  await page.waitForTimeout(1000);
   check('and the sheet moves on to the next name by itself',
     (await page.evaluate(() => sheetWorkerId)) === 'w_02');
 
   await page.keyboard.press('1');
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(1300);
   check('so a roster is a run of single keystrokes',
     (await page.evaluate(() =>
       entriesFor(State.schedule, '2026-08-12', 'w_02', 'actual')[0].placeId)) === 'p_01');
@@ -1411,7 +1415,7 @@ async function seedRoster(page) {
 
   // filling the last one closes the sheet by itself, which is the existing behaviour
   await page.keyboard.press('1');
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(1300);
   check('and the sheet closes itself when nobody is left',
     !(await page.locator('#assignSheet').isVisible()));
 
@@ -1957,33 +1961,40 @@ async function seedRoster(page) {
 
 // ---------------------------------------------------------------- the account period
 {
-  // The week closes on Friday: a period is Saturday through Friday, twice.
-  // The default range is the fortnight ending on the most recent Friday.
+  // An account is fourteen days, Friday through Thursday twice, and WHICH fortnight is
+  // anchored to the owner's own seam (2026-08-07) - not to whatever week today is in.
+  // The default range is the account containing today, whole.
   const page = await open();
   const rangeOn = day => page.evaluate(d => {
     todayStr = () => d;
     return defaultPayrollRange();
   }, day);
 
-  const onFriday = await rangeOn('2026-08-14');     // a Friday: settlement day
-  check('on a Friday the account ends today',
-    onFriday.from === '2026-08-01' && onFriday.to === '2026-08-14',
-    JSON.stringify(onFriday));
+  const midAccount = await rangeOn('2026-08-14');   // a Friday, day 7 of the account
+  check('mid-account the range is the running account, whole',
+    midAccount.from === '2026-08-07' && midAccount.to === '2026-08-20',
+    JSON.stringify(midAccount));
 
-  const onSaturday = await rangeOn('2026-08-15');   // the day after settlement
-  check('on a Saturday it still shows the account just settled',
-    onSaturday.to === '2026-08-14', JSON.stringify(onSaturday));
+  const closingDay = await rangeOn('2026-08-20');   // the account's last Thursday
+  check('on the closing Thursday it is still the same account',
+    closingDay.from === '2026-08-07' && closingDay.to === '2026-08-20',
+    JSON.stringify(closingDay));
 
-  const onWednesday = await rangeOn('2026-08-12');
-  check('mid-week it reaches back to the previous Friday',
-    onWednesday.to === '2026-08-07' && onWednesday.from === '2026-07-25',
-    JSON.stringify(onWednesday));
+  const nextOpen = await rangeOn('2026-08-21');     // the next account's first Friday
+  check('the Friday after that opens the next account',
+    nextOpen.from === '2026-08-21' && nextOpen.to === '2026-09-03',
+    JSON.stringify(nextOpen));
 
-  check('and every account runs Saturday to Friday',
+  const beforeAnchor = await rangeOn('2026-08-06');
+  check('an account before the anchor still lands on its own Friday',
+    beforeAnchor.from === '2026-07-24' && beforeAnchor.to === '2026-08-06',
+    JSON.stringify(beforeAnchor));
+
+  check('and every account runs Friday to Thursday',
     (await page.evaluate(() => {
       const r = defaultPayrollRange();
       return [parseLocalDate(r.from).getDay(), parseLocalDate(r.to).getDay()];
-    })).join() === '6,5');
+    })).join() === '5,4');
   await page.context().close();
 }
 
@@ -2106,8 +2117,9 @@ async function seedRoster(page) {
 
 // ---------------------------------------------------------------- printed in colour
 {
-  // Site colours are inline styles, and a browser prints backgrounds only if the person
-  // ticks the box. White text on an unprinted background is a blank page.
+  // Site colours are inline styles, and by default a browser prints backgrounds only if
+  // the person ticks the box. print-color-adjust ticks it from the stylesheet, so the
+  // printed week - and the PDF that reaches WhatsApp - keeps its colours.
   const page = await open();
   await seedRoster(page);
   await page.evaluate(() => {
@@ -2120,11 +2132,16 @@ async function seedRoster(page) {
 
   const printed = await page.locator('.cell-line').first().evaluate(node => {
     const style = getComputedStyle(node);
-    return { colour: style.color, background: style.backgroundColor };
+    return {
+      colour: style.color,
+      background: style.backgroundColor,
+      adjust: style.webkitPrintColorAdjust || style.printColorAdjust
+    };
   });
-  check('on paper the site badge is black text, not white on nothing',
-    printed.colour === 'rgb(0, 0, 0)' &&
-    printed.background === 'rgba(0, 0, 0, 0)', JSON.stringify(printed));
+  check('on paper the site badge keeps its colour instead of going blank',
+    printed.background !== 'rgba(0, 0, 0, 0)' &&
+    printed.colour === 'rgb(255, 255, 255)' &&
+    printed.adjust === 'exact', JSON.stringify(printed));
   await page.emulateMedia({ media: 'screen' });
   await page.context().close();
 }
@@ -2318,14 +2335,14 @@ async function seedRoster(page) {
   await page.waitForTimeout(300);
   check('the ☰ opens the days drawer',
     await page.locator('.day-drawer.drawer-open').isVisible());
-  check('two working weeks: twelve days, no Saturdays',
-    (await page.locator('.drawer-day').count()) === 12 &&
+  check('two whole accounts: twenty-four working days, no Saturdays',
+    (await page.locator('.drawer-day').count()) === 24 &&
     !(await page.textContent('#dayDrawerList')).includes('שבת'));
-  check('grouped as this week and last week',
-    (await page.textContent('#dayDrawerList')).includes('השבוע') &&
-    (await page.textContent('#dayDrawerList')).includes('שבוע שעבר'));
-  check('each week opens on Sunday, the first day after the rest',
-    (await page.locator('.drawer-day .dd-name').first().textContent()).includes('ראשון'));
+  check('grouped as the running account and the one before it',
+    (await page.textContent('#dayDrawerList')).includes('החשבון הנוכחי') &&
+    (await page.textContent('#dayDrawerList')).includes('החשבון הקודם'));
+  check('each account opens on Friday, its first working day',
+    (await page.locator('.drawer-day .dd-name').first().textContent()).includes('שישי'));
   check('a finished day wears a check mark',
     (await page.locator('.drawer-day.dd-full .dd-count').first().textContent()) === '✓ 3/3');
   check('and today is named as such',

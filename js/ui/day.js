@@ -159,11 +159,12 @@ function bulkAssign(place) {
 
 // ---------------------------------------------------------------- days drawer
 //
-// Behind the ☰: the account fortnight as the owner runs it. Two weeks, each running
-// SATURDAY to FRIDAY - so the rows open on Sunday, with Saturdays left out entirely,
-// because a rest day in a list of working days is a row somebody taps by mistake.
-// Grouped under this-week and last-week headings, a jump-to-today on top, full day
-// names throughout.
+// Behind the ☰: the account fortnight as the owner runs it, not calendar weeks. An
+// account is fourteen days, Friday through Thursday twice - twelve worked, Saturdays
+// left out entirely, because a rest day in a list of working days is a row somebody
+// taps by mistake. The running account is shown whole, first working Friday down to
+// its last Thursday, with the account before it underneath for late corrections. A
+// jump-to-today on top, full day names throughout.
 
 function openDayDrawer() {
     renderDayDrawer();
@@ -199,18 +200,18 @@ function renderDayDrawer() {
         });
     list.appendChild(back);
 
-    const thisWeekStart = snapToWeekStart(parseLocalDate(today));
-    drawerWeek(list, 'השבוע', thisWeekStart, today);
-    const lastWeekStart = new Date(thisWeekStart);
-    lastWeekStart.setDate(thisWeekStart.getDate() - 7);
-    drawerWeek(list, 'שבוע שעבר', lastWeekStart, today);
+    const currentStart = accountStart(parseLocalDate(today));
+    drawerWeek(list, 'החשבון הנוכחי', currentStart, today);
+    const previousStart = new Date(currentStart);
+    previousStart.setDate(currentStart.getDate() - 14);
+    drawerWeek(list, 'החשבון הקודם', previousStart, today);
 }
 
 function drawerWeek(list, title, start, today) {
     list.appendChild(el('h4', 'drawer-week-title', title));
     const workers = State.activeWorkers();
 
-    for (let offset = 0; offset < 7; offset++) {
+    for (let offset = 0; offset < 14; offset++) {
         const date = new Date(start);
         date.setDate(start.getDate() + offset);
         if (date.getDay() === 6) continue;   // Saturday is not a working row

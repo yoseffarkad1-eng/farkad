@@ -1046,19 +1046,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .week-table th, .week-table td { border-color: #999; }
     .cell-filled { background: #fff !important; }
 
-    /* Site colours are set inline, and a browser prints backgrounds only if the person
-       ticked the box. White-on-white is how a printed week comes out blank, so on paper
-       the badges become outlined black text instead. */
-    .tag-place, .cell-line {
-        background: none !important;
-        color: #000 !important;
-        border: 1pt solid #666 !important;
+    /* Site colours are set inline, and by default a browser prints backgrounds only if
+       the person ticked the box. print-color-adjust ticks it from here instead: the
+       badges keep their site colours on paper - and in the PDF that WhatsApp gets,
+       which is the same rendering path. */
+    .tag-place, .cell-line, .sheet-rate-name {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
-    .tag-place .tag-rate, .cell-line .tag-rate {
-        color: #000 !important;
-        border-inline-start-color: #666 !important;
-    }
-    .site-mark { color: #000 !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {

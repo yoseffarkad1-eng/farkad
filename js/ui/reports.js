@@ -15,15 +15,14 @@ let REPORT_PRESET = 'fortnight';
 // invoice to that client alone, for printing.
 let INVOICE_PLACE = null;
 
-// The account period as the owner runs it: the week closes on Friday, so a period is
-// fourteen days, Saturday through Friday. This returns the fortnight ending on the
-// most recent Friday - on a Friday, that is today, which is settlement day.
+// The account period as the owner runs it: fourteen days, Friday through Thursday
+// twice, and WHICH fortnight is anchored to the business's own seam - see accountStart
+// in dates.js. This returns the account containing today, whole, even on its first
+// morning.
 function defaultPayrollRange() {
-    const to = parseLocalDate(todayStr());
-    // getDay(): Friday is 5. Distance back to the most recent Friday.
-    to.setDate(to.getDate() - ((to.getDay() + 2) % 7));
-    const from = new Date(to);
-    from.setDate(to.getDate() - 13);
+    const from = accountStart(parseLocalDate(todayStr()));
+    const to = new Date(from);
+    to.setDate(from.getDate() + 13);
     return { from: toLocalDateStr(from), to: toLocalDateStr(to) };
 }
 

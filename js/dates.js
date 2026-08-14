@@ -27,15 +27,33 @@ function parseLocalDate(value) {
     return date;
 }
 
-// The SATURDAY of the week containing `date`. The working week here runs Saturday to
-// Friday because the accounts do: Friday is the last working day and the week's seam,
-// so a Friday still belongs to the week behind it, and Saturday - the rest day - opens
-// the next one. Every week start goes through here, so the grid can never open on a
-// mid-week date.
+// The FRIDAY of the week containing `date`. The working week runs Friday to Thursday:
+// Friday opens it, Saturday rests, and the account below is two of these laid end to
+// end. Every week start goes through here, so the grid can never open on a mid-week
+// date.
 function snapToWeekStart(date) {
     const start = new Date(date);
-    // getDay(): Saturday is 6. Distance back to the most recent Saturday.
-    start.setDate(date.getDate() - ((date.getDay() + 1) % 7));
+    // getDay(): Friday is 5. Distance back to the most recent Friday.
+    start.setDate(date.getDate() - ((date.getDay() + 2) % 7));
+    start.setHours(12, 0, 0, 0);
+    return start;
+}
+
+// A pay account is FOURTEEN days, Friday through Thursday twice - twelve of them
+// worked, with the Saturdays resting. WHICH Friday opens an account is a fact about
+// the business, not the calendar, so it is anchored to one account start named by the
+// owner; every other account sits a whole number of fortnights from it.
+const ACCOUNT_ANCHOR = '2026-08-07';
+
+// The Friday that opened the account containing `date`.
+function accountStart(date) {
+    const anchor = parseLocalDate(ACCOUNT_ANCHOR);
+    // Both dates are pinned to local noon, so the difference is a whole number of days
+    // give or take a DST hour - which the rounding absorbs.
+    const days = Math.round((date - anchor) / 86400000);
+    const into = ((days % 14) + 14) % 14;
+    const start = new Date(date);
+    start.setDate(date.getDate() - into);
     start.setHours(12, 0, 0, 0);
     return start;
 }
