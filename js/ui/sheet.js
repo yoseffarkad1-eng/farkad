@@ -11,16 +11,6 @@ let pickerPlaceId = null;
 // one turns one tap per worker into three.
 let sheetWorkerId = null;
 
-// The pending move to the next worker. Picking a first site does not jump immediately -
-// there is a beat first, long enough to see the ✓ land, or to add a second site or
-// extra hours. Any further tap on this worker cancels the move.
-let sheetAdvanceTimer = null;
-const SHEET_ADVANCE_DELAY = 1000;
-
-function cancelPendingAdvance() {
-    if (sheetAdvanceTimer) { clearTimeout(sheetAdvanceTimer); sheetAdvanceTimer = null; }
-}
-
 function openAssignSheet(workerId) {
     sheetWorkerId = workerId;
     renderAssignSheet();
@@ -33,7 +23,6 @@ function openAssignSheet(workerId) {
 }
 
 function closeAssignSheet() {
-    cancelPendingAdvance();
     document.removeEventListener('keydown', sheetKeydown);
     document.getElementById('assignSheet').style.display = 'none';
     sheetWorkerId = null;
@@ -76,7 +65,6 @@ function nextUnfilledAfter(workerId) {
 }
 
 function advanceSheet() {
-    cancelPendingAdvance();
     const next = nextUnfilledAfter(sheetWorkerId);
     if (!next) {
         closeAssignSheet();
@@ -85,9 +73,9 @@ function advanceSheet() {
     sheetWorkerId = next;
     renderAssignSheet();
 
-    // The sheet looks the same from worker to worker, so without a visible move the
-    // only sign of the advance is a name changing in the corner - and the next tap
-    // records a site against the wrong worker.
+    // The sheet looks the same from worker to worker, so the advance has to MOVE: the
+    // card slides in slowly enough to be seen and the name line flashes. The move is
+    // instant - one tap, next worker - but it is never silent.
     const content = document.querySelector('#assignSheet .sheet-content');
     content.classList.remove('sheet-swap');
     void content.offsetWidth;   // restart the animation when advances come back to back
@@ -95,10 +83,6 @@ function advanceSheet() {
 }
 
 function renderAssignSheet() {
-    // Re-rendering means something was tapped on this worker - a rate, a second site,
-    // an un-pick. Whatever it was, the person is still HERE, so a pending move away is
-    // no longer wanted.
-    cancelPendingAdvance();
     const worker = State.worker(sheetWorkerId);
     if (!worker) return;
 
@@ -130,13 +114,9 @@ function renderAssignSheet() {
                 }
                 State.commit(assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
                 // A second site in a day is normal here, so picking one cannot assume the
-                // worker is finished - only move on when this is their first. And even
-                // then not instantly: the jump used to happen faster than the eye could
-                // confirm the pick, and the next tap went to the wrong worker's day.
-                renderAssignSheet();
-                if (entries.length === 0) {
-                    sheetAdvanceTimer = setTimeout(advanceSheet, SHEET_ADVANCE_DELAY);
-                }
+                // worker is finished - only move on when this is their first.
+                if (entries.length === 0) advanceSheet();
+                else renderAssignSheet();
             }
         );
 

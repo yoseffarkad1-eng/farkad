@@ -1036,18 +1036,14 @@ async function seedRoster(page) {
 
   await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
   await page.waitForTimeout(250);
-  check('picking a site shows the ✓ land before anything moves',
-    (await page.textContent('#assignSheetTitle')) === 'דוד' &&
-    (await page.locator('#assignSheet .sheet-place-on').count()) === 1);
-  await page.waitForTimeout(1100);
-  check('then the sheet advances to the next unfilled worker by itself',
+  check('picking a site advances to the next unfilled worker',
     (await page.textContent('#assignSheetTitle')) === 'שרה');
   check('and the move to a new name announces itself',
     (await page.locator('#assignSheet .sheet-content.sheet-swap').count()) === 1);
   check('the sheet stays open through the run', await page.isVisible('#assignSheet'));
 
   await page.locator('.sheet-place').filter({ hasText: 'תל אביב' }).click();
-  await page.waitForTimeout(1350);
+  await page.waitForTimeout(250);
   check('and again', (await page.textContent('#assignSheetTitle')) === 'עלי');
 
   // absence also advances - it is a complete answer for that worker
@@ -1084,8 +1080,7 @@ async function seedRoster(page) {
   for (let i = 0; i < 12; i++) {
     await page.locator('.sheet-place').first().click();
     taps++;
-    // the beat before the sheet moves itself along - see SHEET_ADVANCE_DELAY
-    await page.waitForTimeout(1150);
+    await page.waitForTimeout(90);
   }
   await page.waitForTimeout(200);
 
@@ -1104,7 +1099,7 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
 
   await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
-  await page.waitForTimeout(1350);
+  await page.waitForTimeout(250);
   check('a first site moves the run along',
     (await page.textContent('#assignSheetTitle')) === 'שרה');
 
@@ -1396,12 +1391,11 @@ async function seedRoster(page) {
   check('a digit picks the site in that position',
     (await page.evaluate(() =>
       entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual')[0].placeId)) === 'p_02');
-  await page.waitForTimeout(1000);
   check('and the sheet moves on to the next name by itself',
     (await page.evaluate(() => sheetWorkerId)) === 'w_02');
 
   await page.keyboard.press('1');
-  await page.waitForTimeout(1300);
+  await page.waitForTimeout(300);
   check('so a roster is a run of single keystrokes',
     (await page.evaluate(() =>
       entriesFor(State.schedule, '2026-08-12', 'w_02', 'actual')[0].placeId)) === 'p_01');
@@ -1415,7 +1409,7 @@ async function seedRoster(page) {
 
   // filling the last one closes the sheet by itself, which is the existing behaviour
   await page.keyboard.press('1');
-  await page.waitForTimeout(1300);
+  await page.waitForTimeout(300);
   check('and the sheet closes itself when nobody is left',
     !(await page.locator('#assignSheet').isVisible()));
 
