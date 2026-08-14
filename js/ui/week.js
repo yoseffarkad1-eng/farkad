@@ -56,7 +56,7 @@ function renderWeek() {
         if (parsed.getDay() === 6) th.classList.add('col-rest');
         // Both forms are in the cell; the stylesheet decides which fits the screen.
         th.appendChild(el('div', 'day-full', HEBREW_DAY_NAMES[parsed.getDay()]));
-        th.appendChild(el('div', 'day-initial', HEBREW_DAY_NAMES[parsed.getDay()].slice(0, 1)));
+        th.appendChild(el('div', 'day-initial', HEBREW_DAY_LETTERS[parsed.getDay()]));
         th.appendChild(el('small', null, `${String(parsed.getDate()).padStart(2, '0')}/${String(parsed.getMonth() + 1).padStart(2, '0')}`));
         headRow.appendChild(th);
     });

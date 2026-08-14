@@ -1597,6 +1597,15 @@ async function seedRoster(page) {
   check('the whole week fits on one phone screen, all seven days',
     week.inner <= week.box + 1 && week.cols === 8, JSON.stringify(week));
   check('cells shrink to the site colour alone', week.nameHidden, JSON.stringify(week));
+
+  // the shrunk headers use the calendar letters א׳-ש׳, not first letters - four of the
+  // seven day names start with ש or ר, which told nobody anything
+  const initials = await page.evaluate(() =>
+    [...document.querySelectorAll('.week-table thead .day-initial')].map(n => n.textContent));
+  check('every shrunk day letter is distinct',
+    new Set(initials).size === 7, JSON.stringify(initials));
+  check('and Friday reads ו׳ the way a calendar writes it',
+    initials.includes('ו׳'), JSON.stringify(initials));
   check('and the legend maps each colour back to its name', week.legendShown);
 
   // rate marks survive the shrink: the word is gone, the mark stands in for it

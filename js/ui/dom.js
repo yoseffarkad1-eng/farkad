@@ -29,6 +29,11 @@ function clear(node) {
 
 const HEBREW_DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
+// The traditional one-letter weekday marks, for where a whole name cannot fit. NOT the
+// first letter of the name - ראשון, שני, שלישי and רביעי would collapse into two
+// indistinguishable letters. יום א׳ through שבת is how a Hebrew calendar abbreviates.
+const HEBREW_DAY_LETTERS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+
 function hebrewDayName(date) {
     return 'יום ' + HEBREW_DAY_NAMES[date.getDay()];
 }
