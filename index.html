@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>פרקד - רישום עבודה</title>
+<link rel="stylesheet" href="css/app.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f4b7a">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+
+<body>
+
+<div class="app">
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark">פ</span>
+            <strong>פרקד</strong>
+            <span class="brand-sub">רישום עבודה</span>
+        </div>
+
+        <nav class="tabs" role="tablist">
+            <button type="button" class="tab" id="tab-day" role="tab" onclick="showView('day')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></svg></span><span>היום</span></button>
+            <button type="button" class="tab" id="tab-week" role="tab" onclick="showView('week')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18M9 10v11M15 10v11"/></svg></span><span>שבוע</span></button>
+            <button type="button" class="tab" id="tab-roster" role="tab" onclick="showView('roster')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.7-3.2 2.9-4.8 5.5-4.8s4.8 1.6 5.5 4.8"/><circle cx="17" cy="9.5" r="2.5"/><path d="M16.2 14.6c2.3.2 3.9 1.6 4.4 4.2"/></svg></span><span class="tab-long">עובדים ואתרים</span><span class="tab-short">צוות</span></button>
+            <button type="button" class="tab" id="tab-reports" role="tab" onclick="showView('reports')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><rect x="5.5" y="11" width="3.4" height="9" rx="1"/><rect x="10.3" y="6" width="3.4" height="14" rx="1"/><rect x="15.1" y="14" width="3.4" height="6" rx="1"/></svg></span><span>דוחות</span></button>
+        </nav>
+
+        <div class="topbar-actions">
+            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
+        </div>
+    </header>
+
+    <div class="banner banner-warn" id="crashBanner" style="display:none"></div>
+    <div class="banner banner-warn" id="updateBanner" style="display:none"></div>
+    <div class="banner banner-warn" id="offlineBanner" style="display:none"></div>
+    <div class="banner banner-warn" id="migrationBanner" style="display:none"></div>
+    <div class="banner banner-info" id="installBanner" style="display:none"></div>
+
+    <main>
+        <section id="dayView"></section>
+        <section id="weekView" style="display:none"></section>
+
+        <section id="rosterView" style="display:none">
+            <div class="roster-columns">
+                <div class="roster-panel">
+                    <div class="panel-head">
+                        <h2>עובדים</h2>
+                        <button type="button" class="btn-add" onclick="showAddWorkerModal()">+ הוסף עובד</button>
+                        <button type="button" class="btn-secondary" onclick="openQuickStart()">📋 הדבק רשימה</button>
+                    </div>
+                    <div id="workerList"></div>
+                </div>
+
+                <div class="roster-panel">
+                    <div class="panel-head">
+                        <h2>אתרי עבודה</h2>
+                        <button type="button" class="btn-add" onclick="showAddPlaceModal()">+ הוסף אתר</button>
+                    </div>
+                    <div id="placeList"></div>
+                </div>
+            </div>
+
+            <div class="roster-panel">
+                <div class="panel-head"><h2>גיבוי</h2></div>
+                <div class="backup-actions">
+                    <button type="button" class="btn-secondary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
+                    <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
+                    <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
+                </div>
+                <div class="restore-points" id="restorePoints"></div>
+                <p class="hint" id="backupAge"></p>
+                <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
+            </div>
+        </section>
+
+        <section id="reportsView" style="display:none"></section>
+    </main>
+
+    <p class="storage-notice" id="storageNotice">הנתונים נשמרים במכשיר הזה בלבד.</p>
+
+    <!-- The side drawer of days: every working day of the account period, by full name,
+         one tap away - and costing the main screen nothing until the ☰ is pressed. -->
+    <div class="drawer-backdrop" id="dayDrawerBack" onclick="closeDayDrawer()"></div>
+    <!-- The clip box: a fixed, overflow-hidden viewport layer, so the parked panel can
+         never widen the document - the exact bug the page-width tests exist to stop. -->
+    <div class="drawer-wrap" id="dayDrawerWrap">
+    <aside class="day-drawer" id="dayDrawer" aria-label="בחירת יום">
+        <div class="drawer-head">
+            <h3>לאיזה יום?</h3>
+            <button type="button" class="btn-icon" onclick="closeDayDrawer()" aria-label="סגור">✕</button>
+        </div>
+        <div id="dayDrawerList"></div>
+    </aside>
+    </div>
+
+    <!-- One step of undo for the taps that destroy something. Above the action bar, so
+         a mis-tap and its remedy are in the same place. -->
+    <div class="undo-bar" id="undoBar" style="display:none"></div>
+
+    <div class="day-actions">
+        <button type="button" class="btn-secondary" onclick="copyPreviousDay()" title="העתק את מה שנרשם ביום הקודם">↧ מהיום הקודם</button>
+        <button type="button" class="btn-success" onclick="showDayMessage()" title="הודעה לוואטסאפ עם הסידור של היום">💬 וואטסאפ</button>
+    </div>
+
+</div>
+
+<div class="modal sheet" id="assignSheet">
+    <div class="modal-content sheet-content">
+        <div class="sheet-head">
+            <h3 id="assignSheetTitle"></h3>
+            <span class="sheet-meta" id="assignSheetMeta"></span>
+        </div>
+        <div id="assignSheetBody"></div>
+    </div>
+</div>
+
+<div class="modal" id="workerPickerModal">
+    <div class="modal-content">
+        <h3 id="workerPickerTitle"></h3>
+        <div class="picker-list" id="workerPickerList"></div>
+        <button type="button" class="btn-secondary" onclick="closeWorkerPicker()">סגור</button>
+    </div>
+</div>
+
+<div class="modal" id="placePickerModal">
+    <div class="modal-content">
+        <h3 id="placePickerTitle"></h3>
+        <div class="place-choice" id="placePickerList"></div>
+        <button type="button" class="btn-secondary" onclick="closePlacePicker()">סגור</button>
+    </div>
+</div>
+
+<!-- The app's own prompt/confirm/alert. The browser's are ignored inside an embedded
+     frame, which makes "add a site" look like a dead button. -->
+<div class="modal" id="askModal">
+    <div class="modal-content">
+        <h3 id="askTitle"></h3>
+        <p class="hint" id="askMessage"></p>
+        <input id="askInput" type="text" onkeydown="askKeydown(event)"/>
+        <p class="ask-error" id="askError"></p>
+        <div class="modal-actions">
+            <button type="button" id="askOk" onclick="askAccept()">אישור</button>
+            <button type="button" class="btn-secondary" id="askCancel" onclick="askCancel()">ביטול</button>
+        </div>
+    </div>
+</div>
+
+<!-- Quick start: paste a list, get a roster. Fourteen names through fourteen separate
+     dialogs is how a first evening dies; a pasted list is thirty seconds. -->
+<div class="modal" id="quickModal">
+    <div class="modal-content">
+        <h3 id="quickTitle"></h3>
+        <p class="hint" id="quickHint"></p>
+        <textarea id="quickText" rows="10" dir="rtl"></textarea>
+        <p class="field-error" id="quickError"></p>
+        <div class="modal-actions">
+            <button type="button" id="quickNext" onclick="quickNext()">המשך</button>
+            <button type="button" class="btn-secondary" onclick="closeQuickStart()">ביטול</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="workerFormModal">
+    <div class="modal-content">
+        <h3 id="workerFormTitle"></h3>
+        <label class="field-label" for="workerFormName">שם העובד</label>
+        <input id="workerFormName" placeholder="למשל: דוד" type="text"/>
+        <label class="field-label" for="workerFormDaily">שכר יומי</label>
+        <input dir="ltr" id="workerFormDaily" inputmode="decimal" placeholder="₪ ליום" type="number" min="0" step="1"/>
+        <p class="field-error" id="workerFormError"></p>
+        <!-- Two fields answer ninety percent of evenings. The rest fold away so the
+             form fits above the phone keyboard with room to spare. -->
+        <details class="form-more" id="workerFormMore">
+            <summary>עוד פרטים (טלפון, תעודת זהות, שעות נוספות)</summary>
+            <input dir="ltr" id="workerFormPhone" inputmode="tel" placeholder="מספר טלפון" type="text"/>
+            <input dir="ltr" id="workerFormId" inputmode="numeric" placeholder="מספר זהות" type="text"/>
+            <input dir="ltr" id="workerFormHourly" inputmode="decimal" placeholder="שכר לשעה נוספת" type="number" min="0" step="1"/>
+        </details>
+        <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום.</p>
+        <div class="modal-actions">
+            <button type="button" onclick="saveWorkerForm()">שמור</button>
+            <button type="button" class="btn-secondary" onclick="closeWorkerForm()">ביטול</button>
+        </div>
+    </div>
+</div>
+
+<!-- One worker's days, opened from their name in the pay sheet: the answer to "why is
+     my pay this number". -->
+<div class="modal" id="workerDaysModal">
+    <div class="modal-content modal-wide">
+        <h3 id="workerDaysTitle"></h3>
+        <p class="hint" id="workerDaysMeta"></p>
+        <div id="workerDaysBody"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" onclick="closeWorkerDays()">סגור</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="shareModal">
+    <div class="modal-content">
+        <h3>הודעה לוואטסאפ</h3>
+        <!-- Three looks for one message; the choice is remembered, so this is set once
+             and then never thought about again. -->
+        <div class="share-styles" id="shareStyles"></div>
+        <textarea id="shareText" rows="14" readonly></textarea>
+        <div class="modal-actions">
+            <button type="button" onclick="copyDayMessage()">העתק</button>
+            <button type="button" class="btn-secondary" onclick="closeShareModal()">סגור</button>
+            <span class="share-status" id="shareStatus"></span>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="migrationModal">
+    <div class="modal-content modal-wide">
+        <h3>רישומים שדורשים החלטה</h3>
+        <p class="hint">בגרסה הישנה נכתבו לפעמים שני אתרים באותה משבצת, ללא סימן מפריד קבוע.
+            המערכת לא מנחשת - בחר מה נכון לכל רישום. הגרסה הישנה נשמרה ולא שונתה.</p>
+        <div id="migrationList"></div>
+        <button type="button" class="btn-secondary" onclick="closeMigrationModal()">סגור</button>
+    </div>
+</div>
+
+<script src="js/store.js"></script>
+<script src="js/dates.js"></script>
+<script src="js/model/schema.js"></script>
+<script src="js/model/migrate.js"></script>
+<script src="js/sync/sync.js"></script>
+<script src="js/state.js"></script>
+<script src="js/ui/dom.js"></script>
+<script src="js/ui/ask.js"></script>
+<script src="js/ui/undo.js"></script>
+<script src="js/ui/modal.js"></script>
+<script src="js/ui/sitecolor.js"></script>
+<script src="js/ui/day.js"></script>
+<script src="js/ui/sheet.js"></script>
+<script src="js/ui/quickstart.js"></script>
+<script src="js/ui/week.js"></script>
+<script src="js/ui/roster.js"></script>
+<script src="js/ui/reports.js"></script>
+<script src="js/ui/share.js"></script>
+<script src="js/ui/migration.js"></script>
+<script src="js/ui/offline.js"></script>
+<script src="js/ui/install.js"></script>
+<script src="js/app.js"></script>
+
+<!-- Cloud sync. Commented out until a Firebase project exists - see
+     docs/firebase-setup.md. Until then the app is local-only and unchanged.
+     This one file is type="module" because the Firebase SDK ships only as modules;
+     every other script above must stay classic so the inline onclick handlers
+     keep resolving on the global scope. -->
+<!-- <script type="module" src="js/sync/firebase-adapter.js"></script> -->
+</body>
+</html>

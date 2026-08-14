@@ -1,0 +1,1581 @@
+/* Farkad - work record.
+   A dense working tool used late at night on a phone and on a desktop, in Hebrew RTL.
+   Quiet surfaces, one accent, and colour never carrying meaning on its own. */
+
+:root {
+    --paper: #eef1f5;
+    --surface: #ffffff;
+    --surface-2: #e4e9ef;
+    --line: #d3dae2;
+    --line-soft: #e6eaef;
+    --ink: #17202b;
+    --ink-2: #4d5a69;
+    --ink-3: #7a8797;
+
+    --accent: #1f4b7a;
+    --accent-soft: #dce7f3;
+    --on-accent: #ffffff;
+
+    --warn: #9a5b0e;
+    --warn-bg: #fbf0dd;
+    --danger: #9c2f26;
+    --danger-bg: #f9e7e4;
+    --ok: #22614a;
+    --ok-bg: #e0efe8;
+
+    /* Site identity colours. Ten, handed out in creation order and fixed for the life of
+       the site. White text on every one, and every one clears 4.5:1 against it. */
+    --site-1: #1D4ED8;
+    --site-2: #C2410C;
+    --site-3: #15803D;
+    --site-4: #7E22CE;
+    --site-5: #A16207;
+    --site-6: #0E7490;
+    --site-7: #B91C1C;
+    --site-8: #BE185D;
+    --site-9: #0F766E;
+    --site-10: #4338CA;
+
+    --radius: 14px;
+    --radius-sm: 10px;
+    --shadow: 0 1px 2px rgba(23, 32, 43, .05), 0 10px 30px -18px rgba(23, 32, 43, .28);
+    --shadow-lift: 0 24px 60px -24px rgba(23, 32, 43, .35);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --paper: #0f1319;
+        --surface: #171d25;
+        --surface-2: #212934;
+        --line: #2d3540;
+        --line-soft: #232b35;
+        --ink: #e6eaf0;
+        --ink-2: #a7b2c0;
+        --ink-3: #7c8796;
+        --accent: #8ab4e2;
+        --accent-soft: #1d2b3b;
+        --on-accent: #0f1319;
+        --warn: #dfa259;
+        --warn-bg: #2c2315;
+        --danger: #e18a80;
+        --danger-bg: #311916;
+        --ok: #7cc0a1;
+        --ok-bg: #15271f;
+        /* Lifted for a dark background - the light set goes muddy on it - and still
+           above 4.5:1 against the same white text. */
+        --site-1: #2563EB;
+        --site-2: #C9470D;
+        --site-3: #168541;
+        --site-4: #9333EA;
+        --site-5: #A56600;
+        --site-6: #0F7D98;
+        --site-7: #DC2626;
+        --site-8: #D12A78;
+        --site-9: #0D8278;
+        --site-10: #5B55E7;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -18px rgba(0, 0, 0, .6);
+        --shadow-lift: 0 24px 60px -24px rgba(0, 0, 0, .8);
+    }
+}
+
+:root[data-theme="dark"] {
+    --paper: #0f1319;
+    --surface: #171d25;
+    --surface-2: #212934;
+    --line: #2d3540;
+    --line-soft: #232b35;
+    --ink: #e6eaf0;
+    --ink-2: #a7b2c0;
+    --ink-3: #7c8796;
+    --accent: #8ab4e2;
+    --accent-soft: #1d2b3b;
+    --on-accent: #0f1319;
+    --warn: #dfa259;
+    --warn-bg: #2c2315;
+    --danger: #e18a80;
+    --danger-bg: #311916;
+    --ok: #7cc0a1;
+    --ok-bg: #15271f;
+    /* Lifted for a dark background - the light set goes muddy on it - and still
+       above 4.5:1 against the same white text. */
+    --site-1: #2563EB;
+    --site-2: #C9470D;
+    --site-3: #168541;
+    --site-4: #9333EA;
+    --site-5: #A56600;
+    --site-6: #0F7D98;
+    --site-7: #DC2626;
+    --site-8: #D12A78;
+    --site-9: #0D8278;
+    --site-10: #5B55E7;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -18px rgba(0, 0, 0, .6);
+    --shadow-lift: 0 24px 60px -24px rgba(0, 0, 0, .8);
+}
+
+/* Tells the browser which theme its own widgets - select, date picker, scrollbars -
+   should be drawn in. Without it they render light-on-light inside a dark page. */
+:root { color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+
+body {
+    direction: rtl;
+    margin: 0;
+    padding: 0;
+    overflow-x: clip;
+    /* iOS inflates text on pages it thinks are desktop-sized, which is exactly what a
+       runaway wide table makes it think. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+.app {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 16px 120px;
+    padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}
+
+h2 { font-size: 18px; margin: 0; }
+h3 { font-size: 17px; margin: 0 0 12px; }
+h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
+
+/* ---------------------------------------------------------------- top bar */
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 0 10px;
+    margin-bottom: 16px;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line-soft);
+}
+
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--site-6));
+    color: #fff;
+    font-weight: 800;
+    font-size: 17px;
+}
+.brand strong { font-size: 19px; letter-spacing: -.01em; }
+.brand-sub { color: var(--ink-3); font-size: 12.5px; }
+
+.tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+
+.tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--ink-2);
+    padding: 8px 15px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 14.5px;
+    font-weight: 500;
+    font-family: inherit;
+}
+.tab:hover { background: var(--surface-2); }
+.tab-on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
+}
+.tab-icon { display: inline-flex; }
+.tab-icon svg { width: 17px; height: 17px; }
+.tab-short { display: none; }
+
+/* On a phone the tabs live where the thumb is: a fixed bar along the bottom. */
+@media (max-width: 700px) {
+    .topbar { position: static; border-bottom: none; padding: 12px 0 4px; margin-bottom: 10px; }
+    .brand-sub { display: none; }
+    .tabs {
+        position: fixed;
+        bottom: 0;
+        inset-inline: 0;
+        z-index: 45;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 2px;
+        background: var(--surface);
+        border-top: 1px solid var(--line);
+        padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px));
+        box-shadow: 0 -6px 24px -18px rgba(0, 0, 0, .5);
+    }
+    .tab {
+        flex-direction: column;
+        gap: 3px;
+        padding: 5px 2px 4px;
+        font-size: 11px;
+        border-radius: var(--radius-sm);
+    }
+    .tab-icon svg { width: 22px; height: 22px; }
+    .tab-on { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+    /* "עובדים ואתרים" cannot live in a bottom tab; the short form takes over there. */
+    .tab-long { display: none; }
+    .tab-short { display: inline; }
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+/* Text that sits ON the accent is its own token, set once per theme. Doing this with a
+   :root:not(...) selector instead makes the rule outrank every .btn-* class and paints
+   secondary buttons white on white. */
+button {
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+    padding: 9px 16px;
+    transition: filter .12s, background .12s;
+}
+
+button:hover { filter: brightness(1.08); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.btn-secondary {
+    background: var(--surface);
+    color: var(--ink);
+    border-color: var(--line);
+}
+.btn-success { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
+.btn-info { background: var(--surface); color: var(--ink); border-color: var(--line); }
+
+.btn-add {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: transparent;
+    font-weight: 600;
+}
+.btn-on { background: var(--ok-bg); color: var(--ok); border-color: transparent; font-weight: 600; }
+
+.btn-icon {
+    background: transparent;
+    border-color: transparent;
+    color: var(--ink-3);
+    padding: 4px 8px;
+    font-size: 15px;
+}
+.btn-icon:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ---------------------------------------------------------------- banners */
+
+.banner {
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 15px;
+}
+.banner-warn {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-inline-start: 3px solid var(--warn);
+}
+/* An invitation, not a problem: the install prompt is in the app's own colour so it does
+   not read as something having gone wrong. */
+.banner-info {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-inline-start: 3px solid var(--accent);
+}
+.banner span { flex: 1; min-width: 200px; }
+
+/* ---------------------------------------------------------------- day view */
+
+.day-header {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    box-shadow: var(--shadow);
+}
+
+.day-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+/* Back points RIGHT and forward points LEFT: time flows right-to-left here, and the
+   chevrons are pseudo-elements because bidi reorders a bare < inside Hebrew text. */
+/* Narrow side padding: with the ☰ in the row there are four things sharing a phone's
+   width, and the day name in the middle must never be the one that gives way. */
+.btn-nav { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding-inline: 10px; }
+.nav-back::before { content: '\203A'; font-weight: 700; }
+.nav-fwd::after { content: '\2039'; font-weight: 700; }
+
+/* The title is a button that opens the date picker - but it must not look like a grey
+   pill in the middle of the header. */
+.day-label {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    line-height: 1.3;
+    background: none;
+    border: none;
+    color: var(--ink);
+    padding: 2px;
+    border-radius: var(--radius-sm);
+}
+.day-label:hover { filter: none; background: var(--surface-2); }
+.day-label strong { display: block; font-size: 21px; letter-spacing: -.01em; }
+.day-date { color: var(--ink-3); font-size: 13px; font-weight: 400; }
+
+/* Present for the picker UI it owns, never as a visible second date. */
+.day-picker-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+.day-date { color: var(--ink-3); font-size: 14px; font-variant-numeric: tabular-nums; }
+
+.day-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-top: 10px;
+}
+.btn-today { padding: 6px 12px; font-size: 13.5px; }
+.day-tools input[type="date"] {
+    font-family: inherit;
+    font-size: 15px;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+}
+
+.layer-toggle {
+    display: flex;
+    gap: 2px;
+    margin-inline-start: auto;
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+    padding: 3px;
+}
+.layer-toggle button { border: none; border-radius: 8px; padding: 6px 16px; }
+.layer-off { background: transparent; color: var(--ink-2); }
+.layer-off:hover { filter: none; background: rgba(255, 255, 255, .35); }
+.layer-on { background: var(--accent); color: var(--on-accent); font-weight: 600; box-shadow: var(--shadow); }
+
+.site-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.site-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.site-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line-soft);
+}
+/* The card head carries the site's colour, so the count sits on a translucent white
+   rather than a theme surface that would clash with ten different backgrounds. */
+.site-head-color {
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    border-bottom: none;
+    margin-bottom: 10px;
+}
+.site-head-color .site-count { background: rgba(255, 255, 255, .22); color: #fff; }
+.site-head-color h3 { margin: 0; display: flex; align-items: center; gap: 6px; }
+
+.site-count {
+    background: var(--surface-2);
+    color: var(--ink-2);
+    border-radius: 999px;
+    padding: 1px 10px;
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.site-empty { color: var(--ink-3); font-size: 14px; margin: 4px 0; }
+.site-list { display: flex; flex-direction: column; gap: 4px; }
+
+.assign-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border-radius: var(--radius);
+}
+.assign-row:hover { background: var(--surface-2); }
+.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+.rate-control { display: flex; gap: 4px; align-items: center; }
+.rate-select, .rate-hours {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 3px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+}
+.rate-hours { width: 62px; }
+
+.badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+.badge-split { background: var(--accent-soft); color: var(--accent); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-double { background: var(--warn-bg); color: var(--warn); }
+.badge-extra { background: var(--surface-2); color: var(--ink-2); }
+
+.tray {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.tray-empty { color: var(--ink-3); font-size: 14px; margin: 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.chip-main {
+    background: var(--surface);
+    color: var(--ink);
+    border: none;
+    border-radius: 0;
+    padding: 6px 12px;
+}
+.chip-side {
+    background: var(--surface-2);
+    color: var(--ink-2);
+    border: none;
+    border-radius: 0;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+.chip-absent .chip-main { color: var(--ink-3); }
+
+/* On an iPhone the bottom of the screen belongs to the home indicator, and an installed
+   app draws underneath it. Without the inset the buttons sit under the bar the system
+   draws over them - reachable only by a tap that also swipes the app away. */
+.day-actions {
+    position: fixed;
+    bottom: 0;
+    inset-inline: 0;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    padding: 10px 16px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 16px -10px rgba(0, 0, 0, .4);
+}
+
+/* ---------------------------------------------------------------- pickers */
+
+.picker-list { max-height: 55vh; overflow-y: auto; }
+.picker-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.picker-row:last-child { border-bottom: none; }
+.picker-name { flex: 1; display: flex; flex-direction: column; }
+.picker-note { font-size: 12px; color: var(--ink-3); }
+
+.place-choice { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.place-btn {
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line);
+}
+.place-on { background: var(--ok-bg); color: var(--ok); border-color: transparent; font-weight: 600; }
+
+/* ---------------------------------------------------------------- week */
+
+.week-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.week-range { margin-inline: auto; font-variant-numeric: tabular-nums; }
+
+.table-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+.week-table { border-collapse: collapse; width: 100%; min-width: 720px; }
+.week-table th, .week-table td {
+    border: 1px solid var(--line-soft);
+    padding: 6px 8px;
+    text-align: center;
+    vertical-align: top;
+}
+.week-table thead th {
+    background: var(--surface-2);
+    font-size: 13px;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+.week-table thead small { display: block; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.name-cell { text-align: right; font-weight: 600; background: var(--surface-2); white-space: nowrap; }
+.corner { text-align: right; }
+
+.week-cell { cursor: pointer; min-width: 88px; font-size: 13px; }
+.week-cell:hover { background: var(--accent-soft); }
+.week-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cell-filled { background: var(--surface); }
+.col-rest { background: var(--surface-2) !important; opacity: .65; }
+
+.week-table tfoot td {
+    font-weight: 700;
+    background: var(--surface-2);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.week-table tfoot .name-cell { text-align: start; font-size: 13px; }
+.cell-absent { background: var(--surface-2); color: var(--ink-3); }
+/* In the grid the badge is the cell's content, so it is a little tighter than the one in
+   the day list and never wraps its name onto a second line. */
+.cell-line {
+    display: inline-flex;
+    gap: 5px;
+    justify-content: center;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 12px;
+    margin: 1px 0;
+    max-width: 100%;
+}
+.cell-line .site-name { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------------------------------------------------------------- roster */
+
+.roster-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+}
+.roster-panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 14px;
+}
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.roster-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+}
+.roster-row:last-child { border-bottom: none; }
+.roster-details { flex: 1; min-width: 0; }
+.roster-meta { font-size: 13px; color: var(--ink-2); }
+.roster-off { opacity: .55; }
+.roster-actions { display: flex; gap: 2px; }
+.backup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---------------------------------------------------------------- reports */
+
+.range-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 16px;
+}
+.range-bar input[type="date"] {
+    font-family: inherit;
+    font-size: 15px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+}
+
+.report { margin-bottom: 22px; }
+.report h2 { margin-bottom: 10px; }
+.report-table { border-collapse: collapse; width: 100%; min-width: 520px; }
+.report-table th, .report-table td {
+    padding: 9px 12px;
+    text-align: right;
+    border-bottom: 1px solid var(--line-soft);
+}
+.report-table thead th {
+    background: var(--surface-2);
+    font-size: 13px;
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+.report-table td.num, .report-table th.num {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.report-table tfoot td {
+    font-weight: 700;
+    border-top: 2px solid var(--line);
+    background: var(--surface-2);
+}
+
+/* On a phone the report stops being a table and becomes one card per row.
+   A seven-column table only fits by scrolling sideways, and in RTL what falls off the
+   edge is the far left - which is exactly where "לתשלום" and the last site sit. A report
+   whose answer is off-screen by default is not a report. */
+/* screen only: an A4 page is about 794px wide, close enough to this breakpoint that a
+   printed invoice could otherwise come out as a column of cards. */
+@media screen and (max-width: 700px) {
+    .report-table { min-width: 0; }
+    .report-table thead { display: none; }
+    .report-table, .report-table tbody, .report-table tfoot,
+    .report-table tr, .report-table td { display: block; width: 100%; }
+
+    .report-table tr {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 8px 12px;
+        margin-bottom: 10px;
+    }
+    .report-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        border: none;
+        padding: 3px 0;
+        text-align: start;
+    }
+    .report-table td::before {
+        content: attr(data-label);
+        color: var(--ink-2);
+        font-weight: 400;
+    }
+
+    /* The name, or the date, is the card's heading - it needs no label above it. */
+    .report-table td:first-child {
+        font-weight: 700;
+        font-size: 16px;
+        border-bottom: 1px solid var(--line-soft);
+        padding-bottom: 6px;
+        margin-bottom: 4px;
+    }
+    .report-table td:first-child::before { content: none; }
+
+    /* A blank cell is a zero, and a card listing every zero buries the three numbers
+       that matter. They stay in the printed table, which has room for them. */
+    .report-table td.num:empty { display: none; }
+
+    .report-table tfoot tr { background: var(--surface-2); }
+    .report .table-scroll { border: none; background: none; overflow: visible; }
+}
+
+/* The reports' period controls: chips first, calendars only on request. */
+.range-wrap { margin-bottom: 14px; display: flex; flex-direction: column; gap: 10px; }
+.range-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.range-chips .chip-on, .range-chips .chip-off { font-size: 15px; padding: 10px 16px; }
+.range-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.range-current { font-variant-numeric: tabular-nums; margin-inline-end: auto; font-size: 16px; }
+@media print { .range-chips, .range-actions { display: none !important; } }
+
+/* Restore points: dated, and few enough to read as a sentence rather than a list. */
+.restore-points {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-top: 10px;
+}
+.restore-label { color: var(--ink-2); font-size: 13px; }
+.restore-points button { font-size: 13px; padding: 5px 10px; }
+
+/* Choosing one client's site to print. Not printed itself - by then the choice is made
+   and the heading names the site. */
+.invoice-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.invoice-picker-label { color: var(--ink-2); font-size: 13px; margin-inline-end: 4px; }
+@media print { .invoice-picker { display: none !important; } }
+
+/* A name in the pay sheet is a way in, so it looks like one - but it stays a table cell
+   and does not turn the row into a wall of buttons. */
+.link-cell {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 15px;
+    text-align: start;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.link-cell:hover { filter: none; color: var(--ink); }
+
+/* One worker's days. Three columns: when, where, how much - in that order, because that
+   is the order the question is asked in. */
+.wday {
+    display: grid;
+    grid-template-columns: 130px 1fr 80px;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line-soft);
+}
+.wday-date { display: flex; flex-direction: column; line-height: 1.3; }
+.wday-date span { color: var(--ink-3); font-size: 13px; }
+.wday-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wday-note { color: var(--ink-3); font-size: 12px; }
+.wday-money { text-align: start; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wday-absent .wday-date strong { color: var(--ink-3); }
+.wday-total {
+    border-bottom: none;
+    border-top: 2px solid var(--line);
+    margin-top: 4px;
+    font-weight: 700;
+}
+.wday-total .wday-what { color: var(--ink-2); font-weight: 400; font-size: 14px; }
+
+@media (max-width: 700px) {
+    .wday { grid-template-columns: 1fr 70px; }
+    .wday-date { flex-direction: row; gap: 6px; align-items: baseline; }
+    .wday-what { grid-column: 1; }
+    .wday-money { grid-row: 1; grid-column: 2; }
+}
+
+/* The legend that gives the phone's colour-only week its names back. */
+.week-legend { display: none; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.week-legend-note { display: none; }
+.day-initial { display: none; }
+
+/* On a phone the week is a colour map, not a table of words: every cell shrinks to the
+   site's colour block, seven days fit the width of the screen, and a tap still opens
+   the day with everything written out. Asking someone to scroll a grid sideways to see
+   Thursday is not "seeing the week". */
+@media (max-width: 700px) {
+    .week-legend { display: flex; }
+
+    #weekView .table-scroll { overflow: visible; border: none; background: none; }
+    .week-table { min-width: 0; width: 100%; table-layout: fixed; border-radius: var(--radius-sm); overflow: hidden; }
+    .week-table th, .week-table td { padding: 3px 1px; }
+
+    /* The corner label has no room; the column keeps its width for the names. */
+    .week-table .corner { font-size: 0; width: 78px; }
+    .week-table .name-cell {
+        font-size: 12px;
+        padding: 4px 6px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: start;
+    }
+    .week-table .name-cell .badge { display: none; }
+
+    /* One letter of the day name over the date, like the strip. */
+    .week-table thead .day-full { display: none; }
+    .week-table thead .day-initial { display: block; font-size: 12px; }
+    .week-table thead small { font-size: 9px; letter-spacing: -.02em; }
+
+    .week-cell .cell-line {
+        display: block;
+        position: relative;
+        width: 16px;
+        height: 16px;
+        min-height: 0;
+        padding: 0;
+        margin: 1px auto;
+        border-radius: 5px;
+    }
+    .week-cell .cell-line .site-name,
+    .week-cell .cell-line .tag-rate,
+    .week-cell .cell-line .site-mark { display: none; }
+
+    /* No room for the word, so the mark: a white dot is a doubled day, a plus is extra
+       hours. White clears every one of the ten site colours by design. */
+    .week-cell .cell-double::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #fff;
+    }
+    .week-cell .cell-extra::after {
+        content: '+';
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+    }
+
+    .week-legend-note {
+        display: block;
+        color: var(--ink-3);
+        font-size: 12px;
+        margin: 6px 0 0;
+    }
+
+    /* An absence is a state, not a place: a quiet dash, no colour. */
+    .cell-absent { font-size: 0; }
+    .cell-absent::before { content: '\2014'; font-size: 12px; color: var(--ink-3); }
+
+    .week-table tfoot td { font-size: 11.5px; padding: 4px 1px; }
+    .week-table tfoot .name-cell { font-size: 10.5px; }
+}
+
+/* ---------------------------------------------------------------- modals */
+
+/* On a phone the keyboard eats the bottom half of the screen. A centred dialog gets cut
+   through the middle the moment a field is focused, so form dialogs anchor to the TOP
+   there - the keyboard then covers empty backdrop, not the fields. The assign sheet is
+   excluded: it stays at the bottom, where the thumb is, and has no text fields open by
+   default. dvh, not vh: vh ignores the browser chrome and the keyboard. */
+@media (max-width: 700px) {
+    .modal:not(.sheet) { align-items: flex-start; padding: 12px 12px 0; }
+    .modal:not(.sheet) .modal-content { max-height: calc(100dvh - 24px); }
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 15, 22, .45);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 50;
+}
+.modal-content {
+    background: var(--surface);
+    border-radius: 18px;
+    box-shadow: var(--shadow-lift);
+    padding: 22px;
+    width: 100%;
+    max-width: 460px;
+    max-height: 88vh;
+    overflow-y: auto;
+}
+.modal-wide { max-width: 680px; }
+
+/* The app's own prompt is asked FROM other dialogs - a duplicate name while the worker
+   form is open, a confirmation over the migration list. Same z-index as those and it
+   opens behind them: a question nobody can answer and a screen that looks frozen. */
+#askModal { z-index: 60; }
+.modal-content input[type="text"], .modal-content textarea {
+    width: 100%;
+    font-family: inherit;
+    /* 16px exactly: anything smaller makes iOS zoom the page when the field focuses,
+       and the zoom plus the keyboard leaves a keyhole to type through. */
+    font-size: 16px;
+    padding: 9px 11px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+}
+.modal-content textarea { line-height: 1.5; resize: vertical; }
+.field-label { display: block; font-size: 14px; color: var(--ink-2); margin: 2px 2px 4px; }
+.form-more { margin: 4px 0 8px; }
+.form-more summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 15px;
+    padding: 8px 2px;
+    list-style-position: inside;
+}
+.form-more[open] summary { margin-bottom: 6px; }
+.modal-content input[type="number"] { font-size: 16px; }
+.modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+
+/* Under the field it belongs to, not in a second dialog on top of the first. */
+.ask-error { color: var(--danger); font-size: 14px; margin: 0 0 4px; min-height: 1px; }
+.field-error { color: var(--danger); font-size: 14px; margin: -4px 0 8px; }
+.share-status { color: var(--ok); font-size: 14px; }
+.share-styles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
+.issue {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 10px;
+}
+.issue-value { font-weight: 700; font-size: 16px; }
+.issue-meta { color: var(--ink-2); font-size: 14px; }
+.issue-message { color: var(--warn); font-size: 14px; margin: 6px 0 10px; }
+.issue-places { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.issue-label { font-size: 13px; color: var(--ink-3); }
+
+/* ---------------------------------------------------------------- misc */
+
+.storage-notice {
+    text-align: center;
+    margin: 18px 0 0;
+    font-size: 13px;
+    color: var(--ink-3);
+}
+.hint { font-size: 13px; color: var(--ink-3); margin: 10px 0 0; }
+/* A note about money that is missing from a total has to survive the print stylesheet,
+   where every other hint is dropped. */
+.hint-warn { color: var(--warn); font-weight: 600; }
+@media print { .hint-warn { display: block !important; color: #000; } }
+.empty-hint { color: var(--ink-3); font-size: 15px; padding: 14px 0; margin: 0; }
+
+@media (max-width: 700px) {
+    .app { padding: 0 12px; padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+    .site-grid { grid-template-columns: 1fr; }
+    .day-tools .layer-toggle { margin-inline-start: 0; flex: 1; min-width: 0; }
+    .layer-toggle button { flex: 1; padding: 6px 4px; font-size: 13px; }
+    .btn-today { margin-inline-start: auto; }
+    .day-actions {
+        bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: 10px;
+        border-top: none;
+        box-shadow: none;
+        background: transparent;
+        pointer-events: none;
+    }
+    .day-actions button {
+        pointer-events: auto;
+        flex: 1;
+        font-size: 14px;
+        padding: 11px 8px;
+        box-shadow: var(--shadow);
+    }
+    .storage-notice { padding-bottom: 8px; }
+}
+
+@media print {
+    .topbar, .day-actions, .storage-notice, .banner, .week-header, .hint { display: none !important; }
+    body { background: #fff; color: #000; }
+    .table-scroll { border: none; overflow: visible; }
+    .week-table { min-width: 0; }
+    .week-table th, .week-table td { border-color: #999; }
+    .cell-filled { background: #fff !important; }
+
+    /* Site colours are set inline, and a browser prints backgrounds only if the person
+       ticked the box. White-on-white is how a printed week comes out blank, so on paper
+       the badges become outlined black text instead. */
+    .tag-place, .cell-line {
+        background: none !important;
+        color: #000 !important;
+        border: 1pt solid #666 !important;
+    }
+    .tag-place .tag-rate, .cell-line .tag-rate {
+        color: #000 !important;
+        border-inline-start-color: #666 !important;
+    }
+    .site-mark { color: #000 !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+}
+
+/* The empty state, with the button that resolves it inside the card. */
+.setup-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+    box-shadow: var(--shadow);
+}
+.setup-card h3 { margin-bottom: 6px; }
+.setup-card p { color: var(--ink-2); margin: 0 0 14px; }
+.setup-card button { font-size: 17px; padding: 14px 24px; }
+.setup-card .setup-alt { display: block; margin: 10px auto 0; font-size: 14.5px; padding: 9px 16px; }
+
+/* The days drawer: hidden at the screen's edge until the ☰ asks for it. */
+.drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 15, 22, .45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s;
+    z-index: 48;
+}
+.drawer-backdrop.drawer-open { opacity: 1; pointer-events: auto; }
+
+/* The clip box: fixed over the whole viewport, overflow hidden, so the parked panel
+   cannot widen the document. Inert until open - it must never eat a tap. */
+.drawer-wrap {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 49;
+}
+.drawer-wrap.drawer-open { pointer-events: auto; }
+
+.day-drawer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    inset-inline-start: 0;
+    width: min(310px, 84vw);
+    background: var(--surface);
+    transform: translateX(100%);
+    transition: transform .2s ease-out;
+    box-shadow: var(--shadow-lift);
+    display: flex;
+    flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.day-drawer.drawer-open { transform: translateX(0); }
+
+.drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.drawer-head h3 { margin: 0; font-size: 19px; }
+.drawer-head .btn-icon { color: var(--ink-2); }
+
+#dayDrawerList { overflow-y: auto; padding: 8px; }
+
+.drawer-day {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    background: none;
+    border: none;
+    color: var(--ink);
+    padding: 12px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 16px;
+    text-align: start;
+    border-inline-start: 4px solid transparent;
+}
+.drawer-day:hover { filter: none; background: var(--surface-2); }
+.dd-name { flex: 1; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.dd-date { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.dd-count { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 44px; text-align: end; }
+
+/* the state rides the edge stripe and the count's colour */
+.dd-none { border-inline-start-color: var(--line); }
+.dd-none .dd-count { color: var(--ink-3); font-weight: 400; }
+.dd-part { border-inline-start-color: var(--warn); }
+.dd-part .dd-count { color: var(--warn); }
+.dd-full { border-inline-start-color: var(--ok); }
+.dd-full .dd-count { color: var(--ok); }
+
+.dd-on { background: var(--accent-soft); }
+.dd-today { background: var(--accent); color: var(--on-accent); }
+.drawer-today { margin: 4px 4px 8px; width: calc(100% - 8px); }
+.drawer-week-title {
+    margin: 10px 10px 4px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    border-bottom: 1px solid var(--line-soft);
+    padding-bottom: 4px;
+}
+
+.drawer-btn { font-size: 21px; color: var(--ink-2); min-width: 36px; padding: 8px 2px; }
+@media print { .day-drawer, .drawer-backdrop { display: none !important; } }
+
+/* The undo bar. Sits directly above the action bar, pinned to the bottom, because the
+   tap it is undoing was made at the bottom of the screen with a thumb. */
+.undo-bar {
+    position: fixed;
+    inset-inline: 0;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    z-index: 40;
+    margin: 0 auto;
+    max-width: 620px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    font-size: 14px;
+}
+.undo-bar span { flex: 1; }
+.undo-bar .btn-secondary { padding: 6px 14px; font-weight: 600; }
+.undo-bar .btn-icon { color: var(--paper); }
+.undo-bar .btn-icon:hover { background: transparent; color: var(--paper); }
+
+@media (max-width: 700px) {
+    .undo-bar { inset-inline: 12px; bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+}
+@media print { .undo-bar { display: none !important; } }
+
+/* One tap for the day everyone worked in one place. */
+.bulk-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 10px;
+    padding: 9px 14px;
+    background: var(--surface);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+}
+.bulk-label { color: var(--ink-2); font-size: 14px; }
+.bulk-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 8px;
+    font-weight: 700;
+    color: #fff;
+}
+
+/* ---------------------------------------------------------------- day: by worker */
+
+/* The progress line is the only thing that must be readable without scrolling on a
+   phone: how much of the day is done, and one tap into what is left. */
+/* Pinned while the list scrolls: the day being edited must never leave the screen. */
+.progress {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    padding: 9px 14px;
+    margin-bottom: 10px;
+    box-shadow: var(--shadow);
+}
+@media (min-width: 701px) {
+    /* the desktop top bar is sticky too; sit just under it */
+    .progress { top: 62px; }
+}
+.progress .progress-line { width: 100%; }
+.now-editing { font-size: 16px; color: var(--accent); margin-inline-end: auto; }
+.progress-done .now-editing { color: var(--ok); }
+.now-count { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.progress-done .now-count { color: var(--ok); font-weight: 700; }
+
+/* one blink when the day changes, pulling the eye to WHERE it is about to type */
+.now-flash { animation: nowFlash .7s ease-out 1; }
+/* the mode switch is a preference, not the decision of the screen - it whispers */
+.mode-quiet { background: transparent; padding: 0; gap: 6px; }
+.mode-quiet .layer-off { color: var(--ink-2); font-size: 13.5px; padding: 5px 10px; }
+.mode-quiet .layer-on {
+    background: var(--surface-2);
+    color: var(--ink);
+    box-shadow: none;
+    font-size: 13.5px;
+    padding: 5px 10px;
+}
+@keyframes nowFlash {
+    0% { background: var(--accent-soft); }
+    100% { background: var(--surface); }
+}
+.progress-done { border-color: var(--ok); }
+
+.progress-bar {
+    flex: 1;
+    height: 8px;
+    background: var(--surface-2);
+    border-radius: 999px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    /* Done fills from the right, the same direction the text reads: the auto margin
+       sits at the inline END (the left, here) and absorbs the empty part. */
+    margin-inline-end: auto;
+}
+.progress-done .progress-fill { background: var(--ok); }
+
+.progress-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-variant-numeric: tabular-nums;
+    /* wraps rather than ever poking past the screen edge: the pinned bar carries four
+       things, and a long day name plus a big count must fold, not overflow */
+    flex-wrap: wrap;
+}
+.progress-line .btn-add { padding: 6px 13px; font-size: 14px; }
+.progress-ok { color: var(--ok); font-weight: 600; }
+
+.worker-list {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.wrow {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--line-soft);
+}
+.wrow:last-child { border-bottom: none; }
+
+/* The whole row is the tap target. A name-sized one is a miss waiting to happen, and
+   this gets tapped thirty times an evening. */
+.wrow-main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: var(--ink);
+    text-align: start;
+    padding: 13px 14px;
+    min-height: 52px;
+    font-size: 16px;
+}
+.wrow-main:hover { background: var(--surface-2); filter: none; }
+.wrow-empty { background: var(--warn-bg); }
+.wrow-empty .wrow-main:hover { background: transparent; filter: brightness(.97); }
+.wrow-name { font-weight: 600; }
+.wrow-value { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    padding: 3px 9px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+/* The whole badge is the site's colour, and the row behind it is not. A worker can be at
+   two sites in one day, so a single stripe down the edge of the row would be telling half
+   the truth - and a fully coloured row would swallow the yellow of טרם נרשם, which is a
+   state and not a place. */
+.tag-place {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    gap: 6px;
+}
+.tag-absent { background: var(--surface-2); color: var(--ink-3); }
+.tag-empty { background: transparent; color: var(--warn); font-weight: 600; }
+
+/* The rate rides inside the site's badge rather than beside it in a colour of its own:
+   one of the ten site colours is already a gold, and a separate gold chip next to a
+   coloured badge reads as a second site. */
+.tag-place .tag-rate {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    border-inline-start: 1px solid rgba(255, 255, 255, .5);
+    padding-inline-start: 6px;
+}
+.tag-rate {
+    font-size: 11px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: var(--warn-bg);
+    color: var(--warn);
+}
+
+/* Sites past the tenth reuse a colour, and carry a diamond so the repeat is visible
+   without anyone having to compare two badges side by side. The name is always spelled
+   out in full - the colour narrows the search, the text is what confirms it. */
+.site-mark { font-size: 10px; opacity: .9; }
+.sheet-place .site-mark { font-size: 12px; }
+
+/* ---------------------------------------------------------------- assign sheet */
+
+/* Anchored to the bottom on a phone: that is where the thumb is, and the sheet is
+   tapped once per worker all the way down the roster. */
+.sheet { align-items: flex-end; padding: 0; }
+.sheet-content {
+    max-width: 560px;
+    border-radius: 22px 22px 0 0;
+    max-height: 82vh;
+    padding: 16px 16px 20px;
+    /* After the shorthand, or it is overwritten by it. The sheet sits on the bottom edge
+       of an iPhone, where the home indicator is drawn over anything in that strip. */
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 641px) {
+    .sheet { align-items: center; padding: 16px; }
+    .sheet-content { border-radius: var(--radius); }
+}
+
+.sheet-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.sheet-head h3 { margin: 0; font-size: 19px; }
+.sheet-meta { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.sheet-places {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+}
+/* Full coverage, not a dot or a stripe: this button is found from the corner of the eye,
+   thirty times an evening, and area is what makes that work. The colour itself is set
+   per site from JS. */
+.sheet-place {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 14px 10px;
+    font-size: 16px;
+    font-weight: 700;
+    min-height: 52px;
+    color: #fff;
+}
+/* The keyboard shortcut, on the machine that has a keyboard. */
+.sheet-key {
+    display: none;
+    font-size: 11px;
+    font-weight: 700;
+    opacity: .75;
+    border: 1px solid rgba(255, 255, 255, .6);
+    border-radius: 3px;
+    padding: 0 4px;
+    line-height: 1.4;
+}
+@media (min-width: 641px) and (pointer: fine) { .sheet-key { display: inline-block; } }
+
+/* Already chosen: same colour, ringed in white, so the tile does not change identity at
+   the moment it changes state. */
+.sheet-place-on {
+    font-weight: 800;
+    box-shadow: inset 0 0 0 3px rgba(255, 255, 255, .9);
+}
+
+.sheet-rates { margin-bottom: 14px; }
+.sheet-rate-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line-soft);
+}
+.sheet-rate-name { font-size: 13px; margin-inline-end: auto; }
+
+.chip-on, .chip-off {
+    font-size: 13px;
+    padding: 5px 11px;
+    border: 1px solid var(--line);
+}
+.chip-off { background: var(--surface); color: var(--ink-2); }
+.chip-on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+
+.sheet-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line-soft);
+}
+.sheet-actions button { flex: 1; min-height: 48px; }
+
+.mode-toggle { margin-inline-start: 0; }
+
+@media (max-width: 640px) {
+    .mode-toggle { width: 100%; }
+    .mode-toggle button { flex: 1; }
+    .wrow-main { padding: 15px 14px; min-height: 58px; }
+    .sheet-places { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---------------------------------------------------------------- print */
+
+/* The invoice is handed to the client on paper, so it gets a real page layout rather
+   than a screenshot of a screen: no app chrome, black on white, and the range stated
+   at the top because a table of numbers with no period on it means nothing. */
+@media print {
+    @page { size: A4; margin: 14mm; }
+
+    .report-table { font-size: 11pt; page-break-inside: auto; }
+    .report-table tr { page-break-inside: avoid; }
+    .report-table thead { display: table-header-group; }
+    .report-table thead th {
+        background: #fff !important;
+        color: #000;
+        border-bottom: 1.5pt solid #000;
+    }
+    .report-table td, .report-table th { border-bottom: .5pt solid #999; padding: 5pt 8pt; }
+    .report-table tfoot td { border-top: 1.5pt solid #000; background: #fff !important; }
+
+    .range-bar, .hint { display: none !important; }
+    .report { page-break-before: auto; margin-bottom: 10mm; }
+    .report-invoice { page-break-before: always; }
+    .report h2 { font-size: 14pt; margin-bottom: 4mm; }
+
+    .print-period::after { content: attr(data-period); }
+}
+
+/* Only on paper: which period the report covers. */
+.print-period { display: none; }
+@media print { .print-period { display: block; font-size: 10pt; margin-bottom: 3mm; } }
+
+
+/* ================================================================ comfort
+   The person using this every evening is sixty-two. Everything below is sizing
+   only - no colours, no layout changes - and lives in one place so the next
+   adjustment is one edit, not an archaeology dig. Screen only: paper has its
+   own rules. */
+@media screen {
+    body { font-size: 17px; line-height: 1.55; }
+
+    /* the rows that get tapped thirty times an evening */
+    .wrow-main { min-height: 64px; padding: 14px 16px; }
+    .wrow-name { font-size: 17.5px; }
+    .tag { font-size: 14px; }
+    .tag-place { height: 30px; border-radius: 8px; }
+    .tag-empty { font-size: 15px; }
+
+    /* the ✕ that must be pressable without aiming */
+    .btn-icon { min-width: 44px; min-height: 44px; font-size: 18px; display: inline-flex; align-items: center; justify-content: center; }
+    .undo-bar .btn-icon, .roster-actions .btn-icon { min-width: 44px; min-height: 44px; }
+
+    /* the sheet: one big finger target per site */
+    .sheet-head h3 { font-size: 22px; }
+    .sheet-place { min-height: 62px; font-size: 17.5px; }
+    .sheet-actions button { min-height: 54px; font-size: 16.5px; }
+    .chip-on, .chip-off { font-size: 14.5px; padding: 8px 14px; }
+    .rate-hours { font-size: 16px; }
+    .rate-select { font-size: 15px; padding: 7px 9px; }
+
+    /* day navigation */
+    .day-label strong { font-size: 22px; }
+    .day-date { font-size: 14px; }
+    .progress-line strong { font-size: 17px; }
+    .bulk-chip { height: 40px; font-size: 15.5px; }
+
+    /* dialogs: questions in a large voice, answers under a large thumb */
+    .modal-content h3 { font-size: 20px; }
+    .modal-actions button { min-height: 50px; font-size: 16.5px; flex: 1; }
+    .modal-actions .btn-icon { flex: 0; }
+    .ask-error, .field-error { font-size: 15px; }
+    .picker-row { min-height: 56px; }
+
+    /* the bottom bar */
+    @media (max-width: 700px) {
+        .tab { font-size: 12px; padding: 7px 2px 6px; }
+        .tab-icon svg { width: 24px; height: 24px; }
+        .wrow-main { min-height: 66px; }
+        .report-table td { font-size: 16px; }
+        .report-table td:first-child { font-size: 17.5px; }
+    }
+}

@@ -1,0 +1,244 @@
+// The one place the schedule lives while the app is open, and the one place that decides
+// when it is written down.
+//
+// v1 data is never modified. It is read, migrated into a new key, and left exactly where
+// it was - so if anything about the migration turns out to be wrong, the original is
+// still sitting there untouched.
+
+const V1_KEY = 'scheduleData';
+const V2_KEY = 'scheduleData:v2';
+const ISSUES_KEY = 'scheduleData:migrationIssues';
+
+const State = {
+    schedule: emptySchedule(),
+    date: null,          // the day being viewed, YYYY-MM-DD
+    // Always 'actual'. The seder is sent on WhatsApp and never lived comfortably in
+    // here; the app records what HAPPENED, one thing only. The field itself stays -
+    // the data model, the sync paths and old documents all still carry two layers,
+    // and reading them must keep working.
+    layer: 'actual',
+    migrationIssues: [],
+
+    load() {
+        const v2 = Store.get(V2_KEY);
+        if (v2) {
+            try {
+                this.schedule = normaliseSchedule(JSON.parse(v2));
+                this.migrationIssues = readIssues();
+                return { migrated: false };
+            } catch (error) {
+                console.error('v2 schedule unreadable, falling back to v1:', error);
+            }
+        }
+
+        const v1 = Store.get(V1_KEY);
+        if (!v1) {
+            this.schedule = emptySchedule();
+            return { migrated: false };
+        }
+
+        let result;
+        try {
+            result = migrateV1(JSON.parse(v1));
+        } catch (error) {
+            console.error('v1 schedule unreadable:', error);
+            this.schedule = emptySchedule();
+            return { migrated: false, failed: true };
+        }
+
+        this.schedule = result.schedule;
+        this.migrationIssues = result.issues;
+        writeIssues(result.issues);
+        this.save({ silent: true });
+
+        return { migrated: true, issues: result.issues };
+    },
+
+    save(options) {
+        this.schedule.updatedAt = new Date().toISOString();
+        this.schedule.updatedBy = syncDeviceId();
+        Store.set(V2_KEY, JSON.stringify(this.schedule));
+
+        if (!(options && options.silent) && typeof FarkadSync !== 'undefined') {
+            FarkadSync.onLocalChange(this.schedule);
+        }
+    },
+
+    // Every mutation goes through here: it writes locally and hands the sync layer the
+    // single field path that changed, which is what keeps three people editing the same
+    // evening from overwriting one another.
+    commit(change) {
+        this.save();
+        if (change && change.path && typeof FarkadSync !== 'undefined') {
+            FarkadSync.edit(change.path, change.value);
+        }
+        render();
+    },
+
+    // Writes what is in memory to the device WITHOUT re-stamping it. Used when a snapshot
+    // that came from another device is adopted: stamping it here would relabel their work
+    // as this device's, at this device's clock - and that stamp is what every later
+    // comparison is made against.
+    persist() {
+        Store.set(V2_KEY, JSON.stringify(this.schedule));
+    },
+
+    // A bulk edit - copying a whole day across - saves once and renders once, but still
+    // sends every path it touched. Saving alone only pushes a timestamp, so a copy that
+    // skipped this landed on this device and nowhere else: the other two would keep
+    // building the evening against a day they could not see.
+    commitMany(changes) {
+        this.save();
+        if (typeof FarkadSync !== 'undefined') {
+            changes.forEach(change => {
+                if (change && change.path) FarkadSync.edit(change.path, change.value);
+            });
+        }
+        render();
+    },
+
+    worker(id) {
+        return this.schedule.workers.find(w => w.id === id) || null;
+    },
+
+    place(id) {
+        return this.schedule.places.find(p => p.id === id) || null;
+    },
+
+    activeWorkers() {
+        return this.schedule.workers.filter(w => w.active !== false);
+    },
+
+    activePlaces() {
+        return this.schedule.places.filter(p => p.active !== false);
+    },
+
+    // Who to draw on a given day: the current crew, plus anyone archived who has
+    // something recorded on that date. Otherwise the day somebody leaves, every past day
+    // they worked loses their row - and with it any way to see or correct what they did,
+    // while the payroll report keeps counting it.
+    workersForDay(date, layer) {
+        return this.schedule.workers.filter(worker => {
+            if (worker.active !== false) return true;
+            return isAbsent(this.schedule, date, worker.id, layer) ||
+                entriesFor(this.schedule, date, worker.id, layer).length > 0;
+        });
+    },
+
+    // Everyone with no entry and no absence on the current day. This is the number that
+    // matters most on screen: a worker nobody recorded is a worker nobody pays.
+    unrecorded() {
+        return this.activeWorkers().filter(worker => {
+            if (isAbsent(this.schedule, this.date, worker.id, this.layer)) return false;
+            return entriesFor(this.schedule, this.date, worker.id, this.layer).length === 0;
+        });
+    },
+
+    absentToday() {
+        return this.activeWorkers()
+            .filter(worker => isAbsent(this.schedule, this.date, worker.id, this.layer));
+    },
+
+    nextWorkerId() {
+        return nextId(this.schedule.workers, 'w');
+    },
+
+    nextPlaceId() {
+        return nextId(this.schedule.places, 'p');
+    }
+};
+
+// Ids must never be reused: a recycled id would silently attach an old assignment to a
+// new person. Always one past the highest ever issued, not the array length.
+function nextId(list, prefix) {
+    const highest = list.reduce((max, item) => {
+        const match = /^[wp]_(\d+)$/.exec(item.id || '');
+        return match ? Math.max(max, Number(match[1])) : max;
+    }, 0);
+    return `${prefix}_${String(highest + 1).padStart(2, '0')}`;
+}
+
+// Accepts anything shaped roughly right and fills in what is missing, so a document
+// written by an older build - or a half-finished remote write - cannot crash the app.
+function normaliseSchedule(raw) {
+    const schedule = emptySchedule();
+    if (!raw || typeof raw !== 'object') return schedule;
+
+    schedule.workers = (Array.isArray(raw.workers) ? raw.workers : [])
+        .filter(w => w && w.id)
+        .map(w => ({
+            id: String(w.id),
+            name: String(w.name || ''),
+            idNumber: String(w.idNumber || ''),
+            phone: String(w.phone || ''),
+            // Pay rates. Stored as numbers so a blank stays 0 rather than becoming the
+            // string "0" and quietly multiplying to nothing.
+            dailyRate: Number(w.dailyRate) || 0,
+            hourlyRate: Number(w.hourlyRate) || 0,
+            active: w.active !== false
+        }));
+
+    schedule.places = (Array.isArray(raw.places) ? raw.places : [])
+        .filter(p => p && p.id)
+        .map(p => ({
+            id: String(p.id),
+            name: String(p.name || ''),
+            active: p.active !== false
+        }));
+
+    const days = (raw.days && typeof raw.days === 'object') ? raw.days : {};
+    Object.keys(days).forEach(date => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+        const day = days[date] || {};
+        schedule.days[date] = {
+            plan: normaliseLayer(day.plan),
+            actual: normaliseLayer(day.actual)
+        };
+    });
+
+    schedule.updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
+    schedule.updatedBy = typeof raw.updatedBy === 'string' ? raw.updatedBy : null;
+    return schedule;
+}
+
+function normaliseLayer(side) {
+    const out = {};
+    if (!side || typeof side !== 'object') return out;
+
+    Object.keys(side).forEach(workerId => {
+        const record = side[workerId];
+        if (!record || typeof record !== 'object') return;
+
+        const entries = (Array.isArray(record.entries) ? record.entries : [])
+            .filter(entry => entry && entry.placeId)
+            .map(entry => makeEntry(entry.placeId, entry.rate, entry.extraHours));
+
+        out[workerId] = record.absent ? { absent: true, entries: [] } : { entries };
+    });
+
+    return out;
+}
+
+function readIssues() {
+    try {
+        const raw = Store.get(ISSUES_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        return [];
+    }
+}
+
+function writeIssues(issues) {
+    Store.set(ISSUES_KEY, JSON.stringify(issues || []));
+}
+
+// By identity, not by position: the list is rebuilt on every render, and an index
+// captured when the card was drawn can point at a different issue by the time an answer
+// comes back from a dialog.
+function dismissIssue(issue) {
+    const index = State.migrationIssues.indexOf(issue);
+    if (index === -1) return;
+    State.migrationIssues.splice(index, 1);
+    writeIssues(State.migrationIssues);
+}

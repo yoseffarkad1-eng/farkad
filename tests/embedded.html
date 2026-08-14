@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>farkad embedded</title>
+<!--
+  The app inside a sandboxed frame, which is how it is seen in a preview or an embed.
+
+  Nothing here is shipped. It exists because that environment silently removes three
+  things the app used to depend on: window.prompt/confirm/alert are ignored outright,
+  localStorage throws on access, and reading navigator.serviceWorker throws. Each one
+  fails quietly - a button that appears to do nothing, and no error on screen.
+-->
+<body style="margin:0">
+<iframe id="app" sandbox="allow-scripts" src="../index.html"
+        style="width:100%;height:100vh;border:0"></iframe>

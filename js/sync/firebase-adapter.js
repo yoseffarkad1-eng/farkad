@@ -1,0 +1,126 @@
+// Firebase adapter. This is the ONLY file that knows Firebase exists - everything else
+// talks to FarkadSync, which talks to whatever adapter is connected.
+//
+// It is an ES module because the Firebase v9 SDK only ships as modules. That is fine and
+// deliberate: it loads separately from the app's classic scripts and reaches them through
+// the global scope, so the inline onclick handlers everywhere else keep working. Do NOT
+// convert the rest of the app to modules to match this file.
+//
+// With firebase-config.js left as the placeholder, this module does nothing at all and
+// the app stays local-only.
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+    getAuth,
+    onAuthStateChanged,
+    signInWithPopup,
+    GoogleAuthProvider,
+    signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+    getFirestore,
+    doc,
+    setDoc,
+    updateDoc,
+    onSnapshot,
+    FieldPath
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+import { firebaseConfig, SCHEDULE_DOC_PATH } from './firebase-config.js';
+
+function isConfigured() {
+    return Boolean(firebaseConfig && firebaseConfig.projectId && firebaseConfig.apiKey);
+}
+
+if (!isConfigured()) {
+    console.info('Firebase is not configured - running local-only. See docs/firebase-setup.md');
+} else {
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const scheduleRef = doc(db, ...SCHEDULE_DOC_PATH.split('/'));
+
+    // The sync layer's paths look like days.2026-08-12.plan.w_01. Passing that to
+    // updateDoc as a STRING would throw "invalid field path": in a string path, any
+    // segment that starts with a digit or contains a dash has to be backtick-escaped,
+    // and every date segment does both. So every single field write would have failed
+    // the first time sync was switched on - the design would have died on contact.
+    //
+    // The FieldPath constructor takes the segments raw and does its own escaping, and
+    // updateDoc accepts (path, value, path, value, ...) pairs.
+    function patchToUpdateArgs(patch) {
+        const args = [];
+        Object.keys(patch).forEach(path => {
+            args.push(new FieldPath(...path.split('.')), patch[path]);
+        });
+        return args;
+    }
+
+    // Sign-in is a button rather than an automatic redirect: an automatic one would lock
+    // the door on anyone who opens the page before the allowlist has their address.
+    window.farkadSignIn = () => signInWithPopup(auth, new GoogleAuthProvider())
+        .catch(error => {
+            console.error('Sign-in failed:', error);
+            askTell('ההתחברות נכשלה: ' + error.message);
+        });
+
+    window.farkadSignOut = () => signOut(auth);
+
+    onAuthStateChanged(auth, user => {
+        const button = document.getElementById('syncAuthBtn');
+
+        if (!user) {
+            window.FarkadSync.disconnect();
+            if (button) {
+                button.textContent = '☁️ התחבר לענן';
+                button.setAttribute('onclick', 'farkadSignIn()');
+            }
+            return;
+        }
+
+        if (button) {
+            button.textContent = `☁️ ${user.email}`;
+            button.setAttribute('onclick', 'farkadSignOut()');
+        }
+
+        window.FarkadSync.connect({
+            // Firestore merges dotted field paths server-side, so two people writing
+            // days.2026-08-12.plan.w_01 and ...plan.w_07 both land. This is what lets the
+            // three of them build the evening roster at the same time.
+            update(patch) {
+                const args = patchToUpdateArgs(patch);
+                return updateDoc(scheduleRef, ...args)
+                    .catch(error => {
+                        // A document that does not exist yet cannot be updated.
+                        if (error && error.code === 'not-found') {
+                            return setDoc(scheduleRef, {}, { merge: true })
+                                .then(() => updateDoc(scheduleRef, ...args));
+                        }
+                        throw error;
+                    });
+            },
+            save(data) {
+                return setDoc(scheduleRef, data);
+            },
+            subscribe(onSnapshotData, onError) {
+                return onSnapshot(
+                    scheduleRef,
+                    snapshot => {
+                        if (snapshot.exists()) {
+                            onSnapshotData(snapshot.data());
+                            return;
+                        }
+                        // A project connected for the first time has no document yet.
+                        // Saying so - as an empty, unstamped schedule - lets the sync
+                        // layer leave local data alone, mark itself synced, and push
+                        // anything queued. Staying silent left it on "מתחבר לענן…"
+                        // forever, until the first local edit happened to create the
+                        // document.
+                        onSnapshotData({ workers: [], places: [], days: {}, updatedAt: null });
+                    },
+                    onError
+                );
+            }
+        });
+    });
+}

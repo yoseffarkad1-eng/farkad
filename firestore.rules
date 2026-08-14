@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// The real access control for this app. The web config in js/sync/firebase-config.js is
+// public and protects nothing; these rules are enforced on the server and are the only
+// thing standing between the schedule and anyone who finds the URL.
+//
+// Everyone listed writes. The evening roster is built by the three of them together and
+// they divide the work between themselves, so there is deliberately no reader/writer
+// split here - the protection against overwriting each other is technical, not a
+// permission: the client sends one field path per edit, never the whole document.
+//
+// Deployment: Firebase console -> Firestore Database -> Rules -> paste -> Publish.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Put the real addresses here. Anyone not listed is refused even with a valid Google
+    // account - public sign-up is closed on purpose.
+    function allowed() {
+      return request.auth != null && request.auth.token.email in [
+        'REPLACE-ME-owner@example.com',
+        'REPLACE-ME-second@example.com',
+        'REPLACE-ME-third@example.com',
+        // A fourth slot, kept empty on purpose: an account can be added the evening it is
+        // needed without anyone having to remember how this file works. Leave the line as
+        // it is until then - an address that does not exist matches nobody.
+        'REPLACE-ME-spare@example.com'
+      ];
+    }
+
+    // Guards the shape of a full replacement (import, backup restore). A field-level
+    // edit is exempt because it carries only the one path it changed - requiring the top
+    // level keys there would reject every normal write.
+    function fullDocumentOk() {
+      return request.resource.data.keys().hasAll(['workers', 'places', 'updatedAt'])
+        && request.resource.data.workers is list
+        && request.resource.data.places is list;
+    }
+
+    function isFullReplacement() {
+      return request.resource.data.keys().hasAny(['workers', 'places']);
+    }
+
+    // Every write must carry a timestamp: the client's merge rule depends on it, and a
+    // write without one would make the document look older than it is.
+    function stamped() {
+      return request.resource.data.updatedAt is string;
+    }
+
+    match /schedules/{docId} {
+      allow read: if allowed();
+      allow write: if allowed()
+        && stamped()
+        && (!isFullReplacement() || fullDocumentOk());
+    }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
