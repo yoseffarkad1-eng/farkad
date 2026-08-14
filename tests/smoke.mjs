@@ -237,8 +237,10 @@ async function seedRoster(page) {
 
   check('the week has eight columns',
     (await page.locator('.week-table thead th').count()) === 8);
-  check('the week starts on Friday, the way the accounts run',
-    (await page.locator('.week-table thead th').nth(1).textContent()).includes('שישי'));
+  check('the week starts on Saturday, the way the accounts run',
+    (await page.locator('.week-table thead th').nth(1).textContent()).includes('שבת'));
+  check('and closes on Friday, the last working day',
+    (await page.locator('.week-table thead th').nth(7).textContent()).includes('שישי'));
   check('and Saturday rests, greyed but keeping its place',
     (await page.locator('.week-table thead th.col-rest').count()) === 1);
   check('a cell shows both sites rather than hiding one',
@@ -1254,9 +1256,9 @@ async function seedRoster(page) {
   const totals = await page.locator('.week-table tfoot td')
     .evaluateAll(nodes => nodes.map(n => n.textContent.trim()));
   check('the week counts how many people were out each day',
-    totals[4] === '2' && totals[5] === '1', JSON.stringify(totals));
+    totals[3] === '2' && totals[4] === '1', JSON.stringify(totals));
   check('and an absence is not counted as a day worked',
-    totals[5] === '1', JSON.stringify(totals));
+    totals[4] === '1', JSON.stringify(totals));
   await page.context().close();
 }
 
@@ -1951,33 +1953,33 @@ async function seedRoster(page) {
 
 // ---------------------------------------------------------------- the account period
 {
-  // Pay is settled every second Thursday: a period is Friday through Thursday, twice.
-  // The default range is the fortnight ending on the most recent Thursday.
+  // The week closes on Friday: a period is Saturday through Friday, twice.
+  // The default range is the fortnight ending on the most recent Friday.
   const page = await open();
   const rangeOn = day => page.evaluate(d => {
     todayStr = () => d;
     return defaultPayrollRange();
   }, day);
 
-  const onThursday = await rangeOn('2026-08-13');   // a Thursday: settlement day
-  check('on a Thursday the account ends today',
-    onThursday.from === '2026-07-31' && onThursday.to === '2026-08-13',
-    JSON.stringify(onThursday));
+  const onFriday = await rangeOn('2026-08-14');     // a Friday: settlement day
+  check('on a Friday the account ends today',
+    onFriday.from === '2026-08-01' && onFriday.to === '2026-08-14',
+    JSON.stringify(onFriday));
 
-  const onFriday = await rangeOn('2026-08-14');     // the day after settlement
-  check('on a Friday it still shows the account just settled',
-    onFriday.to === '2026-08-13', JSON.stringify(onFriday));
+  const onSaturday = await rangeOn('2026-08-15');   // the day after settlement
+  check('on a Saturday it still shows the account just settled',
+    onSaturday.to === '2026-08-14', JSON.stringify(onSaturday));
 
   const onWednesday = await rangeOn('2026-08-12');
-  check('mid-week it reaches back to the previous Thursday',
-    onWednesday.to === '2026-08-06' && onWednesday.from === '2026-07-24',
+  check('mid-week it reaches back to the previous Friday',
+    onWednesday.to === '2026-08-07' && onWednesday.from === '2026-07-25',
     JSON.stringify(onWednesday));
 
-  check('and every account runs Friday to Thursday',
+  check('and every account runs Saturday to Friday',
     (await page.evaluate(() => {
       const r = defaultPayrollRange();
       return [parseLocalDate(r.from).getDay(), parseLocalDate(r.to).getDay()];
-    })).join() === '5,4');
+    })).join() === '6,5');
   await page.context().close();
 }
 
@@ -2318,8 +2320,8 @@ async function seedRoster(page) {
   check('grouped as this week and last week',
     (await page.textContent('#dayDrawerList')).includes('השבוע') &&
     (await page.textContent('#dayDrawerList')).includes('שבוע שעבר'));
-  check('each week opens on Friday, the first working day',
-    (await page.locator('.drawer-day .dd-name').first().textContent()).includes('שישי'));
+  check('each week opens on Sunday, the first day after the rest',
+    (await page.locator('.drawer-day .dd-name').first().textContent()).includes('ראשון'));
   check('a finished day wears a check mark',
     (await page.locator('.drawer-day.dd-full .dd-count').first().textContent()) === '✓ 3/3');
   check('and today is named as such',

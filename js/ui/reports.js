@@ -15,13 +15,13 @@ let REPORT_PRESET = 'fortnight';
 // invoice to that client alone, for printing.
 let INVOICE_PLACE = null;
 
-// The account period as the owner runs it: pay is settled every second Thursday, so a
-// period is fourteen days, Friday through Thursday. This returns the fortnight ending
-// on the most recent Thursday - on a Thursday, that is today, which is settlement day.
+// The account period as the owner runs it: the week closes on Friday, so a period is
+// fourteen days, Saturday through Friday. This returns the fortnight ending on the
+// most recent Friday - on a Friday, that is today, which is settlement day.
 function defaultPayrollRange() {
     const to = parseLocalDate(todayStr());
-    // getDay(): Thursday is 4. Distance back to the most recent Thursday.
-    to.setDate(to.getDate() - ((to.getDay() + 3) % 7));
+    // getDay(): Friday is 5. Distance back to the most recent Friday.
+    to.setDate(to.getDate() - ((to.getDay() + 2) % 7));
     const from = new Date(to);
     from.setDate(to.getDate() - 13);
     return { from: toLocalDateStr(from), to: toLocalDateStr(to) };

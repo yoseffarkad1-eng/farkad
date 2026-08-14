@@ -27,14 +27,15 @@ function parseLocalDate(value) {
     return date;
 }
 
-// The FRIDAY of the week containing `date`. The working week here runs Friday to
-// Thursday because the accounts do: pay is settled every second Thursday, Friday is
-// usually the rest-then-start seam, and Saturday is off. Every week start goes through
-// here, so the grid can never open on a mid-week date.
+// The SATURDAY of the week containing `date`. The working week here runs Saturday to
+// Friday because the accounts do: Friday is the last working day and the week's seam,
+// so a Friday still belongs to the week behind it, and Saturday - the rest day - opens
+// the next one. Every week start goes through here, so the grid can never open on a
+// mid-week date.
 function snapToWeekStart(date) {
     const start = new Date(date);
-    // getDay(): Friday is 5. Distance back to the most recent Friday.
-    start.setDate(date.getDate() - ((date.getDay() + 2) % 7));
+    // getDay(): Saturday is 6. Distance back to the most recent Saturday.
+    start.setDate(date.getDate() - ((date.getDay() + 1) % 7));
     start.setHours(12, 0, 0, 0);
     return start;
 }
