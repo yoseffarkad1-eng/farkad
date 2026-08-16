@@ -21,6 +21,13 @@ function parseLocalDate(value) {
         return new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12, 0, 0, 0);
     }
 
+    // Everything that reaches the constructor must already be date-SHAPED. It is forgiving
+    // to the point of danger otherwise: new Date('שבוע 32') is the first of January 2032,
+    // so a hand-typed week label in an old save would move a whole week of work six years
+    // into the future, where no report would ever show it again. A null is caught and
+    // reported; a wrong date is not.
+    if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return null;
+
     const date = new Date(value);
     if (isNaN(date)) return null;
     date.setHours(12, 0, 0, 0);

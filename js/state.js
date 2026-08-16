@@ -8,6 +8,10 @@
 const V1_KEY = 'scheduleData';
 const V2_KEY = 'scheduleData:v2';
 const ISSUES_KEY = 'scheduleData:migrationIssues';
+// Where an unreadable v2 blob is put aside before anything overwrites it. It is the most
+// recent copy of the record that exists, and a damaged one is still worth far more than
+// no copy: the days inside it are plain text and can be read out by hand.
+const V2_DAMAGED_KEY = 'scheduleData:v2damaged';
 
 const State = {
     schedule: emptySchedule(),
@@ -20,6 +24,7 @@ const State = {
     migrationIssues: [],
 
     load() {
+        let damaged = false;
         const v2 = Store.get(V2_KEY);
         if (v2) {
             try {
@@ -28,13 +33,18 @@ const State = {
                 return { migrated: false };
             } catch (error) {
                 console.error('v2 schedule unreadable, falling back to v1:', error);
+                // Set it aside BEFORE the fallback below, which ends in save() and would
+                // otherwise overwrite the newest copy of the record with data from before
+                // the migration - destroying the damaged blob and every day added since.
+                Store.set(V2_DAMAGED_KEY, v2, { optional: true });
+                damaged = true;
             }
         }
 
         const v1 = Store.get(V1_KEY);
         if (!v1) {
             this.schedule = emptySchedule();
-            return { migrated: false };
+            return { migrated: false, damaged };
         }
 
         let result;
@@ -43,7 +53,7 @@ const State = {
         } catch (error) {
             console.error('v1 schedule unreadable:', error);
             this.schedule = emptySchedule();
-            return { migrated: false, failed: true };
+            return { migrated: false, failed: true, damaged };
         }
 
         this.schedule = result.schedule;
@@ -51,7 +61,7 @@ const State = {
         writeIssues(result.issues);
         this.save({ silent: true });
 
-        return { migrated: true, issues: result.issues };
+        return { migrated: true, issues: result.issues, damaged };
     },
 
     save(options) {

@@ -42,19 +42,26 @@ const Store = {
         return Object.prototype.hasOwnProperty.call(this.memory, key) ? this.memory[key] : null;
     },
 
-    set(key, value) {
+    // `options.optional` marks a write the app can live without - a restore point, not a
+    // day's record. An optional write never reclaims, because the only thing reclaim can
+    // delete is other restore points: letting one buy space by eating the rest turns a
+    // full device into a device with a single copy of today and no history at all. It
+    // also never raises `full`, which is reserved for a write that actually mattered.
+    set(key, value, options) {
+        const optional = !!(options && options.optional);
         this.memory[key] = String(value);
         if (!this.available) return false;
 
         try {
             localStorage.setItem(key, value);
-            this.full = false;
+            if (!optional) this.full = false;
             return true;
         } catch (error) {
             if (!isQuotaError(error)) {
                 this.fallback(error);
                 return false;
             }
+            if (optional) return false;
 
             // Out of space. Throw away something expendable and try the real write again
             // - the day's record is worth more than any number of old restore points.
@@ -114,6 +121,16 @@ const Store = {
         localStorage.setItem(probe, '1');
         localStorage.removeItem(probe);
     } catch (error) {
+        // A device with no free space throws here too, and that is the misdiagnosis this
+        // file opens by warning about: storage that is merely FULL still holds every day
+        // already recorded and still accepts writes once something is deleted. Calling it
+        // unavailable would skip the reclaim ladder in set() and send the whole evening
+        // to memory, where the next refresh ends it.
+        if (isQuotaError(error)) {
+            Store.full = true;
+            console.warn('Browser storage is full; writes will make room first:', error);
+            return;
+        }
         Store.available = false;
         console.warn('Browser storage unavailable, holding data in memory only:', error);
     }

@@ -233,6 +233,24 @@ const FarkadSync = {
 };
 
 // One line under the board covering both questions the manager actually has: where the
+// The two storage failures - blocked, and full - are the only states where a change the
+// person just made is NOT written down. That cannot be a grey line under the fold, below
+// two fixed bottom bars: it goes in a banner at the top, with the one button that turns
+// the situation around. `text` of null clears it.
+function showStorageBanner(text) {
+    const banner = document.getElementById('storageBanner');
+    if (!banner) return;
+
+    if (!text) { banner.style.display = 'none'; return; }
+    if (banner.dataset.text === text) return;   // already saying exactly this
+
+    banner.dataset.text = text;
+    clear(banner);
+    banner.appendChild(el('span', null, text));
+    banner.appendChild(button('💾 שמור גיבוי', 'btn-secondary', () => exportBackup()));
+    banner.style.display = '';
+}
+
 // data lives, and whether the other device is seeing the same thing.
 function updateSyncNotice() {
     const notice = document.getElementById('storageNotice');
@@ -240,15 +258,21 @@ function updateSyncNotice() {
 
     // Data held only in memory must never look like data that survives a refresh.
     if (typeof Store !== 'undefined' && !Store.available) {
-        notice.textContent = '⚠️ הדפדפן חוסם שמירה. הנתונים יימחקו ברענון - ייצא קובץ גיבוי.';
+        const text = '⚠️ הדפדפן חוסם שמירה. הנתונים יימחקו ברענון - ייצא קובץ גיבוי.';
+        notice.textContent = text;
+        showStorageBanner(text);
         return;
     }
 
     // Full is not blocked: what is already saved is safe, but the last change is not.
     if (typeof Store !== 'undefined' && Store.full) {
-        notice.textContent = '⚠️ אין מקום פנוי במכשיר והשינוי האחרון לא נשמר - ייצא קובץ גיבוי ופנה מקום.';
+        const text = '⚠️ אין מקום פנוי במכשיר והשינוי האחרון לא נשמר - ייצא קובץ גיבוי ופנה מקום.';
+        notice.textContent = text;
+        showStorageBanner(text);
         return;
     }
+
+    showStorageBanner(null);
 
     const messages = {
         off: 'הנתונים נשמרים במכשיר הזה בלבד.',

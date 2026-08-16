@@ -202,8 +202,11 @@ function takeDailySnapshot() {
     if (snapshotDates().includes(today)) return;
 
     // A snapshot must never be the reason a real save fails, so it is written first and
-    // its failure is ignored: Store.set already falls back to memory and says so.
-    Store.set(SNAPSHOT_PREFIX + today, JSON.stringify(State.schedule));
+    // its failure is ignored: Store.set already falls back to memory and says so. Marked
+    // optional so that on a full device it cannot buy its own space by deleting the older
+    // restore points - the reclaim hook below is the only thing Store can throw away, and
+    // a new photograph is not worth the whole album.
+    Store.set(SNAPSHOT_PREFIX + today, JSON.stringify(State.schedule), { optional: true });
 
     snapshotDates().slice(SNAPSHOT_KEEP).forEach(date => Store.remove(SNAPSHOT_PREFIX + date));
 }

@@ -1264,6 +1264,79 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- damaged save file
+{
+  // The newest copy of the record is the one that just failed to parse. The old recovery
+  // path read v1 instead and then SAVED over the damaged blob, destroying the only copy
+  // of every day added since the migration - and said nothing at all about it.
+  const page = await open();
+  await page.evaluate(() => {
+    localStorage.setItem('scheduleData', JSON.stringify({
+      workers: [{ id: 'w_01', name: 'דוד' }], places: [{ id: 'p_01', name: 'הרצליה' }],
+      weekStartDate: '2026-08-07', assignments: []
+    }));
+    localStorage.setItem('scheduleData:v2', '{"workers":[{"id":"w_01","name":"דוד"}],,BROKEN');
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(600);
+
+  const kept = await page.evaluate(() => ({
+    damaged: localStorage.getItem('scheduleData:v2damaged'),
+    v2: localStorage.getItem('scheduleData:v2')
+  }));
+  check('an unreadable save file is put aside instead of being overwritten',
+    typeof kept.damaged === 'string' && kept.damaged.includes('BROKEN'),
+    JSON.stringify({ damaged: (kept.damaged || '').slice(0, 30) }));
+  check('and the app still opens on the older readable copy',
+    kept.v2 !== null && !kept.v2.includes('BROKEN'));
+  check('the person is told the file was damaged rather than left to guess',
+    (await page.textContent('#askModal')).includes('נפגם'));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- an undated v1 week
+{
+  // A hand-typed week field used to throw inside the migration, and the throw escaped
+  // every issue-reporting path: the app came up blank with no message, while the whole
+  // record sat untouched in the old key.
+  const page = await open();
+  await page.evaluate(() => {
+    localStorage.removeItem('scheduleData:v2');
+    localStorage.setItem('scheduleData', JSON.stringify({
+      workers: [{ id: 'w_01', name: 'דוד' }],
+      places: [{ id: 'p_01', name: 'הרצליה' }],
+      weekStartDate: 'שבוע 32',
+      assignments: [{ index: 0, value: 'הרצליה' }]
+    }));
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(600);
+
+  const migrated = await page.evaluate(() => ({
+    workers: State.schedule.workers.length,
+    issues: State.migrationIssues.map(issue => issue.kind),
+    days: Object.keys(State.schedule.days)
+  }));
+  check('a week with an unreadable date still migrates the roster',
+    migrated.workers === 1, JSON.stringify(migrated));
+  check('and says why the assignments could not be placed',
+    migrated.issues.includes('no-week-date'), JSON.stringify(migrated));
+  check('rather than filing them under a date nobody will look at',
+    migrated.days.length === 0, JSON.stringify(migrated));
+
+  // the constructor's forgiveness is the danger: 'שבוע 32' parses as 1 Jan 2032
+  const loose = await page.evaluate(() => [
+    String(parseLocalDate('שבוע 32')),
+    String(parseLocalDate('לא ידוע')),
+    String(parseLocalDate('2026-08-14')).slice(0, 15)
+  ]);
+  check('a label that is not a date is refused, not read as a year',
+    loose[0] === 'null' && loose[1] === 'null', JSON.stringify(loose));
+  check('while a real date still parses',
+    loose[2] === 'Fri Aug 14 2026', JSON.stringify(loose));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- a full device
 {
   // Storage that is FULL is not storage that is blocked: everything already written is
@@ -1313,6 +1386,25 @@ async function seedRoster(page) {
   check('and the notice says the device is full rather than blocking',
     (await page.textContent('#storageNotice')).includes('אין מקום פנוי'),
     await page.textContent('#storageNotice'));
+
+  // a failed save is the one thing that must not hide under the fold
+  check('a failed save is announced in a banner, not only in the grey line',
+    (await page.locator('#storageBanner').isVisible()) &&
+    (await page.textContent('#storageBanner')).includes('אין מקום פנוי'));
+  check('and the banner offers the backup that rescues the day',
+    (await page.locator('#storageBanner').getByText('שמור גיבוי').count()) === 1);
+
+  // an optional write must not buy its own space by eating the restore points
+  const optional = await page.evaluate(() => {
+    Store.set('scheduleData:snap:2021-01-01', 'a'.repeat(80 * 1024));
+    Store.set('scheduleData:snap:2021-01-02', 'b'.repeat(80 * 1024));
+    const before = snapshotDates().length;
+    const wrote = Store.set('scheduleData:snap:2021-06-06', 'c'.repeat(400 * 1024), { optional: true });
+    return { before, wrote, after: snapshotDates().length };
+  });
+  check('an optional write that will not fit is refused, not paid for with older copies',
+    optional.wrote === false && optional.after === optional.before,
+    JSON.stringify(optional));
 
   await page.evaluate(() => {
     Object.keys(localStorage).filter(k => k.startsWith('junk:') || k.startsWith('scheduleData:probe'))

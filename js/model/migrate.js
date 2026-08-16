@@ -82,7 +82,12 @@ function migrateV1(v1) {
         }
     });
 
-    const weekStart = v1 && v1.weekStartDate ? toLocalDateStr(parseLocalDate(v1.weekStartDate)) : null;
+    // parseLocalDate returns null for anything that is not a date - a v1 save with a
+    // hand-typed "שבוע 32" in this field used to throw here, and the throw escaped every
+    // issue-reporting path below to leave the app blank with no message at all. A null
+    // lands in the no-week-date branch, which says so properly.
+    const parsedWeekStart = v1 && v1.weekStartDate ? parseLocalDate(v1.weekStartDate) : null;
+    const weekStart = parsedWeekStart ? toLocalDateStr(parsedWeekStart) : null;
     const assignments = (v1 && Array.isArray(v1.assignments)) ? v1.assignments : [];
 
     if (!weekStart && assignments.length > 0) {

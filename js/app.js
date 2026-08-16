@@ -99,4 +99,21 @@ window.onload = () => {
             askTell(`הנתונים הועברו לגרסה החדשה. ${moved} הגרסה הישנה נשמרה ולא שונתה.`);
         }
     }
+
+    // Two boot failures used to pass in silence, which is the worst way for them to pass:
+    // the app comes up looking ordinary and the person keeps recording into it.
+    if (result.damaged) {
+        askTell({
+            title: 'הקובץ השמור נפגם',
+            message: 'לא הצלחנו לקרוא את הרישום האחרון. העותק הפגום נשמר במכשיר ולא נמחק, ' +
+                'וניתן לשחזר ממנו. מה שרואים כרגע הוא המצב הישן יותר - בדוק את הימים האחרונים ' +
+                'מול נקודות השחזור לפני שממשיכים לרשום.'
+        });
+    } else if (result.failed) {
+        askTell({
+            title: 'לא הצלחנו לפתוח את הרישום',
+            message: 'הנתונים השמורים במכשיר לא נקראו, והמסך שנפתח ריק. הם לא נמחקו - ' +
+                'אל תרשום מחדש מעל הריק, נסה נקודת שחזור או קובץ גיבוי.'
+        });
+    }
 };
