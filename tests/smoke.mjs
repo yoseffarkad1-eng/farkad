@@ -115,7 +115,28 @@ async function seedRoster(page) {
   check('a picked worker is marked as already here',
     (await page.textContent('#workerPickerList')).includes('✓ נמצא'));
 
-  await page.click('#workerPickerModal button.btn-secondary');
+  // The list used to re-sort on every tap, so a name jumped the moment it was touched -
+  // a mis-tap removed someone AND threw them to the top, leaving no way to see who moved.
+  const orderBefore = await page.evaluate(() =>
+    [...document.querySelectorAll('#workerPickerList .picker-name')].map(n => n.firstChild.textContent));
+  await page.locator('#workerPickerList .picker-row').filter({ hasText: 'שרה' }).getByRole('button').click();
+  await page.waitForTimeout(200);
+  const orderAfter = await page.evaluate(() =>
+    [...document.querySelectorAll('#workerPickerList .picker-name')].map(n => n.firstChild.textContent));
+  check('removing someone by mistake leaves them exactly where they were',
+    orderBefore.join() === orderAfter.join(), JSON.stringify({ orderBefore, orderAfter }));
+  check('and the mistake is undoable from the header',
+    !(await page.locator('#undoBtn').isDisabled()));
+
+  // put שרה back, in place, with the same button
+  await page.locator('#workerPickerList .picker-row').filter({ hasText: 'שרה' }).getByRole('button').click();
+  await page.waitForTimeout(200);
+  check('tapping the same row again puts them back',
+    (await page.textContent('#workerPickerList')).includes('✓ נמצא'));
+  check('the title says how many are recorded here',
+    (await page.textContent('#workerPickerTitle')).includes('רשומים'));
+
+  await page.locator('#workerPickerModal').getByRole('button', { name: 'סגור' }).click();
   await page.waitForTimeout(200);
 
   check('the site card counts its workers',
@@ -128,7 +149,7 @@ async function seedRoster(page) {
   await page.waitForTimeout(200);
   await page.locator('#workerPickerList .picker-row').filter({ hasText: 'דוד' }).getByRole('button').click();
   await page.waitForTimeout(200);
-  await page.click('#workerPickerModal button.btn-secondary');
+  await page.locator('#workerPickerModal').getByRole('button', { name: 'סגור' }).click();
   await page.waitForTimeout(200);
 
   const davidEntries = await page.evaluate(() =>
@@ -1261,6 +1282,117 @@ async function seedRoster(page) {
     totals[4] === '2' && totals[5] === '1', JSON.stringify(totals));
   check('and an absence is not counted as a day worked',
     totals[5] === '1', JSON.stringify(totals));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- emptying a site
+{
+  // Building a site up name by name is the normal case; taking it apart one ✓ at a time
+  // when the crew moved elsewhere is the same work twice.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_03', 'actual', 'p_02');
+    State.save(); render();
+    openWorkerPicker('p_01');
+  });
+  await page.waitForTimeout(250);
+
+  await page.locator('#workerPickerModal').getByRole('button', { name: /רוקן אתר/ }).click();
+  await page.waitForTimeout(250);
+  check('emptying a site asks first, naming the site and the count',
+    (await page.textContent('#askModal')).includes('הרצליה') &&
+    (await page.textContent('#askModal')).includes('2'));
+
+  await page.locator('#askOk').click();
+  await page.waitForTimeout(300);
+  check('everyone recorded at that site is removed',
+    (await page.evaluate(() =>
+      workersAtPlace(State.schedule, '2026-08-12', 'p_01', 'actual').length)) === 0);
+  check('and the other site is untouched',
+    (await page.evaluate(() =>
+      workersAtPlace(State.schedule, '2026-08-12', 'p_02', 'actual').length)) === 1);
+
+  await page.evaluate(() => { closeWorkerPicker(); render(); });
+  await page.waitForTimeout(200);
+  await page.locator('#undoBtn').click();
+  await page.waitForTimeout(300);
+  check('emptying a site is one press away from being taken back',
+    (await page.evaluate(() =>
+      workersAtPlace(State.schedule, '2026-08-12', 'p_01', 'actual').length)) === 2);
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the header undo
+{
+  // The bar expires after twelve seconds; the mistake is often noticed two names later.
+  const page = await open();
+  await seedRoster(page);
+  await page.waitForTimeout(200);
+  check('with nothing done yet the undo is dimmed, not hidden',
+    (await page.locator('#undoBtn').isVisible()) &&
+    (await page.locator('#undoBtn').isDisabled()));
+
+  await page.evaluate(() => openAssignSheet('w_01'));
+  await page.waitForTimeout(200);
+  await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
+  await page.waitForTimeout(250);
+  await page.evaluate(() => closeAssignSheet());
+  await page.waitForTimeout(200);
+  check('recording a site arms the undo',
+    !(await page.locator('#undoBtn').isDisabled()));
+
+  await page.evaluate(() => dismissUndoBar());
+  await page.waitForTimeout(150);
+  check('the bar can go without taking the undo with it',
+    !(await page.locator('#undoBar').isVisible()) &&
+    !(await page.locator('#undoBtn').isDisabled()));
+
+  await page.locator('#undoBtn').click();
+  await page.waitForTimeout(250);
+  check('and it still undoes the right thing long after the bar is gone',
+    (await page.evaluate(() =>
+      entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 0);
+  check('then goes quiet again',
+    await page.locator('#undoBtn').isDisabled());
+
+  // changing day must forget it: the undo restores into the day it was made on
+  await page.evaluate(() => { openAssignSheet('w_01'); });
+  await page.waitForTimeout(200);
+  await page.locator('.sheet-place').first().click();
+  await page.waitForTimeout(250);
+  await page.evaluate(() => { closeAssignSheet(); stepDay(-1); });
+  await page.waitForTimeout(250);
+  check('stepping to another day clears it rather than aiming it at the wrong date',
+    await page.locator('#undoBtn').isDisabled());
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- no accidental zoom
+{
+  const page = await open();
+  const viewport = await page.getAttribute('meta[name="viewport"]', 'content');
+  check('the page refuses to zoom under a stray pinch',
+    viewport.includes('maximum-scale=1') && viewport.includes('user-scalable=no'), viewport);
+
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save(); render(); openAssignSheet('w_01');
+  });
+  await page.waitForTimeout(250);
+  await page.locator('.sheet-rate-row').first().getByText('שעות נוספות').click();
+  await page.waitForTimeout(250);
+
+  // 16px is the threshold below which iOS magnifies the whole page on focus
+  const sizes = await page.evaluate(() =>
+    [...document.querySelectorAll('input, select')]
+      .filter(node => node.offsetParent !== null)
+      .map(node => ({ id: node.className || node.type, px: parseFloat(getComputedStyle(node).fontSize) })));
+  check('and every field on screen is at or above the size that triggers it',
+    sizes.every(item => item.px >= 16), JSON.stringify(sizes));
   await page.context().close();
 }
 

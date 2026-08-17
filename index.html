@@ -2,7 +2,10 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<!-- No zoom. Every screen here is already sized for the person using it, and the only
+     zoom that ever actually happened was accidental: a pinch while reaching for a name,
+     or iOS magnifying the page because a field was a pixel under its threshold. -->
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
 <title>פרקד - רישום עבודה</title>
 <link rel="stylesheet" href="css/app.css">
 <link rel="manifest" href="manifest.webmanifest">
@@ -125,7 +128,10 @@
     <div class="modal-content">
         <h3 id="workerPickerTitle"></h3>
         <div class="picker-list" id="workerPickerList"></div>
-        <button type="button" class="btn-secondary" onclick="closeWorkerPicker()">סגור</button>
+        <div class="picker-actions">
+            <button type="button" class="btn-secondary" onclick="clearWorkerPicker()">🧹 רוקן אתר</button>
+            <button type="button" class="btn-secondary" onclick="closeWorkerPicker()">סגור</button>
+        </div>
     </div>
 </div>
 

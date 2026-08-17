@@ -15,6 +15,7 @@ const UNDO_SECONDS = 12;
 
 let undoAction = null;
 let undoTimer = null;
+let undoLabel = '';
 
 // The record for one worker on one day, deep-copied. It has to be taken BEFORE the
 // change, and it has to be a copy: the live object is about to be replaced in place.
@@ -40,6 +41,7 @@ function editWithUndo(workerId, label, mutate) {
 
 function offerUndo(label, restore) {
     undoAction = restore;
+    undoLabel = label;
 
     const bar = document.getElementById('undoBar');
     if (!bar) return;
@@ -51,7 +53,12 @@ function offerUndo(label, restore) {
     bar.style.display = '';
 
     clearTimeout(undoTimer);
-    undoTimer = setTimeout(hideUndo, UNDO_SECONDS * 1000);
+    // Only the BAR expires. The action itself stays available behind the ↶ in the header,
+    // because "I did that wrong" is not always noticed within twelve seconds - often it
+    // is noticed two names later.
+    undoTimer = setTimeout(dismissUndoBar, UNDO_SECONDS * 1000);
+
+    renderUndoButton();
 }
 
 function runUndo() {
@@ -60,11 +67,30 @@ function runUndo() {
     if (restore) restore();
 }
 
-function hideUndo() {
+// Takes the toast off the screen and leaves the undo itself standing.
+function dismissUndoBar() {
     clearTimeout(undoTimer);
     undoTimer = null;
-    undoAction = null;
 
     const bar = document.getElementById('undoBar');
     if (bar) bar.style.display = 'none';
+}
+
+// Forgets the action entirely. Called when the day changes: the undo restores into the
+// day it was made on, and offering it while another day is on screen would put a
+// correction somewhere nobody is looking.
+function hideUndo() {
+    dismissUndoBar();
+    undoAction = null;
+    renderUndoButton();
+}
+
+// The ↶ in the day header. Present always so its place is learned, disabled when there
+// is nothing behind it - a button that appears and disappears is a button that is hunted
+// for at the moment it is needed.
+function renderUndoButton() {
+    const btn = document.getElementById('undoBtn');
+    if (!btn) return;
+    btn.disabled = !undoAction;
+    btn.title = undoAction ? `בטל: ${undoLabel}` : 'אין מה לבטל';
 }

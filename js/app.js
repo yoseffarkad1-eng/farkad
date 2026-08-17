@@ -40,6 +40,9 @@ function render() {
     if (currentView === 'reports') renderReports();
 
     renderMigration();
+    // The day header is rebuilt from scratch on every render, so the ↶ comes back
+    // disabled every time and has to be told what it is standing on.
+    renderUndoButton();
     updateSyncNotice();
 }
 

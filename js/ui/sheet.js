@@ -108,11 +108,13 @@ function renderAssignSheet() {
             on ? 'sheet-place sheet-place-on' : 'sheet-place',
             () => {
                 if (on) {
-                    State.commit(unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id));
+                    editWithUndo(worker.id, `${worker.name} הוסר מ${place.name}`, () =>
+                        unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id));
                     renderAssignSheet();
                     return;
                 }
-                State.commit(assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
+                editWithUndo(worker.id, `${worker.name} נרשם ב${place.name}`, () =>
+                    assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
                 // A second site in a day is normal here, so picking one cannot assume the
                 // worker is finished - only move on when this is their first.
                 if (entries.length === 0) advanceSheet();
@@ -148,8 +150,12 @@ function renderAssignSheet() {
             RATES.forEach(rate => {
                 const on = entryRate(entry) === rate;
                 row.appendChild(button(RATE_LABELS[rate], on ? 'chip-on' : 'chip-off', () => {
-                    State.commit(setRate(State.schedule, State.date, worker.id, State.layer,
-                        entry.placeId, rate, rate === RATE_EXTRA ? entryExtraHours(entry) : 0));
+                    // Through undo because leaving 'שעות נוספות' discards the hours that
+                    // were typed into it, and a mis-tap on this row is otherwise silent
+                    // and permanent.
+                    editWithUndo(worker.id, `${worker.name}: ${RATE_LABELS[rate]}`, () =>
+                        setRate(State.schedule, State.date, worker.id, State.layer,
+                            entry.placeId, rate, rate === RATE_EXTRA ? entryExtraHours(entry) : 0));
                     renderAssignSheet();
                 }));
             });
@@ -165,8 +171,9 @@ function renderAssignSheet() {
                 hours.placeholder = 'ש׳';
                 hours.setAttribute('aria-label', `שעות נוספות ב${place ? place.name : ''}`);
                 hours.addEventListener('change', () => {
-                    State.commit(setRate(State.schedule, State.date, worker.id, State.layer,
-                        entry.placeId, RATE_EXTRA, hours.value));
+                    editWithUndo(worker.id, `${worker.name}: ${hours.value || 0} שעות נוספות`, () =>
+                        setRate(State.schedule, State.date, worker.id, State.layer,
+                            entry.placeId, RATE_EXTRA, hours.value));
                     renderAssignSheet();
                 });
                 row.appendChild(hours);
@@ -180,11 +187,13 @@ function renderAssignSheet() {
     const actions = el('div', 'sheet-actions');
     actions.appendChild(button(absent ? '✓ נעדר' : 'נעדר', absent ? 'chip-on' : 'btn-secondary', () => {
         if (absent) {
-            State.commit(clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
+            editWithUndo(worker.id, `ההיעדרות של ${worker.name} בוטלה`, () =>
+                clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
             renderAssignSheet();
             return;
         }
-        State.commit(markAbsent(State.schedule, State.date, worker.id, State.layer));
+        editWithUndo(worker.id, `${worker.name} נרשם כנעדר`, () =>
+            markAbsent(State.schedule, State.date, worker.id, State.layer));
         advanceSheet();
     }));
     actions.appendChild(button('דלג ›', 'btn-secondary', advanceSheet));
@@ -196,8 +205,25 @@ function renderAssignSheet() {
 
 // Site-first entry: the picker stays open so a run of names can be tapped one after the
 // other. Closing after each pick would triple the work for a site with eight people.
+//
+// The order is decided ONCE, when the picker opens, and then frozen. It used to be
+// re-sorted on every tap - unrecorded first, then those working elsewhere, then those
+// already here - which meant every name jumped the moment it was touched. Tap someone by
+// mistake and they were removed from the site AND thrown to the top of the list, so the
+// only way to find out who had just moved was to read every name again. A row that stays
+// where it is makes the mistake self-correcting: the thumb is already on it.
+let pickerOrder = [];
+
 function openWorkerPicker(placeId) {
     pickerPlaceId = placeId;
+
+    const here = new Set(workersAtPlace(State.schedule, State.date, placeId, State.layer));
+    const unrecorded = new Set(State.unrecorded().map(w => w.id));
+    pickerOrder = State.activeWorkers().slice().sort((a, b) => {
+        const rank = worker => (here.has(worker.id) ? 2 : unrecorded.has(worker.id) ? 0 : 1);
+        return rank(a) - rank(b);
+    }).map(worker => worker.id);
+
     renderWorkerPicker();
     document.getElementById('workerPickerModal').style.display = 'flex';
 }
@@ -206,23 +232,27 @@ function renderWorkerPicker() {
     const place = State.place(pickerPlaceId);
     if (!place) return;
 
-    document.getElementById('workerPickerTitle').textContent = `הוסף עובדים ל${place.name}`;
+    const here = new Set(workersAtPlace(State.schedule, State.date, place.id, State.layer));
+    const unrecorded = new Set(State.unrecorded().map(w => w.id));
+
+    document.getElementById('workerPickerTitle').textContent =
+        `הוסף עובדים ל${place.name} · ${here.size} רשומים`;
 
     const container = document.getElementById('workerPickerList');
     container.innerHTML = '';
 
-    const here = new Set(workersAtPlace(State.schedule, State.date, place.id, State.layer));
-    const unrecorded = new Set(State.unrecorded().map(w => w.id));
-
-    // Unrecorded first: those are the ones being looked for.
-    const ordered = State.activeWorkers().slice().sort((a, b) => {
-        const rank = worker => (here.has(worker.id) ? 2 : unrecorded.has(worker.id) ? 0 : 1);
-        return rank(a) - rank(b);
-    });
+    // Anyone added to the roster while this was open goes on the end rather than being
+    // dropped - the frozen order is a snapshot, not a whitelist.
+    const known = new Set(pickerOrder);
+    const ordered = pickerOrder
+        .map(id => State.worker(id))
+        .filter(worker => worker && worker.active)
+        .concat(State.activeWorkers().filter(worker => !known.has(worker.id)));
 
     ordered.forEach(worker => {
         const row = el('div', 'picker-row');
         const inHere = here.has(worker.id);
+        if (inHere) row.classList.add('picker-row-on');
 
         const label = el('span', 'picker-name', worker.name);
         if (!inHere && !unrecorded.has(worker.id)) {
@@ -235,15 +265,54 @@ function renderWorkerPicker() {
         row.appendChild(label);
 
         row.appendChild(button(inHere ? '✓ נמצא' : '+ הוסף', inHere ? 'btn-on' : 'btn-add', () => {
-            const change = inHere
+            const label = inHere
+                ? `${worker.name} הוסר מ${place.name}`
+                : `${worker.name} נוסף ל${place.name}`;
+            editWithUndo(worker.id, label, () => (inHere
                 ? unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id)
-                : assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL);
-            State.commit(change);
+                : assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL)));
             renderWorkerPicker();
         }));
 
         container.appendChild(row);
     });
+}
+
+// Emptying a site in one go. Building it up name by name is the normal case; taking it
+// apart one ✓ at a time when the crew moved somewhere else is the same work twice.
+async function clearWorkerPicker() {
+    const place = State.place(pickerPlaceId);
+    if (!place) return;
+
+    const here = workersAtPlace(State.schedule, State.date, place.id, State.layer);
+    if (here.length === 0) {
+        askTell(`אף אחד לא רשום ב${place.name} ביום הזה.`);
+        return;
+    }
+
+    const ok = await askConfirm({
+        title: `לרוקן את ${place.name}?`,
+        message: `${here.length} עובדים יוסרו מ${place.name} ביום הזה. שאר הימים לא ייגעו.`,
+        ok: 'רוקן'
+    });
+    if (!ok) return;
+
+    const previous = here.map(workerId => ({
+        workerId,
+        record: snapshotWorkerDay(State.date, State.layer, workerId)
+    }));
+    const date = State.date;
+    const layer = State.layer;
+
+    State.commitMany(here.map(workerId =>
+        unassignPlace(State.schedule, date, workerId, layer, place.id)));
+
+    offerUndo(`${here.length} עובדים הוסרו מ${place.name}`, () => {
+        State.commitMany(previous.map(item =>
+            setWorkerDay(State.schedule, date, item.workerId, layer, item.record)));
+    });
+
+    renderWorkerPicker();
 }
 
 function closeWorkerPicker() {

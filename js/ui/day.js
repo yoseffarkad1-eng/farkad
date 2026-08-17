@@ -319,6 +319,13 @@ function renderDayHeader() {
     // finds. First child, so it holds the start corner on every visit.
     nav.appendChild(button('☰', 'btn-icon drawer-btn', openDayDrawer, 'בחר יום'));
 
+    // One step back, always in the same corner. The undo bar says what was undone at the
+    // moment it happens; this is for the mistake noticed a name or two later.
+    const undoBtn = button('↶', 'btn-icon undo-btn', runUndo, 'אין מה לבטל');
+    undoBtn.id = 'undoBtn';
+    undoBtn.disabled = true;
+    nav.appendChild(undoBtn);
+
     // Time flows right-to-left on an RTL calendar, so back points RIGHT and forward
     // points LEFT. The chevrons are drawn by CSS pseudo-elements, because a bare ‹ in a
     // Hebrew string gets reordered by the bidi algorithm to wherever it pleases.
