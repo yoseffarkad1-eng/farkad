@@ -111,14 +111,17 @@ function dateInput(key) {
     return input;
 }
 
-// Only visible on paper. A printed table of numbers with no period written on it is
-// unusable a month later - nobody can tell which fortnight it was.
-function printPeriod() {
+// Which period these totals cover, on screen as well as on paper. It used to be printed
+// only, and on a phone that made this screen unreadable in the one way that matters: a
+// day recorded outside the range is simply not in the count, and with no dates on screen
+// there was nothing to explain why. A page of numbers with no period on it is unusable a
+// month later too - nobody can tell which fortnight it was.
+function reportPeriod() {
     const from = parseLocalDate(REPORT_RANGE.from);
     const to = parseLocalDate(REPORT_RANGE.to);
-    const node = el('div', 'print-period');
-    node.setAttribute('data-period', `${formatFullDate(from)} - ${formatFullDate(to)}`);
-    return node;
+    const days = Math.round((to - from) / 86400000) + 1;
+    return el('div', 'report-period',
+        `${formatFullDate(from)} - ${formatFullDate(to)} · ${days} ימים`);
 }
 
 function payrollRows() {
@@ -136,7 +139,7 @@ function invoiceRows() {
 function renderPayrollTable() {
     const section = el('section', 'report report-payroll');
     section.appendChild(el('h2', null, 'שכר - לפי עובד'));
-    section.appendChild(printPeriod());
+    section.appendChild(reportPeriod());
 
     const rows = payrollRows();
     if (rows.length === 0) {
@@ -145,12 +148,26 @@ function renderPayrollTable() {
     }
 
     const anyRate = rows.some(row => row.dailyRate > 0);
-    const headers = ['עובד', 'ימי עבודה', 'רגיל', 'כפול', 'שעות נוספות', 'נעדר'];
+
+    // A column is dropped only when it is zero for EVERY worker in the period - never
+    // for one worker at a time. On a phone each row becomes a card, and a card that
+    // silently omits "כפול" because this person happened to have none looks exactly
+    // like a card where the app never recorded any: the same question was asked of the
+    // pay sheet twice. Dropping the whole concept when nobody used it keeps every card
+    // the same shape, so a row that is missing means the fortnight had none of it.
+    const columns = [
+        { header: 'ימי עבודה', value: row => row.daysWorked, always: true },
+        { header: 'רגיל', value: row => row.normalDays, always: true },
+        { header: 'כפול', value: row => row.doubleDays },
+        { header: 'שעות נוספות', value: row => row.extraHours },
+        { header: 'נעדר', value: row => row.absent }
+    ].filter(column => column.always || rows.some(row => column.value(row) > 0));
+
+    const headers = ['עובד'].concat(columns.map(column => column.header));
     if (anyRate) headers.push('שכר יומי', 'לתשלום');
 
     const table = buildTable(headers, rows.map(row => {
-        const cells = [row.name, row.daysWorked, row.normalDays, row.doubleDays,
-            row.extraHours, row.absent];
+        const cells = [row.name].concat(columns.map(column => column.value(row)));
         if (anyRate) {
             cells.push(row.dailyRate);
             // null, not 0: a worker whose rate was never entered owes an unknown amount,
@@ -162,16 +179,11 @@ function renderPayrollTable() {
     }));
 
     const totals = rows.reduce((sum, row) => ({
-        days: sum.days + row.daysWorked,
-        normalDays: sum.normalDays + row.normalDays,
-        doubleDays: sum.doubleDays + row.doubleDays,
-        hours: sum.hours + row.extraHours,
-        absent: sum.absent + row.absent,
         amount: sum.amount + (row.amount || 0)
-    }), { days: 0, normalDays: 0, doubleDays: 0, hours: 0, absent: 0, amount: 0 });
+    }), { amount: 0 });
 
-    const footer = ['סה"כ', totals.days, totals.normalDays, totals.doubleDays,
-        totals.hours, totals.absent];
+    const footer = ['סה"כ'].concat(columns.map(column =>
+        rows.reduce((sum, row) => sum + column.value(row), 0)));
     if (anyRate) footer.push('', Math.round(totals.amount));
     table.appendChild(totalRow(footer, headers));
 
@@ -218,7 +230,7 @@ function renderInvoiceTable() {
 
     section.appendChild(el('h2', null,
         chosen ? `חיוב - ${chosen.name}` : 'חיוב - לפי אתר, יום ביום'));
-    section.appendChild(printPeriod());
+    section.appendChild(reportPeriod());
 
     if (all.places.length === 0) {
         section.appendChild(emptyHint('אין רישומים בטווח הזה.'));

@@ -756,9 +756,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     }
     .report-table td:first-child::before { content: none; }
 
-    /* A blank cell is a zero, and a card listing every zero buries the three numbers
-       that matter. They stay in the printed table, which has room for them. */
-    .report-table td.num:empty { display: none; }
+    /* A blank cell is a zero, and a card listing every zero buries the numbers that
+       matter - so on the invoice grid, where a day-card would otherwise list every site
+       that had nobody, the empty ones go. */
+    .report-invoice .report-table td.num:empty { display: none; }
+
+    /* The pay sheet is the opposite case: it is read one card at a time and compared
+       against what was recorded, so a row that is simply absent gets read as "the app
+       missed this" rather than "this was zero". Columns nobody used are dropped from
+       the table entirely (see renderPayrollTable), and what is left says nought out
+       loud. */
+    .report-payroll .report-table td.num:empty::after {
+        content: '0';
+        color: var(--ink-3);
+    }
 
     .report-table tfoot tr { background: var(--surface-2); }
     .report .table-scroll { border: none; background: none; overflow: visible; }
@@ -1550,12 +1561,18 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .report-invoice { page-break-before: always; }
     .report h2 { font-size: 14pt; margin-bottom: 4mm; }
 
-    .print-period::after { content: attr(data-period); }
 }
 
-/* Only on paper: which period the report covers. */
-.print-period { display: none; }
-@media print { .print-period { display: block; font-size: 10pt; margin-bottom: 3mm; } }
+/* Which period the totals cover - on screen as much as on paper. Off screen it was the
+   missing sentence: a day recorded outside the range is not in the count, and nothing
+   said what the range was. */
+.report-period {
+    font-size: 13.5px;
+    color: var(--ink-2);
+    margin-bottom: 10px;
+    font-variant-numeric: tabular-nums;
+}
+@media print { .report-period { font-size: 10pt; margin-bottom: 3mm; } }
 
 
 /* ================================================================ comfort

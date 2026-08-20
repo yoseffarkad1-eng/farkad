@@ -357,12 +357,16 @@ async function seedRoster(page) {
   check('and the sheet says so where the money is', (await page.textContent('.report-payroll'))
     .includes('שעות נוספות בלי שכר שעה'));
 
-  check('the printed sheet states the period it covers',
-    (await page.getAttribute('.report-payroll .print-period', 'data-period'))
-      === '01/08/2026 - 31/08/2026');
-  check('but the period line stays off the screen',
+  // The period used to print and nothing more, which left the phone with no answer to
+  // the one question this screen provokes: why is a day I recorded not in the count?
+  check('the sheet states the period it covers',
+    (await page.textContent('.report-payroll .report-period'))
+      .includes('01/08/2026 - 31/08/2026'));
+  check('and says how long it is, so a short period is obvious',
+    (await page.textContent('.report-payroll .report-period')).includes('31 ימים'));
+  check('on the screen, not only on paper',
     (await page.evaluate(() =>
-      getComputedStyle(document.querySelector('.print-period')).display)) === 'none');
+      getComputedStyle(document.querySelector('.report-period')).display)) !== 'none');
 
   const bodyText = await page.textContent('#reportsView');
   check('neither report shows an ID number or a phone',
@@ -1702,8 +1706,12 @@ async function seedRoster(page) {
   await page.click('#askOk');
   await page.waitForTimeout(200);
 
-  // three days kept, not every day since the app was installed
+  // three days kept, not every day since the app was installed. The boot snapshot is
+  // dated with the REAL today, so it is cleared first: leaving it in made this check
+  // pass or fail depending on the date the suite was run on, and on 20/08 the stand-in
+  // today below collided with it and took the whole assertion with it.
   const kept = await page.evaluate(() => {
+    snapshotDates().forEach(date => Store.remove('scheduleData:snap:' + date));
     ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04'].forEach(date =>
       Store.set('scheduleData:snap:' + date, JSON.stringify(State.schedule)));
     todayStr = () => '2026-08-20';
