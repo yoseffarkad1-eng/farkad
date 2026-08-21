@@ -4,17 +4,26 @@
 // after work - both are one day at a time, never a week. So this screen shows one date,
 // the sites running on it, and who was at each.
 //
-// The default view is BY WORKER, in roster order, because that is the shape of the paper
-// being copied from: names down the side, days across the top, the site written in the
-// middle. Reading down a fixed list and reordering it under the reader loses their place,
-// so the order never changes - what changes is how an unfilled row looks.
+// The default view is BY SITE: a card per site with the people on it, which is how the
+// owner thinks about the day - "who is at פרסדיה" - and how the seder is read out on
+// WhatsApp. It was BY WORKER for a while, on the theory that the shape of the paper
+// being copied from should be the shape of the screen; the paper is gone now and the
+// question the screen is opened with is the site one.
 //
-// By site is still available, and is the better shape for reviewing or fixing one site.
+// By worker, in roster order, is still there and is the better shape for going down a
+// list making sure nobody was missed. Reading down a fixed list and reordering it under
+// the reader loses their place, so that order never changes - what changes is how an
+// unfilled row looks.
+//
+// Whichever is chosen is remembered: it is a way of working, not a per-visit decision.
 
-let dayMode = 'workers';        // 'workers' | 'sites'
+const DAY_MODE_KEY = 'farkadDayMode';
+
+let dayMode = Store.get(DAY_MODE_KEY) === 'workers' ? 'workers' : 'sites';
 
 function setDayMode(mode) {
     dayMode = mode;
+    Store.set(DAY_MODE_KEY, mode);
     render();
 }
 

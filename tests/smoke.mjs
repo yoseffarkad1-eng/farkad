@@ -1167,8 +1167,11 @@ async function seedRoster(page) {
   const page = await open();
   await seedRoster(page);
 
-  check('the day opens by worker, matching the paper',
-    (await page.evaluate(() => dayMode)) === 'workers');
+  check('the day opens by site, the way the seder is read out',
+    (await page.evaluate(() => dayMode)) === 'sites');
+
+  await page.evaluate(() => setDayMode('workers'));
+  await page.waitForTimeout(200);
   check('every worker has a row', (await page.locator('.wrow').count()) === 3);
   check('rows keep roster order',
     (await page.evaluate(() => [...document.querySelectorAll('.wrow-name')].map(n => n.textContent).join(','))) === 'דוד,שרה,עלי');
@@ -1271,8 +1274,8 @@ async function seedRoster(page) {
     .map(e => `${e.placeId}:${e.rate || 'normal'}`).join());
   check('the rate lands on that site only', rates === 'p_01:normal,p_02:double', rates);
 
-  await page.evaluate(() => closeAssignSheet());
-  await page.waitForTimeout(200);
+  await page.evaluate(() => { closeAssignSheet(); setDayMode('workers'); });
+  await page.waitForTimeout(250);
   check('the worker row shows both sites',
     (await page.locator('.wrow').first().locator('.tag-place').count()) === 2);
   await page.context().close();
@@ -1282,12 +1285,24 @@ async function seedRoster(page) {
 {
   const page = await open();
   await seedRoster(page);
-  await page.getByText('לפי אתרים').click();
-  await page.waitForTimeout(250);
-  check('by-site view still available', (await page.locator('.site-card').count()) === 2);
+  check('by-site is what the day opens on', (await page.locator('.site-card').count()) === 2);
   await page.getByText('לפי עובדים').click();
   await page.waitForTimeout(250);
-  check('and switches back', (await page.locator('.wrow').count()) === 3);
+  check('by-worker is one tap away', (await page.locator('.wrow').count()) === 3);
+
+  // A way of working, not a decision to make every morning.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  check('and the choice is still there on the next visit',
+    (await page.evaluate(() => dayMode)) === 'workers' &&
+    (await page.locator('.wrow').count()) === 3);
+
+  await page.getByText('לפי אתרים').click();
+  await page.waitForTimeout(250);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  check('switching back sticks too',
+    (await page.locator('.site-card').count()) === 2);
   await page.context().close();
 }
 
@@ -1340,7 +1355,7 @@ async function seedRoster(page) {
     assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01', RATE_DOUBLE);
     assignPlace(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_02');
     State.worker('w_01').active = false;
-    State.save(); render();
+    State.save(); setDayMode('workers');
   });
   await page.waitForTimeout(300);
 
@@ -2092,7 +2107,7 @@ async function seedRoster(page) {
   const built = await page.evaluate(() => ({
     workers: State.schedule.workers.map(w => w.name),
     places: State.schedule.places.map(p => p.name),
-    rows: document.querySelectorAll('.wrow').length
+    rows: (setDayMode('workers'), document.querySelectorAll('.wrow').length)
   }));
   check('the pasted names become the roster, blanks and spaces cleaned',
     JSON.stringify(built.workers) === JSON.stringify(['דוד כהן', 'שרה לוי', 'עלי חסן']),
@@ -2514,8 +2529,9 @@ async function seedRoster(page) {
   await page.evaluate(() => {
     assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01', RATE_DOUBLE);
     assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02', RATE_EXTRA, 2);
-    State.save(); render();
+    State.save(); setDayMode('workers');
   });
+  await page.waitForTimeout(200);
 
   await page.locator('.wrow').first().getByRole('button', { name: /נקה/ }).click();
   await page.waitForTimeout(250);
@@ -2573,8 +2589,9 @@ async function seedRoster(page) {
     }));
     State.date = '2026-08-12';
     assignPlace(State.schedule, State.date, 'w_01', 'actual', 'p_03');
-    State.save(); render();
+    State.save(); setDayMode('workers');
   });
+  await page.waitForTimeout(200);
 
   const badge = page.locator('.wrow .tag-place').first();
   const colourOf = locator => locator.evaluate(node => getComputedStyle(node).backgroundColor);
@@ -2861,8 +2878,9 @@ async function seedRoster(page) {
 
   await app.click('#tab-day');
   await app.waitForTimeout(300);
+  // whichever view the day opens on, the new worker has to be reachable from it
   check('the day screen then has the worker on it',
-    (await app.locator('.wrow').count()) === 1);
+    (await app.textContent('#dayView')).includes('מוחמד'));
 
   // and the empty states lead somewhere instead of just stating a fact
   const fresh = await newPage();
