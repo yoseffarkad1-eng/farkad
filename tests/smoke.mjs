@@ -476,7 +476,7 @@ async function seedRoster(page) {
     (await page.textContent('#placeList')).includes('נתניה'));
 
   // archive, never delete: history has to keep resolving
-  await page.locator('#workerList .roster-row').first().getByRole('button').nth(1).click();
+  await page.locator('#workerList .roster-row').first().getByRole('button', { name: /לארכיון/ }).click();
   await page.waitForTimeout(200);
   await page.click('#askOk');
   await page.waitForTimeout(300);
@@ -2161,7 +2161,7 @@ async function seedRoster(page) {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
 
-  await page.locator('#workerList .roster-row').first().getByRole('button').first().click();
+  await page.locator('#workerList .roster-row').first().getByRole('button', { name: /^ערוך/ }).click();
   await page.waitForTimeout(250);
   check('editing someone with a phone number opens the fold',
     (await page.evaluate(() => document.getElementById('workerFormMore').open)) === true);
@@ -2372,6 +2372,208 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- advances
+{
+  // The one number that turns a correct pay sheet into the wrong one: the days are
+  // right, the rate is right, and the man was handed 500 of it a week ago.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    ['2026-08-07', '2026-08-09', '2026-08-10', '2026-08-11'].forEach(date =>
+      assignPlace(State.schedule, date, 'w_01', 'actual', 'p_01'));
+    State.save();
+    REPORT_RANGE.from = '2026-08-07';
+    REPORT_RANGE.to = '2026-08-20';
+    showView('reports');
+  });
+  await page.waitForTimeout(300);
+
+  const before = await page.evaluate(() => payrollRows().find(r => r.workerId === 'w_01'));
+  check('four days at 400 is 1600 before anything is taken off',
+    before.amount === 1600 && before.advances === 0 && before.netAmount === 1600,
+    JSON.stringify(before));
+
+  const after = await page.evaluate(() => {
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-08-10', 500, ''));
+    return payrollRows().find(r => r.workerId === 'w_01');
+  });
+  check('an advance comes off what is still owed, not off what was earned',
+    after.amount === 1600 && after.advances === 500 && after.netAmount === 1100,
+    JSON.stringify(after));
+
+  // An advance dated outside the period belongs to a different account entirely.
+  const outside = await page.evaluate(() => {
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-07-30', 900, ''));
+    return payrollRows().find(r => r.workerId === 'w_01');
+  });
+  check('an advance from another account is not deducted from this one',
+    outside.advances === 500, JSON.stringify(outside));
+
+  check('the sheet grows the columns once an advance exists',
+    (await page.textContent('.report-payroll')).includes('מקדמות') &&
+    (await page.textContent('.report-payroll')).includes('נצבר'));
+
+  // Deleting is a written null, so the other devices receive the deletion itself.
+  const removed = await page.evaluate(() => {
+    const id = Object.keys(State.schedule.advances).find(key =>
+      State.schedule.advances[key].amount === 500);
+    const change = removeAdvance(State.schedule, id);
+    return { path: change.path, value: change.value,
+             advances: payrollRows().find(r => r.workerId === 'w_01').advances };
+  });
+  check('deleting an advance is sent as a field, not as a key that quietly vanished',
+    removed.value === null && removed.path.startsWith('advances.') && removed.advances === 0,
+    JSON.stringify(removed));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the worker statement
+{
+  // What the man is handed on payday. The question it answers is "why is it this
+  // number", so it is the days, then the total, then what he already took.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-07', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-09', 'w_01', 'actual', 'p_02', RATE_DOUBLE);
+    markAbsent(State.schedule, '2026-08-10', 'w_01', 'actual');
+    addAdvance(State.schedule, 'w_01', '2026-08-11', 300, '');
+    State.save();
+    REPORT_RANGE.from = '2026-08-07';
+    REPORT_RANGE.to = '2026-08-20';
+    showView('reports');
+  });
+  await page.waitForTimeout(300);
+
+  const statement = await page.evaluate(() => workerStatementText('w_01'));
+  check('the statement names the worker and the period',
+    statement.includes('דוד') && statement.includes('07/08/2026') && statement.includes('20/08/2026'),
+    statement.split('\n')[0]);
+  check('it lists every day with where he was',
+    statement.includes('הרצליה') && statement.includes('תל אביב'), statement);
+  check('a doubled day says so', statement.includes('(כפול)'), statement);
+  check('an absence is on it too, rather than a gap to wonder about',
+    statement.includes('נעדר'), statement);
+  check('it totals the days worked, not the days listed',
+    statement.includes('2 ימי עבודה'), statement);
+  check('the advance is named with its date',
+    statement.includes('מקדמה') && statement.includes('-300'), statement);
+  // 400 + 800 = 1200 earned, less 300 = 900
+  check('and the last line is the number he is actually paid',
+    statement.includes('נותר לתשלום: 900'), statement);
+
+  // the same route the seder takes
+  const shared = await page.evaluate(() => {
+    window.__shared = null;
+    navigator.share = data => { window.__shared = data; return Promise.resolve(); };
+    shareWorkerStatement('w_01');
+    return new Promise(resolve => setTimeout(() => resolve(window.__shared), 200));
+  });
+  check('the statement goes out the way the seder does',
+    shared && shared.text.includes('נותר לתשלום'), JSON.stringify(shared && shared.text ? 'ok' : shared));
+
+  // and it is reachable from the number that raised the question
+  await page.evaluate(() => openWorkerDays('w_01'));
+  await page.waitForTimeout(250);
+  check('the days screen shows the advance as money going the other way',
+    (await page.locator('.wday-advance').count()) === 1);
+  check('and states what is left after it',
+    (await page.textContent('.wday-net')).includes('900'),
+    await page.textContent('.wday-net'));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- roster order
+{
+  // Roster order is the order every other screen reads in, so setting it puts the men
+  // recorded every single day at the top where they are reached first.
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+
+  const names = () => page.evaluate(() =>
+    State.schedule.workers.map(worker => worker.name).join(','));
+  check('the roster starts in the order it was built', (await names()) === 'דוד,שרה,עלי');
+
+  await page.locator('#workerList .roster-row').nth(2)
+    .getByRole('button', { name: /העלה/ }).click();
+  await page.waitForTimeout(250);
+  check('a name can be moved up', (await names()) === 'דוד,עלי,שרה');
+
+  await page.locator('#workerList .roster-row').first()
+    .getByRole('button', { name: /הורד/ }).click();
+  await page.waitForTimeout(250);
+  check('and down', (await names()) === 'עלי,דוד,שרה');
+
+  check('the first row cannot be moved up past the top',
+    await page.locator('#workerList .roster-row').first()
+      .getByRole('button', { name: /העלה/ }).isDisabled());
+  check('nor the last down past the bottom',
+    await page.locator('#workerList .roster-row').last()
+      .getByRole('button', { name: /הורד/ }).isDisabled());
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  check('the order is kept, being the point of setting it',
+    (await names()) === 'עלי,דוד,שרה');
+
+  await page.click('#tab-day');
+  await page.evaluate(() => setDayMode('workers'));
+  await page.waitForTimeout(300);
+  check('and the day screen reads in that order',
+    (await page.evaluate(() =>
+      [...document.querySelectorAll('.wrow-name')].map(n => n.textContent).join(','))) === 'עלי,דוד,שרה');
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- what the account needs
+{
+  // An installed web app on an iPhone cannot schedule a local notification, so the
+  // reminder is on the screen the person opens every evening anyway.
+  const page = await open();
+  await seedRoster(page);
+
+  // mid-account, with two working days gone by and nothing on them
+  await page.evaluate(() => {
+    todayStr = () => '2026-08-12';
+    State.date = '2026-08-12';
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save(); render();
+  });
+  await page.waitForTimeout(300);
+  const text = await page.textContent('#accountBanner');
+  check('working days with nothing recorded on them are named',
+    (await page.locator('#accountBanner').isVisible()) &&
+    text.includes('07/08') && text.includes('09/08') && text.includes('11/08'), text);
+  check('the rest day is not counted as a missing day', !text.includes('08/08'), text);
+  check('nor is today, which is still being worked on', !text.includes('12/08'), text);
+
+  // two days before settlement it says so
+  await page.evaluate(() => {
+    todayStr = () => '2026-08-19';
+    State.date = '2026-08-19';
+    render();
+  });
+  await page.waitForTimeout(300);
+  check('and near the end it says the account is about to close',
+    (await page.textContent('#accountBanner')).includes('נסגר בעוד'),
+    await page.textContent('#accountBanner'));
+
+  // a fully recorded account mid-run says nothing at all
+  await page.evaluate(() => {
+    todayStr = () => '2026-08-10';
+    State.date = '2026-08-10';
+    ['2026-08-07', '2026-08-09'].forEach(date =>
+      assignPlace(State.schedule, date, 'w_01', 'actual', 'p_01'));
+    State.save(); render();
+  });
+  await page.waitForTimeout(300);
+  check('with nothing outstanding it stays quiet',
+    !(await page.locator('#accountBanner').isVisible()));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- month presets
 {
   const page = await open({ });
@@ -2445,7 +2647,7 @@ async function seedRoster(page) {
   check('and it says out loud that two sites are one day',
     (await page.textContent('#workerDaysBody')).includes('שני אתרים - יום אחד'));
 
-  await page.click('#workerDaysModal .btn-secondary');
+  await page.locator('#workerDaysModal').getByRole('button', { name: 'סגור' }).click();
   await page.waitForTimeout(200);
   check('closing it goes back to the report',
     !(await page.locator('#workerDaysModal').isVisible()));

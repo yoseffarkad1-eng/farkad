@@ -89,6 +89,68 @@ function renderSetupCard(title, text, label, onClick) {
 // on screen says what day this is.
 let lastRenderedDate = null;
 
+// What the running account still needs, checked every time the app is opened.
+//
+// Deliberately NOT a push notification. An installed web app on an iPhone cannot
+// schedule a local one - there is no API for it - and the alternative is a push server,
+// which means a reminder that silently stops the day that server does. Everything below
+// is answerable from data already on the device, and it is on the first screen, which is
+// where the person already is every evening.
+function renderAccountBanner() {
+    const banner = document.getElementById('accountBanner');
+    if (!banner) return;
+
+    if (State.activeWorkers().length === 0 || State.activePlaces().length === 0) {
+        banner.style.display = 'none';
+        return;
+    }
+
+    const today = todayStr();
+    const start = accountStart(parseLocalDate(today));
+    const from = toLocalDateStr(start);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 13);
+
+    const notes = [];
+
+    // Working days already gone by in this account with nothing on them at all. Saturday
+    // is the rest day and today is still being worked on, so neither counts.
+    const blank = [];
+    for (let offset = 0; offset < 14; offset++) {
+        const date = new Date(start);
+        date.setDate(start.getDate() + offset);
+        if (date.getDay() === 6) continue;
+
+        const value = toLocalDateStr(date);
+        if (value >= today) continue;
+        if (!anyRecordOn(value)) blank.push(formatShortDate(date));
+    }
+    if (blank.length > 0) {
+        notes.push(`${blank.length} ימי עבודה בחשבון הנוכחי בלי אף רישום: ${blank.join(', ')}`);
+    }
+
+    // The last two days before settlement, when a correction is still cheap.
+    const daysLeft = Math.round((end - parseLocalDate(today)) / 86400000);
+    if (daysLeft >= 0 && daysLeft <= 2) {
+        notes.push(daysLeft === 0
+            ? 'החשבון נסגר היום - בדוק את השכר ושמור קובץ גיבוי.'
+            : `החשבון נסגר בעוד ${daysLeft} ימים - בדוק את השכר ושמור קובץ גיבוי.`);
+    }
+
+    if (notes.length === 0) { banner.style.display = 'none'; return; }
+
+    clear(banner);
+    banner.appendChild(el('span', null, `⚠️ ${notes.join(' · ')}`));
+    banner.appendChild(button('לדוחות', 'btn-secondary', () => showView('reports')));
+    banner.style.display = '';
+}
+
+function anyRecordOn(date) {
+    return State.schedule.workers.some(worker =>
+        isAbsent(State.schedule, date, worker.id, State.layer) ||
+        entriesFor(State.schedule, date, worker.id, State.layer).length > 0);
+}
+
 function renderProgress() {
     const workers = State.activeWorkers();
     const left = State.unrecorded().length;

@@ -42,9 +42,63 @@ function emptySchedule() {
         workers: [],
         places: [],
         days: {},
+        // Money handed over before settlement day, keyed by its own id so two people
+        // recording an advance at the same moment write to different fields.
+        advances: {},
         updatedAt: null,
         updatedBy: null
     };
+}
+
+// ---------------------------------------------------------------- advances
+//
+// An advance is cash given mid-account, and it is the one number that turns a pay sheet
+// into the wrong pay sheet: the days are right, the rate is right, and the man was
+// already paid 500 of it a week ago. Kept as its own record rather than folded into the
+// total, so the statement can show what was earned AND what is left.
+
+function advanceId() {
+    return 'a_' + Math.random().toString(36).slice(2, 10);
+}
+
+function advancePath(id) {
+    return `advances.${id}`;
+}
+
+function addAdvance(schedule, workerId, date, amount, note) {
+    const id = advanceId();
+    const record = {
+        id,
+        workerId: String(workerId),
+        date: String(date),
+        amount: Number(amount) || 0,
+        note: String(note || '')
+    };
+    schedule.advances = schedule.advances || {};
+    schedule.advances[id] = record;
+    return { path: advancePath(id), value: record };
+}
+
+// Removed by writing null rather than deleting, so the deletion itself is a field the
+// other devices receive - a key that simply vanished locally would be re-added by the
+// next snapshot that still had it.
+function removeAdvance(schedule, id) {
+    if (schedule.advances) delete schedule.advances[id];
+    return { path: advancePath(id), value: null };
+}
+
+function advancesFor(schedule, workerId, fromDate, toDate) {
+    const all = schedule.advances || {};
+    return Object.keys(all)
+        .map(id => all[id])
+        .filter(item => item && item.workerId === workerId &&
+            item.date >= fromDate && item.date <= toDate)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+function advancesTotal(schedule, workerId, fromDate, toDate) {
+    return advancesFor(schedule, workerId, fromDate, toDate)
+        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
 function makeEntry(placeId, rate, extraHours) {
@@ -237,6 +291,11 @@ function payrollReport(schedule, fromDate, toDate) {
         // number that looks finished and is not. Flagged so the sheet can say so rather
         // than quietly under-paying someone by however many hours they stayed.
         row.hoursUnpriced = row.extraHours > 0 && hourly <= 0;
+
+        // What was earned and what is still owed are two different numbers, and paying
+        // the first one twice is the whole reason advances are recorded at all.
+        row.advances = advancesTotal(schedule, worker.id, fromDate, toDate);
+        row.netAmount = row.amount === null ? null : row.amount - row.advances;
 
         return row;
     });

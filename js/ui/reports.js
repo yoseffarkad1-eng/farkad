@@ -163,8 +163,14 @@ function renderPayrollTable() {
         { header: 'נעדר', value: row => row.absent }
     ].filter(column => column.always || rows.some(row => column.value(row) > 0));
 
+    // The advance columns appear only once somebody has actually taken one, so a run of
+    // accounts with no advances is not carrying two empty columns across every card.
+    const anyAdvance = rows.some(row => row.advances > 0);
+
     const headers = ['עובד'].concat(columns.map(column => column.header));
-    if (anyRate) headers.push('שכר יומי', 'לתשלום');
+    if (anyRate) headers.push('שכר יומי', 'נצבר');
+    if (anyRate && anyAdvance) headers.push('מקדמות');
+    if (anyRate) headers.push('לתשלום');
 
     const table = buildTable(headers, rows.map(row => {
         const cells = [row.name].concat(columns.map(column => column.value(row)));
@@ -174,17 +180,23 @@ function renderPayrollTable() {
             // which is a different statement from owing nothing.
             cells.push(row.amount === null ? '—'
                 : Math.round(row.amount) + (row.hoursUnpriced ? ' *' : ''));
+            if (anyAdvance) cells.push(row.advances > 0 ? `-${Math.round(row.advances)}` : 0);
+            cells.push(row.netAmount === null ? '—' : Math.round(row.netAmount));
         }
         return cells;
     }));
 
     const totals = rows.reduce((sum, row) => ({
-        amount: sum.amount + (row.amount || 0)
-    }), { amount: 0 });
+        amount: sum.amount + (row.amount || 0),
+        advances: sum.advances + (row.advances || 0),
+        net: sum.net + (row.netAmount || 0)
+    }), { amount: 0, advances: 0, net: 0 });
 
     const footer = ['סה"כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
     if (anyRate) footer.push('', Math.round(totals.amount));
+    if (anyRate && anyAdvance) footer.push(`-${Math.round(totals.advances)}`);
+    if (anyRate) footer.push(Math.round(totals.net));
     table.appendChild(totalRow(footer, headers));
 
     // The name opens that worker's days. On payday somebody asks why the number is what
@@ -307,11 +319,17 @@ function renderInvoicePicker(places) {
 // The pay sheet says a worker is owed 4,150. This says which days that is: the sites, the
 // doubled days, the hours, and what each day came to. It is read out to the person asking,
 // so it runs the same arithmetic as the total rather than re-deriving it a second way.
+// Which worker's days are on screen, so the advance buttons and the share button know
+// who they belong to after a re-render.
+let workerDaysId = null;
+
 function openWorkerDays(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
+    workerDaysId = workerId;
 
     const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
+    const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
 
     document.getElementById('workerDaysTitle').textContent = worker.name;
     document.getElementById('workerDaysMeta').textContent =
@@ -320,14 +338,166 @@ function openWorkerDays(workerId) {
     const body = document.getElementById('workerDaysBody');
     clear(body);
 
-    if (days.length === 0) {
+    if (days.length === 0 && advances.length === 0) {
         body.appendChild(emptyHint('אין רישומים בטווח הזה.'));
     } else {
         days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
         body.appendChild(renderWorkerDaysTotal(days, worker));
+        advances.forEach(item => body.appendChild(renderAdvanceRow(item)));
+        if (advances.length > 0) body.appendChild(renderNetRow(days, worker, advances));
     }
 
+    body.appendChild(renderAdvanceAdd(worker));
     document.getElementById('workerDaysModal').style.display = 'flex';
+}
+
+// Cash handed over before settlement day. Recorded here, next to the days it will be
+// deducted from, because the question it answers - "how much is left" - is asked on this
+// screen and nowhere else.
+function renderAdvanceRow(item) {
+    const row = el('div', 'wday wday-advance');
+    const parsed = parseLocalDate(item.date);
+
+    const when = el('div', 'wday-date');
+    when.appendChild(el('strong', null, 'מקדמה'));
+    when.appendChild(el('span', null, formatFullDate(parsed)));
+    row.appendChild(when);
+
+    const what = el('div', 'wday-what');
+    if (item.note) what.appendChild(el('span', 'wday-note', item.note));
+    what.appendChild(button('✕', 'btn-icon', () => removeAdvanceRow(item), 'מחק מקדמה'));
+    row.appendChild(what);
+
+    row.appendChild(el('div', 'wday-money', `-${Math.round(item.amount)}`));
+    return row;
+}
+
+function renderNetRow(days, worker, advances) {
+    const earned = days.filter(day => !day.absent)
+        .reduce((sum, day) => sum + (day.amount || 0), 0);
+    const taken = advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+
+    const row = el('div', 'wday wday-total wday-net');
+    row.appendChild(el('div', 'wday-date', 'נותר לתשלום'));
+    row.appendChild(el('div', 'wday-what',
+        `${Math.round(earned)} נצבר · ${Math.round(taken)} מקדמות`));
+    row.appendChild(el('div', 'wday-money',
+        Number(worker.dailyRate) > 0 ? String(Math.round(earned - taken)) : '—'));
+    return row;
+}
+
+function renderAdvanceAdd(worker) {
+    const box = el('div', 'wday-actions');
+
+    box.appendChild(button('+ מקדמה', 'btn-secondary', async () => {
+        const amount = await askText({
+            title: `מקדמה ל${worker.name}`,
+            message: 'כמה קיבל על החשבון? הסכום יירד מהתשלום בסוף התקופה.',
+            placeholder: '500',
+            ok: 'שמור',
+            validate: value => {
+                const number = Number(value);
+                if (!value || isNaN(number) || number <= 0) return 'הכנס סכום גדול מאפס.';
+                return null;
+            }
+        });
+        if (amount === null) return;
+
+        // Dated today when today falls inside the period being viewed, and otherwise on
+        // the period's last day - an advance filed outside the account it belongs to
+        // would be deducted from the wrong fortnight.
+        const today = todayStr();
+        const date = (today >= REPORT_RANGE.from && today <= REPORT_RANGE.to)
+            ? today : REPORT_RANGE.to;
+
+        State.commit(addAdvance(State.schedule, worker.id, date, Number(amount), ''));
+        openWorkerDays(worker.id);
+    }));
+
+    box.appendChild(button('💬 שלח למשלוח', 'btn-success', () => shareWorkerStatement(worker.id)));
+    return box;
+}
+
+async function removeAdvanceRow(item) {
+    const ok = await askConfirm({
+        title: 'למחוק את המקדמה?',
+        message: `${Math.round(item.amount)} ₪ מ-${formatFullDate(parseLocalDate(item.date))}.`,
+        ok: 'מחק'
+    });
+    if (!ok) return;
+    State.commit(removeAdvance(State.schedule, item.id));
+    openWorkerDays(item.workerId);
+}
+
+// The statement the worker gets on payday, in the same shape as the screen it came from:
+// the days, then what they add up to, then what was already handed over. Sent the same
+// way the seder is, because that is the channel these men are reachable on.
+function workerStatementText(workerId) {
+    const worker = State.worker(workerId);
+    if (!worker) return '';
+
+    const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
+    const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
+    const worked = days.filter(day => !day.absent);
+    const earned = worked.reduce((sum, day) => sum + (day.amount || 0), 0);
+    const taken = advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    const priced = Number(worker.dailyRate) > 0;
+
+    const lines = [
+        `📄 ${worker.name} - ${formatFullDate(parseLocalDate(REPORT_RANGE.from))} עד ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`,
+        ''
+    ];
+
+    days.forEach(day => {
+        const parsed = parseLocalDate(day.date);
+        const when = `${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`;
+        if (day.absent) { lines.push(`• ${when} - נעדר`); return; }
+
+        const where = day.entries.map(entry => {
+            const place = State.place(entry.placeId);
+            const name = place ? place.name : entry.placeId;
+            const rate = entryRate(entry);
+            if (rate === RATE_DOUBLE) return `${name} (כפול)`;
+            if (rate === RATE_EXTRA) {
+                const hours = entryExtraHours(entry);
+                return hours ? `${name} (+${hours} ש׳)` : `${name} (נוספות)`;
+            }
+            return name;
+        }).join(' + ');
+
+        lines.push(`• ${when} - ${where}${priced && day.amount !== null ? ` - ${Math.round(day.amount)}` : ''}`);
+    });
+
+    lines.push('');
+    lines.push(`סה"כ ${worked.length} ימי עבודה`);
+    if (priced) lines.push(`נצבר: ${Math.round(earned)}`);
+
+    if (advances.length > 0) {
+        lines.push('');
+        advances.forEach(item => lines.push(
+            `מקדמה ${formatShortDate(parseLocalDate(item.date))}: -${Math.round(item.amount)}`));
+    }
+
+    if (priced) {
+        lines.push('');
+        lines.push(`נותר לתשלום: ${Math.round(earned - taken)}`);
+    }
+
+    return lines.join('\n');
+}
+
+function shareWorkerStatement(workerId) {
+    const text = workerStatementText(workerId);
+    if (!text) return;
+
+    if (navigator.share) {
+        navigator.share({ text }).catch(error => {
+            if (error && error.name === 'AbortError') return;
+            window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+        });
+        return;
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
 }
 
 function renderWorkerDayRow(day, worker) {

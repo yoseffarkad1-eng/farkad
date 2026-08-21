@@ -54,6 +54,20 @@ function renderWorkerList() {
         row.appendChild(details);
 
         const actions = el('div', 'roster-actions');
+
+        // Roster order is the order every other screen reads in - the day list, the
+        // sheet's run through the names, the pay sheet. Being able to set it puts the
+        // men who are recorded every single day at the top, where they are reached
+        // first. Arrows rather than dragging: a drag on a phone, held by a thumb over a
+        // list that scrolls, moves the wrong name often enough to be its own problem.
+        const index = State.schedule.workers.indexOf(worker);
+        const up = button('▲', 'btn-icon', () => moveWorker(worker.id, -1), `העלה את ${worker.name}`);
+        up.disabled = index === 0;
+        const down = button('▼', 'btn-icon', () => moveWorker(worker.id, 1), `הורד את ${worker.name}`);
+        down.disabled = index === State.schedule.workers.length - 1;
+        actions.appendChild(up);
+        actions.appendChild(down);
+
         actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${worker.name}`));
         actions.appendChild(button(
             worker.active === false ? '↩️' : '🗄️',
@@ -65,6 +79,23 @@ function renderWorkerList() {
 
         container.appendChild(row);
     });
+}
+
+// The roster is one array and its order is the whole point, so a move is a whole-list
+// write rather than a per-field one. It goes through save() and replaceAll rather than
+// commit(): there is no single field path that means "the order changed".
+function moveWorker(workerId, direction) {
+    const workers = State.schedule.workers;
+    const from = workers.findIndex(worker => worker.id === workerId);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= workers.length) return;
+
+    workers.splice(to, 0, workers.splice(from, 1)[0]);
+    State.save();
+    if (typeof FarkadSync !== 'undefined' && FarkadSync.replaceAll) {
+        FarkadSync.replaceAll(State.schedule);
+    }
+    render();
 }
 
 function hasDuplicateName(worker) {

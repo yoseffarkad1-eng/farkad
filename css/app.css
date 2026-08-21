@@ -845,6 +845,25 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .wday-total .wday-what { color: var(--ink-2); font-weight: 400; font-size: 14px; }
 
+/* Money already handed over, marked as money going the other way so it is never read as
+   another day worked. */
+.wday-advance .wday-date strong { color: var(--warn); }
+.wday-advance .wday-money { color: var(--warn); }
+
+/* What is actually owed after the advances come off - the number the man is paid, so it
+   is the loudest one on the card. */
+.wday-net { border-top-width: 3px; }
+.wday-net .wday-money { font-size: 19px; }
+
+.wday-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line-soft);
+}
+.wday-actions button { flex: 1; min-height: 46px; }
+
 @media (max-width: 700px) {
     .wday { grid-template-columns: 1fr 70px; }
     .wday-date { flex-direction: row; gap: 6px; align-items: baseline; }

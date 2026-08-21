@@ -206,6 +206,23 @@ function normaliseSchedule(raw) {
         };
     });
 
+    // Advances arrive keyed by id. A null value is a deletion another device sent and
+    // must not come back as a record; anything without a worker or a date cannot be
+    // placed in an account and is dropped rather than counted against the wrong one.
+    const advances = (raw.advances && typeof raw.advances === 'object') ? raw.advances : {};
+    Object.keys(advances).forEach(id => {
+        const item = advances[id];
+        if (!item || typeof item !== 'object') return;
+        if (!item.workerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) return;
+        schedule.advances[id] = {
+            id: String(id),
+            workerId: String(item.workerId),
+            date: String(item.date),
+            amount: Number(item.amount) || 0,
+            note: String(item.note || '')
+        };
+    });
+
     schedule.updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
     schedule.updatedBy = typeof raw.updatedBy === 'string' ? raw.updatedBy : null;
     return schedule;
