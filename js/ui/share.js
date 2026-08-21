@@ -90,9 +90,31 @@ function showDayMessage() {
     renderMessageStyles();
     const box = document.getElementById('shareText');
     box.value = dayMessage(State.date, State.layer);
+    renderShareWarning();
+    document.getElementById('shareStatus').textContent = '';
     document.getElementById('shareModal').style.display = 'flex';
-    box.focus();
-    box.select();
+    // Deliberately NOT focused and select-all'd: on a phone that throws up the keyboard
+    // and a page-wide highlight over a message nobody is going to edit. The send button
+    // takes the text straight from the box.
+}
+
+// The seder is built from what is recorded, so anyone not recorded yet is simply absent
+// from the message - no line, no gap, nothing to notice. That is the same failure the
+// day screen's "not recorded" tray exists to prevent, undone at the moment the message
+// leaves the app, and it is discovered the next morning by the man standing at the wrong
+// gate. So the message says who is missing, above the send button.
+function renderShareWarning() {
+    const box = document.getElementById('shareWarning');
+    if (!box) return;
+    clear(box);
+
+    const missing = State.unrecorded();
+    if (missing.length === 0) { box.style.display = 'none'; return; }
+
+    const names = missing.map(worker => worker.name).join(', ');
+    box.appendChild(el('span', null,
+        `⚠️ ${missing.length} עובדים עדיין לא נרשמו היום ולא יופיעו בהודעה: ${names}`));
+    box.style.display = '';
 }
 
 // Chosen once, remembered for good: the group is used to ONE look, and hunting for
@@ -115,26 +137,74 @@ function renderMessageStyles() {
     });
 }
 
+// Straight to WhatsApp. The old route was copy → leave the app → find WhatsApp → find
+// the group → paste: five steps every evening, and the first one could fail silently.
+//
+// navigator.share is the native sheet, with WhatsApp in it and the group list one tap
+// deeper. Where it does not exist, wa.me opens WhatsApp itself with the message already
+// written. Both leave the app, so the modal closes behind them.
+function sendDayMessage() {
+    const text = document.getElementById('shareText').value;
+    const status = document.getElementById('shareStatus');
+
+    if (navigator.share) {
+        navigator.share({ text }).then(closeShareModal, error => {
+            // A cancelled sheet is not a failure and must not be reported as one.
+            if (error && error.name === 'AbortError') return;
+            openWhatsApp(text);
+        });
+        return;
+    }
+
+    status.textContent = 'פותח וואטסאפ…';
+    openWhatsApp(text);
+}
+
+function openWhatsApp(text) {
+    // No number in the link: it opens WhatsApp on the chat picker, so the group is
+    // chosen the same way it always is.
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    closeShareModal();
+}
+
+// Kept for the machine with a keyboard and for pasting somewhere that is not WhatsApp.
+// It now reports what actually happened: the old version called it copied either way,
+// so on a browser that refused the clipboard the person switched apps, pasted whatever
+// was there from before, and sent that.
 function copyDayMessage() {
     const box = document.getElementById('shareText');
-    box.select();
+    const status = document.getElementById('shareStatus');
 
-    const done = () => {
-        const status = document.getElementById('shareStatus');
-        status.textContent = '✔️ הועתק';
-        setTimeout(() => { status.textContent = ''; }, 2000);
+    const said = ok => {
+        status.textContent = ok ? '✔️ הועתק' : '⚠️ ההעתקה נחסמה - סמן את הטקסט והעתק ידנית';
+        setTimeout(() => { status.textContent = ''; }, ok ? 2000 : 6000);
     };
 
+    // execCommand needs the selection; the async API does not, but selecting is harmless
+    // and keeps the manual fallback one gesture away when both refuse.
+    box.focus();
+    box.select();
+
     // The async clipboard API needs a secure context, which a page opened from a file or
-    // over plain http is not. execCommand still works there, so both paths stay.
+    // over plain http is not. execCommand still works there, so both paths stay - and
+    // its return value is now read rather than assumed.
     if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(box.value).then(done, () => {
-            document.execCommand('copy');
-            done();
-        });
-    } else {
-        document.execCommand('copy');
-        done();
+        navigator.clipboard.writeText(box.value).then(
+            () => said(true),
+            // This rejection handler is outside the user gesture, so execCommand will
+            // usually be refused here too. Its result is reported, not invented.
+            () => said(tryExecCopy())
+        );
+        return;
+    }
+    said(tryExecCopy());
+}
+
+function tryExecCopy() {
+    try {
+        return document.execCommand('copy') === true;
+    } catch (error) {
+        return false;
     }
 }
 

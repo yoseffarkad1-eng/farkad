@@ -216,9 +216,13 @@
         <!-- Three looks for one message; the choice is remembered, so this is set once
              and then never thought about again. -->
         <div class="share-styles" id="shareStyles"></div>
+        <!-- Anyone not recorded yet is missing from the message entirely, which is not
+             visible in the text itself. Said here, above the button that sends it. -->
+        <div class="share-warning" id="shareWarning" style="display:none"></div>
         <textarea id="shareText" rows="14" readonly></textarea>
         <div class="modal-actions">
-            <button type="button" onclick="copyDayMessage()">העתק</button>
+            <button type="button" class="btn-success" onclick="sendDayMessage()">💬 שלח בוואטסאפ</button>
+            <button type="button" class="btn-secondary" onclick="copyDayMessage()">העתק</button>
             <button type="button" class="btn-secondary" onclick="closeShareModal()">סגור</button>
             <span class="share-status" id="shareStatus"></span>
         </div>

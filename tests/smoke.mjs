@@ -512,6 +512,91 @@ async function seedRoster(page) {
     (await page.inputValue('#shareText')).startsWith('בוקר טוב,'));
   check('no ID numbers or phones leak into the message',
     !text.includes('111') && !text.includes('050-1'));
+
+  // Everyone is recorded in this day, so there is nothing to warn about yet.
+  check('with the whole crew recorded the dialog says nothing extra',
+    !(await page.locator('#shareWarning').isVisible()));
+
+  // The button goes to WhatsApp rather than to the clipboard and a walk between apps.
+  const shared = await page.evaluate(() => {
+    window.__shared = null;
+    navigator.share = data => { window.__shared = data; return Promise.resolve(); };
+    sendDayMessage();
+    return new Promise(resolve => setTimeout(() => resolve(window.__shared), 200));
+  });
+  check('sending hands the message straight to the phone\'s share sheet',
+    shared && typeof shared.text === 'string' && shared.text.startsWith('בוקר טוב,'),
+    JSON.stringify(shared && shared.text ? shared.text.split('\n')[0] : shared));
+  check('and the dialog steps out of the way once it is sent',
+    !(await page.locator('#shareModal').isVisible()));
+
+  // A cancelled share sheet is not a failure and must not be treated as one.
+  await page.evaluate(() => {
+    navigator.share = () => Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' }));
+    window.__opened = null;
+    window.open = url => { window.__opened = url; };
+    showDayMessage();
+    sendDayMessage();
+  });
+  await page.waitForTimeout(250);
+  check('backing out of the share sheet does not fall through to anything',
+    (await page.evaluate(() => window.__opened)) === null);
+
+  // Without a share sheet at all, WhatsApp is opened directly with the text in it.
+  await page.evaluate(() => {
+    delete navigator.share;
+    window.__opened = null;
+    sendDayMessage();
+  });
+  await page.waitForTimeout(250);
+  const opened = await page.evaluate(() => window.__opened);
+  check('with no share sheet it opens WhatsApp itself, message already written',
+    typeof opened === 'string' && opened.startsWith('https://wa.me/?text=') &&
+    decodeURIComponent(opened.split('text=')[1]).startsWith('בוקר טוב,'), opened);
+
+  // The seder omits anyone not recorded, which the message itself cannot show.
+  await page.evaluate(() => {
+    State.schedule.workers.push({ id: 'w_04', name: 'סמיר', active: true });
+    State.save(); render();
+    showDayMessage();
+  });
+  await page.waitForTimeout(250);
+  check('someone still unrecorded is named before the message can be sent',
+    (await page.locator('#shareWarning').isVisible()) &&
+    (await page.textContent('#shareWarning')).includes('סמיר'));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- a copy that failed
+{
+  // The status line used to say "copied" whichever way it went. On a browser that
+  // refuses the clipboard the person then switched to WhatsApp, pasted whatever was
+  // there from this morning, and sent that.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save(); render(); showDayMessage();
+  });
+  await page.waitForTimeout(250);
+
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new Error('blocked'));
+    document.execCommand = () => false;
+    copyDayMessage();
+  });
+  await page.waitForTimeout(300);
+  check('a refused copy says so instead of claiming success',
+    (await page.textContent('#shareStatus')).includes('נחסמה'),
+    await page.textContent('#shareStatus'));
+
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () => Promise.resolve();
+    copyDayMessage();
+  });
+  await page.waitForTimeout(300);
+  check('and a real copy still reports itself',
+    (await page.textContent('#shareStatus')).includes('הועתק'));
   await page.context().close();
 }
 
