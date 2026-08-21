@@ -212,6 +212,16 @@ function renderPayrollTable() {
         section.appendChild(el('p', 'hint hint-warn',
             '* לעובד יש שעות נוספות בלי שכר שעה, ולכן הן לא נכללות בסכום.'));
     }
+
+    // A "—" in the pay column is easy to read past when it is one line among thirteen,
+    // and the total at the foot is then quietly short by a whole worker's fortnight. The
+    // people it is missing for are named, once, under the sheet.
+    const unpriced = rows.filter(row => row.amount === null);
+    if (unpriced.length > 0) {
+        section.appendChild(el('p', 'hint hint-warn',
+            `⚠️ ${unpriced.length} עובדים בלי שכר יומי, ולכן הסכום למטה חסר אותם: ` +
+            `${unpriced.map(row => row.name).join(', ')}. הוסף להם שכר במסך "עובדים ואתרים".`));
+    }
     return section;
 }
 

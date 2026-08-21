@@ -231,7 +231,13 @@ async function seedRoster(page) {
   });
   await page.waitForTimeout(200);
 
-  await page.getByText('↧ מהיום הקודם').click();
+  // The button names the day it will copy from rather than saying "the previous day"
+  // and leaving the person to work out which one that was.
+  check('the copy button names the day it will copy from',
+    (await page.textContent('#copyDayBtn')).includes('11/08'),
+    await page.textContent('#copyDayBtn'));
+
+  await page.locator('#copyDayBtn').click();
   await page.waitForTimeout(400);
 
   check('copying carries the rate across',
@@ -241,6 +247,33 @@ async function seedRoster(page) {
   check('copying never overwrites someone already recorded',
     (await page.evaluate(() => entriesFor(State.schedule, '2026-08-12', 'w_02', 'actual')
       .map(e => e.placeId).join())) === 'p_01');
+
+  // the copy reports what it did; clear it before carrying on
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
+  // Yesterday is the wrong source often enough to matter: a rest day, a run of empty
+  // days after a holiday, or a day being fixed weeks later. It skips back to the last
+  // day anything was actually recorded on.
+  await page.evaluate(() => { State.date = '2026-08-18'; render(); });
+  await page.waitForTimeout(300);
+  check('an empty run in between is stepped over, not reported as nothing to copy',
+    (await page.textContent('#copyDayBtn')).includes('12/08'),
+    await page.textContent('#copyDayBtn'));
+
+  await page.locator('#copyDayBtn').click();
+  await page.waitForTimeout(400);
+  check('and it copies that day, days later',
+    (await page.evaluate(() =>
+      entriesFor(State.schedule, '2026-08-18', 'w_01', 'actual').length)) === 1);
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
+  // Before the first record there is genuinely nothing behind it.
+  await page.evaluate(() => { State.date = '2026-08-01'; render(); });
+  await page.waitForTimeout(300);
+  check('with nothing behind it the button is dimmed rather than misleading',
+    await page.locator('#copyDayBtn').isDisabled());
   await page.context().close();
 }
 
@@ -341,6 +374,12 @@ async function seedRoster(page) {
   const payText = await page.textContent('.report-payroll');
   check('the amount owed is on screen, not left to be worked out on paper',
     payText.includes('1300') && payText.includes('לתשלום'), payText);
+  // A dash in the pay column is easy to read past, and the total is then short by a
+  // whole fortnight of someone's work with nothing saying so.
+  check('workers with no rate are named under the sheet, not left as a dash to notice',
+    (await page.textContent('.report-payroll')).includes('בלי שכר יומי') &&
+    (await page.textContent('.report-payroll')).includes('עלי'));
+
   check('a worker without a rate shows a dash rather than a zero',
     payText.includes('—'));
 

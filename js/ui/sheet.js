@@ -400,13 +400,59 @@ function countCopied(changes) {
     return new Set(changes.map(change => change.path)).size;
 }
 
-// Not "copy last week" - the roster does not repeat weekly here. But two consecutive days
-// often look alike, and starting from yesterday and fixing the differences is quicker.
+// The most recent day BEFORE this one that anything was recorded on. Yesterday is the
+// wrong answer often enough to matter: on a Sunday it is the rest day, after a holiday
+// it is a run of empty days, and on a day being fixed weeks later it is whatever
+// happened to be next to it. Every one of those made the copy button do nothing and
+// say so, which teaches a person to stop pressing it.
+function lastRecordedDayBefore(schedule, date, layer) {
+    const workers = schedule.workers || [];
+    return Object.keys(schedule.days || {})
+        .filter(day => day < date)
+        .sort()
+        .reverse()
+        .find(day => workers.some(worker =>
+            isAbsent(schedule, day, worker.id, layer) ||
+            entriesFor(schedule, day, worker.id, layer).length > 0)) || null;
+}
+
+// Not "copy last week" - the roster does not repeat weekly here. But consecutive working
+// days often look alike, and starting from the last one and fixing the differences is
+// the difference between thirty taps and five.
 function copyPreviousDay() {
-    const previous = parseLocalDate(State.date);
-    previous.setDate(previous.getDate() - 1);
-    copyDayInto(toLocalDateStr(previous), State.layer, 'מהיום הקודם',
-        'אין מה להעתיק מהיום הקודם.');
+    const from = lastRecordedDayBefore(State.schedule, State.date, State.layer);
+    if (!from) {
+        askTell('אין יום קודם עם רישום להעתיק ממנו.');
+        return;
+    }
+
+    const parsed = parseLocalDate(from);
+    copyDayInto(from, State.layer,
+        `מ${hebrewDayName(parsed)} ${formatShortDate(parsed)}`,
+        `אין מה להעתיק מ${formatShortDate(parsed)}.`);
+}
+
+// The button names the day it will copy from, because "the previous day" is a guess the
+// person then has to check, and the whole point of the button is not having to.
+function renderCopyButton() {
+    const btn = document.getElementById('copyDayBtn');
+    if (!btn) return;
+
+    const from = State.schedule.workers.length === 0
+        ? null
+        : lastRecordedDayBefore(State.schedule, State.date, State.layer);
+
+    if (!from) {
+        btn.textContent = '↧ מהיום הקודם';
+        btn.disabled = true;
+        btn.title = 'אין יום קודם עם רישום';
+        return;
+    }
+
+    const parsed = parseLocalDate(from);
+    btn.disabled = false;
+    btn.textContent = `↧ מ${hebrewDayName(parsed).replace('יום ', '')} ${formatShortDate(parsed)}`;
+    btn.title = `העתק את מה שנרשם ב${formatFullDate(parsed)}. רק מי שעדיין לא נרשם היום יושלם.`;
 }
 
 

@@ -43,6 +43,9 @@ function render() {
     // The day header is rebuilt from scratch on every render, so the ↶ comes back
     // disabled every time and has to be told what it is standing on.
     renderUndoButton();
+    // Lives outside the day view, so it is not redrawn with it - but what it copies
+    // from changes with the date and with every record made.
+    renderCopyButton();
     updateSyncNotice();
 }
 
