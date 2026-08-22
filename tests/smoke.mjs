@@ -266,6 +266,10 @@ async function seedRoster(page) {
   check('and it copies that day, days later',
     (await page.evaluate(() =>
       entriesFor(State.schedule, '2026-08-18', 'w_01', 'actual').length)) === 1);
+  // Sites carry across any gap; an absence does not. A copied absence looks exactly
+  // like a real one, and one carried over a six-day gap costs a man a paid day.
+  check('but an absence does not travel across a gap',
+    !(await page.evaluate(() => isAbsent(State.schedule, '2026-08-18', 'w_03', 'actual'))));
   await page.click('#askOk');
   await page.waitForTimeout(200);
 
@@ -580,6 +584,21 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('backing out of the share sheet does not fall through to anything',
     (await page.evaluate(() => window.__opened)) === null);
+
+  // A share that FAILS (not cancelled) lands after the tap is over, where window.open
+  // is popup-blocked - so the old fallback closed the modal over a message that had
+  // gone nowhere. Now it stays open and says to use the copy button.
+  await page.evaluate(() => {
+    navigator.share = () => Promise.reject(new Error('boom'));
+    window.__opened = null;
+    sendDayMessage();
+  });
+  await page.waitForTimeout(250);
+  check('a failed share keeps the message on screen instead of losing it',
+    (await page.locator('#shareModal').isVisible()) &&
+    (await page.evaluate(() => window.__opened)) === null &&
+    (await page.textContent('#shareStatus')).includes('העתק'),
+    await page.textContent('#shareStatus'));
 
   // Without a share sheet at all, WhatsApp is opened directly with the text in it.
   await page.evaluate(() => {
@@ -1510,6 +1529,36 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('stepping to another day clears it rather than aiming it at the wrong date',
     await page.locator('#undoBtn').isDisabled());
+
+  // The two other ways of leaving a day used to keep the undo armed - and the header ↶
+  // then silently rewrote the day just left while the screen showed nothing at all.
+  await page.evaluate(() => {
+    openAssignSheet('w_01');
+  });
+  await page.waitForTimeout(200);
+  await page.locator('.sheet-place').first().click();
+  await page.waitForTimeout(250);
+  await page.evaluate(() => {
+    closeAssignSheet();
+    const picker = document.getElementById('dayPicker');
+    picker.value = '2026-08-05';
+    picker.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(250);
+  check('the date picker clears it too',
+    await page.locator('#undoBtn').isDisabled());
+
+  await page.evaluate(() => {
+    openAssignSheet('w_01');
+  });
+  await page.waitForTimeout(200);
+  await page.locator('.sheet-place').first().click();
+  await page.waitForTimeout(250);
+  await page.evaluate(() => closeAssignSheet());
+  await page.locator('.btn-today').click();
+  await page.waitForTimeout(250);
+  check('and so does the today button',
+    await page.locator('#undoBtn').isDisabled());
   await page.context().close();
 }
 
@@ -2424,6 +2473,66 @@ async function seedRoster(page) {
   check('deleting an advance is sent as a field, not as a key that quietly vanished',
     removed.value === null && removed.path.startsWith('advances.') && removed.advances === 0,
     JSON.stringify(removed));
+
+  // A man who took cash and then worked nothing must not vanish from the sheet - with
+  // him goes the 500, which next period is out of range too and never deducted at all.
+  const ghost = await page.evaluate(() => {
+    State.commit(addAdvance(State.schedule, 'w_03', '2026-08-12', 250, ''));
+    return payrollRows().find(r => r.workerId === 'w_03');
+  });
+  check('an advance keeps a worker on the sheet even with no days recorded',
+    ghost && ghost.daysWorked === 0 && ghost.advances === 250, JSON.stringify(ghost));
+
+  // The three money columns must reconcile on the same rows: נצבר − מקדמות = לתשלום.
+  // w_03 has no daily rate, so his 250 used to land in one column and not the other.
+  const foot = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('.report-payroll tfoot td')]
+      .map(node => node.textContent.trim());
+    return cells;
+  });
+  const num = value => Number(String(value).replace(/[^\d-]/g, ''));
+  check('the footer reconciles: earned minus advances equals to-pay',
+    num(foot[foot.length - 3]) - Math.abs(num(foot[foot.length - 2])) === num(foot[foot.length - 1]),
+    JSON.stringify(foot));
+
+  // The exported file goes to the bookkeeper; it must say what the screen says, under
+  // the same headings. It used to write the GROSS amount under 'לתשלום'.
+  const sheet = await page.evaluate(() => reportSheets().payroll);
+  const head = sheet[0];
+  const w1 = sheet.find(row => row[0] === 'דוד');
+  check('the export carries the same money columns as the screen',
+    head.includes('נצבר') && head.includes('מקדמות') && head.includes('לתשלום'),
+    JSON.stringify(head));
+  check('and its לתשלום is net of advances, like the screen',
+    w1[head.indexOf('לתשלום')] === 1600 && w1[head.indexOf('מקדמות')] === 0,
+    JSON.stringify(w1));
+
+  // The minus sign in Hebrew text lays out on the wrong side of the digits without a
+  // direction mark - the worker read "500-" on the one number that says money was taken.
+  const advCell = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.report-payroll tbody tr')];
+    const row = rows.find(tr => tr.textContent.includes('עלי'));
+    return [...row.querySelectorAll('td')].map(td => td.textContent).join('|');
+  });
+  check('a shown advance carries the mark that pins the minus before the digits',
+    advCell.includes('‎-250'), JSON.stringify(advCell));
+
+  // An advance typed while another phone's snapshot is landing must survive the swap -
+  // day edits already did; advance paths were dropped on the floor.
+  const survived = await page.evaluate(() => {
+    const record = { id: 'a_pending1', workerId: 'w_02', date: '2026-08-12', amount: 111, note: '' };
+    FarkadSync._edits.set('advances.a_pending1', record);
+    FarkadSync._edits.set('advances.a_gone', null);
+    const incoming = { workers: [], places: [], days: {},
+      advances: { a_gone: { id: 'a_gone', workerId: 'w_01', date: '2026-08-12', amount: 999, note: '' } } };
+    FarkadSync.reapplyPending(incoming);
+    FarkadSync._edits.clear();
+    return { kept: incoming.advances.a_pending1, tombstoned: 'a_gone' in incoming.advances };
+  });
+  check('a pending advance is re-applied on top of an arriving snapshot',
+    survived.kept && survived.kept.amount === 111, JSON.stringify(survived));
+  check('and a pending deletion stays deleted rather than resurrecting',
+    survived.tombstoned === false, JSON.stringify(survived));
   await page.context().close();
 }
 
@@ -2556,8 +2665,8 @@ async function seedRoster(page) {
     render();
   });
   await page.waitForTimeout(300);
-  check('and near the end it says the account is about to close',
-    (await page.textContent('#accountBanner')).includes('נסגר בעוד'),
+  check('and the day before settlement it says the account closes tomorrow',
+    (await page.textContent('#accountBanner')).includes('נסגר מחר'),
     await page.textContent('#accountBanner'));
 
   // a fully recorded account mid-run says nothing at all
@@ -2898,6 +3007,10 @@ async function seedRoster(page) {
   const page = await open();
   await seedRoster(page);
   await page.evaluate(() => {
+    // Pinned: the drawer shows exactly two accounts anchored at 2026-08-07, so on the
+    // real clock these fixtures roll out of view on 2026-09-04 and the block starts
+    // failing for a reason that has nothing to do with the app.
+    todayStr = () => '2026-08-12';
     assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
     assignPlace(State.schedule, '2026-08-10', 'w_02', 'actual', 'p_01');
     markAbsent(State.schedule, '2026-08-10', 'w_03', 'actual');

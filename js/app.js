@@ -75,6 +75,28 @@ function watchForCrashes() {
     window.addEventListener('unhandledrejection', event => show(event.reason));
 }
 
+// The costliest input error is the wrong date, and the app used to hand it out itself:
+// "today" was computed once at load, and a phone app is not reopened, it is resumed -
+// often the next morning, where the first record of the new day landed on yesterday.
+function watchDayRollover() {
+    let knownToday = todayStr();
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        const now = todayStr();
+        if (now === knownToday) return;
+
+        // Follow the calendar only if the screen was sitting on the old today. Someone
+        // deliberately fixing a past date must not be yanked off it mid-correction.
+        if (State.date === knownToday) {
+            hideUndo();
+            State.date = now;
+        }
+        knownToday = now;
+        takeDailySnapshot();
+        render();
+    });
+}
+
 window.onload = () => {
     State.date = todayStr();
 
@@ -88,6 +110,7 @@ window.onload = () => {
     registerOffline();
     watchConnection();
     watchInstall();
+    watchDayRollover();
 
     if (result.migrated) {
         const count = (result.issues || []).length;

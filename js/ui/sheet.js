@@ -360,17 +360,25 @@ function closePlacePicker() {
 // Two ways of not typing thirty names again, and the same rule under both: only workers
 // with NOTHING recorded are filled. A copy can never overwrite something a person entered
 // by hand - including something one of the other two entered a minute ago.
-function copyDayInto(fromDate, fromLayer, source, empty) {
+function copyDayInto(fromDate, fromLayer, source, empty, options) {
     const targets = State.unrecorded();
     if (targets.length === 0) {
         askTell('כל העובדים כבר טופלו ביום הזה.');
         return;
     }
 
+    // An absence travels only from the day RIGHT BEFORE this one. Copied sites from a
+    // week back are visible and cheap to fix; a copied absence looks exactly like a real
+    // one, and a man marked נעדר off a day from before the holiday loses a paid day
+    // with nothing on screen to catch it.
+    const withAbsences = !(options && options.skipAbsences);
+
     const changes = [];
     targets.forEach(worker => {
         if (isAbsent(State.schedule, fromDate, worker.id, fromLayer)) {
-            changes.push(markAbsent(State.schedule, State.date, worker.id, State.layer));
+            if (withAbsences) {
+                changes.push(markAbsent(State.schedule, State.date, worker.id, State.layer));
+            }
             return;
         }
 
@@ -427,9 +435,13 @@ function copyPreviousDay() {
     }
 
     const parsed = parseLocalDate(from);
+    const gapDays = Math.round((parseLocalDate(State.date) - parsed) / 86400000);
     copyDayInto(from, State.layer,
         `מ${hebrewDayName(parsed)} ${formatShortDate(parsed)}`,
-        `אין מה להעתיק מ${formatShortDate(parsed)}.`);
+        `אין מה להעתיק מ${formatShortDate(parsed)}.`,
+        // Sites carry across any gap; absences only from the adjacent day, where
+        // "he was out yesterday" still says something about today.
+        { skipAbsences: gapDays > 1 });
 }
 
 // The button names the day it will copy from, because "the previous day" is a guess the
@@ -451,8 +463,10 @@ function renderCopyButton() {
 
     const parsed = parseLocalDate(from);
     btn.disabled = false;
-    btn.textContent = `↧ מ${hebrewDayName(parsed).replace('יום ', '')} ${formatShortDate(parsed)}`;
-    btn.title = `העתק את מה שנרשם ב${formatFullDate(parsed)}. רק מי שעדיין לא נרשם היום יושלם.`;
+    // 'מיום רביעי', not 'מרביעי' - the toast for the same action says it correctly and
+    // the button should not speak worse Hebrew than its own confirmation.
+    btn.textContent = `↧ ${'מ' + hebrewDayName(parsed)} ${formatShortDate(parsed)}`;
+    btn.title = `העתק את מה שנרשם ב${formatFullDate(parsed)}. רק מי שעדיין לא נרשם יושלם.`;
 }
 
 

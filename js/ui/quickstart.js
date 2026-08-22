@@ -58,8 +58,11 @@ function quickNext() {
     }
 
     // Both lists in hand - build the roster in one go. Existing entries are never
-    // touched: running quick start twice adds, it does not replace.
+    // touched: running quick start twice adds, it does not replace - and a name that is
+    // already on the roster is skipped the same way a duplicate site is, or pasting an
+    // overlapping list makes two identical דוד rows the day screen cannot tell apart.
     quickWorkers.forEach(name => {
+        if (State.schedule.workers.some(worker => worker.name === name)) return;
         State.schedule.workers.push({
             id: State.nextWorkerId(), name,
             idNumber: '', phone: '', dailyRate: 0, hourlyRate: 0, active: true

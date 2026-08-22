@@ -112,8 +112,13 @@ function renderShareWarning() {
     if (missing.length === 0) { box.style.display = 'none'; return; }
 
     const names = missing.map(worker => worker.name).join(', ');
-    box.appendChild(el('span', null,
-        `⚠️ ${missing.length} עובדים עדיין לא נרשמו היום ולא יופיעו בהודעה: ${names}`));
+    // Named by day, not "today": the modal follows State.date and is opened on past
+    // days too. And one missing man gets a sentence, not "1 עובדים".
+    const day = `ב${hebrewDayName(parseLocalDate(State.date))}`;
+    const head = missing.length === 1
+        ? `עובד אחד עדיין לא נרשם ${day} ולא יופיע בהודעה`
+        : `${missing.length} עובדים עדיין לא נרשמו ${day} ולא יופיעו בהודעה`;
+    box.appendChild(el('span', null, `⚠️ ${head}: ${names}`));
     box.style.display = '';
 }
 
@@ -151,18 +156,19 @@ function sendDayMessage() {
         navigator.share({ text }).then(closeShareModal, error => {
             // A cancelled sheet is not a failure and must not be reported as one.
             if (error && error.name === 'AbortError') return;
-            openWhatsApp(text);
+            // By the time this rejection lands, the user gesture is over - window.open
+            // from here is popup-blocked, and the old fallback then closed the modal
+            // over a message that had gone nowhere. Stay open and say so; the copy
+            // button is right there and still works.
+            status.textContent = '⚠️ השיתוף לא נפתח - השתמש בהעתק ושלח ידנית';
+            setTimeout(() => { status.textContent = ''; }, 6000);
         });
         return;
     }
 
+    // No share sheet at all (desktop): the wa.me link is opened inside the click,
+    // where the browser still allows it.
     status.textContent = 'פותח וואטסאפ…';
-    openWhatsApp(text);
-}
-
-function openWhatsApp(text) {
-    // No number in the link: it opens WhatsApp on the chat picker, so the group is
-    // chosen the same way it always is.
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
     closeShareModal();
 }

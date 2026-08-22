@@ -125,8 +125,11 @@ function reportPeriod() {
 }
 
 function payrollRows() {
+    // Advances keep a row alive on their own: a man who took 500 on the 1st and then
+    // worked nothing would otherwise vanish from the sheet - and with him the 500,
+    // which next period is out of range too and never deducted anywhere.
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
-        .filter(row => row.daysWorked > 0 || row.absent > 0);
+        .filter(row => row.daysWorked > 0 || row.absent > 0 || row.advances > 0);
 }
 
 function invoiceRows() {
@@ -165,11 +168,13 @@ function renderPayrollTable() {
 
     // The advance columns appear only once somebody has actually taken one, so a run of
     // accounts with no advances is not carrying two empty columns across every card.
+    // NOT gated on anyRate: cash handed over is real whether or not rates were entered,
+    // and hiding it because the rates are blank made 500 shekels disappear in silence.
     const anyAdvance = rows.some(row => row.advances > 0);
 
     const headers = ['עובד'].concat(columns.map(column => column.header));
     if (anyRate) headers.push('שכר יומי', 'נצבר');
-    if (anyRate && anyAdvance) headers.push('מקדמות');
+    if (anyAdvance) headers.push('מקדמות');
     if (anyRate) headers.push('לתשלום');
 
     const table = buildTable(headers, rows.map(row => {
@@ -180,23 +185,29 @@ function renderPayrollTable() {
             // which is a different statement from owing nothing.
             cells.push(row.amount === null ? '—'
                 : Math.round(row.amount) + (row.hoursUnpriced ? ' *' : ''));
-            if (anyAdvance) cells.push(row.advances > 0 ? `-${Math.round(row.advances)}` : 0);
-            cells.push(row.netAmount === null ? '—' : Math.round(row.netAmount));
+        }
+        if (anyAdvance) cells.push(row.advances > 0 ? minusAmount(row.advances) : 0);
+        if (anyRate) {
+            // The * follows the money onto the number actually paid.
+            cells.push(row.netAmount === null ? '—'
+                : bidiAmount(Math.round(row.netAmount)) + (row.hoursUnpriced ? ' *' : ''));
         }
         return cells;
     }));
 
+    // The three money columns must reconcile: נצבר − מקדמות = לתשלום, on the same rows.
+    // Summing per-row nets instead used to let an unpriced worker's advance into one
+    // column and not the other, and the footer contradicted itself.
     const totals = rows.reduce((sum, row) => ({
         amount: sum.amount + (row.amount || 0),
-        advances: sum.advances + (row.advances || 0),
-        net: sum.net + (row.netAmount || 0)
-    }), { amount: 0, advances: 0, net: 0 });
+        advances: sum.advances + (row.advances || 0)
+    }), { amount: 0, advances: 0 });
 
     const footer = ['סה"כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
     if (anyRate) footer.push('', Math.round(totals.amount));
-    if (anyRate && anyAdvance) footer.push(`-${Math.round(totals.advances)}`);
-    if (anyRate) footer.push(Math.round(totals.net));
+    if (anyAdvance) footer.push(minusAmount(totals.advances));
+    if (anyRate) footer.push(bidiAmount(Math.round(totals.amount - totals.advances)));
     table.appendChild(totalRow(footer, headers));
 
     // The name opens that worker's days. On payday somebody asks why the number is what
@@ -319,14 +330,9 @@ function renderInvoicePicker(places) {
 // The pay sheet says a worker is owed 4,150. This says which days that is: the sites, the
 // doubled days, the hours, and what each day came to. It is read out to the person asking,
 // so it runs the same arithmetic as the total rather than re-deriving it a second way.
-// Which worker's days are on screen, so the advance buttons and the share button know
-// who they belong to after a re-render.
-let workerDaysId = null;
-
 function openWorkerDays(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
-    workerDaysId = workerId;
 
     const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
     const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
@@ -368,7 +374,7 @@ function renderAdvanceRow(item) {
     what.appendChild(button('✕', 'btn-icon', () => removeAdvanceRow(item), 'מחק מקדמה'));
     row.appendChild(what);
 
-    row.appendChild(el('div', 'wday-money', `-${Math.round(item.amount)}`));
+    row.appendChild(el('div', 'wday-money', minusAmount(item.amount)));
     return row;
 }
 
@@ -382,7 +388,7 @@ function renderNetRow(days, worker, advances) {
     row.appendChild(el('div', 'wday-what',
         `${Math.round(earned)} נצבר · ${Math.round(taken)} מקדמות`));
     row.appendChild(el('div', 'wday-money',
-        Number(worker.dailyRate) > 0 ? String(Math.round(earned - taken)) : '—'));
+        Number(worker.dailyRate) > 0 ? bidiAmount(Math.round(earned - taken)) : '—'));
     return row;
 }
 
@@ -394,6 +400,9 @@ function renderAdvanceAdd(worker) {
             title: `מקדמה ל${worker.name}`,
             message: 'כמה קיבל על החשבון? הסכום יירד מהתשלום בסוף התקופה.',
             placeholder: '500',
+            // The digit keyboard, the way every other amount field in the app gets it.
+            inputmode: 'decimal',
+            dir: 'ltr',
             ok: 'שמור',
             validate: value => {
                 const number = Number(value);
@@ -414,7 +423,7 @@ function renderAdvanceAdd(worker) {
         openWorkerDays(worker.id);
     }));
 
-    box.appendChild(button('💬 שלח למשלוח', 'btn-success', () => shareWorkerStatement(worker.id)));
+    box.appendChild(button('💬 שלח לעובד', 'btn-success', () => shareWorkerStatement(worker.id)));
     return box;
 }
 
@@ -472,15 +481,24 @@ function workerStatementText(workerId) {
     lines.push(`סה"כ ${worked.length} ימי עבודה`);
     if (priced) lines.push(`נצבר: ${Math.round(earned)}`);
 
+    // The screen puts a * on unpriced hours and the sheet explains it; the message the
+    // worker actually receives must not be the one place that pretends the number is
+    // complete.
+    if (priced && days.some(day => !day.absent && day.extraHours > 0)
+        && !(Number(worker.hourlyRate) > 0)) {
+        lines.push('');
+        lines.push('* שעות נוספות בלי שכר שעה - לא נכללו בסכום.');
+    }
+
     if (advances.length > 0) {
         lines.push('');
         advances.forEach(item => lines.push(
-            `מקדמה ${formatShortDate(parseLocalDate(item.date))}: -${Math.round(item.amount)}`));
+            `מקדמה ${formatShortDate(parseLocalDate(item.date))}: ${minusAmount(item.amount)}`));
     }
 
     if (priced) {
         lines.push('');
-        lines.push(`נותר לתשלום: ${Math.round(earned - taken)}`);
+        lines.push(`נותר לתשלום: ${bidiAmount(Math.round(earned - taken))}`);
     }
 
     return lines.join('\n');
@@ -493,10 +511,13 @@ function shareWorkerStatement(workerId) {
     if (navigator.share) {
         navigator.share({ text }).catch(error => {
             if (error && error.name === 'AbortError') return;
-            window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+            // Outside the gesture by now, so a window.open here would be popup-blocked
+            // and the failure silent. Say what happened instead.
+            askTell('השיתוף לא נפתח. נסה שוב, או שלח מתוך מסך היום.');
         });
         return;
     }
+    // Inside the click, where the browser still allows a new tab.
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
 }
 
@@ -621,11 +642,19 @@ function scrollWrap(node) {
 // ---------------------------------------------------------------- export
 
 function reportSheets() {
-    const payroll = [['עובד', 'ימי עבודה', 'רגיל', 'כפול', 'שעות נוספות', 'נעדר', 'שכר יומי', 'לתשלום']]
+    // The exported columns say the SAME thing as the screen, under the same headings.
+    // This file is the one that reaches the bookkeeper, and it used to write the gross
+    // amount under 'לתשלום' - the heading the screen uses for the net - so the two
+    // disagreed by exactly the advances, and the paper won.
+    const payroll = [['עובד', 'ימי עבודה', 'רגיל', 'כפול', 'שעות נוספות', 'נעדר',
+        'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
         .concat(payrollRows().map(row => [
             row.name, row.daysWorked, row.normalDays, row.doubleDays,
             row.extraHours, row.absent, row.dailyRate,
-            row.amount === null ? '' : Math.round(row.amount)
+            row.amount === null ? '' : Math.round(row.amount),
+            row.advances > 0 ? -Math.round(row.advances) : 0,
+            row.netAmount === null ? '' : Math.round(row.netAmount),
+            row.hoursUnpriced ? 'שעות נוספות בלי שכר שעה - לא נכללו' : ''
         ]));
 
     const invoice = invoiceByDate(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);

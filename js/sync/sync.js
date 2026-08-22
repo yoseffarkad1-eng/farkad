@@ -217,12 +217,24 @@ const FarkadSync = {
 
         pending.forEach((value, path) => {
             const parts = path.split('.');
-            if (parts.length !== 4 || parts[0] !== 'days') return;
 
-            const [, date, layer, workerId] = parts;
-            if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
-            if (!schedule.days[date][layer]) schedule.days[date][layer] = {};
-            schedule.days[date][layer][workerId] = value;
+            if (parts.length === 4 && parts[0] === 'days') {
+                const [, date, layer, workerId] = parts;
+                if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
+                if (!schedule.days[date][layer]) schedule.days[date][layer] = {};
+                schedule.days[date][layer][workerId] = value;
+                return;
+            }
+
+            // Advances travel as advances.<id>, two segments. Skipping them here made a
+            // just-typed advance vanish the moment another phone's snapshot arrived -
+            // exactly the class of loss this function exists to prevent. A null value is
+            // a deletion in flight and stays a deletion.
+            if (parts.length === 2 && parts[0] === 'advances') {
+                schedule.advances = schedule.advances || {};
+                if (value === null) delete schedule.advances[parts[1]];
+                else schedule.advances[parts[1]] = value;
+            }
         });
     },
 

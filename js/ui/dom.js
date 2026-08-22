@@ -29,6 +29,20 @@ function clear(node) {
 
 const HEBREW_DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
+// A minus sign in Hebrew text renders on the WRONG SIDE: the bidi algorithm resolves a
+// leading hyphen to the paragraph direction, so "-500" lays out as "500-" and the worker
+// reads it backwards on the one number that says money was already taken. The invisible
+// left-to-right mark (U+200E) before the sign pins the whole token. Works in DOM text
+// and in a WhatsApp message alike, which CSS direction cannot.
+function minusAmount(value) {
+    return '\u200E-' + Math.round(value);
+}
+
+// Any amount that MIGHT be negative goes through here; positives pass untouched.
+function bidiAmount(value) {
+    return value < 0 ? minusAmount(Math.abs(value)) : String(value);
+}
+
 // The traditional one-letter weekday marks, for where a whole name cannot fit. NOT the
 // first letter of the name - ראשון, שני, שלישי and רביעי would collapse into two
 // indistinguishable letters. יום א׳ through שבת is how a Hebrew calendar abbreviates.

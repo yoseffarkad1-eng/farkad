@@ -13,7 +13,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v47';
+const VERSION = 'farkad-v48';
 
 const SHELL = [
     './',
@@ -47,16 +47,26 @@ const SHELL = [
 ];
 
 self.addEventListener('install', event => {
+    // All of the shell or none of it. Swallowing a single failed file used to let a
+    // half-fetched update ACTIVATE - at which point the activate handler below deleted
+    // the complete old cache, and the next offline launch opened an app with some of
+    // its scripts missing and no error pointing at why. A failed install leaves the
+    // old version serving and is retried on a later visit; per-file failures are still
+    // named in the log for whoever goes looking.
     event.waitUntil(
-        caches.open(VERSION)
-            // addAll fails the whole install if any single file 404s, which would leave
-            // the app with no offline copy at all and no obvious symptom. Failures are
-            // reported per file instead.
-            .then(cache => Promise.all(SHELL.map(url =>
+        caches.open(VERSION).then(cache =>
+            Promise.all(SHELL.map(url =>
                 cache.add(url).catch(error => {
                     console.error('[sw] could not cache', url, error);
+                    return url;
                 })
-            )))
+            )).then(results => {
+                const missing = results.filter(Boolean);
+                if (missing.length > 0) {
+                    throw new Error('shell incomplete, keeping the old version: ' + missing.join(', '));
+                }
+            })
+        )
     );
 });
 
@@ -87,9 +97,16 @@ self.addEventListener('fetch', event => {
         event.respondWith(
             timedFetch(request, DOCUMENT_TIMEOUT_MS)
                 .then(response => {
-                    const copy = response.clone();
-                    caches.open(VERSION).then(cache => cache.put('./index.html', copy));
-                    return response;
+                    // Only a real page overwrites the cached shell. A host mid-deploy
+                    // answers 502 for a moment; caching that page made it THE app on
+                    // every offline launch afterwards. And when the network hands back
+                    // an error while a good copy sits in the cache, the good copy wins.
+                    if (response && response.ok) {
+                        const copy = response.clone();
+                        caches.open(VERSION).then(cache => cache.put('./index.html', copy));
+                        return response;
+                    }
+                    return caches.match('./index.html').then(hit => hit || response);
                 })
                 .catch(() => caches.match('./index.html').then(hit => hit || offlineFallback()))
         );

@@ -126,15 +126,16 @@ function renderAccountBanner() {
         if (!anyRecordOn(value)) blank.push(formatShortDate(date));
     }
     if (blank.length > 0) {
-        notes.push(`${blank.length} ימי עבודה בחשבון הנוכחי בלי אף רישום: ${blank.join(', ')}`);
+        notes.push(blank.length === 1
+            ? `יום עבודה אחד בחשבון הנוכחי בלי אף רישום: ${blank[0]}`
+            : `${blank.length} ימי עבודה בחשבון הנוכחי בלי אף רישום: ${blank.join(', ')}`);
     }
 
     // The last two days before settlement, when a correction is still cheap.
     const daysLeft = Math.round((end - parseLocalDate(today)) / 86400000);
     if (daysLeft >= 0 && daysLeft <= 2) {
-        notes.push(daysLeft === 0
-            ? 'החשבון נסגר היום - בדוק את השכר ושמור קובץ גיבוי.'
-            : `החשבון נסגר בעוד ${daysLeft} ימים - בדוק את השכר ושמור קובץ גיבוי.`);
+        const when = daysLeft === 0 ? 'היום' : daysLeft === 1 ? 'מחר' : 'בעוד יומיים';
+        notes.push(`החשבון נסגר ${when} - בדוק את השכר ושמור קובץ גיבוי.`);
     }
 
     if (notes.length === 0) { banner.style.display = 'none'; return; }
@@ -424,7 +425,10 @@ function renderDayHeader() {
     picker.setAttribute('aria-hidden', 'true');
     picker.tabIndex = -1;
     picker.addEventListener('change', () => {
-        if (picker.value) { State.date = picker.value; render(); }
+        // hideUndo like every other way of leaving the day: the armed undo restores
+        // into the day it was made on, and firing it while another day is on screen
+        // reads as "undo is broken" while it silently rewrites the day just left.
+        if (picker.value) { hideUndo(); State.date = picker.value; render(); }
     });
     header.appendChild(picker);
 
@@ -437,7 +441,7 @@ function renderDayHeader() {
 
     if (State.date !== todayStr()) {
         tools.appendChild(button('היום', 'btn-secondary btn-today', () => {
-            State.date = todayStr(); render();
+            hideUndo(); State.date = todayStr(); render();
         }));
     }
 

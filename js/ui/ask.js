@@ -37,6 +37,11 @@ function askText(options) {
     parts.message.style.display = settings.message ? '' : 'none';
     parts.input.value = settings.value || '';
     parts.input.placeholder = settings.placeholder || '';
+    // Reset every call: the field is shared, and an inputmode left over from a number
+    // question would give the next NAME question a digit keyboard.
+    if (settings.inputmode) parts.input.setAttribute('inputmode', settings.inputmode);
+    else parts.input.removeAttribute('inputmode');
+    parts.input.dir = settings.dir || '';
     parts.input.style.display = '';
     parts.error.textContent = '';
     parts.ok.textContent = settings.ok || 'שמור';

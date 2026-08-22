@@ -28,6 +28,16 @@ function registerOffline() {
     }
 
     container.register('sw.js').then(registration => {
+        // An installed app on a phone is not reopened, it is RESUMED - sometimes for
+        // weeks without a real navigation, which is the only thing that checks for a
+        // new worker on its own. So ask on every return to the foreground; the check
+        // is a conditional request and costs nothing when there is nothing new.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                registration.update().catch(() => {});
+            }
+        });
+
         if (registration.waiting) showUpdateBanner(registration.waiting);
 
         registration.addEventListener('updatefound', () => {
