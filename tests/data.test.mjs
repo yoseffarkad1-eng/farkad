@@ -616,6 +616,95 @@ function record(device, date, workerId, placeId, rate) {
         JSON.stringify(read.workers.map(w => w.id)));
 }
 
+// ---------------------------------------------------------------- restore
+{
+    suite('a restore that did not reach the cloud does not report success');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    const restored = device.call('normaliseSchedule', {
+        schemaVersion: 2,
+        workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: { '2026-07-01': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+        advances: {},
+        updatedAt: '2026-07-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+
+    cloud.online = false;
+    let rejected = false;
+    device.State.schedule = restored;
+    device.State.save({ silent: true });
+    await device.Sync.replaceAll(device.State.schedule).catch(() => { rejected = true; });
+
+    check('replaceAll rejects rather than resolving quietly', rejected);
+    check('and the status says so', device.Sync.status === 'error', device.Sync.status);
+    check('the restored state is still what is on the device',
+        Object.keys(device.State.schedule.days).join() === '2026-07-01',
+        JSON.stringify(Object.keys(device.State.schedule.days)));
+    check('and the replacement is written down, not just remembered',
+        Boolean(device.dump()['farkad:pendingReplace']));
+
+    // The dangerous moment: another phone's snapshot arrives while the restore has not
+    // landed. Adopting it would quietly undo the restore, on the device that asked for it.
+    device.Sync.receive({
+        schemaVersion: 2,
+        workers: restored.workers, places: restored.places,
+        days: { '2026-08-12': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+        advances: {}, updatedAt: '2026-08-12T18:00:00.000Z', updatedBy: 'd_other'
+    });
+    check('an arriving snapshot cannot undo a restore that is still pending',
+        Object.keys(device.State.schedule.days).join() === '2026-07-01',
+        JSON.stringify(Object.keys(device.State.schedule.days)));
+
+    // It survives the app being closed, and goes out when the network comes back.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('a restart still knows the restore has not landed',
+        reopened.Sync.pendingReplace() !== null);
+
+    cloud.online = true;
+    reopened.Sync.pushDelayMs = TICK;
+    reopened.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+
+    check('and it goes out once there is a connection',
+        Object.keys(cloud.doc.days).join() === '2026-07-01',
+        JSON.stringify(Object.keys(cloud.doc.days)));
+    check('after which nothing is left pending',
+        reopened.Sync.pendingReplace() === null);
+    check('and the note is off the disk too',
+        !reopened.dump()['farkad:pendingReplace']);
+}
+
+{
+    suite('a restore that did reach the cloud reports success');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    await wait();
+
+    let ok = false;
+    device.State.schedule.days = {};
+    device.call('assignPlace', device.State.schedule, '2026-06-01', 'w_01', 'actual', 'p_01');
+    device.State.save({ silent: true });
+    await device.Sync.replaceAll(device.State.schedule).then(() => { ok = true; });
+
+    check('replaceAll resolves', ok);
+    check('the cloud has the replacement',
+        Boolean(cloud.doc.days['2026-06-01']), JSON.stringify(Object.keys(cloud.doc.days)));
+    check('nothing is pending', device.Sync.pendingReplace() === null);
+    check('and the queue of field edits is cleared, since they were superseded',
+        device.Sync.pendingCount() === 0, String(device.Sync.pendingCount()));
+}
+
 // ---------------------------------------------------------------- money
 {
     suite('the arithmetic that becomes someone\'s pay');

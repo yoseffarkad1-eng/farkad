@@ -2031,6 +2031,44 @@ async function seedRoster(page) {
   await page.click('#askOk');
   await page.waitForTimeout(200);
 
+  // A restore whose cloud write failed used to say "שוחזר." all the same. That is the
+  // worst thing this app can print: the person stops looking, and the next snapshot from
+  // another phone puts the old state back on the very device that asked for the restore.
+  await page.evaluate(() => {
+    FarkadSync.adapter = {
+      update: () => Promise.resolve(),
+      save: () => Promise.reject(Object.assign(new Error('permission denied'),
+        { code: 'permission-denied' })),
+      subscribe: () => () => {}
+    };
+    FarkadSync.setStatus('synced');
+    State.schedule.workers = [];
+    State.save(); render();
+  });
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+  await page.locator('#restorePoints button').first().click();
+  await page.waitForTimeout(300);
+  await page.click('#askOk');
+  await page.waitForTimeout(600);
+
+  const told = await page.textContent('#askMessage');
+  check('a restore the cloud refused does not report plain success',
+    !/^שוחזר\.$/.test((await page.textContent('#askTitle')) || ''), JSON.stringify(told));
+  check('it says the other devices have not got it yet',
+    told.includes('עדיין לא הגיע לענן'), JSON.stringify(told));
+  check('and the restore is written down so it can still go out',
+    (await page.evaluate(() => FarkadSync.pendingReplace() !== null)));
+  check('while the restored state is what is on this device',
+    (await page.evaluate(() => State.schedule.workers.length)) === 3);
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    FarkadSync.forgetReplace();
+    FarkadSync.adapter = null;
+    FarkadSync.setStatus('off');
+  });
+
   // three days kept, not every day since the app was installed. The boot snapshot is
   // dated with the REAL today, so it is cleared first: leaving it in made this check
   // pass or fail depending on the date the suite was run on, and on 20/08 the stand-in

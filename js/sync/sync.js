@@ -34,6 +34,13 @@ const OUTBOX_KEY = 'farkad:outbox';
 // Retry, backing off. A device on a building site loses signal for minutes at a time and
 // gets it back without anyone touching anything, so the queue has to drain on its own -
 // but a phone that retries every second for an hour is a phone with no battery.
+// A whole-document replacement - a backup restored, a file imported - that has not
+// reached the cloud yet. Kept on disk for the same reason the outbox is: the person was
+// TOLD it worked, and the state they asked for is now the only one they can see. If the
+// save failed and nothing remembered that, the next snapshot from another phone would
+// quietly put the old state back, on the device that asked for the restore.
+const REPLACE_KEY = 'farkad:pendingReplace';
+
 const RETRY_FIRST_MS = 2000;
 const RETRY_MAX_MS = 60000;
 
@@ -104,6 +111,9 @@ const FarkadSync = {
     // The roster as the cloud last showed it, keyed by id. What a roster edit is compared
     // against to work out which people actually changed.
     _remoteRoster: { workers: {}, places: {} },
+    // A whole-document replacement that has not been acknowledged yet. Mirrored to disk.
+    _replace: null,
+    _replacing: false,
 
     // adapter: {
     //   update(patchByFieldPath) -> Promise   merge these fields, leave the rest alone
@@ -203,7 +213,8 @@ const FarkadSync = {
             this._watchingConnection = true;
             window.addEventListener('online', () => {
                 this._retryAt = 0;
-                this.flush();
+                if (this.pendingReplace()) this.retryReplace();
+                else this.flush();
             });
         }
 
@@ -213,8 +224,10 @@ const FarkadSync = {
         );
 
         // Anything left over from a previous session goes out as soon as there is
-        // somewhere to send it.
-        if (this._outbox.size > 0) this.scheduleFlush();
+        // somewhere to send it. The replacement goes first: the queued field edits
+        // belong to a state it is about to replace.
+        if (this.pendingReplace()) this.retryReplace();
+        else if (this._outbox.size > 0) this.scheduleFlush();
     },
 
     disconnect() {
@@ -226,9 +239,9 @@ const FarkadSync = {
         this._retryTimer = null;
         this._sending = new Map();
         this._stamp = null;
-        // The outbox is deliberately NOT cleared. Signing out, or the auth token
-        // expiring, must not be a way to lose edits that were never sent - they are
-        // still true, and the next sign-in is where they go.
+        // The outbox and any pending replacement are deliberately NOT cleared. Signing
+        // out, or the auth token expiring, must not be a way to lose edits that were
+        // never sent - they are still true, and the next sign-in is where they go.
         this.setStatus('off');
     },
 
@@ -436,7 +449,8 @@ const FarkadSync = {
         clearTimeout(this._retryTimer);
         this._retryTimer = setTimeout(() => {
             this._retryTimer = null;
-            this.flush();
+            if (this.pendingReplace()) this.retryReplace();
+            else this.flush();
         }, this._retryAt);
     },
 
@@ -480,22 +494,97 @@ const FarkadSync = {
     },
 
     // Import and backup restore only. Replaces the entire remote document on purpose.
+    //
+    // It REJECTS on failure. It used to swallow the error and resolve, and no caller
+    // awaited it anyway - so a restore that never left the phone still ended with
+    // "שוחזר." on screen. A green tick over a write that did not happen is the worst
+    // thing this app can print: the person stops looking, and the next snapshot from
+    // another phone puts the old state back.
     replaceAll(data) {
+        const document = cloudDocument(data);
+
+        // Written down BEFORE the attempt, so a crash mid-save is indistinguishable from
+        // a failed save - both leave a note that says what still has to happen.
+        this.rememberReplace(document);
+
         if (!this.adapter) return Promise.resolve();
 
         const superseded = this._outbox;
         this._stamp = null;
+        this._replacing = true;
 
-        return Promise.resolve(this.adapter.save(cloudDocument(data)))
+        return Promise.resolve(this.adapter.save(document))
             .then(() => {
+                this._replacing = false;
                 // Cleared only now. The pending edits belong to the state that was just
                 // replaced on purpose, so they are genuinely superseded - but only once
                 // the replacement has actually landed. Clearing them first meant a
                 // restore that failed took the unsent edits with it.
                 if (this._outbox === superseded) this.clearOutbox();
+                this.forgetReplace();
                 this.setStatus('synced');
             })
-            .catch(error => this.fail(error));
+            .catch(error => {
+                this._replacing = false;
+                this.fail(error);
+                this.scheduleRetry();
+                throw error;
+            });
+    },
+
+    // ------------------------------------------------------------ pending replacement
+
+    rememberReplace(document) {
+        this._replace = document;
+        Store.set(REPLACE_KEY, JSON.stringify(document));
+    },
+
+    forgetReplace() {
+        this._replace = null;
+        Store.remove(REPLACE_KEY);
+    },
+
+    pendingReplace() {
+        if (this._replace) return this._replace;
+
+        const raw = Store.get(REPLACE_KEY);
+        if (!raw) return null;
+        try {
+            this._replace = JSON.parse(raw);
+            return this._replace;
+        } catch (error) {
+            console.error('Pending replacement unreadable:', error);
+            Store.set(REPLACE_KEY + ':damaged', raw, { optional: true });
+            Store.remove(REPLACE_KEY);
+            return null;
+        }
+    },
+
+    // Push it again, from wherever the app got to. Called on connect and by the retry
+    // ladder, so a restore made on a train reaches the other two phones by itself.
+    retryReplace() {
+        const document = this.pendingReplace();
+        if (!document || !this.adapter) return Promise.resolve();
+
+        // The save publishes the new document straight back as a snapshot, and the
+        // replacement is not forgotten until the save RESOLVES - so without this guard
+        // receive() sees it still pending and saves again, for as long as the stack
+        // holds out. Found by the suite doing exactly that.
+        if (this._replacing) return Promise.resolve();
+        this._replacing = true;
+
+        return Promise.resolve(this.adapter.save(document))
+            .then(() => {
+                this._replacing = false;
+                this.clearOutbox();
+                this.forgetReplace();
+                this.setStatus('synced');
+            })
+            .catch(error => {
+                this._replacing = false;
+                this.fail(error);
+                this.scheduleRetry();
+            });
     },
 
     // An update arrived from the server - either another device wrote, or this is the
@@ -515,6 +604,15 @@ const FarkadSync = {
         // and sanity-checked before it is allowed anywhere near State.
         if (!raw || typeof raw !== 'object') {
             this.fail(new Error('remote document is not a schedule'));
+            return;
+        }
+
+        // A restore is waiting to go out. Everything arriving right now is, by
+        // definition, the state the person asked to replace - adopting it would undo
+        // their restore on the very device that asked for it, and it would look like
+        // nothing happened at all. Push again instead.
+        if (this.pendingReplace()) {
+            if (!this._replacing) this.retryReplace();
             return;
         }
 

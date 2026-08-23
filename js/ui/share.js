@@ -350,15 +350,23 @@ async function restoreFromCloud(date) {
         return;
     }
 
-    // The current state becomes the undo for the restore itself - the same slot the
-    // local restore uses, and for the same reason.
-    Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+    // The current state becomes the undo for the restore itself, on its own entry so a
+    // second restore does not overwrite the way back from the first.
+    pushUndoState(State.schedule);
 
     State.schedule = normaliseSchedule(raw);
     State.save();
-    FarkadSync.replaceAll(State.schedule);
     render();
-    askTell('שוחזר מהענן.');
+
+    // Awaited. This used to print "שוחזר מהענן." whether or not the write happened -
+    // and a green tick over a write that did not happen is the worst thing this app can
+    // print, because the person stops looking.
+    try {
+        await FarkadSync.replaceAll(State.schedule);
+        askTell('שוחזר מהענן.');
+    } catch (error) {
+        askTell(replacementNotice(error));
+    }
 }
 
 async function restoreSnapshot(date) {
@@ -374,13 +382,83 @@ async function restoreSnapshot(date) {
     if (!go) return;
 
     // The current state becomes the undo for the restore itself.
-    Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+    pushUndoState(State.schedule);
 
     State.schedule = normaliseSchedule(JSON.parse(raw));
     State.save();
-    if (typeof FarkadSync !== 'undefined') FarkadSync.replaceAll(State.schedule);
     render();
-    askTell('שוחזר.');
+
+    if (typeof FarkadSync === 'undefined' || FarkadSync.status === 'off') {
+        askTell('שוחזר.');
+        return;
+    }
+    try {
+        await FarkadSync.replaceAll(State.schedule);
+        askTell('שוחזר.');
+    } catch (error) {
+        askTell(replacementNotice(error));
+    }
+}
+
+// The state a restore replaced, kept so the restore itself can be undone.
+//
+// There used to be one slot, which meant the second restore overwrote the way back from
+// the first: after two wrong restores in a row there was no route to the state before
+// either. It is a short stack now - three deep, newest first - and each entry is
+// independent of the others.
+const UNDO_KEY = 'scheduleData:v2backup';
+const UNDO_STACK_KEY = 'scheduleData:undoStack';
+const UNDO_KEEP = 3;
+
+function pushUndoState(schedule) {
+    const entry = JSON.stringify(schedule);
+
+    // The single slot stays, because it is what restoreLocalBackup has always read and
+    // what an older build left behind.
+    Store.set(UNDO_KEY, entry);
+
+    let stack;
+    try {
+        const raw = Store.get(UNDO_STACK_KEY);
+        stack = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(stack)) stack = [];
+    } catch (error) {
+        stack = [];
+    }
+
+    stack.unshift({ at: new Date().toISOString(), schedule: entry });
+    Store.set(UNDO_STACK_KEY, JSON.stringify(stack.slice(0, UNDO_KEEP)));
+}
+
+function popUndoState() {
+    let stack;
+    try {
+        const raw = Store.get(UNDO_STACK_KEY);
+        stack = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(stack)) stack = [];
+    } catch (error) {
+        stack = [];
+    }
+
+    const top = stack.shift();
+    Store.set(UNDO_STACK_KEY, JSON.stringify(stack));
+    if (top && typeof top.schedule === 'string') return top.schedule;
+
+    // Nothing on the stack: fall back to the single slot, which is where a restore made
+    // by an older build put its way back.
+    return Store.get(UNDO_KEY);
+}
+
+// What to say when a replacement landed on this device but not in the cloud. Not a
+// failure - the restore DID happen here, and it is written down and will go out - but
+// not the unqualified "done" the app used to print over a write that never happened.
+function replacementNotice(error) {
+    return {
+        title: 'שוחזר במכשיר הזה',
+        message: 'השחזור בוצע ונשמר כאן, אבל עדיין לא הגיע לענן, כך שהמכשירים האחרים ' +
+            'עדיין רואים את המצב הקודם. הוא יישלח כשהחיבור יחזור - אל תשחזר שוב.\n\n' +
+            String((error && error.message) || error).slice(0, 120)
+    };
 }
 
 // ---------------------------------------------------------------- backup file
@@ -535,8 +613,9 @@ function importBackup(event) {
         }
 
         // The current state becomes the local backup, so an import of the wrong file is
-        // itself undoable.
-        Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+        // itself undoable - on its own entry, so importing twice does not lose the way
+        // back to where this started.
+        pushUndoState(State.schedule);
 
         State.schedule = incoming;
         // Decisions the migration refused to guess at come with the file. Losing them
@@ -544,38 +623,68 @@ function importBackup(event) {
         State.migrationIssues = loaded.issues;
         writeIssues(loaded.issues);
         State.save();
-        if (typeof FarkadSync !== 'undefined') FarkadSync.replaceAll(State.schedule);
-
         event.target.value = '';
         render();
+
+        let sent = true;
+        let failure = null;
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off') {
+            try {
+                await FarkadSync.replaceAll(State.schedule);
+            } catch (error) {
+                sent = false;
+                failure = error;
+            }
+        }
 
         if (loaded.issues.length > 0) {
             await askTell(`הגיבוי נטען. ${loaded.issues.length} רישומים ממתינים להחלטה שלך.`);
             openMigrationModal();
+            if (!sent) askTell(replacementNotice(failure));
             return;
         }
-        askTell('הגיבוי נטען.');
+        askTell(sent ? 'הגיבוי נטען.' : replacementNotice(failure));
     };
     reader.readAsText(file);
 }
 
 async function restoreLocalBackup() {
-    const raw = Store.get('scheduleData:v2backup');
-    if (!raw) {
-        askTell('אין גיבוי מקומי.');
-        return;
-    }
     const go = await askConfirm({
         title: 'לשחזר את המצב שלפני הטעינה האחרונה?',
         ok: 'שחזר'
     });
     if (!go) return;
 
-    const current = JSON.stringify(State.schedule);
-    State.schedule = normaliseSchedule(JSON.parse(raw));
-    Store.set('scheduleData:v2backup', current);
+    // Popped, so pressing it again walks further back rather than flipping between the
+    // last two states forever.
+    const raw = popUndoState();
+    if (!raw) {
+        askTell('אין גיבוי מקומי.');
+        return;
+    }
+
+    let previous;
+    try {
+        previous = normaliseSchedule(JSON.parse(raw));
+    } catch (error) {
+        askTell('הגיבוי המקומי לא נקרא. הנתונים הקיימים לא השתנו.');
+        return;
+    }
+
+    // The state being left is itself pushed, so this is reversible in both directions.
+    pushUndoState(State.schedule);
+    State.schedule = previous;
     State.save();
-    if (typeof FarkadSync !== 'undefined') FarkadSync.replaceAll(State.schedule);
     render();
-    askTell('שוחזר.');
+
+    if (typeof FarkadSync === 'undefined' || FarkadSync.status === 'off') {
+        askTell('שוחזר.');
+        return;
+    }
+    try {
+        await FarkadSync.replaceAll(State.schedule);
+        askTell('שוחזר.');
+    } catch (error) {
+        askTell(replacementNotice(error));
+    }
 }

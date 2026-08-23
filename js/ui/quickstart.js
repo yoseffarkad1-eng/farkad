@@ -78,8 +78,12 @@ function quickNext() {
 
     const made = { workers: quickWorkers.length, places: lines.length };
     closeQuickStart();
-    State.save();
-    if (typeof FarkadSync !== 'undefined') FarkadSync.replaceAll(State.schedule);
+
+    // commitRoster, not replaceAll. This adds the first crew - it is a roster change,
+    // not a decision to replace the whole record - and replacing was actively dangerous:
+    // run on a phone already connected to a project that has data, it would have
+    // overwritten the cloud document with this device's fresh, nearly empty one.
+    State.commitRoster();
     render();
     askTell(`מוכן: ${made.workers} עובדים ו-${made.places} אתרים. אפשר להתחיל לרשום.`);
 }
