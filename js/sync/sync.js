@@ -97,6 +97,22 @@ const FarkadSync = {
         this._timer = setTimeout(() => this.flush(), this.pushDelayMs);
     },
 
+    // The roster - who exists, where they work, and what they are paid. It travels as two
+    // whole-field writes rather than a path per worker, because its ORDER is meaningful
+    // and an array cannot be merged element-wise anyway.
+    //
+    // Without this, a roster change was saved locally and never sent, while receive()
+    // adopted the remote roster wholesale: adding a worker on one phone and recording him
+    // for a week meant his days synced fine and HE did not, so the next snapshot from
+    // another phone deleted him - and the week of pay with him, silently, because the
+    // reports iterate the roster.
+    editRoster(schedule) {
+        if (!this.adapter) return;
+        this._edits.set('workers', schedule.workers);
+        this._edits.set('places', schedule.places);
+        this.scheduleFlush();
+    },
+
     // Called by autoSaveSchedule. Carries no field paths, so it only refreshes the
     // stamp - the actual content went out through edit().
     onLocalChange(data) {
@@ -169,16 +185,39 @@ const FarkadSync = {
     receive(raw) {
         // A malformed document must not wipe a good local schedule, so it is normalised
         // and sanity-checked before it is allowed anywhere near State.
-        if (!raw || typeof raw !== 'object' || !Array.isArray(raw.workers)) {
+        if (!raw || typeof raw !== 'object') {
             this.fail(new Error('remote document is not a schedule'));
+            return;
+        }
+
+        // No roster on the server yet. On a brand-new project the first write is usually
+        // a day edit, which creates the document with days and a timestamp and nothing
+        // else - and treating that as a broken document left the status stuck on
+        // "sync error" forever while writes were in fact landing. It is not broken, it
+        // is unfinished: send the roster up and let the next snapshot be complete.
+        //
+        // Unfinished is not the same as unrecognisable, though. A document carrying days
+        // or a stamp is ours mid-creation; anything else is still refused, because the
+        // one thing that must never happen here is a stranger's document being adopted.
+        if (!Array.isArray(raw.workers)) {
+            const ours = (raw.days && typeof raw.days === 'object')
+                || typeof raw.updatedAt === 'string';
+            if (!ours) {
+                this.fail(new Error('remote document is not a schedule'));
+                return;
+            }
+            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
+            this.setStatus('synced');
             return;
         }
 
         const remote = normaliseSchedule(raw);
 
         // A document nobody has ever written to - a project connected for the first time.
-        // Adopting it would empty this device to match an empty cloud.
+        // Adopting it would empty this device to match an empty cloud, so this device's
+        // roster seeds it instead.
         if (!remote.updatedAt) {
+            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
             this.setStatus('synced');
             if (this._edits.size > 0) this.scheduleFlush();
             return;
@@ -234,6 +273,13 @@ const FarkadSync = {
                 schedule.advances = schedule.advances || {};
                 if (value === null) delete schedule.advances[parts[1]];
                 else schedule.advances[parts[1]] = value;
+                return;
+            }
+
+            // The roster, queued whole. A worker added seconds ago must not be dropped
+            // by the snapshot that arrives before the send completes.
+            if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+                schedule[parts[0]] = value;
             }
         });
     },

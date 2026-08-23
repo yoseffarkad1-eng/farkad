@@ -2536,6 +2536,61 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the roster travels
+{
+  // The roster was saved locally and never sent, while an arriving snapshot replaced it
+  // wholesale: add a worker on one phone, record him for a week, and the next edit from
+  // another phone deleted him - and the week of pay with him, because every report walks
+  // the roster.
+  const page = await open();
+  await seedRoster(page);
+
+  const sent = await page.evaluate(() => {
+    const paths = [];
+    FarkadSync.adapter = { update: patch => { paths.push(...Object.keys(patch)); return Promise.resolve(); } };
+    FarkadSync.pushDelayMs = 0;
+
+    State.schedule.workers.push({ id: 'w_09', name: 'יוסי', active: true, dailyRate: 400, hourlyRate: 0 });
+    State.commitRoster();
+    return FarkadSync.flush().then(() => paths);
+  });
+  check('adding a worker sends the roster, not only the timestamp',
+    sent.includes('workers') && sent.includes('places'), JSON.stringify(sent));
+
+  // and a roster edit in flight is not dropped by a snapshot landing on top of it
+  const kept = await page.evaluate(() => {
+    FarkadSync._edits.set('workers', State.schedule.workers);
+    const incoming = { workers: [{ id: 'w_01', name: 'דוד', active: true }], places: [], days: {} };
+    FarkadSync.reapplyPending(incoming);
+    FarkadSync._edits.clear();
+    return incoming.workers.map(w => w.id);
+  });
+  check('a just-added worker survives the snapshot that arrives mid-send',
+    kept.includes('w_09'), JSON.stringify(kept));
+
+  // A brand-new project: the first write is a day edit, so the server document has days
+  // and a stamp but no roster. That is unfinished, not broken - it used to lock the
+  // status on "sync error" for good while writes were in fact landing.
+  const fresh = await page.evaluate(() => {
+    FarkadSync._edits.clear();
+    FarkadSync.setStatus('connecting');
+    FarkadSync.receive({ days: { '2026-08-12': { actual: {} } }, updatedAt: '2026-08-12T10:00:00Z' });
+    return { status: FarkadSync.status, queued: [...FarkadSync._edits.keys()] };
+  });
+  check('a server document with no roster yet is not treated as a failure',
+    fresh.status === 'synced', JSON.stringify(fresh));
+  check('and this device seeds it with the roster it has',
+    fresh.queued.includes('workers'), JSON.stringify(fresh));
+
+  // A document that is not ours at all still refuses to overwrite anything.
+  const junk = await page.evaluate(() => {
+    FarkadSync.receive(null);
+    return FarkadSync.status;
+  });
+  check('while real rubbish is still refused', junk === 'error', junk);
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- the worker statement
 {
   // What the man is handed on payday. The question it answers is "why is it this

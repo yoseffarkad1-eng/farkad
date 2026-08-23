@@ -74,6 +74,16 @@ const State = {
         }
     },
 
+    // A roster change: who exists, their rates, and the order they are read in. Saved and
+    // SENT - a roster edit that only saved locally was overwritten by the next snapshot
+    // from another phone, taking any days recorded against a new worker with it.
+    commitRoster() {
+        this.save();
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.editRoster) {
+            FarkadSync.editRoster(this.schedule);
+        }
+    },
+
     // Every mutation goes through here: it writes locally and hands the sync layer the
     // single field path that changed, which is what keeps three people editing the same
     // evening from overwriting one another.

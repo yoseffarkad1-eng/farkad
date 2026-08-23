@@ -18,13 +18,10 @@ service cloud.firestore {
     // account - public sign-up is closed on purpose.
     function allowed() {
       return request.auth != null && request.auth.token.email in [
-        'REPLACE-ME-owner@example.com',
-        'REPLACE-ME-second@example.com',
-        'REPLACE-ME-third@example.com',
-        // A fourth slot, kept empty on purpose: an account can be added the evening it is
-        // needed without anyone having to remember how this file works. Leave the line as
-        // it is until then - an address that does not exist matches nobody.
-        'REPLACE-ME-spare@example.com'
+        'yosef.farkad1@gmail.com',
+        'farkad1963@gmail.com'
+        // The third partner's address goes here when his Google account exists - add a
+        // comma to the line above and paste it in the console the same evening.
       ];
     }
 

@@ -269,11 +269,11 @@
 <script src="js/ui/install.js"></script>
 <script src="js/app.js"></script>
 
-<!-- Cloud sync. Commented out until a Firebase project exists - see
-     docs/firebase-setup.md. Until then the app is local-only and unchanged.
+<!-- Cloud sync, live against the farkad-schedule project - see docs/firebase-setup.md.
      This one file is type="module" because the Firebase SDK ships only as modules;
      every other script above must stay classic so the inline onclick handlers
-     keep resolving on the global scope. -->
-<!-- <script type="module" src="js/sync/firebase-adapter.js"></script> -->
+     keep resolving on the global scope. It fails soft: if the SDK cannot be reached
+     the app carries on local-only, which is what a building site needs anyway. -->
+<script type="module" src="js/sync/firebase-adapter.js"></script>
 </body>
 </html>

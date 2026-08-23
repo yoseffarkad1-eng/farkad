@@ -82,8 +82,9 @@ function renderWorkerList() {
 }
 
 // The roster is one array and its order is the whole point, so a move is a whole-list
-// write rather than a per-field one. It goes through save() and replaceAll rather than
-// commit(): there is no single field path that means "the order changed".
+// write rather than a per-field one - there is no field path that means "the order
+// changed". It goes through commitRoster, which sends the two roster fields and not the
+// whole document: reordering mid-evening must not overwrite the other two phones' work.
 function moveWorker(workerId, direction) {
     const workers = State.schedule.workers;
     const from = workers.findIndex(worker => worker.id === workerId);
@@ -91,10 +92,7 @@ function moveWorker(workerId, direction) {
     if (from < 0 || to < 0 || to >= workers.length) return;
 
     workers.splice(to, 0, workers.splice(from, 1)[0]);
-    State.save();
-    if (typeof FarkadSync !== 'undefined' && FarkadSync.replaceAll) {
-        FarkadSync.replaceAll(State.schedule);
-    }
+    State.commitRoster();
     render();
 }
 
@@ -223,7 +221,7 @@ async function saveWorkerForm() {
     }
 
     closeWorkerForm();
-    State.save();
+    State.commitRoster();
     render();
 }
 
@@ -246,7 +244,7 @@ async function toggleWorkerActive(workerId) {
     }
 
     worker.active = worker.active === false;
-    State.save();
+    State.commitRoster();
     render();
 }
 
@@ -264,7 +262,7 @@ async function showAddPlaceModal() {
     if (!name) return;
 
     State.schedule.places.push({ id: State.nextPlaceId(), name, active: true });
-    State.save();
+    State.commitRoster();
     render();
 }
 
@@ -283,7 +281,7 @@ async function renamePlaceById(placeId) {
 
     // Renaming is safe now: assignments point at the id, so the name is only a label.
     place.name = name;
-    State.save();
+    State.commitRoster();
     render();
 }
 
@@ -309,6 +307,6 @@ async function togglePlaceActive(placeId) {
     }
 
     place.active = place.active === false;
-    State.save();
+    State.commitRoster();
     render();
 }
