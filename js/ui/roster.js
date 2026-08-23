@@ -8,6 +8,12 @@ function renderRoster() {
     renderBackupAge();
     renderRestorePoints();
     renderCloudRestorePoints();
+    renderAppVersion();
+}
+
+function renderAppVersion() {
+    const node = document.getElementById('appVersion');
+    if (node) node.textContent = `גרסה ${APP_VERSION}`;
 }
 
 function renderWorkerList() {

@@ -88,6 +88,13 @@
                      entirely while sync is off. -->
                 <div class="restore-points" id="cloudRestorePoints"></div>
                 <p class="hint" id="backupAge"></p>
+                <!-- Which version is actually running, and the way to move off it. An
+                     installed app can sit on a cached build for a long time and there is
+                     nothing on any other screen that would say so. -->
+                <p class="hint app-version">
+                    <span id="appVersion"></span>
+                    <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button>
+                </p>
                 <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
             </div>
         </section>

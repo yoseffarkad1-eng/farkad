@@ -1,5 +1,11 @@
 // View switching and boot.
 
+// Bumped with sw.js. It is cached alongside every other script, so what this prints is
+// the version actually RUNNING on this phone - which is the question that cannot
+// otherwise be answered from inside an installed app, and the one that matters when a
+// fix is not showing up.
+const APP_VERSION = 'v56';
+
 let currentView = 'day';
 
 const VIEWS = ['day', 'week', 'roster', 'reports'];

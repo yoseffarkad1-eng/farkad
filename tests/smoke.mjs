@@ -10,6 +10,11 @@
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const EXEC = process.env.CHROME_PATH || undefined;
+// Read from the app rather than hard-coded, so bumping a version does not mean editing
+// a test - what is asserted is that the two version strings agree with each other.
+const APP_VERSION_EXPECTED = (await import('node:fs'))
+  .readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
+  .match(/APP_VERSION = '(v\d+)'/)[1];
 const BASE = process.env.SMOKE_URL || 'http://127.0.0.1:8802';
 
 const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
@@ -2654,6 +2659,31 @@ async function seedRoster(page) {
     return FarkadSync.status;
   });
   check('while real rubbish is still refused', junk === 'error', junk);
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- which version is this
+{
+  // An installed app can sit on a cached build for a long time, and nothing on any
+  // screen said which one. "Close it and open it twice" is not an instruction anybody
+  // can verify the result of.
+  const page = await open();
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+  check('the running version is on the screen, next to the backups',
+    (await page.textContent('#appVersion')).includes(APP_VERSION_EXPECTED),
+    await page.textContent('#appVersion'));
+  check('and the version shown is the one the scripts were built with',
+    (await page.evaluate(() => window.APP_VERSION || APP_VERSION)) === APP_VERSION_EXPECTED);
+  check('with a way to go and fetch a newer one',
+    (await page.locator('.app-version button').count()) === 1);
+
+  // the service worker's cache name and the displayed version must not drift apart -
+  // one of them says what is cached and the other says what is running
+  const swVersion = await page.evaluate(() =>
+    fetch('sw.js').then(r => r.text()).then(t => (t.match(/farkad-(v\d+)/) || [])[1]));
+  check('the shell version and the app version agree',
+    swVersion === APP_VERSION_EXPECTED, `sw=${swVersion} app=${APP_VERSION_EXPECTED}`);
   await page.context().close();
 }
 
