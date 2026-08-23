@@ -142,6 +142,35 @@
     </div>
 </div>
 
+<!-- Sign-in. Email and password because it is the only route that stays INSIDE an
+     installed app on an iPhone: a home-screen web app has its own storage, and any
+     Google flow completes over in Safari, in a different store, leaving this one exactly
+     as signed-out as it started. -->
+<div class="modal" id="signInModal">
+    <div class="modal-content">
+        <h3>התחברות לענן</h3>
+        <p class="hint">אותו חשבון בכל המכשירים - כך שלושתכם רואים את אותו רישום.</p>
+
+        <label class="field-label" for="signInEmail">מייל</label>
+        <input type="email" id="signInEmail" dir="ltr" inputmode="email"
+               autocomplete="username" autocapitalize="none" spellcheck="false">
+
+        <label class="field-label" for="signInPassword">סיסמה</label>
+        <input type="password" id="signInPassword" dir="ltr" autocomplete="current-password">
+
+        <p class="field-error" id="signInError"></p>
+
+        <div class="modal-actions">
+            <button type="button" class="btn-add" onclick="farkadSignInWithPassword()">התחבר</button>
+            <button type="button" class="btn-secondary" onclick="closeSignInModal()">ביטול</button>
+        </div>
+
+        <p class="hint">בדפדפן אפשר גם להתחבר עם Google:
+            <button type="button" class="btn-secondary" onclick="farkadSignInWithGoogle()">Google</button>
+        </p>
+    </div>
+</div>
+
 <div class="modal" id="workerPickerModal">
     <div class="modal-content">
         <h3 id="workerPickerTitle"></h3>

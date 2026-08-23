@@ -2662,6 +2662,54 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the sign-in sheet
+{
+  // Google sign-in cannot work in an installed app on an iPhone: a home-screen web app
+  // has its own storage, and popup or redirect alike hand the flow to Safari, where it
+  // completes in a different store and comes back signed-out. Email and password never
+  // leaves the page.
+  const page = await open();
+  check('the sign-in sheet is closed until it is asked for',
+    !(await page.locator('#signInModal').isVisible()));
+
+  await page.evaluate(() => openSignInModal());
+  await page.waitForTimeout(250);
+  check('it asks for a mail and a password, in the page',
+    (await page.locator('#signInEmail').isVisible()) &&
+    (await page.locator('#signInPassword').isVisible()));
+  check('the password field is a password field',
+    (await page.getAttribute('#signInPassword', 'type')) === 'password');
+  check('and both read left to right, whatever the page direction',
+    (await page.getAttribute('#signInEmail', 'dir')) === 'ltr' &&
+    (await page.getAttribute('#signInPassword', 'dir')) === 'ltr');
+  check('the phone offers a mail keyboard and does not capitalise the address',
+    (await page.getAttribute('#signInEmail', 'inputmode')) === 'email' &&
+    (await page.getAttribute('#signInEmail', 'autocapitalize')) === 'none');
+
+  // 16px or iOS magnifies the page the moment the field is focused
+  const sizes = await page.evaluate(() =>
+    ['signInEmail', 'signInPassword'].map(id =>
+      parseFloat(getComputedStyle(document.getElementById(id)).fontSize)));
+  check('neither field is small enough to zoom the page',
+    sizes.every(px => px >= 16), JSON.stringify(sizes));
+
+  await page.evaluate(() => closeSignInModal());
+  await page.waitForTimeout(200);
+  check('and it closes again', !(await page.locator('#signInModal').isVisible()));
+
+  // the password must not be left sitting in the field behind a closed sheet
+  await page.evaluate(() => {
+    openSignInModal();
+    document.getElementById('signInPassword').value = 'secret';
+    closeSignInModal();
+    openSignInModal();
+  });
+  await page.waitForTimeout(200);
+  check('the password is not left behind when the sheet is closed',
+    (await page.inputValue('#signInPassword')) === '');
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- which version is this
 {
   // An installed app can sit on a cached build for a long time, and nothing on any

@@ -129,3 +129,26 @@ function trapTab(event, modal) {
         first.focus();
     }
 }
+
+
+// The sign-in sheet. Opened by the adapter, which is the only file that knows whether
+// there is a cloud to sign in to at all.
+function openSignInModal() {
+    const error = document.getElementById('signInError');
+    if (error) error.textContent = '';
+    const password = document.getElementById('signInPassword');
+    if (password) password.value = '';
+
+    const modal = document.getElementById('signInModal');
+    if (modal) modal.style.display = 'flex';
+
+    const email = document.getElementById('signInEmail');
+    if (email && !email.value) email.focus();
+}
+
+function closeSignInModal() {
+    const modal = document.getElementById('signInModal');
+    if (modal) modal.style.display = 'none';
+    const password = document.getElementById('signInPassword');
+    if (password) password.value = '';
+}

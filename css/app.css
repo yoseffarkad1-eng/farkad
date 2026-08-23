@@ -1005,7 +1005,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    form is open, a confirmation over the migration list. Same z-index as those and it
    opens behind them: a question nobody can answer and a screen that looks frozen. */
 #askModal { z-index: 60; }
-.modal-content input[type="text"], .modal-content textarea {
+/* Every text-like field in a dialog, listed by type: an unqualified `input` would
+   also catch the buttons and the file picker. A field left off this list is not a
+   cosmetic slip - it falls back to 13px, which is under the zoom threshold below. */
+.modal-content input[type="text"],
+.modal-content input[type="email"],
+.modal-content input[type="password"],
+.modal-content input[type="tel"],
+.modal-content textarea {
     width: 100%;
     font-family: inherit;
     /* 16px exactly: anything smaller makes iOS zoom the page when the field focuses,

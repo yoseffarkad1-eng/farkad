@@ -14,8 +14,7 @@ import {
     getAuth,
     onAuthStateChanged,
     signInWithPopup,
-    signInWithRedirect,
-    getRedirectResult,
+    signInWithEmailAndPassword,
     GoogleAuthProvider,
     signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -61,59 +60,65 @@ if (!isConfigured()) {
         return args;
     }
 
-    // Sign-in is a button rather than an automatic redirect: an automatic one would lock
-    // the door on anyone who opens the page before the allowlist has their address.
+    // Sign-in has to happen INSIDE the app, and on an iPhone that rules out both of the
+    // usual routes. A home-screen web app has its own storage, separate from Safari's,
+    // and any Google flow - popup or redirect - hands the whole thing to Safari: the
+    // sign-in completes over there, in a different store, and the app comes back exactly
+    // as signed-out as it left. Which is what "it opens Safari and drops straight back"
+    // is, from the outside.
     //
-    // A popup is the better experience where it works, and it does not always: an app
-    // launched from the home screen on iOS has no window to open one into, and Safari
-    // blocks popups that are not obviously a click. When that happens the whole page
-    // goes to Google and comes back, which is slower and perfectly reliable.
-    function signInMessage(error) {
+    // Email and password never leaves the page, so it works in the installed app, in a
+    // browser, and on a desktop alike. Google stays as a second door for a browser,
+    // where it is the more convenient one.
+    function authMessage(error) {
         const code = (error && error.code) || '';
-        if (code === 'auth/unauthorized-domain') {
-            return 'הכתובת של האתר לא מאושרת בפרויקט. הוסף אותה ב-Firebase: ' +
-                'Authentication → Settings → Authorized domains.';
-        }
-        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-            return 'ההתחברות בוטלה.';
-        }
-        return 'ההתחברות נכשלה: ' + ((error && error.message) || error);
+        const said = {
+            'auth/invalid-email': 'כתובת המייל אינה תקינה.',
+            'auth/user-not-found': 'אין משתמש עם הכתובת הזו. הוסף אותו ב-Firebase → Authentication → Users.',
+            'auth/wrong-password': 'הסיסמה שגויה.',
+            'auth/invalid-credential': 'המייל או הסיסמה שגויים.',
+            'auth/too-many-requests': 'יותר מדי נסיונות. המתן דקה ונסה שוב.',
+            'auth/network-request-failed': 'אין חיבור לרשת.',
+            'auth/unauthorized-domain': 'הכתובת של האתר לא מאושרת ב-Firebase: Authentication → Settings → Authorized domains.',
+            'auth/popup-closed-by-user': 'ההתחברות בוטלה.',
+            'auth/operation-not-allowed': 'התחברות במייל וסיסמה אינה מופעלת בפרויקט: Authentication → Sign-in method → Email/Password → Enable.'
+        }[code];
+        return said || ('ההתחברות נכשלה: ' + ((error && error.message) || error));
     }
 
-    function usePopup() {
-        // An installed app has no separate window to put a popup in.
-        return !(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
-            && !window.navigator.standalone;
-    }
+    window.farkadSignIn = () => openSignInModal();
 
-    window.farkadSignIn = () => {
-        const provider = new GoogleAuthProvider();
-        if (!usePopup()) {
-            return signInWithRedirect(auth, provider)
-                .catch(error => askTell(signInMessage(error)));
+    window.farkadSignInWithPassword = () => {
+        const email = document.getElementById('signInEmail').value.trim();
+        const password = document.getElementById('signInPassword').value;
+        const error = document.getElementById('signInError');
+
+        if (!email || !password) {
+            error.textContent = 'הכנס מייל וסיסמה.';
+            return;
         }
-        return signInWithPopup(auth, provider).catch(error => {
-            const code = (error && error.code) || '';
-            // The environment refused the popup rather than the person refusing the
-            // sign-in: fall the whole page through to Google instead of reporting a
-            // failure the person cannot do anything about.
-            if (code === 'auth/popup-blocked'
-                || code === 'auth/operation-not-supported-in-this-environment'
-                || code === 'auth/popup-closed-by-user') {
-                return signInWithRedirect(auth, provider)
-                    .catch(inner => askTell(signInMessage(inner)));
-            }
-            console.error('Sign-in failed:', error);
-            askTell(signInMessage(error));
-        });
+        error.textContent = 'מתחבר…';
+
+        signInWithEmailAndPassword(auth, email, password)
+            .then(closeSignInModal)
+            .catch(err => { error.textContent = authMessage(err); });
     };
 
-    // Coming back from the redirect. Only an error needs saying - a success arrives at
-    // onAuthStateChanged below like any other sign-in.
-    getRedirectResult(auth).catch(error => {
-        console.error('Sign-in redirect failed:', error);
-        askTell(signInMessage(error));
-    });
+    // The browser door. Useless in an installed app for the reason above, so it says so
+    // rather than opening Safari and dropping the person back where they started.
+    window.farkadSignInWithGoogle = () => {
+        const error = document.getElementById('signInError');
+        const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+            || window.navigator.standalone;
+
+        if (standalone) {
+            error.textContent = 'באפליקציה המותקנת יש להתחבר עם מייל וסיסמה - התחברות Google עובדת רק בדפדפן.';
+            return;
+        }
+        signInWithPopup(auth, new GoogleAuthProvider())
+            .then(closeSignInModal)
+            .catch(err => { error.textContent = authMessage(err); });
+    };
 
     window.farkadSignOut = () => signOut(auth);
 
