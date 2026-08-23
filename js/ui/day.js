@@ -140,11 +140,29 @@ function renderAccountBanner() {
 
     if (notes.length === 0) { banner.style.display = 'none'; return; }
 
+    // Dismissed for today, and back tomorrow if it still applies. A notice that cannot
+    // be put away is read once and then looked past for good - and this one has to keep
+    // working on the day it actually matters.
+    const text = notes.join(' · ');
+    if (Store.get(ACCOUNT_BANNER_KEY) === todayStr() + '|' + text) {
+        banner.style.display = 'none';
+        return;
+    }
+
     clear(banner);
-    banner.appendChild(el('span', null, `⚠️ ${notes.join(' · ')}`));
+    banner.appendChild(el('span', null, `⚠️ ${text}`));
     banner.appendChild(button('לדוחות', 'btn-secondary', () => showView('reports')));
+    banner.appendChild(button('✕', 'btn-icon', () => {
+        Store.set(ACCOUNT_BANNER_KEY, todayStr() + '|' + text);
+        banner.style.display = 'none';
+    }, 'הסתר להיום'));
     banner.style.display = '';
 }
+
+// What was dismissed, and for which day and which message: a NEW warning on the same day
+// still gets through, because "two more days missing" is not the notice already waved
+// away this morning.
+const ACCOUNT_BANNER_KEY = 'farkadAccountNotice';
 
 function anyRecordOn(date) {
     return State.schedule.workers.some(worker =>
@@ -391,12 +409,19 @@ function renderDayHeader() {
     // finds. First child, so it holds the start corner on every visit.
     nav.appendChild(button('☰', 'btn-icon drawer-btn', openDayDrawer, 'בחר יום'));
 
-    // One step back, always in the same corner. The undo bar says what was undone at the
-    // moment it happens; this is for the mistake noticed a name or two later.
-    const undoBtn = button('↶', 'btn-icon undo-btn', runUndo, 'אין מה לבטל');
+    // One step back, and one forward again, always in the same corner. The undo bar says
+    // what happened at the moment it happens; these are for the mistake noticed a name or
+    // two later. Both are labelled: a bare ↶ on a phone header is a symbol people guess
+    // at, and the guess is not worth making over a day's pay.
+    const undoBtn = button('↶ בטל', 'btn-secondary step-btn', runUndo, 'אין מה לבטל');
     undoBtn.id = 'undoBtn';
     undoBtn.disabled = true;
     nav.appendChild(undoBtn);
+
+    const redoBtn = button('↷ שוב', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
+    redoBtn.id = 'redoBtn';
+    redoBtn.disabled = true;
+    nav.appendChild(redoBtn);
 
     // Time flows right-to-left on an RTL calendar, so back points RIGHT and forward
     // points LEFT. The chevrons are drawn by CSS pseudo-elements, because a bare ‹ in a

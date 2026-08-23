@@ -62,7 +62,13 @@ function watchForCrashes() {
         clear(banner);
         banner.appendChild(el('span', null,
             '⚠️ משהו השתבש במסך. הרישום ששמור במכשיר לא נפגע - רענן את הדף.'));
+        // The actual message, small and last. Without it the only way to find out what
+        // broke is a developer console, which is not a thing anyone has on a building
+        // site - and "something went wrong" is not a report anybody can act on.
+        banner.appendChild(el('span', 'crash-detail', String(
+            (detail && detail.message) ? detail.message : detail).slice(0, 160)));
         banner.appendChild(button('רענן', 'btn-secondary', () => location.reload()));
+        banner.appendChild(button('✕', 'btn-icon', () => { banner.style.display = 'none'; }, 'סגור'));
         banner.style.display = '';
         console.error('Farkad crash:', detail);
     };

@@ -308,6 +308,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-inline-start: 3px solid var(--accent);
 }
 .banner span { flex: 1; min-width: 200px; }
+/* A banner sets a foreground chosen to carry against its own background; the muted grey
+   an icon button defaults to was never measured against these and fails on both. */
+.banner .btn-icon { color: inherit; }
+.banner .btn-icon:hover { color: inherit; background: rgba(127, 127, 127, .18); }
 
 /* ---------------------------------------------------------------- day view */
 
@@ -326,6 +330,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     align-items: center;
     justify-content: space-between;
     gap: 6px;
+    /* Undo and redo joined a row that already held the ☰, both arrows and the date. On a
+       390px screen that is wider than the phone, and a page that scrolls sideways is how
+       the date - the one thing here that must never be missed - ends up off the edge. */
+    flex-wrap: wrap;
 }
 
 /* Back points RIGHT and forward points LEFT: time flows right-to-left here, and the
@@ -1221,10 +1229,17 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .drawer-btn { font-size: 21px; color: var(--ink-2); min-width: 36px; padding: 8px 2px; }
-.undo-btn { font-size: 20px; color: var(--ink-2); min-width: 36px; padding: 8px 2px; }
-/* Dimmed rather than hidden: the corner it lives in is learned once, and a control that
-   vanishes when idle has to be found again exactly when a mistake has just been made. */
-.undo-btn:disabled { opacity: .28; }
+/* Undo and redo. Worded, not just an arrow: a bare ↶ in a phone header is a symbol to
+   be guessed at, and this one moves a day's pay. Dimmed rather than hidden, because the
+   corner it lives in is learned once and a control that vanishes when idle has to be
+   found again exactly when a mistake has just been made. */
+.step-btn {
+    font-size: 14px;
+    padding: 8px 10px;
+    min-height: 40px;
+    white-space: nowrap;
+}
+.step-btn:disabled { opacity: .35; }
 @media print { .day-drawer, .drawer-backdrop { display: none !important; } }
 
 /* The undo bar. Sits directly above the action bar, pinned to the bottom, because the
@@ -1656,4 +1671,17 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .report-table td { font-size: 16px; }
         .report-table td:first-child { font-size: 17.5px; }
     }
+}
+
+/* The error itself, under the reassurance. Small, wrapped, and selectable: it is there
+   to be read out or screenshotted by someone standing on a site, not to be decoded. */
+.crash-detail {
+    flex-basis: 100%;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--ink-2);
+    word-break: break-word;
+    direction: ltr;
+    text-align: start;
+    user-select: text;
 }

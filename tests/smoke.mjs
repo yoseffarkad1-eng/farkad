@@ -1512,6 +1512,10 @@ async function seedRoster(page) {
     !(await page.locator('#undoBar').isVisible()) &&
     !(await page.locator('#undoBtn').isDisabled()));
 
+  check('the buttons say what they do rather than leaving an arrow to be guessed at',
+    (await page.textContent('#undoBtn')).includes('בטל') &&
+    (await page.textContent('#redoBtn')).includes('שוב'));
+
   await page.locator('#undoBtn').click();
   await page.waitForTimeout(250);
   check('and it still undoes the right thing long after the bar is gone',
@@ -1519,6 +1523,20 @@ async function seedRoster(page) {
       entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 0);
   check('then goes quiet again',
     await page.locator('#undoBtn').isDisabled());
+
+  // Undo on a phone shows a screen much like the one before it. If it undid the wrong
+  // thing, redo is the only way back to the edit that was just thrown away.
+  check('undoing arms the way forward',
+    !(await page.locator('#redoBtn').isDisabled()));
+  await page.locator('#redoBtn').click();
+  await page.waitForTimeout(250);
+  check('and redo puts the record back exactly as the edit left it',
+    (await page.evaluate(() =>
+      entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 1);
+  check('after which there is nothing further forward',
+    await page.locator('#redoBtn').isDisabled());
+  check('while the way back is open again',
+    !(await page.locator('#undoBtn').isDisabled()));
 
   // changing day must forget it: the undo restores into the day it was made on
   await page.evaluate(() => { openAssignSheet('w_01'); });
@@ -1528,7 +1546,8 @@ async function seedRoster(page) {
   await page.evaluate(() => { closeAssignSheet(); stepDay(-1); });
   await page.waitForTimeout(250);
   check('stepping to another day clears it rather than aiming it at the wrong date',
-    await page.locator('#undoBtn').isDisabled());
+    (await page.locator('#undoBtn').isDisabled()) &&
+    (await page.locator('#redoBtn').isDisabled()));
 
   // The two other ways of leaving a day used to keep the undo armed - and the header ↶
   // then silently rewrote the day just left while the screen showed nothing at all.
@@ -1559,6 +1578,53 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('and so does the today button',
     await page.locator('#undoBtn').isDisabled());
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- notices that go away
+{
+  // A notice that cannot be put away is read once and then looked past for good - and
+  // both of these have to keep working on the day they actually matter.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    todayStr = () => '2026-08-12';
+    State.date = '2026-08-12';
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save(); render();
+  });
+  await page.waitForTimeout(300);
+  check('the account notice is there when something is outstanding',
+    await page.locator('#accountBanner').isVisible());
+
+  await page.locator('#accountBanner').getByRole('button', { name: /הסתר/ }).click();
+  await page.waitForTimeout(250);
+  check('and it can be put away',
+    !(await page.locator('#accountBanner').isVisible()));
+
+  await page.evaluate(() => render());
+  await page.waitForTimeout(250);
+  check('it stays away for the rest of the day rather than coming back on every render',
+    !(await page.locator('#accountBanner').isVisible()));
+
+  // but a DIFFERENT warning on the same day still gets through
+  await page.evaluate(() => { todayStr = () => '2026-08-20'; State.date = '2026-08-20'; render(); });
+  await page.waitForTimeout(250);
+  check('while a new warning is not silenced by yesterday\'s dismissal',
+    await page.locator('#accountBanner').isVisible());
+
+  // the crash banner: it names the error, and it closes
+  await page.evaluate(() => {
+    window.dispatchEvent(new ErrorEvent('error', { message: 'boom: something specific' }));
+  });
+  await page.waitForTimeout(300);
+  check('a crash says what actually broke, not only that something did',
+    (await page.textContent('#crashBanner')).includes('boom: something specific'),
+    await page.textContent('#crashBanner'));
+  await page.locator('#crashBanner').getByRole('button', { name: 'סגור' }).click();
+  await page.waitForTimeout(200);
+  check('and it can be dismissed without reloading',
+    !(await page.locator('#crashBanner').isVisible()));
   await page.context().close();
 }
 
