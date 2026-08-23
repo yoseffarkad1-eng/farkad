@@ -14,6 +14,8 @@ import {
     getAuth,
     onAuthStateChanged,
     signInWithPopup,
+    signInWithRedirect,
+    getRedirectResult,
     GoogleAuthProvider,
     signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -61,11 +63,57 @@ if (!isConfigured()) {
 
     // Sign-in is a button rather than an automatic redirect: an automatic one would lock
     // the door on anyone who opens the page before the allowlist has their address.
-    window.farkadSignIn = () => signInWithPopup(auth, new GoogleAuthProvider())
-        .catch(error => {
+    //
+    // A popup is the better experience where it works, and it does not always: an app
+    // launched from the home screen on iOS has no window to open one into, and Safari
+    // blocks popups that are not obviously a click. When that happens the whole page
+    // goes to Google and comes back, which is slower and perfectly reliable.
+    function signInMessage(error) {
+        const code = (error && error.code) || '';
+        if (code === 'auth/unauthorized-domain') {
+            return 'הכתובת של האתר לא מאושרת בפרויקט. הוסף אותה ב-Firebase: ' +
+                'Authentication → Settings → Authorized domains.';
+        }
+        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+            return 'ההתחברות בוטלה.';
+        }
+        return 'ההתחברות נכשלה: ' + ((error && error.message) || error);
+    }
+
+    function usePopup() {
+        // An installed app has no separate window to put a popup in.
+        return !(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+            && !window.navigator.standalone;
+    }
+
+    window.farkadSignIn = () => {
+        const provider = new GoogleAuthProvider();
+        if (!usePopup()) {
+            return signInWithRedirect(auth, provider)
+                .catch(error => askTell(signInMessage(error)));
+        }
+        return signInWithPopup(auth, provider).catch(error => {
+            const code = (error && error.code) || '';
+            // The environment refused the popup rather than the person refusing the
+            // sign-in: fall the whole page through to Google instead of reporting a
+            // failure the person cannot do anything about.
+            if (code === 'auth/popup-blocked'
+                || code === 'auth/operation-not-supported-in-this-environment'
+                || code === 'auth/popup-closed-by-user') {
+                return signInWithRedirect(auth, provider)
+                    .catch(inner => askTell(signInMessage(inner)));
+            }
             console.error('Sign-in failed:', error);
-            askTell('ההתחברות נכשלה: ' + error.message);
+            askTell(signInMessage(error));
         });
+    };
+
+    // Coming back from the redirect. Only an error needs saying - a success arrives at
+    // onAuthStateChanged below like any other sign-in.
+    getRedirectResult(auth).catch(error => {
+        console.error('Sign-in redirect failed:', error);
+        askTell(signInMessage(error));
+    });
 
     window.farkadSignOut = () => signOut(auth);
 

@@ -24,6 +24,12 @@
 1. בתפריט הצד: **Build → Authentication → Get started**.
 2. לשונית **Sign-in method** → **Google** → **Enable**.
 3. בחר Support email → **Save**.
+4. **Settings → Authorized domains → Add domain → `yoseffarkad1-eng.github.io`**
+
+   **אל תדלג על 4.** ברירת המחדל מאשרת רק את `localhost` ואת שני הדומיינים של
+   הפרויקט עצמו - לא את הכתובת שממנה האפליקציה באמת מוגשת. בלי זה ההתחברות
+   נפתחת, מגיעה ל-`<project>.firebaseapp.com`, ועונה **"The requested action is
+   invalid"** בלי לרמוז מה חסר.
 
 ## 3. יצירת מסד הנתונים
 
