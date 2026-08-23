@@ -32,6 +32,26 @@ function syncDeviceId() {
     return id;
 }
 
+// Writes one dotted field path into a plain object, the way Firestore merges one. Used
+// to fold the pending patch into a document that is about to be created, so that the
+// edits which triggered the creation are part of it rather than a second write that
+// might not happen.
+function writeFieldPath(target, path, value) {
+    const parts = path.split('.');
+    let node = target;
+
+    for (let i = 0; i < parts.length - 1; i += 1) {
+        const key = parts[i];
+        if (!node[key] || typeof node[key] !== 'object') node[key] = {};
+        node = node[key];
+    }
+
+    const last = parts[parts.length - 1];
+    // A null is a deletion in flight and stays one, exactly as it would server-side.
+    if (value === null) delete node[last];
+    else node[last] = value;
+}
+
 const FarkadSync = {
     adapter: null,
     status: 'off',       // off | connecting | synced | offline | error
@@ -168,10 +188,26 @@ const FarkadSync = {
 
         const patch = {};
         this._edits.forEach((value, path) => { patch[path] = value; });
-        if (this._stamp) {
-            patch.updatedAt = this._stamp.updatedAt;
-            patch.updatedBy = this._stamp.updatedBy;
-        }
+
+        // EVERY write carries a stamp, not only the ones a local save happened to queue.
+        // A retry after a failed send used to go out with none - and the rules let it
+        // through, because in an update request.resource.data is the MERGED document and
+        // still holds the old timestamp. So the write landed and left the document
+        // looking older than it is, which is the one thing the stamp exists to prevent.
+        //
+        // Falling back to the LOCAL schedule's stamp rather than to now(): that is the
+        // truth about when this device last changed anything, and it is also what
+        // receive() compares against to recognise the echo of its own write. A fresh
+        // timestamp here would make every device adopt its own writes as if they had
+        // come from somewhere else.
+        const stamp = this._stamp || {
+            updatedAt: State.schedule.updatedAt,
+            updatedBy: State.schedule.updatedBy
+        };
+        patch.updatedAt = typeof stamp.updatedAt === 'string'
+            ? stamp.updatedAt : new Date().toISOString();
+        patch.updatedBy = typeof stamp.updatedBy === 'string'
+            ? stamp.updatedBy : syncDeviceId();
 
         const sent = this._edits;
         this._edits = new Map();
@@ -179,6 +215,11 @@ const FarkadSync = {
         this._stamp = null;
 
         return Promise.resolve(this.adapter.update(patch))
+            .catch(error => {
+                // Not an edge case: this is the first write of every new project.
+                if (error && error.code === 'not-found') return this.createDocument(patch);
+                throw error;
+            })
             .then(() => {
                 if (this._inflight === sent) this._inflight = new Map();
                 if (this.status !== 'error') this.setStatus('synced');
@@ -191,6 +232,45 @@ const FarkadSync = {
                 });
                 if (this._inflight === sent) this._inflight = new Map();
                 this.fail(error);
+            });
+    },
+
+    // Firestore refuses to update a document that does not exist, and every project
+    // starts in exactly that state - so the first write of a new project came back
+    // 'not-found' and the recovery for it was to write an empty {}. The rules refuse a
+    // document with no updatedAt, so that was denied too. Between them, the first sync of
+    // a fresh project could never land, and the only sign of it anywhere was a status
+    // line reading "sync error".
+    //
+    // The document is created COMPLETE instead - the whole local schedule, stamped, with
+    // the pending patch written on top so nothing queued is dropped on the way. That also
+    // satisfies the rules' shape check for a full write, which an {} never could.
+    //
+    // And it is created atomically. Two phones opened on the same evening are both told
+    // the document is missing and both try to make it; the second must not overwrite the
+    // first. The adapter does that with a transaction, and the loser is handed
+    // 'already-exists' - at which point its edits are an ordinary field merge, which is
+    // what they were always meant to be.
+    createDocument(patch) {
+        if (!this.adapter || typeof this.adapter.create !== 'function') {
+            return Promise.reject(new Error('the cloud document does not exist and this adapter cannot create it'));
+        }
+
+        // normaliseSchedule rather than the live object: it returns a clean copy of a
+        // known shape, so a stray field picked up locally cannot be what the rules reject.
+        const seed = normaliseSchedule(State.schedule);
+        Object.keys(patch).forEach(path => writeFieldPath(seed, path, patch[path]));
+
+        // The rules require a timestamp on every write, and the merge rule depends on it.
+        if (typeof seed.updatedAt !== 'string') seed.updatedAt = new Date().toISOString();
+        if (typeof seed.updatedBy !== 'string') seed.updatedBy = syncDeviceId();
+
+        return Promise.resolve(this.adapter.create(seed))
+            .catch(error => {
+                if (error && error.code === 'already-exists') {
+                    return this.adapter.update(patch);
+                }
+                throw error;
             });
     },
 

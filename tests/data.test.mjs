@@ -109,6 +109,109 @@ function record(device, date, workerId, placeId, rate) {
     check('and the status says so', device.Sync.status === 'synced', device.Sync.status);
 }
 
+// ---------------------------------------------------------------- the empty project
+{
+    suite('a project whose document does not exist yet');
+
+    const device = makeDevice();
+    const cloud = makeCloud();               // doc: null - nobody has ever written
+    seed(device);
+    await connected(device, cloud);
+
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    given('the cloud document was created at all', Boolean(cloud.doc));
+
+    check('the first write creates a document, not an empty one',
+        typeof cloud.doc.updatedAt === 'string', JSON.stringify(cloud.doc.updatedAt));
+    check('carrying the roster, which the rules require of a full write',
+        Array.isArray(cloud.doc.workers) && Array.isArray(cloud.doc.places)
+        && cloud.doc.workers.length === 3, JSON.stringify(Object.keys(cloud.doc)));
+    check('and it says which device wrote it',
+        typeof cloud.doc.updatedBy === 'string', String(cloud.doc.updatedBy));
+    check('the day that triggered it is in there',
+        Boolean(cloud.doc.days && cloud.doc.days['2026-08-12']),
+        JSON.stringify(cloud.doc.days && Object.keys(cloud.doc.days)));
+    check('nothing was written as a bare {} first',
+        !cloud.writes.some(w => w.data && Object.keys(w.data).length === 0),
+        JSON.stringify(cloud.writes.map(w => w.kind)));
+}
+
+{
+    suite('every write carries a stamp');
+
+    // The rules cannot enforce this. In an update, request.resource.data is the document
+    // as it would be AFTER the merge, so it still holds the stored updatedAt and an
+    // unstamped write passes - and lands, leaving the document looking older than it is.
+    // The guarantee has to be here.
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    // A send that fails and is retried is the path that used to go out bare: the stamp
+    // is consumed by the first attempt and there is nothing left to put on the second.
+    cloud.online = false;
+    record(device, '2026-08-13', 'w_01', 'p_01');
+    await wait();
+    cloud.online = true;
+    device.Sync.flush();
+    await wait();
+
+    const updates = cloud.attempts.filter(a => a.kind === 'update');
+    given('there were writes to look at', updates.length > 0);
+    check('no write goes out without one, retries included',
+        updates.every(a => typeof a.payload.updatedAt === 'string'),
+        `${updates.filter(a => typeof a.payload.updatedAt !== 'string').length} of ${updates.length} unstamped`);
+    check('and the retried day arrived',
+        Boolean(cloud.doc.days && cloud.doc.days['2026-08-13']),
+        JSON.stringify(cloud.doc.days && Object.keys(cloud.doc.days)));
+}
+
+{
+    suite('two devices reaching an empty project at the same moment');
+
+    // Both subscribe before either writes, so both are told the document is missing and
+    // both try to create it. Exactly one can win; the loser must not overwrite the
+    // winner, and must not lose its own day either.
+    const cloud = makeCloud();
+    const one = makeDevice({ deviceId: 'd_one' });
+    const two = makeDevice({ deviceId: 'd_two' });
+
+    one.State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }];
+    one.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    one.State.save({ silent: true });
+
+    two.State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }];
+    two.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    two.State.save({ silent: true });
+
+    one.Sync.pushDelayMs = TICK;
+    two.Sync.pushDelayMs = TICK;
+    one.Sync.connect(cloud.adapter);
+    two.Sync.connect(cloud.adapter);
+    await wait();
+
+    record(one, '2026-08-12', 'w_01', 'p_01');
+    record(two, '2026-08-13', 'w_01', 'p_01');
+    await settle(TICK * 20);
+
+    check('exactly one create was accepted',
+        cloud.writes.filter(w => w.kind === 'create').length === 1,
+        JSON.stringify(cloud.writes.map(w => w.kind)));
+    check('the first device\'s day is there',
+        Boolean(cloud.doc.days && cloud.doc.days['2026-08-12']));
+    check('and so is the second device\'s',
+        Boolean(cloud.doc.days && cloud.doc.days['2026-08-13']),
+        JSON.stringify(cloud.doc.days && Object.keys(cloud.doc.days)));
+    check('neither device is left reporting an error',
+        one.Sync.status === 'synced' && two.Sync.status === 'synced',
+        `${one.Sync.status}/${two.Sync.status}`);
+}
+
 // ---------------------------------------------------------------- money
 {
     suite('the arithmetic that becomes someone\'s pay');
