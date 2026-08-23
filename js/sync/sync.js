@@ -400,14 +400,16 @@ const FarkadSync = {
         // receive() compares against to recognise the echo of its own write. A fresh
         // timestamp here would make every device adopt its own writes as if they had
         // come from somewhere else.
-        const stamp = this._stamp || {
-            updatedAt: State.schedule.updatedAt,
-            updatedBy: State.schedule.updatedBy
-        };
+        // updatedBy is ALWAYS this device. It used to fall back to
+        // State.schedule.updatedBy, which after adopting somebody else's snapshot is
+        // THEIR id - so this device's next write went out signed with their name, and
+        // carrying their timestamp. The other phone then saw its own stamp come back,
+        // took the write for its own echo, and never showed the work. Two people
+        // recording the same evening each stopped seeing the other's entries, silently.
+        const stamp = this._stamp || {};
         patch.updatedAt = typeof stamp.updatedAt === 'string'
             ? stamp.updatedAt : new Date().toISOString();
-        patch.updatedBy = typeof stamp.updatedBy === 'string'
-            ? stamp.updatedBy : syncDeviceId();
+        patch.updatedBy = syncDeviceId();
 
         this._sending = sent;
         this._sendingSince = Date.now();
@@ -652,8 +654,12 @@ const FarkadSync = {
             return;
         }
 
-        // This device's own write, echoed back.
-        if (remote.updatedAt === State.schedule.updatedAt) {
+        // This device's own write, echoed back. Both halves are needed: the timestamp
+        // alone said "somebody wrote at this instant", and after this device adopted
+        // another phone's document that was a stamp it did not own - so the next write
+        // from THAT phone looked like an echo of this one and was skipped.
+        if (remote.updatedAt === State.schedule.updatedAt
+            && remote.updatedBy === syncDeviceId()) {
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             return;
