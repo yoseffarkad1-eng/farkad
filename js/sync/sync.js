@@ -21,6 +21,33 @@
 
 const SYNC_DEVICE_KEY = 'farkad:deviceId';
 
+// The outbox. Every edit is written HERE, on the device, before it is called done - and
+// it stays until the cloud says it has it.
+//
+// Holding the queue in memory was the quiet hole under everything else: a day recorded
+// on a site with no signal lived in a Map, the app was closed the way a phone app always
+// is, and the edit was gone. Nothing said so. The next morning the first snapshot from
+// another phone was adopted whole, and the day was not in it - so the record went
+// backwards, silently, at the one moment nobody was watching.
+const OUTBOX_KEY = 'farkad:outbox';
+
+// Retry, backing off. A device on a building site loses signal for minutes at a time and
+// gets it back without anyone touching anything, so the queue has to drain on its own -
+// but a phone that retries every second for an hour is a phone with no battery.
+const RETRY_FIRST_MS = 2000;
+const RETRY_MAX_MS = 60000;
+
+// Most fields in one write. Someone can record for a month before they ever sign in -
+// that is the ordinary way this app gets adopted - and the whole month is then waiting
+// in the outbox. Sent as a single update it is one enormous write against Firestore's
+// per-write limits, and if it is refused, NONE of it lands. In batches the queue drains
+// steadily and a refusal costs one batch, which is still on disk to retry.
+const MAX_PATHS_PER_WRITE = 300;
+
+// How long an open send may block the next one. Past this it is assumed hung rather than
+// slow - a request that never settles must not be able to stop the queue draining.
+const SEND_STUCK_MS = 30000;
+
 // Stable per-browser id. Lets a device recognise the echo of its own write and lets the
 // status line say which device last changed the schedule.
 function syncDeviceId() {
@@ -60,11 +87,19 @@ const FarkadSync = {
     pushDelayMs: 1200,
 
     _timer: null,
-    _edits: new Map(),
-    // Edits handed to the adapter and not yet acknowledged. They are out of _edits by
-    // then, so without holding them here a snapshot arriving mid-send would take them off
-    // the screen - the one moment a person is most likely to be looking at it.
-    _inflight: new Map(),
+    // path -> { value, seq }. The queue itself, mirrored to storage on every change.
+    // Keyed by path because the value IS the whole record for that field: editing the
+    // same worker twice before a flush is one pending write, not two.
+    _outbox: new Map(),
+    _seq: 0,
+    // The seq numbers currently being sent. An entry is NOT removed from the outbox when
+    // it goes out - only when the cloud acknowledges it, and only if the seq still
+    // matches. An edit made while the send was open has a higher seq and stays.
+    _sending: new Map(),
+    _sendingSince: 0,
+    _retryAt: 0,
+    _retryTimer: null,
+    _loaded: false,
     _stamp: null,
 
     // adapter: {
@@ -72,24 +107,125 @@ const FarkadSync = {
     //   save(wholeDocument)      -> Promise   replace everything
     //   subscribe(onSnapshot, onError)        -> unsubscribe
     // }
+    // ------------------------------------------------------------ the outbox
+
+    // Read back at load, before anything can ask what is pending. Corrupt contents are
+    // kept, not discarded: they are the only record that those edits were ever made, and
+    // a JSON file that will not parse can still be read by a person.
+    loadOutbox() {
+        if (this._loaded) return;
+        this._loaded = true;
+
+        const raw = Store.get(OUTBOX_KEY);
+        if (!raw) return;
+
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (error) {
+            console.error('Outbox unreadable, setting it aside rather than dropping it:', error);
+            Store.set(OUTBOX_KEY + ':damaged', raw, { optional: true });
+            return;
+        }
+
+        const items = (parsed && parsed.items) || {};
+        Object.keys(items).forEach(path => {
+            const item = items[path];
+            if (!item || typeof item !== 'object') return;
+            this._outbox.set(path, { value: item.value, seq: Number(item.seq) || 0 });
+            this._seq = Math.max(this._seq, Number(item.seq) || 0);
+        });
+    },
+
+    // NOT optional. A restore point the device has no room for is a loss the app can
+    // live with; a pending edit it has no room for is the edit itself.
+    saveOutbox() {
+        const items = {};
+        this._outbox.forEach((item, path) => { items[path] = item; });
+        Store.set(OUTBOX_KEY, JSON.stringify({ seq: this._seq, items }));
+    },
+
+    pendingCount() {
+        this.loadOutbox();
+        return this._outbox.size;
+    },
+
+    // Which fields are waiting. Not used on screen - the count is what a person needs -
+    // but it is what makes "is that edit still queued?" answerable from outside without
+    // reaching into the queue itself.
+    pendingPaths() {
+        this.loadOutbox();
+        return [...this._outbox.keys()];
+    },
+
+    // Empty the queue. Only for a deliberate whole-document replacement, which supersedes
+    // every pending field edit by definition.
+    clearOutbox() {
+        this.loadOutbox();
+        this._outbox = new Map();
+        this._sending = new Map();
+        this.saveOutbox();
+    },
+
+    queue(path, value) {
+        this.loadOutbox();
+        this._seq += 1;
+        this._outbox.set(path, { value, seq: this._seq });
+        this.saveOutbox();
+    },
+
+    // Called on acknowledgment, and only then. An entry whose seq has moved on was
+    // edited again while the send was open, and that newer value has not been sent yet.
+    acknowledge(sent) {
+        let changed = false;
+        sent.forEach((seq, path) => {
+            const item = this._outbox.get(path);
+            if (item && item.seq === seq) {
+                this._outbox.delete(path);
+                changed = true;
+            }
+        });
+        if (changed) this.saveOutbox();
+    },
+
     connect(adapter) {
         this.adapter = adapter;
+        this.loadOutbox();
         this.setStatus('connecting');
+
+        // A site loses signal for minutes at a time and gets it back with nobody
+        // touching anything. Without this the queue waits for the next edit to notice.
+        if (!this._watchingConnection && typeof window !== 'undefined'
+            && typeof window.addEventListener === 'function') {
+            this._watchingConnection = true;
+            window.addEventListener('online', () => {
+                this._retryAt = 0;
+                this.flush();
+            });
+        }
 
         adapter.subscribe(
             snapshot => this.receive(snapshot),
             error => this.fail(error)
         );
+
+        // Anything left over from a previous session goes out as soon as there is
+        // somewhere to send it.
+        if (this._outbox.size > 0) this.scheduleFlush();
     },
 
     disconnect() {
         this.adapter = null;
         this._archivedOn = null;
         clearTimeout(this._timer);
+        clearTimeout(this._retryTimer);
         this._timer = null;
-        this._edits = new Map();
-        this._inflight = new Map();
+        this._retryTimer = null;
+        this._sending = new Map();
         this._stamp = null;
+        // The outbox is deliberately NOT cleared. Signing out, or the auth token
+        // expiring, must not be a way to lose edits that were never sent - they are
+        // still true, and the next sign-in is where they go.
         this.setStatus('off');
     },
 
@@ -111,9 +247,13 @@ const FarkadSync = {
     // the same worker twice before the flush sends one write, while edits to different
     // workers all survive.
     edit(path, value) {
+        // Queued whether or not there is a cloud. Returning early when no adapter was
+        // connected is what made a week of local-only recording invisible to the sync
+        // layer: the moment someone signed in, the first snapshot was adopted whole and
+        // the week was not in it. An edit nobody can send yet is still an edit.
+        this.queue(path, value);
         if (!this.adapter) return;
 
-        this._edits.set(path, value);
         clearTimeout(this._timer);
         this._timer = setTimeout(() => this.flush(), this.pushDelayMs);
     },
@@ -164,9 +304,9 @@ const FarkadSync = {
     // another phone deleted him - and the week of pay with him, silently, because the
     // reports iterate the roster.
     editRoster(schedule) {
+        this.queue('workers', schedule.workers);
+        this.queue('places', schedule.places);
         if (!this.adapter) return;
-        this._edits.set('workers', schedule.workers);
-        this._edits.set('places', schedule.places);
         this.scheduleFlush();
     },
 
@@ -182,12 +322,34 @@ const FarkadSync = {
     flush() {
         clearTimeout(this._timer);
         this._timer = null;
+        clearTimeout(this._retryTimer);
+        this._retryTimer = null;
 
         if (!this.adapter) return Promise.resolve();
-        if (this._edits.size === 0 && !this._stamp) return Promise.resolve();
+        this.loadOutbox();
+        if (this._outbox.size === 0 && !this._stamp) return Promise.resolve();
+        // One send at a time, so a bad connection does not pile up a request per edit.
+        //
+        // Time-bounded on purpose. A request that never settles - a hung socket, an
+        // adapter that returns a promise nobody resolves - must not wedge the queue for
+        // the rest of the session. Correctness does not rest on this lock anyway: an
+        // acknowledgment only removes a path whose seq still matches what that send
+        // carried, so two overlapping sends cannot acknowledge each other's work.
+        if (this._sending.size > 0 && Date.now() - this._sendingSince < SEND_STUCK_MS) {
+            return Promise.resolve();
+        }
 
+        // Oldest first, so a queue too big for one write drains in the order it was
+        // made rather than leaving the earliest days for last.
         const patch = {};
-        this._edits.forEach((value, path) => { patch[path] = value; });
+        const sent = new Map();
+        [...this._outbox.entries()]
+            .sort((a, b) => a[1].seq - b[1].seq)
+            .slice(0, MAX_PATHS_PER_WRITE)
+            .forEach(([path, item]) => {
+                patch[path] = item.value;
+                sent.set(path, item.seq);
+            });
 
         // EVERY write carries a stamp, not only the ones a local save happened to queue.
         // A retry after a failed send used to go out with none - and the rules let it
@@ -209,9 +371,8 @@ const FarkadSync = {
         patch.updatedBy = typeof stamp.updatedBy === 'string'
             ? stamp.updatedBy : syncDeviceId();
 
-        const sent = this._edits;
-        this._edits = new Map();
-        this._inflight = sent;
+        this._sending = sent;
+        this._sendingSince = Date.now();
         this._stamp = null;
 
         return Promise.resolve(this.adapter.update(patch))
@@ -221,18 +382,37 @@ const FarkadSync = {
                 throw error;
             })
             .then(() => {
-                if (this._inflight === sent) this._inflight = new Map();
+                // Only now. Up to this point the edits were on disk and would have been
+                // replayed by the next session; from here the cloud is holding them.
+                this.acknowledge(sent);
+                this._sending = new Map();
+                this._retryAt = 0;
                 if (this.status !== 'error') this.setStatus('synced');
+                // Something was edited while the send was open.
+                if (this._outbox.size > 0) this.scheduleFlush();
             })
             .catch(error => {
-                // Put the unsent edits back rather than dropping them. Anything written
-                // since keeps priority, so a retry can never resurrect a stale value.
-                sent.forEach((value, path) => {
-                    if (!this._edits.has(path)) this._edits.set(path, value);
-                });
-                if (this._inflight === sent) this._inflight = new Map();
+                // Nothing is removed. The queue is still on disk exactly as it was, so
+                // this survives the app being closed as well as the network coming back.
+                this._sending = new Map();
                 this.fail(error);
+                this.scheduleRetry();
             });
+    },
+
+    // Doubling, capped. Reset to the first interval by a successful send and by the
+    // browser reporting the connection back.
+    scheduleRetry() {
+        if (!this.adapter) return;
+        this._retryAt = this._retryAt
+            ? Math.min(this._retryAt * 2, RETRY_MAX_MS)
+            : RETRY_FIRST_MS;
+
+        clearTimeout(this._retryTimer);
+        this._retryTimer = setTimeout(() => {
+            this._retryTimer = null;
+            this.flush();
+        }, this._retryAt);
     },
 
     // Firestore refuses to update a document that does not exist, and every project
@@ -278,12 +458,18 @@ const FarkadSync = {
     replaceAll(data) {
         if (!this.adapter) return Promise.resolve();
 
-        this._edits = new Map();
-        this._inflight = new Map();
+        const superseded = this._outbox;
         this._stamp = null;
 
         return Promise.resolve(this.adapter.save(data))
-            .then(() => this.setStatus('synced'))
+            .then(() => {
+                // Cleared only now. The pending edits belong to the state that was just
+                // replaced on purpose, so they are genuinely superseded - but only once
+                // the replacement has actually landed. Clearing them first meant a
+                // restore that failed took the unsent edits with it.
+                if (this._outbox === superseded) this.clearOutbox();
+                this.setStatus('synced');
+            })
             .catch(error => this.fail(error));
     },
 
@@ -338,7 +524,7 @@ const FarkadSync = {
             if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
-            if (this._edits.size > 0) this.scheduleFlush();
+            if (this.pendingCount() > 0) this.scheduleFlush();
             return;
         }
 
@@ -365,7 +551,7 @@ const FarkadSync = {
         // before this evening's editing, which is the state worth being able to go back to.
         this.archiveDaily(State.schedule);
 
-        if (this._edits.size > 0) this.scheduleFlush();
+        if (this.pendingCount() > 0) this.scheduleFlush();
     },
 
     // Edits typed here in the last second or so, or queued after a failed send. They are
@@ -373,12 +559,16 @@ const FarkadSync = {
     // document is a matter of writing each one in again - otherwise the person watches
     // what they just entered disappear when somebody else's change arrives.
     reapplyPending(schedule) {
-        // In-flight first, queued second: a path edited again while the first send was
-        // still open must end up with the newer value.
-        const pending = new Map(this._inflight);
-        this._edits.forEach((value, path) => pending.set(path, value));
+        this.loadOutbox();
 
-        pending.forEach((value, path) => {
+        // The outbox is the whole answer now, in seq order: an entry stays in it from
+        // the moment it is made until the cloud acknowledges it, so anything not yet
+        // acknowledged - including a send that is open right this second - is here.
+        const pending = [...this._outbox.entries()]
+            .sort((a, b) => a[1].seq - b[1].seq);
+
+        pending.forEach(([path, item]) => {
+            const value = item.value;
             const parts = path.split('.');
 
             if (parts.length === 4 && parts[0] === 'days') {
@@ -420,6 +610,10 @@ const FarkadSync = {
 // undefined and the very first line it ran threw. Sync could never have connected.
 // Published deliberately, and by the name the module expects.
 window.FarkadSync = FarkadSync;
+
+// Read back immediately, not at connect: pendingCount() has to be truthful on a device
+// that has never had a cloud, and the answer lives on disk.
+FarkadSync.loadOutbox();
 
 // One line under the board covering both questions the manager actually has: where the
 // The two storage failures - blocked, and full - are the only states where a change the
@@ -475,6 +669,15 @@ function updateSyncNotice() {
 
     if (FarkadSync.status === 'synced' && FarkadSync.lastSyncedAt) {
         text += ` עודכן: ${FarkadSync.lastSyncedAt.toLocaleTimeString('he-IL')}`;
+    }
+
+    // How many edits are written down here and not yet in the cloud. Said plainly,
+    // because "synced" while a day is still sitting in the queue is the same lie as a
+    // green tick over a failed save - and this is the number that tells the difference
+    // between "the other two can see it" and "only this phone can".
+    const waiting = FarkadSync.pendingCount();
+    if (waiting > 0) {
+        text += ` (${waiting} ממתינים לשליחה)`;
     }
 
     notice.textContent = text;

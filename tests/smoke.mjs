@@ -716,7 +716,7 @@ async function seedRoster(page) {
   await page.evaluate(() => {
     FarkadSync.adapter = { update: () => Promise.resolve(), save: () => Promise.resolve() };
     FarkadSync.pushDelayMs = 100000;
-    FarkadSync._edits = new Map();
+    FarkadSync.clearOutbox();
   });
 
   await page.locator('#migrationList .issue').filter({ hasText: 'הרצליה + תל אביב' })
@@ -726,10 +726,10 @@ async function seedRoster(page) {
     (await page.evaluate(() => entriesFor(State.schedule, '2026-08-09', 'w_02', 'actual')
       .map(e => e.placeId).join())) === 'p_01,p_02');
   check('and the decision is sent, not left on the phone that answered it',
-    (await page.evaluate(() => Array.from(FarkadSync._edits.keys())))
+    (await page.evaluate(() => FarkadSync.pendingPaths()))
       .includes('days.2026-08-09.actual.w_02'),
-    JSON.stringify(await page.evaluate(() => Array.from(FarkadSync._edits.keys()))));
-  await page.evaluate(() => { FarkadSync.adapter = null; FarkadSync._edits = new Map(); });
+    JSON.stringify(await page.evaluate(() => FarkadSync.pendingPaths())));
+  await page.evaluate(() => { FarkadSync.adapter = null; FarkadSync.clearOutbox(); });
 
   check('the resolved issue leaves the list',
     (await page.evaluate(() => State.migrationIssues.length)) === 1);
@@ -833,7 +833,13 @@ async function seedRoster(page) {
     const apply = p => Object.keys(p).forEach(k => { server[k] = p[k]; });
     ['w_01', 'w_02', 'w_03'].forEach((workerId, i) => {
       const sync = Object.create(FarkadSync);
-      sync._edits = new Map();
+      // Own queue, and no writing to storage. Without these the three stand-ins inherit
+      // the real one's outbox through the prototype and queue into it - which is not
+      // three phones, it is one phone with nine pending edits.
+      sync._outbox = new Map();
+      sync._sending = new Map();
+      sync._loaded = true;
+      sync.saveOutbox = () => {};
       sync._stamp = { updatedAt: `2026-08-12T18:0${i}:00.000Z`, updatedBy: `d${i}` };
       sync.adapter = { update(p) { apply(p); return Promise.resolve(); } };
       sync.setStatus = () => {};
@@ -926,6 +932,10 @@ async function seedRoster(page) {
 
   await page.evaluate(() => {
     FarkadSync.setStatus('synced');
+    // The check above deliberately left a send open that never completes. Clearing it
+    // is the test tidying up after itself: a hung send is allowed to block the next one
+    // for a while, which is the point of that guard.
+    FarkadSync._sending = new Map();
     FarkadSync.adapter.update = () => Promise.reject(new Error('offline'));
     FarkadSync.edit('days.2026-08-12.actual.w_09', { entries: [] });
   });
@@ -933,7 +943,8 @@ async function seedRoster(page) {
   check('a failed push is reported',
     (await page.evaluate(() => FarkadSync.status)) === 'error');
   check('a failed push keeps the edit for retry',
-    (await page.evaluate(() => FarkadSync._edits.has('days.2026-08-12.actual.w_09'))));
+    (await page.evaluate(() => FarkadSync.pendingPaths()))
+      .includes('days.2026-08-12.actual.w_09'));
   await page.context().close();
 }
 
@@ -2640,12 +2651,13 @@ async function seedRoster(page) {
   // day edits already did; advance paths were dropped on the floor.
   const survived = await page.evaluate(() => {
     const record = { id: 'a_pending1', workerId: 'w_02', date: '2026-08-12', amount: 111, note: '' };
-    FarkadSync._edits.set('advances.a_pending1', record);
-    FarkadSync._edits.set('advances.a_gone', null);
+    FarkadSync.clearOutbox();
+    FarkadSync.queue('advances.a_pending1', record);
+    FarkadSync.queue('advances.a_gone', null);
     const incoming = { workers: [], places: [], days: {},
       advances: { a_gone: { id: 'a_gone', workerId: 'w_01', date: '2026-08-12', amount: 999, note: '' } } };
     FarkadSync.reapplyPending(incoming);
-    FarkadSync._edits.clear();
+    FarkadSync.clearOutbox();
     return { kept: incoming.advances.a_pending1, tombstoned: 'a_gone' in incoming.advances };
   });
   check('a pending advance is re-applied on top of an arriving snapshot',
@@ -2678,10 +2690,11 @@ async function seedRoster(page) {
 
   // and a roster edit in flight is not dropped by a snapshot landing on top of it
   const kept = await page.evaluate(() => {
-    FarkadSync._edits.set('workers', State.schedule.workers);
+    FarkadSync.clearOutbox();
+    FarkadSync.queue('workers', State.schedule.workers);
     const incoming = { workers: [{ id: 'w_01', name: 'דוד', active: true }], places: [], days: {} };
     FarkadSync.reapplyPending(incoming);
-    FarkadSync._edits.clear();
+    FarkadSync.clearOutbox();
     return incoming.workers.map(w => w.id);
   });
   check('a just-added worker survives the snapshot that arrives mid-send',
@@ -2691,10 +2704,10 @@ async function seedRoster(page) {
   // and a stamp but no roster. That is unfinished, not broken - it used to lock the
   // status on "sync error" for good while writes were in fact landing.
   const fresh = await page.evaluate(() => {
-    FarkadSync._edits.clear();
+    FarkadSync.clearOutbox();
     FarkadSync.setStatus('connecting');
     FarkadSync.receive({ days: { '2026-08-12': { actual: {} } }, updatedAt: '2026-08-12T10:00:00Z' });
-    return { status: FarkadSync.status, queued: [...FarkadSync._edits.keys()] };
+    return { status: FarkadSync.status, queued: FarkadSync.pendingPaths() };
   });
   check('a server document with no roster yet is not treated as a failure',
     fresh.status === 'synced', JSON.stringify(fresh));
