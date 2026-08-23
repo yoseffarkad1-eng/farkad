@@ -7,6 +7,7 @@ function renderRoster() {
     renderPlaceList();
     renderBackupAge();
     renderRestorePoints();
+    renderCloudRestorePoints();
 }
 
 function renderWorkerList() {

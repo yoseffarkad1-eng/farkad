@@ -20,6 +20,9 @@ import {
 import {
     getFirestore,
     doc,
+    collection,
+    getDoc,
+    getDocs,
     setDoc,
     updateDoc,
     onSnapshot,
@@ -101,6 +104,26 @@ if (!isConfigured()) {
             },
             save(data) {
                 return setDoc(scheduleRef, data);
+            },
+
+            // Sync is not a backup: a deletion syncs as faithfully as a correction, and
+            // by the time it is noticed every phone agrees with it. These are the copies
+            // that disagree - one per day, written by whichever device opens first.
+            //
+            // The rules allow CREATE here and nothing else. So a day's copy cannot be
+            // overwritten by a later, already-damaged state, and cannot be deleted by a
+            // careless tap or a bug in this file. That is what makes it a backup rather
+            // than another mirror.
+            archive(key, data) {
+                return setDoc(doc(db, 'history', key), data);
+            },
+            archiveDates() {
+                return getDocs(collection(db, 'history'))
+                    .then(snapshot => snapshot.docs.map(entry => entry.id).sort().reverse());
+            },
+            archiveRead(key) {
+                return getDoc(doc(db, 'history', key))
+                    .then(snapshot => (snapshot.exists() ? snapshot.data() : null));
             },
             subscribe(onSnapshotData, onError) {
                 return onSnapshot(

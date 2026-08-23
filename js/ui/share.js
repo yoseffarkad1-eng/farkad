@@ -303,6 +303,64 @@ function renderRestorePoints() {
     });
 }
 
+// The cloud copies. Unlike everything else on this screen these do not live on this
+// phone, so they survive it being lost, wiped, or restored from a mistake - and unlike
+// the schedule itself they cannot be changed by anyone once written.
+function renderCloudRestorePoints() {
+    const box = document.getElementById('cloudRestorePoints');
+    if (!box) return;
+    clear(box);
+
+    if (typeof FarkadSync === 'undefined' || FarkadSync.status !== 'synced') return;
+
+    FarkadSync.archiveDates().then(dates => {
+        if (!dates || dates.length === 0) return;
+        clear(box);
+        box.appendChild(el('span', 'restore-label', '☁️ מהענן:'));
+        // Ten is a fortnight and a bit - far enough back to cover a mistake noticed at
+        // the end of an account, without turning this into a wall of dates.
+        dates.slice(0, 10).forEach(date => {
+            const parsed = parseLocalDate(date);
+            if (!parsed) return;
+            box.appendChild(button(formatFullDate(parsed), 'btn-secondary',
+                () => restoreFromCloud(date),
+                `שחזר את המצב מתחילת ${formatFullDate(parsed)} מהענן`));
+        });
+    });
+}
+
+async function restoreFromCloud(date) {
+    const parsed = parseLocalDate(date);
+    const go = await askConfirm({
+        title: `לחזור למצב של ${formatFullDate(parsed)}?`,
+        message: 'העותק הזה יוחלף בכל המכשירים. המצב הנוכחי יישמר כאן, כך שאפשר לחזור ממנו.',
+        ok: 'שחזר'
+    });
+    if (!go) return;
+
+    let raw;
+    try {
+        raw = await FarkadSync.archiveRead(date);
+    } catch (error) {
+        askTell('לא הצלחנו לקרוא את העותק מהענן. בדוק את החיבור ונסה שוב.');
+        return;
+    }
+    if (!raw) {
+        askTell('העותק הזה לא נמצא בענן.');
+        return;
+    }
+
+    // The current state becomes the undo for the restore itself - the same slot the
+    // local restore uses, and for the same reason.
+    Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+
+    State.schedule = normaliseSchedule(raw);
+    State.save();
+    FarkadSync.replaceAll(State.schedule);
+    render();
+    askTell('שוחזר מהענן.');
+}
+
 async function restoreSnapshot(date) {
     const raw = Store.get(SNAPSHOT_PREFIX + date);
     if (!raw) return;

@@ -64,6 +64,7 @@ const FarkadSync = {
 
     disconnect() {
         this.adapter = null;
+        this._archivedOn = null;
         clearTimeout(this._timer);
         this._timer = null;
         this._edits = new Map();
@@ -95,6 +96,42 @@ const FarkadSync = {
         this._edits.set(path, value);
         clearTimeout(this._timer);
         this._timer = setTimeout(() => this.flush(), this.pushDelayMs);
+    },
+
+    // One copy per day, kept where a deletion cannot follow it.
+    //
+    // Everything else here is a mirror: the schedule, the other two phones, and the local
+    // restore points, which are only three deep and only as old as the last three times
+    // THIS device was opened. A worker cleared by mistake on Sunday and noticed on
+    // Wednesday is gone from all of them. This is the one place it is not.
+    //
+    // Written at most once a day, and by whichever device opens first - the earliest
+    // state of the day is the one worth keeping, since the mistake has not happened yet.
+    // A failure is swallowed on purpose: an archive that cannot be written must never be
+    // the reason the evening's recording does not start.
+    archiveDaily(schedule) {
+        if (!this.adapter || !this.adapter.archive) return;
+        if (!schedule || schedule.workers.length === 0) return;
+
+        const key = todayStr();
+        if (this._archivedOn === key) return;
+        this._archivedOn = key;
+
+        Promise.resolve(this.adapter.archive(key, schedule)).catch(error => {
+            // 'already-exists'/'permission-denied' here means another device got there
+            // first, which is the intended outcome, not a fault worth reporting.
+            console.info('Daily cloud copy not written:', error && error.code);
+        });
+    },
+
+    archiveDates() {
+        if (!this.adapter || !this.adapter.archiveDates) return Promise.resolve([]);
+        return Promise.resolve(this.adapter.archiveDates()).catch(() => []);
+    },
+
+    archiveRead(key) {
+        if (!this.adapter || !this.adapter.archiveRead) return Promise.resolve(null);
+        return Promise.resolve(this.adapter.archiveRead(key));
     },
 
     // The roster - who exists, where they work, and what they are paid. It travels as two
@@ -208,6 +245,7 @@ const FarkadSync = {
             }
             if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
             this.setStatus('synced');
+            this.archiveDaily(State.schedule);
             return;
         }
 
@@ -219,6 +257,7 @@ const FarkadSync = {
         if (!remote.updatedAt) {
             if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
             this.setStatus('synced');
+            this.archiveDaily(State.schedule);
             if (this._edits.size > 0) this.scheduleFlush();
             return;
         }
@@ -226,6 +265,7 @@ const FarkadSync = {
         // This device's own write, echoed back.
         if (remote.updatedAt === State.schedule.updatedAt) {
             this.setStatus('synced');
+            this.archiveDaily(State.schedule);
             return;
         }
 
@@ -240,6 +280,10 @@ const FarkadSync = {
         State.persist();
         if (typeof render === 'function') render();
         this.setStatus('synced');
+
+        // The copy is taken from what the server holds at the first sight of it today -
+        // before this evening's editing, which is the state worth being able to go back to.
+        this.archiveDaily(State.schedule);
 
         if (this._edits.size > 0) this.scheduleFlush();
     },

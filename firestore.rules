@@ -51,6 +51,20 @@ service cloud.firestore {
         && (!isFullReplacement() || fullDocumentOk());
     }
 
+    // One copy of the schedule per day, and the reason sync is not the same thing as a
+    // backup. Everything above is a mirror: a deletion propagates to all three phones as
+    // faithfully as a correction does, and by the time it is noticed everyone agrees
+    // with it.
+    //
+    // CREATE only. Not update - so a day's copy can never be overwritten by a later,
+    // already-damaged state. Not delete - so nothing here can be lost to a careless tap
+    // or a bug in the client, which is exactly what a backup has to promise. Enforced on
+    // the server, so no version of the app can break it.
+    match /history/{day} {
+      allow read, create: if allowed();
+      allow update, delete: if false;
+    }
+
     // Anything not matched above is denied.
     match /{document=**} {
       allow read, write: if false;

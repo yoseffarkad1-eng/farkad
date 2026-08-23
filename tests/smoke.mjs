@@ -2591,6 +2591,67 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the cloud copies
+{
+  // Sync is a mirror: a deletion travels as faithfully as a correction, and the local
+  // restore points are three deep and only as old as the last three openings of THIS
+  // phone. These copies are the one thing a mistake cannot follow.
+  const page = await open();
+  await seedRoster(page);
+
+  const written = await page.evaluate(() => {
+    window.__archive = {};
+    FarkadSync.adapter = {
+      update: () => Promise.resolve(),
+      save: () => Promise.resolve(),
+      archive: (key, data) => { window.__archive[key] = JSON.parse(JSON.stringify(data)); return Promise.resolve(); },
+      archiveDates: () => Promise.resolve(Object.keys(window.__archive).sort().reverse()),
+      archiveRead: key => Promise.resolve(window.__archive[key] || null)
+    };
+    todayStr = () => '2026-08-12';
+    FarkadSync.archiveDaily(State.schedule);
+    FarkadSync.archiveDaily(State.schedule);   // same day again
+    return { keys: Object.keys(window.__archive), workers: window.__archive['2026-08-12'].workers.length };
+  });
+  check('a copy is written once a day, not on every snapshot',
+    written.keys.length === 1 && written.keys[0] === '2026-08-12', JSON.stringify(written.keys));
+  check('and it holds the whole roster', written.workers === 3, JSON.stringify(written));
+
+  // now lose the day the way an accident does, and come back from the cloud
+  const restored = await page.evaluate(() => {
+    State.schedule.workers = [];
+    State.schedule.days = {};
+    State.save();
+    return { before: State.schedule.workers.length };
+  });
+  check('the accident empties the schedule everywhere', restored.before === 0);
+
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => { FarkadSync.setStatus('synced'); renderCloudRestorePoints(); });
+  await page.waitForTimeout(300);
+  check('the cloud copies are offered where the backups are',
+    (await page.locator('#cloudRestorePoints button').count()) === 1 &&
+    (await page.textContent('#cloudRestorePoints')).includes('מהענן'));
+
+  await page.locator('#cloudRestorePoints button').first().click();
+  await page.waitForTimeout(300);
+  await page.click('#askOk');
+  await page.waitForTimeout(400);
+  check('restoring from the cloud brings the roster back',
+    (await page.evaluate(() => State.schedule.workers.length)) === 3);
+  check('and keeps the state it replaced, so the restore itself is reversible',
+    (await page.evaluate(() =>
+      JSON.parse(Store.get('scheduleData:v2backup')).workers.length)) === 0);
+
+  // nothing is offered while sync is off - these copies only exist in the cloud
+  await page.evaluate(() => { FarkadSync.setStatus('off'); renderCloudRestorePoints(); });
+  await page.waitForTimeout(250);
+  check('with sync off the cloud row is not there to mislead',
+    (await page.locator('#cloudRestorePoints button').count()) === 0);
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- the worker statement
 {
   // What the man is handed on payday. The question it answers is "why is it this

@@ -83,6 +83,10 @@
                     <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
                 </div>
                 <div class="restore-points" id="restorePoints"></div>
+                <!-- Copies kept in the cloud, one per day, which a deletion cannot
+                     follow: the rules there allow create and nothing else. Hidden
+                     entirely while sync is off. -->
+                <div class="restore-points" id="cloudRestorePoints"></div>
                 <p class="hint" id="backupAge"></p>
                 <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
             </div>
