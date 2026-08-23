@@ -50,12 +50,23 @@ function makeLocalStorage(initial) {
             error.name = 'QuotaExceededError';
             throw error;
         }
+        const stored = (ls.__corrupt && ls.__corrupt(key, String(value)))
+            ? String(value) + '\u0000corrupted'
+            : String(value);
         Object.defineProperty(ls, key, {
-            value: String(value), enumerable: true, writable: true, configurable: true
+            value: stored, enumerable: true, writable: true, configurable: true
         });
     });
     define('removeItem', key => { delete ls[key]; });
-    define('__quota', null);
+    // Writable, because a test switches the fault on partway through a run.
+    Object.defineProperty(ls, '__quota', {
+        value: null, enumerable: false, writable: true, configurable: true
+    });
+    // A disk that ACCEPTS a write and then hands back something else. Rarer than a full
+    // one and worse, because nothing throws - the only way to find out is to read back.
+    Object.defineProperty(ls, '__corrupt', {
+        value: null, enumerable: false, writable: true, configurable: true
+    });
 
     Object.keys(initial || {}).forEach(key => ls.setItem(key, initial[key]));
     return ls;
@@ -145,8 +156,22 @@ export function makeDevice(options = {}) {
         setToday(dateStr) {
             sandbox.todayStr = () => dateStr;
         },
+        // (key, value) => true to refuse that write, the way a full disk does.
         setQuota(fn) {
-            Object.defineProperty(localStorage, '__quota', { value: fn, enumerable: false });
+            localStorage.__quota = fn;
+        },
+        // Make writes to `key` land as something other than what was written.
+        corruptOnWrite(key) {
+            localStorage.__corrupt = (written) => written === key;
+        },
+        // Put a raw value on disk without going through Store, so a test can stage a
+        // damaged record the way a half-finished write leaves one.
+        putRaw(key, value) {
+            localStorage.setItem(key, value);
+        },
+        raw(key) {
+            return Object.prototype.hasOwnProperty.call(localStorage, key)
+                ? localStorage[key] : null;
         }
     };
 }

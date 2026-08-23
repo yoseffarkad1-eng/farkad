@@ -73,6 +73,70 @@ function record(device, date, workerId, placeId, rate) {
         makeDevice().Store.get('scheduleData:v2') === null);
 }
 
+// ---------------------------------------------------------------- a full device
+{
+    suite('a device with no room still knows who it is');
+
+    // Store.set writes to memory first and then to disk. Store.get read the DISK first
+    // and returned what it found - including null. So on a full device every write went
+    // to memory, every read came back empty, and syncDeviceId() minted a new id on every
+    // single call: each write signed by a different device, and the echo check that keeps
+    // a phone from adopting its own writes had nothing stable to compare against.
+    const device = makeDevice();
+    // No id yet, and no room to write one - which is the state a phone that has been
+    // full since before it was first opened is actually in.
+    device.Store.remove('farkad:deviceId');
+    device.setQuota(() => true);              // every write from here on is refused
+
+    const first = device.call('syncDeviceId');
+    const second = device.call('syncDeviceId');
+    const third = device.call('syncDeviceId');
+
+    check('the device id is the same every time it is asked',
+        first === second && second === third, `${first} / ${second} / ${third}`);
+    check('and it is a real id, not an empty string', /^d_/.test(first), first);
+
+    // The same fault in general: a value written this session must read back as written,
+    // whether or not the disk accepted it.
+    device.Store.set('scheduleData:v2', '{"kept":true}');
+    check('a write that the disk refused still reads back in this session',
+        device.Store.get('scheduleData:v2') === '{"kept":true}',
+        JSON.stringify(device.Store.get('scheduleData:v2')));
+    check('and the refusal was reported, not swallowed', device.Store.full === true);
+
+    // And a NEWER memory value must win over a stale one still on disk, or a failed
+    // outbox write would be read back as the queue from before the edit.
+    const withDisk = makeDevice({ storage: { 'farkad:outbox': '{"seq":1,"items":{}}' } });
+    withDisk.setQuota(() => true);
+    withDisk.Store.set('farkad:outbox', '{"seq":2,"items":{"a":1}}');
+    check('a newer value in memory beats a stale one on disk',
+        withDisk.Store.get('farkad:outbox') === '{"seq":2,"items":{"a":1}}',
+        withDisk.Store.get('farkad:outbox'));
+
+    check('and keys() lists what is only in memory, so snapshots are still found',
+        withDisk.Store.keys().includes('farkad:outbox'));
+}
+
+{
+    suite('a write is only reported as saved when it can be read back');
+
+    const device = makeDevice();
+    check('a write that lands is confirmed',
+        device.Store.setVerified('k', 'v') === true);
+
+    // A disk that accepts the write and gives back something else is rarer than a full
+    // one and worse, because nothing throws. The only way to know is to look.
+    const liar = makeDevice();
+    liar.corruptOnWrite('k');
+    check('a write that comes back changed is not confirmed',
+        liar.Store.setVerified('k', 'v') === false);
+
+    const full = makeDevice();
+    full.setQuota(() => true);
+    check('and neither is one the disk refused',
+        full.Store.setVerified('k', 'v') === false);
+}
+
 // ---------------------------------------------------------------- local only
 {
     suite('with no cloud at all, the app is unchanged');
