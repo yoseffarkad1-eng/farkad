@@ -1,10 +1,19 @@
 // Dev-only smoke tests. Nothing here ships to production and the app still has no
 // build step.
 //
-//   python3 -m http.server 8802 --directory .
-//   node tests/smoke.mjs
+//   npm ci
+//   npx playwright install chromium      (or: npm run browsers)
+//   npm run test:smoke
 //
-// Override with SMOKE_URL, CHROME_PATH and PLAYWRIGHT_MODULE if your paths differ.
+// It serves the app itself. It used to need a second terminal running python3 -m
+// http.server, so `npm ci && npm run test:smoke` from a fresh clone did nothing but
+// fail - and a service worker, which is half of what this file tests, does not register
+// over file://.
+//
+// Override with SMOKE_URL to point at a server you are already running, CHROME_PATH for
+// a browser binary, and PLAYWRIGHT_MODULE for a playwright installed somewhere else.
+
+import { serve } from './serve.mjs';
 
 // ESM ignores NODE_PATH, so allow an explicit path to a global playwright install.
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -15,7 +24,11 @@ const EXEC = process.env.CHROME_PATH || undefined;
 const APP_VERSION_EXPECTED = (await import('node:fs'))
   .readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
   .match(/APP_VERSION = '(v\d+)'/)[1];
-const BASE = process.env.SMOKE_URL || 'http://127.0.0.1:8802';
+
+const server = process.env.SMOKE_URL
+  ? { url: process.env.SMOKE_URL, close: () => {} }
+  : await serve(new URL('..', import.meta.url).pathname);
+const BASE = server.url;
 
 const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 const results = [];
@@ -3710,6 +3723,7 @@ async function seedRoster(page) {
 }
 
 await browser.close();
+await server.close();
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

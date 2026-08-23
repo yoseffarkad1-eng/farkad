@@ -5,15 +5,20 @@
   "description": "Day and pay record for a construction crew. A PWA of classic scripts with no build step - this file exists so the tests can be run, not to introduce one.",
   "type": "module",
   "scripts": {
-    "test": "node tests/data.test.mjs",
+    "test": "npm run test:data",
     "test:data": "node tests/data.test.mjs",
-    "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.mjs\"",
     "test:smoke": "node tests/smoke.mjs",
-    "serve": "python3 -m http.server 8802"
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.mjs\"",
+    "serve": "python3 -m http.server 8802",
+    "browsers": "playwright install chromium"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.12.2",
     "firebase-tools": "^13.29.1",
-    "firebase": "^10.12.2"
+    "playwright": "1.56.1"
+  },
+  "engines": {
+    "node": ">=20.11 <23"
   }
 }
