@@ -88,6 +88,14 @@ const State = {
     // single field path that changed, which is what keeps three people editing the same
     // evening from overwriting one another.
     commit(change) {
+        // A write the model refused. Nothing is saved and nothing is sent, and the reason
+        // is said out loud - a refusal handled in silence looks exactly like a tap that
+        // did not register, and the person taps again.
+        if (change && change.refused) {
+            if (typeof askTell === 'function') askTell(change.reason);
+            return;
+        }
+
         this.save();
         if (change && change.path && typeof FarkadSync !== 'undefined') {
             FarkadSync.edit(change.path, change.value);
@@ -108,13 +116,23 @@ const State = {
     // skipped this landed on this device and nowhere else: the other two would keep
     // building the evening against a day they could not see.
     commitMany(changes) {
+        // Copying a day across can meet the two-site cap partway through. The rest of the
+        // copy still lands - refusing the whole thing over one worker would be a worse
+        // answer - and what did not is named once rather than per row.
+        const refused = (changes || []).filter(change => change && change.refused);
+        const accepted = (changes || []).filter(change => change && !change.refused);
+
         this.save();
         if (typeof FarkadSync !== 'undefined') {
-            changes.forEach(change => {
-                if (change && change.path) FarkadSync.edit(change.path, change.value);
+            accepted.forEach(change => {
+                if (change.path) FarkadSync.edit(change.path, change.value);
             });
         }
         render();
+
+        if (refused.length > 0 && typeof askTell === 'function') {
+            askTell(`${refused.length} רישומים לא נוספו: ${refused[0].reason}`);
+        }
     },
 
     worker(id) {

@@ -38,8 +38,31 @@ function renderReports() {
 
     clear(root);
     root.appendChild(renderRangePicker());
+    renderOverCapNotice(root);
     root.appendChild(renderPayrollTable());
     root.appendChild(renderInvoiceTable());
+}
+
+// Days recorded with more sites than the cap allows. They are NOT trimmed - those
+// entries are days somebody worked, and deleting data to satisfy a rule written
+// afterwards is the one thing a record of pay must not do. They are named here, on the
+// screen where the pay is worked out, because a day recorded at three sites means
+// somebody's day is written down wrong and the invoice is built from it.
+function renderOverCapNotice(root) {
+    const over = daysOverCap(State.schedule).filter(item => item.layer === 'actual');
+    if (over.length === 0) return;
+
+    const notice = el('p', 'hint hint-warn');
+    const days = over.slice(0, 3).map(item => {
+        const worker = State.worker(item.workerId);
+        const parsed = parseLocalDate(item.date);
+        return `${worker ? worker.name : item.workerId} ב-${formatFullDate(parsed)}`;
+    }).join(', ');
+
+    notice.textContent = `⚠️ ${over.length} ימים נרשמו עם יותר מ-${MAX_ENTRIES_PER_DAY} ` +
+        `אתרים (${days}${over.length > 3 ? '…' : ''}). הרישום נשמר כפי שהוא - ` +
+        'בדוק אותו לפני שמוציאים חשבון.';
+    root.appendChild(notice);
 }
 
 // One decision, made with one thumb: which period. The two raw date inputs exist for

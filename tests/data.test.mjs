@@ -734,4 +734,141 @@ function record(device, date, workerId, placeId, rate) {
             .find(r => r.workerId === 'w_03').amount === null);
 }
 
+// ---------------------------------------------------------------- the recording rules
+{
+    suite('the two-site cap belongs to the write, not the screen');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+
+    device.call('assignPlace', s, '2026-08-12', 'w_01', 'actual', 'p_01');
+    device.call('assignPlace', s, '2026-08-12', 'w_01', 'actual', 'p_02');
+    check('two sites in a day is allowed',
+        device.call('entriesFor', s, '2026-08-12', 'w_01', 'actual').length === 2);
+
+    // A third can arrive from a copy-yesterday, a migration decision, or another phone -
+    // none of which pass through the screen that knows about the limit.
+    const third = device.call('assignPlace', s, '2026-08-12', 'w_01', 'actual', 'p_03');
+    check('a third is refused by the model itself',
+        device.call('entriesFor', s, '2026-08-12', 'w_01', 'actual').length === 2,
+        String(device.call('entriesFor', s, '2026-08-12', 'w_01', 'actual').length));
+    check('and the refusal is returned, not swallowed',
+        third === null || (third && third.refused === true), JSON.stringify(third));
+
+    // Replacing a site that is already there is not a third site.
+    const same = device.call('assignPlace', s, '2026-08-12', 'w_01', 'actual', 'p_02');
+    check('re-assigning a site already recorded still works',
+        same && !same.refused
+        && device.call('entriesFor', s, '2026-08-12', 'w_01', 'actual').length === 2);
+}
+
+{
+    suite('data that is already over the cap is flagged, never trimmed');
+
+    const device = makeDevice();
+    seed(device);
+    // A day written by an older build, or by hand. Three sites, and they are real.
+    const s = device.call('normaliseSchedule', {
+        workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }],
+        places: [{ id: 'p_01', name: 'א' }, { id: 'p_02', name: 'ב' }, { id: 'p_03', name: 'ג' }],
+        days: {
+            '2026-08-12': {
+                plan: {},
+                actual: { w_01: { entries: [{ placeId: 'p_01' }, { placeId: 'p_02' }, { placeId: 'p_03' }] } }
+            }
+        },
+        updatedAt: '2026-08-12T18:00:00.000Z'
+    });
+
+    check('reading it keeps all three - nothing is thrown away on the way in',
+        device.call('entriesFor', s, '2026-08-12', 'w_01', 'actual').length === 3,
+        String(device.call('entriesFor', s, '2026-08-12', 'w_01', 'actual').length));
+
+    const flagged = device.call('daysOverCap', s);
+    check('and it is reported for a person to look at',
+        flagged.length === 1 && flagged[0].date === '2026-08-12' && flagged[0].workerId === 'w_01',
+        JSON.stringify(flagged));
+
+    check('a sound schedule flags nothing', (() => {
+        const clean = device.State.schedule;
+        device.call('assignPlace', clean, '2026-08-12', 'w_01', 'actual', 'p_01');
+        return device.call('daysOverCap', clean).length === 0;
+    })());
+}
+
+{
+    suite('two sites with the same name are not silently the same site');
+
+    const device = makeDevice();
+    const result = device.call('migrateV1', {
+        workers: ['דוד'],
+        places: ['הרצליה', 'הרצליה'],
+        weekStartDate: '2026-08-07',
+        assignments: [{ index: 0, value: 'הרצליה' }]
+    });
+
+    check('the duplicate name is reported',
+        result.issues.some(i => i.kind === 'duplicate-place-name'),
+        JSON.stringify(result.issues.map(i => i.kind)));
+    check('and the day is NOT attached to whichever came first',
+        device.call('entriesFor', result.schedule, '2026-08-07', 'w_01', 'actual').length === 0,
+        JSON.stringify(device.call('entriesFor', result.schedule, '2026-08-07', 'w_01', 'actual')));
+    check('it waits for a decision instead',
+        result.issues.some(i => i.kind === 'unknown-place' && i.value === 'הרצליה'),
+        JSON.stringify(result.issues.map(i => i.kind)));
+}
+
+{
+    suite('an archived site does not take its history with it');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+    device.call('assignPlace', s, '2026-08-12', 'w_01', 'actual', 'p_02');
+    s.places.find(p => p.id === 'p_02').active = false;
+
+    const invoice = device.call('invoiceReport', s, '2026-08-01', '2026-08-31');
+    const row = invoice.find(r => r.placeId === 'p_02');
+    check('the archived site is still in the invoice',
+        Boolean(row) && row.workerDays === 1, JSON.stringify(row && row.workerDays));
+    check('and still has its name, so the day is not attributed to nobody',
+        Boolean(row) && row.name === 'תל אביב', JSON.stringify(row && row.name));
+
+    const byDate = device.call('invoiceByDate', s, '2026-08-01', '2026-08-31');
+    check('and it appears in the day-by-day invoice too',
+        byDate.countAt('p_02', '2026-08-12') === 1, String(byDate.countAt('p_02', '2026-08-12')));
+}
+
+{
+    suite('the numbers are the same after a backup and a restore');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+    device.call('assignPlace', s, '2026-08-10', 'w_01', 'actual', 'p_01');
+    device.call('assignPlace', s, '2026-08-11', 'w_01', 'actual', 'p_01', 'double');
+    device.call('assignPlace', s, '2026-08-12', 'w_01', 'actual', 'p_01', 'normal', 3);
+    device.call('assignPlace', s, '2026-08-12', 'w_02', 'actual', 'p_02');
+    device.call('addAdvance', s, 'w_01', '2026-08-11', 250, '');
+    s.places.find(p => p.id === 'p_02').active = false;
+
+    const payBefore = device.call('payrollReport', s, '2026-08-01', '2026-08-31');
+    const invBefore = device.call('invoiceReport', s, '2026-08-01', '2026-08-31');
+
+    // Exported, then read back the way an import reads it.
+    const file = JSON.parse(JSON.stringify(s));
+    const back = device.call('normaliseSchedule', file);
+
+    same('the pay sheet is identical',
+        device.call('payrollReport', back, '2026-08-01', '2026-08-31'), payBefore);
+    same('and so is the invoice',
+        device.call('invoiceReport', back, '2026-08-01', '2026-08-31'), invBefore);
+
+    // And through the cloud form, which is the other shape the same data travels in.
+    const viaCloud = device.call('normaliseSchedule', device.call('cloudDocument', s));
+    same('the cloud round trip does not change them either',
+        device.call('payrollReport', viaCloud, '2026-08-01', '2026-08-31'), payBefore);
+}
+
 report();

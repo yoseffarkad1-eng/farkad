@@ -506,8 +506,13 @@ async function seedRoster(page) {
   });
   check('ids are never recycled',
     !minted.includes('w_09'), JSON.stringify(minted));
-  check('and never guessable from the roster, so two phones cannot collide',
-    !minted.some(id => /^w_\d+$/.test(id)) && new Set(minted).size === 3,
+  // Not "does it look random" - a random hex id can come out all digits, which is what
+  // the first version of this check tripped over. The property that matters is that it
+  // is not DERIVED from the roster: two phones holding the same list must not both
+  // arrive at the same next id.
+  check('and never derived from the roster, so two phones cannot collide',
+    !minted.includes('w_10') && new Set(minted).size === 3
+    && minted.every(id => id.length > 8),
     JSON.stringify(minted));
   await page.context().close();
 }

@@ -306,11 +306,46 @@ function assignPlace(schedule, date, workerId, layer, placeId, rate, extraHours)
     const existing = entriesFor(schedule, date, workerId, layer)
         .filter(entry => entry.placeId !== placeId);
 
+    // The cap is enforced HERE, not only on the screen that knows about it. A third site
+    // can arrive from a copy-yesterday, from a migration decision, or from another phone
+    // - none of which go through that screen. A day with three sites is still paid as one
+    // day, so it does not overpay anybody; it means somebody's day is recorded wrong, and
+    // recording it wrong quietly is what this refuses.
+    //
+    // The refusal is RETURNED. Swallowing it would leave a caller believing it wrote.
+    if (existing.length >= MAX_ENTRIES_PER_DAY) {
+        return {
+            refused: true,
+            reason: `אפשר לרשום עד ${MAX_ENTRIES_PER_DAY} אתרים ליום לעובד.`
+        };
+    }
+
     // Adding, not replacing: two sites in a day is the normal case here, so a second
     // assignment must not silently discard the first.
     const entries = existing.concat([makeEntry(placeId, rate, extraHours)]);
 
     return setWorkerDay(schedule, date, workerId, layer, { entries });
+}
+
+// Days already recorded above the cap. Reported, never trimmed: those entries are days
+// somebody worked, and deleting data to satisfy a rule written afterwards is the one
+// thing a record of pay must not do. They are surfaced so a person can look and decide.
+function daysOverCap(schedule) {
+    const over = [];
+
+    Object.keys(schedule.days || {}).sort().forEach(date => {
+        ['plan', 'actual'].forEach(layer => {
+            const side = (schedule.days[date] || {})[layer] || {};
+            Object.keys(side).forEach(workerId => {
+                const entries = (side[workerId] && side[workerId].entries) || [];
+                if (entries.length > MAX_ENTRIES_PER_DAY) {
+                    over.push({ date, layer, workerId, count: entries.length });
+                }
+            });
+        });
+    });
+
+    return over;
 }
 
 function unassignPlace(schedule, date, workerId, layer, placeId) {
