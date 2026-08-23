@@ -1586,6 +1586,54 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the day name fits
+{
+  // Reported from a phone with a screenshot: "יום ראשון" broken across two lines and
+  // lying on top of the buttons beside it. Six controls shared that row - the ☰, undo,
+  // redo, both arrows and the date - which left the day name about sixty pixels, and an
+  // unbreakable Hebrew word given sixty pixels does not fold, it spills sideways.
+  //
+  // Checked on every day of the week, because the names are not the same length and the
+  // one that broke is not the one anybody would test by hand.
+  for (const width of [320, 360, 390, 430]) {
+    const page = await open({ viewport: { width, height: 800 } });
+    await seedRoster(page);
+
+    for (const date of ['2026-08-23', '2026-08-24', '2026-08-25', '2026-08-26',
+                        '2026-08-27', '2026-08-28', '2026-08-29']) {
+      const seen = await page.evaluate(d => {
+        State.date = d;
+        render();
+        const name = document.querySelector('.day-label strong');
+        const box = name.getBoundingClientRect();
+        const near = [...document.querySelectorAll('.day-nav > *')]
+          .filter(node => !node.contains(name))
+          .map(node => node.getBoundingClientRect());
+        return {
+          text: name.textContent,
+          // scrollWidth past clientWidth is the word being cut; the ellipsis backstop
+          // catches the spill, but a shortened day name is still a failure.
+          cut: name.scrollWidth > name.clientWidth + 1,
+          lines: Math.round(box.height / parseFloat(getComputedStyle(name).lineHeight || 24)),
+          over: near.some(other => box.right > other.left + 1 && box.left < other.right - 1)
+        };
+      }, date);
+
+      check(`${seen.text} fits whole at ${width}px`, !seen.cut, JSON.stringify(seen));
+      check(`${seen.text} does not lie over a button at ${width}px`, !seen.over, JSON.stringify(seen));
+    }
+
+    const wide = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth,
+      viewport: window.innerWidth
+    }));
+    check(`and the header does not widen the page at ${width}px`,
+      wide.page <= wide.viewport + 1, JSON.stringify(wide));
+
+    await page.context().close();
+  }
+}
+
 // ---------------------------------------------------------------- notices that go away
 {
   // A notice that cannot be put away is read once and then looked past for good - and

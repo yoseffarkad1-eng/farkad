@@ -409,24 +409,14 @@ function renderDayHeader() {
     // finds. First child, so it holds the start corner on every visit.
     nav.appendChild(button('☰', 'btn-icon drawer-btn', openDayDrawer, 'בחר יום'));
 
-    // One step back, and one forward again, always in the same corner. The undo bar says
-    // what happened at the moment it happens; these are for the mistake noticed a name or
-    // two later. Both are labelled: a bare ↶ on a phone header is a symbol people guess
-    // at, and the guess is not worth making over a day's pay.
-    const undoBtn = button('↶ בטל', 'btn-secondary step-btn', runUndo, 'אין מה לבטל');
-    undoBtn.id = 'undoBtn';
-    undoBtn.disabled = true;
-    nav.appendChild(undoBtn);
-
-    const redoBtn = button('↷ שוב', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
-    redoBtn.id = 'redoBtn';
-    redoBtn.disabled = true;
-    nav.appendChild(redoBtn);
-
     // Time flows right-to-left on an RTL calendar, so back points RIGHT and forward
     // points LEFT. The chevrons are drawn by CSS pseudo-elements, because a bare ‹ in a
     // Hebrew string gets reordered by the bidi algorithm to wherever it pleases.
-    nav.appendChild(button('יום קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם'));
+    //
+    // "קודם" and not "יום קודם": the word יום appeared three times on this one line, and
+    // the two copies on the buttons were costing the day name sixty pixels it did not
+    // have. The full wording stays as the label a screen reader announces.
+    nav.appendChild(button('קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם'));
 
     // The title IS the date picker. A second full-width input row said the same date
     // twice - once as 12/08 and once as the browser's 08/12, which read as a bug.
@@ -439,7 +429,7 @@ function renderDayHeader() {
     label.addEventListener('click', () => openDayPicker());
     nav.appendChild(label);
 
-    nav.appendChild(button('יום הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא'));
+    nav.appendChild(button('הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא'));
     header.appendChild(nav);
 
     const picker = document.createElement('input');
@@ -459,16 +449,41 @@ function renderDayHeader() {
 
     const tools = el('div', 'day-tools');
 
+    // One step back, and one forward again, always in the same corner. The undo bar says
+    // what happened at the moment it happens; these are for the mistake noticed a name or
+    // two later. Both are labelled: a bare ↶ on a phone header is a symbol people guess
+    // at, and the guess is not worth making over a day's pay.
+    //
+    // They sit on the tools row rather than beside the date, because six controls on one
+    // line left the day name about sixty pixels to render "יום ראשון" in - and an
+    // unbreakable Hebrew word does not fold, it spills sideways across whatever is next
+    // to it. The row above is now only the date and the two ways to move it.
+    const steps = el('div', 'day-steps');
+
+    const undoBtn = button('↶ בטל', 'btn-secondary step-btn', runUndo, 'אין מה לבטל');
+    undoBtn.id = 'undoBtn';
+    undoBtn.disabled = true;
+    steps.appendChild(undoBtn);
+
+    const redoBtn = button('↷ שוב', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
+    redoBtn.id = 'redoBtn';
+    redoBtn.disabled = true;
+    steps.appendChild(redoBtn);
+
+    // "היום" joins them rather than standing alone: on a phone the mode toggle takes the
+    // full width of its line, so a button after it costs a whole third row of chrome
+    // above the list - and this screen is the list.
+    if (State.date !== todayStr()) {
+        steps.appendChild(button('היום', 'btn-secondary btn-today', () => {
+            hideUndo(); State.date = todayStr(); render();
+        }));
+    }
+    tools.appendChild(steps);
+
     const modes = el('div', 'layer-toggle mode-toggle mode-quiet');
     modes.appendChild(modeButton('workers', 'לפי עובדים'));
     modes.appendChild(modeButton('sites', 'לפי אתרים'));
     tools.appendChild(modes);
-
-    if (State.date !== todayStr()) {
-        tools.appendChild(button('היום', 'btn-secondary btn-today', () => {
-            hideUndo(); State.date = todayStr(); render();
-        }));
-    }
 
     header.appendChild(tools);
     return header;

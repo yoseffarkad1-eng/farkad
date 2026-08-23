@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v57';
+const APP_VERSION = 'v58';
 
 let currentView = 'day';
 
