@@ -19,9 +19,11 @@ service cloud.firestore {
     function allowed() {
       return request.auth != null && request.auth.token.email in [
         'yosef.farkad1@gmail.com',
-        'farkad1963@gmail.com'
-        // The third partner's address goes here when his Google account exists - add a
-        // comma to the line above and paste it in the console the same evening.
+        'farkad1963@gmail.com',
+        'mu.mahameed1992@gmail.com'
+        // A fourth goes here the same way: comma on the line above, address below, then
+        // Publish in the console. Lower case - the token's email arrives lower-cased and
+        // an address with a capital in it would match nobody.
       ];
     }
 
