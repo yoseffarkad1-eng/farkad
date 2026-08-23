@@ -61,6 +61,123 @@ function advanceId() {
     return 'a_' + Math.random().toString(36).slice(2, 10);
 }
 
+// ---------------------------------------------------------------- identity
+//
+// Ids used to be one past the highest in the list. Two phones holding the same roster -
+// which is the normal state of three people sharing one record - therefore handed the
+// same id to two different men, and from that moment every day recorded against it
+// belonged to whichever of them the reading device happened to have. That is a pay
+// sheet, not a display glitch, and nothing anywhere would have said so.
+//
+// A random id cannot collide by construction, so no coordination is needed and it works
+// offline, which is where the two additions actually happen.
+//
+// Ids ALREADY ISSUED are never touched. w_01 stays w_01: every day, advance and archived
+// copy in existence points at it, and renaming an id is the one operation that would
+// detach a man from his own history.
+function newEntityId(prefix) {
+    const bytes = (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID().replace(/-/g, '')
+        : Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+    return `${prefix}_${bytes.slice(0, 12)}`;
+}
+
+// What is wrong with a roster, said in sentences rather than repaired.
+//
+// A duplicate id in an imported file is genuinely ambiguous: two rows claim to be the
+// same person, their days are already merged under one id, and there is no way to tell
+// from here which day belonged to whom. Renumbering one of them silently would invent an
+// answer and hide the question. So the import stops and the file is left alone.
+function validateRosterIds(raw) {
+    const problems = [];
+
+    [['workers', 'עובד'], ['places', 'אתר']].forEach(([kind, label]) => {
+        const list = Array.isArray(raw && raw[kind]) ? raw[kind] : [];
+        const seen = new Set();
+
+        list.forEach((item, index) => {
+            const id = item && item.id !== undefined && item.id !== null ? String(item.id) : '';
+            const name = (item && item.name) ? String(item.name) : `#${index + 1}`;
+
+            if (!id) {
+                problems.push(`${label} "${name}" בקובץ בלי מזהה.`);
+                return;
+            }
+            if (seen.has(id)) {
+                problems.push(`המזהה ${id} מופיע ביותר מ${label} אחד ("${name}").`);
+                return;
+            }
+            seen.add(id);
+        });
+    });
+
+    return problems;
+}
+
+// ---------------------------------------------------------------- the wire form
+//
+// The document as it is stored in the cloud. It is the local schedule plus the roster a
+// SECOND time, keyed by id.
+//
+// The arrays alone were the problem: an array cannot be merged element by element, so a
+// roster change had to send the whole thing, and two phones each sending their own whole
+// roster meant the second one erased the first one's new man. His days stayed in the
+// document and his row left the report, so a week of somebody's pay went missing with
+// nothing on screen to say it had.
+//
+// Keyed by id, each man is his own field and two phones adding two men write two
+// different paths. Order is a field of its own, because the order IS meaningful - it is
+// the order every screen reads in - and it is the one part where last-write-wins costs
+// nothing: the worst case is a list in somebody else's preferred order.
+//
+// The arrays are still written, and that is deliberate. A phone that has not updated yet
+// reads them and sees a correct roster; it cannot see `roster` and never writes to it.
+// They can be dropped once all three devices are past v59 - not before.
+function cloudDocument(schedule) {
+    const wire = JSON.parse(JSON.stringify(schedule));
+    wire.roster = rosterDocument(schedule);
+    return wire;
+}
+
+function rosterDocument(schedule) {
+    const byId = list => {
+        const out = {};
+        (list || []).forEach(item => { if (item && item.id) out[String(item.id)] = item; });
+        return out;
+    };
+    const ids = list => (list || []).filter(item => item && item.id).map(item => String(item.id));
+
+    return {
+        workers: byId(schedule.workers),
+        places: byId(schedule.places),
+        workerOrder: ids(schedule.workers),
+        placeOrder: ids(schedule.places)
+    };
+}
+
+// The reverse: a roster map plus an order, back into the ordered array the app works in.
+// Anything present in the map but missing from the order is appended rather than dropped
+// - an order field written by a device that had not yet seen a new man must not be able
+// to remove him.
+function rosterList(map, order) {
+    const entries = (map && typeof map === 'object') ? map : {};
+    const wanted = Array.isArray(order) ? order.map(String) : [];
+    const out = [];
+    const used = new Set();
+
+    wanted.forEach(id => {
+        if (entries[id] && !used.has(id)) {
+            used.add(id);
+            out.push(entries[id]);
+        }
+    });
+    Object.keys(entries).sort().forEach(id => {
+        if (!used.has(id)) out.push(entries[id]);
+    });
+
+    return out;
+}
+
 function advancePath(id) {
     return `advances.${id}`;
 }

@@ -236,16 +236,22 @@ function record(device, date, workerId, placeId, rate) {
     check('editing the same field again does not queue it twice',
         device.Sync.pendingCount() === 2, String(device.Sync.pendingCount()));
 
-    // A roster change is two more paths, and it has to queue with no cloud too - a
-    // worker added offline who never reaches the cloud takes his days with him.
+    // A roster change queues with no cloud too - a worker added offline who never
+    // reaches the cloud takes his days with him. It is one path per person, plus the
+    // order, plus the whole array kept for devices still on the older build: for three
+    // workers and two places that is 5 + 4 on top of the two days.
     device.State.commitRoster();
-    check('a roster change queues as well',
-        device.Sync.pendingCount() === 4, String(device.Sync.pendingCount()));
+    check('a roster change queues one path per person, not one whole array',
+        device.Sync.pendingCount() === 11, String(device.Sync.pendingCount()));
+    check('and the paths are per-entity',
+        device.Sync.pendingPaths().includes('roster.workers.w_01')
+        && device.Sync.pendingPaths().includes('roster.workerOrder'),
+        JSON.stringify(device.Sync.pendingPaths()));
 
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
     check('and the queue survives the app being closed',
-        reopened.Sync.pendingCount() === 4, String(reopened.Sync.pendingCount()));
+        reopened.Sync.pendingCount() === 11, String(reopened.Sync.pendingCount()));
 }
 
 {
@@ -437,6 +443,177 @@ function record(device, date, workerId, placeId, rate) {
         `${Object.keys(cloud.doc.days).length} of ${dates.length}`);
     check('with nothing left waiting',
         device.Sync.pendingCount() === 0, String(device.Sync.pendingCount()));
+}
+
+// ---------------------------------------------------------------- who is who
+{
+    suite('two devices naming new people at the same moment');
+
+    // max+1 gave both devices the same next id, so two different men were both w_04.
+    // From then on every day recorded against w_04 belonged to whichever of them the
+    // reading device happened to have - and that is a pay sheet, not a display glitch.
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+
+    const one = makeDevice({ deviceId: 'd_one' });
+    const two = makeDevice({ deviceId: 'd_two' });
+    [one, two].forEach(device => {
+        device.State.schedule = device.call('normaliseSchedule', cloud.doc);
+        device.State.save({ silent: true });
+    });
+
+    const idOne = one.State.nextWorkerId();
+    const idTwo = two.State.nextWorkerId();
+    check('two devices at the same baseline do not mint the same worker id',
+        idOne !== idTwo, `${idOne} / ${idTwo}`);
+    check('nor the same place id',
+        one.State.nextPlaceId() !== two.State.nextPlaceId());
+
+    // Each adds a different person, offline, then both come back.
+    one.State.schedule.workers.push({ id: idOne, name: 'אחמד', active: true, dailyRate: 400, hourlyRate: 0 });
+    one.State.commitRoster();
+    two.State.schedule.workers.push({ id: idTwo, name: 'ח\'אלד', active: true, dailyRate: 450, hourlyRate: 0 });
+    two.State.commitRoster();
+
+    // A day each, against their own new man.
+    one.State.commit(one.call('assignPlace', one.State.schedule, '2026-08-12', idOne, 'actual', 'p_01'));
+    two.State.commit(two.call('assignPlace', two.State.schedule, '2026-08-12', idTwo, 'actual', 'p_01'));
+
+    one.Sync.pushDelayMs = TICK;
+    two.Sync.pushDelayMs = TICK;
+    one.Sync.connect(cloud.adapter);
+    await settle(TICK * 20);
+    two.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+    one.Sync.flush();
+    two.Sync.flush();
+    await settle(TICK * 30);
+
+    const finalRoster = one.call('normaliseSchedule', cloud.doc);
+    const ids = finalRoster.workers.map(w => w.id);
+    check('both new men are in the cloud roster',
+        ids.includes(idOne) && ids.includes(idTwo), JSON.stringify(ids));
+    check('and neither replaced the other',
+        finalRoster.workers.length === 3, String(finalRoster.workers.length));
+
+    const names = finalRoster.workers.map(w => w.name);
+    check('with their own names and rates intact',
+        names.includes('אחמד') && names.includes('ח\'אלד'), JSON.stringify(names));
+
+    // The whole point: the days did not follow the wrong man.
+    check('each day belongs to the man it was recorded against',
+        one.call('entriesFor', finalRoster, '2026-08-12', idOne, 'actual').length === 1
+        && one.call('entriesFor', finalRoster, '2026-08-12', idTwo, 'actual').length === 1);
+
+    const pay = one.call('payrollReport', finalRoster, '2026-08-01', '2026-08-31');
+    check('and so does the pay',
+        pay.find(r => r.workerId === idOne).amount === 400
+        && pay.find(r => r.workerId === idTwo).amount === 450,
+        JSON.stringify(pay.map(r => [r.name, r.amount])));
+}
+
+{
+    suite('ids that already exist are left exactly as they are');
+
+    const device = makeDevice();
+    seed(device);
+    check('an old-style roster keeps its old-style ids',
+        device.State.schedule.workers.map(w => w.id).join() === 'w_01,w_02,w_03');
+
+    const days = device.State.schedule;
+    device.call('assignPlace', days, '2026-08-12', 'w_01', 'actual', 'p_01');
+    check('and days recorded against them still resolve',
+        device.call('entriesFor', days, '2026-08-12', 'w_01', 'actual').length === 1);
+
+    // Enough of them that a collision would show up rather than being lucky.
+    const minted = new Set();
+    for (let i = 0; i < 500; i += 1) minted.add(device.call('newEntityId', 'w'));
+    check('a new id is not a number one past the last one',
+        !/^w_\d+$/.test([...minted][0]), [...minted][0]);
+    check('and five hundred of them are five hundred different ids',
+        minted.size === 500, String(minted.size));
+}
+
+{
+    suite('an import with a broken roster stops and asks');
+
+    const device = makeDevice();
+    const check1 = device.call('validateRosterIds', {
+        workers: [
+            { id: 'w_01', name: 'דוד' },
+            { id: 'w_01', name: 'מישהו אחר' }
+        ],
+        places: [{ id: 'p_01', name: 'הרצליה' }]
+    });
+    check('a duplicate worker id is reported, not quietly renumbered',
+        check1.length === 1 && check1[0].includes('w_01'), JSON.stringify(check1));
+
+    const check2 = device.call('validateRosterIds', {
+        workers: [{ id: '', name: 'בלי מזהה' }],
+        places: [{ id: 'p_01', name: 'הרצליה' }]
+    });
+    check('so is a missing id', check2.length === 1, JSON.stringify(check2));
+
+    const clean = device.call('validateRosterIds', {
+        workers: [{ id: 'w_01' }, { id: 'w_02' }],
+        places: [{ id: 'p_01' }]
+    });
+    check('and a sound file reports nothing', clean.length === 0, JSON.stringify(clean));
+}
+
+{
+    suite('a device still on the old wire format is understood');
+
+    // The cloud document written by a build that only knew arrays. A device on the new
+    // one has to read it correctly, or updating first is what loses the roster.
+    const device = makeDevice();
+    const legacy = {
+        schemaVersion: 2,
+        workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: {}, advances: {},
+        updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_old'
+    };
+    const read = device.call('normaliseSchedule', legacy);
+    check('an array-only roster still reads',
+        read.workers.length === 1 && read.places.length === 1,
+        JSON.stringify([read.workers.length, read.places.length]));
+
+    // And the new build keeps writing the arrays, so a device that has NOT updated can
+    // still read what a device that has updated wrote.
+    const wire = device.call('cloudDocument', read);
+    check('and the new format still carries the arrays for them to read',
+        Array.isArray(wire.workers) && wire.workers.length === 1,
+        JSON.stringify(Object.keys(wire)));
+    check('alongside the per-entity roster',
+        Boolean(wire.roster && wire.roster.workers && wire.roster.workers.w_01),
+        JSON.stringify(wire.roster && Object.keys(wire.roster)));
+}
+
+{
+    suite('roster order is its own field, not a reason to resend everyone');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    await wait();
+
+    device.State.schedule.workers.reverse();
+    device.State.commitRoster();
+    await wait();
+
+    const read = device.call('normaliseSchedule', cloud.doc);
+    check('the new order reached the cloud',
+        read.workers.map(w => w.id).join() === 'w_03,w_02,w_01',
+        JSON.stringify(read.workers.map(w => w.id)));
 }
 
 // ---------------------------------------------------------------- money

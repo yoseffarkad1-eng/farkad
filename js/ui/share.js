@@ -468,6 +468,18 @@ function readBackupFile(parsed) {
         };
     }
 
+    // Checked BEFORE anything is replaced, and never repaired. Two rows claiming the same
+    // id is genuinely ambiguous - their days are already merged under that one id and
+    // nothing here can tell which day belonged to whom. Renumbering one of them silently
+    // would invent an answer and hide the question, so the file is refused instead and
+    // the existing data is not touched.
+    const problems = validateRosterIds(parsed);
+    if (problems.length > 0) {
+        const error = new Error('roster ids are not sound');
+        error.problems = problems;
+        throw error;
+    }
+
     const schedule = normaliseSchedule(parsed);
     if (parsed.workers.length > 0 && schedule.workers.length === 0) {
         throw new Error('no workers survived normalisation');
@@ -494,7 +506,19 @@ function importBackup(event) {
             // Validated before anything is replaced. The old version emptied the roster
             // first and only then discovered the file was unusable.
             console.error('Import failed:', error);
-            askTell('הקובץ אינו קובץ גיבוי תקין. הנתונים הקיימים לא השתנו.');
+            // A roster problem is named. "Not a valid backup" is true and useless when
+            // the file is perfectly readable and the trouble is two men sharing an id -
+            // that is something the person can go and look at.
+            if (error && error.problems) {
+                askTell({
+                    title: 'הקובץ לא נטען',
+                    message: 'יש בעיה במזהי העובדים או האתרים, ולכן הקובץ לא נטען כדי לא ' +
+                        'לערבב רישומים בין אנשים. הנתונים הקיימים לא השתנו.\n\n' +
+                        error.problems.join('\n')
+                });
+            } else {
+                askTell('הקובץ אינו קובץ גיבוי תקין. הנתונים הקיימים לא השתנו.');
+            }
             event.target.value = '';
             return;
         }

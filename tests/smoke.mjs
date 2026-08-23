@@ -496,12 +496,19 @@ async function seedRoster(page) {
   check('their recorded history survives',
     (await page.evaluate(() => entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 1);
 
-  // a new worker must never reuse an archived id
-  await page.evaluate(() => {
+  // A new worker must never reuse an archived id - and must not be one past the highest
+  // either. Two phones holding the same roster used to hand the same next id to two
+  // different men, and every day recorded against it then belonged to whichever of them
+  // the reading device happened to have.
+  const minted = await page.evaluate(() => {
     State.schedule.workers = [{ id: 'w_09', name: 'ותיק', active: false }];
+    return [State.nextWorkerId(), State.nextWorkerId(), State.nextWorkerId()];
   });
   check('ids are never recycled',
-    (await page.evaluate(() => State.nextWorkerId())) === 'w_10');
+    !minted.includes('w_09'), JSON.stringify(minted));
+  check('and never guessable from the roster, so two phones cannot collide',
+    !minted.some(id => /^w_\d+$/.test(id)) && new Set(minted).size === 3,
+    JSON.stringify(minted));
   await page.context().close();
 }
 
@@ -2093,7 +2100,12 @@ async function seedRoster(page) {
     { name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from(broken, 'utf8') });
   await page.waitForTimeout(400);
   check('a file whose roster does not survive reading is refused, not imported empty',
-    (await page.textContent('#askMessage')).includes('אינו קובץ גיבוי תקין'));
+    (await page.textContent('#askMessage')).includes('לא השתנו'));
+  // And it says WHAT is wrong with it. "Not a valid backup" is true and useless when the
+  // file reads perfectly and the trouble is a man with no id.
+  check('and names the problem rather than calling the file unreadable',
+    (await page.textContent('#askMessage')).includes('בלי מזהה'),
+    await page.textContent('#askMessage'));
   await page.click('#askOk');
   await page.waitForTimeout(200);
   check('and the existing data is untouched',

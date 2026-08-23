@@ -101,6 +101,9 @@ const FarkadSync = {
     _retryTimer: null,
     _loaded: false,
     _stamp: null,
+    // The roster as the cloud last showed it, keyed by id. What a roster edit is compared
+    // against to work out which people actually changed.
+    _remoteRoster: { workers: {}, places: {} },
 
     // adapter: {
     //   update(patchByFieldPath) -> Promise   merge these fields, leave the rest alone
@@ -277,7 +280,7 @@ const FarkadSync = {
         if (this._archivedOn === key) return;
         this._archivedOn = key;
 
-        Promise.resolve(this.adapter.archive(key, schedule)).catch(error => {
+        Promise.resolve(this.adapter.archive(key, cloudDocument(schedule))).catch(error => {
             // 'already-exists'/'permission-denied' here means another device got there
             // first, which is the intended outcome, not a fault worth reporting.
             console.info('Daily cloud copy not written:', error && error.code);
@@ -294,18 +297,40 @@ const FarkadSync = {
         return Promise.resolve(this.adapter.archiveRead(key));
     },
 
-    // The roster - who exists, where they work, and what they are paid. It travels as two
-    // whole-field writes rather than a path per worker, because its ORDER is meaningful
-    // and an array cannot be merged element-wise anyway.
+    // The roster - who exists, where they work, and what they are paid.
     //
-    // Without this, a roster change was saved locally and never sent, while receive()
-    // adopted the remote roster wholesale: adding a worker on one phone and recording him
-    // for a week meant his days synced fine and HE did not, so the next snapshot from
-    // another phone deleted him - and the week of pay with him, silently, because the
-    // reports iterate the roster.
+    // It used to travel as two whole arrays, and an array cannot be merged element by
+    // element: two phones each sending their own whole roster meant the second erased the
+    // first one's new man. His days stayed in the document and his row left the report,
+    // so a week of somebody's pay went missing with nothing on screen to say so.
+    //
+    // One path per person now, so two phones adding two people write two different
+    // fields. Order is its own field, and last-write-wins on the order costs nothing -
+    // the worst case is a list in somebody else's preferred order.
+    //
+    // Only what CHANGED is queued, measured against the last roster this device received
+    // from the cloud. Sending everyone on every roster edit would let a device that has
+    // not yet seen a rate change put its stale copy of that man back.
+    //
+    // The whole arrays are still sent alongside, and that is deliberate: a phone that has
+    // not updated reads them and sees a correct roster. They can stop being written once
+    // all three devices are past v59 - not before.
     editRoster(schedule) {
-        this.queue('workers', schedule.workers);
-        this.queue('places', schedule.places);
+        [['workers', 'workerOrder'], ['places', 'placeOrder']].forEach(([kind, orderKey]) => {
+            const known = this._remoteRoster[kind] || {};
+
+            (schedule[kind] || []).forEach(item => {
+                if (!item || !item.id) return;
+                const before = known[item.id];
+                if (before && JSON.stringify(before) === JSON.stringify(item)) return;
+                this.queue(`roster.${kind}.${item.id}`, item);
+            });
+
+            this.queue(`roster.${orderKey}`,
+                (schedule[kind] || []).filter(item => item && item.id).map(item => String(item.id)));
+            this.queue(kind, schedule[kind]);
+        });
+
         if (!this.adapter) return;
         this.scheduleFlush();
     },
@@ -438,7 +463,7 @@ const FarkadSync = {
 
         // normaliseSchedule rather than the live object: it returns a clean copy of a
         // known shape, so a stray field picked up locally cannot be what the rules reject.
-        const seed = normaliseSchedule(State.schedule);
+        const seed = cloudDocument(normaliseSchedule(State.schedule));
         Object.keys(patch).forEach(path => writeFieldPath(seed, path, patch[path]));
 
         // The rules require a timestamp on every write, and the merge rule depends on it.
@@ -461,7 +486,7 @@ const FarkadSync = {
         const superseded = this._outbox;
         this._stamp = null;
 
-        return Promise.resolve(this.adapter.save(data))
+        return Promise.resolve(this.adapter.save(cloudDocument(data)))
             .then(() => {
                 // Cleared only now. The pending edits belong to the state that was just
                 // replaced on purpose, so they are genuinely superseded - but only once
@@ -516,6 +541,7 @@ const FarkadSync = {
         }
 
         const remote = normaliseSchedule(raw);
+        this.rememberRemoteRoster(remote);
 
         // A document nobody has ever written to - a project connected for the first time.
         // Adopting it would empty this device to match an empty cloud, so this device's
@@ -554,6 +580,21 @@ const FarkadSync = {
         if (this.pendingCount() > 0) this.scheduleFlush();
     },
 
+    // What the cloud last showed, so a roster edit can send only the people who actually
+    // changed. Taken from the NORMALISED roster, not the raw document, so a device on the
+    // old wire format and one on the new are compared on the same footing.
+    rememberRemoteRoster(schedule) {
+        const byId = list => {
+            const out = {};
+            (list || []).forEach(item => { if (item && item.id) out[String(item.id)] = item; });
+            return out;
+        };
+        this._remoteRoster = {
+            workers: byId(schedule.workers),
+            places: byId(schedule.places)
+        };
+    },
+
     // Edits typed here in the last second or so, or queued after a failed send. They are
     // held as (path, value) pairs, so putting them back on top of a freshly adopted
     // document is a matter of writing each one in again - otherwise the person watches
@@ -566,6 +607,14 @@ const FarkadSync = {
         // acknowledged - including a send that is open right this second - is here.
         const pending = [...this._outbox.entries()]
             .sort((a, b) => a[1].seq - b[1].seq);
+
+        // Which lists already have a per-person edit waiting. The legacy whole-array
+        // entry is queued next to them and would otherwise be applied last and undo them.
+        const perEntity = new Set();
+        pending.forEach(([path]) => {
+            const parts = path.split('.');
+            if (parts.length === 3 && parts[0] === 'roster') perEntity.add(parts[1]);
+        });
 
         pending.forEach(([path, item]) => {
             const value = item.value;
@@ -590,10 +639,41 @@ const FarkadSync = {
                 return;
             }
 
-            // The roster, queued whole. A worker added seconds ago must not be dropped
-            // by the snapshot that arrives before the send completes.
+            // One person, queued by id. A worker added seconds ago must not be dropped by
+            // the snapshot that arrives before the send completes.
+            if (parts.length === 3 && parts[0] === 'roster'
+                && (parts[1] === 'workers' || parts[1] === 'places')) {
+                const list = schedule[parts[1]] || [];
+                const at = list.findIndex(item => item && String(item.id) === parts[2]);
+                if (at === -1) list.push(value);
+                else list[at] = value;
+                schedule[parts[1]] = list;
+                return;
+            }
+
+            if (parts.length === 2 && parts[0] === 'roster'
+                && (parts[1] === 'workerOrder' || parts[1] === 'placeOrder')) {
+                const kind = parts[1] === 'workerOrder' ? 'workers' : 'places';
+                const byId = new Map((schedule[kind] || [])
+                    .filter(item => item && item.id)
+                    .map(item => [String(item.id), item]));
+                const ordered = [];
+                (Array.isArray(value) ? value : []).forEach(id => {
+                    const item = byId.get(String(id));
+                    if (item) { ordered.push(item); byId.delete(String(id)); }
+                });
+                // Anyone the pending order had not heard of yet keeps his place rather
+                // than being dropped by it.
+                byId.forEach(item => ordered.push(item));
+                schedule[kind] = ordered;
+                return;
+            }
+
+            // The legacy whole-array form, still queued for devices that only read it.
+            // Applied only when nothing per-entity has already spoken for this list -
+            // otherwise a stale array would undo the per-person edits above.
             if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
-                schedule[parts[0]] = value;
+                if (!perEntity.has(parts[0])) schedule[parts[0]] = value;
             }
         });
     },

@@ -160,23 +160,13 @@ const State = {
     },
 
     nextWorkerId() {
-        return nextId(this.schedule.workers, 'w');
+        return newEntityId('w');
     },
 
     nextPlaceId() {
-        return nextId(this.schedule.places, 'p');
+        return newEntityId('p');
     }
 };
-
-// Ids must never be reused: a recycled id would silently attach an old assignment to a
-// new person. Always one past the highest ever issued, not the array length.
-function nextId(list, prefix) {
-    const highest = list.reduce((max, item) => {
-        const match = /^[wp]_(\d+)$/.exec(item.id || '');
-        return match ? Math.max(max, Number(match[1])) : max;
-    }, 0);
-    return `${prefix}_${String(highest + 1).padStart(2, '0')}`;
-}
 
 // Accepts anything shaped roughly right and fills in what is missing, so a document
 // written by an older build - or a half-finished remote write - cannot crash the app.
@@ -184,7 +174,19 @@ function normaliseSchedule(raw) {
     const schedule = emptySchedule();
     if (!raw || typeof raw !== 'object') return schedule;
 
-    schedule.workers = (Array.isArray(raw.workers) ? raw.workers : [])
+    // The roster is read from the per-entity form when the document has one, and from
+    // the plain arrays otherwise. Both shapes exist on purpose: the arrays are what a
+    // device still on an older build writes and reads, and adopting a document written
+    // by one of those must not empty the roster.
+    const roster = (raw.roster && typeof raw.roster === 'object') ? raw.roster : null;
+    const rawWorkers = (roster && roster.workers && typeof roster.workers === 'object')
+        ? rosterList(roster.workers, roster.workerOrder)
+        : raw.workers;
+    const rawPlaces = (roster && roster.places && typeof roster.places === 'object')
+        ? rosterList(roster.places, roster.placeOrder)
+        : raw.places;
+
+    schedule.workers = (Array.isArray(rawWorkers) ? rawWorkers : [])
         .filter(w => w && w.id)
         .map(w => ({
             id: String(w.id),
@@ -198,7 +200,7 @@ function normaliseSchedule(raw) {
             active: w.active !== false
         }));
 
-    schedule.places = (Array.isArray(raw.places) ? raw.places : [])
+    schedule.places = (Array.isArray(rawPlaces) ? rawPlaces : [])
         .filter(p => p && p.id)
         .map(p => ({
             id: String(p.id),
