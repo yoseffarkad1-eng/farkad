@@ -1206,6 +1206,62 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- one build per session
+{
+  // The page used to be network-first while the scripts were cache-first. Deploy a new
+  // version while a phone is running the old one and the next navigation fetched the NEW
+  // page against the OLD scripts - and wrote that page into the old version's cache, so
+  // every offline launch afterwards opened the mismatch too. A page and a sync layer from
+  // different builds is a data failure, not a rendering one.
+  const page = await open();
+  await page.waitForTimeout(1500);
+
+  const build = await page.evaluate(() => {
+    const tag = document.querySelector('meta[name="farkad-build"]');
+    return tag && tag.getAttribute('content');
+  });
+  check('the page says which build it is', build === APP_VERSION_EXPECTED,
+    `page=${build} app=${APP_VERSION_EXPECTED}`);
+
+  // The document must come from the cache the current worker owns, and must not be
+  // replaced there by whatever the network happens to be serving.
+  const served = await page.evaluate(async () => {
+    const keys = await caches.keys();
+    const cache = await caches.open(keys[0]);
+    const before = await cache.match('./index.html').then(r => r && r.text());
+
+    // A navigation, the way a reload is one.
+    await fetch('index.html', { mode: 'navigate' }).then(r => r.text()).catch(() => '');
+    const after = await cache.match('./index.html').then(r => r && r.text());
+
+    return { cached: Boolean(before), unchanged: before === after, caches: keys.length };
+  });
+  check('the document is served from this version\'s cache', served.cached);
+  check('and a navigation does not overwrite it', served.unchanged);
+  check('exactly one version cache exists at a time', served.caches === 1,
+    String(served.caches));
+
+  // A build mismatch is noticed and stops the app writing, rather than saving an edit in
+  // a shape the other half of the app does not read.
+  const blocked = await page.evaluate(() => {
+    document.querySelector('meta[name="farkad-build"]').setAttribute('content', 'v1');
+    checkBuildConsistency();
+    const before = Store.get('scheduleData:v2');
+    State.schedule.workers.push({ id: 'w_zz', name: 'לא אמור להישמר', active: true });
+    State.save();
+    return {
+      banner: document.getElementById('crashBanner').style.display !== 'none',
+      text: document.getElementById('crashBanner').textContent,
+      unchanged: Store.get('scheduleData:v2') === before
+    };
+  });
+  check('a page and scripts from different builds is noticed', blocked.banner);
+  check('and named, with both versions', blocked.text.includes('v1'), blocked.text.slice(0, 90));
+  check('and nothing is written while they disagree', blocked.unchanged);
+
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- day: by worker
 // The paper being copied from is a grid: names down the side, the site written in the
 // middle. So the default view is the roster in its own fixed order, and the order never
@@ -2848,6 +2904,17 @@ async function seedRoster(page) {
     fetch('sw.js').then(r => r.text()).then(t => (t.match(/farkad-(v\d+)/) || [])[1]));
   check('the shell version and the app version agree',
     swVersion === APP_VERSION_EXPECTED, `sw=${swVersion} app=${APP_VERSION_EXPECTED}`);
+
+  // Three strings now say which build this is - the cache name, the scripts, and the
+  // page - and the whole point of the third is that a session where they disagree is
+  // running two builds at once. Bumping two of the three is exactly the mistake this
+  // catches, and it would otherwise show up as the app refusing to record.
+  const pageVersion = await page.evaluate(() =>
+    fetch('index.html').then(r => r.text())
+      .then(t => (t.match(/name="farkad-build" content="(v\d+)"/) || [])[1]));
+  check('and so does the build stamped on the page',
+    pageVersion === APP_VERSION_EXPECTED,
+    `page=${pageVersion} app=${APP_VERSION_EXPECTED}`);
   await page.context().close();
 }
 

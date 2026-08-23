@@ -65,6 +65,12 @@ const State = {
     },
 
     save(options) {
+        // The page and the scripts are from different builds. Writing now would put an
+        // edit on disk in a shape written by half of one version and read by half of
+        // another, which is worse than not recording it - what is already saved stays
+        // saved, and the banner says to refresh. See checkBuildConsistency in app.js.
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return;
+
         this.schedule.updatedAt = new Date().toISOString();
         this.schedule.updatedBy = syncDeviceId();
         Store.set(V2_KEY, JSON.stringify(this.schedule));
@@ -108,6 +114,7 @@ const State = {
     // as this device's, at this device's clock - and that stamp is what every later
     // comparison is made against.
     persist() {
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return;
         Store.set(V2_KEY, JSON.stringify(this.schedule));
     },
 

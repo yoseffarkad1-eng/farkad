@@ -73,6 +73,15 @@ function registerOffline() {
         // update - reloading there makes every first visit load twice, and reload the
         // screen out from under whatever the person had already started typing.
         if (!applyingUpdate) return;
+        if (midEdit()) {
+            // Come back to it. The new worker is already in control; the page catches up
+            // as soon as the dialog is closed or the field is left.
+            setTimeout(function retry() {
+                if (midEdit()) { setTimeout(retry, 2000); return; }
+                location.reload();
+            }, 2000);
+            return;
+        }
         location.reload();
     });
 }
@@ -87,6 +96,20 @@ function showUpdateBanner(worker) {
     banner.appendChild(button('רענן עכשיו', 'btn-secondary', applyUpdate));
     banner.appendChild(button('אחר כך', 'btn-icon', () => { banner.style.display = 'none'; }));
     banner.style.display = '';
+}
+
+// Is somebody in the middle of something a reload would throw away?
+//
+// Every edit is written to disk the moment it is made, so there is no unsaved schedule -
+// but there is unsaved TYPING: a worker's name half entered in a dialog, an amount in an
+// advance, a site being renamed. A reload takes that with it, and an update the person
+// did not ask for at that exact second is not worth it.
+function midEdit() {
+    const active = document.activeElement;
+    if (active && /^(INPUT|TEXTAREA)$/.test(active.tagName) && active.value) return true;
+
+    return [...document.querySelectorAll('.modal')]
+        .some(modal => modal.style.display && modal.style.display !== 'none');
 }
 
 function applyUpdate() {
@@ -139,7 +162,7 @@ function checkForUpdate() {
                 swRegistration.waiting.postMessage('skip-waiting');
                 // controllerchange reloads; this is the backstop for when it does not
                 // arrive, which is common enough on iOS to be worth covering.
-                setTimeout(() => location.reload(), 2000);
+                setTimeout(() => { if (!midEdit()) location.reload(); }, 2000);
                 return;
             }
             if (swRegistration.installing) {
