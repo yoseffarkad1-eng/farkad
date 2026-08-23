@@ -296,10 +296,106 @@ function ensureDay(schedule, date, layer) {
     return schedule.days[date][layer];
 }
 
+// ---------------------------------------------------------------- what a day was worth
+//
+// The rate a day was worked at belongs to the DAY, not to the worker's row in the roster.
+//
+// It used to be read from the roster at report time, so raising somebody's daily rate
+// silently restated every day they had ever worked - including days already invoiced to
+// a client and already paid. Correcting a typo in a rate did the same thing. The number
+// on last account's pay sheet would simply be different the next time it was opened, with
+// nothing to say it had changed.
+//
+// So a day records what it was worth when it was recorded, and keeps it through every
+// later edit to that day.
+function currentRates(schedule, workerId) {
+    const worker = (schedule.workers || []).find(w => w && w.id === workerId);
+    if (!worker) return null;
+
+    const daily = Number(worker.dailyRate) || 0;
+    const hourly = Number(worker.hourlyRate) || 0;
+    // Nothing worth stamping. A worker with no rate yet is a rate that has not been
+    // decided, and freezing "no rate" onto the day would make it permanent.
+    if (daily <= 0 && hourly <= 0) return null;
+
+    return { daily, hourly };
+}
+
+// What a given day should be paid at. The stamp if it has one; the roster otherwise.
+//
+// The fallback is what makes this safe to ship over data that already exists: every day
+// recorded before this carries no stamp and goes on behaving exactly as it did. Stamping
+// those retroactively would be inventing what somebody was paid, which is not a decision
+// this code is allowed to take - see planRateStamping.
+function ratesForDay(schedule, date, workerId, worker) {
+    const record = workerDay(schedule, date, workerId, 'actual');
+    if (record && record.rates) {
+        return {
+            daily: Number(record.rates.daily) || 0,
+            hourly: Number(record.rates.hourly) || 0,
+            stamped: true
+        };
+    }
+    return {
+        daily: Number(worker.dailyRate) || 0,
+        hourly: Number(worker.hourlyRate) || 0,
+        stamped: false
+    };
+}
+
 function setWorkerDay(schedule, date, workerId, layer, record) {
+    const previous = workerDay(schedule, date, workerId, layer);
     const side = ensureDay(schedule, date, layer);
-    side[workerId] = record;
-    return { path: fieldPath(date, layer, workerId), value: record };
+
+    const next = {};
+    Object.keys(record).forEach(key => { next[key] = record[key]; });
+
+    if (previous && previous.rates) {
+        // Already stamped. Removing one of two sites, changing a rate band, correcting a
+        // site - none of those are a reason to restate what the day was worth.
+        next.rates = previous.rates;
+    } else if (layer === 'actual' && !record.absent && (record.entries || []).length > 0) {
+        const rates = currentRates(schedule, workerId);
+        if (rates) next.rates = rates;
+    }
+
+    side[workerId] = next;
+    return { path: fieldPath(date, layer, workerId), value: next };
+}
+
+// What stamping the days that carry no rate WOULD do. It does not do it.
+//
+// Every day recorded before rates were stamped has no confirmed historical rate: the
+// roster holds today's number, and whether that is what the man was actually paid in
+// March is not something anyone can read out of this data. Writing today's rate onto
+// those days would freeze a guess into the pay record and make it look confirmed.
+//
+// So this reports the change and stops. The decision is the owner's.
+function planRateStamping(schedule) {
+    const changes = [];
+
+    Object.keys(schedule.days || {}).sort().forEach(date => {
+        const side = (schedule.days[date] || {}).actual || {};
+        Object.keys(side).forEach(workerId => {
+            const record = side[workerId];
+            if (!record || record.rates) return;
+            if (record.absent || (record.entries || []).length === 0) return;
+
+            const rates = currentRates(schedule, workerId);
+            if (!rates) return;
+
+            const worker = (schedule.workers || []).find(w => w && w.id === workerId);
+            changes.push({
+                date,
+                workerId,
+                name: worker ? worker.name : workerId,
+                daily: rates.daily,
+                hourly: rates.hourly
+            });
+        });
+    });
+
+    return { days: changes.length, changes };
 }
 
 function assignPlace(schedule, date, workerId, layer, placeId, rate, extraHours) {
@@ -405,6 +501,13 @@ function payrollReport(schedule, fromDate, toDate) {
             absent: 0
         };
 
+        // Summed day by day, because each day is paid at the rate it was RECORDED at.
+        // Multiplying a day count by today's rate is what silently restated the past
+        // every time somebody's rate was corrected or raised.
+        let total = 0;
+        let unpriced = false;
+        const dailyRatesUsed = new Set();
+
         dates.forEach(date => {
             if (isAbsent(schedule, date, worker.id, 'actual')) {
                 row.absent++;
@@ -417,15 +520,23 @@ function payrollReport(schedule, fromDate, toDate) {
             row.daysWorked++;
             row.siteVisits += entries.length;
 
-            if (entries.some(entry => entryRate(entry) === RATE_DOUBLE)) {
-                row.doubleDays++;
-            } else {
-                row.normalDays++;
-            }
+            const doubled = entries.some(entry => entryRate(entry) === RATE_DOUBLE);
+            if (doubled) row.doubleDays++;
+            else row.normalDays++;
 
-            entries.forEach(entry => {
-                row.extraHours += entryExtraHours(entry);
-            });
+            const hours = entries.reduce((sum, entry) => sum + entryExtraHours(entry), 0);
+            row.extraHours += hours;
+
+            const rates = ratesForDay(schedule, date, worker.id, worker);
+            dailyRatesUsed.add(rates.daily);
+
+            if (rates.daily <= 0) {
+                unpriced = true;
+                return;
+            }
+            if (hours > 0 && rates.hourly <= 0) row.hoursUnpriced = true;
+
+            total += rates.daily * (doubled ? 2 : 1) + rates.hourly * hours;
         });
 
         const daily = Number(worker.dailyRate) || 0;
@@ -436,13 +547,14 @@ function payrollReport(schedule, fromDate, toDate) {
         // Only a number when there is a rate to multiply by. Showing 0 for a worker whose
         // rate has not been entered would read as "owed nothing", which is a different
         // thing entirely.
-        row.amount = daily > 0
-            ? daily * row.normalDays + daily * 2 * row.doubleDays + hourly * row.extraHours
-            : null;
-        // Hours worked at a rate nobody entered are worth 0 in that sum, which is a
-        // number that looks finished and is not. Flagged so the sheet can say so rather
-        // than quietly under-paying someone by however many hours they stayed.
-        row.hoursUnpriced = row.extraHours > 0 && hourly <= 0;
+        if (row.daysWorked === 0) row.amount = daily > 0 ? 0 : null;
+        else row.amount = unpriced ? null : total;
+
+        // More than one daily rate inside one period. Not an error - a raise mid-account
+        // is ordinary - but a sheet whose total cannot be checked by multiplying days by
+        // the rate on screen has to say so, or it reads as an arithmetic mistake.
+        row.mixedRates = dailyRatesUsed.size > 1;
+        row.hoursUnpriced = Boolean(row.hoursUnpriced);
 
         // What was earned and what is still owed are two different numbers, and paying
         // the first one twice is the whole reason advances are recorded at all.
@@ -457,9 +569,6 @@ function payrollReport(schedule, fromDate, toDate) {
 // question this answers is "why is my pay this number", and an answer computed a second
 // way is not an answer.
 function workerDaysReport(schedule, worker, fromDate, toDate) {
-    const daily = Number(worker.dailyRate) || 0;
-    const hourly = Number(worker.hourlyRate) || 0;
-
     return Object.keys(schedule.days || {})
         .filter(date => date >= fromDate && date <= toDate)
         .sort()
@@ -473,6 +582,7 @@ function workerDaysReport(schedule, worker, fromDate, toDate) {
 
             const doubled = entries.some(entry => entryRate(entry) === RATE_DOUBLE);
             const extraHours = entries.reduce((sum, entry) => sum + entryExtraHours(entry), 0);
+            const rates = ratesForDay(schedule, date, worker.id, worker);
 
             return {
                 date,
@@ -480,8 +590,12 @@ function workerDaysReport(schedule, worker, fromDate, toDate) {
                 entries,
                 doubled,
                 extraHours,
-                amount: daily > 0
-                    ? daily * (doubled ? 2 : 1) + hourly * extraHours
+                dailyRate: rates.daily,
+                // True when this day is not at the rate the roster shows today, so the
+                // line can say why it does not match.
+                historic: rates.stamped && rates.daily !== (Number(worker.dailyRate) || 0),
+                amount: rates.daily > 0
+                    ? rates.daily * (doubled ? 2 : 1) + rates.hourly * extraHours
                     : null
             };
         })

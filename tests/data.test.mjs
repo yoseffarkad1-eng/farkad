@@ -871,4 +871,104 @@ function record(device, date, workerId, placeId, rate) {
         device.call('payrollReport', viaCloud, '2026-08-01', '2026-08-31'), payBefore);
 }
 
+// ---------------------------------------------------------------- historical pay
+{
+    suite('changing a rate does not repay the past');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+
+    ['2026-08-09', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13'].forEach(date => {
+        device.call('assignPlace', s, date, 'w_01', 'actual', 'p_01');
+    });
+
+    const before = device.call('payrollReport', s, '2026-08-01', '2026-08-31')
+        .find(r => r.workerId === 'w_01');
+    check('five days at 400 is 2000', before.amount === 2000, String(before.amount));
+
+    // The raise. It applies from now on, not to work already done and possibly already
+    // invoiced - and a rate typed to fix a typo must not silently restate five days.
+    device.State.worker('w_01').dailyRate = 450;
+
+    const after = device.call('payrollReport', s, '2026-08-01', '2026-08-31')
+        .find(r => r.workerId === 'w_01');
+    check('after the rate changes to 450 the old days are still 2000',
+        after.amount === 2000, String(after.amount));
+
+    // The next day worked is at the new rate.
+    device.call('assignPlace', s, '2026-08-14', 'w_01', 'actual', 'p_01');
+    const next = device.call('payrollReport', s, '2026-08-01', '2026-08-31')
+        .find(r => r.workerId === 'w_01');
+    check('and the next day worked is at the new one', next.amount === 2450, String(next.amount));
+
+    check('the day-by-day sheet agrees with the total',
+        device.call('workerDaysReport', s, device.State.worker('w_01'), '2026-08-01', '2026-08-31')
+            .reduce((sum, day) => sum + (day.amount || 0), 0) === next.amount);
+
+    check('and the sheet says the period is not all at one rate',
+        next.mixedRates === true, JSON.stringify(next.mixedRates));
+}
+
+{
+    suite('a day recorded before rates were stamped keeps behaving as it did');
+
+    // The days already in the record carry no rate. Guessing one would be inventing what
+    // somebody was paid, so they follow the worker's current rate exactly as they always
+    // have - and that is a decision for the owner to take, not for this code.
+    const device = makeDevice();
+    seed(device);
+    const old = device.call('normaliseSchedule', {
+        workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: { '2026-07-01': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+        updatedAt: '2026-07-01T06:00:00.000Z'
+    });
+
+    check('it is paid at the current rate, as before',
+        device.call('payrollReport', old, '2026-07-01', '2026-07-31')
+            .find(r => r.workerId === 'w_01').amount === 400);
+
+    check('and it is not silently stamped on the way in',
+        !device.call('workerDay', old, '2026-07-01', 'w_01', 'actual').rates);
+
+    // What a migration WOULD do, offered rather than done.
+    const plan = device.call('planRateStamping', old);
+    check('the days with no stamped rate are countable',
+        plan.days === 1, JSON.stringify(plan));
+    check('and the plan names what it would write, without writing it',
+        plan.changes.length === 1 && plan.changes[0].daily === 400
+        && !device.call('workerDay', old, '2026-07-01', 'w_01', 'actual').rates,
+        JSON.stringify(plan.changes));
+}
+
+{
+    suite('the stamped rate travels and survives');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    const remote = device.call('normaliseSchedule', cloud.doc);
+    check('the rate a day was recorded at reaches the cloud with it',
+        (device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual').rates || {}).daily === 400,
+        JSON.stringify(device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual')));
+
+    // And through a backup file.
+    const back = device.call('normaliseSchedule', JSON.parse(JSON.stringify(device.State.schedule)));
+    check('and survives a backup round trip',
+        (device.call('workerDay', back, '2026-08-12', 'w_01', 'actual').rates || {}).daily === 400);
+
+    // Removing one of two sites must not lose the rate the day was recorded at.
+    device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02');
+    device.State.worker('w_01').dailyRate = 999;
+    device.call('unassignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02');
+    check('editing a day does not restamp it at today\'s rate',
+        (device.call('workerDay', device.State.schedule, '2026-08-12', 'w_01', 'actual').rates || {}).daily === 400,
+        JSON.stringify(device.call('workerDay', device.State.schedule, '2026-08-12', 'w_01', 'actual').rates));
+}
+
 report();

@@ -259,6 +259,18 @@ function renderPayrollTable() {
             '* לעובד יש שעות נוספות בלי שכר שעה, ולכן הן לא נכללות בסכום.'));
     }
 
+    // A day is paid at the rate it was RECORDED at, so after a raise mid-period the total
+    // cannot be checked by multiplying the days by the rate in the column beside it. Said
+    // plainly, because a sheet whose arithmetic does not come out reads as a mistake -
+    // and the alternative, quietly repaying old days at the new rate, is the mistake.
+    const mixed = rows.filter(row => row.mixedRates);
+    if (mixed.length > 0) {
+        section.appendChild(el('p', 'hint',
+            `בתקופה הזו השתנה השכר היומי של ${mixed.map(row => row.name).join(', ')}. ` +
+            'כל יום מחושב לפי השכר שהיה בזמן שנרשם, ולכן הסכום אינו מספר הימים כפול ' +
+            'השכר שמופיע כאן.'));
+    }
+
     // A "—" in the pay column is easy to read past when it is one line among thirteen,
     // and the total at the foot is then quietly short by a whole worker's fortnight. The
     // people it is missing for are named, once, under the sheet.

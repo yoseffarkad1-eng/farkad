@@ -277,7 +277,17 @@ function normaliseLayer(side) {
             .filter(entry => entry && entry.placeId)
             .map(entry => makeEntry(entry.placeId, entry.rate, entry.extraHours));
 
-        out[workerId] = record.absent ? { absent: true, entries: [] } : { entries };
+        // The rate the day was recorded at travels with it. Dropping it here would send
+        // every day back to being paid at whatever the roster says today, which is the
+        // whole thing the stamp exists to prevent - and it would do it silently, on the
+        // way in from a backup file or from another phone.
+        const kept = record.absent ? { absent: true, entries: [] } : { entries };
+        if (record.rates && typeof record.rates === 'object') {
+            const daily = Number(record.rates.daily) || 0;
+            const hourly = Number(record.rates.hourly) || 0;
+            if (daily > 0 || hourly > 0) kept.rates = { daily, hourly };
+        }
+        out[workerId] = kept;
     });
 
     return out;
