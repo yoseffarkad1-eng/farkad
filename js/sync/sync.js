@@ -873,6 +873,16 @@ function updateSyncNotice() {
         return;
     }
 
+    // A write that neither threw nor came back as written. Rarer than a full device and
+    // worse, because nothing anywhere reports it - the only way to know is that the save
+    // read back as something else, which is exactly what State.save now checks.
+    if (typeof State !== 'undefined' && State.saveFailed) {
+        const text = '⚠️ השינוי האחרון לא נשמר במכשיר. ייצא קובץ גיבוי עכשיו.';
+        notice.textContent = text;
+        showStorageBanner(text);
+        return;
+    }
+
     showStorageBanner(null);
 
     const messages = {

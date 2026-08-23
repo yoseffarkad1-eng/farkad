@@ -28,7 +28,11 @@ const FILES = [
     'js/model/schema.js',
     'js/model/migrate.js',
     'js/state.js',
-    'js/sync/sync.js'
+    'js/sync/sync.js',
+    // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls
+    // askTell, but only inside functions - nothing at its top level touches either, and
+    // registering Store.reclaim is exactly the behaviour a full-disk test needs.
+    'js/ui/share.js'
 ];
 
 const SOURCE = FILES.map(file => ({ file, code: readFileSync(join(ROOT, file), 'utf8') }));

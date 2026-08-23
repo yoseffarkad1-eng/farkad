@@ -2172,6 +2172,32 @@ async function seedRoster(page) {
     FarkadSync.setStatus('off');
   });
 
+  // No room to write the way back. Going ahead would leave the person holding the state
+  // they restored, no route to the one they had, and nothing saying so until they look.
+  const noRoom = await page.evaluate(async () => {
+    const before = Store.get('scheduleData:v2');
+    const realSet = Store.set.bind(Store);
+    Store.set = (key, value, options) =>
+      (String(key).startsWith('scheduleData:undo') || key === 'scheduleData:v2backup'
+        ? false
+        : realSet(key, value, options));
+
+    const date = snapshotDates()[0];
+    const restoring = restoreSnapshot(date);
+    await new Promise(done => setTimeout(done, 250));
+    document.getElementById('askOk').click();
+    await restoring;
+
+    Store.set = realSet;
+    return { before, after: Store.get('scheduleData:v2'), told: document.getElementById('askMessage').textContent };
+  });
+  check('a restore with nowhere to put the way back does not happen',
+    noRoom.before === noRoom.after);
+  check('and says why, rather than reporting a restore',
+    noRoom.told.includes('לא שינינו כלום'), JSON.stringify(noRoom.told.slice(0, 80)));
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
   // three days kept, not every day since the app was installed. The boot snapshot is
   // dated with the REAL today, so it is cleared first: leaving it in made this check
   // pass or fail depending on the date the suite was run on, and on 20/08 the stand-in

@@ -80,20 +80,31 @@ const State = {
         return { migrated: true, issues: result.issues, damaged };
     },
 
+    // True only when the schedule is on the disk. Every caller that tells somebody
+    // something happened needs to be able to find that out.
+    saveFailed: false,
+
     save(options) {
-        // The page and the scripts are from different builds. Writing now would put an
-        // edit on disk in a shape written by half of one version and read by half of
-        // another, which is worse than not recording it - what is already saved stays
-        // saved, and the banner says to refresh. See checkBuildConsistency in app.js.
-        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return;
+        // Blocked: either the page and the scripts are from different builds, or a
+        // damaged record is sitting under one of these keys. Either way what is already
+        // saved stays saved and nothing new is written. See js/recovery.js.
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
 
         this.schedule.updatedAt = new Date().toISOString();
         this.schedule.updatedBy = syncDeviceId();
-        Store.set(V2_KEY, JSON.stringify(this.schedule));
+
+        // Verified, not assumed. This is the record; a write that did not land is the
+        // evening gone at the next reload, and the old line here could not tell the
+        // difference between that and a save.
+        const landed = Store.setVerified(V2_KEY, JSON.stringify(this.schedule));
+        this.saveFailed = !landed;
 
         if (!(options && options.silent) && typeof FarkadSync !== 'undefined') {
             FarkadSync.onLocalChange(this.schedule);
         }
+        if (!landed && typeof updateSyncNotice === 'function') updateSyncNotice();
+
+        return landed;
     },
 
     // A roster change: who exists, their rates, and the order they are read in. Saved and
@@ -130,8 +141,10 @@ const State = {
     // as this device's, at this device's clock - and that stamp is what every later
     // comparison is made against.
     persist() {
-        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return;
-        Store.set(V2_KEY, JSON.stringify(this.schedule));
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+        const landed = Store.setVerified(V2_KEY, JSON.stringify(this.schedule));
+        this.saveFailed = !landed;
+        return landed;
     },
 
     // A bulk edit - copying a whole day across - saves once and renders once, but still

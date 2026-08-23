@@ -350,9 +350,13 @@ async function restoreFromCloud(date) {
         return;
     }
 
-    // The current state becomes the undo for the restore itself, on its own entry so a
-    // second restore does not overwrite the way back from the first.
-    pushUndoState(State.schedule);
+    // Confirmed BEFORE anything is replaced. The order is the guarantee: a close between
+    // any two steps has to leave something readable, which is only true if the way back
+    // is on the disk before the thing it is a way back from is gone.
+    if (!pushUndoState(State.schedule)) {
+        askTell(noWayBackNotice());
+        return;
+    }
 
     State.schedule = normaliseSchedule(raw);
     State.save();
@@ -381,8 +385,10 @@ async function restoreSnapshot(date) {
     });
     if (!go) return;
 
-    // The current state becomes the undo for the restore itself.
-    pushUndoState(State.schedule);
+    if (!pushUndoState(State.schedule)) {
+        askTell(noWayBackNotice());
+        return;
+    }
 
     State.schedule = normaliseSchedule(JSON.parse(raw));
     State.save();
@@ -410,12 +416,13 @@ const UNDO_KEY = 'scheduleData:v2backup';
 const UNDO_STACK_KEY = 'scheduleData:undoStack';
 const UNDO_KEEP = 3;
 
+// Returns true only when the way back is on the disk and can be read again.
+//
+// The caller must not replace anything until it does. A restore that goes ahead without a
+// confirmed way back leaves somebody with the state they restored, no route to the one
+// they had, and no way to know that until they look for it.
 function pushUndoState(schedule) {
     const entry = JSON.stringify(schedule);
-
-    // The single slot stays, because it is what restoreLocalBackup has always read and
-    // what an older build left behind.
-    Store.set(UNDO_KEY, entry);
 
     let stack;
     try {
@@ -423,11 +430,20 @@ function pushUndoState(schedule) {
         stack = raw ? JSON.parse(raw) : [];
         if (!Array.isArray(stack)) stack = [];
     } catch (error) {
+        // Unreadable is not empty, and this one is recoverable without ceremony: the
+        // stack is a convenience over the single slot below, so it starts again rather
+        // than taking the app down with it. The raw value is left where it is.
         stack = [];
     }
 
     stack.unshift({ at: new Date().toISOString(), schedule: entry });
-    Store.set(UNDO_STACK_KEY, JSON.stringify(stack.slice(0, UNDO_KEEP)));
+    const stacked = Store.setVerified(UNDO_STACK_KEY, JSON.stringify(stack.slice(0, UNDO_KEEP)));
+
+    // The single slot stays, because it is what restoreLocalBackup has always read and
+    // what an older build left behind. Either route home is enough.
+    const slotted = Store.setVerified(UNDO_KEY, entry);
+
+    return stacked || slotted;
 }
 
 function popUndoState() {
@@ -447,6 +463,19 @@ function popUndoState() {
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
     return Store.get(UNDO_KEY);
+}
+
+// Said, and the replacement abandoned, when the way back could not be written.
+//
+// Going ahead anyway is the one thing that must not happen: the person ends up holding
+// the state they restored, no route to the one they had, and nothing telling them so
+// until they go looking for it.
+function noWayBackNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'אין מקום במכשיר לשמור את המצב הנוכחי לפני השחזור, ובלי זה אי אפשר יהיה ' +
+            'לחזור ממנו. לא שינינו כלום. פנה מקום במכשיר, או ייצא קובץ גיבוי קודם, ונסה שוב.'
+    };
 }
 
 // What to say when a replacement landed on this device but not in the cloud. Not a
@@ -644,8 +673,12 @@ function importBackup(event) {
 
         // The current state becomes the local backup, so an import of the wrong file is
         // itself undoable - on its own entry, so importing twice does not lose the way
-        // back to where this started.
-        pushUndoState(State.schedule);
+        // back to where this started. Confirmed before the file replaces anything.
+        if (!pushUndoState(State.schedule)) {
+            askTell(noWayBackNotice());
+            event.target.value = '';
+            return;
+        }
 
         State.schedule = incoming;
         // Decisions the migration refused to guess at come with the file. Losing them
@@ -702,7 +735,10 @@ async function restoreLocalBackup() {
     }
 
     // The state being left is itself pushed, so this is reversible in both directions.
-    pushUndoState(State.schedule);
+    if (!pushUndoState(State.schedule)) {
+        askTell(noWayBackNotice());
+        return;
+    }
     State.schedule = previous;
     State.save();
     render();

@@ -1382,4 +1382,114 @@ function record(device, date, workerId, placeId, rate) {
         device.raw('scheduleData:v2').includes('2026-08-12'));
 }
 
+// ---------------------------------------------------------------- writes that fail
+{
+    suite('a save that did not reach the disk is not reported as a save');
+
+    const device = makeDevice();
+    seed(device);
+    // Only the schedule fails. Everything else on this device still works, which is what
+    // makes it worth testing one write at a time rather than one full disk.
+    device.setQuota(key => key === 'scheduleData:v2');
+
+    const wrote = device.State.save({ silent: true });
+    check('save says it did not land', wrote === false, String(wrote));
+    check('and says so where the app can see it', device.State.saveFailed === true);
+    check('the day is still on screen, held in memory',
+        device.State.schedule.workers.length === 3);
+    check('and reading it back in this session still works',
+        device.Store.get('scheduleData:v2') !== null);
+}
+
+{
+    suite('a queue that did not reach the disk is not reported as queued');
+
+    const device = makeDevice();
+    seed(device);
+    device.setQuota(key => key === 'farkad:outbox');
+
+    check('saveOutbox says it did not land',
+        device.Sync.saveOutbox() === false);
+
+    // The one that matters: the disk accepts the write and gives back something else.
+    const liar = makeDevice();
+    seed(liar);
+    liar.corruptOnWrite('farkad:outbox');
+    check('nor does a write that comes back changed',
+        liar.Sync.saveOutbox() === false);
+}
+
+{
+    suite('a restore does not begin until the way back is written down');
+
+    const device = makeDevice();
+    seed(device);
+    device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    device.State.save({ silent: true });
+    const before = device.raw('scheduleData:v2');
+
+    // No room for the undo copy. Replacing now would leave the person with a restored
+    // state and no route back to the one they had.
+    device.setQuota(key => key.startsWith('scheduleData:undo') || key === 'scheduleData:v2backup');
+
+    check('pushing the way back reports failure',
+        device.call('pushUndoState', device.State.schedule) === false);
+    check('and the schedule on disk is untouched, because nothing was replaced',
+        device.raw('scheduleData:v2') === before);
+}
+
+{
+    suite('each critical write, failed one at a time');
+
+    // Every one of these has to be survivable on its own, because on a real device that
+    // is how it happens - one key too big for the space that is left, not the whole disk
+    // vanishing at once.
+    const keys = ['scheduleData:v2', 'farkad:outbox', 'farkad:pendingReplace'];
+
+    for (const failing of keys) {
+        const device = makeDevice();
+        const cloud = makeCloud();
+        seed(device);
+        device.setQuota(key => key === failing);
+
+        let threw = null;
+        try {
+            await connected(device, cloud);
+            record(device, '2026-08-12', 'w_01', 'p_01');
+            await wait();
+            await device.Sync.replaceAll(device.State.schedule).catch(() => {});
+            await wait();
+        } catch (error) {
+            threw = String(error && error.message);
+        }
+
+        check(`the app survives ${failing} failing`, threw === null, String(threw));
+        check(`and the day is still readable with ${failing} failing`,
+            device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+    }
+}
+
+{
+    suite('closing the app between two writes loses nothing that was confirmed');
+
+    // The order is: write the way back, confirm it, then replace. A close between any two
+    // steps has to leave something readable - which is only true if the confirmation
+    // comes before the replacement, not after.
+    const device = makeDevice();
+    seed(device);
+    device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    device.State.save({ silent: true });
+
+    check('the way back is written and confirmed',
+        device.call('pushUndoState', device.State.schedule) === true);
+
+    // The app dies here, before the replacement is written.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and after a restart the original is still the one on disk',
+        reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+    check('with the way back still there beside it',
+        reopened.call('popUndoState') !== null);
+}
+
 report();
