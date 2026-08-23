@@ -155,24 +155,47 @@ function rosterDocument(schedule) {
     };
 }
 
-// The reverse: a roster map plus an order, back into the ordered array the app works in.
-// Anything present in the map but missing from the order is appended rather than dropped
-// - an order field written by a device that had not yet seen a new man must not be able
-// to remove him.
-function rosterList(map, order) {
+// The reverse: the two forms of the roster, back into the one ordered array the app works
+// in. They are MERGED, not chosen between, and that is the whole of it.
+//
+// Reading the per-entity map alone looks right and is catastrophic. Only the people who
+// CHANGED are written into it - that is the point, so a stale copy of somebody cannot be
+// put back - so a document that has always held plain arrays and then receives its first
+// per-entity write ends up with exactly one person in the map. A device reading the map
+// alone would see a roster of one and adopt it, deleting everybody else from every phone,
+// and every report walks the roster. The suite caught this before it shipped.
+//
+// So the array is the floor and the map is laid over it: the map wins per person, because
+// it is the authoritative per-entity form, and nobody is dropped for being absent from
+// it. Nothing is ever removed from a roster anyway - people are archived, never deleted -
+// so a union cannot resurrect anyone.
+//
+// Order: the order field first, then anyone it had not heard of, in the order the array
+// had them. An order written by a device that has not yet seen a new man must not remove
+// him.
+function mergeRoster(list, map, order) {
+    const byId = new Map();
+    (Array.isArray(list) ? list : []).forEach(item => {
+        if (item && item.id) byId.set(String(item.id), item);
+    });
+
     const entries = (map && typeof map === 'object') ? map : {};
-    const wanted = Array.isArray(order) ? order.map(String) : [];
+    Object.keys(entries).forEach(id => {
+        if (entries[id]) byId.set(String(id), entries[id]);
+    });
+
     const out = [];
     const used = new Set();
 
-    wanted.forEach(id => {
-        if (entries[id] && !used.has(id)) {
-            used.add(id);
-            out.push(entries[id]);
+    (Array.isArray(order) ? order : []).forEach(id => {
+        const key = String(id);
+        if (byId.has(key) && !used.has(key)) {
+            used.add(key);
+            out.push(byId.get(key));
         }
     });
-    Object.keys(entries).sort().forEach(id => {
-        if (!used.has(id)) out.push(entries[id]);
+    byId.forEach((item, id) => {
+        if (!used.has(id)) out.push(item);
     });
 
     return out;

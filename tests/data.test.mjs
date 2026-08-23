@@ -971,4 +971,176 @@ function record(device, date, workerId, placeId, rate) {
         JSON.stringify(device.call('workerDay', device.State.schedule, '2026-08-12', 'w_01', 'actual').rates));
 }
 
+// ---------------------------------------------------------------- two phones, one evening
+{
+    suite('two devices building the same evening');
+
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: [
+                { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 },
+                { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
+            ],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true },
+                     { id: 'p_02', name: 'תל אביב', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+
+    const one = makeDevice({ deviceId: 'd_one' });
+    const two = makeDevice({ deviceId: 'd_two' });
+    [one, two].forEach(d => {
+        d.State.schedule = d.call('normaliseSchedule', cloud.doc);
+        d.State.save({ silent: true });
+        d.Sync.pushDelayMs = TICK;
+        d.Sync.connect(cloud.adapter);
+    });
+    await wait();
+
+    // Different workers, same date. The whole design exists for this.
+    record(one, '2026-08-12', 'w_01', 'p_01');
+    record(two, '2026-08-12', 'w_02', 'p_02');
+    await settle(TICK * 30);
+
+    const merged = one.call('normaliseSchedule', cloud.doc);
+    check('both people\'s work is in the day',
+        one.call('entriesFor', merged, '2026-08-12', 'w_01', 'actual').length === 1
+        && one.call('entriesFor', merged, '2026-08-12', 'w_02', 'actual').length === 1,
+        JSON.stringify(merged.days['2026-08-12']));
+    check('and each device can see the other\'s',
+        one.call('entriesFor', one.State.schedule, '2026-08-12', 'w_02', 'actual').length === 1
+        && two.call('entriesFor', two.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+}
+
+{
+    suite('two devices editing the same worker on the same day');
+
+    // Genuinely ambiguous, and the app says so: the later write wins. What must NOT
+    // happen is the rest of the evening going with it.
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: [
+                { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 },
+                { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
+            ],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true },
+                     { id: 'p_02', name: 'תל אביב', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+
+    const one = makeDevice({ deviceId: 'd_one' });
+    const two = makeDevice({ deviceId: 'd_two' });
+    [one, two].forEach(d => {
+        d.State.schedule = d.call('normaliseSchedule', cloud.doc);
+        d.State.save({ silent: true });
+        d.Sync.pushDelayMs = TICK;
+        d.Sync.connect(cloud.adapter);
+    });
+    await wait();
+
+    record(one, '2026-08-12', 'w_02', 'p_01');       // somebody else's work, same evening
+    await settle(TICK * 12);
+    record(one, '2026-08-12', 'w_01', 'p_01');
+    await settle(TICK * 12);
+    record(two, '2026-08-12', 'w_01', 'p_02');       // the same cell, from the other phone
+    await settle(TICK * 30);
+
+    const merged = one.call('normaliseSchedule', cloud.doc);
+    const contested = one.call('entriesFor', merged, '2026-08-12', 'w_01', 'actual');
+    check('one of the two values stands, and it is a whole value',
+        contested.length >= 1 && contested.every(e => e.placeId),
+        JSON.stringify(contested));
+    check('and the rest of the evening is untouched',
+        one.call('entriesFor', merged, '2026-08-12', 'w_02', 'actual').length === 1,
+        JSON.stringify(merged.days['2026-08-12'].actual));
+    check('neither device is left in an error state',
+        one.Sync.status === 'synced' && two.Sync.status === 'synced',
+        `${one.Sync.status}/${two.Sync.status}`);
+}
+
+{
+    suite('a device still on the old build writing while a new one reads');
+
+    // The un-updated phone writes the roster as a whole array and knows nothing about
+    // `roster`. The updated one must not lose people because of that.
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_old'
+        }
+    });
+
+    const fresh = makeDevice({ deviceId: 'd_new' });
+    fresh.State.schedule = fresh.call('normaliseSchedule', cloud.doc);
+    fresh.State.save({ silent: true });
+    fresh.Sync.pushDelayMs = TICK;
+    fresh.Sync.connect(cloud.adapter);
+    await wait();
+
+    // The new device adds someone - per-entity plus the legacy array.
+    const id = fresh.State.nextWorkerId();
+    fresh.State.schedule.workers.push({ id, name: 'אחמד', active: true, dailyRate: 400, hourlyRate: 0 });
+    fresh.State.commitRoster();
+    await settle(TICK * 20);
+
+    check('an old device reading only the arrays still sees the new man',
+        (cloud.doc.workers || []).some(w => w.id === id),
+        JSON.stringify((cloud.doc.workers || []).map(w => w.id)));
+    check('and the per-entity form has him too',
+        Boolean(cloud.doc.roster && cloud.doc.roster.workers[id]));
+
+    // Now the old device writes the whole array, the only way it knows how, without a
+    // `roster` key at all.
+    cloud.doc.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 },
+        { id: id, name: 'אחמד', active: true, dailyRate: 420, hourlyRate: 0 }
+    ];
+    cloud.doc.updatedAt = '2026-08-13T19:00:00.000Z';
+    cloud.doc.updatedBy = 'd_old';
+    fresh.Sync.receive(JSON.parse(JSON.stringify(cloud.doc)));
+
+    check('the new device keeps everyone after an old-build write',
+        fresh.State.schedule.workers.length === 2,
+        JSON.stringify(fresh.State.schedule.workers.map(w => w.id)));
+}
+
+{
+    suite('data from the old schema comes across whole');
+
+    const device = makeDevice();
+    const result = device.call('migrateV1', {
+        workers: ['דוד', 'שרה'],
+        places: ['הרצליה', 'תל אביב'],
+        weekStartDate: '2026-08-07',
+        assignments: [
+            { index: 0, value: 'הרצליה' },
+            { index: 1, value: 'תל אביב' },
+            { index: 7, value: 'חופש', holiday: true },
+            { index: 8, value: 'הרצליה + תל אביב' }
+        ]
+    });
+
+    check('the roster comes across', result.schedule.workers.length === 2);
+    check('a day resolves to the right site',
+        device.call('entriesFor', result.schedule, '2026-08-07', 'w_01', 'actual')[0].placeId === 'p_01');
+    check('a holiday becomes an absence',
+        device.call('isAbsent', result.schedule, '2026-08-07', 'w_02', 'actual'));
+    check('and a cell it cannot read is a question, not a guess',
+        result.issues.some(i => i.kind === 'unknown-place' && i.value === 'הרצליה + תל אביב'),
+        JSON.stringify(result.issues.map(i => i.kind)));
+    check('with a split offered but not applied',
+        result.issues.find(i => i.kind === 'unknown-place').suggestion.placeIds.join() === 'p_01,p_02'
+        && device.call('entriesFor', result.schedule, '2026-08-08', 'w_02', 'actual').length === 0);
+    check('migrated days carry no invented rate',
+        !device.call('workerDay', result.schedule, '2026-08-07', 'w_01', 'actual').rates);
+}
+
 report();

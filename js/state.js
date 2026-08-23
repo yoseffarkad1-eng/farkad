@@ -199,17 +199,12 @@ function normaliseSchedule(raw) {
     const schedule = emptySchedule();
     if (!raw || typeof raw !== 'object') return schedule;
 
-    // The roster is read from the per-entity form when the document has one, and from
-    // the plain arrays otherwise. Both shapes exist on purpose: the arrays are what a
-    // device still on an older build writes and reads, and adopting a document written
-    // by one of those must not empty the roster.
-    const roster = (raw.roster && typeof raw.roster === 'object') ? raw.roster : null;
-    const rawWorkers = (roster && roster.workers && typeof roster.workers === 'object')
-        ? rosterList(roster.workers, roster.workerOrder)
-        : raw.workers;
-    const rawPlaces = (roster && roster.places && typeof roster.places === 'object')
-        ? rosterList(roster.places, roster.placeOrder)
-        : raw.places;
+    // Both shapes of the roster, merged rather than chosen between - see mergeRoster.
+    // The arrays are what a device still on an older build writes and reads; the map
+    // carries only the people who changed, so reading either one alone loses somebody.
+    const roster = (raw.roster && typeof raw.roster === 'object') ? raw.roster : {};
+    const rawWorkers = mergeRoster(raw.workers, roster.workers, roster.workerOrder);
+    const rawPlaces = mergeRoster(raw.places, roster.places, roster.placeOrder);
 
     schedule.workers = (Array.isArray(rawWorkers) ? rawWorkers : [])
         .filter(w => w && w.id)
