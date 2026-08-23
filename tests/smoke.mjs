@@ -2657,6 +2657,30 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the module boundary
+{
+  // The Firebase adapter is the one ES module in an app of classic scripts, and it can
+  // only reach the rest through the global object. A `const` at the top of a classic
+  // script makes a global BINDING and not a property of window - so every classic file
+  // could say FarkadSync while the module could not, and the first line it ran threw
+  // "undefined is not an object". Sync could never have connected.
+  const page = await open();
+  const reach = await page.evaluate(() => ({
+    sync: typeof window.FarkadSync,
+    connect: typeof (window.FarkadSync || {}).connect,
+    disconnect: typeof (window.FarkadSync || {}).disconnect,
+    // the module calls this one as a bare name; a function declaration does land on
+    // the global object, unlike const
+    tell: typeof window.askTell
+  }));
+  check('the sync layer is reachable the way the module reaches it',
+    reach.sync === 'object' && reach.connect === 'function' && reach.disconnect === 'function',
+    JSON.stringify(reach));
+  check('and so is the dialog it reports failures through',
+    reach.tell === 'function', JSON.stringify(reach));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- the sign-in door
 {
   // The button ships hidden, because with no Firebase project it is a door onto

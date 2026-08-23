@@ -334,6 +334,13 @@ const FarkadSync = {
     }
 };
 
+// `const` at the top level of a classic script creates a global BINDING, not a property
+// of window - so every other classic file here can say FarkadSync, and the Firebase
+// adapter, which is the one ES module in the app, cannot: window.FarkadSync was
+// undefined and the very first line it ran threw. Sync could never have connected.
+// Published deliberately, and by the name the module expects.
+window.FarkadSync = FarkadSync;
+
 // One line under the board covering both questions the manager actually has: where the
 // The two storage failures - blocked, and full - are the only states where a change the
 // person just made is NOT written down. That cannot be a grey line under the fold, below
