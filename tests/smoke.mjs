@@ -1816,16 +1816,45 @@ async function seedRoster(page) {
   await page.waitForTimeout(600);
 
   const kept = await page.evaluate(() => ({
-    damaged: localStorage.getItem('scheduleData:v2damaged'),
-    v2: localStorage.getItem('scheduleData:v2')
+    copy: localStorage.getItem('scheduleData:v2:damaged'),
+    v2: localStorage.getItem('scheduleData:v2'),
+    workers: State.schedule.workers.length,
+    blocked: farkadWritesBlocked()
   }));
-  check('an unreadable save file is put aside instead of being overwritten',
-    typeof kept.damaged === 'string' && kept.damaged.includes('BROKEN'),
-    JSON.stringify({ damaged: (kept.damaged || '').slice(0, 30) }));
-  check('and the app still opens on the older readable copy',
-    kept.v2 !== null && !kept.v2.includes('BROKEN'));
+  check('an unreadable save file is copied somewhere safe',
+    typeof kept.copy === 'string' && kept.copy.includes('BROKEN'),
+    JSON.stringify({ copy: (kept.copy || '').slice(0, 30) }));
+
+  // This used to assert the OPPOSITE - that the v1 fallback was saved over the damaged
+  // blob, leaving the raw bytes only in the second copy. That copy was written with
+  // `optional: true` and its result was never looked at, so on a full device it failed
+  // and the save succeeded: the recovery destroyed the thing it was recovering.
+  check('and the damaged original is left exactly where it was',
+    typeof kept.v2 === 'string' && kept.v2.includes('BROKEN'),
+    JSON.stringify((kept.v2 || '').slice(0, 30)));
+  check('the older readable data is on screen, so the week can still be read',
+    kept.workers === 1, String(kept.workers));
+  check('but writing is stopped, so nothing can be saved over it',
+    kept.blocked === true);
   check('the person is told the file was damaged rather than left to guess',
     (await page.textContent('#askModal')).includes('נפגם'));
+
+  // And the banner offers the way to get the raw bytes off the phone.
+  await page.click('#askOk');
+  await page.waitForTimeout(300);
+  // Scoped to the buttons: the banner's own sentence also contains the word, so a plain
+  // getByText matches two things and the count is not what it looks like.
+  check('a banner offers the raw export',
+    (await page.locator('#recoveryBanner').isVisible())
+    && (await page.locator('#recoveryBanner button').filter({ hasText: 'ייצא' }).count()) === 1,
+    await page.textContent('#recoveryBanner'));
+  check('and a way to resume once it has been taken',
+    (await page.locator('#recoveryBanner button').filter({ hasText: 'הבנתי' }).count()) === 1);
+
+  await page.locator('#recoveryBanner button').filter({ hasText: 'הבנתי' }).click();
+  await page.waitForTimeout(200);
+  check('acknowledging resumes recording, the copy having been confirmed',
+    (await page.evaluate(() => farkadWritesBlocked())) === false);
   await page.context().close();
 }
 

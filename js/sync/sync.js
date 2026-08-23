@@ -107,6 +107,9 @@ const FarkadSync = {
     _retryAt: 0,
     _retryTimer: null,
     _loaded: false,
+    // The queue on disk will not parse. Not the same as an empty queue, and the
+    // difference is whether writing over it is allowed.
+    outboxDamaged: false,
     _stamp: null,
     // The roster as the cloud last showed it, keyed by id. What a roster edit is compared
     // against to work out which people actually changed.
@@ -114,6 +117,9 @@ const FarkadSync = {
     // A whole-document replacement that has not been acknowledged yet. Mirrored to disk.
     _replace: null,
     _replacing: false,
+    // The pending-restore note on disk will not parse. Adopting anything from the cloud
+    // while that is true would silently finish undoing a restore nobody can describe.
+    replaceDamaged: false,
 
     // adapter: {
     //   update(patchByFieldPath) -> Promise   merge these fields, leave the rest alone
@@ -136,8 +142,18 @@ const FarkadSync = {
         try {
             parsed = JSON.parse(raw);
         } catch (error) {
-            console.error('Outbox unreadable, setting it aside rather than dropping it:', error);
-            Store.set(OUTBOX_KEY + ':damaged', raw, { optional: true });
+            // NOT an empty queue. This is a list of edits that were made and never sent,
+            // and the old behaviour - copy it optionally, carry on empty - meant the very
+            // next edit wrote over the original. On a full device, which is where a
+            // truncated write comes from in the first place, the copy had failed too, so
+            // the recovery deleted the only trace of those edits.
+            //
+            // Recovery makes a verified copy, keeps the original exactly where it is, and
+            // stops the app writing until somebody has been told.
+            console.error('Outbox unreadable, holding it rather than dropping it:', error);
+            this.outboxDamaged = true;
+            Recovery.damaged(OUTBOX_KEY, raw,
+                'תור השליחה (עריכות שטרם נשלחו) לא נקרא.');
             return;
         }
 
@@ -153,9 +169,14 @@ const FarkadSync = {
     // NOT optional. A restore point the device has no room for is a loss the app can
     // live with; a pending edit it has no room for is the edit itself.
     saveOutbox() {
+        // The damaged original is still under this key. Writing here would destroy it.
+        if (this.outboxDamaged || farkadWritesBlocked()) return false;
+
         const items = {};
         this._outbox.forEach((item, path) => { items[path] = item; });
-        Store.set(OUTBOX_KEY, JSON.stringify({ seq: this._seq, items }));
+        // Verified: an edit that did not reach the disk is an edit the next session will
+        // not replay, and the caller has to be able to find that out.
+        return Store.setVerified(OUTBOX_KEY, JSON.stringify({ seq: this._seq, items }));
     },
 
     pendingCount() {
@@ -536,9 +557,12 @@ const FarkadSync = {
 
     // ------------------------------------------------------------ pending replacement
 
+    // Returns false when the note did not reach the disk, so the caller does not report
+    // a restore as durable when nothing durable happened.
     rememberReplace(document) {
+        if (this.replaceDamaged || farkadWritesBlocked()) return false;
         this._replace = document;
-        Store.set(REPLACE_KEY, JSON.stringify(document));
+        return Store.setVerified(REPLACE_KEY, JSON.stringify(document));
     },
 
     forgetReplace() {
@@ -548,6 +572,7 @@ const FarkadSync = {
 
     pendingReplace() {
         if (this._replace) return this._replace;
+        if (this.replaceDamaged) return null;
 
         const raw = Store.get(REPLACE_KEY);
         if (!raw) return null;
@@ -555,9 +580,14 @@ const FarkadSync = {
             this._replace = JSON.parse(raw);
             return this._replace;
         } catch (error) {
-            console.error('Pending replacement unreadable:', error);
-            Store.set(REPLACE_KEY + ':damaged', raw, { optional: true });
-            Store.remove(REPLACE_KEY);
+            // It used to copy this optionally and then DELETE the original. That record
+            // is a restore somebody asked for and was told had happened - the state they
+            // are looking at - and deleting it removed the only description of what was
+            // supposed to reach the other two phones.
+            console.error('Pending replacement unreadable, holding it:', error);
+            this.replaceDamaged = true;
+            Recovery.damaged(REPLACE_KEY, raw,
+                'שחזור שהמתין לשליחה לענן לא נקרא.');
             return null;
         }
     },
@@ -613,6 +643,10 @@ const FarkadSync = {
         // definition, the state the person asked to replace - adopting it would undo
         // their restore on the very device that asked for it, and it would look like
         // nothing happened at all. Push again instead.
+        // A restore that has not landed, or a note about one that cannot be read. Either
+        // way what is arriving is the state somebody asked to replace, and adopting it
+        // would undo their restore on the device that asked for it.
+        if (this.replaceDamaged || farkadWritesBlocked()) return;
         if (this.pendingReplace()) {
             if (!this._replacing) this.retryReplace();
             return;

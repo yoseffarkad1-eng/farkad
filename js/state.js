@@ -8,10 +8,11 @@
 const V1_KEY = 'scheduleData';
 const V2_KEY = 'scheduleData:v2';
 const ISSUES_KEY = 'scheduleData:migrationIssues';
-// Where an unreadable v2 blob is put aside before anything overwrites it. It is the most
-// recent copy of the record that exists, and a damaged one is still worth far more than
-// no copy: the days inside it are plain text and can be read out by hand.
-const V2_DAMAGED_KEY = 'scheduleData:v2damaged';
+// An unreadable v2 blob is handled by Recovery, which copies it to
+// `scheduleData:v2:damaged` and leaves the original alone. A build before v67 put its
+// copy under `scheduleData:v2damaged` - no colon - and then overwrote the original;
+// nothing reads that key any more, and anything found under it on an old device is still
+// a real copy worth keeping.
 
 const State = {
     schedule: emptySchedule(),
@@ -32,11 +33,22 @@ const State = {
                 this.migrationIssues = readIssues();
                 return { migrated: false };
             } catch (error) {
-                console.error('v2 schedule unreadable, falling back to v1:', error);
-                // Set it aside BEFORE the fallback below, which ends in save() and would
-                // otherwise overwrite the newest copy of the record with data from before
-                // the migration - destroying the damaged blob and every day added since.
-                Store.set(V2_DAMAGED_KEY, v2, { optional: true });
+                // The newest copy of the record that exists, and it will not parse -
+                // almost always a truncated write, with the days inside it still plain
+                // text somebody can read out.
+                //
+                // The old line here set it aside with `optional: true` and did not look
+                // at whether that worked, and then fell through to a v1 migration ending
+                // in save() - which writes to this very key. On a full device, which is
+                // where a truncated write comes from, the copy failed and the save
+                // succeeded: the recovery destroyed the thing it was recovering.
+                //
+                // Recovery keeps the original where it is, makes a copy it has read back,
+                // and blocks writing. save() and persist() both ask before writing, so
+                // nothing below this line - migration, a later edit, or somebody
+                // re-typing the week over a blank screen - can reach V2_KEY.
+                console.error('v2 schedule unreadable, holding it:', error);
+                Recovery.damaged(V2_KEY, v2, 'הרישום השמור במכשיר לא נקרא.');
                 damaged = true;
             }
         }
@@ -58,8 +70,12 @@ const State = {
 
         this.schedule = result.schedule;
         this.migrationIssues = result.issues;
-        writeIssues(result.issues);
-        this.save({ silent: true });
+        // Shown, so the week is on screen and can be read - but not written down. Saving
+        // it would put pre-migration data over the newest record there is.
+        if (!damaged) {
+            writeIssues(result.issues);
+            this.save({ silent: true });
+        }
 
         return { migrated: true, issues: result.issues, damaged };
     },

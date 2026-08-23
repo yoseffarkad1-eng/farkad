@@ -465,6 +465,36 @@ function replacementNotice(error) {
 
 const LAST_BACKUP_KEY = 'scheduleData:lastBackup';
 
+// Everything Recovery is holding, as a file, exactly as it sits on the device.
+//
+// Not a schedule - a schedule is what this could not be turned into. It is the raw bytes,
+// so that whatever is inside them leaves the phone before anything else happens to it,
+// and so somebody can look at it later. JSON a parser refuses is usually a truncated
+// write, and the days in it are plain text.
+function exportRecoveryData() {
+    const records = Recovery.rawRecords();
+    const payload = {
+        kind: 'farkad-recovery',
+        takenAt: new Date().toISOString(),
+        appVersion: typeof APP_VERSION === 'string' ? APP_VERSION : null,
+        // Said in the file too, because whoever opens it will not have the banner.
+        note: 'Raw records that could not be parsed. Nothing here was deleted from the device.',
+        problems: Recovery.problems.map(problem => ({
+            key: problem.key, copiedTo: problem.copy, message: problem.message
+        })),
+        records
+    };
+
+    const name = `farkad-recovery-${todayStr()}.json`;
+    const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function exportBackup() {
     const name = `farkad-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(State.schedule, null, 1)], { type: 'application/json' });

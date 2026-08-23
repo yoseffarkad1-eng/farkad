@@ -1207,4 +1207,179 @@ function record(device, date, workerId, placeId, rate) {
         !device.call('workerDay', result.schedule, '2026-08-07', 'w_01', 'actual').rates);
 }
 
+// ---------------------------------------------------------------- damaged records
+{
+    suite('a damaged outbox is not an empty one');
+
+    // Half a write. JSON refuses it; the days inside are still plain text.
+    const broken = '{"seq":7,"items":{"days.2026-08-12.actual.w_01":{"value":{"entr';
+    const device = makeDevice({ storage: { 'farkad:outbox': broken } });
+    seed(device);
+
+    check('it is not reported as an empty queue',
+        device.Sync.outboxDamaged === true, String(device.Sync.outboxDamaged));
+    check('the raw record is still exactly where it was',
+        device.raw('farkad:outbox') === broken);
+    check('a copy of it was put somewhere safe',
+        device.raw('farkad:outbox:damaged') === broken);
+    check('and writing is stopped until somebody has seen this',
+        device.call('farkadWritesBlocked') === true);
+
+    // The failure this closes: the next ordinary edit used to overwrite the original.
+    record(device, '2026-08-13', 'w_01', 'p_01');
+    check('an edit made now does not overwrite the damaged record',
+        device.raw('farkad:outbox') === broken, device.raw('farkad:outbox'));
+    check('and the schedule is not written over either',
+        device.raw('scheduleData:v2') === null);
+
+    // The raw bytes can be got off the device.
+    const held = device.global('Recovery').rawRecords();
+    check('the export carries the raw record',
+        held['farkad:outbox'] === broken, JSON.stringify(Object.keys(held)));
+
+    check('and once it is acknowledged, recording resumes',
+        device.global('Recovery').acknowledge() === true
+        && device.call('farkadWritesBlocked') === false);
+}
+
+{
+    suite('a damaged outbox on a device with no room stays blocked');
+
+    const broken = '{"seq":7,"items":{"days.2026-08-12.actual.w_01":{"value":{"entr';
+    // The fault has to be on BEFORE the scripts run: sync.js reads its outbox the
+    // moment it loads. This is the device this is most likely to happen on.
+    const device = makeDevice({ storage: { 'farkad:outbox': broken }, quota: () => true });
+
+    check('the copy could not be made', device.raw('farkad:outbox:damaged') === null);
+    check('the original is untouched', device.raw('farkad:outbox') === broken);
+    check('writing is blocked', device.call('farkadWritesBlocked') === true);
+    check('and acknowledging does not unblock it - the original is the only copy',
+        device.global('Recovery').acknowledge() === false
+        && device.call('farkadWritesBlocked') === true);
+}
+
+{
+    suite('a damaged pending replacement is not deleted');
+
+    const broken = '{"schemaVersion":2,"workers":[{"id":"w_01","na';
+    const device = makeDevice({ storage: { 'farkad:pendingReplace': broken } });
+    seed(device);
+
+    check('reading it does not return a schedule',
+        device.Sync.pendingReplace() === null);
+    check('and does not remove it', device.raw('farkad:pendingReplace') === broken);
+    check('a copy was put aside',
+        device.raw('farkad:pendingReplace:damaged') === broken);
+    check('writing is blocked', device.call('farkadWritesBlocked') === true);
+
+    // The dangerous part: a snapshot arriving now must not be adopted, because a restore
+    // was in flight and nobody knows any more what it was.
+    const cloud = makeCloud();
+    device.Sync.adapter = cloud.adapter;
+    device.Sync.receive({
+        schemaVersion: 2, workers: [], places: [],
+        days: { '2026-08-01': { plan: {}, actual: {} } }, advances: {},
+        updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_other'
+    });
+    check('an arriving snapshot is not adopted while this is unresolved',
+        Object.keys(device.State.schedule.days).length === 0,
+        JSON.stringify(Object.keys(device.State.schedule.days)));
+    check('and the record is still there afterwards',
+        device.raw('farkad:pendingReplace') === broken);
+}
+
+{
+    suite('a damaged schedule is never written over - with a v1 to fall back to');
+
+    const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
+    const v1 = JSON.stringify({
+        workers: ['דוד'], places: ['הרצליה'],
+        weekStartDate: '2026-08-07',
+        assignments: [{ index: 0, value: 'הרצליה' }]
+    });
+    const device = makeDevice({ storage: { 'scheduleData:v2': brokenV2, 'scheduleData': v1 } });
+    const result = device.State.load();
+
+    check('the damage is reported to the caller', result.damaged === true);
+    check('the raw v2 is exactly where it was',
+        device.raw('scheduleData:v2') === brokenV2);
+    check('and a copy was put aside',
+        device.raw('scheduleData:v2:damaged') === brokenV2);
+    check('the v1 data was read, so there is something on screen',
+        device.State.schedule.workers.length === 1,
+        String(device.State.schedule.workers.length));
+    check('but it was NOT saved over the damaged v2',
+        device.raw('scheduleData:v2') === brokenV2);
+
+    // Nor by any later write.
+    device.State.schedule.workers.push({ id: 'w_99', name: 'חדש', active: true });
+    device.State.save();
+    check('and a later save does not overwrite it either',
+        device.raw('scheduleData:v2') === brokenV2, device.raw('scheduleData:v2'));
+}
+
+{
+    suite('a damaged schedule with no v1 does not become an empty table');
+
+    const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
+    const device = makeDevice({ storage: { 'scheduleData:v2': brokenV2 } });
+    const result = device.State.load();
+
+    check('it says it failed rather than opening blank and quiet',
+        result.damaged === true);
+    check('the raw record is untouched',
+        device.raw('scheduleData:v2') === brokenV2);
+    check('writing is blocked, so an empty table cannot be saved over it',
+        device.call('farkadWritesBlocked') === true);
+
+    // This is the whole scenario: an empty screen, somebody starts re-entering the week.
+    device.State.schedule.workers.push({ id: 'w_99', name: 'מקליד מחדש', active: true });
+    device.State.save();
+    check('re-typing over the blank screen does not destroy the damaged record',
+        device.raw('scheduleData:v2') === brokenV2, device.raw('scheduleData:v2'));
+}
+
+{
+    suite('a damaged schedule on a full device holds everything');
+
+    const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
+    const device = makeDevice({ storage: { 'scheduleData:v2': brokenV2 }, quota: () => true });
+    device.State.load();
+
+    check('no copy was made', device.raw('scheduleData:v2:damaged') === null);
+    check('the original is untouched', device.raw('scheduleData:v2') === brokenV2);
+    check('and it cannot be acknowledged away',
+        device.global('Recovery').acknowledge() === false);
+}
+
+{
+    suite('a quarantine never overwrites an earlier one');
+
+    const first = '{"a":';
+    const device = makeDevice({
+        storage: { 'farkad:outbox': '{"b":', 'farkad:outbox:damaged': first }
+    });
+    device.Sync.loadOutbox();
+
+    check('the earlier copy is still the earlier copy',
+        device.raw('farkad:outbox:damaged') === first);
+    check('and the new one went beside it, not on top',
+        device.raw('farkad:outbox:damaged:2') === '{"b":',
+        device.raw('farkad:outbox:damaged:2'));
+}
+
+{
+    suite('the ordinary paths are untouched by any of this');
+
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    check('nothing is blocked', device.call('farkadWritesBlocked') === false);
+    check('no problems are recorded',
+        device.global('Recovery').problems.length === 0);
+    check('and the day was saved',
+        device.raw('scheduleData:v2').includes('2026-08-12'));
+}
+
 report();

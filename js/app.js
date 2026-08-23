@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v67';
+const APP_VERSION = 'v68';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -19,20 +19,15 @@ function pageBuild() {
     return tag ? tag.getAttribute('content') : null;
 }
 
-let buildMismatch = false;
-
-// A function declaration, not the variable: declarations land on the global object with
-// no temporal dead zone, so state.js can ask this by name from a file that loads before
-// this one.
-function farkadWritesBlocked() {
-    return buildMismatch;
-}
-
 function checkBuildConsistency() {
     const page = pageBuild();
     if (!page || page === APP_VERSION) return;
 
-    buildMismatch = true;
+    // Through Recovery, which is what everything that writes asks before writing. It
+    // cannot be acknowledged away - a reload is the fix, and until then this page and
+    // these scripts disagree about what a record looks like.
+    Recovery.halt('build', `הדף מגרסה ${page} והתוכנה מגרסה ${APP_VERSION}.`);
+
     const banner = document.getElementById('crashBanner');
     if (!banner) return;
 

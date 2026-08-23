@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v67">
+<meta name="farkad-build" content="v68">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -51,6 +51,7 @@
          schedule a local one, and a reminder that needs a server behind it is a
          reminder that stops arriving the day the server does. -->
     <div class="banner banner-warn" id="accountBanner" style="display:none"></div>
+    <div class="banner banner-warn" id="recoveryBanner" style="display:none"></div>
     <div class="banner banner-warn" id="crashBanner" style="display:none"></div>
     <div class="banner banner-warn" id="updateBanner" style="display:none"></div>
     <div class="banner banner-warn" id="offlineBanner" style="display:none"></div>
@@ -294,6 +295,7 @@
 </div>
 
 <script src="js/store.js"></script>
+<script src="js/recovery.js"></script>
 <script src="js/dates.js"></script>
 <script src="js/model/schema.js"></script>
 <script src="js/model/migrate.js"></script>

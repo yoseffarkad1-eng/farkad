@@ -24,6 +24,7 @@ const FILES = [
     // this file builds DOM nodes and is harmless against the stub document below.
     'js/ui/dom.js',
     'js/store.js',
+    'js/recovery.js',
     'js/model/schema.js',
     'js/model/migrate.js',
     'js/state.js',
@@ -94,6 +95,11 @@ export function makeDevice(options = {}) {
 
     const localStorage = makeLocalStorage(options.storage);
     const renders = { count: 0 };
+
+    // Installed BEFORE the app's scripts run. sync.js reads its outbox the moment it
+    // loads, so a fault switched on after makeDevice() returns is switched on too late
+    // to affect it - which quietly turned "no room for the copy" into "copy made fine".
+    if (options.quota) localStorage.__quota = options.quota;
 
     const sandbox = {
         localStorage,
