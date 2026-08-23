@@ -72,6 +72,12 @@ if (!isConfigured()) {
     onAuthStateChanged(auth, user => {
         const button = document.getElementById('syncAuthBtn');
 
+        // The button ships hidden, because with no Firebase project a "connect to the
+        // cloud" button is a door onto nothing. Reaching this callback means the SDK
+        // loaded and a project answered, so the door is real - and nothing else on the
+        // page was ever going to show it.
+        if (button) button.style.display = '';
+
         if (!user) {
             window.FarkadSync.disconnect();
             if (button) {

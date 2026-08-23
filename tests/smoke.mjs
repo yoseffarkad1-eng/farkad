@@ -2591,6 +2591,34 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the sign-in door
+{
+  // The button ships hidden, because with no Firebase project it is a door onto
+  // nothing. It was hidden by a style attribute in the HTML and NOTHING anywhere ever
+  // removed it - so the evening sync was switched on, the whole feature was invisible
+  // and there was no way in at all.
+  const page = await open();
+  const button = page.locator('#syncAuthBtn');
+  check('with no cloud project the sign-in button stays out of the way',
+    !(await button.isVisible()));
+
+  // the adapter reaches this on its first auth callback, which only happens once a
+  // Firebase project has actually answered
+  await page.evaluate(() => {
+    const node = document.getElementById('syncAuthBtn');
+    node.style.display = '';
+    node.textContent = '☁️ התחבר לענן';
+  });
+  await page.waitForTimeout(200);
+  check('and appears once a project answers',
+    (await button.isVisible()) &&
+    (await button.textContent()).includes('התחבר לענן'));
+  check('it sits in the header, where it is found without hunting',
+    (await page.evaluate(() =>
+      Boolean(document.querySelector('.topbar #syncAuthBtn')))) === true);
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- the cloud copies
 {
   // Sync is a mirror: a deletion travels as faithfully as a correction, and the local
