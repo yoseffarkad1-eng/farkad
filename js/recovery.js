@@ -31,7 +31,18 @@ const Recovery = {
     //
     // `raw` is passed in rather than re-read: whoever found the damage has the bytes in
     // hand, and reading again could pick up something else.
-    damaged(key, raw, message) {
+    //
+    // `alwaysHold` is for the records where a safe copy is not the question.
+    //
+    // Acknowledging normally means "I have the export, let me carry on recording", and
+    // for most damaged records that is a fair trade: the bytes are safe, and the work
+    // that follows is new work. For a record that describes an UNFINISHED TRANSACTION it
+    // is not. Carrying on there means ordinary sends resume, an acknowledged entry inside
+    // a written schedule is pruned, and the queue is emptied of exactly the edits that
+    // transaction would have needed to replay once it could run again - so the day the
+    // person recorded after the restore disappears from the screen, the disk and the
+    // cloud, hours after they pressed the button that promised the opposite.
+    damaged(key, raw, message, alwaysHold) {
         const already = this.problems.find(problem => problem.key === key);
         if (already) return already.copy;
 
@@ -43,7 +54,7 @@ const Recovery = {
             message: message || `הרישום "${key}" לא נקרא.`,
             // A copy that could not be confirmed means the original is the only one there
             // is. Writing anywhere near it is not something to let somebody wave away.
-            mustHold: !copy
+            mustHold: !copy || alwaysHold === true
         });
 
         this.paint();

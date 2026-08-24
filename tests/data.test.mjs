@@ -3693,6 +3693,15 @@ const diskDays = device => {
 
 // ---------------------------------------------------------------- G16: the last of it
 
+// Every attempt that could change the shared schedule document. `save` alone is not the
+// question: an ordinary `update` is what gets acknowledged, and an acknowledgement is
+// what lets an entry be pruned out of the queue.
+function documentWrites(cloud) {
+    return cloud.attempts
+        .filter(attempt => ['update', 'create', 'save'].includes(attempt.kind))
+        .map(attempt => attempt.kind);
+}
+
 // The value of one field path, off the cloud document, so "which of the two writes won"
 // is a question with a plain answer.
 function cloudEntries(cloud, date, workerId) {
@@ -4721,9 +4730,11 @@ for (const [label, arm] of [
     first.Sync.pushDelayMs = TICK;
     first.Sync.connect(cloud.adapter);
     await settle(TICK * 30);
+    // EVERY write that can change the shared document. Counting only `save` was how the
+    // hole below went unnoticed: the restore never went out, and the ordinary field
+    // merges did - and it is the merges that get acknowledged and pruned.
     check('nothing is sent while the boundary cannot be trusted',
-        cloud.attempts.filter(a => a.kind === 'save').length === 0,
-        String(cloud.attempts.filter(a => a.kind === 'save').length));
+        documentWrites(cloud).length === 0, JSON.stringify(documentWrites(cloud)));
 
     // TWO REOPENS. The day must survive both, and must never be superseded.
     const second = makeDevice({ storage: first.dump(), deviceId: 'd_here' });
@@ -4947,6 +4958,183 @@ for (const [label, arm] of [
     check('and every entry still in it',
         again.Sync.pendingPaths().length === device.Sync.pendingPaths().length,
         `${again.Sync.pendingPaths().length} vs ${device.Sync.pendingPaths().length}`);
+}
+
+{
+    suite('G18: a held legacy transaction cannot be acknowledged away');
+
+    // The continuation the last round left open. The companion is damaged, the app
+    // correctly holds the transaction - and then the person presses "I understand,
+    // carry on recording", which is the button that exists for a damaged record whose
+    // bytes are safely copied. From there ordinary sends resumed, the seq-2 entry was
+    // acknowledged and pruned, and when the good companion came back the restore ran
+    // with its original boundary over a queue that no longer held the day.
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.putRaw('farkad:pendingReplace', V71_RECORD);
+
+    const half = makeDevice({
+        storage: device.dump(), deviceId: 'd_here',
+        quota: (key, value) => key === 'farkad:pendingReplace' && value.includes('"version":2')
+    });
+    half.State.load();
+    given('the boundary was frozen at 1', half.Sync.pendingReplace().supersedesSeq === 1,
+        String(half.Sync.pendingReplace().supersedesSeq));
+    const goodCompanion = half.raw('farkad:pendingReplace:v71');
+
+    check('a day recorded after the restore is accepted',
+        record(half, '2026-08-20', 'w_02', 'p_02') === true);
+    const queueBefore = half.raw(half.Sync.activeOutboxKey());
+    given('and it is queued above the boundary',
+        JSON.parse(queueBefore).items['days.2026-08-20.actual.w_02'].seq === 2,
+        queueBefore);
+
+    // The companion is damaged; everything else is left exactly as it is.
+    const broken = makeDevice({ storage: half.dump(), deviceId: 'd_here' });
+    broken.putRaw('farkad:pendingReplace:v71', '{"version":2,"phase":"pre');
+    const brokenCompanion = broken.raw('farkad:pendingReplace:v71');
+
+    const held = makeDevice({ storage: broken.dump(), deviceId: 'd_here' });
+    held.State.load();
+    const cloud = makeCloud();
+    held.Sync.pushDelayMs = TICK;
+    held.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+
+    given('the transaction is held', held.Sync.replaceHeld === true);
+
+    // 1. Connecting sends nothing at all - not a save, not an update, not a create.
+    check('connecting sends nothing that could change the document',
+        documentWrites(cloud).length === 0, JSON.stringify(documentWrites(cloud)));
+
+    // 2. The acknowledgment cannot lift it, even though the copy was taken.
+    check('a copy of the damaged companion WAS taken',
+        held.raw('farkad:pendingReplace:v71:damaged') !== null);
+    check('and it is still held anyway',
+        held.global('Recovery').acknowledge() === false);
+    check('writing is still blocked after acknowledging',
+        held.call('farkadWritesBlocked') === true);
+    check('the queue is byte-for-byte what it was',
+        held.raw(held.Sync.activeOutboxKey()) === queueBefore,
+        String(held.raw(held.Sync.activeOutboxKey())));
+
+    // 3. Nothing anybody presses can get past it.
+    await held.Sync.flush();
+    await held.Sync.flush();
+    held.Sync.scheduleFlush();
+    held.Sync.disconnect();
+    held.Sync.connect(cloud.adapter);
+    held.Sync.scheduleRetry();
+    await settle(TICK * 60);
+
+    check('repeated flushes, a reconnect and a retry still send nothing',
+        documentWrites(cloud).length === 0, JSON.stringify(documentWrites(cloud)));
+    check('and the queue is still byte-for-byte what it was',
+        held.raw(held.Sync.activeOutboxKey()) === queueBefore,
+        String(held.raw(held.Sync.activeOutboxKey())));
+    const waitingBefore = Object.keys(JSON.parse(queueBefore).items)
+        .filter(path => JSON.parse(queueBefore).items[path].sent !== true).length;
+    check('and every entry is still waiting - none was marked as sent',
+        held.Sync.pendingCount() === waitingBefore,
+        `${held.Sync.pendingCount()} vs ${waitingBefore}`);
+
+    // 4. And no new work is taken on while it is held.
+    check('a new edit is refused rather than accepted',
+        record(held, '2026-08-21', 'w_01', 'p_01') === false);
+    check('the disk did not change either',
+        JSON.parse(held.raw('scheduleData:v2')).days['2026-08-21'] === undefined);
+    check('and the queue STILL has not moved',
+        held.raw(held.Sync.activeOutboxKey()) === queueBefore);
+
+    // Both raw records, and the copy, are all there to be exported.
+    check('the raw v71 record is intact',
+        held.raw('farkad:pendingReplace') === V71_RECORD);
+    check('the damaged companion is intact',
+        held.raw('farkad:pendingReplace:v71') === brokenCompanion);
+    const exported = held.global('Recovery').rawRecords();
+    check('the export carries both, and the queue',
+        exported['farkad:pendingReplace'] === V71_RECORD
+        && exported['farkad:pendingReplace:v71'] === brokenCompanion
+        && exported[held.Sync.activeOutboxKey()] === queueBefore,
+        JSON.stringify(Object.keys(exported)));
+
+    // 5. The companion is repaired, and the transaction finishes properly.
+    const mended = makeDevice({ storage: held.dump(), deviceId: 'd_here' });
+    mended.putRaw('farkad:pendingReplace:v71', goodCompanion);
+
+    const running = makeDevice({ storage: mended.dump(), deviceId: 'd_here' });
+    running.State.load();
+    check('the original frozen boundary is the one used',
+        running.Sync.pendingReplace().supersedesSeq === 1,
+        JSON.stringify(running.Sync.pendingReplace() && running.Sync.pendingReplace().supersedesSeq));
+
+    running.Sync.pushDelayMs = TICK;
+    running.Sync.connect(cloud.adapter);
+    await settle(TICK * 60);
+
+    check('the restore finishes', running.Sync.pendingReplace() === null,
+        JSON.stringify(running.Sync.pendingReplace()));
+    check('the queue drains', running.Sync.pendingCount() === 0,
+        String(running.Sync.pendingCount()));
+    check('the restored day is on the screen',
+        dayKeys(running.State.schedule).includes('2026-07-01'),
+        dayKeys(running.State.schedule));
+    check('and the day recorded after the restore survived',
+        dayKeys(running.State.schedule).includes('2026-08-20'),
+        dayKeys(running.State.schedule));
+    check('the disk says the same', String(diskDays(running)).includes('2026-08-20'),
+        String(diskDays(running)));
+    check('and so does the cloud',
+        Boolean((cloud.doc.days || {})['2026-08-20'])
+        && Boolean((cloud.doc.days || {})['2026-07-01']),
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+
+    const first = makeDevice({ storage: running.dump(), deviceId: 'd_here' });
+    first.State.load();
+    check('the first reopen agrees',
+        dayKeys(first.State.schedule) === '2026-07-01,2026-08-20',
+        dayKeys(first.State.schedule));
+    const second = makeDevice({ storage: first.dump(), deviceId: 'd_here' });
+    second.State.load();
+    check('and the second',
+        dayKeys(second.State.schedule) === '2026-07-01,2026-08-20',
+        dayKeys(second.State.schedule));
+    check('with nothing left held or pending',
+        second.Sync.replaceHeld === false && second.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G18: a companion belonging to another restore holds it just as hard');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.putRaw('farkad:pendingReplace', V71_RECORD);
+    device.putRaw('farkad:pendingReplace:v71', JSON.stringify({
+        version: 2, phase: 'prepared', transactionId: 'legacy_other', supersedesSeq: 99,
+        cloud: true,
+        document: device.call('cloudDocument', device.call('normaliseSchedule', {
+            workers: device.State.schedule.workers, places: device.State.schedule.places,
+            days: { '2026-01-01': { plan: {}, actual: {} } }, advances: {},
+            updatedAt: '2026-01-01T06:00:00.000Z', updatedBy: 'd_other'
+        }))
+    }));
+
+    const held = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    held.State.load();
+    const cloud = makeCloud();
+    held.Sync.pushDelayMs = TICK;
+    held.Sync.connect(cloud.adapter);
+    await settle(TICK * 40);
+
+    check('it is held', held.Sync.replaceHeld === true);
+    check('acknowledging does not lift it',
+        held.global('Recovery').acknowledge() === false);
+    check('nothing that could change the document was sent',
+        documentWrites(cloud).length === 0, JSON.stringify(documentWrites(cloud)));
+    check('and no new edit is taken on',
+        record(held, '2026-08-21', 'w_01', 'p_01') === false);
 }
 
 report();

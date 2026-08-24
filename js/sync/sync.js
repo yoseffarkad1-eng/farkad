@@ -507,6 +507,11 @@ const FarkadSync = {
         this.loadOutbox();
         if (!this._activeKey) return false;
         if (farkadWritesBlocked()) return false;
+        // Every path that marks, prunes or drops an entry comes through here, so this one
+        // line is the whole of "no queued entry may be acknowledged, marked sent, or
+        // pruned while a transaction is held". The queue stays byte-for-byte until the
+        // record that describes what it owes can be read again.
+        if (this.replaceHeld) return false;
 
         const items = {};
         candidate.forEach((item, path) => { items[path] = item; });
@@ -828,7 +833,15 @@ const FarkadSync = {
     // never drain again would be a second failure on top of the first.
     replacementOutstanding() {
         if (this._replacing) return true;
-        return Boolean(this.pendingReplace());
+        if (this.pendingReplace()) return true;
+
+        // A legacy record whose frozen boundary cannot be read. pendingReplace() answers
+        // null for it, which is right - nothing may ACT on it - but null used to mean
+        // "carry on as normal", and carrying on is the destructive half: an ordinary send
+        // is acknowledged, an acknowledged entry inside a written schedule is pruned, and
+        // the queue loses exactly the edits that transaction would have replayed once its
+        // boundary was readable again. So it is outstanding too.
+        return this.replaceHeld;
     },
 
     // The journal position an outstanding replacement has superseded, or 0.
@@ -971,7 +984,7 @@ const FarkadSync = {
     //
     // The whole arrays are still sent alongside, and that is deliberate: a phone that has
     // not updated reads them and sees a correct roster. They can stop being written once
-    // all three devices are past v76 - not before.
+    // all three devices are past v77 - not before.
     editRoster(schedule) {
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
@@ -1043,7 +1056,11 @@ const FarkadSync = {
         // to resume the restore, and the restore was left with nothing scheduled to pick
         // it up while the ordinary sends carried on over the top of it.
         if (this.replacementOutstanding()) {
-            if (!this._replacing && !this._retryTimer) this.scheduleRetry();
+            // Nothing is scheduled for a HELD one: there is nothing a retry could do
+            // except come back and find the same unreadable record.
+            if (!this._replacing && !this._retryTimer && !this.replaceHeld) {
+                this.scheduleRetry();
+            }
             return Promise.resolve();
         }
 
@@ -1746,8 +1763,13 @@ const FarkadSync = {
             //
             // Nothing is recomputed, nothing is overwritten, and the bytes are kept.
             this.replaceHeld = true;
+            // Held, not merely reported - see Recovery.damaged's fourth argument. A copy
+            // of these bytes is not enough to make it safe to carry on: this record is
+            // the boundary of a transaction that has not finished, and recording past it
+            // is what empties the queue of the very entries that transaction still owes.
             Recovery.damaged(LEGACY_UPGRADE_KEY, companion.raw,
-                'הרישום שמלווה שחזור ישן שממתין לשליחה אינו תקין. השחזור מושהה.');
+                'הרישום שמלווה שחזור ישן שממתין לשליחה אינו תקין. הרישום לא נמחק, ' +
+                'והרישום מושבת עד שהנתונים הגולמיים ייוצאו.', true);
             return null;
         }
 
