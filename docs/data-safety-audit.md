@@ -7,18 +7,14 @@ the live site still serves v58.
 |---|---|
 | Baseline asked for (round 1) | `ca0d2d6` (v57) |
 | Baseline actually used | `182a51f` (v58) — see below |
-| **Last behaviour change** | `7272be6` — *Three ways a half-finished write could still survive* |
-| **Branch HEAD** | `bdc1717` and later — documentation, plus two JS **comment** lines |
-| Version | v71 |
+| **Last behaviour change** | `109a029` — *A restore reaches this device before it reaches the cloud* |
+| **Branch HEAD** | this documentation commit |
+| Version | v72 |
 
 **Code HEAD and branch HEAD are not the same thing.** An earlier version of this file
 called a documentation commit the "Final HEAD", which was misleading. The table above
-separates them, and precisely: the last commit that changes **behaviour** is `7272be6`.
-`bdc1717` is documentation plus two comment lines in `js/model/schema.js` and
-`js/sync/sync.js` — the version at which the legacy roster arrays may be dropped, which
-had gone stale at v59. Comments only; the browser suite was re-run over it anyway
-(560/560). `git branch -r --contains 7272be6` returns only
-`origin/claude/farkad-data-safety`.
+separates them: the last commit that changes **behaviour** is `109a029`, and
+`git branch -r --contains 109a029` returns only `origin/claude/farkad-data-safety`.
 
 ## The one deviation from the brief
 
@@ -28,6 +24,98 @@ That commit is layout only — CSS, the day header builder, version strings, tes
 touches no data path. The branch was cut from `182a51f` so the fix is not lost.
 
 Round 2's precondition (`HEAD == 6f1dee2`) matched exactly.
+
+## Round 5 — the replacement transaction
+
+### Root cause
+
+`retryReplace()` pushed the pending document to the cloud from wherever the app happened
+to be, without ever asking whether **this** device held it. Crash between preparing a
+restore and storing it, reopen, and:
+
+```
+{"cloudDays":"2026-07-01","screenDays":"2026-08-12",
+ "diskDays":"2026-08-12","pending":null,"status":"synced"}
+```
+
+The snapshot published during `save()` was ignored because a replacement was in flight,
+then the record and the queue were cleared. The cloud held the restore, the phone that
+asked for it held the old schedule, and the only thing that knew a restore was owed had
+just been deleted — so a later edit from that phone would build on the superseded state
+with nothing anywhere recording it.
+
+### The invariant
+
+> The cloud may be written only once `scheduleData:v2`, **read straight back off the
+> disk**, already contains the replacement.
+
+`localDurableHolds(document)` asks exactly that — before the cloud write, and **again**
+before anything is forgotten. A resolved cloud write is not on its own a reason to forget:
+the question is whether screen, disk and cloud say the same thing, and only the disk can
+answer it. Comparison is canonical (key-order independent) over `workers`, `places`,
+`days`, `advances`; the **only** excluded metadata is `updatedAt` and `updatedBy`, which
+saving here legitimately re-stamps.
+
+### The envelope
+
+```
+{ version: 2, phase, transactionId, supersedesSeq, document }
+
+phase: 'prepared'      the intent is written down; nothing else has happened
+       'local-stored'  this device durably holds it; the cloud may be written
+       'cancelled'     a tombstone, for a delete that could not be confirmed
+```
+
+**The phase is a hint, not the guarantee.** A phase can be stale after a crash; the bytes
+cannot. `supersedesSeq` is the journal position when the restore was asked for — entries
+at or below it describe the state being replaced, and replaying them would put the
+pre-restore days back on top of the restore. They are dropped **only** once the
+replacement is durably stored here.
+
+### The flow — `FarkadSync.replaceEverything(schedule)`
+
+```
+1 prepareReplace          verified   → fail: nothing changed                (stage 'prepare')
+2 applyReplacementLocally verified   → fail: memory reverted, intent cancelled (stage 'local')
+  └─ then drop superseded journal entries
+3 confirmReplaceStored               (best effort; the disk is the gate)
+4 executePreparedReplace  cloud      → fail: intent stays on disk, resumed  (stage 'cloud')
+  └─ on resolve: re-check the invariant, then clear queue + forget + synced
+```
+
+`resumeReplace()` replaces `retryReplace()` and puts **this device first**. It applies
+unconditionally rather than only when the disk disagrees — `State.load` has meanwhile
+replayed the journal, so memory can be ahead of a disk that already holds the replacement.
+That also makes it idempotent, which is what the third crash boundary needs.
+
+### Cancellation
+
+`cancelPreparedReplace()` / `forgetReplace()` return whether the record is **genuinely
+gone**. `localStorage` can refuse a remove; a tombstone covers that with a write instead;
+if neither works the answer is `false` and the app says the restore may still happen at the
+next open rather than claiming nothing is pending.
+
+### v71 compatibility
+
+A v71 record is the bare cloud document, no `version`, no `phase`. It is read as
+**`prepared`** — conservative *and* accurate, since v71 also wrote it before the local
+save. It is never deleted for being old; recovery applies it locally first, exactly like a
+new one.
+
+### Round 5 fault injection — every result measured after a close and reopen
+
+| Boundary | Outcome |
+|---|---|
+| crash after prepare, before memory | resumes, applies locally, then sends; screen = disk = cloud; survives a **second** reopen |
+| crash after memory, before the schedule write | same |
+| crash after the schedule landed, before the phase | idempotent resume; no journal replay left on top |
+| each of the three, against an **older** cloud | the restore wins, not the older snapshot |
+| no room during resume | **zero** cloud calls, original screen and disk, transaction survives, status not synced, queue intact |
+| snapshot published synchronously inside `save()` | asserted to happen, and nothing depends on it |
+| cloud resolves while the disk no longer holds what was sent | record **kept**, status not synced |
+| v71 raw record | recovered, not deleted |
+| cancellation cannot be confirmed | reports `false`; record still there; still visible after reopen |
+| queue while only prepared / after a failed local save | untouched |
 
 ## Round 4 — three ways a half-finished write could still survive
 
@@ -187,6 +275,12 @@ copy that was refused.
 
 ## Commits
 
+Round 5:
+
+| SHA | What it fixed |
+|---|---|
+| `109a029` | **G13** — the phased durable replacement transaction |
+
 Round 4:
 
 | SHA | What it fixed |
@@ -223,6 +317,16 @@ Round 1:
 | `8b9d4a0` | **P1** — the durable outbox |
 | `2485a73` | **P2** — the first cloud document, complete and atomic |
 | `e1fcdbe` | The Node device harness (deliberately red — reproduces P2) |
+
+## Files changed in round 5, and why
+
+| File | Why |
+|---|---|
+| `js/sync/sync.js` | The envelope (`version`/`phase`/`transactionId`/`supersedesSeq`), `readReplacementRecord` for the v71 format, `canonicalJson` + `replacementContent` for the comparison, `localDurableHolds` (the invariant), `applyReplacementLocally`, `dropSupersededEntries`, `resumeReplace`, `confirmReplaceStored`, `replaceEverything`; `executePreparedReplace` gated on the disk and re-checked after the cloud resolves; `forgetReplace`/`cancelPreparedReplace` return a verified result with a tombstone fallback; **`retryReplace` deleted** — it was where G13 lived. |
+| `js/ui/share.js` | All four restore paths call `replaceEverything`; `tellRestoreResult` reads the stage; `stuckIntentNotice()` for a cancellation that could not be confirmed. |
+| `tests/harness.mjs` | `blockRemoval()` — a `removeItem` the browser silently refuses. |
+| `index.html`, `sw.js`, `js/app.js`, `js/model/schema.js` | v72. |
+| `tests/data.test.mjs` | The round-5 scenarios above. |
 
 ## Files changed in round 4, and why
 
@@ -272,7 +376,7 @@ Run from a **clean clone** (`git clone` → `npm ci`), Node v22.22.2:
 
 | Suite | Result |
 |---|---|
-| Data (`npm test`) | **299/299**, ten consecutive runs |
+| Data (`npm test`) | **344/344**, ten consecutive runs |
 | Browser (`npm run test:smoke`) | **560/560**, twice |
 | Rules (`npm run test:rules`, Firestore emulator) | **24/24** |
 
@@ -392,7 +496,7 @@ anything found under it on an old device is still a real copy worth keeping.
    write and does not write it. Nobody can read out of this data what a man was actually
    paid in March.
 2. **Legacy roster arrays.** Still written, for devices that have not updated. Not to be
-   removed before all three phones are confirmed past v71 and there is a rollback plan.
+   removed before all three phones are confirmed past v72 and there is a rollback plan.
 3. **Firestore rules.** Unchanged. Nothing here needs them changed and nothing needs
    republishing in the console.
 4. **UX notes.** None implemented, per the brief.
