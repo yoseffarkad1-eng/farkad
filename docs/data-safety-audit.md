@@ -11,10 +11,10 @@ the live site still serves v58.
 | Last commit on the branch | this documentation commit, which changes no code |
 | Version | v70 |
 
-**Code HEAD and branch HEAD are not the same thing.** The previous version of this file
+**Code HEAD and branch HEAD are not the same thing.** An earlier version of this file
 called a documentation commit the "Final HEAD", which was misleading. The table above
 separates them: nothing in `docs/` affects the app, and the last commit that changes
-behaviour is `3f415c5`.
+behaviour is `d4229ad`.
 
 ## The one deviation from the brief
 
@@ -133,6 +133,19 @@ Round 1:
 | `8b9d4a0` | **P1** — the durable outbox |
 | `2485a73` | **P2** — the first cloud document, complete and atomic |
 | `e1fcdbe` | The Node device harness (deliberately red — reproduces P2) |
+
+## Files changed in round 3, and why
+
+| File | Why |
+|---|---|
+| `js/state.js` | `commit`/`commitMany`/`commitRoster` return whether the edit is durable and refuse it when it is not; `journal()` is the gate; `rollback()` and `durableText`; `load()` replays the journal; `save()` calls `onLocalChange` only on success. |
+| `js/sync/sync.js` | Journal semantics — `sent` marking, `pruneJournal`, `markSaved`, `replayJournal`, `reloadJournal`, `activeOutboxKey`; outbox slots so a damaged queue does not stop recording; `queue`/`edit`/`editRoster` return durability; `receive()` reads `persist()` and refuses while the journal cannot be written; `replaceAll` keeps the queue when the local save failed. |
+| `js/store.js` | `durableGet()` — what the next session would see, bypassing the session cache. |
+| `js/recovery.js` | The export carries the live schedule and the live queue, not only the wreckage. |
+| `js/ui/share.js` | All four restore paths check the save of the **new** state; `notStoredNotice()`. |
+| `js/ui/undo.js`, `day.js`, `sheet.js`, `quickstart.js`, `migration.js` | Every success message and undo bar gated on the commit result. |
+| `index.html`, `sw.js`, `js/app.js` | v70. |
+| `tests/data.test.mjs`, `tests/smoke.mjs` | The round-3 scenarios below. |
 
 ## Files changed in round 2, and why
 
