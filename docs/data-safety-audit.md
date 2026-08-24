@@ -7,14 +7,15 @@ the live site still serves v58.
 |---|---|
 | Baseline asked for (round 1) | `ca0d2d6` (v57) |
 | Baseline actually used | `182a51f` (v58) — see below |
-| Last **code** commit | `d4229ad` — *An edit is not made until something on this device can make it again* |
-| Last commit on the branch | this documentation commit, which changes no code |
-| Version | v70 |
+| **Code HEAD** | `7272be6` — *Three ways a half-finished write could still survive* |
+| **Branch HEAD** | this documentation commit, which changes no code |
+| Version | v71 |
 
 **Code HEAD and branch HEAD are not the same thing.** An earlier version of this file
 called a documentation commit the "Final HEAD", which was misleading. The table above
 separates them: nothing in `docs/` affects the app, and the last commit that changes
-behaviour is `d4229ad`.
+behaviour is `7272be6`. `git branch -r --contains 7272be6` returns only
+`origin/claude/farkad-data-safety`.
 
 ## The one deviation from the brief
 
@@ -24,6 +25,86 @@ That commit is layout only — CSS, the day header builder, version strings, tes
 touches no data path. The branch was cut from `182a51f` so the fix is not lost.
 
 Round 2's precondition (`HEAD == 6f1dee2`) matched exactly.
+
+## Round 4 — three ways a half-finished write could still survive
+
+### G10 — a bulk operation was not atomic, only reported as if it were
+
+The queue is rewritten whole on every entry, so journalling a bulk change one entry at a
+time was a run of writes each larger than the last. The second running out of room left
+the **first one durable** — and `commitMany` reported that nothing had happened while half
+of it sat on the disk and came back at the next open.
+
+**`queueBatch(entries)`** builds the change on a copy, writes it **once**, reads it back,
+and adopts it only then. Nothing partial can survive because nothing partial is ever
+written — there is no prefix to clean up afterwards. `commitMany` and `editRoster` each go
+through one batch. A repeated path inside a batch keeps the later value at the later seq;
+`Map.set` replaces, so that falls out rather than needing a rule.
+
+### G11 — how an outbox slot is chosen
+
+```
+for i in 0 .. 24:
+    key = i == 0 ? "farkad:outbox" : "farkad:outbox:active{i}"
+    raw = durableGet(key)
+    raw is absent   →  _activeKey = key, empty queue, done
+    raw parses      →  _activeKey = key, load it, done
+    raw is damaged  →  quarantine it, leave it byte-for-byte, try the next i
+none left           →  _activeKey = null, Recovery.halt(mustHold)
+```
+
+`_activeKey` is **null until a slot passes**, and a slot passes only by being absent or
+parsing. The previous version assigned it at the top of each turn, so with every slot
+damaged it came to rest on the last one and wrote the new journal over bytes it had just
+quarantined. With no slot available, `saveOutbox` refuses **without writing**, and
+acknowledging cannot open recording.
+
+### G12 — the whole-document restore, step by step
+
+```
+1. pushUndoState(current)            verified  → fail: nothing replaced
+2. prepareReplace(incoming)          verified  → fail: nothing replaced, cloud NOT called
+3. State.schedule = incoming
+4. State.save()                      verified  → fail: revert memory,
+                                                  cancelPreparedReplace(), cloud NOT called
+5. render()
+6. executePreparedReplace()          cloud     → fail: retry record STAYS on disk
+7. on success only: clear the pending record and the superseded queue
+```
+
+Preparing **first** is the only order in which a crash between any two steps is safe.
+Before 1 nothing has happened; between 2 and 4 there is a retry record and the old state,
+so the restore is re-attempted next session; after 4 the two agree.
+
+`rememberReplace` no longer adopts the document in memory when the write failed — that
+left this device believing in a pending restore no other session would ever find, while
+refusing to adopt snapshots on account of a record that did not exist.
+
+All four paths reordered: `restoreFromCloud`, `restoreSnapshot`, `importBackup`,
+`restoreLocalBackup`. **None calls `replaceAll` any more.**
+
+### The private-mode exception does not extend to a restore
+
+An ordinary edit is allowed on a browser that stores nothing — the app says plainly that
+nothing survives, and refusing would protect nobody. A whole-document restore changes what
+**every other device** holds, and doing that with no durable record of the intent is a
+different bargain. `prepareReplace` returns false when storage is unavailable.
+
+### Round 4 fault injection, by boundary
+
+| Boundary | Outcome |
+|---|---|
+| bulk: second journal write fails (by **size**) | whole batch refused, neither half on disk or after reopen |
+| bulk: room for part, not all | refused whole |
+| roster: add + reorder, batch too large | refused, worker not on screen, none of it journalled |
+| bulk that fits | lands whole, all three present after reopen |
+| same path twice in a batch | later value kept, one entry |
+| five slots present and damaged, **quarantine space available** | moves to slot 6; all five byte-identical, before and after reopen |
+| every slot damaged | `_activeKey` null, `saveOutbox` false, acknowledge cannot unblock, edit refused |
+| restore: retry record refused | restore never starts, `adapter.save` **never called**, nothing pending after reopen |
+| restore: retry ok, local save fails | memory reverted, prepared record cancelled, cloud never called |
+| restore: retry + local ok, cloud fails | record survives the close and is sent on reconnect |
+| restore under unavailable storage | refused; ordinary edits still accepted |
 
 ## Round 3 — the durable transaction
 
@@ -103,6 +184,12 @@ copy that was refused.
 
 ## Commits
 
+Round 4:
+
+| SHA | What it fixed |
+|---|---|
+| `7272be6` | **G10/G11/G12** — atomic batch journal, safe slot selection, ordered restore |
+
 Round 3:
 
 | SHA | What it fixed |
@@ -133,6 +220,16 @@ Round 1:
 | `8b9d4a0` | **P1** — the durable outbox |
 | `2485a73` | **P2** — the first cloud document, complete and atomic |
 | `e1fcdbe` | The Node device harness (deliberately red — reproduces P2) |
+
+## Files changed in round 4, and why
+
+| File | Why |
+|---|---|
+| `js/sync/sync.js` | `queueBatch()` — one verified write, adopted only on success; `queue()` delegates to it; `editRoster` collects into one batch. Slot selection rewritten: `_activeKey` null until a slot passes, bound raised to 25, `Recovery.halt` when none. `saveOutbox` refuses with no active key. `prepareReplace`/`executePreparedReplace`/`cancelPreparedReplace`; `rememberReplace` no longer adopts on a failed write and refuses when storage is unavailable. |
+| `js/state.js` | `journalBatch()`; `commitMany` uses one batch instead of a chain. |
+| `js/ui/share.js` | All four restore paths reordered to prepare → save → execute, with `cancelPreparedReplace` on a local failure; `noRetryRecordNotice()`. |
+| `index.html`, `sw.js`, `js/app.js` | v71. |
+| `tests/data.test.mjs`, `tests/smoke.mjs` | The round-4 scenarios above. |
 
 ## Files changed in round 3, and why
 
@@ -172,8 +269,8 @@ Run from a **clean clone** (`git clone` → `npm ci`), Node v22.22.2:
 
 | Suite | Result |
 |---|---|
-| Data (`npm test`) | **247/247**, ten consecutive runs |
-| Browser (`npm run test:smoke`) | **556/556**, twice |
+| Data (`npm test`) | **299/299**, ten consecutive runs |
+| Browser (`npm run test:smoke`) | **560/560**, twice |
 | Rules (`npm run test:rules`, Firestore emulator) | **24/24** |
 
 Syntax check: 32 tracked `.js`/`.mjs` files, 0 failures.
@@ -292,15 +389,15 @@ anything found under it on an old device is still a real copy worth keeping.
    write and does not write it. Nobody can read out of this data what a man was actually
    paid in March.
 2. **Legacy roster arrays.** Still written, for devices that have not updated. Not to be
-   removed before all three phones are confirmed past v69 and there is a rollback plan.
+   removed before all three phones are confirmed past v71 and there is a rollback plan.
 3. **Firestore rules.** Unchanged. Nothing here needs them changed and nothing needs
    republishing in the console.
 4. **UX notes.** None implemented, per the brief.
 
 ## What was not touched
 
-- **`main`** is `182a51f`, and `git branch -r --contains 3f415c5` lists only
-  `origin/claude/farkad-data-safety`.
+- **`main`** is `182a51f`, and `git branch -r --contains 7272be6` — the current code HEAD —
+  lists only `origin/claude/farkad-data-safety`.
 - **The live site** deploys from `main` and still serves `APP_VERSION = 'v58'`.
 - **Firebase** — no writes, no rule changes, no console actions. `firestore.rules` is
   byte-identical to `182a51f`. The rules suite runs against a local emulator under
