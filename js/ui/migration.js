@@ -99,7 +99,9 @@ function applyIssueDecision(issue, placeIds) {
     const changes = resolveIssue(State.schedule, issue, placeIds);
     if (changes.length === 0) return;
 
-    State.commitMany(changes);
+    // A decision that could not be stored must not leave the list, or the question is
+    // gone and the day it was about is not recorded anywhere.
+    if (!State.commitMany(changes)) return;
     dismissIssue(issue);
     renderMigrationList();
 }

@@ -83,7 +83,7 @@ function quickNext() {
     // not a decision to replace the whole record - and replacing was actively dangerous:
     // run on a phone already connected to a project that has data, it would have
     // overwritten the cloud document with this device's fresh, nearly empty one.
-    State.commitRoster();
+    if (!State.commitRoster()) return;
     render();
     askTell(`מוכן: ${made.workers} עובדים ו-${made.places} אתרים. אפשר להתחיל לרשום.`);
 }

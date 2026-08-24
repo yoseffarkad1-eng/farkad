@@ -358,8 +358,17 @@ async function restoreFromCloud(date) {
         return;
     }
 
+    const previous = State.schedule;
     State.schedule = normaliseSchedule(raw);
-    State.save();
+
+    // Stored HERE first, and checked. Sending a state this device could not keep would
+    // put it on the other two phones and lose it on this one.
+    if (!State.save()) {
+        State.schedule = previous;
+        render();
+        askTell(notStoredNotice());
+        return;
+    }
     render();
 
     // Awaited. This used to print "שוחזר מהענן." whether or not the write happened -
@@ -390,8 +399,15 @@ async function restoreSnapshot(date) {
         return;
     }
 
+    const previous = State.schedule;
     State.schedule = normaliseSchedule(JSON.parse(raw));
-    State.save();
+
+    if (!State.save()) {
+        State.schedule = previous;
+        render();
+        askTell(notStoredNotice());
+        return;
+    }
     render();
 
     if (typeof FarkadSync === 'undefined' || FarkadSync.status === 'off') {
@@ -463,6 +479,20 @@ function popUndoState() {
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
     return Store.get(UNDO_KEY);
+}
+
+// Said, and the restore abandoned, when the RESTORED state could not be stored.
+//
+// The way back being written is only half of it. If the new state cannot be stored
+// either, going ahead leaves the restored week on the screen and the old one on the disk
+// - the person sees a restore that worked, closes the app, and opens it to find nothing
+// happened. Worse, the cloud would then be sent a state this device does not hold.
+function notStoredNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'אין מקום במכשיר לשמור את המצב המשוחזר, ולכן לא שינינו כלום - הרישום ' +
+            'שהיה כאן נשאר כמו שהוא. פנה מקום במכשיר או ייצא קובץ גיבוי, ונסה שוב.'
+    };
 }
 
 // Said, and the replacement abandoned, when the way back could not be written.
@@ -680,12 +710,22 @@ function importBackup(event) {
             return;
         }
 
+        const previous = State.schedule;
+        const previousIssues = State.migrationIssues;
         State.schedule = incoming;
         // Decisions the migration refused to guess at come with the file. Losing them
         // here would leave work in the old file that the app now claims to have imported.
         State.migrationIssues = loaded.issues;
+
+        if (!State.save()) {
+            State.schedule = previous;
+            State.migrationIssues = previousIssues;
+            event.target.value = '';
+            render();
+            askTell(notStoredNotice());
+            return;
+        }
         writeIssues(loaded.issues);
-        State.save();
         event.target.value = '';
         render();
 
@@ -739,8 +779,15 @@ async function restoreLocalBackup() {
         askTell(noWayBackNotice());
         return;
     }
+
+    const leaving = State.schedule;
     State.schedule = previous;
-    State.save();
+    if (!State.save()) {
+        State.schedule = leaving;
+        render();
+        askTell(notStoredNotice());
+        return;
+    }
     render();
 
     if (typeof FarkadSync === 'undefined' || FarkadSync.status === 'off') {

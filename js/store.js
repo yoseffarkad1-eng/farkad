@@ -59,6 +59,23 @@ const Store = {
         return null;
     },
 
+    // What the NEXT session would see.
+    //
+    // Bypasses the session cache deliberately. memory holds writes the disk refused,
+    // which is right for reading back something written a moment ago and exactly wrong
+    // for anything whose whole job is to survive the app being closed. The journal is
+    // read through this, so "what is durably queued" cannot be answered with an entry
+    // that never reached the disk.
+    durableGet(key) {
+        if (!this.available) return null;
+        try {
+            return localStorage.getItem(key);
+        } catch (error) {
+            this.fallback(error);
+            return null;
+        }
+    },
+
     // A write that is not believed until it can be read back.
     //
     // For the records where losing the write silently is the failure - the schedule, the

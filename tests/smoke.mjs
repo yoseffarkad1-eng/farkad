@@ -2198,6 +2198,39 @@ async function seedRoster(page) {
   await page.click('#askOk');
   await page.waitForTimeout(200);
 
+  // The other half, and the one the previous round did not cover: the way back writes
+  // FINE and the restored state is what cannot be stored. Going ahead there leaves the
+  // restored week on the screen and the old one on the disk - a restore that looks like
+  // it worked until the app is closed.
+  const newStateFails = await page.evaluate(async () => {
+    const before = Store.get('scheduleData:v2');
+    const onScreen = Object.keys(State.schedule.days).join();
+    const realSet = Store.set.bind(Store);
+    Store.set = (key, value, options) =>
+      (key === 'scheduleData:v2' ? false : realSet(key, value, options));
+
+    const restoring = restoreSnapshot(snapshotDates()[0]);
+    await new Promise(done => setTimeout(done, 250));
+    document.getElementById('askOk').click();
+    await restoring;
+
+    Store.set = realSet;
+    return {
+      same: Store.get('scheduleData:v2') === before,
+      screen: Object.keys(State.schedule.days).join() === onScreen,
+      told: document.getElementById('askMessage').textContent
+    };
+  });
+  check('a restore whose new state cannot be stored does not happen either',
+    newStateFails.same);
+  check('and the screen is put back rather than showing a restore that is not stored',
+    newStateFails.screen);
+  check('with a message that says nothing changed',
+    newStateFails.told.includes('לא שינינו כלום'),
+    JSON.stringify(newStateFails.told.slice(0, 80)));
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
   // three days kept, not every day since the app was installed. The boot snapshot is
   // dated with the REAL today, so it is cleared first: leaving it in made this check
   // pass or fail depending on the date the suite was run on, and on 20/08 the stand-in

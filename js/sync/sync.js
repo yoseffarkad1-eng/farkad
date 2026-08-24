@@ -31,6 +31,18 @@ const SYNC_DEVICE_KEY = 'farkad:deviceId';
 // backwards, silently, at the one moment nobody was watching.
 const OUTBOX_KEY = 'farkad:outbox';
 
+// Where an active queue can live. The first is the ordinary one; the rest exist because a
+// damaged queue is never overwritten, so recording after one has to continue somewhere
+// else. Scanned in order at load: the first that is absent or parses is the active one,
+// and anything damaged on the way is quarantined and left exactly where it is.
+const OUTBOX_KEYS = [
+    OUTBOX_KEY,
+    'farkad:outbox:active1',
+    'farkad:outbox:active2',
+    'farkad:outbox:active3',
+    'farkad:outbox:active4'
+];
+
 // Retry, backing off. A device on a building site loses signal for minutes at a time and
 // gets it back without anyone touching anything, so the queue has to drain on its own -
 // but a phone that retries every second for an hour is a phone with no battery.
@@ -107,9 +119,20 @@ const FarkadSync = {
     _retryAt: 0,
     _retryTimer: null,
     _loaded: false,
+    // Which key the live queue is written to. Not always OUTBOX_KEY: a damaged queue is
+    // never overwritten, so recording continues in the next slot along.
+    _activeKey: OUTBOX_KEY,
+    // The highest seq that is known to be inside a schedule successfully written to disk.
+    // A journal entry at or below this is already in the record, so once the cloud has it
+    // too there is nothing left for it to protect.
+    _savedSeq: 0,
     // The queue on disk will not parse. Not the same as an empty queue, and the
     // difference is whether writing over it is allowed.
     outboxDamaged: false,
+    // The last attempt to write the queue did not reach the disk. While this is true the
+    // device cannot record what it would need to re-apply, so it must not accept a
+    // snapshot that would overwrite local work.
+    journalFailed: false,
     _stamp: null,
     // The roster as the cloud last showed it, keyed by id. What a roster edit is compared
     // against to work out which people actually changed.
@@ -135,8 +158,27 @@ const FarkadSync = {
         if (this._loaded) return;
         this._loaded = true;
 
-        const raw = Store.get(OUTBOX_KEY);
-        if (!raw) return;
+        // Walk the slots. The first that is empty or readable becomes the live queue;
+        // every damaged one on the way is copied aside and left untouched.
+        let raw = null;
+        for (let i = 0; i < OUTBOX_KEYS.length; i += 1) {
+            this._activeKey = OUTBOX_KEYS[i];
+            const candidate = Store.durableGet(this._activeKey);
+            if (candidate === null) return;                 // free slot, nothing to load
+
+            try {
+                JSON.parse(candidate);
+                raw = candidate;
+                break;                                      // readable, this is the queue
+            } catch (error) {
+                console.error('Queue unreadable, holding it:', this._activeKey, error);
+                this.outboxDamaged = true;
+                Recovery.damaged(this._activeKey, candidate,
+                    `תור השליחה (עריכות שטרם נשלחו) לא נקרא: ${this._activeKey}.`);
+                // ...and carry on to the next slot, which is where recording resumes.
+            }
+        }
+        if (raw === null) return;
 
         let parsed;
         try {
@@ -150,10 +192,12 @@ const FarkadSync = {
             //
             // Recovery makes a verified copy, keeps the original exactly where it is, and
             // stops the app writing until somebody has been told.
-            console.error('Outbox unreadable, holding it rather than dropping it:', error);
+            // Unreachable: the loop above already parsed it. Kept because a queue that
+            // parses on one read and not the next is exactly the kind of thing that
+            // should stop the app rather than be shrugged off.
+            console.error('Queue unreadable on second read:', error);
             this.outboxDamaged = true;
-            Recovery.damaged(OUTBOX_KEY, raw,
-                'תור השליחה (עריכות שטרם נשלחו) לא נקרא.');
+            Recovery.damaged(this._activeKey, raw, 'תור השליחה לא נקרא.');
             return;
         }
 
@@ -161,7 +205,13 @@ const FarkadSync = {
         Object.keys(items).forEach(path => {
             const item = items[path];
             if (!item || typeof item !== 'object') return;
-            this._outbox.set(path, { value: item.value, seq: Number(item.seq) || 0 });
+            this._outbox.set(path, {
+                value: item.value,
+                seq: Number(item.seq) || 0,
+                // Already in the cloud, still kept: it is only removed once the local
+                // schedule holding it has also been written.
+                sent: item.sent === true
+            });
             this._seq = Math.max(this._seq, Number(item.seq) || 0);
         });
     },
@@ -169,24 +219,88 @@ const FarkadSync = {
     // NOT optional. A restore point the device has no room for is a loss the app can
     // live with; a pending edit it has no room for is the edit itself.
     saveOutbox() {
-        // The damaged original is still under this key. Writing here would destroy it.
-        if (this.outboxDamaged || farkadWritesBlocked()) return false;
+        if (farkadWritesBlocked()) return false;
 
         const items = {};
         this._outbox.forEach((item, path) => { items[path] = item; });
-        // Verified: an edit that did not reach the disk is an edit the next session will
-        // not replay, and the caller has to be able to find that out.
-        return Store.setVerified(OUTBOX_KEY, JSON.stringify({ seq: this._seq, items }));
+        // The ACTIVE key, which is not the damaged one. Verified: an edit that did not
+        // reach the disk is an edit the next session will not replay, and the caller has
+        // to be able to find that out.
+        const landed = Store.setVerified(this._activeKey,
+            JSON.stringify({ seq: this._seq, items }));
+        this.journalFailed = !landed;
+        if (!landed && typeof updateSyncNotice === 'function') updateSyncNotice();
+        return landed;
     },
 
+    // Throw away what is in memory and read the journal back off the disk.
+    //
+    // A queue write that failed leaves entries in memory that no reopen will ever see.
+    // Two things then go wrong if they are left there: a rollback replays them and puts
+    // the refused edit straight back on screen, and the next flush SENDS them - telling
+    // the other two phones about an edit this one has just told its owner did not happen.
+    reloadJournal() {
+        this._loaded = false;
+        this._outbox = new Map();
+        this._seq = 0;
+        this._sending = new Map();
+        this.loadOutbox();
+    },
+
+    // Every entry, applied to a schedule. This is the journal doing the job it exists for:
+    // rebuilding edits at boot from the device alone, with no cloud anywhere.
+    //
+    // An entry that is still here has NOT been shown to be in a written schedule, so
+    // re-applying it is right even when it has already reached the cloud. Each value is
+    // the whole record for its field, so applying it twice is applying it once.
+    replayJournal(schedule) {
+        this.loadOutbox();
+        [...this._outbox.entries()]
+            .sort((a, b) => a[1].seq - b[1].seq)
+            .forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
+    },
+
+    // The schedule has just been written to disk, so everything queued up to now is in it.
+    // Told by State.save, because only State knows whether the write actually landed.
+    markSaved() {
+        this._savedSeq = this._seq;
+        this.pruneJournal();
+    },
+
+    // An entry goes only when BOTH are true: the cloud has it, and a schedule containing
+    // it has been written here. Either one alone leaves something that cannot be rebuilt.
+    pruneJournal() {
+        let changed = false;
+        [...this._outbox.entries()].forEach(([path, item]) => {
+            if (item.sent && item.seq <= this._savedSeq) {
+                this._outbox.delete(path);
+                changed = true;
+            }
+        });
+        if (changed) this.saveOutbox();
+    },
+
+    // Waiting to be SENT. Not the journal's size: an entry the cloud already has is kept
+    // until the local schedule holding it is written, and telling somebody it is waiting
+    // to go out would be untrue.
     pendingCount() {
         this.loadOutbox();
-        return this._outbox.size;
+        let waiting = 0;
+        this._outbox.forEach(item => { if (!item.sent) waiting += 1; });
+        return waiting;
     },
 
     // Which fields are waiting. Not used on screen - the count is what a person needs -
     // but it is what makes "is that edit still queued?" answerable from outside without
     // reaching into the queue itself.
+    // Which key the live queue is under. Not always the obvious one: after a damaged
+    // queue, recording continues in the next slot along, and the recovery export has to
+    // carry whichever it is.
+    activeOutboxKey() {
+        this.loadOutbox();
+        return this._activeKey;
+    },
+
     pendingPaths() {
         this.loadOutbox();
         return [...this._outbox.keys()];
@@ -201,11 +315,13 @@ const FarkadSync = {
         this.saveOutbox();
     },
 
+    // Returns whether the entry is now on the disk. The caller needs to know: a queue
+    // held only in memory rebuilds nothing after the app is closed.
     queue(path, value) {
         this.loadOutbox();
         this._seq += 1;
         this._outbox.set(path, { value, seq: this._seq });
-        this.saveOutbox();
+        return this.saveOutbox();
     },
 
     // Called on acknowledgment, and only then. An entry whose seq has moved on was
@@ -214,12 +330,18 @@ const FarkadSync = {
         let changed = false;
         sent.forEach((seq, path) => {
             const item = this._outbox.get(path);
-            if (item && item.seq === seq) {
-                this._outbox.delete(path);
+            if (item && item.seq === seq && !item.sent) {
+                // MARKED, not removed. The cloud has it; this device may still not, and
+                // until a schedule containing it is written here the journal is the only
+                // thing that can put it back. pruneJournal takes it when both are true.
+                item.sent = true;
                 changed = true;
             }
         });
-        if (changed) this.saveOutbox();
+        if (changed) {
+            this.pruneJournal();
+            this.saveOutbox();
+        }
     },
 
     connect(adapter) {
@@ -248,7 +370,7 @@ const FarkadSync = {
         // somewhere to send it. The replacement goes first: the queued field edits
         // belong to a state it is about to replace.
         if (this.pendingReplace()) this.retryReplace();
-        else if (this._outbox.size > 0) this.scheduleFlush();
+        else if (this.pendingCount() > 0) this.scheduleFlush();
     },
 
     disconnect() {
@@ -283,16 +405,18 @@ const FarkadSync = {
     // One changed field, e.g. days.2026-08-12.plan.w_03. Queued by path so that editing
     // the same worker twice before the flush sends one write, while edits to different
     // workers all survive.
+    // Returns whether the edit is now recorded somewhere that survives the app closing.
     edit(path, value) {
         // Queued whether or not there is a cloud. Returning early when no adapter was
         // connected is what made a week of local-only recording invisible to the sync
         // layer: the moment someone signed in, the first snapshot was adopted whole and
         // the week was not in it. An edit nobody can send yet is still an edit.
-        this.queue(path, value);
-        if (!this.adapter) return;
+        const journalled = this.queue(path, value);
+        if (!this.adapter) return journalled;
 
         clearTimeout(this._timer);
         this._timer = setTimeout(() => this.flush(), this.pushDelayMs);
+        return journalled;
     },
 
     // One copy per day, kept where a deletion cannot follow it.
@@ -350,6 +474,9 @@ const FarkadSync = {
     // not updated reads them and sees a correct roster. They can stop being written once
     // all three devices are past v59 - not before.
     editRoster(schedule) {
+        let journalled = true;
+        const put = (path, value) => { journalled = this.queue(path, value) && journalled; };
+
         [['workers', 'workerOrder'], ['places', 'placeOrder']].forEach(([kind, orderKey]) => {
             const known = this._remoteRoster[kind] || {};
 
@@ -357,16 +484,16 @@ const FarkadSync = {
                 if (!item || !item.id) return;
                 const before = known[item.id];
                 if (before && JSON.stringify(before) === JSON.stringify(item)) return;
-                this.queue(`roster.${kind}.${item.id}`, item);
+                put(`roster.${kind}.${item.id}`, item);
             });
 
-            this.queue(`roster.${orderKey}`,
+            put(`roster.${orderKey}`,
                 (schedule[kind] || []).filter(item => item && item.id).map(item => String(item.id)));
-            this.queue(kind, schedule[kind]);
+            put(kind, schedule[kind]);
         });
 
-        if (!this.adapter) return;
-        this.scheduleFlush();
+        if (this.adapter) this.scheduleFlush();
+        return journalled;
     },
 
     // Called by autoSaveSchedule. Carries no field paths, so it only refreshes the
@@ -386,7 +513,7 @@ const FarkadSync = {
 
         if (!this.adapter) return Promise.resolve();
         this.loadOutbox();
-        if (this._outbox.size === 0 && !this._stamp) return Promise.resolve();
+        if (this.pendingCount() === 0 && !this._stamp) return Promise.resolve();
         // One send at a time, so a bad connection does not pile up a request per edit.
         //
         // Time-bounded on purpose. A request that never settles - a hung socket, an
@@ -403,12 +530,14 @@ const FarkadSync = {
         const patch = {};
         const sent = new Map();
         [...this._outbox.entries()]
+            .filter(([, item]) => !item.sent)
             .sort((a, b) => a[1].seq - b[1].seq)
             .slice(0, MAX_PATHS_PER_WRITE)
             .forEach(([path, item]) => {
                 patch[path] = item.value;
                 sent.set(path, item.seq);
             });
+        if (Object.keys(patch).length === 0 && !this._stamp) return Promise.resolve();
 
         // EVERY write carries a stamp, not only the ones a local save happened to queue.
         // A retry after a failed send used to go out with none - and the rules let it
@@ -450,7 +579,7 @@ const FarkadSync = {
                 this._retryAt = 0;
                 if (this.status !== 'error') this.setStatus('synced');
                 // Something was edited while the send was open.
-                if (this._outbox.size > 0) this.scheduleFlush();
+                if (this.pendingCount() > 0) this.scheduleFlush();
             })
             .catch(error => {
                 // Nothing is removed. The queue is still on disk exactly as it was, so
@@ -543,7 +672,13 @@ const FarkadSync = {
                 // replaced on purpose, so they are genuinely superseded - but only once
                 // the replacement has actually landed. Clearing them first meant a
                 // restore that failed took the unsent edits with it.
-                if (this._outbox === superseded) this.clearOutbox();
+                // Only when the replacement is durable HERE too. The journal is what
+                // rebuilds local edits at boot, and clearing it while the schedule that
+                // supersedes them never reached the disk throws away the only copy of
+                // them that exists. Found by the suite: schedule write refused, cloud
+                // write accepted, journal cleared, edit gone at the next open.
+                const localIsDurable = typeof State === 'undefined' || !State.saveFailed;
+                if (this._outbox === superseded && localIsDurable) this.clearOutbox();
                 this.forgetReplace();
                 this.setStatus('synced');
             })
@@ -647,6 +782,16 @@ const FarkadSync = {
         // way what is arriving is the state somebody asked to replace, and adopting it
         // would undo their restore on the device that asked for it.
         if (this.replaceDamaged || farkadWritesBlocked()) return;
+
+        // The journal cannot be written. Local edits are then held by the schedule alone,
+        // and the journal is the only thing that puts them back on top of an arriving
+        // snapshot - so adopting one now would take today's work off the device with
+        // nothing to restore it from. Hold what is here and say the storage is the
+        // problem, which it is.
+        if (this.journalFailed) {
+            this.fail(new Error('no room to record pending edits; snapshot not adopted'));
+            return;
+        }
         if (this.pendingReplace()) {
             if (!this._replacing) this.retryReplace();
             return;
@@ -702,12 +847,27 @@ const FarkadSync = {
         // Keep what was on screen, so an unexpected remote change is recoverable.
         Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
 
+        const previous = State.schedule;
         State.schedule = remote;
         this.reapplyPending(State.schedule);
 
         // persist, not save: save() would re-stamp the document as this device's, at this
         // device's clock, which is exactly the stamp everything else is compared against.
-        State.persist();
+        //
+        // And its answer is READ. It used to be ignored, so a device with no room drew
+        // the other phone's roster, called itself synced, and put the old one back at the
+        // next open - the screen and the disk describing two different crews, with
+        // nothing anywhere saying which was real.
+        if (!State.persist()) {
+            State.schedule = previous;
+            if (typeof render === 'function') render();
+            // Not 'synced'. Nothing about this device is up to date, and the storage
+            // notice already names the actual problem. The next snapshot - or the next
+            // reconnect - tries again, by which time there may be room.
+            this.fail(new Error('no room to store the update; it was not adopted'));
+            return;
+        }
+
         if (typeof render === 'function') render();
         this.setStatus('synced');
 
@@ -743,7 +903,11 @@ const FarkadSync = {
         // The outbox is the whole answer now, in seq order: an entry stays in it from
         // the moment it is made until the cloud acknowledges it, so anything not yet
         // acknowledged - including a send that is open right this second - is here.
+        // Unsent only. An entry the cloud has already acknowledged is IN the snapshot
+        // that just arrived, and putting it back on top would undo whatever another
+        // phone has changed since.
         const pending = [...this._outbox.entries()]
+            .filter(([, item]) => !item.sent)
             .sort((a, b) => a[1].seq - b[1].seq);
 
         // Which lists already have a per-person edit waiting. The legacy whole-array
@@ -755,7 +919,24 @@ const FarkadSync = {
         });
 
         pending.forEach(([path, item]) => {
-            const value = item.value;
+            applyJournalEntry(schedule, path, item.value, perEntity);
+        });
+    },
+
+    scheduleFlush() {
+        clearTimeout(this._timer);
+        this._timer = setTimeout(() => this.flush(), this.pushDelayMs);
+    }
+};
+
+// One journal entry, written into a schedule. Shared by the two things that need it: the
+// boot rebuild, and putting local edits back on top of a snapshot that just arrived.
+//
+// `perEntity` names the roster lists that already have a per-person entry waiting, so the
+// legacy whole-array entry queued beside them does not undo those.
+function applyJournalEntry(schedule, path, value, perEntity) {
+    {
+        {
             const parts = path.split('.');
 
             if (parts.length === 4 && parts[0] === 'days') {
@@ -811,16 +992,11 @@ const FarkadSync = {
             // Applied only when nothing per-entity has already spoken for this list -
             // otherwise a stale array would undo the per-person edits above.
             if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
-                if (!perEntity.has(parts[0])) schedule[parts[0]] = value;
+                if (!perEntity || !perEntity.has(parts[0])) schedule[parts[0]] = value;
             }
-        });
-    },
-
-    scheduleFlush() {
-        clearTimeout(this._timer);
-        this._timer = setTimeout(() => this.flush(), this.pushDelayMs);
+        }
     }
-};
+}
 
 // `const` at the top level of a classic script creates a global BINDING, not a property
 // of window - so every other classic file here can say FarkadSync, and the Firebase

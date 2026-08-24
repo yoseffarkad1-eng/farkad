@@ -304,8 +304,8 @@ async function clearWorkerPicker() {
     const date = State.date;
     const layer = State.layer;
 
-    State.commitMany(here.map(workerId =>
-        unassignPlace(State.schedule, date, workerId, layer, place.id)));
+    if (!State.commitMany(here.map(workerId =>
+        unassignPlace(State.schedule, date, workerId, layer, place.id)))) return;
 
     offerUndo(`${here.length} עובדים הוסרו מ${place.name}`, () => {
         State.commitMany(previous.map(item =>
@@ -397,8 +397,9 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
     }
 
     // One save and one render for the whole copy, but every path is still sent - see
-    // State.commitMany.
-    State.commitMany(changes);
+    // State.commitMany. No "copied N workers" over a copy that was refused: commit has
+    // already said what happened.
+    if (!State.commitMany(changes)) return;
     askTell(`הועתקו ${countCopied(changes)} עובדים ${source}. רק מי שלא היה רשום עודכן.`);
 }
 

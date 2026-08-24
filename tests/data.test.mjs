@@ -36,11 +36,12 @@ function seed(device) {
 
 // Record a day the way the app does: mutate through the model, commit through State so
 // the field path reaches the sync layer.
+// Returns what commit() reports: whether the edit is now somewhere that survives the
+// app being closed. Tests that care about the change object build it themselves.
 function record(device, date, workerId, placeId, rate) {
     const change = device.call('assignPlace',
         device.State.schedule, date, workerId, 'actual', placeId, rate);
-    device.State.commit(change);
-    return change;
+    return device.State.commit(change);
 }
 
 // ---------------------------------------------------------------- the harness itself
@@ -1444,18 +1445,27 @@ function record(device, date, workerId, placeId, rate) {
     // Every one of these has to be survivable on its own, because on a real device that
     // is how it happens - one key too big for the space that is left, not the whole disk
     // vanishing at once.
-    const keys = ['scheduleData:v2', 'farkad:outbox', 'farkad:pendingReplace'];
+    // The expected outcome differs by key, and saying so is the point:
+    //   the schedule    - the journal carries the edit, so it stands
+    //   the journal     - the edit is REFUSED, because nothing could re-apply it
+    //   the replacement - unrelated to an ordinary edit, which stands
+    const cases = [
+        { key: 'scheduleData:v2', stands: true },
+        { key: 'farkad:outbox', stands: false },
+        { key: 'farkad:pendingReplace', stands: true }
+    ];
 
-    for (const failing of keys) {
+    for (const { key: failing, stands } of cases) {
         const device = makeDevice();
         const cloud = makeCloud();
         seed(device);
         device.setQuota(key => key === failing);
 
         let threw = null;
+        let committed = null;
         try {
             await connected(device, cloud);
-            record(device, '2026-08-12', 'w_01', 'p_01');
+            committed = record(device, '2026-08-12', 'w_01', 'p_01');
             await wait();
             await device.Sync.replaceAll(device.State.schedule).catch(() => {});
             await wait();
@@ -1464,8 +1474,21 @@ function record(device, date, workerId, placeId, rate) {
         }
 
         check(`the app survives ${failing} failing`, threw === null, String(threw));
-        check(`and the day is still readable with ${failing} failing`,
-            device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+        check(`the edit ${stands ? 'stands' : 'is refused'} with ${failing} failing`,
+            committed === stands, String(committed));
+
+        const onScreen = device.call('entriesFor',
+            device.State.schedule, '2026-08-12', 'w_01', 'actual').length;
+        check(`and the screen agrees with ${failing} failing`,
+            onScreen === (stands ? 1 : 0), String(onScreen));
+
+        // The only measure that counts.
+        const reopened = makeDevice({ storage: device.dump() });
+        reopened.State.load();
+        const afterClose = reopened.call('entriesFor',
+            reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length;
+        check(`and so does a reopen with ${failing} failing`,
+            afterClose === (stands ? 1 : 0), String(afterClose));
     }
 }
 
@@ -1490,6 +1513,465 @@ function record(device, date, workerId, placeId, rate) {
         reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
     check('with the way back still there beside it',
         reopened.call('popUndoState') !== null);
+}
+
+// ---------------------------------------------------------------- what survives a close
+//
+// The only question that counts. "The data is still readable in this session" is not an
+// answer: the app is closed and reopened every day, and an edit that lives in memory is
+// an edit that was never made.
+{
+    suite('G6: schedule and journal both refused - the edit is refused too');
+
+    const device = makeDevice();
+    seed(device);
+    const before = device.raw('scheduleData:v2');
+    given('there is a good schedule on disk to start from', Boolean(before));
+
+    // Nothing durable is available. Neither the record nor the journal can be written.
+    device.setQuota(key => key === 'scheduleData:v2' || key.startsWith('farkad:outbox'));
+
+    const done = record(device, '2026-08-12', 'w_01', 'p_01');
+
+    check('the commit reports that it did not happen', done === false, String(done));
+    check('the schedule on disk is untouched',
+        device.raw('scheduleData:v2') === before);
+    check('and nothing was journalled either',
+        device.raw('farkad:outbox') === null);
+    check('the screen was put back to what is actually stored',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 0,
+        JSON.stringify(device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual')));
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and after closing and reopening there is nothing half-there',
+        reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 0);
+}
+
+{
+    suite('G6: schedule refused, journal written - the edit comes back at boot');
+
+    const device = makeDevice();
+    seed(device);
+    // The record cannot be written, but the journal can. That is enough: the edit is
+    // recoverable without any cloud at all.
+    device.setQuota(key => key === 'scheduleData:v2');
+
+    const done = record(device, '2026-08-12', 'w_01', 'p_01');
+    check('the commit reports success, because something durable holds it', done === true);
+    check('and the journal is what holds it',
+        (device.raw('farkad:outbox') || '').includes('2026-08-12'));
+
+    // No cloud anywhere. The journal has to rebuild the edit by itself.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('reopening with no cloud rebuilds the edit from the journal',
+        reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1,
+        JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+}
+
+{
+    suite('G6: the journal is the gate, so nothing lands that cannot be re-applied');
+
+    // The journal is one field; the schedule is the whole record. If only one of them
+    // fits it is the journal, so making it the gate costs nothing real - and it buys the
+    // guarantee that every committed edit can be put back on top of an arriving snapshot.
+    const device = makeDevice();
+    seed(device);
+    const before = device.raw('scheduleData:v2');
+    device.setQuota(key => key.startsWith('farkad:outbox'));
+
+    const done = record(device, '2026-08-12', 'w_01', 'p_01');
+    check('the commit is refused when only the journal fails', done === false, String(done));
+    check('and the schedule was NOT written, so the disk did not get ahead of the screen',
+        device.raw('scheduleData:v2') === before);
+    check('the screen shows what the device can actually produce again',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 0);
+}
+
+{
+    suite('G6: an older cloud snapshot cannot take today off the device');
+
+    // The failure this closes: an edit on the disk that nothing would ever send and
+    // nothing could re-apply. Every committed edit is journalled now, so reapplyPending
+    // always has it.
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const disk = device.dump();
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: device.State.schedule.workers, places: device.State.schedule.places,
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+
+    const again = makeDevice({ storage: disk });
+    again.State.load();
+    await connected(again, cloud);
+    await settle(TICK * 20);
+
+    check('the day recorded here is still on the device',
+        again.call('entriesFor', again.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1,
+        JSON.stringify(Object.keys(again.State.schedule.days || {})));
+    check('and it reached the cloud rather than sitting there unsendable',
+        Boolean(cloud.doc.days && cloud.doc.days['2026-08-12']),
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+}
+
+{
+    suite('G6: a browser that refuses storage entirely still records');
+
+    // Safari in private mode. Nothing survives a refresh, and the app says so in a
+    // permanent banner - so an edit accepted here is not being passed off as saved, and
+    // refusing every edit would protect nothing while making the app useless.
+    const device = makeDevice();
+    seed(device);
+    device.Store.available = false;
+
+    check('the edit is accepted', record(device, '2026-08-12', 'w_01', 'p_01') === true);
+    check('and the app is saying storage is blocked',
+        device.Store.available === false);
+}
+
+{
+    suite('G6: a roster change that cannot be stored is not shown as made');
+
+    const device = makeDevice();
+    seed(device);
+    const before = device.raw('scheduleData:v2');
+    device.setQuota(() => true);
+
+    device.State.schedule.workers.push({ id: 'w_zz', name: 'לא נשמר', active: true });
+    const done = device.State.commitRoster();
+
+    check('commitRoster says it did not happen', done === false, String(done));
+    check('the stored roster is untouched', device.raw('scheduleData:v2') === before);
+    check('and the screen no longer shows the worker either',
+        !device.State.worker('w_zz'),
+        JSON.stringify(device.State.schedule.workers.map(w => w.id)));
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('nor does it after a reopen', !reopened.State.worker('w_zz'));
+}
+
+{
+    suite('G6: a bulk copy that cannot be stored offers no undo and no success');
+
+    const device = makeDevice();
+    seed(device);
+    const before = device.raw('scheduleData:v2');
+    device.setQuota(() => true);
+
+    const changes = ['w_01', 'w_02'].map(id =>
+        device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
+    const done = device.State.commitMany(changes);
+
+    check('commitMany says it did not happen', done === false, String(done));
+    check('the stored schedule is untouched', device.raw('scheduleData:v2') === before);
+    check('and neither day is on screen',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 0
+        && device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_02', 'actual').length === 0);
+}
+
+{
+    suite('G6: a failed save does not tell the sync layer anything happened');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    await wait();
+
+    const writesBefore = cloud.writes.length;
+    device.setQuota(() => true);
+    device.State.save();
+    await wait();
+
+    check('onLocalChange was not called, so no stamp went out alone',
+        cloud.writes.length === writesBefore,
+        `${writesBefore} -> ${cloud.writes.length}`);
+}
+
+{
+    suite('G7: a snapshot that could not be stored is not adopted');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    device.State.schedule.workers = [
+        { id: 'w_old', name: 'ותיק', active: true, dailyRate: 400, hourlyRate: 0 }
+    ];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    given('the old roster is on disk', device.State.save({ silent: true }) === true);
+
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: [{ id: 'w_new', name: 'חדש', active: true, dailyRate: 400, hourlyRate: 0 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-20T18:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+
+    // No room to write the adopted state. Showing it and calling the app synced would
+    // leave the screen and the disk describing two different crews.
+    device.setQuota(key => key === 'scheduleData:v2');
+    await connected(device, cloud);
+    await settle(TICK * 20);
+
+    check('the status does not say synced',
+        device.Sync.status !== 'synced', device.Sync.status);
+    check('the screen still shows what is actually stored',
+        device.State.schedule.workers.map(w => w.id).join() === 'w_old',
+        JSON.stringify(device.State.schedule.workers.map(w => w.id)));
+    check('and the disk still holds the old roster',
+        (device.raw('scheduleData:v2') || '').includes('w_old'));
+
+    // The measure that counts.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('a reopen shows the same thing the screen did, not a different crew',
+        reopened.State.schedule.workers.map(w => w.id).join() === 'w_old',
+        JSON.stringify(reopened.State.schedule.workers.map(w => w.id)));
+}
+
+{
+    suite('G7: once there is room, the snapshot is adopted after all');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    device.State.schedule.workers = [{ id: 'w_old', name: 'ותיק', active: true, dailyRate: 400 }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: [{ id: 'w_new', name: 'חדש', active: true, dailyRate: 400, hourlyRate: 0 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-20T18:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+
+    device.setQuota(key => key === 'scheduleData:v2');
+    await connected(device, cloud);
+    await settle(TICK * 15);
+    given('it was refused first', device.Sync.status !== 'synced');
+
+    // Space is freed and the cloud says something again.
+    device.setQuota(null);
+    device.Sync.receive(JSON.parse(JSON.stringify(cloud.doc)));
+    await settle(TICK * 10);
+
+    check('now it is adopted', device.State.schedule.workers.map(w => w.id).join() === 'w_new',
+        JSON.stringify(device.State.schedule.workers.map(w => w.id)));
+    check('and stored', (device.raw('scheduleData:v2') || '').includes('w_new'));
+    check('and the status says synced', device.Sync.status === 'synced', device.Sync.status);
+}
+
+{
+    suite('G8: a restore whose new state cannot be stored does not happen');
+
+    // The undo write SUCCEEDS here. Only the new state fails - which is the case the
+    // previous round did not cover, having tested the undo write failing instead.
+    function stagedDevice() {
+        const device = makeDevice();
+        seed(device);
+        device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+        device.State.save({ silent: true });
+
+        // A restore point to come back to.
+        device.setToday('2026-08-13');
+        device.call('takeDailySnapshot');
+        return device;
+    }
+
+    const device = stagedDevice();
+    const originalDisk = device.raw('scheduleData:v2');
+    const originalDays = Object.keys(device.State.schedule.days).join();
+
+    // Let the undo copies through, refuse the record itself.
+    let armed = false;
+    device.setQuota(key => armed && key === 'scheduleData:v2');
+
+    const restoredInto = device.call('normaliseSchedule', {
+        schemaVersion: 2, workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: { '2026-01-01': { plan: {}, actual: {} } }, advances: {},
+        updatedAt: '2026-01-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+
+    check('the way back can be written', device.call('pushUndoState', device.State.schedule) === true);
+
+    // Now the restore itself: replace memory and try to store it.
+    armed = true;
+    const previous = device.State.schedule;
+    device.State.schedule = restoredInto;
+    const stored = device.State.save();
+
+    check('storing the restored state fails', stored === false);
+    // What the app must now do - and what the fixed restore paths do.
+    device.State.schedule = previous;
+
+    check('the record on disk is exactly as it was',
+        device.raw('scheduleData:v2') === originalDisk);
+    check('and the days are the ones that were there before',
+        Object.keys(device.State.schedule.days).join() === originalDays);
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('a reopen shows the original, not a half-finished restore',
+        Object.keys(reopened.State.schedule.days).join() === originalDays,
+        JSON.stringify(Object.keys(reopened.State.schedule.days)));
+}
+
+{
+    suite('G8: and it does not reach the cloud, or clear the queue');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    // Something queued and not yet sent.
+    cloud.online = false;
+    record(device, '2026-08-13', 'w_02', 'p_01');
+    await wait();
+    const queuedBefore = device.Sync.pendingCount();
+    given('there is something in the queue', queuedBefore > 0);
+
+    const cloudDaysBefore = Object.keys(cloud.doc.days || {}).join();
+    cloud.online = true;
+    device.setQuota(key => key === 'scheduleData:v2');
+
+    // A restore attempt whose local write cannot land.
+    device.State.schedule = device.call('normaliseSchedule', {
+        schemaVersion: 2, workers: device.State.schedule.workers,
+        places: device.State.schedule.places, days: {}, advances: {},
+        updatedAt: '2026-01-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+    const stored = device.State.save();
+    check('the local write fails', stored === false);
+
+    // The rule: do not send what could not be stored here.
+    check('nothing new was pushed to the cloud',
+        Object.keys(cloud.doc.days || {}).join() === cloudDaysBefore,
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('and the queue was not cleared',
+        device.Sync.pendingCount() === queuedBefore,
+        `${queuedBefore} -> ${device.Sync.pendingCount()}`);
+}
+
+{
+    suite('G9: after a damaged queue, recording resumes on a queue that is real');
+
+    // The brief's scenario, run end to end.
+    // 1. a damaged queue
+    const broken = '{"seq":7,"items":{"days.2026-08-01.actual.w_01":{"value":{"entr';
+    const device = makeDevice({ storage: { 'farkad:outbox': broken } });
+    seed(device);
+
+    // 2. quarantine succeeds
+    check('the raw queue was copied aside',
+        device.raw('farkad:outbox:damaged') === broken);
+    check('and the original is untouched',
+        device.raw('farkad:outbox') === broken);
+
+    // 3. the person acknowledges and carries on
+    check('acknowledging resumes recording',
+        device.global('Recovery').acknowledge() === true);
+
+    // 4. a new day is recorded
+    const committed = record(device, '2026-08-12', 'w_01', 'p_01');
+    check('the new day is accepted', committed === true, String(committed));
+    check('and it went into a NEW queue, not over the damaged one',
+        device.raw('farkad:outbox') === broken
+        && (device.raw('farkad:outbox:active1') || '').includes('2026-08-12'),
+        JSON.stringify({
+            original: (device.raw('farkad:outbox') || '').slice(0, 20),
+            active: (device.raw('farkad:outbox:active1') || '').slice(0, 40)
+        }));
+
+    // 5-6. closed and reopened
+    const disk = device.dump();
+    const cloud = makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: device.State.schedule.workers, places: device.State.schedule.places,
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+    const again = makeDevice({ storage: disk });
+    again.State.load();
+
+    check('the new day is still there after a reopen',
+        again.call('entriesFor', again.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1,
+        JSON.stringify(Object.keys(again.State.schedule.days || {})));
+
+    // 7. an older cloud snapshot arrives
+    again.global('Recovery').acknowledge();
+    await connected(again, cloud);
+    await settle(TICK * 25);
+
+    // 8. it survives
+    check('and an older cloud snapshot does not take it away',
+        again.call('entriesFor', again.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1,
+        JSON.stringify(Object.keys(again.State.schedule.days || {})));
+    check('it reached the cloud, so the other phones have it too',
+        Boolean(cloud.doc.days && cloud.doc.days['2026-08-12']),
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('and the damaged original is STILL exactly where it was',
+        again.raw('farkad:outbox') === broken);
+}
+
+{
+    suite('G9: with nowhere to put a new queue, recording is refused');
+
+    // Damaged queue, and no room for a replacement either. There is no safe way to
+    // record: the edit could not be re-applied and could not be sent.
+    const broken = '{"seq":7,"items":{"days.2026-08-01.actual.w_01":{"value":{"entr';
+    const device = makeDevice({
+        storage: { 'farkad:outbox': broken },
+        quota: () => true
+    });
+    seed(device);
+
+    check('writing is blocked and cannot be acknowledged away',
+        device.global('Recovery').acknowledge() === false
+        && device.call('farkadWritesBlocked') === true);
+    check('and an edit is refused rather than held in memory',
+        record(device, '2026-08-12', 'w_01', 'p_01') === false);
+    check('with the damaged original untouched',
+        device.raw('farkad:outbox') === broken);
+}
+
+{
+    suite('G9: the recovery export carries the live state too, not only the wreckage');
+
+    const broken = '{"seq":7,"items":{"days.2026-08-01.actual.w_01":{"value":{"entr';
+    const device = makeDevice({ storage: { 'farkad:outbox': broken } });
+    seed(device);
+    device.global('Recovery').acknowledge();
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const held = device.global('Recovery').rawRecords();
+    check('the damaged queue is in it', held['farkad:outbox'] === broken);
+    check('the quarantined copy is in it', held['farkad:outbox:damaged'] === broken);
+    check('the schedule as it stands is in it',
+        typeof held['scheduleData:v2'] === 'string'
+        && held['scheduleData:v2'].includes('2026-08-12'),
+        JSON.stringify(Object.keys(held)));
+    check('and so is the queue that is actually live',
+        typeof held['farkad:outbox:active1'] === 'string'
+        && held['farkad:outbox:active1'].includes('2026-08-12'),
+        JSON.stringify(Object.keys(held)));
 }
 
 report();

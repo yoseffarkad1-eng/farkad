@@ -67,14 +67,32 @@ const Recovery = {
         return this.problems.some(problem => problem.mustHold);
     },
 
-    // Every raw record involved, for the export. Includes the originals as they still sit
-    // on the device, which is the point - the export is a way to get them off it.
+    // Everything worth getting off the device, for the export.
+    //
+    // The wreckage AND the live state. A file holding only the unreadable records is a
+    // file nobody can use to carry on: what somebody in this situation actually needs is
+    // the schedule as it stands and whatever queue is live, alongside the raw bytes of
+    // whatever went wrong. Reading them through durableGet on purpose - the export is
+    // about what is on the device, not what this session happens to be holding.
     rawRecords() {
         const out = {};
+
         this.problems.forEach(problem => {
             if (problem.raw !== null && problem.raw !== undefined) out[problem.key] = problem.raw;
             if (problem.copy) out[problem.copy] = Store.get(problem.copy);
         });
+
+        const schedule = Store.durableGet('scheduleData:v2');
+        if (schedule !== null) out['scheduleData:v2'] = schedule;
+
+        // The queue that is actually being written to, which after a damaged one is not
+        // the key anybody would think to look under.
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.activeOutboxKey) {
+            const key = FarkadSync.activeOutboxKey();
+            const live = Store.durableGet(key);
+            if (live !== null) out[key] = live;
+        }
+
         return out;
     },
 

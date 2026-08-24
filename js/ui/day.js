@@ -239,7 +239,7 @@ function bulkAssign(place) {
     const date = State.date;
     const changes = workers.map(worker =>
         assignPlace(State.schedule, date, worker.id, 'actual', place.id, RATE_NORMAL));
-    State.commitMany(changes);
+    if (!State.commitMany(changes)) return;
 
     offerUndo(`${workers.length} עובדים נרשמו ב${place.name}`, () => {
         State.commitMany(workers.map(worker =>
