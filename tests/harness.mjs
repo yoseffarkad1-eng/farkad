@@ -62,7 +62,12 @@ function makeLocalStorage(initial) {
             value: stored, enumerable: true, writable: true, configurable: true
         });
     });
-    define('removeItem', key => { delete ls[key]; });
+    define('removeItem', key => {
+        // A remove the browser refuses. Rare, and the reason cancellation cannot be
+        // assumed to have worked just because it was asked for.
+        if (ls.__blockRemoval && ls.__blockRemoval(key)) return;
+        delete ls[key];
+    });
     // Writable, because a test switches the fault on partway through a run.
     Object.defineProperty(ls, '__quota', {
         value: null, enumerable: false, writable: true, configurable: true
@@ -70,6 +75,9 @@ function makeLocalStorage(initial) {
     // A disk that ACCEPTS a write and then hands back something else. Rarer than a full
     // one and worse, because nothing throws - the only way to find out is to read back.
     Object.defineProperty(ls, '__corrupt', {
+        value: null, enumerable: false, writable: true, configurable: true
+    });
+    Object.defineProperty(ls, '__blockRemoval', {
         value: null, enumerable: false, writable: true, configurable: true
     });
 
@@ -173,6 +181,10 @@ export function makeDevice(options = {}) {
         // Make writes to `key` land as something other than what was written.
         corruptOnWrite(key) {
             localStorage.__corrupt = (written) => written === key;
+        },
+        // Make removeItem silently do nothing for the matching keys.
+        blockRemoval(fn) {
+            localStorage.__blockRemoval = fn;
         },
         // Put a raw value on disk without going through Store, so a test can stage a
         // damaged record the way a half-finished write leaves one.

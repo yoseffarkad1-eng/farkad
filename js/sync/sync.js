@@ -53,6 +53,89 @@ function outboxSlotKey(index) {
 // quietly put the old state back, on the device that asked for the restore.
 const REPLACE_KEY = 'farkad:pendingReplace';
 
+// The record is an ENVELOPE with a phase, not a bare document, because "a restore is
+// owed" and "a restore has reached this device" are different states and only one of them
+// makes it safe to write the cloud.
+//
+// The failure that forced this: prepare succeeded, the app closed before the new schedule
+// was stored, and on reopening the pending record was sent to the cloud, the record and
+// the queue were cleared, and the status read "synced" - while the device that had asked
+// for the restore still held, and showed, the old schedule. The cloud and the phone
+// disagreed, and the only thing that knew a restore was owed had just been deleted.
+//
+//   prepared      - the intent is written down. Nothing else has happened.
+//   local-stored  - this device durably holds the replacement. The cloud may be written.
+//   cancelled     - a tombstone for a cancellation whose delete could not be confirmed.
+//
+// The phase is a hint, not the guarantee. What actually gates the cloud write is reading
+// scheduleData:v2 back off the disk and finding the replacement in it - see
+// localDurableHolds. A phase can be stale after a crash; the bytes cannot.
+const REPLACE_VERSION = 2;
+const SCHEDULE_KEY = 'scheduleData:v2';     // must match V2_KEY in state.js
+
+// supersedesSeq is the journal position at the moment the restore was asked for. Every
+// entry at or below it describes the state the restore is replacing, so replaying them
+// afterwards would put the pre-restore days straight back on top of it - which is what
+// happened when the app died between storing the restore and finishing the transaction.
+// They are dropped only once the replacement is durably stored here, never while it is
+// merely prepared or while its local save failed.
+function replacementEnvelope(document, phase, transactionId, supersedesSeq) {
+    return {
+        version: REPLACE_VERSION,
+        phase,
+        transactionId,
+        supersedesSeq: Number(supersedesSeq) || 0,
+        document
+    };
+}
+
+function replacementId() {
+    return 'r_' + Math.random().toString(36).slice(2, 10);
+}
+
+// Key order is not part of what a schedule IS, and two paths that build the same schedule
+// can produce different orders. Comparing raw JSON would report a difference that is not
+// one - and this comparison decides whether a restore is allowed to reach the cloud.
+function canonicalJson(value) {
+    if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+    if (value && typeof value === 'object') {
+        return '{' + Object.keys(value).sort()
+            .map(key => JSON.stringify(key) + ':' + canonicalJson(value[key]))
+            .join(',') + '}';
+    }
+    return JSON.stringify(value === undefined ? null : value);
+}
+
+// What two schedules have to agree on for one to BE the other.
+//
+// updatedAt and updatedBy are excluded, and that is the whole list of exclusions: saving
+// the replacement here re-stamps it with this device and this clock, which is correct and
+// is not a difference in the record. schemaVersion is constant, and the roster block is
+// derived from workers and places.
+// Reads whichever of the two formats is on the disk.
+//
+// v71 wrote the bare cloud document with no version and no phase. It wrote it BEFORE the
+// local save in that ordering too, so reading it as 'prepared' is both the conservative
+// interpretation and the accurate one - the device may or may not hold it. It is never
+// deleted for being old: the recovery below applies it locally first, exactly as it would
+// a new one.
+function readReplacementRecord(parsed) {
+    if (parsed && parsed.version === REPLACE_VERSION && typeof parsed.phase === 'string') {
+        return parsed;
+    }
+    return replacementEnvelope(parsed, 'prepared', 'legacy');
+}
+
+function replacementContent(source) {
+    const schedule = normaliseSchedule(source);
+    return canonicalJson({
+        workers: schedule.workers,
+        places: schedule.places,
+        days: schedule.days,
+        advances: schedule.advances
+    });
+}
+
 // Retry, backing off. A device on a building site loses signal for minutes at a time and
 // gets it back without anyone touching anything, so the queue has to drain on its own -
 // but a phone that retries every second for an hour is a phone with no battery.
@@ -428,7 +511,7 @@ const FarkadSync = {
             this._watchingConnection = true;
             window.addEventListener('online', () => {
                 this._retryAt = 0;
-                if (this.pendingReplace()) this.retryReplace();
+                if (this.pendingReplace()) this.resumeReplace();
                 else this.flush();
             });
         }
@@ -441,7 +524,7 @@ const FarkadSync = {
         // Anything left over from a previous session goes out as soon as there is
         // somewhere to send it. The replacement goes first: the queued field edits
         // belong to a state it is about to replace.
-        if (this.pendingReplace()) this.retryReplace();
+        if (this.pendingReplace()) this.resumeReplace();
         else if (this.pendingCount() > 0) this.scheduleFlush();
     },
 
@@ -544,7 +627,7 @@ const FarkadSync = {
     //
     // The whole arrays are still sent alongside, and that is deliberate: a phone that has
     // not updated reads them and sees a correct roster. They can stop being written once
-    // all three devices are past v71 - not before.
+    // all three devices are past v72 - not before.
     editRoster(schedule) {
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
@@ -678,7 +761,7 @@ const FarkadSync = {
         clearTimeout(this._retryTimer);
         this._retryTimer = setTimeout(() => {
             this._retryTimer = null;
-            if (this.pendingReplace()) this.retryReplace();
+            if (this.pendingReplace()) this.resumeReplace();
             else this.flush();
         }, this._retryAt);
     },
@@ -743,20 +826,118 @@ const FarkadSync = {
         // and refusing would protect nobody. A whole-document restore changes what every
         // other device holds, and doing that with no durable record of the intent is a
         // different bargain entirely.
-        return this.rememberReplace(cloudDocument(schedule));
+        this.loadOutbox();
+        return this.rememberReplace(replacementEnvelope(
+            cloudDocument(schedule), 'prepared', replacementId(), this._seq));
+    },
+
+    // Says the device now holds it. Best effort on purpose: the phase is a hint, and the
+    // gate on the cloud write is localDurableHolds, which reads the disk.
+    confirmReplaceStored() {
+        const envelope = this.pendingReplace();
+        if (!envelope || envelope.phase === 'local-stored') return true;
+        return this.rememberReplace(replacementEnvelope(
+            envelope.document, 'local-stored', envelope.transactionId, envelope.supersedesSeq));
     },
 
     // Undoes a prepare when the caller could not store the new state. The restore is not
     // happening, so a record saying it is owed would make the next session send a state
-    // this device never adopted.
+    // this device never adopted. Returns whether that is now certain.
     cancelPreparedReplace() {
-        this.forgetReplace();
+        return this.forgetReplace();
+    },
+
+    // THE INVARIANT. Does scheduleData:v2, read straight off the disk, already contain
+    // the replacement?
+    //
+    // Not the phase, not what is in memory, not what a promise resolved to - the bytes
+    // that the next session will open. Everything about a whole-document restore hangs
+    // off this one question, and it is asked before the cloud is written and again before
+    // anything is forgotten.
+    localDurableHolds(document) {
+        if (!document) return false;
+        const raw = Store.durableGet(SCHEDULE_KEY);
+        if (raw === null) return false;
+        try {
+            return replacementContent(JSON.parse(raw)) === replacementContent(document);
+        } catch (error) {
+            return false;
+        }
+    },
+
+    // Puts the replacement on this device, durably, and on the screen. Returns false if
+    // it could not be stored - in which case nothing at all has changed.
+    applyReplacementLocally(envelope) {
+        const previous = State.schedule;
+        State.schedule = normaliseSchedule(envelope.document);
+
+        if (!State.save()) {
+            State.schedule = previous;
+            if (typeof render === 'function') render();
+            return false;
+        }
+
+        // Only now, and only because the replacement is on the disk. Until this point the
+        // queue is the only record of those edits and must not be touched.
+        this.dropSupersededEntries(envelope.supersedesSeq);
+        if (typeof render === 'function') render();
+        return true;
+    },
+
+    // Journal entries the replacement has made obsolete. Anything newer was made after
+    // the restore was asked for and is still owed.
+    dropSupersededEntries(supersedesSeq) {
+        const upTo = Number(supersedesSeq) || 0;
+        if (upTo <= 0) return;
+        this.loadOutbox();
+
+        let changed = false;
+        [...this._outbox.entries()].forEach(([path, item]) => {
+            if (item.seq <= upTo) {
+                this._outbox.delete(path);
+                changed = true;
+            }
+        });
+        if (changed) this.saveOutbox();
+    },
+
+    // Picking a restore back up - at connect, on the retry ladder, when the connection
+    // returns, or when a snapshot arrives while one is outstanding.
+    //
+    // The order is the whole fix. THIS DEVICE FIRST. Sending first and adopting from the
+    // echo was what left the cloud holding a restore the phone that asked for it had
+    // never seen: the snapshot published during save() was ignored, because a replacement
+    // was in flight, and then the record was deleted.
+    resumeReplace() {
+        const envelope = this.pendingReplace();
+        if (!envelope || this._replacing) return Promise.resolve();
+
+        // Applied unconditionally, not only when the disk disagrees. Writing the same
+        // bytes again is harmless; SKIPPING it is not, because State.load has meanwhile
+        // replayed the journal - including the entries this restore supersedes - so
+        // memory can be ahead of a disk that already holds the replacement.
+        if (!this.applyReplacementLocally(envelope)) {
+            // No room. Nothing is sent, nothing is cleared, nothing is forgotten, and
+            // the status does not say synced.
+            this.fail(new Error('no room to store the restored schedule; nothing was sent'));
+            return Promise.resolve();
+        }
+
+        this.confirmReplaceStored();
+        return this.executePreparedReplace().catch(() => {});
     },
 
     executePreparedReplace() {
-        const document = this.pendingReplace();
-        if (!document) {
+        const envelope = this.pendingReplace();
+        if (!envelope) {
             return Promise.reject(new Error('no prepared replacement to send'));
+        }
+
+        const document = envelope.document;
+        // The gate. A phase can be stale after a crash; the disk cannot.
+        if (!this.localDurableHolds(document)) {
+            return Promise.reject(
+                new Error('the replacement is not stored on this device yet'));
         }
         if (!this.adapter) return Promise.resolve();
 
@@ -767,17 +948,25 @@ const FarkadSync = {
         return Promise.resolve(this.adapter.save(document))
             .then(() => {
                 this._replacing = false;
-                // Cleared only now. The pending edits belong to the state that was just
-                // replaced on purpose, so they are genuinely superseded - but only once
-                // the replacement has actually landed. Clearing them first meant a
-                // restore that failed took the unsent edits with it.
-                // Only when the replacement is durable HERE too. The journal is what
-                // rebuilds local edits at boot, and clearing it while the schedule that
-                // supersedes them never reached the disk throws away the only copy of
-                // them that exists. Found by the suite: schedule write refused, cloud
-                // write accepted, journal cleared, edit gone at the next open.
-                const localIsDurable = typeof State === 'undefined' || !State.saveFailed;
-                if (this._outbox === superseded && localIsDurable) this.clearOutbox();
+
+                // Asked AGAIN, after the cloud has it. A resolved cloud write is not a
+                // reason to forget anything: the question is whether screen, disk and
+                // cloud now describe the same schedule, and only the disk can answer it.
+                // Anything else and this device would be left holding one schedule while
+                // the other two phones hold another, with nothing recording the fact.
+                if (!this.localDurableHolds(document)) {
+                    this.fail(new Error(
+                        'the cloud has the restore but this device does not; keeping it pending'));
+                    this.scheduleRetry();
+                    return;
+                }
+
+                // The pending edits belong to the state that was just replaced on
+                // purpose, so they are genuinely superseded - but only once the
+                // replacement is durable HERE. The journal is what rebuilds local edits
+                // at boot, and clearing it while the schedule that supersedes them never
+                // reached the disk throws away the only copy of them that exists.
+                if (this._outbox === superseded) this.clearOutbox();
                 this.forgetReplace();
                 this.setStatus('synced');
             })
@@ -790,12 +979,51 @@ const FarkadSync = {
             });
     },
 
-    // The old single call, kept for callers that have their own ordering - the tests, and
-    // any path that has already stored its new state. Prepare and execute in one go.
+    // The whole restore, in one call, so the four places that perform one cannot each get
+    // the ordering slightly wrong. Never rejects: it resolves with which STAGE failed, so
+    // the caller can say the right thing without a try/catch around four outcomes.
+    //
+    //   1. write down the intent          fail -> nothing has changed
+    //   2. store it on this device        fail -> memory reverted, intent cancelled
+    //   3. mark the intent as stored
+    //   4. send it to the cloud           fail -> the intent stays on disk and is resumed
+    //
+    // Step 2 before step 4 is the invariant this exists for. It is also the only order in
+    // which a crash between any two steps recovers to something true.
+    replaceEverything(schedule) {
+        const previous = State.schedule;
+        const cloudOn = Boolean(this.adapter) && this.status !== 'off';
+
+        if (cloudOn && !this.prepareReplace(schedule)) {
+            return Promise.resolve({ ok: false, stage: 'prepare' });
+        }
+
+        this.loadOutbox();
+        const envelope = cloudOn
+            ? this.pendingReplace()
+            : replacementEnvelope(cloudDocument(schedule), 'prepared', 'local-only', this._seq);
+
+        if (!this.applyReplacementLocally(envelope)) {
+            State.schedule = previous;
+            const cancelled = cloudOn ? this.cancelPreparedReplace() : true;
+            if (typeof render === 'function') render();
+            return Promise.resolve({ ok: false, stage: 'local', cancelled });
+        }
+
+        if (!cloudOn) return Promise.resolve({ ok: true, stage: 'done' });
+
+        this.confirmReplaceStored();
+        return this.executePreparedReplace()
+            .then(() => ({ ok: true, stage: 'done' }))
+            .catch(error => ({ ok: false, stage: 'cloud', error }));
+    },
+
+    // Kept for the paths and tests that manage their own ordering.
     replaceAll(data) {
         if (!this.prepareReplace(data)) {
             return Promise.reject(new Error('the restore could not be written down'));
         }
+        this.confirmReplaceStored();
         return this.executePreparedReplace();
     },
 
@@ -808,29 +1036,54 @@ const FarkadSync = {
     // set _replace first, so a failed write left this device believing a restore was
     // pending that no other session would ever find - the worst of both: it refused to
     // adopt snapshots on account of a record that did not exist.
-    rememberReplace(document) {
-        if (this.replaceDamaged || farkadWritesBlocked()) return false;
-        if (!Store.available) return false;
-
-        const landed = Store.setVerified(REPLACE_KEY, JSON.stringify(document));
-        if (landed) this._replace = document;
-        return landed;
-    },
-
+    // Returns whether the record is genuinely gone. A remove that quietly does nothing -
+    // and localStorage can - would leave a restore nobody wants waiting to be resumed by
+    // the next session, while this one reports it cancelled.
     forgetReplace() {
         this._replace = null;
         Store.remove(REPLACE_KEY);
+        if (Store.durableGet(REPLACE_KEY) === null) return true;
+
+        // The delete did not take. A tombstone says the same thing in a way that only
+        // needs a WRITE to work, which is a different failure mode.
+        const tombstone = replacementEnvelope(null, 'cancelled', replacementId());
+        if (Store.setVerified(REPLACE_KEY, JSON.stringify(tombstone))) {
+            this._replace = tombstone;
+            return true;
+        }
+
+        // Neither worked, so the record is still there and WILL be resumed. Saying
+        // otherwise is the one answer that would let it surprise somebody later.
+        try {
+            this._replace = readReplacementRecord(JSON.parse(Store.get(REPLACE_KEY)));
+        } catch (error) {
+            this._replace = null;
+        }
+        return false;
     },
 
+    rememberReplace(envelope) {
+        if (this.replaceDamaged || farkadWritesBlocked()) return false;
+        if (!Store.available) return false;
+
+        const landed = Store.setVerified(REPLACE_KEY, JSON.stringify(envelope));
+        if (landed) this._replace = envelope;
+        return landed;
+    },
+
+    // The envelope, or null. Never the bare document - callers that want that ask for
+    // pendingReplaceDocument().
     pendingReplace() {
-        if (this._replace) return this._replace;
+        if (this._replace) {
+            return this._replace.phase === 'cancelled' ? null : this._replace;
+        }
         if (this.replaceDamaged) return null;
 
         const raw = Store.get(REPLACE_KEY);
         if (!raw) return null;
         try {
-            this._replace = JSON.parse(raw);
-            return this._replace;
+            this._replace = readReplacementRecord(JSON.parse(raw));
+            return this._replace.phase === 'cancelled' ? null : this._replace;
         } catch (error) {
             // It used to copy this optionally and then DELETE the original. That record
             // is a restore somebody asked for and was told had happened - the state they
@@ -844,32 +1097,12 @@ const FarkadSync = {
         }
     },
 
-    // Push it again, from wherever the app got to. Called on connect and by the retry
-    // ladder, so a restore made on a train reaches the other two phones by itself.
-    retryReplace() {
-        const document = this.pendingReplace();
-        if (!document || !this.adapter) return Promise.resolve();
-
-        // The save publishes the new document straight back as a snapshot, and the
-        // replacement is not forgotten until the save RESOLVES - so without this guard
-        // receive() sees it still pending and saves again, for as long as the stack
-        // holds out. Found by the suite doing exactly that.
-        if (this._replacing) return Promise.resolve();
-        this._replacing = true;
-
-        return Promise.resolve(this.adapter.save(document))
-            .then(() => {
-                this._replacing = false;
-                this.clearOutbox();
-                this.forgetReplace();
-                this.setStatus('synced');
-            })
-            .catch(error => {
-                this._replacing = false;
-                this.fail(error);
-                this.scheduleRetry();
-            });
-    },
+    // retryReplace lived here, and it is where G13 was. It pushed the pending document to
+    // the cloud from wherever the app happened to be, without ever asking whether THIS
+    // device held it - so a crash between preparing a restore and storing it left the
+    // cloud holding the restore, the phone holding the old schedule, the record deleted
+    // and the status reading "synced". resumeReplace replaces it and puts this device
+    // first.
 
     // An update arrived from the server - either another device wrote, or this is the
     // first read after connecting.
@@ -910,7 +1143,7 @@ const FarkadSync = {
             return;
         }
         if (this.pendingReplace()) {
-            if (!this._replacing) this.retryReplace();
+            if (!this._replacing) this.resumeReplace();
             return;
         }
 

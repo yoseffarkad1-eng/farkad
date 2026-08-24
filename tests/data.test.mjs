@@ -2333,4 +2333,362 @@ function record(device, date, workerId, placeId, rate) {
         cloud.attempts.filter(a => a.kind === 'save').length === cloudCallsBefore);
 }
 
+// ---------------------------------------------------------------- G13: the transaction
+//
+// Everything below is measured after a CLOSE AND REOPEN. A restore that is only true in
+// the session that performed it is not a restore.
+
+// The state a restore is trying to reach, and the state it is leaving.
+function restoreFixture() {
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+
+    const restored = device.call('normaliseSchedule', {
+        schemaVersion: 2,
+        workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: { '2026-07-01': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+        advances: {},
+        updatedAt: '2026-07-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+    return { device, restored };
+}
+
+function olderCloud(device) {
+    return makeCloud({
+        doc: {
+            schemaVersion: 2,
+            workers: device.State.schedule.workers, places: device.State.schedule.places,
+            days: { '2026-01-01': { plan: {}, actual: {} } }, advances: {},
+            updatedAt: '2026-01-01T06:00:00.000Z', updatedBy: 'd_other'
+        }
+    });
+}
+
+const dayKeys = schedule => Object.keys(schedule.days || {}).sort().join();
+const diskDays = device => {
+    const raw = device.raw('scheduleData:v2');
+    return raw ? Object.keys(JSON.parse(raw).days || {}).sort().join() : null;
+};
+
+{
+    suite('G13: crash after prepare, before the new state is in memory');
+
+    // GPT's measurement, reproduced exactly: the cloud ends up holding the restore while
+    // the device that asked for it still holds - and shows - the old schedule, with the
+    // only record of the restore deleted and the status reading "synced".
+    const { device, restored } = restoreFixture();
+    check('the restore is prepared', device.Sync.prepareReplace(restored) === true);
+    check('and the record is on the disk',
+        typeof device.raw('farkad:pendingReplace') === 'string');
+
+    // The app dies here. Nothing else happened.
+    const disk = device.dump();
+    check('the disk still holds the old schedule', (() => {
+        const raw = JSON.parse(disk['scheduleData:v2']);
+        return Object.keys(raw.days).join() === '2026-08-12';
+    })());
+
+    const again = makeDevice({ storage: disk, deviceId: 'd_here' });
+    again.State.load();
+    const cloud = olderCloud(again);
+    check('and so does the reopened device before it connects',
+        dayKeys(again.State.schedule) === '2026-08-12', dayKeys(again.State.schedule));
+
+    await connected(again, cloud);
+    await settle(TICK * 40);
+
+    const measured = {
+        cloudDays: Object.keys(cloud.doc.days || {}).sort().join(),
+        screenDays: dayKeys(again.State.schedule),
+        diskDays: diskDays(again),
+        pending: again.Sync.pendingReplace() === null ? null : 'held',
+        status: again.Sync.status
+    };
+
+    check('the cloud and this device do not disagree about what the schedule is',
+        measured.cloudDays === measured.screenDays, JSON.stringify(measured));
+    check('the screen and the disk agree',
+        measured.screenDays === measured.diskDays, JSON.stringify(measured));
+    check('and if anything reached the cloud, this device holds it too',
+        measured.cloudDays !== '2026-07-01' || measured.diskDays === '2026-07-01',
+        JSON.stringify(measured));
+    check('the status is not "synced" while they differ',
+        measured.status !== 'synced' || measured.cloudDays === measured.diskDays,
+        JSON.stringify(measured));
+
+    // And once more round: what survives a second close.
+    const third = makeDevice({ storage: again.dump(), deviceId: 'd_here' });
+    third.State.load();
+    check('the restore survives another close and reopen',
+        dayKeys(third.State.schedule) === measured.diskDays,
+        `${dayKeys(third.State.schedule)} vs ${measured.diskDays}`);
+}
+
+{
+    suite('G13: crash after memory changed, before the schedule was written');
+
+    const { device, restored } = restoreFixture();
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    device.State.schedule = restored;                 // memory only; no save
+    const disk = device.dump();
+
+    const again = makeDevice({ storage: disk, deviceId: 'd_here' });
+    again.State.load();
+    const cloud = olderCloud(again);
+    await connected(again, cloud);
+    await settle(TICK * 40);
+
+    check('the device ends up holding the restore on disk',
+        diskDays(again) === '2026-07-01', String(diskDays(again)));
+    check('the screen agrees with the disk',
+        dayKeys(again.State.schedule) === diskDays(again),
+        `${dayKeys(again.State.schedule)} vs ${diskDays(again)}`);
+    check('and the cloud has the same thing',
+        Object.keys(cloud.doc.days || {}).sort().join() === '2026-07-01',
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('with nothing left pending', again.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G13: crash after the schedule landed, before the phase was updated');
+
+    // The riskiest of the three, because the disk already agrees with the intended
+    // replacement and the record still says it has not been applied. Resuming has to be
+    // idempotent rather than clever.
+    const { device, restored } = restoreFixture();
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    device.State.schedule = restored;
+    given('and stored locally', device.State.save() === true);
+    // The phase update never happened.
+    const disk = device.dump();
+
+    const again = makeDevice({ storage: disk, deviceId: 'd_here' });
+    again.State.load();
+    const cloud = olderCloud(again);
+    await connected(again, cloud);
+    await settle(TICK * 40);
+
+    check('the disk still holds the restore', diskDays(again) === '2026-07-01',
+        String(diskDays(again)));
+    check('the screen agrees', dayKeys(again.State.schedule) === '2026-07-01',
+        dayKeys(again.State.schedule));
+    check('the cloud agrees',
+        Object.keys(cloud.doc.days || {}).sort().join() === '2026-07-01',
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('and nothing is pending', again.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G13: resuming with no room to store the schedule touches nothing');
+
+    const { device, restored } = restoreFixture();
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    const disk = device.dump();
+
+    const again = makeDevice({ storage: disk, deviceId: 'd_here', quota: key => key === 'scheduleData:v2' });
+    again.State.load();
+    const cloud = olderCloud(again);
+    const before = Object.keys(cloud.doc.days || {}).sort().join();
+
+    await connected(again, cloud);
+    await settle(TICK * 40);
+
+    check('the cloud was never written to',
+        cloud.attempts.filter(a => a.kind === 'save').length === 0,
+        String(cloud.attempts.filter(a => a.kind === 'save').length));
+    check('the cloud document is untouched',
+        Object.keys(cloud.doc.days || {}).sort().join() === before);
+    check('the original schedule is still on the disk',
+        diskDays(again) === '2026-08-12', String(diskDays(again)));
+    check('and on the screen',
+        dayKeys(again.State.schedule) === '2026-08-12', dayKeys(again.State.schedule));
+    check('the pending transaction survives',
+        again.Sync.pendingReplace() !== null);
+    check('the status is not synced', again.Sync.status !== 'synced', again.Sync.status);
+    check('and the queue was not cleared',
+        again.Sync.pendingCount() > 0, String(again.Sync.pendingCount()));
+}
+
+{
+    suite('G13: a v71 record, with no envelope around it, is recovered not deleted');
+
+    // What v71 wrote: the raw cloud document, no version and no phase. It was written
+    // BEFORE the local save in that ordering too, so reading it as "prepared" is the
+    // conservative interpretation and the correct one.
+    const { device, restored } = restoreFixture();
+    const legacy = JSON.stringify(device.call('cloudDocument', restored));
+    device.putRaw('farkad:pendingReplace', legacy);
+    const disk = device.dump();
+
+    const again = makeDevice({ storage: disk, deviceId: 'd_here' });
+    again.State.load();
+    check('it is read as a pending replacement',
+        again.Sync.pendingReplace() !== null);
+
+    const cloud = olderCloud(again);
+    await connected(again, cloud);
+    await settle(TICK * 40);
+
+    check('the restore it described is on the disk',
+        diskDays(again) === '2026-07-01', String(diskDays(again)));
+    check('and in the cloud',
+        Object.keys(cloud.doc.days || {}).sort().join() === '2026-07-01',
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('and it is finished with, not left behind',
+        again.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G13: the queue is not cleared while a replacement is only prepared');
+
+    const { device, restored } = restoreFixture();
+    const queuedBefore = device.Sync.pendingCount();
+    given('there is something queued', queuedBefore > 0);
+
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    check('the queue is untouched by preparing',
+        device.Sync.pendingCount() === queuedBefore,
+        `${queuedBefore} -> ${device.Sync.pendingCount()}`);
+
+    // And when the local save fails, still untouched.
+    device.setQuota(key => key === 'scheduleData:v2');
+    device.State.schedule = restored;
+    check('the local save fails', device.State.save() === false);
+    check('and the queue is still untouched',
+        device.Sync.pendingCount() === queuedBefore,
+        `${queuedBefore} -> ${device.Sync.pendingCount()}`);
+    check('and the pending record is still there',
+        device.Sync.pendingReplace() !== null);
+}
+
+{
+    suite('G13: a cancellation that cannot be confirmed is not reported as cancelled');
+
+    const { device, restored } = restoreFixture();
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+
+    // Nothing can be written or removed from here on.
+    device.setQuota(() => true);
+    device.blockRemoval(key => key === 'farkad:pendingReplace');
+
+    const cancelled = device.Sync.cancelPreparedReplace();
+    check('cancelling reports that it could not be done', cancelled === false,
+        String(cancelled));
+    check('and the record is still on the disk',
+        typeof device.raw('farkad:pendingReplace') === 'string');
+
+    // The point of all that: it must not quietly go to the cloud next session either.
+    // Either it is still pending and visible, or it is gone. Not silently sent.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('a reopened device still sees it, rather than it having vanished',
+        again.Sync.pendingReplace() !== null);
+}
+
+{
+    suite('G13: the snapshot published during save() is not what makes it work');
+
+    // The fake cloud publishes synchronously inside save(), before its promise resolves -
+    // exactly as Firestore does. The old code depended on that echo to adopt the restore
+    // and then ignored it, because a replacement was in flight. Nothing depends on it now:
+    // this device already holds the replacement before save() is ever called.
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    const observed = [];
+    const realSave = cloud.adapter.save;
+    let publishedBeforeResolve = false;
+    cloud.adapter.save = data => {
+        const seen = observed.length;
+        const promise = realSave(data);
+        publishedBeforeResolve = observed.length > seen;   // publish() ran inside save()
+        return promise;
+    };
+    cloud.subscribers.push(() => observed.push(1));
+
+    const result = await device.Sync.replaceEverything(restored);
+    check('the restore succeeded', result.ok === true, JSON.stringify(result));
+    check('and the cloud did publish inside save(), as Firestore does',
+        publishedBeforeResolve === true);
+    check('the device holds the restore on disk',
+        diskDays(device) === '2026-07-01', String(diskDays(device)));
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    reopened.State.load();
+    check('and after a close and reopen it still does',
+        dayKeys(reopened.State.schedule) === '2026-07-01',
+        dayKeys(reopened.State.schedule));
+    check('with nothing pending', reopened.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G13: a resolved cloud write is not on its own a reason to forget');
+
+    // The cloud accepts it, and between the local save and the acknowledgement the disk
+    // stops holding what was sent. Forgetting the record here would leave the other two
+    // phones on the restore and this one on something else, with nothing recording it.
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    given('applied locally',
+        device.Sync.applyReplacementLocally(device.Sync.pendingReplace()) === true);
+    device.Sync.confirmReplaceStored();
+
+    // The disk changes underneath, the way a second tab or a failed later write would
+    // leave it - after the send starts, before it is acknowledged.
+    const realSave = cloud.adapter.save;
+    cloud.adapter.save = data => {
+        device.putRaw('scheduleData:v2', JSON.stringify({
+            schemaVersion: 2, workers: [], places: [], days: { '1999-01-01': { plan: {}, actual: {} } },
+            advances: {}, updatedAt: '1999-01-01T00:00:00.000Z', updatedBy: 'd_other'
+        }));
+        return realSave(data);
+    };
+
+    await device.Sync.executePreparedReplace().catch(() => {});
+    cloud.adapter.save = realSave;
+
+    check('the cloud did take it',
+        Object.keys(cloud.doc.days || {}).sort().join() === '2026-07-01',
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('but the record is NOT forgotten, because this device no longer holds it',
+        device.Sync.pendingReplace() !== null);
+    check('and the status does not claim synced',
+        device.Sync.status !== 'synced', device.Sync.status);
+}
+
+{
+    suite('G13: the queue is not cleared while the replacement is only prepared');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    // Something queued and unsent.
+    cloud.online = false;
+    record(device, '2026-08-13', 'w_02', 'p_01');
+    await wait();
+    const queued = device.Sync.pendingCount();
+    given('there is something waiting to send', queued > 0);
+
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    check('preparing does not clear the queue',
+        device.Sync.pendingCount() === queued,
+        `${queued} -> ${device.Sync.pendingCount()}`);
+
+    // And a local save that fails leaves it alone too.
+    device.setQuota(key => key === 'scheduleData:v2');
+    check('a failed local apply does not clear it',
+        device.Sync.applyReplacementLocally(device.Sync.pendingReplace()) === false
+        && device.Sync.pendingCount() === queued,
+        `${queued} -> ${device.Sync.pendingCount()}`);
+}
+
 report();

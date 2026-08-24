@@ -358,37 +358,12 @@ async function restoreFromCloud(date) {
         return;
     }
 
-    const previous = State.schedule;
-    const incoming = normaliseSchedule(raw);
-
-    // The retry record FIRST, before memory changes and before the cloud is touched.
-    if (!FarkadSync.prepareReplace(incoming)) {
-        askTell(noRetryRecordNotice());
-        return;
-    }
-
-    State.schedule = incoming;
-    // Stored HERE second, and checked. Sending a state this device could not keep would
-    // put it on the other two phones and lose it on this one.
-    if (!State.save()) {
-        State.schedule = previous;
-        FarkadSync.cancelPreparedReplace();
-        render();
-        askTell(notStoredNotice());
-        return;
-    }
-    render();
-
-    // Awaited. This used to print "שוחזר מהענן." whether or not the write happened -
-    // and a green tick over a write that did not happen is the worst thing this app can
-    // print, because the person stops looking. A failure here leaves the retry record on
-    // the disk, so the next session sends it.
-    try {
-        await FarkadSync.executePreparedReplace();
-        askTell('שוחזר מהענן.');
-    } catch (error) {
-        askTell(replacementNotice(error));
-    }
+    // One transaction, in the sync layer: write down the intent, store it HERE, mark it
+    // stored, then send. Reproducing that ordering in four places is how one of them ends
+    // up subtly different.
+    tellRestoreResult(
+        await FarkadSync.replaceEverything(normaliseSchedule(raw)),
+        'שוחזר מהענן.');
 }
 
 async function restoreSnapshot(date) {
@@ -408,35 +383,9 @@ async function restoreSnapshot(date) {
         return;
     }
 
-    const previous = State.schedule;
-    const incoming = normaliseSchedule(JSON.parse(raw));
-    const cloudIsOn = typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off';
-
-    if (cloudIsOn && !FarkadSync.prepareReplace(incoming)) {
-        askTell(noRetryRecordNotice());
-        return;
-    }
-
-    State.schedule = incoming;
-    if (!State.save()) {
-        State.schedule = previous;
-        if (cloudIsOn) FarkadSync.cancelPreparedReplace();
-        render();
-        askTell(notStoredNotice());
-        return;
-    }
-    render();
-
-    if (!cloudIsOn) {
-        askTell('שוחזר.');
-        return;
-    }
-    try {
-        await FarkadSync.executePreparedReplace();
-        askTell('שוחזר.');
-    } catch (error) {
-        askTell(replacementNotice(error));
-    }
+    tellRestoreResult(
+        await FarkadSync.replaceEverything(normaliseSchedule(JSON.parse(raw))),
+        'שוחזר.');
 }
 
 // The state a restore replaced, kept so the restore itself can be undone.
@@ -496,6 +445,34 @@ function popUndoState() {
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
     return Store.get(UNDO_KEY);
+}
+
+// One place decides what to say about a restore, so the four that perform one cannot
+// drift apart. FarkadSync.replaceEverything does the ordering; this reads the stage it
+// stopped at.
+function tellRestoreResult(result, done) {
+    if (result.ok) { askTell(done); return; }
+
+    if (result.stage === 'prepare') { askTell(noRetryRecordNotice()); return; }
+    if (result.stage === 'local') {
+        // A cancellation that could not be confirmed means the intent is still on the
+        // disk and the next session will act on it. Saying "nothing changed" would be
+        // the one answer that lets it surprise somebody later.
+        askTell(result.cancelled === false ? stuckIntentNotice() : notStoredNotice());
+        return;
+    }
+    askTell(replacementNotice(result.error));
+}
+
+// The restore did not happen here, and the note saying it was wanted could not be taken
+// off the device either.
+function stuckIntentNotice() {
+    return {
+        title: 'השחזור לא בוצע - ויש מה לבדוק',
+        message: 'לא הצלחנו לשמור את המצב המשוחזר, וגם לא הצלחנו למחוק את הבקשה לשחזר. ' +
+            'הרישום הנוכחי לא השתנה, אבל ייתכן שהשחזור יתבצע בפתיחה הבאה. ' +
+            'פנה מקום במכשיר ופתח מחדש כדי לראות מה המצב.'
+    };
 }
 
 // Said, and the restore abandoned, when there is nowhere to write down the fact that a
@@ -742,53 +719,31 @@ function importBackup(event) {
             return;
         }
 
-        const previous = State.schedule;
         const previousIssues = State.migrationIssues;
-        const cloudIsOn = typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off';
-
-        // The retry record first, before memory changes and before the cloud is touched.
-        if (cloudIsOn && !FarkadSync.prepareReplace(incoming)) {
-            event.target.value = '';
-            askTell(noRetryRecordNotice());
-            return;
-        }
-
-        State.schedule = incoming;
         // Decisions the migration refused to guess at come with the file. Losing them
         // here would leave work in the old file that the app now claims to have imported.
         State.migrationIssues = loaded.issues;
 
-        if (!State.save()) {
-            State.schedule = previous;
+        const result = await FarkadSync.replaceEverything(incoming);
+        event.target.value = '';
+
+        if (!result.ok && result.stage !== 'cloud') {
+            // The schedule was put back by the transaction; the issues are this file's
+            // business and go back with it.
             State.migrationIssues = previousIssues;
-            if (cloudIsOn) FarkadSync.cancelPreparedReplace();
-            event.target.value = '';
             render();
-            askTell(notStoredNotice());
+            tellRestoreResult(result, '');
             return;
         }
         writeIssues(loaded.issues);
-        event.target.value = '';
-        render();
-
-        let sent = true;
-        let failure = null;
-        if (cloudIsOn) {
-            try {
-                await FarkadSync.executePreparedReplace();
-            } catch (error) {
-                sent = false;
-                failure = error;
-            }
-        }
 
         if (loaded.issues.length > 0) {
             await askTell(`הגיבוי נטען. ${loaded.issues.length} רישומים ממתינים להחלטה שלך.`);
             openMigrationModal();
-            if (!sent) askTell(replacementNotice(failure));
+            if (!result.ok) askTell(replacementNotice(result.error));
             return;
         }
-        askTell(sent ? 'הגיבוי נטען.' : replacementNotice(failure));
+        tellRestoreResult(result, 'הגיבוי נטען.');
     };
     reader.readAsText(file);
 }
@@ -822,32 +777,5 @@ async function restoreLocalBackup() {
         return;
     }
 
-    const leaving = State.schedule;
-    const cloudIsOn = typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off';
-
-    if (cloudIsOn && !FarkadSync.prepareReplace(previous)) {
-        askTell(noRetryRecordNotice());
-        return;
-    }
-
-    State.schedule = previous;
-    if (!State.save()) {
-        State.schedule = leaving;
-        if (cloudIsOn) FarkadSync.cancelPreparedReplace();
-        render();
-        askTell(notStoredNotice());
-        return;
-    }
-    render();
-
-    if (!cloudIsOn) {
-        askTell('שוחזר.');
-        return;
-    }
-    try {
-        await FarkadSync.executePreparedReplace();
-        askTell('שוחזר.');
-    } catch (error) {
-        askTell(replacementNotice(error));
-    }
+    tellRestoreResult(await FarkadSync.replaceEverything(previous), 'שוחזר.');
 }
