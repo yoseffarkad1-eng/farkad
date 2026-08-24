@@ -7,14 +7,17 @@ the live site still serves v58.
 |---|---|
 | Baseline asked for (round 1) | `ca0d2d6` (v57) |
 | Baseline actually used | `182a51f` (v58) — see below |
-| **Code HEAD** | `7272be6` — *Three ways a half-finished write could still survive* |
-| **Branch HEAD** | this documentation commit, which changes no code |
+| **Last behaviour change** | `7272be6` — *Three ways a half-finished write could still survive* |
+| **Branch HEAD** | `bdc1717` and later — documentation, plus two JS **comment** lines |
 | Version | v71 |
 
 **Code HEAD and branch HEAD are not the same thing.** An earlier version of this file
 called a documentation commit the "Final HEAD", which was misleading. The table above
-separates them: nothing in `docs/` affects the app, and the last commit that changes
-behaviour is `7272be6`. `git branch -r --contains 7272be6` returns only
+separates them, and precisely: the last commit that changes **behaviour** is `7272be6`.
+`bdc1717` is documentation plus two comment lines in `js/model/schema.js` and
+`js/sync/sync.js` — the version at which the legacy roster arrays may be dropped, which
+had gone stale at v59. Comments only; the browser suite was re-run over it anyway
+(560/560). `git branch -r --contains 7272be6` returns only
 `origin/claude/farkad-data-safety`.
 
 ## The one deviation from the brief
