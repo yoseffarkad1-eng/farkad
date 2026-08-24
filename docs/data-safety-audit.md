@@ -7,9 +7,9 @@ the live site still serves v58.
 |---|---|
 | Baseline asked for (round 1) | `ca0d2d6` (v57) |
 | Baseline actually used | `182a51f` (v58) — see below |
-| Last **code** commit | `3f415c5` — *Believe a write only when it can be read back* |
+| Last **code** commit | `d4229ad` — *An edit is not made until something on this device can make it again* |
 | Last commit on the branch | this documentation commit, which changes no code |
-| Version | v69 |
+| Version | v70 |
 
 **Code HEAD and branch HEAD are not the same thing.** The previous version of this file
 called a documentation commit the "Final HEAD", which was misleading. The table above
@@ -25,9 +25,91 @@ touches no data path. The branch was cut from `182a51f` so the fix is not lost.
 
 Round 2's precondition (`HEAD == 6f1dee2`) matched exactly.
 
+## Round 3 — the durable transaction
+
+Four findings, one root cause: the app changed memory, drew the result, and reported
+success without anything durable holding the change.
+
+### The rule
+
+**A commit is not made until the journal holds it.**
+
+```
+1. journal the change      (verified: written, then read back off the disk)
+   └─ failed?  →  roll back memory, redraw, say why, return false. Nothing else runs.
+2. write the schedule      (verified; may fail - the journal covers it)
+3. render, return true
+```
+
+The journal is one field; the schedule is the whole record. In practice the journal is
+the write that fits, so making it the *gate* rather than one of two acceptable outcomes
+costs nothing real — and it buys the guarantee that **every committed edit is in the
+journal**, so an arriving snapshot can always be told what to put back on top of itself.
+
+I built the weaker version first, exactly as the brief specified it (durable if the
+schedule **or** the journal landed). The suite then found the hole: schedule written,
+journal refused, an older snapshot arrives from another phone — the edit was on the disk,
+nothing would ever send it, nothing could re-apply it, and `receive()` took it off the
+device. Hence the stronger rule.
+
+Writing the schedule only *after* the journal is what keeps the disk from getting ahead of
+the screen: a refused edit is never written anywhere.
+
+### The journal
+
+- Replayed at boot by `State.load()`, so an edit whose schedule write failed comes back on
+  the next open **with no cloud involved**.
+- An acknowledged entry is **marked sent, not deleted**; it goes only once a schedule
+  containing it has also been written here. Either alone leaves something unrebuildable.
+- `pendingCount()` still counts only what is waiting to *go out* — that is what the number
+  on screen claims.
+- Read through `Store.durableGet` (new): what the **next session** would see, bypassing
+  the session cache that holds writes the disk refused.
+
+### Rollback
+
+Memory returns to the last state this device is known to hold, then forward again through
+the journal — what a reopen would do. Three things had to be right: the journal is
+re-read from the **disk**; the schedule is never written; and the failed entries are
+dropped, so the next flush cannot send the other two phones an edit this one has just
+disowned.
+
+### Failure boundaries
+
+| Boundary | Behaviour |
+|---|---|
+| journal fails | edit refused, memory rolled back, schedule untouched, message shown |
+| journal ok, schedule fails | edit stands; rebuilt from the journal at next boot |
+| both fail | refused; nothing written anywhere |
+| `persist()` fails in `receive()` | snapshot **not** adopted, previous state on screen and disk, status **not** synced, retried on the next snapshot |
+| restore: way back fails | nothing replaced, `noWayBackNotice` |
+| restore: new state fails | memory rolled back, **not** sent to cloud, queue **not** cleared, `notStoredNotice` |
+| `replaceAll` cloud ok, local save failed | queue **not** cleared (found by the suite) |
+| damaged queue, quarantine ok | recording resumes in the next slot, confirmed by read-back |
+| damaged queue, no room for a new slot | recording refused, not held in memory |
+| storage unavailable entirely | edits accepted — see the exception below |
+
+### One deliberate exception
+
+A browser that refuses storage outright (Safari private mode) accepts edits. Nothing there
+is recoverable whatever we do, the app already says so in a permanent banner, and refusing
+every edit would protect nothing while making the app useless. Tested rather than assumed.
+
+### Every announcement now asks first
+
+undo/redo, bulk assign, clearing a site, copy-a-day, quick start, migration decisions,
+roster edits. No undo bar over an edit that did not happen; no "copied N workers" over a
+copy that was refused.
+
 ## Commits
 
-Round 2 first, since that is what is under review.
+Round 3:
+
+| SHA | What it fixed |
+|---|---|
+| `d4229ad` | **G6/G7/G8/G9** — the durable transaction above |
+
+Round 2:
 
 | SHA | What it fixed |
 |---|---|
@@ -77,8 +159,8 @@ Run from a **clean clone** (`git clone` → `npm ci`), Node v22.22.2:
 
 | Suite | Result |
 |---|---|
-| Data (`npm test`) | **187/187**, ten consecutive runs |
-| Browser (`npm run test:smoke`) | **553/553**, twice |
+| Data (`npm test`) | **247/247**, ten consecutive runs |
+| Browser (`npm run test:smoke`) | **556/556**, twice |
 | Rules (`npm run test:rules`, Firestore emulator) | **24/24** |
 
 Syntax check: 32 tracked `.js`/`.mjs` files, 0 failures.
@@ -140,6 +222,32 @@ Keys: `farkad:outbox`, `farkad:pendingReplace`, `scheduleData:v2` → `<key>:dam
 A build before v67 used `scheduleData:v2damaged` (no colon); nothing reads it now, and
 anything found under it on an old device is still a real copy worth keeping.
 
+### Round 3 scenarios, all measured by what survives a close
+
+- schedule **and** journal refused → refused, rolled back, nothing on disk, nothing after
+  reopen;
+- schedule refused, journal written → accepted, and **rebuilt at boot with no cloud**;
+- journal refused, schedule writable → **refused**, and the schedule deliberately not
+  written;
+- an older cloud snapshot arriving over a locally-recorded day → the day survives *and*
+  reaches the cloud;
+- storage unavailable entirely → accepted, banner up;
+- roster change with nowhere to store it → refused, worker gone from the screen too, and
+  after reopen;
+- bulk copy with nowhere to store it → refused, no success message, no undo bar;
+- failed save does **not** call `onLocalChange`, so no bare timestamp goes out for an edit
+  that does not exist;
+- each critical key failed **in isolation**, with the expected outcome stated per key and
+  checked after a reopen;
+- `persist()` failing during `receive()`, then succeeding once there is room;
+- restore with the **new state** failing after the undo write succeeded — nothing
+  replaced, nothing sent, queue intact;
+- the brief's full G9 sequence: damaged queue → quarantine → continue → record → close →
+  reopen → older snapshot → the day survives, reached the cloud, and the damaged original
+  is still byte-for-byte where it was;
+- recovery export carries the damaged record, its quarantine, the live schedule and the
+  live queue.
+
 ## Remaining risks
 
 - **Blocking writes is a real cost on a site.** A single corrupt byte in the outbox stops
@@ -152,6 +260,13 @@ anything found under it on an old device is still a real copy worth keeping.
 - **Real Firestore is untested.** Simulated faithfully; the SDK's own offline persistence
   and retry are not in the loop.
 - **The 300-path batch** is a conservative guess, not a measured ceiling.
+- **The journal is now a hard dependency of recording.** If it cannot be written, the app
+  refuses edits. That is the intended trade, and it is why the queue moves to a fresh slot
+  rather than staying stuck — but it means a storage fault stops recording rather than
+  degrading. Deliberate, and the one design decision here most worth a second opinion.
+- **`rollback()` needs `durableText`.** It is set on every confirmed save and on load, so
+  the only window without it is before the first successful save of a brand-new install —
+  where there is nothing to roll back to anyway.
 - **Recovery's banner is one line of text.** It says what happened and what to press. It
   has had no design pass, per the brief.
 - **`window.print()` in an installed iOS PWA** and **XLSX export offline** — pre-existing,
