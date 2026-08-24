@@ -329,6 +329,45 @@ function renderCloudRestorePoints() {
     });
 }
 
+// The gate every restore door goes through, before normaliseSchedule is allowed near
+// the content.
+//
+// normaliseSchedule is forgiving on purpose - a half-finished remote write should be
+// read for what is in it - so it turns {} and {"workers":[],"places":[]} into an empty
+// schedule and says nothing. Down these four doors that is a whole-document replacement:
+// the empty schedule goes on the screen, onto the disk and up to the other two phones.
+//
+// Returns the document to restore, or null after telling the person exactly what is
+// wrong with the one they picked. Nothing is changed on the way to a null.
+function acceptRestoreSource(raw, what) {
+    const read = readReplacementDocument(raw);
+    if (read.document) return read.document;
+
+    askTell({
+        title: 'לא בוצע שחזור',
+        message: `${what} אינו רישום שלם של לוח עבודה, ולכן לא שינינו כלום. ` +
+            `מה שכבר שמור לא נפגע.\n\n${read.problems.slice(0, 3).join(' ')}`
+    });
+    return null;
+}
+
+// The same, for a source that has to be parsed first. A restore point whose JSON will
+// not parse used to throw out of the click handler: no dialog, no error, nothing on
+// screen at all - the button simply did nothing.
+function acceptRestoreText(text, what) {
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
+    } catch (error) {
+        askTell({
+            title: 'לא בוצע שחזור',
+            message: `${what} לא נקרא, ולכן לא שינינו כלום. מה שכבר שמור לא נפגע.`
+        });
+        return null;
+    }
+    return acceptRestoreSource(parsed, what);
+}
+
 async function restoreFromCloud(date) {
     const parsed = parseLocalDate(date);
     const go = await askConfirm({
@@ -350,6 +389,10 @@ async function restoreFromCloud(date) {
         return;
     }
 
+    // Checked before the way back is written, let alone before anything is replaced.
+    const document = acceptRestoreSource(raw, 'העותק מהענן');
+    if (!document) return;
+
     // Confirmed BEFORE anything is replaced. The order is the guarantee: a close between
     // any two steps has to leave something readable, which is only true if the way back
     // is on the disk before the thing it is a way back from is gone.
@@ -362,7 +405,7 @@ async function restoreFromCloud(date) {
     // stored, then send. Reproducing that ordering in four places is how one of them ends
     // up subtly different.
     tellRestoreResult(
-        await FarkadSync.replaceEverything(normaliseSchedule(raw)),
+        await FarkadSync.replaceEverything(normaliseSchedule(document)),
         'שוחזר מהענן.');
 }
 
@@ -378,13 +421,16 @@ async function restoreSnapshot(date) {
     });
     if (!go) return;
 
+    const document = acceptRestoreText(raw, 'העותק השמור');
+    if (!document) return;
+
     if (!pushUndoState(State.schedule)) {
         askTell(noWayBackNotice());
         return;
     }
 
     tellRestoreResult(
-        await FarkadSync.replaceEverything(normaliseSchedule(JSON.parse(raw))),
+        await FarkadSync.replaceEverything(normaliseSchedule(document)),
         'שוחזר.');
 }
 
@@ -428,23 +474,39 @@ function pushUndoState(schedule) {
     return stacked || slotted;
 }
 
-function popUndoState() {
-    let stack;
+function readUndoStack() {
     try {
         const raw = Store.get(UNDO_STACK_KEY);
-        stack = raw ? JSON.parse(raw) : [];
-        if (!Array.isArray(stack)) stack = [];
+        const stack = raw ? JSON.parse(raw) : [];
+        return Array.isArray(stack) ? stack : [];
     } catch (error) {
-        stack = [];
+        return [];
     }
+}
 
-    const top = stack.shift();
-    Store.set(UNDO_STACK_KEY, JSON.stringify(stack));
+// The way back, WITHOUT taking it off the stack. Reading and consuming used to be the
+// same call, so an entry that turned out to be unreadable was destroyed by the attempt
+// that discovered it.
+function peekUndoState() {
+    const top = readUndoStack()[0];
     if (top && typeof top.schedule === 'string') return top.schedule;
 
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
     return Store.get(UNDO_KEY);
+}
+
+// Taken off, once the state it holds has been accepted. Matched on content so that a
+// push which happened in between cannot cause the wrong entry to be dropped.
+function dropUndoState(raw) {
+    const stack = readUndoStack();
+    const at = stack.findIndex(entry => entry && entry.schedule === raw);
+    if (at !== -1) {
+        stack.splice(at, 1);
+        Store.set(UNDO_STACK_KEY, JSON.stringify(stack));
+        return;
+    }
+    if (Store.get(UNDO_KEY) === raw) Store.remove(UNDO_KEY);
 }
 
 // One place decides what to say about a restore, so the four that perform one cannot
@@ -453,6 +515,7 @@ function popUndoState() {
 function tellRestoreResult(result, done) {
     if (result.ok) { askTell(done); return; }
 
+    if (result.stage === 'invalid') { askTell(notAScheduleNotice()); return; }
     if (result.stage === 'prepare') { askTell(noRetryRecordNotice()); return; }
     if (result.stage === 'queue') { askTell(unfinishedRestoreNotice()); return; }
     if (result.stage === 'finalize') { askTell(unfinishedTransactionNotice()); return; }
@@ -475,6 +538,16 @@ function unfinishedRestoreNotice() {
         message: 'המצב המשוחזר נשמר במכשיר, אבל לא הצלחנו לסיים את תור השליחה, ולכן ' +
             'השחזור עדיין לא הסתיים ולא נשלח למכשירים האחרים. פנה מקום במכשיר - ' +
             'הוא ימשיך מעצמו.'
+    };
+}
+
+// The sync layer refused the document itself. A door that skipped its own check would
+// otherwise have replaced everything with whatever it was handed.
+function notAScheduleNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'המצב שביקשת לשחזר אינו רישום שלם של לוח עבודה, ולכן לא שינינו כלום. ' +
+            'מה שכבר שמור לא נפגע.'
     };
 }
 
@@ -683,7 +756,19 @@ function readBackupFile(parsed) {
         throw error;
     }
 
-    const schedule = normaliseSchedule(parsed);
+    // The complete check, on the RAW file, before normaliseSchedule sees it. The
+    // "did anybody survive" test below caught a file that emptied itself; it could not
+    // catch one that was already empty in the wrong way, or one carrying a day against a
+    // worker who is not in it, or an impossible date, or an id with a dot in it that
+    // would write every edit for that man somewhere else in the document.
+    const read = readReplacementDocument(parsed);
+    if (!read.document) {
+        const error = new Error('not a whole schedule');
+        error.problems = read.problems;
+        throw error;
+    }
+
+    const schedule = normaliseSchedule(read.document);
     if (parsed.workers.length > 0 && schedule.workers.length === 0) {
         throw new Error('no workers survived normalisation');
     }
@@ -782,21 +867,19 @@ async function restoreLocalBackup() {
     });
     if (!go) return;
 
-    // Popped, so pressing it again walks further back rather than flipping between the
-    // last two states forever.
-    const raw = popUndoState();
+    // READ, not popped. The entry only leaves the stack once it has been checked and
+    // accepted: popping first meant a way back that would not parse, or that was not a
+    // schedule, was consumed by the attempt that failed on it - so the button that could
+    // not restore it also destroyed it, and the next press walked past it to an older
+    // state without saying so.
+    const raw = peekUndoState();
     if (!raw) {
         askTell('אין גיבוי מקומי.');
         return;
     }
 
-    let previous;
-    try {
-        previous = normaliseSchedule(JSON.parse(raw));
-    } catch (error) {
-        askTell('הגיבוי המקומי לא נקרא. הנתונים הקיימים לא השתנו.');
-        return;
-    }
+    const document = acceptRestoreText(raw, 'הגיבוי המקומי');
+    if (!document) return;
 
     // The state being left is itself pushed, so this is reversible in both directions.
     if (!pushUndoState(State.schedule)) {
@@ -804,5 +887,11 @@ async function restoreLocalBackup() {
         return;
     }
 
-    tellRestoreResult(await FarkadSync.replaceEverything(previous), 'שוחזר.');
+    // Now, and only now. Popped BEFORE the replacement so that pressing the button twice
+    // walks further back rather than flipping between the last two states forever -
+    // pushUndoState above has already put the state being left on top of it, so the entry
+    // being dropped here is the one about to be restored.
+    dropUndoState(raw);
+
+    tellRestoreResult(await FarkadSync.replaceEverything(normaliseSchedule(document)), 'שוחזר.');
 }

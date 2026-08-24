@@ -1512,7 +1512,7 @@ function record(device, date, workerId, placeId, rate) {
     check('and after a restart the original is still the one on disk',
         reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
     check('with the way back still there beside it',
-        reopened.call('popUndoState') !== null);
+        reopened.call('peekUndoState') !== null);
 }
 
 // ---------------------------------------------------------------- what survives a close
@@ -2996,7 +2996,6 @@ const diskDays = device => {
         // into an empty schedule and replace the screen, the disk and the cloud with it.
         ['the two rosters and nothing else', '{"workers":[],"places":[]}'],
         ['a document with no days', '{"workers":[],"places":[],"advances":{}}'],
-        ['a document with no advances', '{"workers":[],"places":[],"days":{}}'],
         ['days as an array', bare({ days: [] })],
         ['a worker with no id', bare({ workers: [{ name: 'בלי מזהה' }] })],
         ['two workers claiming one id', bare({
@@ -3690,6 +3689,851 @@ const diskDays = device => {
     check('and one more reopen still holds everything',
         ['2026-08-12', '2026-08-13'].every(date => Boolean(third.State.schedule.days[date])),
         dayKeys(third.State.schedule));
+}
+
+// ---------------------------------------------------------------- G16: the last of it
+
+// The value of one field path, off the cloud document, so "which of the two writes won"
+// is a question with a plain answer.
+function cloudEntries(cloud, date, workerId) {
+    const day = (cloud.doc && cloud.doc.days && cloud.doc.days[date]) || {};
+    const record = (day.actual || {})[workerId] || {};
+    return (record.entries || []).map(entry => entry.placeId).join();
+}
+
+function screenEntries(device, date, workerId) {
+    return device.call('entriesFor', device.State.schedule, date, workerId, 'actual')
+        .map(entry => entry.placeId).join();
+}
+
+function diskEntries(device, date, workerId) {
+    const raw = device.raw('scheduleData:v2');
+    if (!raw) return null;
+    const day = (JSON.parse(raw).days || {})[date] || {};
+    const record = (day.actual || {})[workerId] || {};
+    return (record.entries || []).map(entry => entry.placeId).join();
+}
+
+for (const ending of ['succeeds', 'fails']) {
+    suite(`G16.1: a second write never starts while the first is open (A ${ending})`);
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    // A: the day, recorded at one site.
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+    given('A reached the cloud', cloudEntries(cloud, '2026-08-12', 'w_01') === 'p_01',
+        cloudEntries(cloud, '2026-08-12', 'w_01'));
+
+    // A second write to the SAME path, held open. In the app this is a socket that has
+    // gone quiet: the request was made, the server may or may not have it.
+    //
+    // The threshold is dropped to a few milliseconds BEFORE the write starts, so that
+    // "past every timeout there is" happens inside the test rather than half a minute
+    // from now.
+    device.Sync.stuckMs = TICK;
+    const gate = deferred();
+    cloud.hold = kind => (kind === 'update' ? gate.promise : null);
+    device.State.commit(device.call('unassignPlace',
+        device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    await settle(TICK * 10);
+    const attemptsWithAOpen = cloud.attempts.filter(a => a.kind === 'update').length;
+    given('the second write is open', attemptsWithAOpen > 0);
+
+    // B: the same path again, while A hangs.
+    device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02'));
+
+    // Past every timeout there is, several times over.
+    await settle(TICK * 40);
+
+    check(`${ending}: B has not called the adapter while A is unresolved`,
+        cloud.attempts.filter(a => a.kind === 'update').length === attemptsWithAOpen,
+        `${attemptsWithAOpen} -> ${cloud.attempts.filter(a => a.kind === 'update').length}`);
+    check(`${ending}: nothing claims to be synced`,
+        device.Sync.status !== 'synced', device.Sync.status);
+    check(`${ending}: and B is durable in the journal`,
+        String(device.raw(device.Sync.activeOutboxKey()))
+            .includes('days.2026-08-12.actual.w_01'));
+
+    if (ending === 'succeeds') gate.release();
+    else gate.refuse(new Error('the socket gave up'));
+    cloud.hold = null;
+    await settle(TICK * 60);
+    await device.Sync.flush();
+    await settle(TICK * 40);
+
+    check(`${ending}: B is what the screen shows`,
+        screenEntries(device, '2026-08-12', 'w_01') === 'p_02',
+        screenEntries(device, '2026-08-12', 'w_01'));
+    check(`${ending}: B is what the disk holds`,
+        diskEntries(device, '2026-08-12', 'w_01') === 'p_02',
+        String(diskEntries(device, '2026-08-12', 'w_01')));
+    check(`${ending}: B is what the cloud holds - A did not land on top of it`,
+        cloudEntries(cloud, '2026-08-12', 'w_01') === 'p_02',
+        cloudEntries(cloud, '2026-08-12', 'w_01'));
+    check(`${ending}: the queue is empty`, device.Sync.pendingCount() === 0,
+        String(device.Sync.pendingCount()));
+    check(`${ending}: and only now does it say synced`,
+        device.Sync.status === 'synced', device.Sync.status);
+
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check(`${ending}: the first reopen agrees`,
+        screenEntries(again, '2026-08-12', 'w_01') === 'p_02',
+        screenEntries(again, '2026-08-12', 'w_01'));
+
+    const third = makeDevice({ storage: again.dump(), deviceId: 'd_here' });
+    third.State.load();
+    check(`${ending}: and the second`,
+        screenEntries(third, '2026-08-12', 'w_01') === 'p_02',
+        screenEntries(third, '2026-08-12', 'w_01'));
+}
+
+{
+    suite('G16.2: a pruned queue does not take the sequence counter back to zero');
+
+    // The exact regression. A restore prunes the entries it supersedes, which can leave
+    // {seq:N, items:{}} on the disk. Reading the mark back out of the items - there are
+    // none - started the next session at zero, so the next edit was handed a sequence
+    // number BELOW the boundary of a restore that was still pending. The restore then
+    // superseded an edit made after it, and deleted it.
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    // Finalisation cannot happen: neither the delete nor the tombstone will write.
+    device.blockRemoval(key => key === 'farkad:pendingReplace');
+    device.setQuota((key, value) =>
+        key === 'farkad:pendingReplace' && value.includes('"cancelled"'));
+    const first = await device.Sync.replaceEverything(restored);
+    given('the transaction is left pending', first.ok === false
+        && device.Sync.pendingReplace() !== null, JSON.stringify(first));
+
+    const boundary = device.Sync.pendingReplace().supersedesSeq;
+    given('it has a real boundary', boundary > 0, String(boundary));
+    const queue = JSON.parse(device.raw(device.Sync.activeOutboxKey()));
+    given('the queue is pruned down to nothing but the mark',
+        Object.keys(queue.items).length === 0, JSON.stringify(queue));
+    given('and the mark itself is on the disk', queue.seq === boundary,
+        `${queue.seq} vs ${boundary}`);
+
+    // The app closes and opens again. Disconnected first, or the session that is
+    // supposedly closed carries on retrying its own restore against the same cloud - two
+    // phones, not one closed and reopened.
+    device.Sync.disconnect();
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('the sequence counter survives the reopen',
+        again.Sync._seq === boundary, `${again.Sync._seq} vs ${boundary}`);
+
+    check('a day recorded now is accepted',
+        record(again, '2026-08-20', 'w_02', 'p_02') === true);
+    const entry = JSON.parse(again.raw(again.Sync.activeOutboxKey()))
+        .items['days.2026-08-20.actual.w_02'];
+    check('and it is numbered above the boundary, not below it',
+        entry.seq > boundary, `${entry.seq} vs ${boundary}`);
+
+    // The transaction finishes.
+    again.blockRemoval(null);
+    again.setQuota(null);
+    again.Sync.pushDelayMs = TICK;
+    again.Sync.connect(cloud.adapter);
+    await settle(TICK * 60);
+
+    check('the restore finishes', again.Sync.pendingReplace() === null,
+        JSON.stringify(again.Sync.pendingReplace()));
+    check('the day recorded after it is still on the screen',
+        dayKeys(again.State.schedule) === '2026-07-01,2026-08-20',
+        dayKeys(again.State.schedule));
+    check('and on the disk', diskDays(again) === '2026-07-01,2026-08-20',
+        String(diskDays(again)));
+    check('and in the cloud',
+        Object.keys(cloud.doc.days || {}).sort().join() === '2026-07-01,2026-08-20',
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('the queue drained', again.Sync.pendingCount() === 0,
+        String(again.Sync.pendingCount()));
+
+    const third = makeDevice({ storage: again.dump(), deviceId: 'd_here' });
+    third.State.load();
+    check('the first reopen agrees',
+        dayKeys(third.State.schedule) === '2026-07-01,2026-08-20',
+        dayKeys(third.State.schedule));
+    const fourth = makeDevice({ storage: third.dump(), deviceId: 'd_here' });
+    fourth.State.load();
+    check('and the second',
+        dayKeys(fourth.State.schedule) === '2026-07-01,2026-08-20',
+        dayKeys(fourth.State.schedule));
+}
+
+{
+    suite('G16.2: a sequence that is not a whole number is corruption, not a number');
+
+    for (const [label, seq] of [
+        ['a string', '"7"'], ['a boolean', 'true'], ['null', 'null'],
+        ['a fraction', '1.5'], ['a negative', '-1'],
+        ['past the safe range', '9007199254740993']
+    ]) {
+        const raw = `{"seq":${seq},"items":{}}`;
+        const device = makeDevice({ storage: { 'farkad:outbox': raw }, deviceId: 'd_here' });
+        check(`${label} is not read as a queue`,
+            device.Sync.activeOutboxKey() !== 'farkad:outbox',
+            String(device.Sync.activeOutboxKey()));
+        check(`${label} goes through Recovery`,
+            device.global('Recovery').problems.some(p => p.key === 'farkad:outbox'));
+        check(`${label} is left byte-for-byte`,
+            device.raw('farkad:outbox') === raw, String(device.raw('farkad:outbox')));
+    }
+}
+
+// A record exactly as v71 wrote one: the bare cloud document, no envelope around it, and
+// the stamp still null because v71 captured it before State.save had touched it.
+//
+// FROZEN. Written out by hand rather than built with today's cloudDocument(), because
+// the whole question is whether a record from a build that no longer exists still opens
+// - and a fixture generated by the current builder answers a different question every
+// time the builder changes.
+const V71_RECORD = JSON.stringify({
+    schemaVersion: 2,
+    workers: [
+        { id: 'w_01', name: 'דוד', idNumber: '', phone: '', dailyRate: 400, hourlyRate: 50, active: true },
+        { id: 'w_02', name: 'שרה', idNumber: '', phone: '', dailyRate: 350, hourlyRate: 0, active: true },
+        { id: 'w_03', name: 'עלי', idNumber: '', phone: '', dailyRate: 0, hourlyRate: 0, active: true }
+    ],
+    places: [
+        { id: 'p_01', name: 'הרצליה', active: true },
+        { id: 'p_02', name: 'תל אביב', active: true }
+    ],
+    days: {
+        '2026-07-01': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } }
+    },
+    advances: {},
+    updatedAt: null,
+    updatedBy: null,
+    roster: {
+        workers: {
+            w_01: { id: 'w_01', name: 'דוד', idNumber: '', phone: '', dailyRate: 400, hourlyRate: 50, active: true },
+            w_02: { id: 'w_02', name: 'שרה', idNumber: '', phone: '', dailyRate: 350, hourlyRate: 0, active: true },
+            w_03: { id: 'w_03', name: 'עלי', idNumber: '', phone: '', dailyRate: 0, hourlyRate: 0, active: true }
+        },
+        places: {
+            p_01: { id: 'p_01', name: 'הרצליה', active: true },
+            p_02: { id: 'p_02', name: 'תל אביב', active: true }
+        },
+        workerOrder: ['w_01', 'w_02', 'w_03'],
+        placeOrder: ['p_01', 'p_02']
+    }
+});
+
+{
+    suite('G16.3: a genuine v71 record is frozen once, and never recomputed');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.putRaw('farkad:pendingReplace', V71_RECORD);
+
+    // FIRST OPEN. The record is upgraded, and the boundary it gets is the queue as it
+    // stands right now - the pre-restore queue.
+    const first = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    first.State.load();
+    const frozen = first.Sync.pendingReplace();
+    check('the v71 record is recognised, not quarantined',
+        frozen !== null && !first.global('Recovery').problems.some(p => p.key === 'farkad:pendingReplace'),
+        JSON.stringify(first.global('Recovery').problems.map(p => p.key)));
+    check('the upgrade is on the disk, not only in memory',
+        String(first.raw('farkad:pendingReplace')).includes('"version":2'),
+        String(first.raw('farkad:pendingReplace')).slice(0, 60));
+    check('with a stamp the rules will accept',
+        typeof frozen.document.updatedAt === 'string' && frozen.document.updatedAt.length > 0
+        && typeof frozen.document.updatedBy === 'string' && frozen.document.updatedBy.length > 0,
+        JSON.stringify([frozen.document.updatedAt, frozen.document.updatedBy]));
+    check('and a cloud write owed', frozen.cloud === true);
+    check('and a transaction id of its own',
+        typeof frozen.transactionId === 'string' && frozen.transactionId !== 'legacy',
+        String(frozen.transactionId));
+
+    const boundary = frozen.supersedesSeq;
+    check('the boundary is the queue as it was, not zero', boundary > 0, String(boundary));
+
+    // A day recorded while the restore is still pending.
+    check('a day recorded now is accepted',
+        record(first, '2026-08-20', 'w_02', 'p_02') === true);
+
+    // TWO REOPENS. The boundary must be the one frozen above, not one computed again
+    // against a queue that has grown - which would put the new day INSIDE it.
+    const second = makeDevice({ storage: first.dump(), deviceId: 'd_here' });
+    second.State.load();
+    check('the boundary is unchanged after one reopen',
+        second.Sync.pendingReplace().supersedesSeq === boundary,
+        `${second.Sync.pendingReplace().supersedesSeq} vs ${boundary}`);
+    check('and the transaction id is the same one',
+        second.Sync.pendingReplace().transactionId === frozen.transactionId);
+
+    const third = makeDevice({ storage: second.dump(), deviceId: 'd_here' });
+    third.State.load();
+    check('and after two', third.Sync.pendingReplace().supersedesSeq === boundary,
+        `${third.Sync.pendingReplace().supersedesSeq} vs ${boundary}`);
+    check('the day recorded after the restore is still queued',
+        third.Sync.pendingPaths().includes('days.2026-08-20.actual.w_02'),
+        JSON.stringify(third.Sync.pendingPaths()));
+
+    // And now it runs.
+    const cloud = makeCloud();
+    third.Sync.pushDelayMs = TICK;
+    third.Sync.connect(cloud.adapter);
+    await settle(TICK * 60);
+
+    check('the restore finished', third.Sync.pendingReplace() === null,
+        JSON.stringify(third.Sync.pendingReplace()));
+    check('the queue finished with it', third.Sync.pendingCount() === 0,
+        String(third.Sync.pendingCount()));
+    check('the restored day is here', dayKeys(third.State.schedule).includes('2026-07-01'),
+        dayKeys(third.State.schedule));
+    check('the day recorded after it survived',
+        dayKeys(third.State.schedule).includes('2026-08-20'), dayKeys(third.State.schedule));
+    check('the day the restore replaced is gone',
+        !dayKeys(third.State.schedule).includes('2026-08-12'), dayKeys(third.State.schedule));
+    check('the cloud holds both',
+        ['2026-07-01', '2026-08-20'].every(date => Boolean((cloud.doc.days || {})[date])),
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('and every write it accepted carried a real timestamp',
+        cloud.writes.every(write => typeof (write.data || write.patch).updatedAt === 'string'
+            && (write.data || write.patch).updatedAt.length > 0),
+        JSON.stringify(cloud.writes.map(w => (w.data || w.patch).updatedAt)));
+
+    const fourth = makeDevice({ storage: third.dump(), deviceId: 'd_here' });
+    fourth.State.load();
+    check('and a reopen after all that agrees',
+        dayKeys(fourth.State.schedule) === '2026-07-01,2026-08-20',
+        dayKeys(fourth.State.schedule));
+    check('with nothing pending', fourth.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G16.3: an upgrade with nowhere to live holds the record instead of guessing');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.putRaw('farkad:pendingReplace', V71_RECORD);
+
+    const held = makeDevice({
+        storage: device.dump(), deviceId: 'd_here',
+        quota: key => key.startsWith('farkad:pendingReplace')
+    });
+    held.State.load();
+
+    check('the raw v71 record is left byte-for-byte',
+        held.raw('farkad:pendingReplace') === V71_RECORD);
+    check('nothing acts on it', held.Sync.pendingReplace() === null,
+        JSON.stringify(held.Sync.pendingReplace()));
+    check('no half-written companion is left behind',
+        held.raw('farkad:pendingReplace:v71') === null,
+        String(held.raw('farkad:pendingReplace:v71')));
+    check('recording is stopped rather than allowed to run past it',
+        held.call('farkadWritesBlocked') === true);
+    check('and the reason names the storage, not the record',
+        held.global('Recovery').problems.some(problem =>
+            problem.key === 'replace-upgrade' && problem.message.includes('אין מקום')),
+        JSON.stringify(held.global('Recovery').problems.map(p => p.message)));
+
+    const cloud = makeCloud();
+    held.Sync.pushDelayMs = TICK;
+    held.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+    check('and nothing is sent anywhere',
+        cloud.attempts.filter(a => a.kind === 'save').length === 0,
+        String(cloud.attempts.filter(a => a.kind === 'save').length));
+
+    // Room is made, and the next open upgrades it properly.
+    const free = makeDevice({ storage: held.dump(), deviceId: 'd_here' });
+    free.State.load();
+    check('once there is room the upgrade happens',
+        free.Sync.pendingReplace() !== null);
+    check('and the record on disk is a v2 envelope now',
+        String(free.raw('farkad:pendingReplace')).includes('"version":2'));
+}
+
+{
+    suite('G16.3: a companion left by a half-finished upgrade is what the next open reads');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.putRaw('farkad:pendingReplace', V71_RECORD);
+
+    // The companion writes; replacing the raw record does not. That is the one window
+    // where two different descriptions of the same restore exist, and the frozen one has
+    // to win - a recomputed boundary would swallow anything recorded since.
+    const half = makeDevice({
+        storage: device.dump(), deviceId: 'd_here',
+        quota: (key, value) => key === 'farkad:pendingReplace' && value.includes('"version":2')
+    });
+    half.State.load();
+    const frozen = half.Sync.pendingReplace();
+    check('the upgrade still happened', frozen !== null);
+    check('the companion holds it',
+        String(half.raw('farkad:pendingReplace:v71')).includes('"version":2'),
+        String(half.raw('farkad:pendingReplace:v71')).slice(0, 40));
+    check('and the raw v71 record was not destroyed on the way',
+        half.raw('farkad:pendingReplace') === V71_RECORD);
+
+    check('a day recorded now is accepted',
+        record(half, '2026-08-20', 'w_02', 'p_02') === true);
+
+    const again = makeDevice({ storage: half.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('the next open reads the frozen boundary, not a new one',
+        again.Sync.pendingReplace().supersedesSeq === frozen.supersedesSeq,
+        `${again.Sync.pendingReplace().supersedesSeq} vs ${frozen.supersedesSeq}`);
+
+    const cloud = makeCloud();
+    again.Sync.pushDelayMs = TICK;
+    again.Sync.connect(cloud.adapter);
+    await settle(TICK * 60);
+    check('and the day recorded after the restore survives it',
+        dayKeys(again.State.schedule) === '2026-07-01,2026-08-20',
+        dayKeys(again.State.schedule));
+}
+
+// A schedule that passes everything, built once so the malformed cases below can each
+// break exactly one thing and nothing else.
+function soundDocument() {
+    return {
+        schemaVersion: 2,
+        workers: [{ id: 'w_01', name: 'דוד', dailyRate: 400, hourlyRate: 50, active: true }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: {
+            '2026-08-12': {
+                plan: {},
+                actual: { w_01: { entries: [{ placeId: 'p_01', rate: 'extra', extraHours: 2 }] } }
+            }
+        },
+        advances: { a_01: { id: 'a_01', workerId: 'w_01', date: '2026-08-12', amount: 500, note: '' } },
+        updatedAt: '2026-08-12T18:00:00.000Z',
+        updatedBy: 'd_other'
+    };
+}
+
+// One thing wrong with it, per row.
+function brokenDocuments() {
+    const broken = [];
+    const add = (label, change) => {
+        const document = soundDocument();
+        change(document);
+        broken.push([label, document]);
+    };
+
+    add('a worker id with a dot in it', d => {
+        d.workers[0].id = 'w.01';
+        d.days['2026-08-12'].actual = { 'w.01': d.days['2026-08-12'].actual.w_01 };
+        d.advances.a_01.workerId = 'w.01';
+    });
+    add('a place id with a bracket in it', d => {
+        d.places[0].id = 'p[1]';
+        d.days['2026-08-12'].actual.w_01.entries[0].placeId = 'p[1]';
+    });
+    add('two workers claiming one id', d => d.workers.push({ id: 'w_01', name: 'אחר' }));
+    add('a roster map key that is not the id it holds', d => {
+        d.roster = { workers: { w_02: { id: 'w_01', name: 'דוד' } } };
+    });
+    add('an order list naming the same man twice', d => {
+        d.roster = { workerOrder: ['w_01', 'w_01'] };
+    });
+    add('an order list that is not a list', d => { d.roster = { workerOrder: 'w_01' }; });
+    add('a day on the 30th of February', d => {
+        d.days['2026-02-30'] = { plan: {}, actual: {} };
+    });
+    add('the 29th of a February that had 28 days', d => {
+        d.days['2025-02-29'] = { plan: {}, actual: {} };
+    });
+    add('a layer nobody has heard of', d => {
+        d.days['2026-08-12'].estimate = {};
+    });
+    add('a day recorded against a worker who is not in it', d => {
+        d.days['2026-08-12'].actual.w_09 = { entries: [] };
+    });
+    add('an entry at a site that is not in it', d => {
+        d.days['2026-08-12'].actual.w_01.entries[0].placeId = 'p_09';
+    });
+    add('a rate the model does not have', d => {
+        d.days['2026-08-12'].actual.w_01.entries[0].rate = 'triple';
+    });
+    add('extra hours that are not a number', d => {
+        d.days['2026-08-12'].actual.w_01.entries[0].extraHours = '2';
+    });
+    add('extra hours below zero', d => {
+        d.days['2026-08-12'].actual.w_01.entries[0].extraHours = -1;
+    });
+    add('an absence flag that is not a flag', d => {
+        d.days['2026-08-12'].actual.w_01.absent = 'yes';
+    });
+    add('a frozen rate that is not a number', d => {
+        d.days['2026-08-12'].actual.w_01.rates = { daily: 'four hundred', hourly: 0 };
+    });
+    add('a frozen rate below zero', d => {
+        d.days['2026-08-12'].actual.w_01.rates = { daily: -400, hourly: 0 };
+    });
+    add('a pay rate that is not a number', d => { d.workers[0].dailyRate = '400'; });
+    add('an advance for a worker who is not in it', d => { d.advances.a_01.workerId = 'w_09'; });
+    add('an advance on a day that does not exist', d => { d.advances.a_01.date = '2026-13-01'; });
+    add('an advance whose amount is not a number', d => { d.advances.a_01.amount = null; });
+    add('an advance filed under a different id', d => { d.advances.a_01.id = 'a_99'; });
+    add('an "active" flag that is not a flag', d => { d.workers[0].active = 'yes'; });
+
+    return broken;
+}
+
+{
+    suite('G16.4: what a whole-document replacement has to be');
+
+    const model = makeDevice({ deviceId: 'd_model' });
+
+    check('the sound document passes',
+        model.call('readReplacementDocument', soundDocument()).document !== null,
+        JSON.stringify(model.call('readReplacementDocument', soundDocument()).problems));
+
+    brokenDocuments().forEach(([label, document]) => {
+        const read = model.call('readReplacementDocument', document);
+        check(`${label} is refused`, read.document === null,
+            JSON.stringify(read.problems));
+        check(`${label} is refused with a reason`, read.problems.length > 0);
+    });
+
+    // The two that must keep working.
+    const empty = { schemaVersion: 2, workers: [], places: [], days: {}, advances: {},
+        updatedAt: '2026-08-12T18:00:00.000Z', updatedBy: 'd_other' };
+    check('a complete empty schedule is a real schedule',
+        model.call('readReplacementDocument', empty).document !== null,
+        JSON.stringify(model.call('readReplacementDocument', empty).problems));
+
+    const preAdvances = {
+        schemaVersion: 2,
+        workers: [{ id: 'w_01', name: 'דוד', dailyRate: 400, hourlyRate: 50, active: true }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: { '2026-08-12': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+        updatedAt: '2026-08-12T18:00:00.000Z', updatedBy: 'd_other'
+    };
+    const upgraded = model.call('readReplacementDocument', preAdvances);
+    check('a backup from before advances existed still opens', upgraded.document !== null,
+        JSON.stringify(upgraded.problems));
+    check('and it opens with no advances rather than with something invented',
+        JSON.stringify(upgraded.document.advances) === '{}',
+        JSON.stringify(upgraded.document.advances));
+    check('with the day it actually holds',
+        Object.keys(upgraded.document.days).join() === '2026-08-12');
+
+    check('the frozen v71 fixture passes too',
+        model.call('readReplacementDocument', JSON.parse(V71_RECORD)).document !== null,
+        JSON.stringify(model.call('readReplacementDocument', JSON.parse(V71_RECORD)).problems));
+
+    // The leap day itself, both ways round.
+    check('the 29th of February 2024 is a real day',
+        model.call('isRealDate', '2024-02-29') === true);
+    check('the 29th of February 2025 is not',
+        model.call('isRealDate', '2025-02-29') === false);
+    check('the 29th of February 2100 is not either',
+        model.call('isRealDate', '2100-02-29') === false);
+    check('the 29th of February 2000 is',
+        model.call('isRealDate', '2000-02-29') === true);
+}
+
+{
+    suite('G16.4: the envelope, checked exactly');
+
+    const model = makeDevice({ deviceId: 'd_model' });
+    const sound = () => ({
+        version: 2, phase: 'prepared', transactionId: 'r_1', supersedesSeq: 3,
+        cloud: true, document: soundDocument()
+    });
+
+    check('a sound envelope reads', model.call('envelopeProblems', sound()).length === 0,
+        JSON.stringify(model.call('envelopeProblems', sound())));
+
+    [
+        ['a supersede point as a string', e => { e.supersedesSeq = '3'; }],
+        ['a supersede point as a boolean', e => { e.supersedesSeq = true; }],
+        ['a supersede point as null', e => { e.supersedesSeq = null; }],
+        ['a fractional supersede point', e => { e.supersedesSeq = 3.5; }],
+        ['a supersede point past the safe range', e => { e.supersedesSeq = 9007199254740993; }],
+        ['a negative supersede point', e => { e.supersedesSeq = -1; }],
+        ['no supersede point at all', e => { delete e.supersedesSeq; }],
+        ['cloud as a string', e => { e.cloud = 'true'; }],
+        ['no transaction id', e => { delete e.transactionId; }],
+        ['an empty transaction id', e => { e.transactionId = ''; }],
+        ['a phase nobody wrote', e => { e.phase = 'halfway'; }],
+        ['a document that is not a schedule', e => { e.document = { workers: [], places: [] }; }]
+    ].forEach(([label, breakIt]) => {
+        const envelope = sound();
+        breakIt(envelope);
+        check(`${label} is refused`,
+            model.call('envelopeProblems', envelope).length > 0);
+    });
+
+    const tombstone = { version: 2, phase: 'cancelled', transactionId: 'r_2', document: null };
+    check('a cancelled record may carry no document',
+        model.call('envelopeProblems', tombstone).length === 0,
+        JSON.stringify(model.call('envelopeProblems', tombstone)));
+    check('but not a document',
+        model.call('envelopeProblems',
+            Object.assign({}, tombstone, { document: soundDocument() })).length > 0);
+    check('and still needs a transaction id',
+        model.call('envelopeProblems',
+            { version: 2, phase: 'cancelled', document: null }).length > 0);
+}
+
+// The dialogs, in the harness. The four restore doors ask before they act and tell
+// afterwards; ask.js is a UI file the data suite does not load, so the two calls are
+// answered here and recorded. What they SAY is then something a test can assert on.
+function watchDialogs(device, answer = true) {
+    const said = [];
+    device.ctx.askConfirm = () => Promise.resolve(answer);
+    device.ctx.askTell = message => {
+        said.push(typeof message === 'string'
+            ? { title: '', message }
+            : { title: String(message.title || ''), message: String(message.message || '') });
+        return Promise.resolve();
+    };
+    return said;
+}
+
+{
+    suite('G16.4: all four doors refuse a source that is not a whole schedule');
+
+    // Each door is handed something that parses, normalises into an empty schedule, and
+    // is not a schedule. Nothing anywhere may change.
+    const rubbish = JSON.stringify({ workers: [], places: [] });
+
+    for (const door of ['cloud copy', 'restore point', 'imported file', 'way back']) {
+        const device = makeDevice({ deviceId: 'd_here' });
+        seed(device);
+        record(device, '2026-08-12', 'w_01', 'p_01');
+        const cloud = makeCloud();
+        await connected(device, cloud);
+        await wait();
+
+        const said = watchDialogs(device);
+        const diskBefore = device.raw('scheduleData:v2');
+        const queueBefore = device.raw(device.Sync.activeOutboxKey());
+        const cloudBefore = JSON.stringify(cloud.doc);
+        const savesBefore = cloud.attempts.filter(a => a.kind === 'save').length;
+
+        if (door === 'cloud copy') {
+            device.Sync.archiveRead = () => Promise.resolve(JSON.parse(rubbish));
+            await device.call('restoreFromCloud', '2026-08-01');
+        } else if (door === 'restore point') {
+            device.Store.set('scheduleData:snap:2026-08-01', rubbish);
+            await device.call('restoreSnapshot', '2026-08-01');
+        } else if (door === 'imported file') {
+            let refused = false;
+            try {
+                device.call('readBackupFile', JSON.parse(rubbish));
+            } catch (error) {
+                refused = Boolean(error);
+            }
+            check(`${door}: the file is refused before anything is replaced`, refused);
+        } else {
+            device.Store.set('scheduleData:undoStack',
+                JSON.stringify([{ at: '2026-08-01T06:00:00.000Z', schedule: rubbish }]));
+            await device.call('restoreLocalBackup');
+            check(`${door}: the way back is still on the stack, not consumed by the attempt`,
+                JSON.parse(device.raw('scheduleData:undoStack'))
+                    .some(entry => entry.schedule === rubbish),
+                String(device.raw('scheduleData:undoStack')));
+        }
+
+        check(`${door}: the disk is untouched`,
+            device.raw('scheduleData:v2') === diskBefore);
+        check(`${door}: the queue is untouched`,
+            device.raw(device.Sync.activeOutboxKey()) === queueBefore);
+        check(`${door}: the cloud is untouched`,
+            JSON.stringify(cloud.doc) === cloudBefore);
+        check(`${door}: nothing was sent`,
+            cloud.attempts.filter(a => a.kind === 'save').length === savesBefore);
+        check(`${door}: no restore was written down`,
+            device.raw('farkad:pendingReplace') === null,
+            String(device.raw('farkad:pendingReplace')));
+        check(`${door}: the screen still shows the day that was there`,
+            dayKeys(device.State.schedule) === '2026-08-12', dayKeys(device.State.schedule));
+
+        if (door !== 'imported file') {
+            check(`${door}: and it says so, rather than reporting a restore`,
+                said.length > 0 && said[said.length - 1].title === 'לא בוצע שחזור',
+                JSON.stringify(said));
+        }
+    }
+}
+
+{
+    suite('G16.4: a restore point whose JSON will not parse says so');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    const said = watchDialogs(device);
+    device.Store.set('scheduleData:snap:2026-08-01', '{"workers":[');
+
+    const before = device.raw('scheduleData:v2');
+    await device.call('restoreSnapshot', '2026-08-01');
+
+    check('the button does not simply do nothing',
+        said.length > 0, JSON.stringify(said));
+    check('it names the failure exactly',
+        said[said.length - 1].title === 'לא בוצע שחזור'
+        && said[said.length - 1].message.includes('לא נקרא'),
+        JSON.stringify(said[said.length - 1]));
+    check('and nothing was replaced', device.raw('scheduleData:v2') === before);
+    check('the damaged restore point is left where it is',
+        device.raw('scheduleData:snap:2026-08-01') === '{"workers":[');
+}
+
+{
+    suite('G16.4: replaceEverything refuses on its own account');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    const before = device.raw('scheduleData:v2');
+    const result = await device.Sync.replaceEverything({ workers: [], places: [] });
+
+    check('a caller that skipped its own check is still refused',
+        result.ok === false && result.stage === 'invalid', JSON.stringify(result));
+    check('the disk is untouched', device.raw('scheduleData:v2') === before);
+    check('no record was written', device.raw('farkad:pendingReplace') === null);
+    check('and nothing was sent',
+        cloud.attempts.filter(a => a.kind === 'save').length === 0);
+}
+
+{
+    suite('G16.5: a queue record that parses is not therefore a queue');
+
+    for (const [label, raw] of [
+        ['an empty object', '{}'],
+        ['an array', '[]'],
+        ['no items block', '{"seq":3}'],
+        ['items as an array', '{"seq":3,"items":[]}'],
+        ['an item that is not an object', '{"seq":3,"items":{"days.a.b.c":7}}'],
+        ['an item with no value', '{"seq":3,"items":{"days.a.b.c":{"seq":1}}}'],
+        ['an item sequence as a string', '{"seq":3,"items":{"days.a.b.c":{"value":1,"seq":"1"}}}'],
+        ['an item past the high-water mark', '{"seq":1,"items":{"days.a.b.c":{"value":1,"seq":9}}}'],
+        ['a sent flag that is not a flag', '{"seq":3,"items":{"days.a.b.c":{"value":1,"seq":1,"sent":"yes"}}}'],
+        ['a path with a bracket in it', '{"seq":3,"items":{"days.a[1].b.c":{"value":1,"seq":1}}}'],
+        ['a path with an empty segment', '{"seq":3,"items":{"days..b.c":{"value":1,"seq":1}}}']
+    ]) {
+        const device = makeDevice({ storage: { 'farkad:outbox': raw }, deviceId: 'd_here' });
+        seed(device);
+
+        check(`${label} is not chosen as the live queue`,
+            device.Sync.activeOutboxKey() !== 'farkad:outbox',
+            String(device.Sync.activeOutboxKey()));
+        check(`${label} goes through Recovery`,
+            device.global('Recovery').problems.some(p => p.key === 'farkad:outbox'));
+        check(`${label} has a verified copy taken`,
+            device.raw('farkad:outbox:damaged') !== null);
+
+        // The whole point: the next edit must not land on top of it.
+        record(device, '2026-08-12', 'w_01', 'p_01');
+        check(`${label} is left byte-for-byte after the next edit`,
+            device.raw('farkad:outbox') === raw, String(device.raw('farkad:outbox')));
+
+        const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+        again.State.load();
+        check(`${label} survives a reopen untouched`,
+            again.raw('farkad:outbox') === raw);
+    }
+}
+
+{
+    suite('G16.5: a local record that parses is not therefore a schedule');
+
+    for (const [label, raw] of [
+        ['the two rosters and nothing else', '{"workers":[],"places":[]}'],
+        ['an empty object', '{}'],
+        ['an array', '[]'],
+        ['days as an array', '{"workers":[],"places":[],"days":[],"advances":{}}'],
+        ['a day on the 31st of April',
+            '{"workers":[],"places":[],"days":{"2026-04-31":{"actual":{}}},"advances":{}}'],
+        ['an id with a dot in it',
+            '{"workers":[{"id":"w.1","name":"x"}],"places":[],"days":{},"advances":{}}']
+    ]) {
+        const device = makeDevice({ storage: { 'scheduleData:v2': raw }, deviceId: 'd_here' });
+        device.State.load();
+
+        check(`${label} is not read as an empty schedule`,
+            device.call('farkadWritesBlocked') === true);
+        check(`${label} goes through Recovery`,
+            device.global('Recovery').problems.some(p => p.key === 'scheduleData:v2'),
+            JSON.stringify(device.global('Recovery').problems.map(p => p.key)));
+        check(`${label} keeps the original byte-for-byte`,
+            device.raw('scheduleData:v2') === raw, String(device.raw('scheduleData:v2')));
+
+        // Writing is blocked, so nothing can land on top of it.
+        check(`${label} cannot be overwritten by a save`,
+            device.State.save() === false);
+        check(`${label} is still there afterwards`,
+            device.raw('scheduleData:v2') === raw);
+    }
+}
+
+{
+    suite('G16.5: a genuine record from before advances existed still opens');
+
+    // Frozen, and written by hand: the shape a build from before the advances feature
+    // wrote. No `advances` block, because there was nothing to put in one.
+    const OLD_V2 = JSON.stringify({
+        schemaVersion: 2,
+        workers: [
+            { id: 'w_01', name: 'דוד', idNumber: '', phone: '', dailyRate: 400, hourlyRate: 50, active: true },
+            { id: 'w_02', name: 'שרה', idNumber: '', phone: '', dailyRate: 350, hourlyRate: 0, active: true }
+        ],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: {
+            '2026-08-12': {
+                plan: {},
+                actual: {
+                    w_01: { entries: [{ placeId: 'p_01' }] },
+                    w_02: { absent: true, entries: [] }
+                }
+            }
+        },
+        updatedAt: '2026-08-12T18:00:00.000Z',
+        updatedBy: 'd_old'
+    });
+
+    const device = makeDevice({ storage: { 'scheduleData:v2': OLD_V2 }, deviceId: 'd_here' });
+    device.State.load();
+
+    check('it opens', device.call('farkadWritesBlocked') === false);
+    check('with both people', device.State.schedule.workers.map(w => w.id).join() === 'w_01,w_02',
+        JSON.stringify(device.State.schedule.workers.map(w => w.id)));
+    check('the day that was recorded',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+    check('the absence that was recorded',
+        device.call('isAbsent', device.State.schedule, '2026-08-12', 'w_02', 'actual') === true);
+    check('the site', device.State.schedule.places.map(p => p.id).join() === 'p_01');
+    check('and no advances rather than something invented',
+        JSON.stringify(device.State.schedule.advances) === '{}');
+
+    // And it can then be written down and reopened without losing any of it.
+    check('a new day can be recorded on top of it',
+        record(device, '2026-08-13', 'w_01', 'p_01') === true);
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('and a reopen has everything',
+        dayKeys(again.State.schedule) === '2026-08-12,2026-08-13',
+        dayKeys(again.State.schedule));
+    check('with the absence intact',
+        again.call('isAbsent', again.State.schedule, '2026-08-12', 'w_02', 'actual') === true);
 }
 
 report();

@@ -36,6 +36,16 @@ const RATE_LABELS = {
 // it exists so the UI can size itself, not to reject data that is already stored.
 const MAX_ENTRIES_PER_DAY = 2;
 
+// The dot, because every edit travels as a dotted field path and an id containing one
+// splits that path into a different one. The rest are Firestore's field-path
+// metacharacters, kept out for the same reason the sync paths keep them out.
+const UNSAFE_ID = /[.`~*/\[\]]/;
+
+const ROSTER_KINDS = [
+    ['workers', 'workerOrder', 'עובד'],
+    ['places', 'placeOrder', 'אתר']
+];
+
 function emptySchedule() {
     return {
         schemaVersion: SCHEMA_VERSION,
@@ -115,27 +125,95 @@ function validateRosterIds(raw) {
 }
 
 // ---------------------------------------------------------------- is it a schedule?
+//
+// Three questions, and they are not the same question:
+//
+//   storedScheduleProblems  - is this a record this device wrote for itself? Structure
+//                             and types only. A live record is a merge in progress and
+//                             may name a worker whose roster field has not arrived yet.
+//   fullScheduleProblems    - is this a whole schedule somebody is asking to replace
+//                             EVERYTHING with? Everything above, plus every reference
+//                             resolving, because this one overwrites three phones.
+//   upgradeStoredSchedule   - the one narrow step between a genuinely old record and
+//                             today's shape. Not a repair kit.
+//
+// All three run on the RAW parsed content, before normaliseSchedule. That order is the
+// point: normaliseSchedule is deliberately forgiving - it has to be, a half-finished
+// remote write should be read for what is in it rather than crash the app - so it turns
+// {}, null, [] and {"workers":[],"places":[]} into an empty schedule without a word.
+// Forgiving is right for a document arriving from the cloud and catastrophic for one
+// about to replace the screen, the disk and the other two phones.
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-// Everything wrong with a document that claims to be a WHOLE schedule, in sentences.
+// A whole number of things, at or above zero, with no coercion anywhere.
 //
-// This is the gate on a whole-document replacement, and it exists because
-// normaliseSchedule is deliberately forgiving. It has to be: a half-finished remote
-// write, or a file from an older build, should be read for whatever is in it rather
-// than crash the app. So it turns {}, null, [] and {"workers":[],"places":[]} into an
-// EMPTY schedule without a word - which is the right answer for a document arriving
-// from the cloud and a catastrophic one for a record that is about to replace the
-// screen, the disk and the other two phones.
+// Number(x) || 0 read "3" as 3, true as 1, 1.5 as 1.5 and null as 0 - so a corrupt
+// record became a valid one on the way in, and the sequence number that decides which
+// half of the journal a restore supersedes is not a field to be lenient about.
+function isSafeSeq(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+// An id that can be half of a field path.
 //
-// Emptiness is NOT what is rejected here. A brand-new project restored from a backup
-// made on its first day is an empty schedule and a perfectly good one. What is rejected
-// is a document that does not carry the PARTS a schedule has - the two rosters, the
-// days, the advances - because a document missing them is not an empty schedule, it is
-// something else that would silently normalise into one.
-function fullScheduleProblems(raw) {
+// Every edit travels as days.<date>.<layer>.<workerId>, so a dot inside an id splits
+// that path into a different one: the write lands somewhere else in the document and the
+// entry it was meant to be arrives against a stranger. The rest are Firestore's own
+// field-path metacharacters, refused for the same reason.
+function isSafeId(value) {
+    return typeof value === 'string'
+        && value.length > 0 && value.length <= 100
+        && value === value.trim()
+        && !UNSAFE_ID.test(value);
+}
+
+// A date that exists. The regex on its own accepts 2026-02-30 and 2025-02-29, which are
+// not days anybody worked, and a payroll report that sums them is a report of a month
+// that did not happen.
+function isRealDate(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const year = Number(value.slice(0, 4));
+    const month = Number(value.slice(5, 7));
+    const day = Number(value.slice(8, 10));
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+
+    const made = new Date(Date.UTC(year, month - 1, day));
+    return made.getUTCFullYear() === year
+        && made.getUTCMonth() === month - 1
+        && made.getUTCDate() === day;
+}
+
+function isFiniteNumber(value) {
+    return typeof value === 'number' && Number.isFinite(value);
+}
+
+// The one narrow, deterministic step between a genuinely old record and today's shape.
+//
+// Builds before advances existed wrote no `advances` block at all, and there is exactly
+// one right answer for what a record from that build holds: none. That is the whole
+// migration. Nothing else is filled in, because "fill in whatever is missing" is how
+// {"workers":[],"places":[]} became a valid empty schedule in the first place. A record
+// missing anything else is not an old record, it is a damaged one, and telling those two
+// apart is what this section exists for.
+//
+// Returns the record to read, or null when it is not a record from a build we know.
+function upgradeStoredSchedule(parsed) {
+    if (!isPlainObject(parsed)) return null;
+    if (!Array.isArray(parsed.workers) || !Array.isArray(parsed.places)) return null;
+    if (!isPlainObject(parsed.days)) return null;
+
+    if (parsed.advances !== undefined) return parsed;
+
+    const upgraded = Object.assign({}, parsed);
+    upgraded.advances = {};
+    return upgraded;
+}
+
+// Structure and types. Run on the record this device wrote for itself.
+function storedScheduleProblems(raw) {
     if (!isPlainObject(raw)) return ['הרישום אינו מסמך של לוח עבודה.'];
 
     const problems = [];
@@ -143,69 +221,295 @@ function fullScheduleProblems(raw) {
     if (!Array.isArray(raw.places)) problems.push('רשימת האתרים חסרה מהרישום.');
     if (!isPlainObject(raw.days)) problems.push('רשימת הימים חסרה מהרישום.');
     if (!isPlainObject(raw.advances)) problems.push('רשימת המקדמות חסרה מהרישום.');
-    // No point naming a bad date inside a `days` that is not there.
     if (problems.length > 0) return problems;
 
-    // Missing, empty or duplicated ids. The same check the import runs, rather than a
-    // second weaker one: two rows claiming to be the same person is ambiguous wherever
-    // it arrives from, and the answer is to stop, not to renumber one of them.
-    validateRosterIds(raw).forEach(problem => problems.push(problem));
+    rosterProblems(raw).forEach(problem => problems.push(problem));
+    dayProblems(raw, null).forEach(problem => problems.push(problem));
+    advanceProblems(raw, null).forEach(problem => problems.push(problem));
+    return problems;
+}
+
+// Everything above, and every reference resolving. The gate on a replacement.
+function fullScheduleProblems(raw) {
+    const problems = storedScheduleProblems(raw);
+    if (problems.length > 0) return problems;
+
+    // Who the document says exists, in both forms at once - the arrays a phone on an
+    // older build reads, and the per-person map today's builds merge on top of them.
+    // A reference is satisfied by either, because mergeRoster reads both.
+    const known = {
+        workers: rosterIds(raw, 'workers'),
+        places: rosterIds(raw, 'places')
+    };
+    dayProblems(raw, known).forEach(problem => problems.push(problem));
+    advanceProblems(raw, known).forEach(problem => problems.push(problem));
+    return problems;
+}
+
+function rosterIds(raw, kind) {
+    const ids = new Set();
+    (Array.isArray(raw[kind]) ? raw[kind] : []).forEach(item => {
+        if (item && item.id !== undefined && item.id !== null) ids.add(String(item.id));
+    });
+
+    const roster = isPlainObject(raw.roster) ? raw.roster : {};
+    if (isPlainObject(roster[kind])) {
+        Object.keys(roster[kind]).forEach(id => {
+            if (roster[kind][id]) ids.add(String(id));
+        });
+    }
+    return ids;
+}
+
+function rosterProblems(raw) {
+    const problems = [];
+    if (raw.roster !== undefined && !isPlainObject(raw.roster)) {
+        problems.push('גוש הרוסטר ברישום אינו תקין.');
+        return problems;
+    }
+    const roster = isPlainObject(raw.roster) ? raw.roster : null;
+
+    ROSTER_KINDS.forEach(([kind, orderKey, label]) => {
+        const seen = new Set();
+
+        raw[kind].forEach((item, index) => {
+            const name = (item && item.name) ? String(item.name) : '#' + (index + 1);
+            if (!isPlainObject(item)) {
+                problems.push(label + ' "' + name + '" ברישום אינו תקין.');
+                return;
+            }
+            if (!isSafeId(item.id)) {
+                problems.push(label + ' "' + name + '" בלי מזהה תקין.');
+                return;
+            }
+            // Two rows claiming to be the same person is genuinely ambiguous: their days
+            // are already merged under one id and there is no way to tell from here which
+            // day belonged to whom. Renumbering one silently would invent an answer.
+            if (seen.has(item.id)) {
+                problems.push('המזהה ' + item.id + ' מופיע ביותר מ' + label + ' אחד.');
+                return;
+            }
+            seen.add(item.id);
+            entityProblems(item, kind, label).forEach(problem => problems.push(problem));
+        });
+
+        if (!roster) return;
+
+        if (roster[kind] !== undefined) {
+            if (!isPlainObject(roster[kind])) {
+                problems.push('רשימת ה' + label + 'ים בגוש הרוסטר אינה תקינה.');
+            } else {
+                Object.keys(roster[kind]).forEach(id => {
+                    const item = roster[kind][id];
+                    if (item === null) return;              // a removal, on the wire
+                    if (!isSafeId(id)) {
+                        problems.push('המזהה ' + id + ' בגוש הרוסטר אינו תקין.');
+                        return;
+                    }
+                    if (!isPlainObject(item)) {
+                        problems.push(label + ' ' + id + ' בגוש הרוסטר אינו תקין.');
+                        return;
+                    }
+                    // The key IS the id. A map whose key and whose record disagree says
+                    // two things about one person, and every reader picks a different one.
+                    if (String(item.id) !== String(id)) {
+                        problems.push(label + ' ' + id + ' בגוש הרוסטר רשום תחת מזהה אחר.');
+                        return;
+                    }
+                    entityProblems(item, kind, label).forEach(p => problems.push(p));
+                });
+            }
+        }
+
+        if (roster[orderKey] === undefined) return;
+        if (!Array.isArray(roster[orderKey])) {
+            problems.push('הסדר של ה' + label + 'ים ברישום אינו רשימה.');
+            return;
+        }
+        const ordered = new Set();
+        roster[orderKey].forEach(id => {
+            if (!isSafeId(id)) {
+                problems.push('הסדר של ה' + label + 'ים כולל מזהה שאינו תקין.');
+                return;
+            }
+            if (ordered.has(id)) {
+                problems.push('המזהה ' + id + ' מופיע פעמיים בסדר.');
+                return;
+            }
+            ordered.add(id);
+        });
+    });
+
+    return problems;
+}
+
+function entityProblems(item, kind, label) {
+    const problems = [];
+    if (item.active !== undefined && typeof item.active !== 'boolean') {
+        problems.push(label + ' ' + item.id + ': הסימון "פעיל" אינו תקין.');
+    }
+    if (kind !== 'workers') return problems;
+
+    ['dailyRate', 'hourlyRate'].forEach(field => {
+        if (item[field] === undefined) return;
+        if (!isFiniteNumber(item[field]) || item[field] < 0) {
+            problems.push(label + ' ' + item.id + ': השכר אינו מספר תקין.');
+        }
+    });
+    return problems;
+}
+
+// `known` names the ids that have to resolve, or null to skip the reference checks.
+function dayProblems(raw, known) {
+    const problems = [];
 
     Object.keys(raw.days).forEach(date => {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            problems.push(`התאריך "${date}" ברישום אינו תקין.`);
+        if (!isRealDate(date)) {
+            problems.push('התאריך "' + date + '" ברישום אינו תאריך אמיתי.');
             return;
         }
         const day = raw.days[date];
         if (!isPlainObject(day)) {
-            problems.push(`היום ${date} ברישום אינו תקין.`);
+            problems.push('היום ' + date + ' ברישום אינו תקין.');
             return;
         }
-        // A day with neither side is not a day. normaliseSchedule would hand it back as
-        // an empty one, which reads on screen as "nobody worked" rather than as a fault.
+        // Only the two sides the model has. A third key is something this app did not
+        // write, and reading it as a day would be reading somebody else's document.
+        const extra = Object.keys(day).filter(key => key !== 'plan' && key !== 'actual');
+        if (extra.length > 0) {
+            problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
+            return;
+        }
         if (day.plan === undefined && day.actual === undefined) {
-            problems.push(`ליום ${date} אין רישום כלל.`);
+            problems.push('ליום ' + date + ' אין רישום כלל.');
             return;
         }
 
         ['plan', 'actual'].forEach(layer => {
             if (day[layer] === undefined) return;
             if (!isPlainObject(day[layer])) {
-                problems.push(`הרישום של ${date} אינו תקין.`);
+                problems.push('הרישום של ' + date + ' אינו תקין.');
                 return;
             }
             Object.keys(day[layer]).forEach(workerId => {
-                const record = day[layer][workerId];
-                if (!isPlainObject(record)) {
-                    problems.push(`הרישום של ${workerId} ביום ${date} אינו תקין.`);
+                if (!isSafeId(workerId)) {
+                    problems.push('ביום ' + date + ' יש רישום תחת מזהה שאינו תקין.');
                     return;
                 }
-                if (record.entries !== undefined && !Array.isArray(record.entries)) {
-                    problems.push(`הרישומים של ${workerId} ביום ${date} אינם רשימה.`);
+                if (known && !known.workers.has(workerId)) {
+                    problems.push('ביום ' + date + ' יש רישום לעובד ' + workerId
+                        + ' שאינו ברשימה.');
                     return;
                 }
-                (record.entries || []).forEach(entry => {
-                    if (!isPlainObject(entry) || !entry.placeId) {
-                        problems.push(`רישום בלי אתר אצל ${workerId} ביום ${date}.`);
-                    }
-                });
+                recordProblems(known, date, workerId, day[layer][workerId])
+                    .forEach(problem => problems.push(problem));
             });
         });
     });
 
-    Object.keys(raw.advances).forEach(id => {
-        const item = raw.advances[id];
-        if (!isPlainObject(item)) {
-            problems.push(`המקדמה ${id} ברישום אינה תקינה.`);
+    return problems;
+}
+
+function recordProblems(known, date, workerId, record) {
+    const problems = [];
+    const who = ' אצל ' + workerId + ' ביום ' + date + '.';
+
+    if (!isPlainObject(record)) {
+        problems.push('רישום שאינו תקין' + who);
+        return problems;
+    }
+    if (record.absent !== undefined && typeof record.absent !== 'boolean') {
+        problems.push('סימון היעדרות שאינו תקין' + who);
+    }
+
+    // The rate the day was WORKED at, frozen onto it. Quietly rounding or defaulting one
+    // of these rewrites what somebody was paid, so it is refused instead of repaired.
+    if (record.rates !== undefined) {
+        if (!isPlainObject(record.rates)) {
+            problems.push('שכר שמור שאינו תקין' + who);
+        } else {
+            ['daily', 'hourly'].forEach(field => {
+                if (record.rates[field] === undefined) return;
+                if (!isFiniteNumber(record.rates[field]) || record.rates[field] < 0) {
+                    problems.push('שכר שמור שאינו מספר תקין' + who);
+                }
+            });
+        }
+    }
+
+    if (record.entries === undefined) return problems;
+    if (!Array.isArray(record.entries)) {
+        problems.push('רשימת רישומים שאינה רשימה' + who);
+        return problems;
+    }
+
+    record.entries.forEach(entry => {
+        if (!isPlainObject(entry)) {
+            problems.push('רישום שאינו תקין' + who);
             return;
         }
-        if (!item.workerId) problems.push(`המקדמה ${id} אינה משויכת לעובד.`);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) {
-            problems.push(`למקדמה ${id} אין תאריך תקין.`);
+        if (!isSafeId(entry.placeId)) {
+            problems.push('רישום בלי אתר תקין' + who);
+            return;
+        }
+        if (known && !known.places.has(String(entry.placeId))) {
+            problems.push('רישום באתר ' + entry.placeId + ' שאינו ברשימה' + who);
+            return;
+        }
+        if (entry.rate !== undefined && !RATES.includes(entry.rate)) {
+            problems.push('תעריף שאינו מוכר' + who);
+        }
+        if (entry.extraHours !== undefined
+            && (!isFiniteNumber(entry.extraHours) || entry.extraHours < 0)) {
+            problems.push('שעות נוספות שאינן מספר תקין' + who);
         }
     });
 
     return problems;
+}
+
+function advanceProblems(raw, known) {
+    const problems = [];
+
+    Object.keys(raw.advances).forEach(id => {
+        if (!isSafeId(id)) {
+            problems.push('מזהה מקדמה שאינו תקין: ' + id + '.');
+            return;
+        }
+        const item = raw.advances[id];
+        if (!isPlainObject(item)) {
+            problems.push('המקדמה ' + id + ' ברישום אינה תקינה.');
+            return;
+        }
+        if (item.id !== undefined && String(item.id) !== String(id)) {
+            problems.push('המקדמה ' + id + ' רשומה תחת מזהה אחר.');
+            return;
+        }
+        if (!isSafeId(item.workerId)) {
+            problems.push('המקדמה ' + id + ' אינה משויכת לעובד.');
+        } else if (known && !known.workers.has(String(item.workerId))) {
+            problems.push('המקדמה ' + id + ' משויכת לעובד שאינו ברשימה.');
+        }
+        if (!isRealDate(item.date)) {
+            problems.push('למקדמה ' + id + ' אין תאריך אמיתי.');
+        }
+        if (!isFiniteNumber(item.amount)) {
+            problems.push('הסכום של המקדמה ' + id + ' אינו מספר תקין.');
+        }
+    });
+
+    return problems;
+}
+
+// The gate the four restore doors and the sync layer share: the narrow migration first,
+// then the complete check. Returns the document to use, and why not.
+function readReplacementDocument(raw) {
+    const upgraded = upgradeStoredSchedule(raw);
+    if (!upgraded) {
+        return { document: null, problems: ['הקובץ אינו מסמך של לוח עבודה.'] };
+    }
+    const problems = fullScheduleProblems(upgraded);
+    return { document: problems.length === 0 ? upgraded : null, problems };
 }
 
 // ---------------------------------------------------------------- the wire form
@@ -226,7 +530,7 @@ function fullScheduleProblems(raw) {
 //
 // The arrays are still written, and that is deliberate. A phone that has not updated yet
 // reads them and sees a correct roster; it cannot see `roster` and never writes to it.
-// They can be dropped once all three devices are past v74 - not before.
+// They can be dropped once all three devices are past v75 - not before.
 function cloudDocument(schedule) {
     const wire = JSON.parse(JSON.stringify(schedule));
     wire.roster = rosterDocument(schedule);

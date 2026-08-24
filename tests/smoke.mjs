@@ -2305,127 +2305,391 @@ async function seedRoster(page) {
 
 // ------------------------------------------------- what a half-finished restore says
 //
-// G15: four screens perform a restore, and every one of them reports the outcome through
-// tellRestoreResult. What must never come out of any of them is the plain "done" line
-// over a transaction that has not finished - the queue not pruned, an older cloud write
-// not yet settled, or the record of the restore still on the disk. That is the message
-// somebody reads before closing the app.
+// G16.6. Four screens perform a whole-document restore, and every one of them reports
+// the outcome through tellRestoreResult. What must never come out of any of them is the
+// plain "done" line over a transaction that has not finished.
+//
+// Every failure below is produced by breaking the thing that actually breaks - a write
+// the disk refuses, a delete it will not perform, a request that has not answered - and
+// not by standing in for replaceEverything with a function that returns a shape. A stub
+// proves the sentence the app would print IF the transaction stopped there; it proves
+// nothing about whether it stops there.
 {
   const page = await open();
   await seedRoster(page);
   await page.click('#tab-roster');
   await page.waitForTimeout(300);
 
-  // A snapshot, a cloud copy and something on the undo stack, so all four doors open.
-  await page.evaluate(() => {
-    Store.set('scheduleData:snap:2026-08-01', JSON.stringify(State.schedule));
-    Store.set('scheduleData:undoStack',
-      JSON.stringify([{ at: '2026-08-01T06:00:00.000Z', schedule: JSON.stringify(State.schedule) }]));
-    window.__archive = JSON.parse(JSON.stringify(State.schedule));
-    FarkadSync.archiveRead = () => Promise.resolve(window.__archive);
+  // Everything the four doors read from, and a cloud that answers.
+  //
+  // The restore point is FROZEN - written out here rather than taken from
+  // State.schedule - so that what these tests restore is a fixed document and not
+  // whatever today's builder happens to produce.
+  const RESTORE_POINT = JSON.stringify({
+    schemaVersion: 2,
+    workers: [{ id: 'w_01', name: 'דוד', idNumber: '111', phone: '050-1', active: true,
+      dailyRate: 400, hourlyRate: 50 }],
+    places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+    days: { '2026-07-01': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+    advances: {},
+    updatedAt: '2026-07-01T06:00:00.000Z',
+    updatedBy: 'd_backup'
   });
 
-  // Every stage that is NOT a finished restore, against every door.
-  const stages = [
-    ['queue', { ok: false, stage: 'queue' }],
-    ['finalize', { ok: false, stage: 'finalize' }],
-    ['ordering', { ok: false, stage: 'cloud', error: new Error('an earlier cloud write has not finished') }]
-  ];
-  const doors = [
-    ['a local restore point', () => restoreSnapshot('2026-08-01'), 'שוחזר.'],
-    ['a cloud copy', () => restoreFromCloud('2026-08-01'), 'שוחזר מהענן.'],
-    ['the way back from the last load', () => restoreLocalBackup(), 'שוחזר.']
-  ];
+  // Re-installed after every reload: a page that navigates loses everything on window,
+  // and the reopen cycles below are real reloads.
+  const installHelpers = () => page.evaluate(([restorePoint]) => {
+    window.__cloud = { saves: [], updates: [], hold: null, doc: null };
+    window.__installCloud = () => {
+      FarkadSync.adapter = {
+        update(patch) {
+          window.__cloud.updates.push(patch);
+          return window.__cloud.hold || Promise.resolve();
+        },
+        save(data) {
+          window.__cloud.saves.push(data);
+          return Promise.resolve();
+        },
+        subscribe() { return () => {}; }
+      };
+      FarkadSync.setStatus('synced');
+    };
+    window.__removeCloud = () => {
+      FarkadSync.adapter = null;
+      FarkadSync.setStatus('off');
+    };
 
-  for (const [stageName, outcome] of stages) {
-    for (const [doorName, , successLine] of doors) {
-      const said = await page.evaluate(async ([stage, door]) => {
-        const real = FarkadSync.replaceEverything.bind(FarkadSync);
-        FarkadSync.replaceEverything = () => Promise.resolve(
-          stage.stage === 'cloud'
-            ? { ok: false, stage: 'cloud', error: new Error('an earlier cloud write has not finished') }
-            : stage);
+    // A clean slate between cases: the record, the queue, the way back, the restore
+    // point, and whatever the last case left in Store's session cache.
+    window.__reset = () => {
+      FarkadSync.forgetReplace();
+      FarkadSync._replace = null;
+      FarkadSync.replaceDamaged = false;
+      FarkadSync.replaceHeld = false;
+      FarkadSync.clearOutbox();
+      FarkadSync._cloudChain = null;
+      FarkadSync._cloudOpen = 0;
+      FarkadSync.stuckMs = 30000;
+      window.__cloud.saves.length = 0;
+      window.__cloud.updates.length = 0;
+      window.__cloud.hold = null;
+      Store.remove('scheduleData:undoStack');
+      Store.remove('scheduleData:v2backup');
+      Store.set('scheduleData:snap:2026-08-01', restorePoint);
+      Store.set('scheduleData:undoStack', JSON.stringify(
+        [{ at: '2026-08-01T06:00:00.000Z', schedule: restorePoint }]));
+      window.__archive = JSON.parse(restorePoint);
+      FarkadSync.archiveRead = () => Promise.resolve(window.__archive);
+    };
+    window.__restorePoint = restorePoint;
+  }, [RESTORE_POINT]);
 
-        const run = door === 0 ? restoreSnapshot('2026-08-01')
-          : door === 1 ? restoreFromCloud('2026-08-01')
-            : restoreLocalBackup();
+  await installHelpers();
+
+  // Runs one door with one real fault installed, and reports exactly what the app said
+  // and what it did.
+  const attempt = async (door, fault) => {
+    const state = await page.evaluate(async ([door, fault]) => {
+      window.__reset();
+      if (fault !== 'no-cloud') window.__installCloud();
+      else window.__removeCloud();
+
+      const realSet = Store.set.bind(Store);
+      const realRemove = Store.remove.bind(Store);
+      const refuse = test => {
+        Store.set = (key, value, options) =>
+          (test(String(key), String(value)) ? false : realSet(key, value, options));
+      };
+
+      // A day recorded before the restore, so a prune has something to supersede.
+      State.commit(assignPlace(State.schedule, '2026-08-18', 'w_02', 'actual', 'p_02'));
+
+      if (fault === 'prepare') refuse(key => key === 'farkad:pendingReplace');
+      if (fault === 'local-save') refuse(key => key === 'scheduleData:v2');
+      if (fault === 'queue-prune') refuse(key => key.indexOf('farkad:outbox') === 0);
+      if (fault === 'finalize') {
+        refuse((key, value) =>
+          key === 'farkad:pendingReplace' && value.indexOf('"cancelled"') !== -1);
+        Store.remove = key => (key === 'farkad:pendingReplace' ? undefined : realRemove(key));
+      }
+      if (fault === 'ordering') {
+        // A write that was started first and has not answered. The restore must not
+        // overtake it, and must not report itself done while it has not.
+        FarkadSync.stuckMs = 60;
+        window.__cloud.hold = new Promise(() => {});
+        FarkadSync.flush();
+        await new Promise(done => setTimeout(done, 150));
+      }
+      if (fault === 'malformed') {
+        const rubbish = JSON.stringify({ workers: [], places: [] });
+        Store.set('scheduleData:snap:2026-08-01', rubbish);
+        Store.set('scheduleData:undoStack', JSON.stringify(
+          [{ at: '2026-08-01T06:00:00.000Z', schedule: rubbish }]));
+        window.__archive = JSON.parse(rubbish);
+      }
+      if (fault === 'unparseable') {
+        Store.set('scheduleData:snap:2026-08-01', '{"workers":[');
+      }
+
+      const before = {
+        disk: localStorage.getItem('scheduleData:v2'),
+        queue: localStorage.getItem(FarkadSync.activeOutboxKey()),
+        undo: localStorage.getItem('scheduleData:undoStack'),
+        saves: window.__cloud.saves.length
+      };
+
+      let running;
+      if (door === 'restore point') running = restoreSnapshot('2026-08-01');
+      else if (door === 'cloud copy') running = restoreFromCloud('2026-08-01');
+      else if (door === 'way back') running = restoreLocalBackup();
+      else {
+        running = importBackup({
+          target: {
+            value: 'x',
+            files: [new File([window.__restorePoint], 'b.json', { type: 'application/json' })]
+          }
+        });
+      }
+
+      // Two dialogs at most: the "are you sure", then the result. Clicking OK on a modal
+      // that is not open would dismiss the result before it could be read.
+      for (let i = 0; i < 2; i += 1) {
         await new Promise(done => setTimeout(done, 250));
-        document.getElementById('askOk').click();      // the "are you sure" dialog
-        await run;
+        const modal = document.getElementById('askModal');
+        const isResult = document.getElementById('askCancel').style.display === 'none';
+        if (modal.style.display !== 'none' && !isResult) document.getElementById('askOk').click();
+      }
+      await running;
+      await new Promise(done => setTimeout(done, 200));
 
-        FarkadSync.replaceEverything = real;
+      const modal = document.getElementById('askModal');
+      const said = {
+        visible: modal.style.display !== 'none',
+        title: document.getElementById('askTitle').textContent,
+        message: document.getElementById('askMessage').textContent
+      };
+      document.getElementById('askOk').click();
+
+      Store.set = realSet;
+      Store.remove = realRemove;
+
+      return {
+        said,
+        before,
+        screen: Object.keys(State.schedule.days).sort().join(),
+        disk: localStorage.getItem('scheduleData:v2'),
+        diskDays: Object.keys(
+          JSON.parse(localStorage.getItem('scheduleData:v2') || '{}').days || {}).sort().join(),
+        queue: localStorage.getItem(FarkadSync.activeOutboxKey()),
+        undo: localStorage.getItem('scheduleData:undoStack'),
+        pending: localStorage.getItem('farkad:pendingReplace'),
+        pendingRead: FarkadSync.pendingReplace() !== null,
+        queued: FarkadSync.pendingPaths(),
+        saves: window.__cloud.saves.length,
+        status: FarkadSync.status
+      };
+    }, [door, fault]);
+    await page.waitForTimeout(150);
+    return state;
+  };
+
+  const DOORS = ['restore point', 'cloud copy', 'way back', 'imported file'];
+  const SUCCESS_LINES = ['שוחזר.', 'שוחזר מהענן.', 'הגיבוי נטען.'];
+
+  // ---------------------------------------------------------- malformed, at every door
+  for (const door of DOORS) {
+    const fault = door === 'imported file' ? 'malformed-import' : 'malformed';
+    if (fault === 'malformed-import') {
+      // The import reads the file itself, so the malformed one is handed to it directly.
+      const said = await page.evaluate(async () => {
+        window.__reset();
+        window.__installCloud();
+        const before = localStorage.getItem('scheduleData:v2');
+        const running = importBackup({
+          target: {
+            value: 'x',
+            files: [new File([JSON.stringify({ workers: [], places: [] })], 'b.json',
+              { type: 'application/json' })]
+          }
+        });
+        await new Promise(done => setTimeout(done, 400));
+        const modal = document.getElementById('askModal');
         const told = {
+          visible: modal.style.display !== 'none',
           title: document.getElementById('askTitle').textContent,
           message: document.getElementById('askMessage').textContent
         };
         document.getElementById('askOk').click();
-        return told;
-      }, [outcome, doors.findIndex(d => d[0] === doorName)]);
+        await new Promise(done => setTimeout(done, 200));
+        await running;
+        return { told, same: localStorage.getItem('scheduleData:v2') === before,
+          pending: localStorage.getItem('farkad:pendingReplace'),
+          saves: window.__cloud.saves.length };
+      });
+      check('a malformed file: the modal is on screen', said.told.visible);
+      check('a malformed file: it is not reported as loaded',
+        !SUCCESS_LINES.includes(said.told.title) && !SUCCESS_LINES.includes(said.told.message),
+        JSON.stringify(said.told));
+      check('a malformed file: it says the file could not be read',
+        said.told.title === 'הקובץ לא נטען', JSON.stringify(said.told));
+      check('a malformed file: the disk is untouched', said.same);
+      check('a malformed file: nothing was written down', said.pending === null,
+        String(said.pending));
+      check('a malformed file: and nothing was sent', said.saves === 0, String(said.saves));
+      await page.waitForTimeout(150);
+      continue;
+    }
 
-      check(`${doorName} does not report a plain "${successLine}" on a ${stageName} failure`,
-        said.title !== successLine && said.message !== successLine,
-        JSON.stringify(said));
-      check(`${doorName} says something about a ${stageName} failure`,
-        said.message.length > 0, JSON.stringify(said));
-      await page.waitForTimeout(120);
+    const out = await attempt(door, 'malformed');
+    check(`${door}, malformed: the result modal is on screen`, out.said.visible,
+      JSON.stringify(out.said));
+    check(`${door}, malformed: it says exactly "לא בוצע שחזור"`,
+      out.said.title === 'לא בוצע שחזור', JSON.stringify(out.said));
+    check(`${door}, malformed: and names it as not a whole record`,
+      out.said.message.indexOf('אינו רישום שלם') !== -1, JSON.stringify(out.said));
+    check(`${door}, malformed: the disk is byte-for-byte what it was`,
+      out.disk === out.before.disk);
+    check(`${door}, malformed: the queue is byte-for-byte what it was`,
+      out.queue === out.before.queue);
+    check(`${door}, malformed: nothing was written down`, out.pending === null,
+      String(out.pending));
+    check(`${door}, malformed: nothing was sent`, out.saves === out.before.saves,
+      `${out.before.saves} -> ${out.saves}`);
+    if (door === 'way back') {
+      check('way back, malformed: the way back is still on the stack',
+        out.undo === out.before.undo, String(out.undo));
     }
   }
 
-  // The fourth door: a file dropped in. Same rule.
-  const imported = await page.evaluate(async () => {
-    const real = FarkadSync.replaceEverything.bind(FarkadSync);
-    FarkadSync.replaceEverything = () => Promise.resolve({ ok: false, stage: 'queue' });
+  // ---------------------------------------------------------- a restore point that will not parse
+  {
+    const out = await attempt('restore point', 'unparseable');
+    check('unreadable restore point: the modal is on screen, not silence', out.said.visible,
+      JSON.stringify(out.said));
+    check('unreadable restore point: it says exactly "לא בוצע שחזור"',
+      out.said.title === 'לא בוצע שחזור', JSON.stringify(out.said));
+    check('unreadable restore point: and says it could not be read',
+      out.said.message.indexOf('לא נקרא') !== -1, JSON.stringify(out.said));
+    check('unreadable restore point: the disk is untouched', out.disk === out.before.disk);
+  }
 
-    const file = {
-      schemaVersion: 2,
-      workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }],
-      places: [{ id: 'p_01', name: 'הרצליה', active: true }],
-      days: { '2026-07-01': { plan: {}, actual: {} } },
-      advances: {},
-      updatedAt: '2026-07-01T06:00:00.000Z', updatedBy: 'd_backup'
-    };
-    const before = Object.keys(State.schedule.days).join();
-    window.__importDone = importBackup({
-      target: {
-        value: 'x',
-        files: [new File([JSON.stringify(file)], 'backup.json', { type: 'application/json' })]
-      }
+  // ---------------------------------------------------------- the real transaction faults
+  const FAULTS = [
+    ['cloud copy', 'prepare', 'לא בוצע שחזור', 'ממתין לשליחה'],
+    ['restore point', 'local-save', 'לא בוצע שחזור', 'לא שינינו כלום'],
+    ['way back', 'queue-prune', 'השחזור לא הושלם', 'תור השליחה'],
+    ['restore point', 'finalize', 'שוחזר במכשיר הזה', 'עדיין לא הגיע לענן'],
+    ['cloud copy', 'ordering', 'שוחזר במכשיר הזה', 'עדיין לא הגיע לענן']
+  ];
+
+  for (const [door, fault, title, phrase] of FAULTS) {
+    const out = await attempt(door, fault);
+    const where = `${door}, ${fault}`;
+
+    check(`${where}: the result modal is on screen`, out.said.visible, JSON.stringify(out.said));
+    check(`${where}: it never reports a plain success`,
+      !SUCCESS_LINES.includes(out.said.title) && !SUCCESS_LINES.includes(out.said.message),
+      JSON.stringify(out.said));
+    check(`${where}: it says exactly "${title}"`, out.said.title === title,
+      JSON.stringify(out.said));
+    check(`${where}: and names what happened`, out.said.message.indexOf(phrase) !== -1,
+      JSON.stringify(out.said));
+
+    if (fault === 'prepare' || fault === 'local-save') {
+      check(`${where}: nothing on the disk changed`, out.disk === out.before.disk);
+      check(`${where}: no restore was written down`, out.pending === null, String(out.pending));
+      check(`${where}: and nothing was sent`, out.saves === out.before.saves,
+        `${out.before.saves} -> ${out.saves}`);
+    }
+    if (fault === 'queue-prune') {
+      check(`${where}: the restored state IS on the disk`,
+        out.diskDays === '2026-07-01', out.diskDays);
+      check(`${where}: the transaction is still on the disk to finish it`,
+        out.pending !== null && out.pendingRead === true, String(out.pending));
+      check(`${where}: the superseded entry is still queued, not lost`,
+        out.queued.indexOf('days.2026-08-18.actual.w_02') !== -1, JSON.stringify(out.queued));
+      check(`${where}: and nothing was sent`, out.saves === out.before.saves,
+        `${out.before.saves} -> ${out.saves}`);
+    }
+    if (fault === 'finalize') {
+      check(`${where}: the restored state is on the disk`,
+        out.diskDays === '2026-07-01', out.diskDays);
+      check(`${where}: it did reach the cloud`, out.saves > out.before.saves,
+        `${out.before.saves} -> ${out.saves}`);
+      check(`${where}: and the record is kept because it could not be cleared`,
+        out.pending !== null, String(out.pending));
+    }
+    if (fault === 'ordering') {
+      check(`${where}: the restore was NOT sent past the open write`,
+        out.saves === out.before.saves, `${out.before.saves} -> ${out.saves}`);
+      check(`${where}: the restored state is on this device, as it was told`,
+        out.diskDays === '2026-07-01', out.diskDays);
+      check(`${where}: the transaction is kept so it can still run`,
+        out.pending !== null && out.pendingRead === true, String(out.pending));
+      check(`${where}: and nothing claims to be synced`, out.status !== 'synced', out.status);
+    }
+    check(`${where}: the status does not claim synced`,
+      fault === 'prepare' || fault === 'local-save' || out.status !== 'synced', out.status);
+  }
+
+  // ---------------------------------------------------------- two close-and-reopen cycles
+  //
+  // The queue-prune failure, followed by the app being closed and opened twice, with the
+  // fault gone. The transaction has to finish itself and lose nothing on the way.
+  await attempt('way back', 'queue-prune');
+  for (const round of ['first', 'second']) {
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => ({
+      screen: Object.keys(State.schedule.days).sort().join(),
+      disk: Object.keys(
+        JSON.parse(localStorage.getItem('scheduleData:v2') || '{}').days || {}).sort().join(),
+      pending: localStorage.getItem('farkad:pendingReplace'),
+      blocked: farkadWritesBlocked()
+    }));
+    check(`after the ${round} reopen the superseded day has not come back`,
+      after.screen === '2026-07-01', after.screen);
+    check(`after the ${round} reopen the disk says the same`,
+      after.disk === '2026-07-01', after.disk);
+    check(`after the ${round} reopen recording is not blocked`, after.blocked === false);
+  }
+
+  // ---------------------------------------------------------- and the control
+  //
+  // Without this, every check above would pass on an app that never reports success at
+  // all.
+  await installHelpers();
+  {
+    const done = await page.evaluate(async () => {
+      window.__reset();
+      window.__installCloud();
+      const running = restoreSnapshot('2026-08-01');
+      await new Promise(wait => setTimeout(wait, 250));
+      document.getElementById('askOk').click();
+      await running;
+      await new Promise(wait => setTimeout(wait, 200));
+      const told = {
+        visible: document.getElementById('askModal').style.display !== 'none',
+        // A plain string reaches askTell as the message, not the title, which is why
+        // the checks above compare both fields against the success lines.
+        said: document.getElementById('askTitle').textContent
+          + document.getElementById('askMessage').textContent
+      };
+      document.getElementById('askOk').click();
+      return {
+        told,
+        days: Object.keys(State.schedule.days).sort().join(),
+        saves: window.__cloud.saves.length,
+        pending: localStorage.getItem('farkad:pendingReplace')
+      };
     });
-    await new Promise(done => setTimeout(done, 400));
-    document.getElementById('askOk').click();
-    await new Promise(done => setTimeout(done, 400));
-
-    const told = {
-      title: document.getElementById('askTitle').textContent,
-      message: document.getElementById('askMessage').textContent
-    };
-    document.getElementById('askOk').click();
-    FarkadSync.replaceEverything = real;
-    return { told, before };
-  });
-  check('an imported file does not report a plain "הגיבוי נטען." on a queue failure',
-    imported.told.title !== 'הגיבוי נטען.' && imported.told.message !== 'הגיבוי נטען.',
-    JSON.stringify(imported.told));
-  check('and says what is actually unfinished',
-    imported.told.message.includes('לא') || imported.told.title.includes('לא'),
-    JSON.stringify(imported.told));
-
-  // And the control: a restore that DID finish still says so plainly, or the check
-  // above would pass on an app that never reports success at all.
-  const good = await page.evaluate(async () => {
-    const real = FarkadSync.replaceEverything.bind(FarkadSync);
-    FarkadSync.replaceEverything = () => Promise.resolve({ ok: true, stage: 'done' });
-    const run = restoreSnapshot('2026-08-01');
-    await new Promise(done => setTimeout(done, 250));
-    document.getElementById('askOk').click();
-    await run;
-    const told = document.getElementById('askTitle').textContent
-      + document.getElementById('askMessage').textContent;
-    document.getElementById('askOk').click();
-    FarkadSync.replaceEverything = real;
-    return told;
-  });
-  check('a restore that finished still says so', good.includes('שוחזר.'), JSON.stringify(good));
+    check('a restore that finished says exactly "שוחזר."', done.told.said === 'שוחזר.',
+      JSON.stringify(done.told));
+    check('and the modal is on screen saying it', done.told.visible);
+    check('and it really did happen', done.days === '2026-07-01', done.days);
+    check('reaching the cloud', done.saves > 0, String(done.saves));
+    check('with nothing left pending', done.pending === null, String(done.pending));
+  }
 
   await page.context().close();
 }

@@ -43,7 +43,23 @@ const State = {
         const v2 = Store.get(V2_KEY);
         if (v2) {
             try {
-                this.schedule = normaliseSchedule(JSON.parse(v2));
+                // Parsing is not the question. A record that parses into
+                // {"workers":[],"places":[]} is not an empty schedule - normaliseSchedule
+                // would hand one back without a word, the app would draw a blank crew,
+                // and the first ordinary save would write that blank over the last real
+                // record this device had. So the raw content is checked BEFORE
+                // normaliseSchedule is allowed near it.
+                //
+                // Compatibility-aware, and narrowly: a record from a build that predates
+                // advances is a real record and still opens. Anything else missing is
+                // damage, and damage is held, not filled in. See upgradeStoredSchedule.
+                const upgraded = upgradeStoredSchedule(JSON.parse(v2));
+                const problems = upgraded
+                    ? storedScheduleProblems(upgraded)
+                    : ['הרישום השמור אינו מסמך של לוח עבודה.'];
+                if (problems.length > 0) throw new Error(problems[0]);
+
+                this.schedule = normaliseSchedule(upgraded);
                 this.durableText = v2;
                 this.migrationIssues = readIssues();
                 // Anything the journal is still holding goes back on top. This is the
@@ -67,7 +83,8 @@ const State = {
                 // nothing below this line - migration, a later edit, or somebody
                 // re-typing the week over a blank screen - can reach V2_KEY.
                 console.error('v2 schedule unreadable, holding it:', error);
-                Recovery.damaged(V2_KEY, v2, 'הרישום השמור במכשיר לא נקרא.');
+                Recovery.damaged(V2_KEY, v2,
+                    'הרישום השמור במכשיר לא נקרא: ' + String(error && error.message || error));
                 damaged = true;
             }
         }

@@ -195,6 +195,52 @@ async function denied(name, promise) {
         getDoc(doc(as(STRANGER), 'history/2026-08-12')));
 }
 
+// ---------------------------------------------------------------- the v71 upgrade
+{
+    suite('a restore left behind by v71 can actually be sent');
+
+    await env.clearFirestore();
+    const db = as(ALLOWED);
+
+    // The record exactly as v71 wrote one: the bare cloud document, captured before
+    // State.save had stamped it - so updatedAt is null. Frozen here rather than built
+    // with today's helpers, because the question is whether a record from a build that
+    // no longer exists still works.
+    const v71 = {
+        schemaVersion: 2,
+        workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: { '2026-07-01': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+        advances: {},
+        updatedAt: null,
+        updatedBy: null,
+        roster: {
+            workers: { w_01: { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 } },
+            places: { p_01: { id: 'p_01', name: 'הרצליה', active: true } },
+            workerOrder: ['w_01'],
+            placeOrder: ['p_01']
+        }
+    };
+
+    await passes('the project exists first', setDoc(doc(db, PATH), schedule()));
+
+    // This is why the upgrade stamps it. Sent as it stands, the rules refuse it - and
+    // they refuse it again on every retry, for as long as the record exists.
+    await denied('the record as v71 left it is refused, and always would be',
+        setDoc(doc(db, PATH), v71));
+
+    // What freezeLegacyReplacement makes of it.
+    const upgraded = { ...v71, updatedAt: new Date().toISOString(), updatedBy: 'd_here' };
+    await passes('the upgraded document is accepted',
+        setDoc(doc(db, PATH), upgraded));
+
+    const after = await getDoc(doc(db, PATH));
+    check('and it lands whole, roster and all',
+        Boolean(after.data().days['2026-07-01'])
+        && Boolean(after.data().roster.workers.w_01),
+        JSON.stringify(Object.keys(after.data())));
+}
+
 // ---------------------------------------------------------------- everything else
 {
     suite('anything not named is denied');
