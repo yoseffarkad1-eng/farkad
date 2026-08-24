@@ -33,19 +33,19 @@ const OUTBOX_KEY = 'farkad:outbox';
 
 // Where an active queue can live. The first is the ordinary one; the rest exist because a
 // damaged queue is never overwritten, so recording after one has to continue somewhere
-// else. Scanned in order at load: the first that is absent or parses is the active one,
-// and anything damaged on the way is quarantined and left exactly where it is.
-const OUTBOX_KEYS = [
-    OUTBOX_KEY,
-    'farkad:outbox:active1',
-    'farkad:outbox:active2',
-    'farkad:outbox:active3',
-    'farkad:outbox:active4'
-];
+// else.
+//
+// A slot counts as ACTIVE only if it is absent, or present and readable as a queue. A
+// damaged one never does.
+//
+// Bounded, and generously: twenty-five damaged queues on one device is not a storage
+// problem any more, and an unbounded search would spin on a device that cannot write.
+const OUTBOX_SLOTS = 25;
 
-// Retry, backing off. A device on a building site loses signal for minutes at a time and
-// gets it back without anyone touching anything, so the queue has to drain on its own -
-// but a phone that retries every second for an hour is a phone with no battery.
+function outboxSlotKey(index) {
+    return index === 0 ? OUTBOX_KEY : `farkad:outbox:active${index}`;
+}
+
 // A whole-document replacement - a backup restored, a file imported - that has not
 // reached the cloud yet. Kept on disk for the same reason the outbox is: the person was
 // TOLD it worked, and the state they asked for is now the only one they can see. If the
@@ -53,6 +53,9 @@ const OUTBOX_KEYS = [
 // quietly put the old state back, on the device that asked for the restore.
 const REPLACE_KEY = 'farkad:pendingReplace';
 
+// Retry, backing off. A device on a building site loses signal for minutes at a time and
+// gets it back without anyone touching anything, so the queue has to drain on its own -
+// but a phone that retries every second for an hour is a phone with no battery.
 const RETRY_FIRST_MS = 2000;
 const RETRY_MAX_MS = 60000;
 
@@ -120,8 +123,10 @@ const FarkadSync = {
     _retryTimer: null,
     _loaded: false,
     // Which key the live queue is written to. Not always OUTBOX_KEY: a damaged queue is
-    // never overwritten, so recording continues in the next slot along.
-    _activeKey: OUTBOX_KEY,
+    // never overwritten, so recording continues in the next slot along. null until
+    // loadOutbox has found a slot that is safe to write - and it stays null if there
+    // isn't one, which is what stops a write landing on a damaged record.
+    _activeKey: null,
     // The highest seq that is known to be inside a schedule successfully written to disk.
     // A journal entry at or below this is already in the record, so once the cloud has it
     // too there is nothing left for it to protect.
@@ -159,24 +164,45 @@ const FarkadSync = {
         this._loaded = true;
 
         // Walk the slots. The first that is empty or readable becomes the live queue;
-        // every damaged one on the way is copied aside and left untouched.
+        // every damaged one on the way is copied aside and left exactly where it is.
+        //
+        // _activeKey starts as null and is only ever set to a slot that PASSED. The first
+        // version assigned it at the top of each turn, so with every slot damaged it came
+        // to rest on the last one and wrote the new journal straight over raw bytes it
+        // had just finished quarantining.
+        this._activeKey = null;
         let raw = null;
-        for (let i = 0; i < OUTBOX_KEYS.length; i += 1) {
-            this._activeKey = OUTBOX_KEYS[i];
-            const candidate = Store.durableGet(this._activeKey);
-            if (candidate === null) return;                 // free slot, nothing to load
+
+        for (let i = 0; i < OUTBOX_SLOTS; i += 1) {
+            const key = outboxSlotKey(i);
+            const candidate = Store.durableGet(key);
+
+            if (candidate === null) {
+                this._activeKey = key;                      // free slot, nothing to load
+                return;
+            }
 
             try {
                 JSON.parse(candidate);
+                this._activeKey = key;                      // readable, this is the queue
                 raw = candidate;
-                break;                                      // readable, this is the queue
+                break;
             } catch (error) {
-                console.error('Queue unreadable, holding it:', this._activeKey, error);
+                console.error('Queue unreadable, holding it:', key, error);
                 this.outboxDamaged = true;
-                Recovery.damaged(this._activeKey, candidate,
-                    `תור השליחה (עריכות שטרם נשלחו) לא נקרא: ${this._activeKey}.`);
-                // ...and carry on to the next slot, which is where recording resumes.
+                Recovery.damaged(key, candidate,
+                    `תור השליחה (עריכות שטרם נשלחו) לא נקרא: ${key}.`);
+                // ...and on to the next slot, which is where recording may resume.
             }
+        }
+
+        if (this._activeKey === null) {
+            // Every slot damaged. There is nowhere a journal can go, so there is no way
+            // to record anything that could be re-applied - and no acknowledgement should
+            // be able to make it look otherwise.
+            Recovery.halt('outbox-slots',
+                'לא נמצא מקום תקין לתור השליחה. הרישום מושבת עד שהנתונים הגולמיים ייוצאו.');
+            return;
         }
         if (raw === null) return;
 
@@ -219,6 +245,9 @@ const FarkadSync = {
     // NOT optional. A restore point the device has no room for is a loss the app can
     // live with; a pending edit it has no room for is the edit itself.
     saveOutbox() {
+        this.loadOutbox();
+        // No safe slot anywhere. Writing now would mean writing over a damaged record.
+        if (!this._activeKey) return false;
         if (farkadWritesBlocked()) return false;
 
         const items = {};
@@ -318,10 +347,53 @@ const FarkadSync = {
     // Returns whether the entry is now on the disk. The caller needs to know: a queue
     // held only in memory rebuilds nothing after the app is closed.
     queue(path, value) {
+        return this.queueBatch([{ path, value }]);
+    },
+
+    // Several entries, or one, as a SINGLE write.
+    //
+    // Chaining queue() looked equivalent and was not. Each call rewrites the whole queue,
+    // so a bulk operation was a run of writes each larger than the last - and the second
+    // one running out of room left the FIRST one durable. commitMany then reported that
+    // nothing had happened while half of it was on the disk and came back at the next
+    // open, which is worse than either outcome on its own: the app and the device
+    // disagreeing about what was recorded, with the app the one that is wrong.
+    //
+    // So the batch is built on a copy, written once, and only adopted after the write has
+    // been read back. Nothing partial can survive, because nothing partial is ever
+    // written - there is no prefix to clean up afterwards.
+    queueBatch(entries) {
         this.loadOutbox();
-        this._seq += 1;
-        this._outbox.set(path, { value, seq: this._seq });
-        return this.saveOutbox();
+        if (!entries || entries.length === 0) return true;
+        if (farkadWritesBlocked() || !this._activeKey) return false;
+
+        // The copy. Entries are Map values shared with _outbox, so a shallow clone of
+        // each is enough: nothing here mutates one in place.
+        const candidate = new Map(this._outbox);
+        let seq = this._seq;
+
+        entries.forEach(entry => {
+            if (!entry || !entry.path) return;
+            seq += 1;
+            // The same path twice in one batch is the later value, at the later seq -
+            // set() on a Map replaces, so this falls out rather than needing a rule.
+            candidate.set(entry.path, { value: entry.value, seq });
+        });
+
+        const items = {};
+        candidate.forEach((item, path) => { items[path] = item; });
+        const landed = Store.setVerified(this._activeKey, JSON.stringify({ seq, items }));
+
+        this.journalFailed = !landed;
+        if (!landed) {
+            if (typeof updateSyncNotice === 'function') updateSyncNotice();
+            return false;
+        }
+
+        // Adopted only now.
+        this._outbox = candidate;
+        this._seq = seq;
+        return true;
     },
 
     // Called on acknowledgment, and only then. An entry whose seq has moved on was
@@ -474,8 +546,12 @@ const FarkadSync = {
     // not updated reads them and sees a correct roster. They can stop being written once
     // all three devices are past v59 - not before.
     editRoster(schedule) {
-        let journalled = true;
-        const put = (path, value) => { journalled = this.queue(path, value) && journalled; };
+        // Collected, then written once. This is the longest chain of entries in the app -
+        // one path per person, plus the order, plus the legacy array - and a partial
+        // result here is the hardest kind to notice: a worker present but missing from
+        // the order, or an order naming somebody who is not in the list.
+        const batch = [];
+        const put = (path, value) => batch.push({ path, value });
 
         [['workers', 'workerOrder'], ['places', 'placeOrder']].forEach(([kind, orderKey]) => {
             const known = this._remoteRoster[kind] || {};
@@ -492,7 +568,8 @@ const FarkadSync = {
             put(kind, schedule[kind]);
         });
 
-        if (this.adapter) this.scheduleFlush();
+        const journalled = this.queueBatch(batch);
+        if (journalled && this.adapter) this.scheduleFlush();
         return journalled;
     },
 
@@ -645,20 +722,42 @@ const FarkadSync = {
             });
     },
 
-    // Import and backup restore only. Replaces the entire remote document on purpose.
+    // A whole-document replacement - a restore, an import - in two halves, because the
+    // order is the guarantee and one function cannot express it.
     //
-    // It REJECTS on failure. It used to swallow the error and resolve, and no caller
-    // awaited it anyway - so a restore that never left the phone still ended with
-    // "שוחזר." on screen. A green tick over a write that did not happen is the worst
-    // thing this app can print: the person stops looking, and the next snapshot from
-    // another phone puts the old state back.
-    replaceAll(data) {
-        const document = cloudDocument(data);
+    //   prepareReplace(schedule)         write the retry record, and read it back
+    //   ...caller stores the new state locally, and gives up if it cannot...
+    //   executePreparedReplace()         send it to the cloud
+    //
+    // Preparing FIRST is what makes the whole thing recoverable. replaceAll used to write
+    // that record and ignore whether it landed: with no room for it and no network, the
+    // restore was rejected, nothing was on the disk to say a restore was owed, and the
+    // next older snapshot from another phone quietly finished undoing it.
+    //
+    // It is also the only order in which a crash between any two steps is safe. Before
+    // step 1 nothing has happened. Between 1 and 2 there is a retry record and the old
+    // state - the restore is re-attempted. After 2 the new state and the record agree.
+    prepareReplace(schedule) {
+        // NOT subject to the private-mode exception. An ordinary edit is allowed on a
+        // browser that stores nothing, because the app says plainly that nothing survives
+        // and refusing would protect nobody. A whole-document restore changes what every
+        // other device holds, and doing that with no durable record of the intent is a
+        // different bargain entirely.
+        return this.rememberReplace(cloudDocument(schedule));
+    },
 
-        // Written down BEFORE the attempt, so a crash mid-save is indistinguishable from
-        // a failed save - both leave a note that says what still has to happen.
-        this.rememberReplace(document);
+    // Undoes a prepare when the caller could not store the new state. The restore is not
+    // happening, so a record saying it is owed would make the next session send a state
+    // this device never adopted.
+    cancelPreparedReplace() {
+        this.forgetReplace();
+    },
 
+    executePreparedReplace() {
+        const document = this.pendingReplace();
+        if (!document) {
+            return Promise.reject(new Error('no prepared replacement to send'));
+        }
         if (!this.adapter) return Promise.resolve();
 
         const superseded = this._outbox;
@@ -686,18 +785,36 @@ const FarkadSync = {
                 this._replacing = false;
                 this.fail(error);
                 this.scheduleRetry();
+                // The prepared record stays on the disk. That is the whole point of it.
                 throw error;
             });
+    },
+
+    // The old single call, kept for callers that have their own ordering - the tests, and
+    // any path that has already stored its new state. Prepare and execute in one go.
+    replaceAll(data) {
+        if (!this.prepareReplace(data)) {
+            return Promise.reject(new Error('the restore could not be written down'));
+        }
+        return this.executePreparedReplace();
     },
 
     // ------------------------------------------------------------ pending replacement
 
     // Returns false when the note did not reach the disk, so the caller does not report
     // a restore as durable when nothing durable happened.
+    //
+    // And it does NOT adopt the document in memory unless the write landed. It used to
+    // set _replace first, so a failed write left this device believing a restore was
+    // pending that no other session would ever find - the worst of both: it refused to
+    // adopt snapshots on account of a record that did not exist.
     rememberReplace(document) {
         if (this.replaceDamaged || farkadWritesBlocked()) return false;
-        this._replace = document;
-        return Store.setVerified(REPLACE_KEY, JSON.stringify(document));
+        if (!Store.available) return false;
+
+        const landed = Store.setVerified(REPLACE_KEY, JSON.stringify(document));
+        if (landed) this._replace = document;
+        return landed;
     },
 
     forgetReplace() {

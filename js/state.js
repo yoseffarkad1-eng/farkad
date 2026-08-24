@@ -229,6 +229,19 @@ const State = {
         return Boolean(FarkadSync.edit(change.path, change.value)) || !Store.available;
     },
 
+    // The same, for several changes at once, as a single write.
+    journalBatch(changes) {
+        const entries = (changes || [])
+            .filter(change => change && change.path)
+            .map(change => ({ path: change.path, value: change.value }));
+        if (entries.length === 0) return true;
+        if (typeof FarkadSync === 'undefined') return !Store.available;
+
+        const journalled = Boolean(FarkadSync.queueBatch(entries));
+        if (journalled && FarkadSync.adapter) FarkadSync.scheduleFlush();
+        return journalled || !Store.available;
+    },
+
     // The shared ending for a commit with nowhere to live.
     refuseEdit() {
         this.rollback();
@@ -271,12 +284,11 @@ const State = {
         const refused = (changes || []).filter(change => change && change.refused);
         const accepted = (changes || []).filter(change => change && !change.refused);
 
-        // All or nothing. A copy half of which is durable is a day that comes back in the
-        // morning missing three men, which is harder to notice than one that plainly did
-        // not happen.
-        let journalled = true;
-        accepted.forEach(change => { journalled = this.journal(change) && journalled; });
-        if (!journalled) return this.refuseEdit();
+        // All or nothing, and ONE write. Journalling them one at a time was all-or-nothing
+        // in what it reported and not in what it did: the first entry landed, the second
+        // ran out of room, and the app said the copy had not happened while half of it sat
+        // on the disk waiting to come back at the next open.
+        if (!this.journalBatch(accepted)) return this.refuseEdit();
 
         this.save();
         render();

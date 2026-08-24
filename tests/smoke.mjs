@@ -2231,6 +2231,52 @@ async function seedRoster(page) {
   await page.click('#askOk');
   await page.waitForTimeout(200);
 
+  // And the third: the retry record itself cannot be written. That record is what makes a
+  // restore survivable - with it on the disk, a restore whose cloud write fails is re-sent
+  // by the next session; without it the restore exists only on this screen, and the next
+  // older snapshot from another phone finishes undoing it. So the restore must not start.
+  const noRetryRecord = await page.evaluate(async () => {
+    const saves = [];
+    FarkadSync.adapter = {
+      update: () => Promise.resolve(),
+      save: data => { saves.push(data); return Promise.resolve(); },
+      subscribe: () => () => {}
+    };
+    FarkadSync.setStatus('synced');
+
+    const before = Store.get('scheduleData:v2');
+    const realSet = Store.set.bind(Store);
+    Store.set = (key, value, options) =>
+      (key === 'farkad:pendingReplace' ? false : realSet(key, value, options));
+
+    const restoring = restoreSnapshot(snapshotDates()[0]);
+    await new Promise(done => setTimeout(done, 250));
+    document.getElementById('askOk').click();
+    await restoring;
+
+    Store.set = realSet;
+    const result = {
+      same: Store.get('scheduleData:v2') === before,
+      cloudCalls: saves.length,
+      pending: Store.get('farkad:pendingReplace'),
+      told: document.getElementById('askMessage').textContent
+    };
+    FarkadSync.adapter = null;
+    FarkadSync.setStatus('off');
+    return result;
+  });
+  check('a restore with nowhere to record the retry does not start',
+    noRetryRecord.same);
+  check('and the cloud is never asked to save',
+    noRetryRecord.cloudCalls === 0, String(noRetryRecord.cloudCalls));
+  check('nothing claims a restore is waiting',
+    noRetryRecord.pending === null, String(noRetryRecord.pending));
+  check('and the reason names the retry record',
+    noRetryRecord.told.includes('ממתין לשליחה'),
+    JSON.stringify(noRetryRecord.told.slice(0, 90)));
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
   // three days kept, not every day since the app was installed. The boot snapshot is
   // dated with the REAL today, so it is cleared first: leaving it in made this check
   // pass or fail depending on the date the suite was run on, and on 20/08 the stand-in

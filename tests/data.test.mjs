@@ -1974,4 +1974,363 @@ function record(device, date, workerId, placeId, rate) {
         JSON.stringify(Object.keys(held)));
 }
 
+// ---------------------------------------------------------------- G10: all or nothing
+{
+    suite('G10: a bulk journal write is one write, not a chain of them');
+
+    // The queue is rewritten whole on every entry, so a chain of them means each write is
+    // larger than the last. Fail on SIZE rather than on the key: that is how a real disk
+    // runs out, and it is what makes the second write the one that fails.
+    const device = makeDevice();
+    seed(device);
+    const before = device.raw('scheduleData:v2');
+
+    const baseline = (device.raw('farkad:outbox') || '').length;
+    device.setQuota((key, value) =>
+        key.startsWith('farkad:outbox') && value.length > baseline + 220);
+
+    const changes = ['w_01', 'w_02'].map(id =>
+        device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
+    const done = device.State.commitMany(changes);
+
+    check('the bulk operation reports that it did not happen', done === false, String(done));
+    check('neither worker is on screen',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 0
+        && device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_02', 'actual').length === 0,
+        JSON.stringify([
+            device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length,
+            device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_02', 'actual').length
+        ]));
+    check('the schedule on disk is untouched', device.raw('scheduleData:v2') === before);
+    check('and NEITHER worker is in the journal on disk',
+        !(device.raw('farkad:outbox') || '').includes('2026-08-12'),
+        (device.raw('farkad:outbox') || '').slice(0, 120));
+
+    // The measure that counts, and the one that caught this.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('after closing and reopening, neither half is there',
+        reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 0
+        && reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_02', 'actual').length === 0,
+        JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+}
+
+{
+    suite('G10: room for some of the batch is not room for the batch');
+
+    // There is no "middle write" any more - that is the point of the fix - so the case
+    // becomes: enough room for part of what is being recorded, and not for all of it.
+    // Under the old chain that left a prefix on the disk. Now the one write is refused.
+    const device = makeDevice();
+    seed(device);
+    const baseline = (device.raw('farkad:outbox') || '').length;
+    device.setQuota((key, value) =>
+        key.startsWith('farkad:outbox') && value.length > baseline + 250);
+
+    const changes = ['w_01', 'w_02', 'w_03'].map(id =>
+        device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
+    check('the batch is refused', device.State.commitMany(changes) === false);
+    check('and none of the three reached the disk',
+        !(device.raw('farkad:outbox') || '').includes('2026-08-12'),
+        (device.raw('farkad:outbox') || '').slice(0, 140));
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('nor are any of them there after a reopen',
+        Object.keys(reopened.State.schedule.days || {}).length === 0,
+        JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+}
+
+{
+    suite('G10: a roster change is one batch too');
+
+    // editRoster writes one path per person plus the order plus the legacy array - the
+    // longest chain of queue() calls in the app, and the one where a partial result is
+    // hardest to see: a worker present but missing from the order, or the other way round.
+    const device = makeDevice();
+    seed(device);
+    const before = device.raw('scheduleData:v2');
+    const baseline = (device.raw('farkad:outbox') || '').length;
+    device.setQuota((key, value) =>
+        key.startsWith('farkad:outbox') && value.length > baseline + 400);
+
+    device.State.schedule.workers.push({ id: 'w_zz', name: 'חדש', active: true, dailyRate: 300 });
+    device.State.schedule.workers.reverse();
+    const done = device.State.commitRoster();
+
+    check('the roster change is refused', done === false, String(done));
+    check('the new worker is not on screen', !device.State.worker('w_zz'),
+        JSON.stringify(device.State.schedule.workers.map(w => w.id)));
+    check('the schedule on disk is untouched', device.raw('scheduleData:v2') === before);
+    check('and no half-roster reached the journal',
+        !(device.raw('farkad:outbox') || '').includes('w_zz'),
+        (device.raw('farkad:outbox') || '').slice(0, 140));
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and the worker is not there after a reopen', !reopened.State.worker('w_zz'),
+        JSON.stringify(reopened.State.schedule.workers.map(w => w.id)));
+}
+
+{
+    suite('G10: a batch that fits lands whole');
+
+    const device = makeDevice();
+    seed(device);
+    const changes = ['w_01', 'w_02', 'w_03'].map(id =>
+        device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
+    check('it is accepted', device.State.commitMany(changes) === true);
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and all three are there after a reopen',
+        ['w_01', 'w_02', 'w_03'].every(id =>
+            reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', id, 'actual').length === 1));
+}
+
+{
+    suite('G10: the same path twice in one batch keeps the later value');
+
+    const device = makeDevice();
+    seed(device);
+    const path = 'days.2026-08-12.actual.w_01';
+    check('a batch with a repeated path is accepted',
+        device.Sync.queueBatch([
+            { path, value: { entries: [{ placeId: 'p_01' }] } },
+            { path, value: { entries: [{ placeId: 'p_02' }] } }
+        ]) === true);
+
+    const stored = JSON.parse(device.raw('farkad:outbox')).items[path];
+    check('and the value that survives is the later one',
+        stored.value.entries[0].placeId === 'p_02', JSON.stringify(stored.value));
+    check('with one entry, not two',
+        Object.keys(JSON.parse(device.raw('farkad:outbox')).items).length === 1);
+}
+
+// ---------------------------------------------------------------- G11: slots
+{
+    suite('G11: every slot damaged, and plenty of room to quarantine them');
+
+    // No quota fault here on purpose. The device has space; what it does not have is a
+    // readable queue anywhere. The old scan left _activeKey pointing at the LAST damaged
+    // slot and then wrote the new journal straight over it.
+    const raw = {};
+    ['farkad:outbox', 'farkad:outbox:active1', 'farkad:outbox:active2',
+     'farkad:outbox:active3', 'farkad:outbox:active4'].forEach((key, i) => {
+        raw[key] = `{"seq":${i + 1},"items":{"days.2026-0${i + 1}-01.actual.w_01":{"value":{"ent`;
+    });
+
+    const device = makeDevice({ storage: Object.assign({}, raw) });
+    seed(device);
+
+    check('all five were noticed',
+        device.global('Recovery').problems.length >= 5,
+        String(device.global('Recovery').problems.length));
+    check('and all five were quarantined, since there was room',
+        Object.keys(raw).every(key => device.raw(key + ':damaged') === raw[key]));
+
+    const resumed = device.global('Recovery').acknowledge();
+    const committed = record(device, '2026-08-12', 'w_01', 'p_01');
+
+    // Either outcome is acceptable. What is not acceptable is writing over the wreckage.
+    check('recording either moved to a safe slot or was refused, not written over damage',
+        (committed === true && !Object.keys(raw).includes(device.Sync.activeOutboxKey()))
+        || committed === false,
+        JSON.stringify({ resumed, committed, active: device.Sync.activeOutboxKey() }));
+
+    check('and all five originals are byte-for-byte what they were',
+        Object.keys(raw).every(key => device.raw(key) === raw[key]),
+        JSON.stringify(Object.keys(raw).filter(key => device.raw(key) !== raw[key])));
+
+    // After a close and reopen, still true.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('still true after closing and reopening',
+        Object.keys(raw).every(key => reopened.raw(key) === raw[key]),
+        JSON.stringify(Object.keys(raw).filter(key => reopened.raw(key) !== raw[key])));
+}
+
+{
+    suite('G11: when no safe slot can be had at all, recording is refused');
+
+    // Every slot the app will ever try, damaged. There is nowhere to put a journal, so
+    // there is no way to record anything that could be re-applied.
+    const storage = {};
+    const keys = ['farkad:outbox'];
+    for (let i = 1; i <= 24; i += 1) keys.push('farkad:outbox:active' + i);
+    keys.forEach((key, i) => { storage[key] = `{"seq":${i},"items":{"broken`; });
+
+    const device = makeDevice({ storage: Object.assign({}, storage) });
+    seed(device);
+
+    check('there is no active slot',
+        device.Sync.activeOutboxKey() === null, String(device.Sync.activeOutboxKey()));
+    check('the queue refuses to write rather than choosing a damaged key',
+        device.Sync.saveOutbox() === false);
+    check('acknowledging does not open recording',
+        device.global('Recovery').acknowledge() === false
+        && device.call('farkadWritesBlocked') === true);
+    check('and an edit is refused',
+        record(device, '2026-08-12', 'w_01', 'p_01') === false);
+    check('with every original untouched',
+        keys.every(key => device.raw(key) === storage[key]),
+        JSON.stringify(keys.filter(key => device.raw(key) !== storage[key])));
+}
+
+// ---------------------------------------------------------------- G12: the restore
+{
+    suite('G12: a restore whose pending record cannot be written never starts');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    const cloudCallsBefore = cloud.attempts.filter(a => a.kind === 'save').length;
+    const restored = device.call('normaliseSchedule', {
+        schemaVersion: 2, workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: { '2026-08-01': { plan: {}, actual: {} } }, advances: {},
+        updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+
+    device.setQuota(key => key === 'farkad:pendingReplace');
+    const prepared = device.Sync.prepareReplace(restored);
+
+    check('preparing the restore reports failure', prepared === false, String(prepared));
+    check('and nothing was written for it',
+        device.raw('farkad:pendingReplace') === null);
+    check('the cloud was never asked to save',
+        cloud.attempts.filter(a => a.kind === 'save').length === cloudCallsBefore,
+        `${cloudCallsBefore} -> ${cloud.attempts.filter(a => a.kind === 'save').length}`);
+    check('the day recorded here is still on screen',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+
+    // Close, reopen, and an older snapshot arrives. Nothing should have half-happened.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and still there after a reopen',
+        reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1,
+        JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+    check('with no pending restore claiming to be waiting',
+        reopened.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G12: pending written, local save fails - the prepared record is cancelled');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    const cloudCallsBefore = cloud.attempts.filter(a => a.kind === 'save').length;
+    const previous = device.State.schedule;
+    const restored = device.call('normaliseSchedule', {
+        schemaVersion: 2, workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: { '2026-08-01': { plan: {}, actual: {} } }, advances: {},
+        updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+
+    check('the pending record is written first', device.Sync.prepareReplace(restored) === true);
+    check('and it is on the disk', typeof device.raw('farkad:pendingReplace') === 'string');
+
+    // Now the local save fails.
+    device.setQuota(key => key === 'scheduleData:v2');
+    device.State.schedule = restored;
+    check('the local save fails', device.State.save() === false);
+
+    // What the restore path must do next.
+    device.State.schedule = previous;
+    device.Sync.cancelPreparedReplace();
+
+    check('the prepared record is gone', device.raw('farkad:pendingReplace') === null);
+    check('the cloud was never asked to save',
+        cloud.attempts.filter(a => a.kind === 'save').length === cloudCallsBefore);
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and a reopen knows about no restore at all',
+        reopened.Sync.pendingReplace() === null);
+    check('with the original day still there',
+        reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+}
+
+{
+    suite('G12: pending and local both written, cloud fails - the record survives');
+
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+
+    const restored = device.call('normaliseSchedule', {
+        schemaVersion: 2, workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: { '2026-07-01': { plan: {}, actual: {} } }, advances: {},
+        updatedAt: '2026-07-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+
+    check('prepared', device.Sync.prepareReplace(restored) === true);
+    device.State.schedule = restored;
+    check('and stored locally', device.State.save() === true);
+
+    cloud.online = false;
+    let rejected = false;
+    await device.Sync.executePreparedReplace().catch(() => { rejected = true; });
+    check('the cloud send is reported as failed', rejected === true);
+    check('and the pending record is still on the disk',
+        typeof device.raw('farkad:pendingReplace') === 'string');
+
+    // Closed, reopened, and an OLDER snapshot turns up.
+    const disk = device.dump();
+    const again = makeDevice({ storage: disk });
+    again.State.load();
+    check('a reopen knows a restore is still waiting',
+        again.Sync.pendingReplace() !== null);
+
+    cloud.online = true;
+    again.Sync.pushDelayMs = TICK;
+    again.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+
+    check('the restore is what the cloud ends up holding',
+        Object.keys(cloud.doc.days || {}).join() === '2026-07-01',
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('the restored state is what is on screen',
+        Object.keys(again.State.schedule.days || {}).join() === '2026-07-01',
+        JSON.stringify(Object.keys(again.State.schedule.days || {})));
+    check('and nothing is left pending', again.Sync.pendingReplace() === null);
+}
+
+{
+    suite('G12: a restore is not attempted at all when nothing can be written down');
+
+    // Safari private mode. An ordinary edit is allowed there - the app says plainly that
+    // nothing survives - but a whole-document restore changes every device, and doing that
+    // with no durable retry record is not the same bargain at all.
+    const device = makeDevice();
+    const cloud = makeCloud();
+    seed(device);
+    await connected(device, cloud);
+    await wait();
+
+    device.Store.available = false;
+    const cloudCallsBefore = cloud.attempts.filter(a => a.kind === 'save').length;
+
+    check('an ordinary edit is still accepted',
+        record(device, '2026-08-12', 'w_01', 'p_01') === true);
+    check('but a restore is refused',
+        device.Sync.prepareReplace(device.State.schedule) === false);
+    check('and the cloud was never asked',
+        cloud.attempts.filter(a => a.kind === 'save').length === cloudCallsBefore);
+}
+
 report();

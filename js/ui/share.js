@@ -359,12 +359,20 @@ async function restoreFromCloud(date) {
     }
 
     const previous = State.schedule;
-    State.schedule = normaliseSchedule(raw);
+    const incoming = normaliseSchedule(raw);
 
-    // Stored HERE first, and checked. Sending a state this device could not keep would
+    // The retry record FIRST, before memory changes and before the cloud is touched.
+    if (!FarkadSync.prepareReplace(incoming)) {
+        askTell(noRetryRecordNotice());
+        return;
+    }
+
+    State.schedule = incoming;
+    // Stored HERE second, and checked. Sending a state this device could not keep would
     // put it on the other two phones and lose it on this one.
     if (!State.save()) {
         State.schedule = previous;
+        FarkadSync.cancelPreparedReplace();
         render();
         askTell(notStoredNotice());
         return;
@@ -373,9 +381,10 @@ async function restoreFromCloud(date) {
 
     // Awaited. This used to print "שוחזר מהענן." whether or not the write happened -
     // and a green tick over a write that did not happen is the worst thing this app can
-    // print, because the person stops looking.
+    // print, because the person stops looking. A failure here leaves the retry record on
+    // the disk, so the next session sends it.
     try {
-        await FarkadSync.replaceAll(State.schedule);
+        await FarkadSync.executePreparedReplace();
         askTell('שוחזר מהענן.');
     } catch (error) {
         askTell(replacementNotice(error));
@@ -400,22 +409,30 @@ async function restoreSnapshot(date) {
     }
 
     const previous = State.schedule;
-    State.schedule = normaliseSchedule(JSON.parse(raw));
+    const incoming = normaliseSchedule(JSON.parse(raw));
+    const cloudIsOn = typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off';
 
+    if (cloudIsOn && !FarkadSync.prepareReplace(incoming)) {
+        askTell(noRetryRecordNotice());
+        return;
+    }
+
+    State.schedule = incoming;
     if (!State.save()) {
         State.schedule = previous;
+        if (cloudIsOn) FarkadSync.cancelPreparedReplace();
         render();
         askTell(notStoredNotice());
         return;
     }
     render();
 
-    if (typeof FarkadSync === 'undefined' || FarkadSync.status === 'off') {
+    if (!cloudIsOn) {
         askTell('שוחזר.');
         return;
     }
     try {
-        await FarkadSync.replaceAll(State.schedule);
+        await FarkadSync.executePreparedReplace();
         askTell('שוחזר.');
     } catch (error) {
         askTell(replacementNotice(error));
@@ -479,6 +496,21 @@ function popUndoState() {
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
     return Store.get(UNDO_KEY);
+}
+
+// Said, and the restore abandoned, when there is nowhere to write down the fact that a
+// restore is owed.
+//
+// That record is what makes the whole thing recoverable: with it on the disk, a restore
+// whose cloud write fails is re-sent by the next session. Without it, the restore exists
+// only on this screen, and the next older snapshot from another phone finishes undoing
+// it - which is precisely the state somebody performing a restore is trying to escape.
+function noRetryRecordNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'אין מקום במכשיר לרשום שהשחזור ממתין לשליחה, ובלי זה הוא היה עלול ' +
+            'להיעלם ברגע שמכשיר אחר יתעדכן. לא שינינו כלום. פנה מקום במכשיר, ונסה שוב.'
+    };
 }
 
 // Said, and the restore abandoned, when the RESTORED state could not be stored.
@@ -712,6 +744,15 @@ function importBackup(event) {
 
         const previous = State.schedule;
         const previousIssues = State.migrationIssues;
+        const cloudIsOn = typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off';
+
+        // The retry record first, before memory changes and before the cloud is touched.
+        if (cloudIsOn && !FarkadSync.prepareReplace(incoming)) {
+            event.target.value = '';
+            askTell(noRetryRecordNotice());
+            return;
+        }
+
         State.schedule = incoming;
         // Decisions the migration refused to guess at come with the file. Losing them
         // here would leave work in the old file that the app now claims to have imported.
@@ -720,6 +761,7 @@ function importBackup(event) {
         if (!State.save()) {
             State.schedule = previous;
             State.migrationIssues = previousIssues;
+            if (cloudIsOn) FarkadSync.cancelPreparedReplace();
             event.target.value = '';
             render();
             askTell(notStoredNotice());
@@ -731,9 +773,9 @@ function importBackup(event) {
 
         let sent = true;
         let failure = null;
-        if (typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off') {
+        if (cloudIsOn) {
             try {
-                await FarkadSync.replaceAll(State.schedule);
+                await FarkadSync.executePreparedReplace();
             } catch (error) {
                 sent = false;
                 failure = error;
@@ -781,21 +823,29 @@ async function restoreLocalBackup() {
     }
 
     const leaving = State.schedule;
+    const cloudIsOn = typeof FarkadSync !== 'undefined' && FarkadSync.status !== 'off';
+
+    if (cloudIsOn && !FarkadSync.prepareReplace(previous)) {
+        askTell(noRetryRecordNotice());
+        return;
+    }
+
     State.schedule = previous;
     if (!State.save()) {
         State.schedule = leaving;
+        if (cloudIsOn) FarkadSync.cancelPreparedReplace();
         render();
         askTell(notStoredNotice());
         return;
     }
     render();
 
-    if (typeof FarkadSync === 'undefined' || FarkadSync.status === 'off') {
+    if (!cloudIsOn) {
         askTell('שוחזר.');
         return;
     }
     try {
-        await FarkadSync.replaceAll(State.schedule);
+        await FarkadSync.executePreparedReplace();
         askTell('שוחזר.');
     } catch (error) {
         askTell(replacementNotice(error));
