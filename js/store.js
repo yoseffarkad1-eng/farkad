@@ -156,6 +156,15 @@ const Store = {
         }
     },
 
+    // Drops a key from the session cache without touching the disk.
+    //
+    // For a required write that the disk refused: memory keeps it so the rest of the
+    // session can read what it wrote, which is right for the schedule and wrong for a
+    // record whose whole meaning is "this is on the device". The caller decides which.
+    forget(key) {
+        delete this.memory[key];
+    },
+
     remove(key) {
         delete this.memory[key];
         if (!this.available) return;

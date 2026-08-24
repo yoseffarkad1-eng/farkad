@@ -132,7 +132,7 @@ function validateRosterIds(raw) {
 //
 // The arrays are still written, and that is deliberate. A phone that has not updated yet
 // reads them and sees a correct roster; it cannot see `roster` and never writes to it.
-// They can be dropped once all three devices are past v72 - not before.
+// They can be dropped once all three devices are past v73 - not before.
 function cloudDocument(schedule) {
     const wire = JSON.parse(JSON.stringify(schedule));
     wire.roster = rosterDocument(schedule);

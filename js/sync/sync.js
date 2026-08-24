@@ -119,11 +119,40 @@ function canonicalJson(value) {
 // interpretation and the accurate one - the device may or may not hold it. It is never
 // deleted for being old: the recovery below applies it locally first, exactly as it would
 // a new one.
+const REPLACE_PHASES = ['prepared', 'local-stored', 'cancelled'];
+
+// Is this actually a whole schedule? Anything that reaches applyReplacementLocally is
+// about to become the entire record on this device, and normaliseSchedule turns {} - or
+// null, or [] - into an EMPTY schedule without complaint. A pending record that is not a
+// schedule must be quarantined, not applied.
+function isFullScheduleDocument(document) {
+    if (!document || typeof document !== 'object' || Array.isArray(document)) return false;
+
+    const roster = (document.roster && typeof document.roster === 'object') ? document.roster : null;
+    const hasWorkers = Array.isArray(document.workers)
+        || Boolean(roster && roster.workers && typeof roster.workers === 'object');
+    const hasPlaces = Array.isArray(document.places)
+        || Boolean(roster && roster.places && typeof roster.places === 'object');
+    if (!hasWorkers || !hasPlaces) return false;
+
+    return document.days === undefined
+        || (Boolean(document.days) && typeof document.days === 'object' && !Array.isArray(document.days));
+}
+
+// Returns the envelope, or null when the record is not one. Null means "quarantine it";
+// it never means "empty".
 function readReplacementRecord(parsed) {
-    if (parsed && parsed.version === REPLACE_VERSION && typeof parsed.phase === 'string') {
-        return parsed;
+    if (parsed && typeof parsed === 'object' && parsed.version === REPLACE_VERSION) {
+        if (!REPLACE_PHASES.includes(parsed.phase)) return null;
+        if (parsed.phase === 'cancelled') return parsed;
+        return isFullScheduleDocument(parsed.document) ? parsed : null;
     }
-    return replacementEnvelope(parsed, 'prepared', 'legacy');
+
+    // The v71 format: a bare cloud document, accepted only after being checked. Any other
+    // parseable JSON used to be waved through as a legacy restore, which meant {} became
+    // "replace everything with nothing".
+    if (!isFullScheduleDocument(parsed)) return null;
+    return replacementEnvelope(parsed, 'prepared', 'legacy', 0);
 }
 
 function replacementContent(source) {
@@ -365,9 +394,13 @@ const FarkadSync = {
     // An entry that is still here has NOT been shown to be in a written schedule, so
     // re-applying it is right even when it has already reached the cloud. Each value is
     // the whole record for its field, so applying it twice is applying it once.
-    replayJournal(schedule) {
+    // `after` skips everything a replacement has superseded, which is what makes it
+    // possible to say "the replacement, plus the work done since it was asked for".
+    replayJournal(schedule, after) {
         this.loadOutbox();
+        const floor = Number(after) || 0;
         [...this._outbox.entries()]
+            .filter(([, item]) => item.seq > floor)
             .sort((a, b) => a[1].seq - b[1].seq)
             .forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
     },
@@ -627,7 +660,7 @@ const FarkadSync = {
     //
     // The whole arrays are still sent alongside, and that is deliberate: a phone that has
     // not updated reads them and sees a correct roster. They can stop being written once
-    // all three devices are past v72 - not before.
+    // all three devices are past v73 - not before.
     editRoster(schedule) {
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
@@ -827,8 +860,21 @@ const FarkadSync = {
         // other device holds, and doing that with no durable record of the intent is a
         // different bargain entirely.
         this.loadOutbox();
-        return this.rememberReplace(replacementEnvelope(
-            cloudDocument(schedule), 'prepared', replacementId(), this._seq));
+
+        // Stamped HERE, not left to whatever the source had. A migrated v1 backup has no
+        // timestamp at all, and the envelope captured the document before State.save
+        // stamped the schedule - so every retry sent updatedAt: null, which the rules
+        // reject on every attempt, forever.
+        const document = cloudDocument(schedule);
+        if (typeof document.updatedAt !== 'string' || !document.updatedAt) {
+            document.updatedAt = new Date().toISOString();
+        }
+        if (typeof document.updatedBy !== 'string' || !document.updatedBy) {
+            document.updatedBy = syncDeviceId();
+        }
+
+        return this.rememberReplace(
+            replacementEnvelope(document, 'prepared', replacementId(), this._seq));
     },
 
     // Says the device now holds it. Best effort on purpose: the phase is a hint, and the
@@ -854,51 +900,95 @@ const FarkadSync = {
     // that the next session will open. Everything about a whole-document restore hangs
     // off this one question, and it is asked before the cloud is written and again before
     // anything is forgotten.
-    localDurableHolds(document) {
-        if (!document) return false;
+    localDurableHolds(envelope) {
+        if (!envelope || !envelope.document) return false;
+
+        const actual = this.durableLocalState();
+        if (!actual) return false;
+
+        // What the device SHOULD hold: the replacement, with the work done after it was
+        // asked for laid back on top. Comparing against the bare document would call a
+        // correct device wrong the moment anybody recorded anything mid-restore.
+        const expected = normaliseSchedule(envelope.document);
+        this.replayJournal(expected, envelope.supersedesSeq);
+        return replacementContent(actual) === replacementContent(expected);
+    },
+
+    // The local state as the NEXT session would compute it: the schedule on the disk with
+    // the durable journal replayed over it. Not scheduleData:v2 on its own - a journal
+    // entry that is still queued is part of what this device holds, and a superseded one
+    // that could not be pruned is exactly the difference that must be noticed.
+    durableLocalState() {
         const raw = Store.durableGet(SCHEDULE_KEY);
-        if (raw === null) return false;
+        if (raw === null) return null;
         try {
-            return replacementContent(JSON.parse(raw)) === replacementContent(document);
+            const schedule = normaliseSchedule(JSON.parse(raw));
+            this.replayJournal(schedule);
+            return schedule;
         } catch (error) {
-            return false;
+            return null;
         }
     },
 
     // Puts the replacement on this device, durably, and on the screen. Returns false if
     // it could not be stored - in which case nothing at all has changed.
+    // Returns { stored, pruned }.
+    //
+    // stored - the replacement, WITH the work done since it was asked for, is on the disk
+    // pruned - the entries it supersedes are off the disk
+    //
+    // Both have to be true before anything is sent or forgotten. The schedule is written
+    // first and the queue pruned second, so a failure between them leaves the superseded
+    // entries queued rather than lost - they replay next session, the invariant notices,
+    // and the transaction is retried.
     applyReplacementLocally(envelope) {
         const previous = State.schedule;
-        State.schedule = normaliseSchedule(envelope.document);
 
+        // The replacement, then the newer work back on top of it. Dropping straight to
+        // the document deleted every edit made after the restore was asked for - the
+        // person recorded a day, was told it was saved, and the restore removed it from
+        // the screen, the disk and the cloud at once.
+        const next = normaliseSchedule(envelope.document);
+        this.replayJournal(next, envelope.supersedesSeq);
+
+        State.schedule = next;
         if (!State.save()) {
             State.schedule = previous;
             if (typeof render === 'function') render();
-            return false;
+            return { stored: false, pruned: false };
         }
 
-        // Only now, and only because the replacement is on the disk. Until this point the
-        // queue is the only record of those edits and must not be touched.
-        this.dropSupersededEntries(envelope.supersedesSeq);
+        const pruned = this.dropSupersededEntries(envelope.supersedesSeq);
         if (typeof render === 'function') render();
-        return true;
+        return { stored: true, pruned };
     },
 
     // Journal entries the replacement has made obsolete. Anything newer was made after
-    // the restore was asked for and is still owed.
+    // the restore was asked for and is still owed, and is left alone.
+    //
+    // Built as a candidate and verified before it is adopted, like every other queue
+    // write: the version that mutated the map and ignored saveOutbox's answer reported a
+    // finished restore while the old journal sat on the disk, ready to put the superseded
+    // days back at the next open.
     dropSupersededEntries(supersedesSeq) {
         const upTo = Number(supersedesSeq) || 0;
-        if (upTo <= 0) return;
+        if (upTo <= 0) return true;
         this.loadOutbox();
 
+        const candidate = new Map();
         let changed = false;
-        [...this._outbox.entries()].forEach(([path, item]) => {
-            if (item.seq <= upTo) {
-                this._outbox.delete(path);
-                changed = true;
-            }
+        this._outbox.forEach((item, path) => {
+            if (item.seq > upTo) candidate.set(path, item);
+            else changed = true;
         });
-        if (changed) this.saveOutbox();
+        if (!changed) return true;
+
+        const kept = this._outbox;
+        this._outbox = candidate;
+        if (this.saveOutbox()) return true;
+
+        this._outbox = kept;
+        return false;
     },
 
     // Picking a restore back up - at connect, on the retry ladder, when the connection
@@ -916,10 +1006,19 @@ const FarkadSync = {
         // bytes again is harmless; SKIPPING it is not, because State.load has meanwhile
         // replayed the journal - including the entries this restore supersedes - so
         // memory can be ahead of a disk that already holds the replacement.
-        if (!this.applyReplacementLocally(envelope)) {
+        const applied = this.applyReplacementLocally(envelope);
+        if (!applied.stored) {
             // No room. Nothing is sent, nothing is cleared, nothing is forgotten, and
             // the status does not say synced.
             this.fail(new Error('no room to store the restored schedule; nothing was sent'));
+            return Promise.resolve();
+        }
+        if (!applied.pruned) {
+            // The schedule landed; the queue still holds entries this replacement
+            // supersedes. Sending now would be sending a state the next open would not
+            // reproduce, because those entries would replay over it.
+            this.fail(new Error('the queue could not be finished; the restore is still pending'));
+            this.scheduleRetry();
             return Promise.resolve();
         }
 
@@ -935,13 +1034,12 @@ const FarkadSync = {
 
         const document = envelope.document;
         // The gate. A phase can be stale after a crash; the disk cannot.
-        if (!this.localDurableHolds(document)) {
+        if (!this.localDurableHolds(envelope)) {
             return Promise.reject(
                 new Error('the replacement is not stored on this device yet'));
         }
         if (!this.adapter) return Promise.resolve();
 
-        const superseded = this._outbox;
         this._stamp = null;
         this._replacing = true;
 
@@ -954,21 +1052,34 @@ const FarkadSync = {
                 // cloud now describe the same schedule, and only the disk can answer it.
                 // Anything else and this device would be left holding one schedule while
                 // the other two phones hold another, with nothing recording the fact.
-                if (!this.localDurableHolds(document)) {
-                    this.fail(new Error(
-                        'the cloud has the restore but this device does not; keeping it pending'));
+                //
+                // It THROWS. Returning quietly here set the error status and then let
+                // replaceEverything resolve, which reported the restore as done over a
+                // device and a cloud that disagreed.
+                if (!this.localDurableHolds(envelope)) {
+                    const problem = new Error(
+                        'the cloud has the restore but this device does not; keeping it pending');
+                    this.fail(problem);
                     this.scheduleRetry();
-                    return;
+                    throw problem;
                 }
 
-                // The pending edits belong to the state that was just replaced on
-                // purpose, so they are genuinely superseded - but only once the
-                // replacement is durable HERE. The journal is what rebuilds local edits
-                // at boot, and clearing it while the schedule that supersedes them never
-                // reached the disk throws away the only copy of them that exists.
-                if (this._outbox === superseded) this.clearOutbox();
-                this.forgetReplace();
+                // NOT clearOutbox. What is left in the queue at this point is work done
+                // AFTER the restore was asked for - already in the local schedule, and
+                // still owed to the other two phones. A blanket clear deleted it from the
+                // cloud as well as the queue, which is the one thing a restore must not
+                // do to work somebody did afterwards.
+                if (!this.forgetReplace()) {
+                    // The record is still on the disk and will be resumed. Saying synced
+                    // would be claiming a transaction is over while it can still run.
+                    const problem = new Error(
+                        'the restore reached the cloud but its record could not be cleared');
+                    this.fail(problem);
+                    throw problem;
+                }
+
                 this.setStatus('synced');
+                if (this.pendingCount() > 0) this.scheduleFlush();
             })
             .catch(error => {
                 this._replacing = false;
@@ -1003,11 +1114,19 @@ const FarkadSync = {
             ? this.pendingReplace()
             : replacementEnvelope(cloudDocument(schedule), 'prepared', 'local-only', this._seq);
 
-        if (!this.applyReplacementLocally(envelope)) {
+        const applied = this.applyReplacementLocally(envelope);
+        if (!applied.stored) {
             State.schedule = previous;
             const cancelled = cloudOn ? this.cancelPreparedReplace() : true;
             if (typeof render === 'function') render();
             return Promise.resolve({ ok: false, stage: 'local', cancelled });
+        }
+        if (!applied.pruned) {
+            // The replacement is on the disk, but the entries it supersedes are still
+            // queued and would replay over it at the next open. Not a success, and the
+            // transaction stays so a later attempt can finish it.
+            this.fail(new Error('the queue could not be finished'));
+            return Promise.resolve({ ok: false, stage: 'queue' });
         }
 
         if (!cloudOn) return Promise.resolve({ ok: true, stage: 'done' });
@@ -1041,7 +1160,14 @@ const FarkadSync = {
     // the next session, while this one reports it cancelled.
     forgetReplace() {
         this._replace = null;
-        Store.remove(REPLACE_KEY);
+        // remove() can throw; Store catches it and marks storage unavailable, which is
+        // not the same as the bytes being gone.
+        try { Store.remove(REPLACE_KEY); } catch (error) { /* checked below */ }
+        Store.forget(REPLACE_KEY);
+
+        // With no readable storage there is no way to prove anything left the disk, and
+        // Store.available === false is not that proof.
+        if (!Store.available) return false;
         if (Store.durableGet(REPLACE_KEY) === null) return true;
 
         // The delete did not take. A tombstone says the same thing in a way that only
@@ -1055,7 +1181,7 @@ const FarkadSync = {
         // Neither worked, so the record is still there and WILL be resumed. Saying
         // otherwise is the one answer that would let it surprise somebody later.
         try {
-            this._replace = readReplacementRecord(JSON.parse(Store.get(REPLACE_KEY)));
+            this._replace = readReplacementRecord(JSON.parse(Store.durableGet(REPLACE_KEY)));
         } catch (error) {
             this._replace = null;
         }
@@ -1067,8 +1193,18 @@ const FarkadSync = {
         if (!Store.available) return false;
 
         const landed = Store.setVerified(REPLACE_KEY, JSON.stringify(envelope));
-        if (landed) this._replace = envelope;
-        return landed;
+        if (landed) {
+            this._replace = envelope;
+            return true;
+        }
+
+        // The write failed, and Store keeps required writes in its session cache so the
+        // rest of this session can still read what it wrote. For THIS record that cache
+        // is a phantom: a restore that was refused, readable all session, executed by
+        // the next snapshot. Taken back out.
+        Store.forget(REPLACE_KEY);
+        this._replace = null;
+        return false;
     },
 
     // The envelope, or null. Never the bare document - callers that want that ask for
@@ -1079,10 +1215,34 @@ const FarkadSync = {
         }
         if (this.replaceDamaged) return null;
 
-        const raw = Store.get(REPLACE_KEY);
+        // durableGet, not get. A required write the disk refused still sits in the
+        // session cache, so reading the pending record through get() found one that does
+        // not exist on the disk - and a later snapshot then executed a restore this app
+        // had already reported as refused.
+        const raw = Store.durableGet(REPLACE_KEY);
         if (!raw) return null;
         try {
-            this._replace = readReplacementRecord(JSON.parse(raw));
+            const envelope = readReplacementRecord(JSON.parse(raw));
+            if (!envelope) {
+                // Parseable, and not a restore. Treated exactly like unreadable: the raw
+                // bytes stay where they are, a copy is taken, and nothing is applied.
+                console.error('Pending replacement is not a schedule; holding it.');
+                this.replaceDamaged = true;
+                Recovery.damaged(REPLACE_KEY, raw,
+                    'הרישום של שחזור שממתין לשליחה אינו תקין.');
+                return null;
+            }
+            // A v71 record carries no supersede point, because v71 had none: it cleared
+            // the whole queue on success. The equivalent without a blanket clear is
+            // "everything queued at the moment this record is first read" - which, since
+            // reading happens during load, is exactly the pre-restore queue. Anything
+            // recorded afterwards has a higher seq and survives.
+            if (envelope.transactionId === 'legacy' && !envelope.supersedesSeq) {
+                this.loadOutbox();
+                envelope.supersedesSeq = this._seq;
+            }
+
+            this._replace = envelope;
             return this._replace.phase === 'cancelled' ? null : this._replace;
         } catch (error) {
             // It used to copy this optionally and then DELETE the original. That record

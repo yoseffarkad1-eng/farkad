@@ -454,6 +454,7 @@ function tellRestoreResult(result, done) {
     if (result.ok) { askTell(done); return; }
 
     if (result.stage === 'prepare') { askTell(noRetryRecordNotice()); return; }
+    if (result.stage === 'queue') { askTell(unfinishedRestoreNotice()); return; }
     if (result.stage === 'local') {
         // A cancellation that could not be confirmed means the intent is still on the
         // disk and the next session will act on it. Saying "nothing changed" would be
@@ -462,6 +463,18 @@ function tellRestoreResult(result, done) {
         return;
     }
     askTell(replacementNotice(result.error));
+}
+
+// The replacement is on the device, but the queue of unsent edits could not be finished -
+// so the next open would replay entries this restore replaces straight back on top of it.
+// Not a success, and not a failure that undid anything either.
+function unfinishedRestoreNotice() {
+    return {
+        title: 'השחזור לא הושלם',
+        message: 'המצב המשוחזר נשמר במכשיר, אבל לא הצלחנו לסיים את תור השליחה, ולכן ' +
+            'השחזור עדיין לא הסתיים ולא נשלח למכשירים האחרים. פנה מקום במכשיר - ' +
+            'הוא ימשיך מעצמו.'
+    };
 }
 
 // The restore did not happen here, and the note saying it was wanted could not be taken

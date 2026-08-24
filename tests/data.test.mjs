@@ -2639,7 +2639,7 @@ const diskDays = device => {
 
     given('prepared', device.Sync.prepareReplace(restored) === true);
     given('applied locally',
-        device.Sync.applyReplacementLocally(device.Sync.pendingReplace()) === true);
+        device.Sync.applyReplacementLocally(device.Sync.pendingReplace()).stored === true);
     device.Sync.confirmReplaceStored();
 
     // The disk changes underneath, the way a second tab or a failed later write would
@@ -2686,9 +2686,322 @@ const diskDays = device => {
     // And a local save that fails leaves it alone too.
     device.setQuota(key => key === 'scheduleData:v2');
     check('a failed local apply does not clear it',
-        device.Sync.applyReplacementLocally(device.Sync.pendingReplace()) === false
+        device.Sync.applyReplacementLocally(device.Sync.pendingReplace()).stored === false
         && device.Sync.pendingCount() === queued,
         `${queued} -> ${device.Sync.pendingCount()}`);
+}
+
+// ---------------------------------------------------------------- G14: the gaps
+{
+    suite('G14.1: a prepare that failed leaves no phantom behind');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    // The record cannot be written. Store.set still puts required writes in the session
+    // cache, so reading the pending record through Store.get found one that does not
+    // exist on the disk - and a later snapshot executed a restore the app had refused.
+    device.setQuota(key => key === 'farkad:pendingReplace');
+    const result = await device.Sync.replaceEverything(restored);
+
+    check('the restore is reported as refused',
+        result.ok === false && result.stage === 'prepare', JSON.stringify(result));
+    check('nothing is on the disk', device.raw('farkad:pendingReplace') === null);
+    check('and nothing reads as pending either',
+        device.Sync.pendingReplace() === null,
+        JSON.stringify(device.Sync.pendingReplace()));
+    check('the screen still shows the original',
+        dayKeys(device.State.schedule) === '2026-08-12', dayKeys(device.State.schedule));
+
+    // Everything that could pick a pending restore back up.
+    const before = cloud.attempts.filter(a => a.kind === 'save').length;
+    device.Sync.receive(JSON.parse(JSON.stringify(cloud.doc)));
+    device.Sync.resumeReplace();
+    device.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+
+    check('no replacement was ever sent to the cloud',
+        cloud.attempts.filter(a => a.kind === 'save').length === before,
+        `${before} -> ${cloud.attempts.filter(a => a.kind === 'save').length}`);
+    check('and the schedule is still the original',
+        dayKeys(device.State.schedule) === '2026-08-12', dayKeys(device.State.schedule));
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    reopened.State.load();
+    check('after a reopen too', dayKeys(reopened.State.schedule) === '2026-08-12',
+        dayKeys(reopened.State.schedule));
+}
+
+{
+    suite('G14.2: work done after a restore was asked for is not deleted by it');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+
+    // A real edit, after the restore was asked for and before it was applied.
+    check('the later edit is accepted',
+        record(device, '2026-08-20', 'w_02', 'p_02') === true);
+
+    const disk = device.dump();
+    const again = makeDevice({ storage: disk, deviceId: 'd_here' });
+    again.State.load();
+    again.Sync.pushDelayMs = TICK;
+    again.Sync.connect(cloud.adapter);
+    await settle(TICK * 40);
+
+    check('the restore happened',
+        again.call('entriesFor', again.State.schedule, '2026-07-01', 'w_01', 'actual').length === 1,
+        dayKeys(again.State.schedule));
+    check('and the later edit survived on screen',
+        again.call('entriesFor', again.State.schedule, '2026-08-20', 'w_02', 'actual').length === 1,
+        dayKeys(again.State.schedule));
+    check('and on the disk',
+        (diskDays(again) || '').includes('2026-08-20'), String(diskDays(again)));
+    check('and reached the cloud',
+        Boolean(cloud.doc.days && cloud.doc.days['2026-08-20']),
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('while the day the restore replaced is gone',
+        !(diskDays(again) || '').includes('2026-08-12'), String(diskDays(again)));
+
+    const third = makeDevice({ storage: again.dump(), deviceId: 'd_here' });
+    third.State.load();
+    check('all of it survives another reopen',
+        dayKeys(third.State.schedule) === dayKeys(again.State.schedule),
+        `${dayKeys(third.State.schedule)} vs ${dayKeys(again.State.schedule)}`);
+}
+
+{
+    suite('G14.2: a roster change after prepare survives too');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+
+    const id = device.State.nextWorkerId();
+    device.State.schedule.workers.push({ id, name: 'אחרי', active: true, dailyRate: 300 });
+    check('the roster change is accepted', device.State.commitRoster() === true);
+
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    again.Sync.pushDelayMs = TICK;
+    again.Sync.connect(cloud.adapter);
+    await settle(TICK * 40);
+
+    check('the worker added after the restore was asked for is still here',
+        Boolean(again.State.worker(id)),
+        JSON.stringify(again.State.schedule.workers.map(w => w.id)));
+    check('and in the cloud',
+        again.call('normaliseSchedule', cloud.doc).workers.some(w => w.id === id),
+        JSON.stringify(again.call('normaliseSchedule', cloud.doc).workers.map(w => w.id)));
+}
+
+{
+    suite('G14.3: a queue that could not be pruned is not reported as done');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud({ online: false });
+    await connected(device, cloud);
+    // Offline, so the entry stays UNSENT and is still in the queue when the restore is
+    // asked for - which is what gives the prune something to do.
+    record(device, '2026-08-18', 'w_02', 'p_02');
+    await wait();
+    given('there is something to supersede', device.Sync.pendingCount() > 0);
+
+    cloud.online = true;
+    // The schedule can be written; the queue cannot.
+    device.setQuota(key => key.startsWith('farkad:outbox'));
+    const result = await device.Sync.replaceEverything(restored);
+
+    check('the restore is not reported as done',
+        result.ok === false, JSON.stringify(result));
+    check('and the transaction is still pending',
+        device.Sync.pendingReplace() !== null);
+    check('the status does not claim synced',
+        device.Sync.status !== 'synced', device.Sync.status);
+
+    // The failure this closes: reopening and the superseded day coming back.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('the superseded day does not resurrect on reopen',
+        !dayKeys(again.State.schedule).includes('2026-08-12')
+        || again.Sync.pendingReplace() !== null,
+        JSON.stringify({ days: dayKeys(again.State.schedule),
+            pending: again.Sync.pendingReplace() !== null }));
+}
+
+{
+    suite('G14.3: a queue write that comes back changed is caught too');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud({ online: false });
+    await connected(device, cloud);
+    record(device, '2026-08-18', 'w_02', 'p_02');
+    await wait();
+    given('there is something to supersede', device.Sync.pendingCount() > 0);
+
+    cloud.online = true;
+    device.corruptOnWrite(device.Sync.activeOutboxKey());
+    const result = await device.Sync.replaceEverything(restored);
+    check('it is not reported as done', result.ok === false, JSON.stringify(result));
+    check('and the transaction is still pending', device.Sync.pendingReplace() !== null);
+}
+
+{
+    suite('G14.4: a mismatch after the cloud write is a failure, not a success');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    given('applied', device.Sync.applyReplacementLocally(device.Sync.pendingReplace()).stored === true);
+    device.Sync.confirmReplaceStored();
+
+    const realSave = cloud.adapter.save;
+    cloud.adapter.save = data => {
+        device.putRaw('scheduleData:v2', JSON.stringify({
+            schemaVersion: 2, workers: [], places: [],
+            days: { '1999-01-01': { plan: {}, actual: {} } }, advances: {},
+            updatedAt: '1999-01-01T00:00:00.000Z', updatedBy: 'd_other'
+        }));
+        return realSave(data);
+    };
+
+    let rejected = false;
+    await device.Sync.executePreparedReplace().catch(() => { rejected = true; });
+    cloud.adapter.save = realSave;
+
+    check('executePreparedReplace rejects', rejected === true);
+    check('the record is kept', device.Sync.pendingReplace() !== null);
+    check('and the status is not synced', device.Sync.status !== 'synced', device.Sync.status);
+}
+
+{
+    suite('G14.5: finalisation that cannot be confirmed is not success');
+
+    const { device, restored } = restoreFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    // Prepared while everything works, so the transaction really exists...
+    given('prepared', device.Sync.prepareReplace(restored) === true);
+    given('applied',
+        device.Sync.applyReplacementLocally(device.Sync.pendingReplace()).stored === true);
+
+    // ...and only then does the record become impossible to get rid of: the delete does
+    // nothing and the tombstone write cannot land either.
+    device.blockRemoval(key => key === 'farkad:pendingReplace');
+    device.setQuota(key => key === 'farkad:pendingReplace');
+
+    let rejected = false;
+    await device.Sync.executePreparedReplace().catch(() => { rejected = true; });
+
+    check('the cloud did take the restore',
+        Object.keys(cloud.doc.days || {}).sort().join() === '2026-07-01',
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+    check('but it is not reported as finished', rejected === true);
+    check('and the status does not claim synced',
+        device.Sync.status !== 'synced', device.Sync.status);
+    check('the record is still on the disk, and will be resumed',
+        device.raw('farkad:pendingReplace') !== null);
+}
+
+{
+    suite('G14.5: a removeItem that throws is handled');
+
+    const device = makeDevice();
+    seed(device);
+    device.throwOnRemove(key => key === 'farkad:pendingReplace');
+    device.putRaw('farkad:pendingReplace', JSON.stringify({
+        version: 2, phase: 'prepared', transactionId: 't', supersedesSeq: 0,
+        document: device.call('cloudDocument', device.State.schedule)
+    }));
+
+    let threw = false;
+    let answer = null;
+    try { answer = device.Sync.forgetReplace(); } catch (error) { threw = true; }
+    check('it does not throw out of forgetReplace', threw === false);
+    check('and the answer is honest about whether it is gone',
+        answer === false || device.raw('farkad:pendingReplace') === null,
+        JSON.stringify({ answer, still: device.raw('farkad:pendingReplace') !== null }));
+}
+
+{
+    suite('G14.6: a pending record that is not a schedule is quarantined, not applied');
+
+    for (const [label, raw] of [
+        ['an empty object', '{}'],
+        ['null', 'null'],
+        ['an array', '[]'],
+        ['an unknown phase', '{"version":2,"phase":"whatever","document":{}}'],
+        ['an envelope with no document', '{"version":2,"phase":"prepared"}']
+    ]) {
+        const device = makeDevice({ deviceId: 'd_here' });
+        seed(device);
+        device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+        device.State.save({ silent: true });
+        const before = device.raw('scheduleData:v2');
+        device.putRaw('farkad:pendingReplace', raw);
+
+        const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+        again.State.load();
+        const cloud = makeCloud();
+        await connected(again, cloud);
+        await settle(TICK * 25);
+
+        check(`${label} is not applied as a restore`,
+            again.raw('scheduleData:v2') === before,
+            `${(again.raw('scheduleData:v2') || '').slice(0, 40)}`);
+        check(`${label} is left byte-for-byte`,
+            again.raw('farkad:pendingReplace') === raw,
+            String(again.raw('farkad:pendingReplace')));
+        check(`${label} goes through Recovery`,
+            again.global('Recovery').problems.some(p => p.key === 'farkad:pendingReplace'),
+            JSON.stringify(again.global('Recovery').problems.map(p => p.key)));
+        check(`${label} does not reach the cloud`,
+            cloud.attempts.filter(a => a.kind === 'save').length === 0);
+        check(`${label} leaves the roster intact`,
+            again.State.schedule.workers.length === 3,
+            String(again.State.schedule.workers.length));
+    }
+}
+
+{
+    suite('G14.7: the document always carries a valid stamp');
+
+    // A migrated v1 backup has no timestamp at all. The envelope used to capture the
+    // document BEFORE State.save stamped the schedule, so every retry sent updatedAt:
+    // null - which the real rules reject, forever.
+    const device = makeDevice();
+    seed(device);
+    const migrated = device.call('migrateV1', {
+        workers: ['דוד'], places: ['הרצליה'],
+        weekStartDate: '2026-08-07',
+        assignments: [{ index: 0, value: 'הרצליה' }]
+    }).schedule;
+    check('the migrated backup really has no stamp',
+        migrated.updatedAt === null, String(migrated.updatedAt));
+
+    given('prepared', device.Sync.prepareReplace(migrated) === true);
+    const envelope = device.Sync.pendingReplace();
+    check('the stored document has a string updatedAt',
+        typeof envelope.document.updatedAt === 'string',
+        JSON.stringify(envelope.document.updatedAt));
+    check('and a string updatedBy',
+        typeof envelope.document.updatedBy === 'string',
+        JSON.stringify(envelope.document.updatedBy));
+    check('with the roster the rules require',
+        Array.isArray(envelope.document.workers) && Array.isArray(envelope.document.places));
 }
 
 report();
