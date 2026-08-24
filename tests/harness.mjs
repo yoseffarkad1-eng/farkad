@@ -222,7 +222,13 @@ export function makeCloud(options = {}) {
         attempts: [],                      // every attempted write, accepted or not
         subscribers: [],
         // Set to a function to reject specific writes: (kind, payload) => Error | null
-        reject: options.reject || null
+        reject: options.reject || null,
+        // Set to a function to HOLD a write open: (kind, payload) => Promise | null.
+        // The call is made and counted immediately, as it is in the app, and the write
+        // does not land until the returned promise resolves. That gap is where a
+        // whole-document replacement can overtake an ordinary update, so it has to be
+        // something a test can open on purpose.
+        hold: options.hold || null
     };
 
     const offlineError = () => {
@@ -230,6 +236,24 @@ export function makeCloud(options = {}) {
         error.code = 'unavailable';
         return error;
     };
+
+    // Runs `apply` - the part that actually changes the document - either now or when
+    // whatever `hold` returned resolves.
+    //
+    // With no hold it runs SYNCHRONOUSLY, before the returned promise settles, because
+    // that is what Firestore does: the local echo is published inside the call. Making
+    // every write asynchronous here would quietly retire the tests that measure it.
+    //
+    // Called after guard(), so an attempt is still counted when the call is made rather
+    // than when it lands - which is what the app sees.
+    function landing(kind, payload, apply) {
+        const wait = cloud.hold ? cloud.hold(kind, payload) : null;
+        if (!wait) {
+            try { apply(); } catch (error) { return Promise.reject(error); }
+            return Promise.resolve();
+        }
+        return Promise.resolve(wait).then(apply);
+    }
 
     function guard(kind, payload) {
         cloud.attempts.push({ kind, payload });
@@ -266,38 +290,41 @@ export function makeCloud(options = {}) {
         update(patch) {
             const problem = guard('update', patch);
             if (problem) return Promise.reject(problem);
-            // Firestore refuses to update a document that is not there. The adapter's
-            // recovery from this is the thing under test, so it must be modelled.
-            if (!cloud.doc) {
-                const error = new Error('No document to update');
-                error.code = 'not-found';
-                return Promise.reject(error);
-            }
-            Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
-            cloud.writes.push({ kind: 'update', patch });
-            publish();
-            return Promise.resolve();
+            return landing('update', patch, () => {
+                // Firestore refuses to update a document that is not there. The adapter's
+                // recovery from this is the thing under test, so it must be modelled.
+                if (!cloud.doc) {
+                    const error = new Error('No document to update');
+                    error.code = 'not-found';
+                    throw error;
+                }
+                Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
+                cloud.writes.push({ kind: 'update', patch });
+                publish();
+            });
         },
         save(data) {
             const problem = guard('save', data);
             if (problem) return Promise.reject(problem);
-            cloud.doc = JSON.parse(JSON.stringify(data));
-            cloud.writes.push({ kind: 'save', data });
-            publish();
-            return Promise.resolve();
+            return landing('save', data, () => {
+                cloud.doc = JSON.parse(JSON.stringify(data));
+                cloud.writes.push({ kind: 'save', data });
+                publish();
+            });
         },
         create(data) {
             const problem = guard('create', data);
             if (problem) return Promise.reject(problem);
-            if (cloud.doc) {
-                const error = new Error('Document already exists');
-                error.code = 'already-exists';
-                return Promise.reject(error);
-            }
-            cloud.doc = JSON.parse(JSON.stringify(data));
-            cloud.writes.push({ kind: 'create', data });
-            publish();
-            return Promise.resolve();
+            return landing('create', data, () => {
+                if (cloud.doc) {
+                    const error = new Error('Document already exists');
+                    error.code = 'already-exists';
+                    throw error;
+                }
+                cloud.doc = JSON.parse(JSON.stringify(data));
+                cloud.writes.push({ kind: 'create', data });
+                publish();
+            });
         },
         archive(key, data) {
             const problem = guard('archive', { key, data });
@@ -338,4 +365,16 @@ export function makeCloud(options = {}) {
 // the app, so tests set FarkadSync.pushDelayMs low and wait a little longer than that.
 export function settle(ms = 30) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// A promise somebody else decides the fate of. How "an older write that is still open"
+// is spelled.
+export function deferred() {
+    let release;
+    let refuse;
+    const promise = new Promise((resolve, reject) => { release = resolve; refuse = reject; });
+    // Nothing is waiting on the rejection path until a test asks for one, and an
+    // unhandled rejection would take the run down with it.
+    promise.catch(() => {});
+    return { promise, release, refuse };
 }

@@ -25,6 +25,20 @@ const State = {
     migrationIssues: [],
 
     load() {
+        const result = this.loadRecord();
+
+        // A restore performed with no cloud connected is a transaction like any other -
+        // the schedule and the queue - and a crash between the two halves leaves the
+        // second one owed. There is no connect() coming to finish it on a device that
+        // has never had a cloud, so it is finished here, right after the disk has been
+        // read and before anything new can be written over it.
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.finishLocalReplace) {
+            FarkadSync.finishLocalReplace();
+        }
+        return result;
+    },
+
+    loadRecord() {
         let damaged = false;
         const v2 = Store.get(V2_KEY);
         if (v2) {
@@ -89,9 +103,16 @@ const State = {
         return { migrated: true, issues: result.issues, damaged };
     },
 
+    // Everything the journal is still holding, laid back over the schedule on the disk.
+    //
+    // Everything EXCEPT what an outstanding restore has superseded. Those entries
+    // describe the state that restore is replacing, so replaying them puts back exactly
+    // the days it removed - which is what a device looked like after a restore whose
+    // queue prune had been refused: the restored schedule on the disk, the old journal
+    // beside it, and the superseded days back on the screen at the next open.
     replayJournal() {
         if (typeof FarkadSync === 'undefined' || !FarkadSync.replayJournal) return;
-        FarkadSync.replayJournal(this.schedule);
+        FarkadSync.replayJournal(this.schedule, FarkadSync.supersededFloor());
     },
 
     // True only when the schedule is on the disk. Every caller that tells somebody
@@ -153,7 +174,7 @@ const State = {
             // ones being rolled back, and replaying them would put the edit straight
             // back on the screen it was just removed from.
             FarkadSync.reloadJournal();
-            FarkadSync.replayJournal(this.schedule);
+            FarkadSync.replayJournal(this.schedule, FarkadSync.supersededFloor());
         }
         return true;
     },

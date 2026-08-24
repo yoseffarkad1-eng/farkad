@@ -853,7 +853,7 @@ async function seedRoster(page) {
   check('status turns synced', (await page.evaluate(() => FarkadSync.status)) === 'synced');
 
   // the case this design exists for: three people building the same evening at once
-  const merged = await page.evaluate(() => {
+  const merged = await page.evaluate(async () => {
     const server = {};
     const apply = p => Object.keys(p).forEach(k => { server[k] = p[k]; });
     ['w_01', 'w_02', 'w_03'].forEach((workerId, i) => {
@@ -864,13 +864,17 @@ async function seedRoster(page) {
       sync._outbox = new Map();
       sync._sending = new Map();
       sync._loaded = true;
-      sync.saveOutbox = () => {};
+      sync.adoptJournal = candidate => { sync._outbox = candidate; return true; };
       sync._stamp = { updatedAt: `2026-08-12T18:0${i}:00.000Z`, updatedBy: `d${i}` };
       sync.adapter = { update(p) { apply(p); return Promise.resolve(); } };
       sync.setStatus = () => {};
       sync.edit(`days.2026-08-12.plan.${workerId}`, { entries: [{ placeId: 'p_01' }] });
       sync.flush();
     });
+    // Cloud writes are serialised now, so the request goes out on the next microtask
+    // rather than inside flush(). Reading the server synchronously would be reading it
+    // before any of the three had been sent.
+    await new Promise(done => setTimeout(done, 100));
     return Object.keys(server);
   });
   check('three people editing different workers all survive',
@@ -961,6 +965,11 @@ async function seedRoster(page) {
     // is the test tidying up after itself: a hung send is allowed to block the next one
     // for a while, which is the point of that guard.
     FarkadSync._sending = new Map();
+    // And the same for the write chain, which is the other thing a never-settling
+    // request holds up. In the app that resolves itself after stuckMs; here the point
+    // of the next check is the failure it reports, not how long the wait was.
+    FarkadSync._cloudChain = null;
+    FarkadSync._cloudOpen = 0;
     FarkadSync.adapter.update = () => Promise.reject(new Error('offline'));
     FarkadSync.edit('days.2026-08-12.actual.w_09', { entries: [] });
   });
@@ -2291,6 +2300,133 @@ async function seedRoster(page) {
   });
   check('only the newest three restore points are kept',
     kept.length === 3 && kept[0] === '2026-08-20', JSON.stringify(kept));
+  await page.context().close();
+}
+
+// ------------------------------------------------- what a half-finished restore says
+//
+// G15: four screens perform a restore, and every one of them reports the outcome through
+// tellRestoreResult. What must never come out of any of them is the plain "done" line
+// over a transaction that has not finished - the queue not pruned, an older cloud write
+// not yet settled, or the record of the restore still on the disk. That is the message
+// somebody reads before closing the app.
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+
+  // A snapshot, a cloud copy and something on the undo stack, so all four doors open.
+  await page.evaluate(() => {
+    Store.set('scheduleData:snap:2026-08-01', JSON.stringify(State.schedule));
+    Store.set('scheduleData:undoStack',
+      JSON.stringify([{ at: '2026-08-01T06:00:00.000Z', schedule: JSON.stringify(State.schedule) }]));
+    window.__archive = JSON.parse(JSON.stringify(State.schedule));
+    FarkadSync.archiveRead = () => Promise.resolve(window.__archive);
+  });
+
+  // Every stage that is NOT a finished restore, against every door.
+  const stages = [
+    ['queue', { ok: false, stage: 'queue' }],
+    ['finalize', { ok: false, stage: 'finalize' }],
+    ['ordering', { ok: false, stage: 'cloud', error: new Error('an earlier cloud write has not finished') }]
+  ];
+  const doors = [
+    ['a local restore point', () => restoreSnapshot('2026-08-01'), 'שוחזר.'],
+    ['a cloud copy', () => restoreFromCloud('2026-08-01'), 'שוחזר מהענן.'],
+    ['the way back from the last load', () => restoreLocalBackup(), 'שוחזר.']
+  ];
+
+  for (const [stageName, outcome] of stages) {
+    for (const [doorName, , successLine] of doors) {
+      const said = await page.evaluate(async ([stage, door]) => {
+        const real = FarkadSync.replaceEverything.bind(FarkadSync);
+        FarkadSync.replaceEverything = () => Promise.resolve(
+          stage.stage === 'cloud'
+            ? { ok: false, stage: 'cloud', error: new Error('an earlier cloud write has not finished') }
+            : stage);
+
+        const run = door === 0 ? restoreSnapshot('2026-08-01')
+          : door === 1 ? restoreFromCloud('2026-08-01')
+            : restoreLocalBackup();
+        await new Promise(done => setTimeout(done, 250));
+        document.getElementById('askOk').click();      // the "are you sure" dialog
+        await run;
+
+        FarkadSync.replaceEverything = real;
+        const told = {
+          title: document.getElementById('askTitle').textContent,
+          message: document.getElementById('askMessage').textContent
+        };
+        document.getElementById('askOk').click();
+        return told;
+      }, [outcome, doors.findIndex(d => d[0] === doorName)]);
+
+      check(`${doorName} does not report a plain "${successLine}" on a ${stageName} failure`,
+        said.title !== successLine && said.message !== successLine,
+        JSON.stringify(said));
+      check(`${doorName} says something about a ${stageName} failure`,
+        said.message.length > 0, JSON.stringify(said));
+      await page.waitForTimeout(120);
+    }
+  }
+
+  // The fourth door: a file dropped in. Same rule.
+  const imported = await page.evaluate(async () => {
+    const real = FarkadSync.replaceEverything.bind(FarkadSync);
+    FarkadSync.replaceEverything = () => Promise.resolve({ ok: false, stage: 'queue' });
+
+    const file = {
+      schemaVersion: 2,
+      workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }],
+      places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+      days: { '2026-07-01': { plan: {}, actual: {} } },
+      advances: {},
+      updatedAt: '2026-07-01T06:00:00.000Z', updatedBy: 'd_backup'
+    };
+    const before = Object.keys(State.schedule.days).join();
+    window.__importDone = importBackup({
+      target: {
+        value: 'x',
+        files: [new File([JSON.stringify(file)], 'backup.json', { type: 'application/json' })]
+      }
+    });
+    await new Promise(done => setTimeout(done, 400));
+    document.getElementById('askOk').click();
+    await new Promise(done => setTimeout(done, 400));
+
+    const told = {
+      title: document.getElementById('askTitle').textContent,
+      message: document.getElementById('askMessage').textContent
+    };
+    document.getElementById('askOk').click();
+    FarkadSync.replaceEverything = real;
+    return { told, before };
+  });
+  check('an imported file does not report a plain "הגיבוי נטען." on a queue failure',
+    imported.told.title !== 'הגיבוי נטען.' && imported.told.message !== 'הגיבוי נטען.',
+    JSON.stringify(imported.told));
+  check('and says what is actually unfinished',
+    imported.told.message.includes('לא') || imported.told.title.includes('לא'),
+    JSON.stringify(imported.told));
+
+  // And the control: a restore that DID finish still says so plainly, or the check
+  // above would pass on an app that never reports success at all.
+  const good = await page.evaluate(async () => {
+    const real = FarkadSync.replaceEverything.bind(FarkadSync);
+    FarkadSync.replaceEverything = () => Promise.resolve({ ok: true, stage: 'done' });
+    const run = restoreSnapshot('2026-08-01');
+    await new Promise(done => setTimeout(done, 250));
+    document.getElementById('askOk').click();
+    await run;
+    const told = document.getElementById('askTitle').textContent
+      + document.getElementById('askMessage').textContent;
+    document.getElementById('askOk').click();
+    FarkadSync.replaceEverything = real;
+    return told;
+  });
+  check('a restore that finished still says so', good.includes('שוחזר.'), JSON.stringify(good));
+
   await page.context().close();
 }
 

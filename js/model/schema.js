@@ -114,6 +114,100 @@ function validateRosterIds(raw) {
     return problems;
 }
 
+// ---------------------------------------------------------------- is it a schedule?
+
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Everything wrong with a document that claims to be a WHOLE schedule, in sentences.
+//
+// This is the gate on a whole-document replacement, and it exists because
+// normaliseSchedule is deliberately forgiving. It has to be: a half-finished remote
+// write, or a file from an older build, should be read for whatever is in it rather
+// than crash the app. So it turns {}, null, [] and {"workers":[],"places":[]} into an
+// EMPTY schedule without a word - which is the right answer for a document arriving
+// from the cloud and a catastrophic one for a record that is about to replace the
+// screen, the disk and the other two phones.
+//
+// Emptiness is NOT what is rejected here. A brand-new project restored from a backup
+// made on its first day is an empty schedule and a perfectly good one. What is rejected
+// is a document that does not carry the PARTS a schedule has - the two rosters, the
+// days, the advances - because a document missing them is not an empty schedule, it is
+// something else that would silently normalise into one.
+function fullScheduleProblems(raw) {
+    if (!isPlainObject(raw)) return ['הרישום אינו מסמך של לוח עבודה.'];
+
+    const problems = [];
+    if (!Array.isArray(raw.workers)) problems.push('רשימת העובדים חסרה מהרישום.');
+    if (!Array.isArray(raw.places)) problems.push('רשימת האתרים חסרה מהרישום.');
+    if (!isPlainObject(raw.days)) problems.push('רשימת הימים חסרה מהרישום.');
+    if (!isPlainObject(raw.advances)) problems.push('רשימת המקדמות חסרה מהרישום.');
+    // No point naming a bad date inside a `days` that is not there.
+    if (problems.length > 0) return problems;
+
+    // Missing, empty or duplicated ids. The same check the import runs, rather than a
+    // second weaker one: two rows claiming to be the same person is ambiguous wherever
+    // it arrives from, and the answer is to stop, not to renumber one of them.
+    validateRosterIds(raw).forEach(problem => problems.push(problem));
+
+    Object.keys(raw.days).forEach(date => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            problems.push(`התאריך "${date}" ברישום אינו תקין.`);
+            return;
+        }
+        const day = raw.days[date];
+        if (!isPlainObject(day)) {
+            problems.push(`היום ${date} ברישום אינו תקין.`);
+            return;
+        }
+        // A day with neither side is not a day. normaliseSchedule would hand it back as
+        // an empty one, which reads on screen as "nobody worked" rather than as a fault.
+        if (day.plan === undefined && day.actual === undefined) {
+            problems.push(`ליום ${date} אין רישום כלל.`);
+            return;
+        }
+
+        ['plan', 'actual'].forEach(layer => {
+            if (day[layer] === undefined) return;
+            if (!isPlainObject(day[layer])) {
+                problems.push(`הרישום של ${date} אינו תקין.`);
+                return;
+            }
+            Object.keys(day[layer]).forEach(workerId => {
+                const record = day[layer][workerId];
+                if (!isPlainObject(record)) {
+                    problems.push(`הרישום של ${workerId} ביום ${date} אינו תקין.`);
+                    return;
+                }
+                if (record.entries !== undefined && !Array.isArray(record.entries)) {
+                    problems.push(`הרישומים של ${workerId} ביום ${date} אינם רשימה.`);
+                    return;
+                }
+                (record.entries || []).forEach(entry => {
+                    if (!isPlainObject(entry) || !entry.placeId) {
+                        problems.push(`רישום בלי אתר אצל ${workerId} ביום ${date}.`);
+                    }
+                });
+            });
+        });
+    });
+
+    Object.keys(raw.advances).forEach(id => {
+        const item = raw.advances[id];
+        if (!isPlainObject(item)) {
+            problems.push(`המקדמה ${id} ברישום אינה תקינה.`);
+            return;
+        }
+        if (!item.workerId) problems.push(`המקדמה ${id} אינה משויכת לעובד.`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) {
+            problems.push(`למקדמה ${id} אין תאריך תקין.`);
+        }
+    });
+
+    return problems;
+}
+
 // ---------------------------------------------------------------- the wire form
 //
 // The document as it is stored in the cloud. It is the local schedule plus the roster a
@@ -132,7 +226,7 @@ function validateRosterIds(raw) {
 //
 // The arrays are still written, and that is deliberate. A phone that has not updated yet
 // reads them and sees a correct roster; it cannot see `roster` and never writes to it.
-// They can be dropped once all three devices are past v73 - not before.
+// They can be dropped once all three devices are past v74 - not before.
 function cloudDocument(schedule) {
     const wire = JSON.parse(JSON.stringify(schedule));
     wire.roster = rosterDocument(schedule);

@@ -455,6 +455,7 @@ function tellRestoreResult(result, done) {
 
     if (result.stage === 'prepare') { askTell(noRetryRecordNotice()); return; }
     if (result.stage === 'queue') { askTell(unfinishedRestoreNotice()); return; }
+    if (result.stage === 'finalize') { askTell(unfinishedTransactionNotice()); return; }
     if (result.stage === 'local') {
         // A cancellation that could not be confirmed means the intent is still on the
         // disk and the next session will act on it. Saying "nothing changed" would be
@@ -474,6 +475,19 @@ function unfinishedRestoreNotice() {
         message: 'המצב המשוחזר נשמר במכשיר, אבל לא הצלחנו לסיים את תור השליחה, ולכן ' +
             'השחזור עדיין לא הסתיים ולא נשלח למכשירים האחרים. פנה מקום במכשיר - ' +
             'הוא ימשיך מעצמו.'
+    };
+}
+
+// The restore itself is done and on the device - what could not be taken off the disk is
+// the note saying one was owed. Nothing is lost and nothing will be undone: the note is
+// replayed at the next open, and applying the same restore twice is applying it once.
+// Still not a finished piece of work, so it is not reported as one.
+function unfinishedTransactionNotice() {
+    return {
+        title: 'השחזור בוצע - לא הכול הסתיים',
+        message: 'המצב המשוחזר נשמר במכשיר, אבל לא הצלחנו למחוק את הבקשה לשחזר. ' +
+            'שום דבר לא ילך לאיבוד - הבקשה תיסגר מעצמה בפתיחה הבאה. ' +
+            'פנה מקום במכשיר כדי שזה יקרה.'
     };
 }
 
