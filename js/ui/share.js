@@ -498,15 +498,39 @@ function peekUndoState() {
 
 // Taken off, once the state it holds has been accepted. Matched on content so that a
 // push which happened in between cannot cause the wrong entry to be dropped.
+// Taken off, once the state it holds has been accepted - or once the restore it was
+// written for has been abandoned. Matched on content so that a push which happened in
+// between cannot cause the wrong entry to be dropped.
+//
+// Returns whether the entry is genuinely gone. The stack write is VERIFIED: an ignored
+// write left the app believing an entry had been consumed while the disk still held it,
+// which is the same class of lie as a tick over a save that did not happen.
+//
+// The single slot is rewritten rather than removed when the stack still has entries,
+// because that slot is what an older build reads and what peekUndoState falls back to:
+// leaving it pointing at a state that has just been consumed would hand the next press a
+// way back the stack no longer offers.
 function dropUndoState(raw) {
     const stack = readUndoStack();
     const at = stack.findIndex(entry => entry && entry.schedule === raw);
+
+    let gone = true;
     if (at !== -1) {
         stack.splice(at, 1);
-        Store.set(UNDO_STACK_KEY, JSON.stringify(stack));
-        return;
+        gone = Store.setVerified(UNDO_STACK_KEY, JSON.stringify(stack));
     }
-    if (Store.get(UNDO_KEY) === raw) Store.remove(UNDO_KEY);
+
+    if (Store.get(UNDO_KEY) === raw) {
+        const next = stack.find(entry => entry && typeof entry.schedule === 'string');
+        if (next) {
+            if (!Store.setVerified(UNDO_KEY, next.schedule)) gone = false;
+        } else {
+            Store.remove(UNDO_KEY);
+            if (Store.durableGet(UNDO_KEY) === raw) gone = false;
+        }
+    }
+
+    return gone;
 }
 
 // One place decides what to say about a restore, so the four that perform one cannot
@@ -882,16 +906,31 @@ async function restoreLocalBackup() {
     if (!document) return;
 
     // The state being left is itself pushed, so this is reversible in both directions.
+    // It goes on FIRST, before anything is replaced: a close between any two steps has to
+    // leave something readable.
+    const leaving = JSON.stringify(State.schedule);
     if (!pushUndoState(State.schedule)) {
         askTell(noWayBackNotice());
         return;
     }
 
-    // Now, and only now. Popped BEFORE the replacement so that pressing the button twice
-    // walks further back rather than flipping between the last two states forever -
-    // pushUndoState above has already put the state being left on top of it, so the entry
-    // being dropped here is the one about to be restored.
-    dropUndoState(raw);
+    const result = await FarkadSync.replaceEverything(normaliseSchedule(document));
 
-    tellRestoreResult(await FarkadSync.replaceEverything(normaliseSchedule(document)), 'שוחזר.');
+    if (result.ok) {
+        // Now, and only now. Dropping it before the transaction had proved itself meant
+        // a restore the app correctly REFUSED still destroyed the state it was refusing
+        // to restore: the entry left the stack, the single slot was overwritten with the
+        // state that had not moved, and the way back was gone with nothing said about it.
+        //
+        // Dropped after the push above, so pressing the button twice walks further back
+        // rather than flipping between the last two states forever.
+        dropUndoState(raw);
+    } else {
+        // Nothing was replaced, so the way back that was written a moment ago is a way
+        // back to a state nothing moved away from. Taken off again, so the stack is
+        // exactly what it was and the next press reaches the same entry as this one.
+        dropUndoState(leaving);
+    }
+
+    tellRestoreResult(result, 'שוחזר.');
 }

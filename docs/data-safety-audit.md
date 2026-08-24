@@ -9,7 +9,7 @@ the live site still serves v58.
 | Baseline actually used | `182a51f` (v58) — see below |
 | **Last behaviour change** | `109a029` — *A restore reaches this device before it reaches the cloud* |
 | **Branch HEAD** | this documentation commit |
-| Version | v75 |
+| Version | v76 |
 
 **Code HEAD and branch HEAD are not the same thing.** An earlier version of this file
 called a documentation commit the "Final HEAD", which was misleading. The table above
@@ -496,7 +496,7 @@ anything found under it on an old device is still a real copy worth keeping.
    write and does not write it. Nobody can read out of this data what a man was actually
    paid in March.
 2. **Legacy roster arrays.** Still written, for devices that have not updated. Not to be
-   removed before all three phones are confirmed past v75 and there is a rollback plan.
+   removed before all three phones are confirmed past v76 and there is a rollback plan.
 3. **Firestore rules.** Unchanged. Nothing here needs them changed and nothing needs
    republishing in the console.
 4. **UX notes.** None implemented, per the brief.

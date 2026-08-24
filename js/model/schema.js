@@ -512,6 +512,106 @@ function readReplacementDocument(raw) {
     return { document: problems.length === 0 ? upgraded : null, problems };
 }
 
+// ---------------------------------------------------------------- the journal, exactly
+//
+// A queue entry is a (path, value) pair that will be written into a schedule at boot and
+// merged into the cloud document on the way out. Both of those happen with no further
+// checking, so this is where an entry has to be recognised as one this app wrote.
+//
+// Shape is not enough. `days.2026-08-12.estimate.w_01` is four dotted segments of safe
+// characters and passes any structural test - and replaying it puts a layer called
+// `estimate` into the schedule in memory. The next ordinary edit writes that schedule to
+// the disk, and the reopen after THAT quarantines scheduleData:v2 and stops recording
+// altogether: a single bad queue entry, three steps later, is an app that will not take
+// another day's work.
+//
+// So the families are named, one by one, and everything else is refused.
+
+// A segment that would land on Object.prototype rather than in the record.
+const POISON_SEGMENTS = ['__proto__', 'prototype', 'constructor'];
+
+function isSafeSegment(value) {
+    return isSafeId(value) && POISON_SEGMENTS.indexOf(value) === -1;
+}
+
+// Everything wrong with one journal entry. Empty means it is one.
+function journalEntryProblems(path, value) {
+    if (typeof path !== 'string' || path.length === 0 || path.length > 300) {
+        return ['a path that is not a path'];
+    }
+    const parts = path.split('.');
+    if (parts.some(part => part.length === 0)) return ['a path with an empty segment'];
+    if (parts.some(part => POISON_SEGMENTS.indexOf(part) !== -1)) {
+        return ['a path that would land on the prototype'];
+    }
+
+    // days.<date>.<layer>.<workerId> - one person, one day, one side of it.
+    if (parts[0] === 'days') {
+        if (parts.length !== 4) return ['a day path with the wrong number of segments'];
+        if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
+        if (parts[2] !== 'plan' && parts[2] !== 'actual') return ['a layer nobody wrote'];
+        if (!isSafeSegment(parts[3])) return ['a day path with an unusable worker id'];
+        // `known` is null: the queue is a list of edits, not a document, and the roster
+        // they belong to may still be arriving.
+        return recordProblems(null, parts[1], parts[3], value);
+    }
+
+    // advances.<id> - or a deletion of one, which travels as null.
+    if (parts[0] === 'advances') {
+        if (parts.length !== 2) return ['an advance path with the wrong number of segments'];
+        if (!isSafeSegment(parts[1])) return ['an advance path with an unusable id'];
+        if (value === null) return [];
+        return advanceProblems({ advances: { [parts[1]]: value } }, null);
+    }
+
+    if (parts[0] === 'roster') {
+        // roster.workerOrder / roster.placeOrder - the order the lists are read in.
+        if (parts.length === 2) {
+            if (parts[1] !== 'workerOrder' && parts[1] !== 'placeOrder') {
+                return ['a roster path nobody wrote'];
+            }
+            if (!Array.isArray(value)) return ['an order that is not a list'];
+            const seen = new Set();
+            for (let i = 0; i < value.length; i += 1) {
+                if (!isSafeSegment(value[i])) return ['an order naming an unusable id'];
+                if (seen.has(value[i])) return ['an order naming the same one twice'];
+                seen.add(value[i]);
+            }
+            return [];
+        }
+
+        // roster.workers.<id> / roster.places.<id> - one person or one site, or a
+        // removal, which travels as null.
+        if (parts.length !== 3) return ['a roster path with the wrong number of segments'];
+        const kind = parts[1];
+        if (kind !== 'workers' && kind !== 'places') return ['a roster path nobody wrote'];
+        if (!isSafeSegment(parts[2])) return ['a roster path with an unusable id'];
+        if (value === null) return [];
+        if (!isPlainObject(value)) return ['a roster entry that is not a record'];
+        if (String(value.id) !== parts[2]) return ['a roster entry filed under another id'];
+        return entityProblems(value, kind, kind === 'workers' ? 'עובד' : 'אתר');
+    }
+
+    // The legacy whole-array form. Still written on purpose, for a phone that has not
+    // updated and reads nothing else - see editRoster.
+    if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+        if (!Array.isArray(value)) return ['a roster array that is not an array'];
+        const seen = new Set();
+        for (let i = 0; i < value.length; i += 1) {
+            const item = value[i];
+            if (!isPlainObject(item)) return ['a roster array holding something else'];
+            if (!isSafeSegment(item.id)) return ['a roster array entry with an unusable id'];
+            if (seen.has(item.id)) return ['a roster array naming the same id twice'];
+            seen.add(item.id);
+            const problems = entityProblems(item, parts[0], parts[0] === 'workers' ? 'עובד' : 'אתר');
+            if (problems.length > 0) return problems;
+        }
+        return [];
+    }
+
+    return ['a path root nobody wrote'];
+}
+
 // ---------------------------------------------------------------- the wire form
 //
 // The document as it is stored in the cloud. It is the local schedule plus the roster a
@@ -530,7 +630,7 @@ function readReplacementDocument(raw) {
 //
 // The arrays are still written, and that is deliberate. A phone that has not updated yet
 // reads them and sees a correct roster; it cannot see `roster` and never writes to it.
-// They can be dropped once all three devices are past v75 - not before.
+// They can be dropped once all three devices are past v76 - not before.
 function cloudDocument(schedule) {
     const wire = JSON.parse(JSON.stringify(schedule));
     wire.roster = rosterDocument(schedule);

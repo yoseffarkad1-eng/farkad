@@ -4536,4 +4536,417 @@ function watchDialogs(device, answer = true) {
         again.call('isAbsent', again.State.schedule, '2026-08-12', 'w_02', 'actual') === true);
 }
 
+// ---------------------------------------------------------------- G17: the last three
+
+// A device with a real way back on the stack, and an older one behind it.
+function undoFixture() {
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+
+    // A and B: two states worth going back to, frozen as text so the tests can compare
+    // them byte-for-byte rather than by whatever the builder produces today.
+    const stateWithDay = date => JSON.stringify(device.call('normaliseSchedule', {
+        schemaVersion: 2,
+        workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: { [date]: { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+        advances: {},
+        updatedAt: `${date}T06:00:00.000Z`, updatedBy: 'd_backup'
+    }));
+
+    const A = stateWithDay('2026-07-01');
+    const B = stateWithDay('2026-06-01');
+    device.Store.set('scheduleData:undoStack', JSON.stringify([
+        { at: '2026-07-01T06:00:00.000Z', schedule: A },
+        { at: '2026-06-01T06:00:00.000Z', schedule: B }
+    ]));
+    device.Store.set('scheduleData:v2backup', A);
+
+    // C, the state actually on screen.
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    return { device, A, B };
+}
+
+for (const [label, arm] of [
+    ['the record cannot be written', device => device.setQuota(key => key === 'farkad:pendingReplace')],
+    ['the schedule cannot be written', device => device.setQuota(key => key === 'scheduleData:v2')]
+]) {
+    suite(`G17.1: a refused restore does not eat the way back (${label})`);
+
+    const { device, A, B } = undoFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    const said = watchDialogs(device);
+    const stackBefore = device.raw('scheduleData:undoStack');
+    const screenBefore = dayKeys(device.State.schedule);
+    arm(device);
+
+    await device.call('restoreLocalBackup');
+    device.setQuota(null);
+
+    check('the restore was refused', said.some(line => line.title === 'לא בוצע שחזור'),
+        JSON.stringify(said));
+    check('the screen still shows what it showed',
+        dayKeys(device.State.schedule) === screenBefore, dayKeys(device.State.schedule));
+    check('the way back is still the first thing on the stack',
+        JSON.parse(device.raw('scheduleData:undoStack'))[0].schedule === A,
+        String(device.raw('scheduleData:undoStack')).slice(0, 80));
+    check('the older one behind it is still there too',
+        JSON.parse(device.raw('scheduleData:undoStack'))
+            .some(entry => entry.schedule === B));
+    check('the stack is exactly what it was - nothing pushed either',
+        device.raw('scheduleData:undoStack') === stackBefore,
+        String(device.raw('scheduleData:undoStack')).slice(0, 80));
+    check('the single slot was not overwritten with the state that never moved',
+        device.raw('scheduleData:v2backup') === A,
+        String(device.raw('scheduleData:v2backup')).slice(0, 60));
+    check('and the next press still reaches it',
+        device.call('peekUndoState') === A);
+
+    // With the fault gone it works, and it is A that comes back.
+    await device.call('restoreLocalBackup');
+    await settle(TICK * 30);
+    check('once the fault is gone the same way back is the one restored',
+        dayKeys(device.State.schedule) === '2026-07-01', dayKeys(device.State.schedule));
+}
+
+{
+    suite('G17.1: pressing it again undoes the undo, and loses nothing behind it');
+
+    const { device, A, B } = undoFixture();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+    watchDialogs(device);
+
+    await device.call('restoreLocalBackup');
+    await settle(TICK * 30);
+    check('the first press restores A', dayKeys(device.State.schedule) === '2026-07-01',
+        dayKeys(device.State.schedule));
+    check('A is off the stack now',
+        !JSON.parse(device.raw('scheduleData:undoStack'))
+            .some(entry => entry.schedule === A));
+    check('and B is still behind it',
+        JSON.parse(device.raw('scheduleData:undoStack'))
+            .some(entry => entry.schedule === B));
+    check('the single slot points at the state this restore left, not at A',
+        device.raw('scheduleData:v2backup') !== A,
+        String(device.raw('scheduleData:v2backup')).slice(0, 60));
+
+    // The second press undoes the first: restoreLocalBackup pushes the state it leaves,
+    // by design, so the pair is reversible in both directions. What matters here is that
+    // walking back and forth over the top of the stack never consumes what is under it.
+    await device.call('restoreLocalBackup');
+    await settle(TICK * 30);
+    check('the second press goes back to where the first one started',
+        dayKeys(device.State.schedule) === '2026-08-12', dayKeys(device.State.schedule));
+    check('and B is still behind them, untouched',
+        JSON.parse(device.raw('scheduleData:undoStack'))
+            .some(entry => entry.schedule === B),
+        String(device.raw('scheduleData:undoStack')).slice(0, 100));
+
+    await device.call('restoreLocalBackup');
+    await settle(TICK * 30);
+    check('a third press still finds A rather than nothing',
+        dayKeys(device.State.schedule) === '2026-07-01', dayKeys(device.State.schedule));
+    check('and B has still not been skipped past or dropped',
+        JSON.parse(device.raw('scheduleData:undoStack'))
+            .some(entry => entry.schedule === B),
+        String(device.raw('scheduleData:undoStack')).slice(0, 100));
+    check('the stack never grew past what it keeps',
+        JSON.parse(device.raw('scheduleData:undoStack')).length <= 3,
+        String(JSON.parse(device.raw('scheduleData:undoStack')).length));
+}
+
+{
+    suite('G17.2: a damaged companion is never read past, and never recomputed');
+
+    // The setup the report names: the companion writes, replacing the primary record does
+    // not, a day is recorded after the restore was asked for, and then the companion is
+    // corrupted while the bare v71 record beside it is left alone.
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.putRaw('farkad:pendingReplace', V71_RECORD);
+
+    const half = makeDevice({
+        storage: device.dump(), deviceId: 'd_here',
+        quota: (key, value) => key === 'farkad:pendingReplace' && value.includes('"version":2')
+    });
+    half.State.load();
+    const boundary = half.Sync.pendingReplace().supersedesSeq;
+    given('the boundary was frozen at the pre-restore queue', boundary === 1, String(boundary));
+    given('the companion holds it',
+        String(half.raw('farkad:pendingReplace:v71')).includes('"version":2'));
+
+    check('a day recorded now is accepted',
+        record(half, '2026-08-20', 'w_02', 'p_02') === true);
+    const entry = JSON.parse(half.raw(half.Sync.activeOutboxKey()))
+        .items['days.2026-08-20.actual.w_02'];
+    given('and it is numbered above the boundary', entry.seq > boundary,
+        `${entry.seq} vs ${boundary}`);
+
+    // The companion is damaged. The bare v71 primary is untouched.
+    const damaged = makeDevice({ storage: half.dump(), deviceId: 'd_here' });
+    damaged.putRaw('farkad:pendingReplace:v71', '{"version":2,"phase":"pre');
+    const companionRaw = damaged.raw('farkad:pendingReplace:v71');
+
+    const first = makeDevice({ storage: damaged.dump(), deviceId: 'd_here' });
+    first.State.load();
+
+    check('the boundary is not recomputed',
+        first.Sync.pendingReplace() === null,
+        JSON.stringify(first.Sync.pendingReplace()));
+    check('the damaged companion is kept byte-for-byte',
+        first.raw('farkad:pendingReplace:v71') === companionRaw,
+        String(first.raw('farkad:pendingReplace:v71')));
+    check('the bare v71 record is kept byte-for-byte too',
+        first.raw('farkad:pendingReplace') === V71_RECORD);
+    check('and it goes through Recovery rather than passing unnoticed',
+        first.global('Recovery').problems.some(p => p.key === 'farkad:pendingReplace:v71'),
+        JSON.stringify(first.global('Recovery').problems.map(p => p.key)));
+    check('a verified copy of it was taken',
+        first.raw('farkad:pendingReplace:v71:damaged') !== null);
+    check('the transaction is held rather than run',
+        first.Sync.replaceHeld === true);
+    check('the day recorded after the restore is still on the screen',
+        dayKeys(first.State.schedule).includes('2026-08-20'),
+        dayKeys(first.State.schedule));
+    check('and still queued', first.Sync.pendingPaths().includes('days.2026-08-20.actual.w_02'),
+        JSON.stringify(first.Sync.pendingPaths()));
+
+    const cloud = makeCloud();
+    first.Sync.pushDelayMs = TICK;
+    first.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+    check('nothing is sent while the boundary cannot be trusted',
+        cloud.attempts.filter(a => a.kind === 'save').length === 0,
+        String(cloud.attempts.filter(a => a.kind === 'save').length));
+
+    // TWO REOPENS. The day must survive both, and must never be superseded.
+    const second = makeDevice({ storage: first.dump(), deviceId: 'd_here' });
+    second.State.load();
+    check('after the first reopen the day is still here',
+        dayKeys(second.State.schedule).includes('2026-08-20'),
+        dayKeys(second.State.schedule));
+    check('and the companion is still untouched',
+        second.raw('farkad:pendingReplace:v71') === companionRaw);
+
+    const third = makeDevice({ storage: second.dump(), deviceId: 'd_here' });
+    third.State.load();
+    check('after the second reopen too',
+        dayKeys(third.State.schedule).includes('2026-08-20'),
+        dayKeys(third.State.schedule));
+    check('and the boundary was never recomputed to swallow it',
+        third.Sync.pendingReplace() === null);
+
+    // The export has to carry both, or the person cannot hand any of it to anybody.
+    const exported = third.global('Recovery').rawRecords();
+    check('the export carries the damaged companion',
+        exported['farkad:pendingReplace:v71'] === companionRaw,
+        JSON.stringify(Object.keys(exported)));
+    check('and the v71 record it belongs to',
+        exported['farkad:pendingReplace'] === V71_RECORD);
+}
+
+{
+    suite('G17.2: a companion belonging to a different restore is not borrowed');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.putRaw('farkad:pendingReplace', V71_RECORD);
+
+    // Perfectly readable, and about something else entirely.
+    const stranger = JSON.stringify({
+        version: 2, phase: 'prepared', transactionId: 'legacy_other', supersedesSeq: 99,
+        cloud: true,
+        document: device.call('cloudDocument', device.call('normaliseSchedule', {
+            workers: device.State.schedule.workers, places: device.State.schedule.places,
+            days: { '2026-01-01': { plan: {}, actual: {} } }, advances: {},
+            updatedAt: '2026-01-01T06:00:00.000Z', updatedBy: 'd_other'
+        }))
+    });
+    device.putRaw('farkad:pendingReplace:v71', stranger);
+
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+
+    check('its boundary is not applied to this restore',
+        again.Sync.pendingReplace() === null,
+        JSON.stringify(again.Sync.pendingReplace()));
+    check('the stranger is kept byte-for-byte, not written over',
+        again.raw('farkad:pendingReplace:v71') === stranger);
+    check('the v71 record is kept too',
+        again.raw('farkad:pendingReplace') === V71_RECORD);
+    check('and it is reported rather than passed over',
+        again.global('Recovery').problems.some(p => p.key === 'farkad:pendingReplace:v71'));
+}
+
+{
+    suite('G17.3: a queue entry that is not a Farkad journal entry is corruption');
+
+    const good = { entries: [{ placeId: 'p_01' }] };
+    const queue = (path, value, seq = 1) =>
+        JSON.stringify({ seq, items: { [path]: { value, seq } } });
+
+    for (const [label, raw] of [
+        ['a layer nobody wrote', queue('days.2026-08-12.estimate.w_01', good)],
+        ['a root nobody wrote', queue('schedule.2026-08-12', good)],
+        ['a day path with three segments', queue('days.2026-08-12.actual', good)],
+        ['a day path with five', queue('days.2026-08-12.actual.w_01.extra', good)],
+        ['a date that does not exist', queue('days.2026-02-30.actual.w_01', good)],
+        ['a date that is not a date', queue('days.yesterday.actual.w_01', good)],
+        ['a worker id with a dot', queue('days.2026-08-12.actual.w.01', good)],
+        ['a segment that lands on the prototype',
+            queue('days.2026-08-12.actual.__proto__', good)],
+        ['a roster path with a prototype segment', queue('roster.workers.constructor', { id: 'constructor' })],
+        ['a day value that is not a record', queue('days.2026-08-12.actual.w_01', 7)],
+        ['a day value with entries that are not a list',
+            queue('days.2026-08-12.actual.w_01', { entries: 'p_01' })],
+        ['a day value with an entry with no site',
+            queue('days.2026-08-12.actual.w_01', { entries: [{}] })],
+        ['a day value with a rate nobody has',
+            queue('days.2026-08-12.actual.w_01', { entries: [{ placeId: 'p_01', rate: 'triple' }] })],
+        ['a day value with a frozen rate that is not a number',
+            queue('days.2026-08-12.actual.w_01', { entries: [], rates: { daily: 'x' } })],
+        ['an advance with no worker', queue('advances.a_01', { date: '2026-08-12', amount: 5 })],
+        ['an advance on a day that does not exist',
+            queue('advances.a_01', { workerId: 'w_01', date: '2026-02-30', amount: 5 })],
+        ['an advance whose amount is not a number',
+            queue('advances.a_01', { workerId: 'w_01', date: '2026-08-12', amount: 'x' })],
+        ['an advance path with three segments',
+            queue('advances.a_01.amount', 5)],
+        ['a roster entry filed under another id',
+            queue('roster.workers.w_01', { id: 'w_02', name: 'x' })],
+        ['a roster entry that is not a record', queue('roster.workers.w_01', 'דוד')],
+        ['an order that is not a list', queue('roster.workerOrder', 'w_01')],
+        ['an order naming the same man twice', queue('roster.workerOrder', ['w_01', 'w_01'])],
+        ['an order naming an unusable id', queue('roster.workerOrder', ['w.01'])],
+        ['a roster path nobody wrote', queue('roster.crew.w_01', { id: 'w_01' })],
+        ['a legacy array that is not an array', queue('workers', { w_01: {} })],
+        ['a legacy array holding something else', queue('workers', ['דוד'])],
+        ['a legacy array with a duplicate id',
+            queue('workers', [{ id: 'w_01', name: 'a' }, { id: 'w_01', name: 'b' }])]
+    ]) {
+        const device = makeDevice({ storage: { 'farkad:outbox': raw }, deviceId: 'd_here' });
+        seed(device);
+        const cloud = makeCloud();
+        await connected(device, cloud);
+        await wait();
+
+        check(`${label}: the slot is not chosen`,
+            device.Sync.activeOutboxKey() !== 'farkad:outbox',
+            String(device.Sync.activeOutboxKey()));
+        check(`${label}: it goes through Recovery`,
+            device.global('Recovery').problems.some(p => p.key === 'farkad:outbox'));
+        check(`${label}: a verified copy is taken`,
+            device.raw('farkad:outbox:damaged') !== null);
+        check(`${label}: nothing from it was replayed onto the schedule`,
+            device.State.schedule.days['2026-08-12'] === undefined
+            && device.State.schedule.days['2026-02-30'] === undefined,
+            dayKeys(device.State.schedule));
+        check(`${label}: nothing from it reached the cloud`,
+            cloud.writes.every(write => Object.keys(write.patch || write.data || {})
+                .every(key => key.indexOf('estimate') === -1 && key.indexOf('2026-02-30') === -1)),
+            JSON.stringify(cloud.writes.map(w => Object.keys(w.patch || w.data || {}))));
+
+        // Recovery's own rule: the raw bytes are copied, the person is told, and once
+        // that is acknowledged recording carries on - in the next slot along, never over
+        // the record that is being held.
+        given(`${label}: acknowledging the copy lifts the hold`,
+            device.global('Recovery').acknowledge() === true);
+        check(`${label}: a day can still be recorded`,
+            record(device, '2026-09-01', 'w_01', 'p_01') === true);
+        check(`${label}: and it went to a slot of its own`,
+            device.Sync.activeOutboxKey() !== 'farkad:outbox',
+            String(device.Sync.activeOutboxKey()));
+        check(`${label}: the original is byte-for-byte what it was`,
+            device.raw('farkad:outbox') === raw, String(device.raw('farkad:outbox')));
+
+        // Two reopens. The point is that the SCHEDULE is never poisoned: the damaged
+        // queue is held every time, and the record of the work is readable every time.
+        const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+        again.State.load();
+        check(`${label}: the first reopen still has the day`,
+            dayKeys(again.State.schedule) === '2026-09-01', dayKeys(again.State.schedule));
+        check(`${label}: and the schedule itself was never quarantined`,
+            !again.global('Recovery').problems.some(p => p.key === 'scheduleData:v2'),
+            JSON.stringify(again.global('Recovery').problems.map(p => p.key)));
+        given(`${label}: acknowledging again lifts the hold`,
+            again.global('Recovery').acknowledge() === true);
+        check(`${label}: and recording carries on`,
+            record(again, '2026-09-02', 'w_01', 'p_01') === true);
+
+        const third = makeDevice({ storage: again.dump(), deviceId: 'd_here' });
+        third.State.load();
+        check(`${label}: the second reopen has both days`,
+            dayKeys(third.State.schedule) === '2026-09-01,2026-09-02',
+            dayKeys(third.State.schedule));
+        check(`${label}: the schedule is still not quarantined`,
+            !third.global('Recovery').problems.some(p => p.key === 'scheduleData:v2'),
+            JSON.stringify(third.global('Recovery').problems.map(p => p.key)));
+        check(`${label}: and the original is still exactly as it was`,
+            third.raw('farkad:outbox') === raw);
+    }
+}
+
+{
+    suite('G17.3: every journal path this app writes is still accepted');
+
+    const model = makeDevice({ deviceId: 'd_model' });
+    const ok = (path, value) => model.call('journalEntryProblems', path, value).length === 0;
+
+    check('a day', ok('days.2026-08-12.actual.w_01',
+        { entries: [{ placeId: 'p_01', rate: 'extra', extraHours: 2 }], rates: { daily: 400, hourly: 50 } }));
+    check('a plan day', ok('days.2026-08-12.plan.w_01', { entries: [{ placeId: 'p_01' }] }));
+    check('an absence', ok('days.2026-08-12.actual.w_01', { absent: true, entries: [] }));
+    check('a cleared day', ok('days.2026-08-12.actual.w_01', { entries: [] }));
+    check('a leap day', ok('days.2024-02-29.actual.w_01', { entries: [] }));
+    check('an advance', ok('advances.a_01',
+        { id: 'a_01', workerId: 'w_01', date: '2026-08-12', amount: 500, note: '' }));
+    check('an advance being removed', ok('advances.a_01', null));
+    check('one person', ok('roster.workers.w_01',
+        { id: 'w_01', name: 'דוד', dailyRate: 400, hourlyRate: 50, active: true }));
+    check('one person being removed', ok('roster.workers.w_01', null));
+    check('one site', ok('roster.places.p_01', { id: 'p_01', name: 'הרצליה', active: true }));
+    check('the order of the crew', ok('roster.workerOrder', ['w_01', 'w_02']));
+    check('the order of the sites', ok('roster.placeOrder', ['p_01']));
+    check('an empty order', ok('roster.workerOrder', []));
+    check('the legacy crew array', ok('workers',
+        [{ id: 'w_01', name: 'דוד', dailyRate: 400, hourlyRate: 50, active: true }]));
+    check('the legacy site array', ok('places', [{ id: 'p_01', name: 'הרצליה', active: true }]));
+    check('an empty legacy array', ok('workers', []));
+
+    // And the real thing, end to end: a full roster edit still queues nothing the
+    // reader will refuse.
+    const device = makeDevice({ deviceId: 'd_here' });
+    seed(device);
+    const cloud = makeCloud({ online: false });
+    await connected(device, cloud);
+    device.State.schedule.workers.push(
+        { id: device.State.nextWorkerId(), name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.commitRoster();
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.State.commit(device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-12', 200, ''));
+    await wait();
+
+    const raw = device.raw(device.Sync.activeOutboxKey());
+    given('there is a real queue to read back', JSON.parse(raw).seq > 3, String(raw).slice(0, 40));
+
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('a queue the app just wrote reads back as a queue',
+        again.Sync.activeOutboxKey() === device.Sync.activeOutboxKey(),
+        String(again.Sync.activeOutboxKey()));
+    check('with nothing quarantined',
+        !again.global('Recovery').problems.some(p => p.key.startsWith('farkad:outbox')),
+        JSON.stringify(again.global('Recovery').problems.map(p => p.key)));
+    check('and every entry still in it',
+        again.Sync.pendingPaths().length === device.Sync.pendingPaths().length,
+        `${again.Sync.pendingPaths().length} vs ${device.Sync.pendingPaths().length}`);
+}
+
 report();

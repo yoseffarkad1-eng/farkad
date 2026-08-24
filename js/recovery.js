@@ -93,6 +93,15 @@ const Recovery = {
             if (live !== null) out[key] = live;
         }
 
+        // A restore that was asked for and has not finished, and the frozen upgrade of an
+        // old one beside it. Neither is derivable from anything else in the file: they
+        // describe work somebody was TOLD had happened, and a device held up by one of
+        // them is exactly the device whose data is being exported.
+        ['farkad:pendingReplace', 'farkad:pendingReplace:v71'].forEach(key => {
+            const held = Store.durableGet(key);
+            if (held !== null) out[key] = held;
+        });
+
         return out;
     },
 

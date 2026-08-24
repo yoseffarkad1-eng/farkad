@@ -280,26 +280,22 @@ function readOutboxRecord(raw) {
     for (let i = 0; i < paths.length; i += 1) {
         const path = paths[i];
         const item = parsed.items[path];
-        if (!isSafeJournalPath(path)) return null;
         if (!isPlainObject(item)) return null;
         if (!isSafeSeq(item.seq)) return null;
         if (item.seq > parsed.seq) return null;      // an entry the mark never covered
         if (item.sent !== undefined && typeof item.sent !== 'boolean') return null;
         if (!Object.prototype.hasOwnProperty.call(item, 'value')) return null;
+        // The path AND the value, against the families this app actually writes. A
+        // structurally sound entry naming a layer nobody wrote poisons the schedule in
+        // memory, and the next ordinary save puts that on the disk - where the reopen
+        // after it quarantines the record and stops recording. See journalEntryProblems.
+        if (journalEntryProblems(path, item.value).length > 0) return null;
         items[path] = item;
     }
 
     return { seq: parsed.seq, items };
 }
 
-// A field path this app writes: dotted segments, none of them empty, none of them
-// carrying a character that would make the path mean something else on the way out.
-function isSafeJournalPath(path) {
-    if (typeof path !== 'string' || path.length === 0 || path.length > 300) return false;
-    const parts = path.split('.');
-    if (parts.length < 1 || parts.length > 4) return false;
-    return parts.every(part => part.length > 0 && !/[`~*/[\]]/.test(part));
-}
 
 // Stable per-browser id. Lets a device recognise the echo of its own write and lets the
 // status line say which device last changed the schedule.
@@ -975,7 +971,7 @@ const FarkadSync = {
     //
     // The whole arrays are still sent alongside, and that is deliberate: a phone that has
     // not updated reads them and sees a correct roster. They can stop being written once
-    // all three devices are past v75 - not before.
+    // all three devices are past v76 - not before.
     editRoster(schedule) {
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
@@ -1737,7 +1733,23 @@ const FarkadSync = {
         if (!isLegacyReplacement(parsed)) return null;
 
         const companion = this.readFrozenLegacy(parsed);
-        if (companion) return companion;
+        if (companion.state === 'frozen') return companion.envelope;
+        if (companion.state === 'unusable') {
+            // A companion that is there and cannot be trusted. Absence means "nothing has
+            // been frozen yet"; this means "something was, and it no longer says what".
+            //
+            // The two were treated alike, and that was the whole of this bug: the
+            // boundary was computed again - against a queue that had grown since - and
+            // written over the companion, so a day recorded after the restore was outside
+            // the boundary yesterday and inside it today, and the retry deleted it with
+            // nothing anywhere reporting a fault.
+            //
+            // Nothing is recomputed, nothing is overwritten, and the bytes are kept.
+            this.replaceHeld = true;
+            Recovery.damaged(LEGACY_UPGRADE_KEY, companion.raw,
+                'הרישום שמלווה שחזור ישן שממתין לשליחה אינו תקין. השחזור מושהה.');
+            return null;
+        }
 
         this.loadOutbox();
         const document = Object.assign({}, upgradeStoredSchedule(parsed));
@@ -1774,20 +1786,32 @@ const FarkadSync = {
         return frozen;
     },
 
-    // The frozen upgrade written on an earlier open, if it is still there and still
-    // describes THIS record. Matched on content, so a companion left over from a
-    // different restore cannot be applied to this one.
+    // The frozen upgrade written on an earlier open. Three answers, not two:
+    //
+    //   absent   - nothing has been frozen yet, so freezing it now is the right move
+    //   frozen   - it is here, it reads, and it describes THIS record: use it
+    //   unusable - it is here and it does not: do not read past it, and do not write
+    //              over it either
+    //
+    // The third case covers a companion whose bytes are damaged AND one that is perfectly
+    // readable but belongs to a different restore. Reusing a stale-but-valid companion
+    // would apply one transaction's boundary to another; overwriting it would destroy the
+    // only record of that other transaction. Both are refused.
     readFrozenLegacy(parsed) {
         const raw = Store.durableGet(LEGACY_UPGRADE_KEY);
-        if (!raw) return null;
+        if (raw === null) return { state: 'absent' };
+
+        let frozen = null;
         try {
-            const frozen = readReplacementRecord(JSON.parse(raw));
-            if (!frozen) return null;
-            return replacementContent(frozen.document) === replacementContent(parsed)
-                ? frozen : null;
+            frozen = readReplacementRecord(JSON.parse(raw));
         } catch (error) {
-            return null;
+            frozen = null;
         }
+        if (!frozen) return { state: 'unusable', raw };
+
+        return replacementContent(frozen.document) === replacementContent(parsed)
+            ? { state: 'frozen', envelope: frozen }
+            : { state: 'unusable', raw };
     },
 
     // retryReplace lived here, and it is where G13 was. It pushed the pending document to
