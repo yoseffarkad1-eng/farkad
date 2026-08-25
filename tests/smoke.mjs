@@ -354,8 +354,8 @@ async function seedRoster(page) {
 
   const payroll = await page.evaluate(() => payrollRows());
   const david = payroll.find(r => r.workerId === 'w_01');
-  check('two sites in one day is still one day worked',
-    david.daysWorked === 2, JSON.stringify(david));
+  check('two sites in one day is still one day of attendance',
+    david.attendanceDays === 2, JSON.stringify(david));
   check('the day is counted, not the site visit',
     david.siteVisits === 3 && david.normalDays + david.doubleDays === 2, JSON.stringify(david));
   check('a day with any doubled site is a double day',
@@ -432,6 +432,103 @@ async function seedRoster(page) {
   const bodyText = await page.textContent('#reportsView');
   check('neither report shows an ID number or a phone',
     !bodyText.includes('111') && !bodyText.includes('050-1'));
+  await page.context().close();
+}
+
+// ------------------------------------------------- four screens, one pair of numbers
+//
+// The account that started this: four dates on site, two of them double, at 450 a day,
+// less a 100 advance. 2700 gross, 2600 net.
+//
+// The money was always right. What was wrong was "4 ימי עבודה" printed beside it, with
+// no way to get from 4 to 2700. The pay sheet, the worker's detail screen, the message
+// he receives and the exported file all have to say the same two numbers - and this is
+// the test that they do, because four places kept by hand do not stay in step.
+{
+  const page = await open();
+  await seedRoster(page);
+
+  await page.evaluate(() => {
+    State.schedule.workers = [
+      { id: 'w_01', name: 'דוד', active: true, dailyRate: 450, hourlyRate: 0 }
+    ];
+    State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-13', 'w_01', 'actual', 'p_01');
+    addAdvance(State.schedule, 'w_01', '2026-08-13', 100, '');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    showView('reports');
+  });
+  await page.waitForTimeout(400);
+
+  // 1. The pay sheet.
+  const sheet = await page.evaluate(() => {
+    const table = document.querySelector('#reportsView .report-table');
+    const heads = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+    const cells = [...table.querySelectorAll('tbody tr')]
+      .find(tr => tr.textContent.includes('דוד'))
+      .querySelectorAll('td, th');
+    return { heads, cells: [...cells].map(cell => cell.textContent.trim()) };
+  });
+  const at = name => sheet.heads.indexOf(name);
+
+  check('the sheet has a column for the dates he was on site',
+    at('ימי נוכחות') !== -1, JSON.stringify(sheet.heads));
+  check('and a separate one for the days he is paid for',
+    at('ימי שכר') !== -1, JSON.stringify(sheet.heads));
+  check('it no longer prints one count as if it explained the total',
+    !sheet.heads.includes('ימי עבודה'), JSON.stringify(sheet.heads));
+  check('four dates on site', sheet.cells[at('ימי נוכחות')] === '4',
+    JSON.stringify(sheet.cells));
+  check('six days of pay', sheet.cells[at('ימי שכר')] === '6', JSON.stringify(sheet.cells));
+  check('two of them double', sheet.cells[at('מתוכם כפולים')] === '2',
+    JSON.stringify(sheet.cells));
+  check('and the money is the real arithmetic, unchanged',
+    sheet.cells[at('נצבר')] === '2700' && sheet.cells[at('לתשלום')] === '2600',
+    JSON.stringify(sheet.cells));
+
+  // 2. His detail screen, reached from the number itself.
+  const detail = await page.evaluate(() => {
+    openWorkerDays('w_01');
+    const total = document.querySelector('#workerDaysModal .wday-total');
+    return total.textContent;
+  });
+  check('the detail screen says the same about the dates',
+    detail.includes('4 ימי נוכחות'), detail);
+  check('and the same about the days of pay',
+    detail.includes('6 ימי שכר') && detail.includes('מתוכם 2 ימים כפולים'), detail);
+  await page.evaluate(() => closeWorkerDays());
+
+  // 3. The message he is handed.
+  const statement = await page.evaluate(() => workerStatementText('w_01'));
+  check('the message he receives says both, in the same words',
+    statement.includes('4 ימי נוכחות') && statement.includes('6 ימי שכר')
+    && statement.includes('מתוכם 2 ימים כפולים'), statement);
+  check('and the number he is paid is still the real one',
+    statement.includes('נותר לתשלום: 2600'), statement);
+
+  // 4. The file the bookkeeper opens - same headings, same numbers.
+  const exported = await page.evaluate(() => {
+    const rows = reportSheets().payroll;
+    return { head: rows[0], row: rows.find(line => line && line[0] === 'דוד') };
+  });
+  check('the export uses the same two headings',
+    exported.head.includes('ימי נוכחות') && exported.head.includes('ימי שכר')
+    && !exported.head.includes('ימי עבודה'), JSON.stringify(exported.head));
+  check('with the same numbers under them',
+    exported.row[exported.head.indexOf('ימי נוכחות')] === 4
+    && exported.row[exported.head.indexOf('ימי שכר')] === 6
+    && exported.row[exported.head.indexOf('מתוכם כפולים')] === 2,
+    JSON.stringify(exported.row));
+  check('and the same money',
+    exported.row[exported.head.indexOf('נצבר')] === 2700
+    && exported.row[exported.head.indexOf('לתשלום')] === 2600,
+    JSON.stringify(exported.row));
+
   await page.context().close();
 }
 
@@ -1503,7 +1600,7 @@ async function seedRoster(page) {
   // and the pay report was always counting them - that is why the row has to be reachable
   const paid = await page.evaluate(() =>
     payrollReport(State.schedule, '2026-08-01', '2026-08-31')
-      .find(row => row.workerId === 'w_01').daysWorked);
+      .find(row => row.workerId === 'w_01').attendanceDays);
   check('the pay report counts the day either way', paid === 1);
   await page.context().close();
 }
@@ -3269,7 +3366,7 @@ async function seedRoster(page) {
     return payrollRows().find(r => r.workerId === 'w_03');
   });
   check('an advance keeps a worker on the sheet even with no days recorded',
-    ghost && ghost.daysWorked === 0 && ghost.advances === 250, JSON.stringify(ghost));
+    ghost && ghost.attendanceDays === 0 && ghost.advances === 250, JSON.stringify(ghost));
 
   // The three money columns must reconcile on the same rows: נצבר − מקדמות = לתשלום.
   // w_03 has no daily rate, so his 250 used to land in one column and not the other.
@@ -3605,8 +3702,15 @@ async function seedRoster(page) {
   check('a doubled day says so', statement.includes('(כפול)'), statement);
   check('an absence is on it too, rather than a gap to wonder about',
     statement.includes('נעדר'), statement);
-  check('it totals the days worked, not the days listed',
-    statement.includes('2 ימי עבודה'), statement);
+  // Two counts, because one could not explain the total: he was on site on two dates,
+  // and one of them was double, so he is paid for three days. 2 x 400 would be 800 and
+  // the 1200 below it would read as a mistake.
+  check('it says how many dates he was on site',
+    statement.includes('2 ימי נוכחות'), statement);
+  check('and how many days he is actually paid for',
+    statement.includes('3 ימי שכר'), statement);
+  check('naming the double day that makes up the difference',
+    statement.includes('מתוכם יום כפול אחד'), statement);
   check('the advance is named with its date',
     statement.includes('מקדמה') && statement.includes('-300'), statement);
   // 400 + 800 = 1200 earned, less 300 = 900

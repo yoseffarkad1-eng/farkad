@@ -152,7 +152,7 @@ function payrollRows() {
     // worked nothing would otherwise vanish from the sheet - and with him the 500,
     // which next period is out of range too and never deducted anywhere.
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
-        .filter(row => row.daysWorked > 0 || row.absent > 0 || row.advances > 0);
+        .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0);
 }
 
 function invoiceRows() {
@@ -181,10 +181,18 @@ function renderPayrollTable() {
     // like a card where the app never recorded any: the same question was asked of the
     // pay sheet twice. Dropping the whole concept when nobody used it keeps every card
     // the same shape, so a row that is missing means the fortnight had none of it.
+    //
+    // Two day columns, not one. "ימי עבודה" on its own was being read as the number the
+    // money was worked out from, and it is not: four dates with two of them double is
+    // six days of pay. Both are named, so the total beside them can be checked.
+    //
+    // "רגיל" is gone with it. It was the count of the days that were not double, which
+    // is now the difference between the two columns either side of it - a third number
+    // saying the same thing is a third number to reconcile.
     const columns = [
-        { header: 'ימי עבודה', value: row => row.daysWorked, always: true },
-        { header: 'רגיל', value: row => row.normalDays, always: true },
-        { header: 'כפול', value: row => row.doubleDays },
+        { header: 'ימי נוכחות', value: row => row.attendanceDays, always: true },
+        { header: 'ימי שכר', value: row => row.payUnits, always: true },
+        { header: 'מתוכם כפולים', value: row => row.doubleDays },
         { header: 'שעות נוספות', value: row => row.extraHours },
         { header: 'נעדר', value: row => row.absent }
     ].filter(column => column.always || rows.some(row => column.value(row) > 0));
@@ -251,7 +259,9 @@ function renderPayrollTable() {
             'הוסף שכר יומי לעובדים במסך "עובדים ואתרים" כדי שהדוח יחשב גם את הסכום.'));
     } else {
         section.appendChild(el('p', 'hint',
-            'יום כפול מחושב כפול השכר היומי. שני אתרים באותו יום נחשבים ליום אחד.'));
+            'ימי נוכחות = כמה תאריכים העובד היה באתר. ימי שכר = כמה ימים משולמים, ' +
+            'כשיום כפול נספר כשניים. שני אתרים באותו יום הם יום נוכחות אחד, ' +
+            'ויום שכר אחד - או שניים אם היום כפול. שעות נוספות מחושבות בנפרד.'));
     }
 
     if (rows.some(row => row.hoursUnpriced)) {
@@ -513,7 +523,11 @@ function workerStatementText(workerId) {
     });
 
     lines.push('');
-    lines.push(`סה"כ ${worked.length} ימי עבודה`);
+    // Both numbers, in the message the man actually receives. He is the one person who
+    // will check the total against the days, and one count could not explain it.
+    const summary = workerDaysSummary(days);
+    lines.push('סה"כ ' + countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות'));
+    lines.push(workUnitsLine(summary));
     if (priced) lines.push(`נצבר: ${Math.round(earned)}`);
 
     // The screen puts a * on unpriced hours and the sheet explains it; the message the
@@ -604,17 +618,39 @@ function renderWorkerDayRow(day, worker) {
 }
 
 function renderWorkerDaysTotal(days, worker) {
-    const worked = days.filter(day => !day.absent);
-    const total = worked.reduce((sum, day) => sum + (day.amount || 0), 0);
+    // One computation, shared with the pay sheet, the message and the export. Counting
+    // it again here is how the four of them came to disagree in the first place.
+    const summary = workerDaysSummary(days);
+    const total = summary.amount === null
+        ? days.filter(day => !day.absent).reduce((sum, day) => sum + (day.amount || 0), 0)
+        : summary.amount;
 
     const row = el('div', 'wday wday-total');
-    row.appendChild(el('div', 'wday-date', `${worked.length} ימי עבודה`));
-    row.appendChild(el('div', 'wday-what',
-        `${worked.filter(day => day.doubled).length} כפולים · ` +
-        `${worked.reduce((sum, day) => sum + day.extraHours, 0)} שעות נוספות`));
+    row.appendChild(el('div', 'wday-date',
+        countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות')));
+    row.appendChild(el('div', 'wday-what', workUnitsLine(summary)));
     row.appendChild(el('div', 'wday-money',
         Number(worker.dailyRate) > 0 ? String(Math.round(total)) : '—'));
     return row;
+}
+
+// "6 ימי שכר · מתוכם 2 ימים כפולים · 3 שעות נוספות", with the parts that are zero left
+// out. Written once, so the card, the message and the sheet say it the same way.
+function workUnitsLine(summary) {
+    const parts = [countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר')];
+    if (summary.doubleDays > 0) {
+        parts.push('מתוכם ' + countedIn(summary.doubleDays, 'יום כפול אחד', 'ימים כפולים'));
+    }
+    if (summary.extraHours > 0) {
+        parts.push(countedIn(summary.extraHours, 'שעה נוספת אחת', 'שעות נוספות'));
+    }
+    return parts.join(' · ');
+}
+
+// Hebrew does not read "1 ימים" the way a template makes it. One of anything gets its own
+// wording; everything else gets the number and the plural.
+function countedIn(count, one, many) {
+    return count === 1 ? one : `${count} ${many}`;
 }
 
 function closeWorkerDays() {
@@ -681,10 +717,10 @@ function reportSheets() {
     // This file is the one that reaches the bookkeeper, and it used to write the gross
     // amount under 'לתשלום' - the heading the screen uses for the net - so the two
     // disagreed by exactly the advances, and the paper won.
-    const payroll = [['עובד', 'ימי עבודה', 'רגיל', 'כפול', 'שעות נוספות', 'נעדר',
-        'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
+    const payroll = [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
+        'נעדר', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
         .concat(payrollRows().map(row => [
-            row.name, row.daysWorked, row.normalDays, row.doubleDays,
+            row.name, row.attendanceDays, row.payUnits, row.doubleDays,
             row.extraHours, row.absent, row.dailyRate,
             row.amount === null ? '' : Math.round(row.amount),
             row.advances > 0 ? -Math.round(row.advances) : 0,

@@ -630,7 +630,7 @@ function journalEntryProblems(path, value) {
 //
 // The arrays are still written, and that is deliberate. A phone that has not updated yet
 // reads them and sees a correct roster; it cannot see `roster` and never writes to it.
-// They can be dropped once all three devices are past v77 - not before.
+// They can be dropped once all three devices are past v78 - not before.
 function cloudDocument(schedule) {
     const wire = JSON.parse(JSON.stringify(schedule));
     wire.roster = rosterDocument(schedule);
@@ -1011,10 +1011,21 @@ function payrollReport(schedule, fromDate, toDate) {
         .sort();
 
     return schedule.workers.map(worker => {
+        // Two counts, deliberately, because they answer two different questions and one
+        // number was being made to answer both.
+        //
+        //   attendanceDays - how many DATES this man was on a site. Two sites on one
+        //                    date is one day; he was there once.
+        //   payUnits       - how many days he is PAID for. A double day is two of them.
+        //
+        // The sheet used to print only the first, next to a total computed from the
+        // second, so four days at 450 came out as 2700 and looked like an arithmetic
+        // mistake. Neither number was wrong; the sheet was only showing one of them.
         const row = {
             workerId: worker.id,
             name: worker.name,
-            daysWorked: 0,
+            attendanceDays: 0,
+            payUnits: 0,
             normalDays: 0,
             doubleDays: 0,
             extraHours: 0,
@@ -1038,12 +1049,18 @@ function payrollReport(schedule, fromDate, toDate) {
             const entries = entriesFor(schedule, date, worker.id, 'actual');
             if (entries.length === 0) return;
 
-            row.daysWorked++;
+            // Once per DATE, whatever is on it. Two sites in one day is two entries and
+            // one day of work - counting the entries would pay a man twice for standing
+            // in two places.
+            row.attendanceDays++;
             row.siteVisits += entries.length;
 
+            // `some`, not a count: a double day is double whether it carries one site or
+            // two, so two sites on a double day is two pay units and never four.
             const doubled = entries.some(entry => entryRate(entry) === RATE_DOUBLE);
             if (doubled) row.doubleDays++;
             else row.normalDays++;
+            row.payUnits += doubled ? 2 : 1;
 
             const hours = entries.reduce((sum, entry) => sum + entryExtraHours(entry), 0);
             row.extraHours += hours;
@@ -1068,13 +1085,21 @@ function payrollReport(schedule, fromDate, toDate) {
         // Only a number when there is a rate to multiply by. Showing 0 for a worker whose
         // rate has not been entered would read as "owed nothing", which is a different
         // thing entirely.
-        if (row.daysWorked === 0) row.amount = daily > 0 ? 0 : null;
+        if (row.attendanceDays === 0) row.amount = daily > 0 ? 0 : null;
         else row.amount = unpriced ? null : total;
 
-        // More than one daily rate inside one period. Not an error - a raise mid-account
-        // is ordinary - but a sheet whose total cannot be checked by multiplying days by
-        // the rate on screen has to say so, or it reads as an arithmetic mistake.
-        row.mixedRates = dailyRatesUsed.size > 1;
+        // A sheet whose total cannot be checked against the rate printed beside it has to
+        // say so, or it reads as an arithmetic mistake. Two ways that happens:
+        //
+        //   more than one rate inside the period - a raise partway through it; or
+        //   every day at one rate that is no longer the rate on the roster today.
+        //
+        // The second was missed. All the days would be stamped 450, the column would
+        // print today's 900, and nothing anywhere said why 7 days came to 3270 - which is
+        // the same complaint that split this count in two: a number printed next to a
+        // total it does not explain.
+        row.mixedRates = dailyRatesUsed.size > 1
+            || (daily > 0 && row.attendanceDays > 0 && !dailyRatesUsed.has(daily));
         row.hoursUnpriced = Boolean(row.hoursUnpriced);
 
         // What was earned and what is still owed are two different numbers, and paying
@@ -1125,6 +1150,35 @@ function workerDaysReport(schedule, worker, fromDate, toDate) {
 
 // Per place, over a date range: worker-days at each site, which is what the client
 // invoice is built from.
+// The same two counts, over the day rows one worker's detail screen is built from.
+//
+// It exists so that the pay sheet, the detail modal, the message sent to the worker and
+// the exported file cannot disagree: every one of them asks THIS, and none of them counts
+// anything for itself. The bug that started this was one screen printing a count of dates
+// beside a total computed from pay units, and there is no way to keep four places in step
+// by hand.
+//
+// Absences are not attendance. A man who was away was not on a site, and paying him for
+// the day he was away is the one arithmetic nobody wants to explain.
+function workerDaysSummary(days) {
+    const worked = (days || []).filter(day => day && !day.absent);
+
+    return {
+        attendanceDays: worked.length,
+        payUnits: worked.reduce((sum, day) => sum + (day.doubled ? 2 : 1), 0),
+        doubleDays: worked.filter(day => day.doubled).length,
+        // Reported beside the days and never folded into them: extra hours are paid at
+        // the hourly rate, and adding them to a day count would restate the day itself.
+        extraHours: worked.reduce((sum, day) => sum + (Number(day.extraHours) || 0), 0),
+        absent: (days || []).filter(day => day && day.absent).length,
+        // The real sum of what each day was worth at the rate it was RECORDED at - never
+        // payUnits times today's rate, which quietly repays the past at the new price.
+        amount: worked.some(day => day.amount === null)
+            ? null
+            : worked.reduce((sum, day) => sum + (day.amount || 0), 0)
+    };
+}
+
 function invoiceReport(schedule, fromDate, toDate) {
     const dates = Object.keys(schedule.days || {})
         .filter(date => date >= fromDate && date <= toDate)

@@ -5137,4 +5137,135 @@ for (const [label, arm] of [
         record(held, '2026-08-21', 'w_01', 'p_01') === false);
 }
 
+// ---------------------------------------------------------------- counting the days
+//
+// The account that started this: four dates on site, two of them double, at 450 a day.
+//
+//   450 + 900 + 900 + 450 = 2700, less a 100 advance = 2600
+//
+// The money was right the whole time. What was wrong was the sheet printing "4 ימי עבודה"
+// beside it, because 4 x 450 is 1800 and the person reading it has no way to get from one
+// number to the other. Two counts now, and they answer two different questions.
+{
+    suite('the account that reads: 4 days on site, 6 days of pay');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 450, hourlyRate: 0 }
+    ];
+    device.State.schedule.places = [
+        { id: 'p_01', name: 'הרצליה', active: true },
+        { id: 'p_02', name: 'תל אביב', active: true }
+    ];
+    device.State.save({ silent: true });
+
+    const RATE_DOUBLE = device.global('RATE_DOUBLE');
+    const assign = (date, place, rate) => device.State.commit(device.call('assignPlace',
+        device.State.schedule, date, 'w_01', 'actual', place, rate));
+
+    assign('2026-08-10', 'p_01');                   // ordinary
+    assign('2026-08-11', 'p_01', RATE_DOUBLE);      // double
+    assign('2026-08-12', 'p_01', RATE_DOUBLE);      // double
+    assign('2026-08-13', 'p_01');                   // ordinary
+    device.State.commit(device.call('addAdvance',
+        device.State.schedule, 'w_01', '2026-08-13', 100, ''));
+
+    const row = device.call('payrollReport', device.State.schedule, '2026-08-01', '2026-08-31')
+        .find(item => item.workerId === 'w_01');
+
+    check('attendanceDays = 4', row.attendanceDays === 4, String(row.attendanceDays));
+    check('payUnits = 6', row.payUnits === 6, String(row.payUnits));
+    check('doubleDays = 2', row.doubleDays === 2, String(row.doubleDays));
+    check('gross = 2700', row.amount === 2700, String(row.amount));
+    check('advance = 100', row.advances === 100, String(row.advances));
+    check('net = 2600', row.netAmount === 2600, String(row.netAmount));
+
+    // The detail screen, the message and the export all read the same summary, so the
+    // four of them cannot print different numbers for the same fortnight.
+    const days = device.call('workerDaysReport', device.State.schedule,
+        device.State.worker('w_01'), '2026-08-01', '2026-08-31');
+    const summary = device.call('workerDaysSummary', days);
+
+    check('the detail summary agrees on attendance',
+        summary.attendanceDays === row.attendanceDays, String(summary.attendanceDays));
+    check('and on pay units', summary.payUnits === row.payUnits, String(summary.payUnits));
+    check('and on double days', summary.doubleDays === row.doubleDays,
+        String(summary.doubleDays));
+    check('and on the money', summary.amount === row.amount, String(summary.amount));
+}
+
+{
+    suite('what does and does not add a day');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 450, hourlyRate: 40 }
+    ];
+    device.State.schedule.places = [
+        { id: 'p_01', name: 'הרצליה', active: true },
+        { id: 'p_02', name: 'תל אביב', active: true }
+    ];
+    device.State.save({ silent: true });
+
+    const RATE_DOUBLE = device.global('RATE_DOUBLE');
+    const RATE_EXTRA = device.global('RATE_EXTRA');
+    const assign = (date, place, rate, hours) => device.State.commit(device.call('assignPlace',
+        device.State.schedule, date, 'w_01', 'actual', place, rate, hours));
+    const rowFor = () => device.call('payrollReport',
+        device.State.schedule, '2026-08-01', '2026-08-31')
+        .find(item => item.workerId === 'w_01');
+
+    // 1. One site, one date.
+    assign('2026-08-03', 'p_01');
+    same('one site on a date is one day of attendance and one of pay',
+        [rowFor().attendanceDays, rowFor().payUnits], [1, 1]);
+
+    // 2. Two sites, same date. He was there once.
+    assign('2026-08-04', 'p_01');
+    assign('2026-08-04', 'p_02');
+    same('two sites on one date is still one day, not two',
+        [rowFor().attendanceDays, rowFor().payUnits], [2, 2]);
+    check('though both site visits are counted separately', rowFor().siteVisits === 3,
+        String(rowFor().siteVisits));
+
+    // 3. A double day.
+    assign('2026-08-05', 'p_01', RATE_DOUBLE);
+    same('a double day is one day of attendance and two of pay',
+        [rowFor().attendanceDays, rowFor().payUnits], [3, 4]);
+
+    // 4. Two sites on a double day. Two pay units, never four.
+    assign('2026-08-06', 'p_01', RATE_DOUBLE);
+    assign('2026-08-06', 'p_02');
+    same('two sites on a double day is one day of attendance and two of pay',
+        [rowFor().attendanceDays, rowFor().payUnits], [4, 6]);
+
+    // 5. Extra hours change neither count.
+    const before = [rowFor().attendanceDays, rowFor().payUnits];
+    assign('2026-08-07', 'p_01', RATE_EXTRA, 3);
+    same('extra hours add the day itself and nothing more',
+        [rowFor().attendanceDays - before[0], rowFor().payUnits - before[1]], [1, 1]);
+    check('and the hours are reported on their own', rowFor().extraHours === 3,
+        String(rowFor().extraHours));
+
+    // 6. An absence is not attendance.
+    device.State.commit(device.call('markAbsent',
+        device.State.schedule, '2026-08-08', 'w_01', 'actual'));
+    same('an absence is counted as an absence, not as a day worked',
+        [rowFor().attendanceDays, rowFor().payUnits, rowFor().absent], [5, 7, 1]);
+
+    // 7. The total is the real arithmetic, not payUnits times today's rate.
+    //
+    // The rate is raised AFTER the days above were recorded, so every one of them keeps
+    // the 450 it was worked at. 7 x 900 would be 6300, and that number would be a lie
+    // about what these men were paid.
+    device.State.schedule.workers[0].dailyRate = 900;
+    device.State.commitRoster();
+    const raised = rowFor();
+    check('the days keep the rate they were worked at',
+        raised.amount === 450 * 7 + 40 * 3, String(raised.amount));
+    check('which is NOT pay units times the rate on screen today',
+        raised.amount !== raised.payUnits * 900, String(raised.amount));
+    check('and the sheet says the rate changed mid-period', raised.mixedRates === true);
+}
+
 report();
