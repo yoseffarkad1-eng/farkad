@@ -126,22 +126,32 @@ iframe מבודד, כך שבדיקת `in` עוברת והקריאה עצמה נ�
 
 ## בדיקות
 
-```bash
-python3 tests/serve.py 8802 . &
-node tests/smoke.mjs
-```
-
-השרת חייב להיות מרובה תהליכונים: ה-service worker מוסיף גל בקשות שני על הבקשות
-של הדף עצמו, ועם תהליכון אחד הן נתקעות בתור ובדיקה נכשלת מסיבה שאינה קשורה לאפליקציה.
-
-בסביבה בלי playwright מקומי:
+מ-clone נקי, בלי שום דבר מותקן גלובלית:
 
 ```bash
-PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs \
-CHROME_PATH=/path/to/chrome \
-SMOKE_URL=http://127.0.0.1:8802 \
-node tests/smoke.mjs
+npm ci
+npm run browsers        # playwright install chromium - פעם אחת
+npm test                # חבילת הנתונים
+npm run test:smoke      # חבילת הדפדפן, מרימה שרת בעצמה
+npm run test:rules      # חוקי Firestore מול האמולטור (דורש Java)
 ```
+
+דרושה גרסת Node 20 או 22 - כתוב ב-`engines`. `playwright` מוצמד לגרסה מדויקת
+ולא לטווח, כי גרסת הדפדפן שהיא מורידה קשורה לגרסת החבילה: טווח היה מוריד build
+אחר ממה שנמצא במכונה ונופל על "Executable doesn't exist".
+
+שלוש חבילות:
+
+| קובץ | מה הוא בודק | איך |
+|---|---|---|
+| `tests/data.test.mjs` | אחסון, סנכרון, וחשבון השכר | כל "מכשיר" הוא הקשר V8 עם ה-localStorage שלו, מריץ את קבצי האפליקציה האמיתיים |
+| `tests/smoke.mjs` | האפליקציה בדפדפן אמיתי | Playwright + Chromium, מגיש את הקבצים בעצמו |
+| `tests/rules.test.mjs` | `firestore.rules` האמיתי | אמולטור Firestore מקומי - לא נוגע בפרויקט האמיתי |
+
+חבילת הדפדפן מגישה את האפליקציה בעצמה (`tests/serve.mjs`), כי service worker לא
+נרשם מעל `file://` ובלי זה `npm ci && npm run test:smoke` מ-clone נקי פשוט נכשל.
+לשרת שכבר רץ: `SMOKE_URL=http://127.0.0.1:8802 node tests/smoke.mjs`.
+ל-playwright או דפדפן במקום אחר: `PLAYWRIGHT_MODULE` ו-`CHROME_PATH`.
 
 ## סנכרון
 

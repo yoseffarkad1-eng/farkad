@@ -38,7 +38,9 @@ function editWithUndo(workerId, label, mutate) {
     const layer = State.layer;
     const previous = snapshotWorkerDay(date, layer, workerId);
 
-    State.commit(mutate());
+    // No undo bar for an edit that did not happen. commit() has already put the screen
+    // back and said why; offering "undo" over that would name a change nobody made.
+    if (!State.commit(mutate())) return;
 
     // Taken AFTER the commit, so redo restores exactly what the edit produced rather
     // than being a guess at how to repeat it.

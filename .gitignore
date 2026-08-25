@@ -1,0 +1,15 @@
+node_modules/
+
+# Firebase emulator output. Written into the working tree by `firebase
+# emulators:exec`, and one of these was committed once already.
+firestore-debug.log
+firebase-debug.log
+database-debug.log
+pubsub-debug.log
+ui-debug.log
+*-debug.log
+.firebase/
+
+# Playwright
+test-results/
+playwright-report/

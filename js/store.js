@@ -31,7 +31,24 @@ const Store = {
     reclaim: null,
     memory: {},
 
+    // Memory first, disk second - and that order is the whole point.
+    //
+    // set() writes to memory and then tries the disk. Reading the disk first meant that
+    // on a full device every write went to memory, every read came back null, and the
+    // caller was told its own write had never happened. syncDeviceId() minted a new id on
+    // every single call: each write signed by a different device, and the echo check that
+    // keeps a phone from adopting its own writes with nothing stable to compare against.
+    //
+    // The stale case is worse than the null one. A disk holding the queue from before the
+    // last edit, with the newer queue sitting in memory because the write was refused,
+    // would hand back the OLD queue - so an edit that was made, and is still in this
+    // session, reads as though it was not.
+    //
+    // memory is therefore what this session has written, and it wins. Anything not
+    // written this session comes off the disk as before.
     get(key) {
+        if (Object.prototype.hasOwnProperty.call(this.memory, key)) return this.memory[key];
+
         if (this.available) {
             try {
                 return localStorage.getItem(key);
@@ -39,7 +56,47 @@ const Store = {
                 this.fallback(error);
             }
         }
-        return Object.prototype.hasOwnProperty.call(this.memory, key) ? this.memory[key] : null;
+        return null;
+    },
+
+    // What the NEXT session would see.
+    //
+    // Bypasses the session cache deliberately. memory holds writes the disk refused,
+    // which is right for reading back something written a moment ago and exactly wrong
+    // for anything whose whole job is to survive the app being closed. The journal is
+    // read through this, so "what is durably queued" cannot be answered with an entry
+    // that never reached the disk.
+    durableGet(key) {
+        if (!this.available) return null;
+        try {
+            return localStorage.getItem(key);
+        } catch (error) {
+            this.fallback(error);
+            return null;
+        }
+    },
+
+    // A write that is not believed until it can be read back.
+    //
+    // For the records where losing the write silently is the failure - the schedule, the
+    // outbox, a pending restore, a quarantined copy. set() reports a refusal it was told
+    // about; this also catches a disk that accepts a write and hands back something else,
+    // which throws nothing and is only visible if somebody looks.
+    //
+    // It deliberately does NOT consult memory: reading through Store.get would find the
+    // value this call just put there and confirm every write, including the ones that
+    // never reached the disk. This has to ask the disk itself.
+    setVerified(key, value) {
+        const text = String(value);
+        if (!this.set(key, text)) return false;
+        if (!this.available) return false;
+
+        try {
+            return localStorage.getItem(key) === text;
+        } catch (error) {
+            this.fallback(error);
+            return false;
+        }
     },
 
     // `options.optional` marks a write the app can live without - a restore point, not a
@@ -49,7 +106,16 @@ const Store = {
     // also never raises `full`, which is reserved for a write that actually mattered.
     set(key, value, options) {
         const optional = !!(options && options.optional);
+
+        // Kept so an optional write that the disk refuses can be taken back out again.
+        const had = Object.prototype.hasOwnProperty.call(this.memory, key);
+        const was = this.memory[key];
+        const forget = () => { if (had) this.memory[key] = was; else delete this.memory[key]; };
+
         this.memory[key] = String(value);
+
+        // No disk at all. Memory is the whole of storage here, so even an optional write
+        // stays - there is nothing better for it to be.
         if (!this.available) return false;
 
         try {
@@ -61,7 +127,12 @@ const Store = {
                 this.fallback(error);
                 return false;
             }
-            if (optional) return false;
+            // An OPTIONAL write the disk refused is taken back out of memory. It is
+            // optional precisely because the app can live without it, and leaving it
+            // would make a restore point that will not survive a reload appear in the
+            // list beside ones that will. A required write stays: this session made it,
+            // this session has to keep seeing it, and the caller is told it did not land.
+            if (optional) { forget(); return false; }
 
             // Out of space. Throw away something expendable and try the real write again
             // - the day's record is worth more than any number of old restore points.
@@ -79,10 +150,19 @@ const Store = {
             }
 
             this.full = true;
-            console.warn('Browser storage is full; this write did not land:', error);
+            console.warn('Browser storage is full; this write did not land on disk:', error);
             if (typeof updateSyncNotice === 'function') updateSyncNotice();
             return false;
         }
+    },
+
+    // Drops a key from the session cache without touching the disk.
+    //
+    // For a required write that the disk refused: memory keeps it so the rest of the
+    // session can read what it wrote, which is right for the schedule and wrong for a
+    // record whose whole meaning is "this is on the device". The caller decides which.
+    forget(key) {
+        delete this.memory[key];
     },
 
     remove(key) {
@@ -95,15 +175,20 @@ const Store = {
         }
     },
 
+    // Everything this session can see: what is on the disk, plus anything written this
+    // session that did not reach it. A restore point held only in memory is still a
+    // restore point, and the list that offers them reads this.
     keys() {
+        const seen = new Set(Object.keys(this.memory));
+
         if (this.available) {
             try {
-                return Object.keys(localStorage);
+                Object.keys(localStorage).forEach(key => seen.add(key));
             } catch (error) {
                 this.fallback(error);
             }
         }
-        return Object.keys(this.memory);
+        return [...seen];
     },
 
     fallback(error) {

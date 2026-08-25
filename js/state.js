@@ -8,10 +8,11 @@
 const V1_KEY = 'scheduleData';
 const V2_KEY = 'scheduleData:v2';
 const ISSUES_KEY = 'scheduleData:migrationIssues';
-// Where an unreadable v2 blob is put aside before anything overwrites it. It is the most
-// recent copy of the record that exists, and a damaged one is still worth far more than
-// no copy: the days inside it are plain text and can be read out by hand.
-const V2_DAMAGED_KEY = 'scheduleData:v2damaged';
+// An unreadable v2 blob is handled by Recovery, which copies it to
+// `scheduleData:v2:damaged` and leaves the original alone. A build before v67 put its
+// copy under `scheduleData:v2damaged` - no colon - and then overwrote the original;
+// nothing reads that key any more, and anything found under it on an old device is still
+// a real copy worth keeping.
 
 const State = {
     schedule: emptySchedule(),
@@ -24,19 +25,66 @@ const State = {
     migrationIssues: [],
 
     load() {
+        const result = this.loadRecord();
+
+        // A restore performed with no cloud connected is a transaction like any other -
+        // the schedule and the queue - and a crash between the two halves leaves the
+        // second one owed. There is no connect() coming to finish it on a device that
+        // has never had a cloud, so it is finished here, right after the disk has been
+        // read and before anything new can be written over it.
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.finishLocalReplace) {
+            FarkadSync.finishLocalReplace();
+        }
+        return result;
+    },
+
+    loadRecord() {
         let damaged = false;
         const v2 = Store.get(V2_KEY);
         if (v2) {
             try {
-                this.schedule = normaliseSchedule(JSON.parse(v2));
+                // Parsing is not the question. A record that parses into
+                // {"workers":[],"places":[]} is not an empty schedule - normaliseSchedule
+                // would hand one back without a word, the app would draw a blank crew,
+                // and the first ordinary save would write that blank over the last real
+                // record this device had. So the raw content is checked BEFORE
+                // normaliseSchedule is allowed near it.
+                //
+                // Compatibility-aware, and narrowly: a record from a build that predates
+                // advances is a real record and still opens. Anything else missing is
+                // damage, and damage is held, not filled in. See upgradeStoredSchedule.
+                const upgraded = upgradeStoredSchedule(JSON.parse(v2));
+                const problems = upgraded
+                    ? storedScheduleProblems(upgraded)
+                    : ['הרישום השמור אינו מסמך של לוח עבודה.'];
+                if (problems.length > 0) throw new Error(problems[0]);
+
+                this.schedule = normaliseSchedule(upgraded);
+                this.durableText = v2;
                 this.migrationIssues = readIssues();
+                // Anything the journal is still holding goes back on top. This is the
+                // whole point of the journal: an edit whose schedule write failed is
+                // rebuilt here, on this device, with no cloud anywhere near it.
+                this.replayJournal();
                 return { migrated: false };
             } catch (error) {
-                console.error('v2 schedule unreadable, falling back to v1:', error);
-                // Set it aside BEFORE the fallback below, which ends in save() and would
-                // otherwise overwrite the newest copy of the record with data from before
-                // the migration - destroying the damaged blob and every day added since.
-                Store.set(V2_DAMAGED_KEY, v2, { optional: true });
+                // The newest copy of the record that exists, and it will not parse -
+                // almost always a truncated write, with the days inside it still plain
+                // text somebody can read out.
+                //
+                // The old line here set it aside with `optional: true` and did not look
+                // at whether that worked, and then fell through to a v1 migration ending
+                // in save() - which writes to this very key. On a full device, which is
+                // where a truncated write comes from, the copy failed and the save
+                // succeeded: the recovery destroyed the thing it was recovering.
+                //
+                // Recovery keeps the original where it is, makes a copy it has read back,
+                // and blocks writing. save() and persist() both ask before writing, so
+                // nothing below this line - migration, a later edit, or somebody
+                // re-typing the week over a blank screen - can reach V2_KEY.
+                console.error('v2 schedule unreadable, holding it:', error);
+                Recovery.damaged(V2_KEY, v2,
+                    'הרישום השמור במכשיר לא נקרא: ' + String(error && error.message || error));
                 damaged = true;
             }
         }
@@ -44,6 +92,9 @@ const State = {
         const v1 = Store.get(V1_KEY);
         if (!v1) {
             this.schedule = emptySchedule();
+            // A first run has no schedule and no v1, but it may have a journal - an edit
+            // made after a schedule write failed on a device that had nothing yet.
+            this.replayJournal();
             return { migrated: false, damaged };
         }
 
@@ -58,41 +109,190 @@ const State = {
 
         this.schedule = result.schedule;
         this.migrationIssues = result.issues;
-        writeIssues(result.issues);
-        this.save({ silent: true });
+        this.replayJournal();
+        // Shown, so the week is on screen and can be read - but not written down. Saving
+        // it would put pre-migration data over the newest record there is.
+        if (!damaged) {
+            writeIssues(result.issues);
+            this.save({ silent: true });
+        }
 
         return { migrated: true, issues: result.issues, damaged };
     },
 
+    // Everything the journal is still holding, laid back over the schedule on the disk.
+    //
+    // Everything EXCEPT what an outstanding restore has superseded. Those entries
+    // describe the state that restore is replacing, so replaying them puts back exactly
+    // the days it removed - which is what a device looked like after a restore whose
+    // queue prune had been refused: the restored schedule on the disk, the old journal
+    // beside it, and the superseded days back on the screen at the next open.
+    replayJournal() {
+        if (typeof FarkadSync === 'undefined' || !FarkadSync.replayJournal) return;
+        FarkadSync.replayJournal(this.schedule, FarkadSync.supersededFloor());
+    },
+
+    // True only when the schedule is on the disk. Every caller that tells somebody
+    // something happened needs to be able to find that out.
+    saveFailed: false,
+
+    // The schedule exactly as it was last CONFIRMED on the disk. What memory is put back
+    // to when an edit turns out to have nowhere durable to live.
+    durableText: null,
+
     save(options) {
+        // Blocked: either the page and the scripts are from different builds, or a
+        // damaged record is sitting under one of these keys. Either way what is already
+        // saved stays saved and nothing new is written. See js/recovery.js.
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+
         this.schedule.updatedAt = new Date().toISOString();
         this.schedule.updatedBy = syncDeviceId();
-        Store.set(V2_KEY, JSON.stringify(this.schedule));
 
-        if (!(options && options.silent) && typeof FarkadSync !== 'undefined') {
+        // Verified, not assumed. This is the record; a write that did not land is the
+        // evening gone at the next reload, and the old line here could not tell the
+        // difference between that and a save.
+        const text = JSON.stringify(this.schedule);
+        const landed = Store.setVerified(V2_KEY, text);
+        this.saveFailed = !landed;
+
+        if (landed) {
+            this.durableText = text;
+            // Everything journalled up to now is inside the blob just written, so the
+            // journal no longer has to hold the ones the cloud already has.
+            if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
+        }
+
+        // Only on success. Telling the sync layer that something changed here when
+        // nothing was stored sends a bare timestamp for an edit that does not exist,
+        // and moves the document's clock forward over work that was never recorded.
+        if (landed && !(options && options.silent) && typeof FarkadSync !== 'undefined') {
             FarkadSync.onLocalChange(this.schedule);
         }
+        if (!landed && typeof updateSyncNotice === 'function') updateSyncNotice();
+
+        return landed;
+    },
+
+    // Back to the last state this device is known to hold, and then forward again through
+    // the journal - which is exactly what a reopen would do. Used when an edit turns out
+    // to have nowhere durable to live: the screen must not keep showing something the
+    // device cannot produce again.
+    rollback() {
+        if (typeof this.durableText !== 'string') return false;
+
+        try {
+            this.schedule = normaliseSchedule(JSON.parse(this.durableText));
+        } catch (error) {
+            return false;
+        }
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.reloadJournal) {
+            // Off the disk, not out of memory. The entries that failed to write are the
+            // ones being rolled back, and replaying them would put the edit straight
+            // back on the screen it was just removed from.
+            FarkadSync.reloadJournal();
+            FarkadSync.replayJournal(this.schedule, FarkadSync.supersededFloor());
+        }
+        return true;
     },
 
     // A roster change: who exists, their rates, and the order they are read in. Saved and
     // SENT - a roster edit that only saved locally was overwritten by the next snapshot
     // from another phone, taking any days recorded against a new worker with it.
     commitRoster() {
+        const journalled = (typeof FarkadSync === 'undefined' || !FarkadSync.editRoster)
+            ? !Store.available
+            : Boolean(FarkadSync.editRoster(this.schedule)) || !Store.available;
+
+        if (!journalled) return this.refuseEdit();
+
         this.save();
-        if (typeof FarkadSync !== 'undefined' && FarkadSync.editRoster) {
-            FarkadSync.editRoster(this.schedule);
-        }
+        return true;
     },
 
     // Every mutation goes through here: it writes locally and hands the sync layer the
     // single field path that changed, which is what keeps three people editing the same
     // evening from overwriting one another.
+    // Returns whether the edit is now somewhere that survives the app being closed.
+    //
+    // The mutation has already happened in memory by the time this runs - the caller
+    // changed the schedule and handed over the field path. What this decides is whether
+    // that change is allowed to STAND, and it stands only if at least one durable record
+    // holds it:
+    //
+    //   the schedule, written and read back;  or
+    //   the journal, written and read back, which rebuilds it at the next boot with no
+    //   cloud involved at all.
+    //
+    // If neither, memory goes back to what the device can actually produce again and the
+    // person is told. An edit that is on the screen and nowhere else is the worst outcome
+    // available here: it looks done, it reads back all evening, and it is gone in the
+    // morning.
     commit(change) {
-        this.save();
-        if (change && change.path && typeof FarkadSync !== 'undefined') {
-            FarkadSync.edit(change.path, change.value);
+        // A write the model refused. Nothing is saved and nothing is sent, and the reason
+        // is said out loud - a refusal handled in silence looks exactly like a tap that
+        // did not register, and the person taps again.
+        if (change && change.refused) {
+            if (typeof askTell === 'function') askTell(change.reason);
+            return false;
         }
+
+        // The journal first, and the schedule only if the journal took it.
+        //
+        // The journal is the smaller write by a long way - one field against the whole
+        // record - so in practice it is the one that fits. Making it the gate rather than
+        // one of two alternatives buys something the alternative version could not: every
+        // committed edit is in the journal, always, so an arriving snapshot can always be
+        // told what to put back on top of itself. The version where a schedule write
+        // alone was enough left an edit on the disk that nothing would ever send and
+        // nothing could re-apply - and the next older snapshot from another phone took it
+        // off the device.
+        //
+        // Writing the schedule only afterwards is what keeps the disk from getting ahead
+        // of the screen: a refused edit is never written anywhere.
+        if (!this.journal(change)) return this.refuseEdit();
+
+        this.save();
         render();
+        return true;
+    },
+
+    // Puts one change in the journal. True when it is durably there - or when this
+    // browser has no durable storage at all, which is a different situation and an
+    // honest one: the app says so in a permanent banner, so an edit accepted here is not
+    // being passed off as saved.
+    journal(change) {
+        if (!change || !change.path) return true;
+        if (typeof FarkadSync === 'undefined') return !Store.available;
+        return Boolean(FarkadSync.edit(change.path, change.value)) || !Store.available;
+    },
+
+    // The same, for several changes at once, as a single write.
+    journalBatch(changes) {
+        const entries = (changes || [])
+            .filter(change => change && change.path)
+            .map(change => ({ path: change.path, value: change.value }));
+        if (entries.length === 0) return true;
+        if (typeof FarkadSync === 'undefined') return !Store.available;
+
+        const journalled = Boolean(FarkadSync.queueBatch(entries));
+        if (journalled && FarkadSync.adapter) FarkadSync.scheduleFlush();
+        return journalled || !Store.available;
+    },
+
+    // The shared ending for a commit with nowhere to live.
+    refuseEdit() {
+        this.rollback();
+        render();
+        if (typeof askTell === 'function') {
+            askTell({
+                title: 'הרישום לא נשמר',
+                message: 'אין מקום פנוי במכשיר, ולכן לא הצלחנו לשמור את השינוי - הוא בוטל ' +
+                    'כדי שלא ייראה כאילו נרשם. מה שכבר שמור לא נפגע. פנה מקום במכשיר ' +
+                    'או ייצא קובץ גיבוי, ונסה שוב.'
+            });
+        }
+        return false;
     },
 
     // Writes what is in memory to the device WITHOUT re-stamping it. Used when a snapshot
@@ -100,7 +300,15 @@ const State = {
     // as this device's, at this device's clock - and that stamp is what every later
     // comparison is made against.
     persist() {
-        Store.set(V2_KEY, JSON.stringify(this.schedule));
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+        const text = JSON.stringify(this.schedule);
+        const landed = Store.setVerified(V2_KEY, text);
+        this.saveFailed = !landed;
+        if (landed) {
+            this.durableText = text;
+            if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
+        }
+        return landed;
     },
 
     // A bulk edit - copying a whole day across - saves once and renders once, but still
@@ -108,13 +316,24 @@ const State = {
     // skipped this landed on this device and nowhere else: the other two would keep
     // building the evening against a day they could not see.
     commitMany(changes) {
+        // Copying a day across can meet the two-site cap partway through. The rest of the
+        // copy still lands - refusing the whole thing over one worker would be a worse
+        // answer - and what did not is named once rather than per row.
+        const refused = (changes || []).filter(change => change && change.refused);
+        const accepted = (changes || []).filter(change => change && !change.refused);
+
+        // All or nothing, and ONE write. Journalling them one at a time was all-or-nothing
+        // in what it reported and not in what it did: the first entry landed, the second
+        // ran out of room, and the app said the copy had not happened while half of it sat
+        // on the disk waiting to come back at the next open.
+        if (!this.journalBatch(accepted)) return this.refuseEdit();
+
         this.save();
-        if (typeof FarkadSync !== 'undefined') {
-            changes.forEach(change => {
-                if (change && change.path) FarkadSync.edit(change.path, change.value);
-            });
-        }
         render();
+        if (refused.length > 0 && typeof askTell === 'function') {
+            askTell(`${refused.length} רישומים לא נוספו: ${refused[0].reason}`);
+        }
+        return true;
     },
 
     worker(id) {
@@ -160,23 +379,13 @@ const State = {
     },
 
     nextWorkerId() {
-        return nextId(this.schedule.workers, 'w');
+        return newEntityId('w');
     },
 
     nextPlaceId() {
-        return nextId(this.schedule.places, 'p');
+        return newEntityId('p');
     }
 };
-
-// Ids must never be reused: a recycled id would silently attach an old assignment to a
-// new person. Always one past the highest ever issued, not the array length.
-function nextId(list, prefix) {
-    const highest = list.reduce((max, item) => {
-        const match = /^[wp]_(\d+)$/.exec(item.id || '');
-        return match ? Math.max(max, Number(match[1])) : max;
-    }, 0);
-    return `${prefix}_${String(highest + 1).padStart(2, '0')}`;
-}
 
 // Accepts anything shaped roughly right and fills in what is missing, so a document
 // written by an older build - or a half-finished remote write - cannot crash the app.
@@ -184,7 +393,14 @@ function normaliseSchedule(raw) {
     const schedule = emptySchedule();
     if (!raw || typeof raw !== 'object') return schedule;
 
-    schedule.workers = (Array.isArray(raw.workers) ? raw.workers : [])
+    // Both shapes of the roster, merged rather than chosen between - see mergeRoster.
+    // The arrays are what a device still on an older build writes and reads; the map
+    // carries only the people who changed, so reading either one alone loses somebody.
+    const roster = (raw.roster && typeof raw.roster === 'object') ? raw.roster : {};
+    const rawWorkers = mergeRoster(raw.workers, roster.workers, roster.workerOrder);
+    const rawPlaces = mergeRoster(raw.places, roster.places, roster.placeOrder);
+
+    schedule.workers = (Array.isArray(rawWorkers) ? rawWorkers : [])
         .filter(w => w && w.id)
         .map(w => ({
             id: String(w.id),
@@ -198,7 +414,7 @@ function normaliseSchedule(raw) {
             active: w.active !== false
         }));
 
-    schedule.places = (Array.isArray(raw.places) ? raw.places : [])
+    schedule.places = (Array.isArray(rawPlaces) ? rawPlaces : [])
         .filter(p => p && p.id)
         .map(p => ({
             id: String(p.id),
@@ -250,7 +466,17 @@ function normaliseLayer(side) {
             .filter(entry => entry && entry.placeId)
             .map(entry => makeEntry(entry.placeId, entry.rate, entry.extraHours));
 
-        out[workerId] = record.absent ? { absent: true, entries: [] } : { entries };
+        // The rate the day was recorded at travels with it. Dropping it here would send
+        // every day back to being paid at whatever the roster says today, which is the
+        // whole thing the stamp exists to prevent - and it would do it silently, on the
+        // way in from a backup file or from another phone.
+        const kept = record.absent ? { absent: true, entries: [] } : { entries };
+        if (record.rates && typeof record.rates === 'object') {
+            const daily = Number(record.rates.daily) || 0;
+            const hourly = Number(record.rates.hourly) || 0;
+            if (daily > 0 || hourly > 0) kept.rates = { daily, hourly };
+        }
+        out[workerId] = kept;
     });
 
     return out;

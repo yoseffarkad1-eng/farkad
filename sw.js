@@ -3,23 +3,32 @@
 // The people using this are on building sites with unreliable signal, and the app is the
 // official record of who worked where. It has to open whether or not there is a network.
 //
-// Two rules decide everything here:
+// One rule decides everything here: A SESSION RUNS ONE BUILD, END TO END.
 //
-//   index.html is network-first  - so a new version is picked up rather than a stale page
-//                                  being served forever from cache.
-//   everything else is cache-first - the CSS and JS are versioned with the cache, so once
-//                                  a version is installed its assets never change.
+// index.html used to be network-first, and that quietly broke the rule. Deploy v63 while
+// a phone is running v62 and the next navigation fetched v63's PAGE while the scripts
+// came cache-first from v62's cache - new HTML, old JavaScript, in the same session.
+// Worse, that page was written INTO the v62 cache, so every offline launch afterwards
+// opened the mismatch too. A page and a sync layer from different builds is how an edit
+// gets written in a shape the other half does not read.
+//
+// So everything is cache-first, the page included, and a cache only ever holds the build
+// it was installed with. A new version is not picked up by loading the page - it is
+// picked up by the service worker update the browser runs anyway, which installs the new
+// build COMPLETE and waits until the person presses the banner. Then one reload crosses
+// from all of one build to all of the next.
 //
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v58';
+const VERSION = 'farkad-v77';
 
 const SHELL = [
     './',
     './index.html',
     './css/app.css',
     './js/store.js',
+    './js/recovery.js',
     './js/dates.js',
     './js/model/schema.js',
     './js/model/migrate.js',
@@ -91,31 +100,28 @@ self.addEventListener('fetch', event => {
     // CSV when it is unavailable.
     if (url.origin !== self.location.origin) return;
 
-    // Network-first for the document, so a deployed change is seen on the next load -
-    // but only for as long as the network is worth waiting for.
+    // The document, from THIS version's cache. Not from the network, and never written
+    // back at runtime: the page in a cache has to stay the page that build was installed
+    // with, or the session is running two builds at once.
+    //
+    // It is a fast path as well as a correct one - no wait for the network before the app
+    // appears, which on a site with a signal that is technically connected and going
+    // nowhere was the difference between opening and staring at white.
     if (request.mode === 'navigate') {
         event.respondWith(
-            timedFetch(request, DOCUMENT_TIMEOUT_MS)
-                .then(response => {
-                    // Only a real page overwrites the cached shell. A host mid-deploy
-                    // answers 502 for a moment; caching that page made it THE app on
-                    // every offline launch afterwards. And when the network hands back
-                    // an error while a good copy sits in the cache, the good copy wins.
-                    if (response && response.ok) {
-                        const copy = response.clone();
-                        caches.open(VERSION).then(cache => cache.put('./index.html', copy));
-                        return response;
-                    }
-                    return caches.match('./index.html').then(hit => hit || response);
-                })
-                .catch(() => caches.match('./index.html').then(hit => hit || offlineFallback()))
+            caches.open(VERSION)
+                .then(cache => cache.match('./index.html'))
+                .then(hit => hit || timedFetch(request, DOCUMENT_TIMEOUT_MS)
+                    .catch(() => offlineFallback()))
         );
         return;
     }
 
-    // Cache-first for versioned assets.
+    // Cache-first for versioned assets, and only from THIS version's cache. Falling
+    // through to caches.match() across every cache would serve an asset from the build
+    // before this one - which is the same mixed-build failure by another route.
     event.respondWith(
-        caches.match(request).then(hit => {
+        caches.open(VERSION).then(cache => cache.match(request)).then(hit => {
             if (hit) return hit;
 
             return fetch(request).then(response => {

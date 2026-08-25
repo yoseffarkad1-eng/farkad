@@ -329,6 +329,45 @@ function renderCloudRestorePoints() {
     });
 }
 
+// The gate every restore door goes through, before normaliseSchedule is allowed near
+// the content.
+//
+// normaliseSchedule is forgiving on purpose - a half-finished remote write should be
+// read for what is in it - so it turns {} and {"workers":[],"places":[]} into an empty
+// schedule and says nothing. Down these four doors that is a whole-document replacement:
+// the empty schedule goes on the screen, onto the disk and up to the other two phones.
+//
+// Returns the document to restore, or null after telling the person exactly what is
+// wrong with the one they picked. Nothing is changed on the way to a null.
+function acceptRestoreSource(raw, what) {
+    const read = readReplacementDocument(raw);
+    if (read.document) return read.document;
+
+    askTell({
+        title: 'לא בוצע שחזור',
+        message: `${what} אינו רישום שלם של לוח עבודה, ולכן לא שינינו כלום. ` +
+            `מה שכבר שמור לא נפגע.\n\n${read.problems.slice(0, 3).join(' ')}`
+    });
+    return null;
+}
+
+// The same, for a source that has to be parsed first. A restore point whose JSON will
+// not parse used to throw out of the click handler: no dialog, no error, nothing on
+// screen at all - the button simply did nothing.
+function acceptRestoreText(text, what) {
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
+    } catch (error) {
+        askTell({
+            title: 'לא בוצע שחזור',
+            message: `${what} לא נקרא, ולכן לא שינינו כלום. מה שכבר שמור לא נפגע.`
+        });
+        return null;
+    }
+    return acceptRestoreSource(parsed, what);
+}
+
 async function restoreFromCloud(date) {
     const parsed = parseLocalDate(date);
     const go = await askConfirm({
@@ -350,15 +389,24 @@ async function restoreFromCloud(date) {
         return;
     }
 
-    // The current state becomes the undo for the restore itself - the same slot the
-    // local restore uses, and for the same reason.
-    Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+    // Checked before the way back is written, let alone before anything is replaced.
+    const document = acceptRestoreSource(raw, 'העותק מהענן');
+    if (!document) return;
 
-    State.schedule = normaliseSchedule(raw);
-    State.save();
-    FarkadSync.replaceAll(State.schedule);
-    render();
-    askTell('שוחזר מהענן.');
+    // Confirmed BEFORE anything is replaced. The order is the guarantee: a close between
+    // any two steps has to leave something readable, which is only true if the way back
+    // is on the disk before the thing it is a way back from is gone.
+    if (!pushUndoState(State.schedule)) {
+        askTell(noWayBackNotice());
+        return;
+    }
+
+    // One transaction, in the sync layer: write down the intent, store it HERE, mark it
+    // stored, then send. Reproducing that ordering in four places is how one of them ends
+    // up subtly different.
+    tellRestoreResult(
+        await FarkadSync.replaceEverything(normaliseSchedule(document)),
+        'שוחזר מהענן.');
 }
 
 async function restoreSnapshot(date) {
@@ -373,19 +421,271 @@ async function restoreSnapshot(date) {
     });
     if (!go) return;
 
-    // The current state becomes the undo for the restore itself.
-    Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+    const document = acceptRestoreText(raw, 'העותק השמור');
+    if (!document) return;
 
-    State.schedule = normaliseSchedule(JSON.parse(raw));
-    State.save();
-    if (typeof FarkadSync !== 'undefined') FarkadSync.replaceAll(State.schedule);
-    render();
-    askTell('שוחזר.');
+    if (!pushUndoState(State.schedule)) {
+        askTell(noWayBackNotice());
+        return;
+    }
+
+    tellRestoreResult(
+        await FarkadSync.replaceEverything(normaliseSchedule(document)),
+        'שוחזר.');
+}
+
+// The state a restore replaced, kept so the restore itself can be undone.
+//
+// There used to be one slot, which meant the second restore overwrote the way back from
+// the first: after two wrong restores in a row there was no route to the state before
+// either. It is a short stack now - three deep, newest first - and each entry is
+// independent of the others.
+const UNDO_KEY = 'scheduleData:v2backup';
+const UNDO_STACK_KEY = 'scheduleData:undoStack';
+const UNDO_KEEP = 3;
+
+// Returns true only when the way back is on the disk and can be read again.
+//
+// The caller must not replace anything until it does. A restore that goes ahead without a
+// confirmed way back leaves somebody with the state they restored, no route to the one
+// they had, and no way to know that until they look for it.
+function pushUndoState(schedule) {
+    const entry = JSON.stringify(schedule);
+
+    let stack;
+    try {
+        const raw = Store.get(UNDO_STACK_KEY);
+        stack = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(stack)) stack = [];
+    } catch (error) {
+        // Unreadable is not empty, and this one is recoverable without ceremony: the
+        // stack is a convenience over the single slot below, so it starts again rather
+        // than taking the app down with it. The raw value is left where it is.
+        stack = [];
+    }
+
+    stack.unshift({ at: new Date().toISOString(), schedule: entry });
+    const stacked = Store.setVerified(UNDO_STACK_KEY, JSON.stringify(stack.slice(0, UNDO_KEEP)));
+
+    // The single slot stays, because it is what restoreLocalBackup has always read and
+    // what an older build left behind. Either route home is enough.
+    const slotted = Store.setVerified(UNDO_KEY, entry);
+
+    return stacked || slotted;
+}
+
+function readUndoStack() {
+    try {
+        const raw = Store.get(UNDO_STACK_KEY);
+        const stack = raw ? JSON.parse(raw) : [];
+        return Array.isArray(stack) ? stack : [];
+    } catch (error) {
+        return [];
+    }
+}
+
+// The way back, WITHOUT taking it off the stack. Reading and consuming used to be the
+// same call, so an entry that turned out to be unreadable was destroyed by the attempt
+// that discovered it.
+function peekUndoState() {
+    const top = readUndoStack()[0];
+    if (top && typeof top.schedule === 'string') return top.schedule;
+
+    // Nothing on the stack: fall back to the single slot, which is where a restore made
+    // by an older build put its way back.
+    return Store.get(UNDO_KEY);
+}
+
+// Taken off, once the state it holds has been accepted. Matched on content so that a
+// push which happened in between cannot cause the wrong entry to be dropped.
+// Taken off, once the state it holds has been accepted - or once the restore it was
+// written for has been abandoned. Matched on content so that a push which happened in
+// between cannot cause the wrong entry to be dropped.
+//
+// Returns whether the entry is genuinely gone. The stack write is VERIFIED: an ignored
+// write left the app believing an entry had been consumed while the disk still held it,
+// which is the same class of lie as a tick over a save that did not happen.
+//
+// The single slot is rewritten rather than removed when the stack still has entries,
+// because that slot is what an older build reads and what peekUndoState falls back to:
+// leaving it pointing at a state that has just been consumed would hand the next press a
+// way back the stack no longer offers.
+function dropUndoState(raw) {
+    const stack = readUndoStack();
+    const at = stack.findIndex(entry => entry && entry.schedule === raw);
+
+    let gone = true;
+    if (at !== -1) {
+        stack.splice(at, 1);
+        gone = Store.setVerified(UNDO_STACK_KEY, JSON.stringify(stack));
+    }
+
+    if (Store.get(UNDO_KEY) === raw) {
+        const next = stack.find(entry => entry && typeof entry.schedule === 'string');
+        if (next) {
+            if (!Store.setVerified(UNDO_KEY, next.schedule)) gone = false;
+        } else {
+            Store.remove(UNDO_KEY);
+            if (Store.durableGet(UNDO_KEY) === raw) gone = false;
+        }
+    }
+
+    return gone;
+}
+
+// One place decides what to say about a restore, so the four that perform one cannot
+// drift apart. FarkadSync.replaceEverything does the ordering; this reads the stage it
+// stopped at.
+function tellRestoreResult(result, done) {
+    if (result.ok) { askTell(done); return; }
+
+    if (result.stage === 'invalid') { askTell(notAScheduleNotice()); return; }
+    if (result.stage === 'prepare') { askTell(noRetryRecordNotice()); return; }
+    if (result.stage === 'queue') { askTell(unfinishedRestoreNotice()); return; }
+    if (result.stage === 'finalize') { askTell(unfinishedTransactionNotice()); return; }
+    if (result.stage === 'local') {
+        // A cancellation that could not be confirmed means the intent is still on the
+        // disk and the next session will act on it. Saying "nothing changed" would be
+        // the one answer that lets it surprise somebody later.
+        askTell(result.cancelled === false ? stuckIntentNotice() : notStoredNotice());
+        return;
+    }
+    askTell(replacementNotice(result.error));
+}
+
+// The replacement is on the device, but the queue of unsent edits could not be finished -
+// so the next open would replay entries this restore replaces straight back on top of it.
+// Not a success, and not a failure that undid anything either.
+function unfinishedRestoreNotice() {
+    return {
+        title: 'השחזור לא הושלם',
+        message: 'המצב המשוחזר נשמר במכשיר, אבל לא הצלחנו לסיים את תור השליחה, ולכן ' +
+            'השחזור עדיין לא הסתיים ולא נשלח למכשירים האחרים. פנה מקום במכשיר - ' +
+            'הוא ימשיך מעצמו.'
+    };
+}
+
+// The sync layer refused the document itself. A door that skipped its own check would
+// otherwise have replaced everything with whatever it was handed.
+function notAScheduleNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'המצב שביקשת לשחזר אינו רישום שלם של לוח עבודה, ולכן לא שינינו כלום. ' +
+            'מה שכבר שמור לא נפגע.'
+    };
+}
+
+// The restore itself is done and on the device - what could not be taken off the disk is
+// the note saying one was owed. Nothing is lost and nothing will be undone: the note is
+// replayed at the next open, and applying the same restore twice is applying it once.
+// Still not a finished piece of work, so it is not reported as one.
+function unfinishedTransactionNotice() {
+    return {
+        title: 'השחזור בוצע - לא הכול הסתיים',
+        message: 'המצב המשוחזר נשמר במכשיר, אבל לא הצלחנו למחוק את הבקשה לשחזר. ' +
+            'שום דבר לא ילך לאיבוד - הבקשה תיסגר מעצמה בפתיחה הבאה. ' +
+            'פנה מקום במכשיר כדי שזה יקרה.'
+    };
+}
+
+// The restore did not happen here, and the note saying it was wanted could not be taken
+// off the device either.
+function stuckIntentNotice() {
+    return {
+        title: 'השחזור לא בוצע - ויש מה לבדוק',
+        message: 'לא הצלחנו לשמור את המצב המשוחזר, וגם לא הצלחנו למחוק את הבקשה לשחזר. ' +
+            'הרישום הנוכחי לא השתנה, אבל ייתכן שהשחזור יתבצע בפתיחה הבאה. ' +
+            'פנה מקום במכשיר ופתח מחדש כדי לראות מה המצב.'
+    };
+}
+
+// Said, and the restore abandoned, when there is nowhere to write down the fact that a
+// restore is owed.
+//
+// That record is what makes the whole thing recoverable: with it on the disk, a restore
+// whose cloud write fails is re-sent by the next session. Without it, the restore exists
+// only on this screen, and the next older snapshot from another phone finishes undoing
+// it - which is precisely the state somebody performing a restore is trying to escape.
+function noRetryRecordNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'אין מקום במכשיר לרשום שהשחזור ממתין לשליחה, ובלי זה הוא היה עלול ' +
+            'להיעלם ברגע שמכשיר אחר יתעדכן. לא שינינו כלום. פנה מקום במכשיר, ונסה שוב.'
+    };
+}
+
+// Said, and the restore abandoned, when the RESTORED state could not be stored.
+//
+// The way back being written is only half of it. If the new state cannot be stored
+// either, going ahead leaves the restored week on the screen and the old one on the disk
+// - the person sees a restore that worked, closes the app, and opens it to find nothing
+// happened. Worse, the cloud would then be sent a state this device does not hold.
+function notStoredNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'אין מקום במכשיר לשמור את המצב המשוחזר, ולכן לא שינינו כלום - הרישום ' +
+            'שהיה כאן נשאר כמו שהוא. פנה מקום במכשיר או ייצא קובץ גיבוי, ונסה שוב.'
+    };
+}
+
+// Said, and the replacement abandoned, when the way back could not be written.
+//
+// Going ahead anyway is the one thing that must not happen: the person ends up holding
+// the state they restored, no route to the one they had, and nothing telling them so
+// until they go looking for it.
+function noWayBackNotice() {
+    return {
+        title: 'לא בוצע שחזור',
+        message: 'אין מקום במכשיר לשמור את המצב הנוכחי לפני השחזור, ובלי זה אי אפשר יהיה ' +
+            'לחזור ממנו. לא שינינו כלום. פנה מקום במכשיר, או ייצא קובץ גיבוי קודם, ונסה שוב.'
+    };
+}
+
+// What to say when a replacement landed on this device but not in the cloud. Not a
+// failure - the restore DID happen here, and it is written down and will go out - but
+// not the unqualified "done" the app used to print over a write that never happened.
+function replacementNotice(error) {
+    return {
+        title: 'שוחזר במכשיר הזה',
+        message: 'השחזור בוצע ונשמר כאן, אבל עדיין לא הגיע לענן, כך שהמכשירים האחרים ' +
+            'עדיין רואים את המצב הקודם. הוא יישלח כשהחיבור יחזור - אל תשחזר שוב.\n\n' +
+            String((error && error.message) || error).slice(0, 120)
+    };
 }
 
 // ---------------------------------------------------------------- backup file
 
 const LAST_BACKUP_KEY = 'scheduleData:lastBackup';
+
+// Everything Recovery is holding, as a file, exactly as it sits on the device.
+//
+// Not a schedule - a schedule is what this could not be turned into. It is the raw bytes,
+// so that whatever is inside them leaves the phone before anything else happens to it,
+// and so somebody can look at it later. JSON a parser refuses is usually a truncated
+// write, and the days in it are plain text.
+function exportRecoveryData() {
+    const records = Recovery.rawRecords();
+    const payload = {
+        kind: 'farkad-recovery',
+        takenAt: new Date().toISOString(),
+        appVersion: typeof APP_VERSION === 'string' ? APP_VERSION : null,
+        // Said in the file too, because whoever opens it will not have the banner.
+        note: 'Raw records that could not be parsed. Nothing here was deleted from the device.',
+        problems: Recovery.problems.map(problem => ({
+            key: problem.key, copiedTo: problem.copy, message: problem.message
+        })),
+        records
+    };
+
+    const name = `farkad-recovery-${todayStr()}.json`;
+    const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function exportBackup() {
     const name = `farkad-${todayStr()}.json`;
@@ -468,7 +768,31 @@ function readBackupFile(parsed) {
         };
     }
 
-    const schedule = normaliseSchedule(parsed);
+    // Checked BEFORE anything is replaced, and never repaired. Two rows claiming the same
+    // id is genuinely ambiguous - their days are already merged under that one id and
+    // nothing here can tell which day belonged to whom. Renumbering one of them silently
+    // would invent an answer and hide the question, so the file is refused instead and
+    // the existing data is not touched.
+    const problems = validateRosterIds(parsed);
+    if (problems.length > 0) {
+        const error = new Error('roster ids are not sound');
+        error.problems = problems;
+        throw error;
+    }
+
+    // The complete check, on the RAW file, before normaliseSchedule sees it. The
+    // "did anybody survive" test below caught a file that emptied itself; it could not
+    // catch one that was already empty in the wrong way, or one carrying a day against a
+    // worker who is not in it, or an impossible date, or an id with a dot in it that
+    // would write every edit for that man somewhere else in the document.
+    const read = readReplacementDocument(parsed);
+    if (!read.document) {
+        const error = new Error('not a whole schedule');
+        error.problems = read.problems;
+        throw error;
+    }
+
+    const schedule = normaliseSchedule(read.document);
     if (parsed.workers.length > 0 && schedule.workers.length === 0) {
         throw new Error('no workers survived normalisation');
     }
@@ -494,7 +818,19 @@ function importBackup(event) {
             // Validated before anything is replaced. The old version emptied the roster
             // first and only then discovered the file was unusable.
             console.error('Import failed:', error);
-            askTell('הקובץ אינו קובץ גיבוי תקין. הנתונים הקיימים לא השתנו.');
+            // A roster problem is named. "Not a valid backup" is true and useless when
+            // the file is perfectly readable and the trouble is two men sharing an id -
+            // that is something the person can go and look at.
+            if (error && error.problems) {
+                askTell({
+                    title: 'הקובץ לא נטען',
+                    message: 'יש בעיה במזהי העובדים או האתרים, ולכן הקובץ לא נטען כדי לא ' +
+                        'לערבב רישומים בין אנשים. הנתונים הקיימים לא השתנו.\n\n' +
+                        error.problems.join('\n')
+                });
+            } else {
+                askTell('הקובץ אינו קובץ גיבוי תקין. הנתונים הקיימים לא השתנו.');
+            }
             event.target.value = '';
             return;
         }
@@ -511,47 +847,90 @@ function importBackup(event) {
         }
 
         // The current state becomes the local backup, so an import of the wrong file is
-        // itself undoable.
-        Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+        // itself undoable - on its own entry, so importing twice does not lose the way
+        // back to where this started. Confirmed before the file replaces anything.
+        if (!pushUndoState(State.schedule)) {
+            askTell(noWayBackNotice());
+            event.target.value = '';
+            return;
+        }
 
-        State.schedule = incoming;
+        const previousIssues = State.migrationIssues;
         // Decisions the migration refused to guess at come with the file. Losing them
         // here would leave work in the old file that the app now claims to have imported.
         State.migrationIssues = loaded.issues;
-        writeIssues(loaded.issues);
-        State.save();
-        if (typeof FarkadSync !== 'undefined') FarkadSync.replaceAll(State.schedule);
 
+        const result = await FarkadSync.replaceEverything(incoming);
         event.target.value = '';
-        render();
+
+        if (!result.ok && result.stage !== 'cloud') {
+            // The schedule was put back by the transaction; the issues are this file's
+            // business and go back with it.
+            State.migrationIssues = previousIssues;
+            render();
+            tellRestoreResult(result, '');
+            return;
+        }
+        writeIssues(loaded.issues);
 
         if (loaded.issues.length > 0) {
             await askTell(`הגיבוי נטען. ${loaded.issues.length} רישומים ממתינים להחלטה שלך.`);
             openMigrationModal();
+            if (!result.ok) askTell(replacementNotice(result.error));
             return;
         }
-        askTell('הגיבוי נטען.');
+        tellRestoreResult(result, 'הגיבוי נטען.');
     };
     reader.readAsText(file);
 }
 
 async function restoreLocalBackup() {
-    const raw = Store.get('scheduleData:v2backup');
-    if (!raw) {
-        askTell('אין גיבוי מקומי.');
-        return;
-    }
     const go = await askConfirm({
         title: 'לשחזר את המצב שלפני הטעינה האחרונה?',
         ok: 'שחזר'
     });
     if (!go) return;
 
-    const current = JSON.stringify(State.schedule);
-    State.schedule = normaliseSchedule(JSON.parse(raw));
-    Store.set('scheduleData:v2backup', current);
-    State.save();
-    if (typeof FarkadSync !== 'undefined') FarkadSync.replaceAll(State.schedule);
-    render();
-    askTell('שוחזר.');
+    // READ, not popped. The entry only leaves the stack once it has been checked and
+    // accepted: popping first meant a way back that would not parse, or that was not a
+    // schedule, was consumed by the attempt that failed on it - so the button that could
+    // not restore it also destroyed it, and the next press walked past it to an older
+    // state without saying so.
+    const raw = peekUndoState();
+    if (!raw) {
+        askTell('אין גיבוי מקומי.');
+        return;
+    }
+
+    const document = acceptRestoreText(raw, 'הגיבוי המקומי');
+    if (!document) return;
+
+    // The state being left is itself pushed, so this is reversible in both directions.
+    // It goes on FIRST, before anything is replaced: a close between any two steps has to
+    // leave something readable.
+    const leaving = JSON.stringify(State.schedule);
+    if (!pushUndoState(State.schedule)) {
+        askTell(noWayBackNotice());
+        return;
+    }
+
+    const result = await FarkadSync.replaceEverything(normaliseSchedule(document));
+
+    if (result.ok) {
+        // Now, and only now. Dropping it before the transaction had proved itself meant
+        // a restore the app correctly REFUSED still destroyed the state it was refusing
+        // to restore: the entry left the stack, the single slot was overwritten with the
+        // state that had not moved, and the way back was gone with nothing said about it.
+        //
+        // Dropped after the push above, so pressing the button twice walks further back
+        // rather than flipping between the last two states forever.
+        dropUndoState(raw);
+    } else {
+        // Nothing was replaced, so the way back that was written a moment ago is a way
+        // back to a state nothing moved away from. Taken off again, so the stack is
+        // exactly what it was and the next press reaches the same entry as this one.
+        dropUndoState(leaving);
+    }
+
+    tellRestoreResult(result, 'שוחזר.');
 }

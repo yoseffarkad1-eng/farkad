@@ -27,6 +27,7 @@ import {
     setDoc,
     updateDoc,
     onSnapshot,
+    runTransaction,
     FieldPath
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -150,19 +151,34 @@ if (!isConfigured()) {
             // days.2026-08-12.plan.w_01 and ...plan.w_07 both land. This is what lets the
             // three of them build the evening roster at the same time.
             update(patch) {
-                const args = patchToUpdateArgs(patch);
-                return updateDoc(scheduleRef, ...args)
-                    .catch(error => {
-                        // A document that does not exist yet cannot be updated.
-                        if (error && error.code === 'not-found') {
-                            return setDoc(scheduleRef, {}, { merge: true })
-                                .then(() => updateDoc(scheduleRef, ...args));
-                        }
-                        throw error;
-                    });
+                // 'not-found' travels back to the sync layer untouched. Answering it
+                // here used to mean writing an empty {} - which the rules refuse, since
+                // they require a timestamp on every write - so the first sync of a new
+                // project failed twice over and reported only "sync error". What to put
+                // in a document that does not exist yet is a question about the
+                // schedule, and this file is not allowed to know what a schedule is.
+                return updateDoc(scheduleRef, ...patchToUpdateArgs(patch));
             },
             save(data) {
                 return setDoc(scheduleRef, data);
+            },
+
+            // The first write of a new project. A transaction rather than a plain set:
+            // two phones opened the same evening are both told the document is missing
+            // and both try to create it, and a set would let the second silently
+            // overwrite the first. Inside the transaction the read and the write are one
+            // operation, so exactly one wins and the other is handed 'already-exists' -
+            // which the sync layer turns back into an ordinary field merge.
+            create(data) {
+                return runTransaction(db, transaction =>
+                    transaction.get(scheduleRef).then(snapshot => {
+                        if (snapshot.exists()) {
+                            const error = new Error('the schedule already exists');
+                            error.code = 'already-exists';
+                            throw error;
+                        }
+                        transaction.set(scheduleRef, data);
+                    }));
             },
 
             // Sync is not a backup: a deletion syncs as faithfully as a correction, and

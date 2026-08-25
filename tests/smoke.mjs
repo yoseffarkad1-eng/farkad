@@ -1,10 +1,19 @@
 // Dev-only smoke tests. Nothing here ships to production and the app still has no
 // build step.
 //
-//   python3 -m http.server 8802 --directory .
-//   node tests/smoke.mjs
+//   npm ci
+//   npx playwright install chromium      (or: npm run browsers)
+//   npm run test:smoke
 //
-// Override with SMOKE_URL, CHROME_PATH and PLAYWRIGHT_MODULE if your paths differ.
+// It serves the app itself. It used to need a second terminal running python3 -m
+// http.server, so `npm ci && npm run test:smoke` from a fresh clone did nothing but
+// fail - and a service worker, which is half of what this file tests, does not register
+// over file://.
+//
+// Override with SMOKE_URL to point at a server you are already running, CHROME_PATH for
+// a browser binary, and PLAYWRIGHT_MODULE for a playwright installed somewhere else.
+
+import { serve } from './serve.mjs';
 
 // ESM ignores NODE_PATH, so allow an explicit path to a global playwright install.
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -15,7 +24,11 @@ const EXEC = process.env.CHROME_PATH || undefined;
 const APP_VERSION_EXPECTED = (await import('node:fs'))
   .readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
   .match(/APP_VERSION = '(v\d+)'/)[1];
-const BASE = process.env.SMOKE_URL || 'http://127.0.0.1:8802';
+
+const server = process.env.SMOKE_URL
+  ? { url: process.env.SMOKE_URL, close: () => {} }
+  : await serve(new URL('..', import.meta.url).pathname);
+const BASE = server.url;
 
 const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 const results = [];
@@ -496,12 +509,24 @@ async function seedRoster(page) {
   check('their recorded history survives',
     (await page.evaluate(() => entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 1);
 
-  // a new worker must never reuse an archived id
-  await page.evaluate(() => {
+  // A new worker must never reuse an archived id - and must not be one past the highest
+  // either. Two phones holding the same roster used to hand the same next id to two
+  // different men, and every day recorded against it then belonged to whichever of them
+  // the reading device happened to have.
+  const minted = await page.evaluate(() => {
     State.schedule.workers = [{ id: 'w_09', name: 'ותיק', active: false }];
+    return [State.nextWorkerId(), State.nextWorkerId(), State.nextWorkerId()];
   });
   check('ids are never recycled',
-    (await page.evaluate(() => State.nextWorkerId())) === 'w_10');
+    !minted.includes('w_09'), JSON.stringify(minted));
+  // Not "does it look random" - a random hex id can come out all digits, which is what
+  // the first version of this check tripped over. The property that matters is that it
+  // is not DERIVED from the roster: two phones holding the same list must not both
+  // arrive at the same next id.
+  check('and never derived from the roster, so two phones cannot collide',
+    !minted.includes('w_10') && new Set(minted).size === 3
+    && minted.every(id => id.length > 8),
+    JSON.stringify(minted));
   await page.context().close();
 }
 
@@ -716,7 +741,7 @@ async function seedRoster(page) {
   await page.evaluate(() => {
     FarkadSync.adapter = { update: () => Promise.resolve(), save: () => Promise.resolve() };
     FarkadSync.pushDelayMs = 100000;
-    FarkadSync._edits = new Map();
+    FarkadSync.clearOutbox();
   });
 
   await page.locator('#migrationList .issue').filter({ hasText: 'הרצליה + תל אביב' })
@@ -726,10 +751,10 @@ async function seedRoster(page) {
     (await page.evaluate(() => entriesFor(State.schedule, '2026-08-09', 'w_02', 'actual')
       .map(e => e.placeId).join())) === 'p_01,p_02');
   check('and the decision is sent, not left on the phone that answered it',
-    (await page.evaluate(() => Array.from(FarkadSync._edits.keys())))
+    (await page.evaluate(() => FarkadSync.pendingPaths()))
       .includes('days.2026-08-09.actual.w_02'),
-    JSON.stringify(await page.evaluate(() => Array.from(FarkadSync._edits.keys()))));
-  await page.evaluate(() => { FarkadSync.adapter = null; FarkadSync._edits = new Map(); });
+    JSON.stringify(await page.evaluate(() => FarkadSync.pendingPaths())));
+  await page.evaluate(() => { FarkadSync.adapter = null; FarkadSync.clearOutbox(); });
 
   check('the resolved issue leaves the list',
     (await page.evaluate(() => State.migrationIssues.length)) === 1);
@@ -828,18 +853,28 @@ async function seedRoster(page) {
   check('status turns synced', (await page.evaluate(() => FarkadSync.status)) === 'synced');
 
   // the case this design exists for: three people building the same evening at once
-  const merged = await page.evaluate(() => {
+  const merged = await page.evaluate(async () => {
     const server = {};
     const apply = p => Object.keys(p).forEach(k => { server[k] = p[k]; });
     ['w_01', 'w_02', 'w_03'].forEach((workerId, i) => {
       const sync = Object.create(FarkadSync);
-      sync._edits = new Map();
+      // Own queue, and no writing to storage. Without these the three stand-ins inherit
+      // the real one's outbox through the prototype and queue into it - which is not
+      // three phones, it is one phone with nine pending edits.
+      sync._outbox = new Map();
+      sync._sending = new Map();
+      sync._loaded = true;
+      sync.adoptJournal = candidate => { sync._outbox = candidate; return true; };
       sync._stamp = { updatedAt: `2026-08-12T18:0${i}:00.000Z`, updatedBy: `d${i}` };
       sync.adapter = { update(p) { apply(p); return Promise.resolve(); } };
       sync.setStatus = () => {};
       sync.edit(`days.2026-08-12.plan.${workerId}`, { entries: [{ placeId: 'p_01' }] });
       sync.flush();
     });
+    // Cloud writes are serialised now, so the request goes out on the next microtask
+    // rather than inside flush(). Reading the server synchronously would be reading it
+    // before any of the three had been sent.
+    await new Promise(done => setTimeout(done, 100));
     return Object.keys(server);
   });
   check('three people editing different workers all survive',
@@ -926,6 +961,15 @@ async function seedRoster(page) {
 
   await page.evaluate(() => {
     FarkadSync.setStatus('synced');
+    // The check above deliberately left a send open that never completes. Clearing it
+    // is the test tidying up after itself: a hung send is allowed to block the next one
+    // for a while, which is the point of that guard.
+    FarkadSync._sending = new Map();
+    // And the same for the write chain, which is the other thing a never-settling
+    // request holds up. In the app that resolves itself after stuckMs; here the point
+    // of the next check is the failure it reports, not how long the wait was.
+    FarkadSync._cloudChain = null;
+    FarkadSync._cloudOpen = 0;
     FarkadSync.adapter.update = () => Promise.reject(new Error('offline'));
     FarkadSync.edit('days.2026-08-12.actual.w_09', { entries: [] });
   });
@@ -933,7 +977,8 @@ async function seedRoster(page) {
   check('a failed push is reported',
     (await page.evaluate(() => FarkadSync.status)) === 'error');
   check('a failed push keeps the edit for retry',
-    (await page.evaluate(() => FarkadSync._edits.has('days.2026-08-12.actual.w_09'))));
+    (await page.evaluate(() => FarkadSync.pendingPaths()))
+      .includes('days.2026-08-12.actual.w_09'));
   await page.context().close();
 }
 
@@ -1180,6 +1225,62 @@ async function seedRoster(page) {
   });
   check('every script and stylesheet the page loads is precached',
     notPrecached.length === 0, notPrecached.join(', '));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- one build per session
+{
+  // The page used to be network-first while the scripts were cache-first. Deploy a new
+  // version while a phone is running the old one and the next navigation fetched the NEW
+  // page against the OLD scripts - and wrote that page into the old version's cache, so
+  // every offline launch afterwards opened the mismatch too. A page and a sync layer from
+  // different builds is a data failure, not a rendering one.
+  const page = await open();
+  await page.waitForTimeout(1500);
+
+  const build = await page.evaluate(() => {
+    const tag = document.querySelector('meta[name="farkad-build"]');
+    return tag && tag.getAttribute('content');
+  });
+  check('the page says which build it is', build === APP_VERSION_EXPECTED,
+    `page=${build} app=${APP_VERSION_EXPECTED}`);
+
+  // The document must come from the cache the current worker owns, and must not be
+  // replaced there by whatever the network happens to be serving.
+  const served = await page.evaluate(async () => {
+    const keys = await caches.keys();
+    const cache = await caches.open(keys[0]);
+    const before = await cache.match('./index.html').then(r => r && r.text());
+
+    // A navigation, the way a reload is one.
+    await fetch('index.html', { mode: 'navigate' }).then(r => r.text()).catch(() => '');
+    const after = await cache.match('./index.html').then(r => r && r.text());
+
+    return { cached: Boolean(before), unchanged: before === after, caches: keys.length };
+  });
+  check('the document is served from this version\'s cache', served.cached);
+  check('and a navigation does not overwrite it', served.unchanged);
+  check('exactly one version cache exists at a time', served.caches === 1,
+    String(served.caches));
+
+  // A build mismatch is noticed and stops the app writing, rather than saving an edit in
+  // a shape the other half of the app does not read.
+  const blocked = await page.evaluate(() => {
+    document.querySelector('meta[name="farkad-build"]').setAttribute('content', 'v1');
+    checkBuildConsistency();
+    const before = Store.get('scheduleData:v2');
+    State.schedule.workers.push({ id: 'w_zz', name: 'לא אמור להישמר', active: true });
+    State.save();
+    return {
+      banner: document.getElementById('crashBanner').style.display !== 'none',
+      text: document.getElementById('crashBanner').textContent,
+      unchanged: Store.get('scheduleData:v2') === before
+    };
+  });
+  check('a page and scripts from different builds is noticed', blocked.banner);
+  check('and named, with both versions', blocked.text.includes('v1'), blocked.text.slice(0, 90));
+  check('and nothing is written while they disagree', blocked.unchanged);
+
   await page.context().close();
 }
 
@@ -1724,16 +1825,45 @@ async function seedRoster(page) {
   await page.waitForTimeout(600);
 
   const kept = await page.evaluate(() => ({
-    damaged: localStorage.getItem('scheduleData:v2damaged'),
-    v2: localStorage.getItem('scheduleData:v2')
+    copy: localStorage.getItem('scheduleData:v2:damaged'),
+    v2: localStorage.getItem('scheduleData:v2'),
+    workers: State.schedule.workers.length,
+    blocked: farkadWritesBlocked()
   }));
-  check('an unreadable save file is put aside instead of being overwritten',
-    typeof kept.damaged === 'string' && kept.damaged.includes('BROKEN'),
-    JSON.stringify({ damaged: (kept.damaged || '').slice(0, 30) }));
-  check('and the app still opens on the older readable copy',
-    kept.v2 !== null && !kept.v2.includes('BROKEN'));
+  check('an unreadable save file is copied somewhere safe',
+    typeof kept.copy === 'string' && kept.copy.includes('BROKEN'),
+    JSON.stringify({ copy: (kept.copy || '').slice(0, 30) }));
+
+  // This used to assert the OPPOSITE - that the v1 fallback was saved over the damaged
+  // blob, leaving the raw bytes only in the second copy. That copy was written with
+  // `optional: true` and its result was never looked at, so on a full device it failed
+  // and the save succeeded: the recovery destroyed the thing it was recovering.
+  check('and the damaged original is left exactly where it was',
+    typeof kept.v2 === 'string' && kept.v2.includes('BROKEN'),
+    JSON.stringify((kept.v2 || '').slice(0, 30)));
+  check('the older readable data is on screen, so the week can still be read',
+    kept.workers === 1, String(kept.workers));
+  check('but writing is stopped, so nothing can be saved over it',
+    kept.blocked === true);
   check('the person is told the file was damaged rather than left to guess',
     (await page.textContent('#askModal')).includes('נפגם'));
+
+  // And the banner offers the way to get the raw bytes off the phone.
+  await page.click('#askOk');
+  await page.waitForTimeout(300);
+  // Scoped to the buttons: the banner's own sentence also contains the word, so a plain
+  // getByText matches two things and the count is not what it looks like.
+  check('a banner offers the raw export',
+    (await page.locator('#recoveryBanner').isVisible())
+    && (await page.locator('#recoveryBanner button').filter({ hasText: 'ייצא' }).count()) === 1,
+    await page.textContent('#recoveryBanner'));
+  check('and a way to resume once it has been taken',
+    (await page.locator('#recoveryBanner button').filter({ hasText: 'הבנתי' }).count()) === 1);
+
+  await page.locator('#recoveryBanner button').filter({ hasText: 'הבנתי' }).click();
+  await page.waitForTimeout(200);
+  check('acknowledging resumes recording, the copy having been confirmed',
+    (await page.evaluate(() => farkadWritesBlocked())) === false);
   await page.context().close();
 }
 
@@ -2013,6 +2143,149 @@ async function seedRoster(page) {
   await page.click('#askOk');
   await page.waitForTimeout(200);
 
+  // A restore whose cloud write failed used to say "שוחזר." all the same. That is the
+  // worst thing this app can print: the person stops looking, and the next snapshot from
+  // another phone puts the old state back on the very device that asked for the restore.
+  await page.evaluate(() => {
+    FarkadSync.adapter = {
+      update: () => Promise.resolve(),
+      save: () => Promise.reject(Object.assign(new Error('permission denied'),
+        { code: 'permission-denied' })),
+      subscribe: () => () => {}
+    };
+    FarkadSync.setStatus('synced');
+    State.schedule.workers = [];
+    State.save(); render();
+  });
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+  await page.locator('#restorePoints button').first().click();
+  await page.waitForTimeout(300);
+  await page.click('#askOk');
+  await page.waitForTimeout(600);
+
+  const told = await page.textContent('#askMessage');
+  check('a restore the cloud refused does not report plain success',
+    !/^שוחזר\.$/.test((await page.textContent('#askTitle')) || ''), JSON.stringify(told));
+  check('it says the other devices have not got it yet',
+    told.includes('עדיין לא הגיע לענן'), JSON.stringify(told));
+  check('and the restore is written down so it can still go out',
+    (await page.evaluate(() => FarkadSync.pendingReplace() !== null)));
+  check('while the restored state is what is on this device',
+    (await page.evaluate(() => State.schedule.workers.length)) === 3);
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    FarkadSync.forgetReplace();
+    FarkadSync.adapter = null;
+    FarkadSync.setStatus('off');
+  });
+
+  // No room to write the way back. Going ahead would leave the person holding the state
+  // they restored, no route to the one they had, and nothing saying so until they look.
+  const noRoom = await page.evaluate(async () => {
+    const before = Store.get('scheduleData:v2');
+    const realSet = Store.set.bind(Store);
+    Store.set = (key, value, options) =>
+      (String(key).startsWith('scheduleData:undo') || key === 'scheduleData:v2backup'
+        ? false
+        : realSet(key, value, options));
+
+    const date = snapshotDates()[0];
+    const restoring = restoreSnapshot(date);
+    await new Promise(done => setTimeout(done, 250));
+    document.getElementById('askOk').click();
+    await restoring;
+
+    Store.set = realSet;
+    return { before, after: Store.get('scheduleData:v2'), told: document.getElementById('askMessage').textContent };
+  });
+  check('a restore with nowhere to put the way back does not happen',
+    noRoom.before === noRoom.after);
+  check('and says why, rather than reporting a restore',
+    noRoom.told.includes('לא שינינו כלום'), JSON.stringify(noRoom.told.slice(0, 80)));
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
+  // The other half, and the one the previous round did not cover: the way back writes
+  // FINE and the restored state is what cannot be stored. Going ahead there leaves the
+  // restored week on the screen and the old one on the disk - a restore that looks like
+  // it worked until the app is closed.
+  const newStateFails = await page.evaluate(async () => {
+    const before = Store.get('scheduleData:v2');
+    const onScreen = Object.keys(State.schedule.days).join();
+    const realSet = Store.set.bind(Store);
+    Store.set = (key, value, options) =>
+      (key === 'scheduleData:v2' ? false : realSet(key, value, options));
+
+    const restoring = restoreSnapshot(snapshotDates()[0]);
+    await new Promise(done => setTimeout(done, 250));
+    document.getElementById('askOk').click();
+    await restoring;
+
+    Store.set = realSet;
+    return {
+      same: Store.get('scheduleData:v2') === before,
+      screen: Object.keys(State.schedule.days).join() === onScreen,
+      told: document.getElementById('askMessage').textContent
+    };
+  });
+  check('a restore whose new state cannot be stored does not happen either',
+    newStateFails.same);
+  check('and the screen is put back rather than showing a restore that is not stored',
+    newStateFails.screen);
+  check('with a message that says nothing changed',
+    newStateFails.told.includes('לא שינינו כלום'),
+    JSON.stringify(newStateFails.told.slice(0, 80)));
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
+  // And the third: the retry record itself cannot be written. That record is what makes a
+  // restore survivable - with it on the disk, a restore whose cloud write fails is re-sent
+  // by the next session; without it the restore exists only on this screen, and the next
+  // older snapshot from another phone finishes undoing it. So the restore must not start.
+  const noRetryRecord = await page.evaluate(async () => {
+    const saves = [];
+    FarkadSync.adapter = {
+      update: () => Promise.resolve(),
+      save: data => { saves.push(data); return Promise.resolve(); },
+      subscribe: () => () => {}
+    };
+    FarkadSync.setStatus('synced');
+
+    const before = Store.get('scheduleData:v2');
+    const realSet = Store.set.bind(Store);
+    Store.set = (key, value, options) =>
+      (key === 'farkad:pendingReplace' ? false : realSet(key, value, options));
+
+    const restoring = restoreSnapshot(snapshotDates()[0]);
+    await new Promise(done => setTimeout(done, 250));
+    document.getElementById('askOk').click();
+    await restoring;
+
+    Store.set = realSet;
+    const result = {
+      same: Store.get('scheduleData:v2') === before,
+      cloudCalls: saves.length,
+      pending: Store.get('farkad:pendingReplace'),
+      told: document.getElementById('askMessage').textContent
+    };
+    FarkadSync.adapter = null;
+    FarkadSync.setStatus('off');
+    return result;
+  });
+  check('a restore with nowhere to record the retry does not start',
+    noRetryRecord.same);
+  check('and the cloud is never asked to save',
+    noRetryRecord.cloudCalls === 0, String(noRetryRecord.cloudCalls));
+  check('nothing claims a restore is waiting',
+    noRetryRecord.pending === null, String(noRetryRecord.pending));
+  check('and the reason names the retry record',
+    noRetryRecord.told.includes('ממתין לשליחה'),
+    JSON.stringify(noRetryRecord.told.slice(0, 90)));
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
   // three days kept, not every day since the app was installed. The boot snapshot is
   // dated with the REAL today, so it is cleared first: leaving it in made this check
   // pass or fail depending on the date the suite was run on, and on 20/08 the stand-in
@@ -2027,6 +2300,397 @@ async function seedRoster(page) {
   });
   check('only the newest three restore points are kept',
     kept.length === 3 && kept[0] === '2026-08-20', JSON.stringify(kept));
+  await page.context().close();
+}
+
+// ------------------------------------------------- what a half-finished restore says
+//
+// G16.6. Four screens perform a whole-document restore, and every one of them reports
+// the outcome through tellRestoreResult. What must never come out of any of them is the
+// plain "done" line over a transaction that has not finished.
+//
+// Every failure below is produced by breaking the thing that actually breaks - a write
+// the disk refuses, a delete it will not perform, a request that has not answered - and
+// not by standing in for replaceEverything with a function that returns a shape. A stub
+// proves the sentence the app would print IF the transaction stopped there; it proves
+// nothing about whether it stops there.
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+
+  // Everything the four doors read from, and a cloud that answers.
+  //
+  // The restore point is FROZEN - written out here rather than taken from
+  // State.schedule - so that what these tests restore is a fixed document and not
+  // whatever today's builder happens to produce.
+  const RESTORE_POINT = JSON.stringify({
+    schemaVersion: 2,
+    workers: [{ id: 'w_01', name: 'דוד', idNumber: '111', phone: '050-1', active: true,
+      dailyRate: 400, hourlyRate: 50 }],
+    places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+    days: { '2026-07-01': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+    advances: {},
+    updatedAt: '2026-07-01T06:00:00.000Z',
+    updatedBy: 'd_backup'
+  });
+
+  // Re-installed after every reload: a page that navigates loses everything on window,
+  // and the reopen cycles below are real reloads.
+  const installHelpers = () => page.evaluate(([restorePoint]) => {
+    window.__cloud = { saves: [], updates: [], hold: null, doc: null };
+    window.__installCloud = () => {
+      FarkadSync.adapter = {
+        update(patch) {
+          window.__cloud.updates.push(patch);
+          return window.__cloud.hold || Promise.resolve();
+        },
+        save(data) {
+          window.__cloud.saves.push(data);
+          return Promise.resolve();
+        },
+        subscribe() { return () => {}; }
+      };
+      FarkadSync.setStatus('synced');
+    };
+    window.__removeCloud = () => {
+      FarkadSync.adapter = null;
+      FarkadSync.setStatus('off');
+    };
+
+    // A clean slate between cases: the record, the queue, the way back, the restore
+    // point, and whatever the last case left in Store's session cache.
+    window.__reset = () => {
+      FarkadSync.forgetReplace();
+      FarkadSync._replace = null;
+      FarkadSync.replaceDamaged = false;
+      FarkadSync.replaceHeld = false;
+      FarkadSync.clearOutbox();
+      FarkadSync._cloudChain = null;
+      FarkadSync._cloudOpen = 0;
+      FarkadSync.stuckMs = 30000;
+      window.__cloud.saves.length = 0;
+      window.__cloud.updates.length = 0;
+      window.__cloud.hold = null;
+      Store.remove('scheduleData:undoStack');
+      Store.remove('scheduleData:v2backup');
+      Store.set('scheduleData:snap:2026-08-01', restorePoint);
+      Store.set('scheduleData:undoStack', JSON.stringify(
+        [{ at: '2026-08-01T06:00:00.000Z', schedule: restorePoint }]));
+      window.__archive = JSON.parse(restorePoint);
+      FarkadSync.archiveRead = () => Promise.resolve(window.__archive);
+    };
+    window.__restorePoint = restorePoint;
+  }, [RESTORE_POINT]);
+
+  await installHelpers();
+
+  // Runs one door with one real fault installed, and reports exactly what the app said
+  // and what it did.
+  const attempt = async (door, fault) => {
+    const state = await page.evaluate(async ([door, fault]) => {
+      window.__reset();
+      if (fault !== 'no-cloud') window.__installCloud();
+      else window.__removeCloud();
+
+      const realSet = Store.set.bind(Store);
+      const realRemove = Store.remove.bind(Store);
+      const refuse = test => {
+        Store.set = (key, value, options) =>
+          (test(String(key), String(value)) ? false : realSet(key, value, options));
+      };
+
+      // A day recorded before the restore, so a prune has something to supersede.
+      State.commit(assignPlace(State.schedule, '2026-08-18', 'w_02', 'actual', 'p_02'));
+
+      if (fault === 'prepare') refuse(key => key === 'farkad:pendingReplace');
+      if (fault === 'local-save') refuse(key => key === 'scheduleData:v2');
+      if (fault === 'queue-prune') refuse(key => key.indexOf('farkad:outbox') === 0);
+      if (fault === 'finalize') {
+        refuse((key, value) =>
+          key === 'farkad:pendingReplace' && value.indexOf('"cancelled"') !== -1);
+        Store.remove = key => (key === 'farkad:pendingReplace' ? undefined : realRemove(key));
+      }
+      if (fault === 'ordering') {
+        // A write that was started first and has not answered. The restore must not
+        // overtake it, and must not report itself done while it has not.
+        FarkadSync.stuckMs = 60;
+        window.__cloud.hold = new Promise(() => {});
+        FarkadSync.flush();
+        await new Promise(done => setTimeout(done, 150));
+      }
+      if (fault === 'malformed') {
+        const rubbish = JSON.stringify({ workers: [], places: [] });
+        Store.set('scheduleData:snap:2026-08-01', rubbish);
+        Store.set('scheduleData:undoStack', JSON.stringify(
+          [{ at: '2026-08-01T06:00:00.000Z', schedule: rubbish }]));
+        window.__archive = JSON.parse(rubbish);
+      }
+      if (fault === 'unparseable') {
+        Store.set('scheduleData:snap:2026-08-01', '{"workers":[');
+      }
+
+      const before = {
+        disk: localStorage.getItem('scheduleData:v2'),
+        queue: localStorage.getItem(FarkadSync.activeOutboxKey()),
+        undo: localStorage.getItem('scheduleData:undoStack'),
+        saves: window.__cloud.saves.length
+      };
+
+      let running;
+      if (door === 'restore point') running = restoreSnapshot('2026-08-01');
+      else if (door === 'cloud copy') running = restoreFromCloud('2026-08-01');
+      else if (door === 'way back') running = restoreLocalBackup();
+      else {
+        running = importBackup({
+          target: {
+            value: 'x',
+            files: [new File([window.__restorePoint], 'b.json', { type: 'application/json' })]
+          }
+        });
+      }
+
+      // Two dialogs at most: the "are you sure", then the result. Clicking OK on a modal
+      // that is not open would dismiss the result before it could be read.
+      for (let i = 0; i < 2; i += 1) {
+        await new Promise(done => setTimeout(done, 250));
+        const modal = document.getElementById('askModal');
+        const isResult = document.getElementById('askCancel').style.display === 'none';
+        if (modal.style.display !== 'none' && !isResult) document.getElementById('askOk').click();
+      }
+      await running;
+      await new Promise(done => setTimeout(done, 200));
+
+      const modal = document.getElementById('askModal');
+      const said = {
+        visible: modal.style.display !== 'none',
+        title: document.getElementById('askTitle').textContent,
+        message: document.getElementById('askMessage').textContent
+      };
+      document.getElementById('askOk').click();
+
+      Store.set = realSet;
+      Store.remove = realRemove;
+
+      return {
+        said,
+        before,
+        screen: Object.keys(State.schedule.days).sort().join(),
+        disk: localStorage.getItem('scheduleData:v2'),
+        diskDays: Object.keys(
+          JSON.parse(localStorage.getItem('scheduleData:v2') || '{}').days || {}).sort().join(),
+        queue: localStorage.getItem(FarkadSync.activeOutboxKey()),
+        undo: localStorage.getItem('scheduleData:undoStack'),
+        pending: localStorage.getItem('farkad:pendingReplace'),
+        pendingRead: FarkadSync.pendingReplace() !== null,
+        queued: FarkadSync.pendingPaths(),
+        saves: window.__cloud.saves.length,
+        status: FarkadSync.status
+      };
+    }, [door, fault]);
+    await page.waitForTimeout(150);
+    return state;
+  };
+
+  const DOORS = ['restore point', 'cloud copy', 'way back', 'imported file'];
+  const SUCCESS_LINES = ['שוחזר.', 'שוחזר מהענן.', 'הגיבוי נטען.'];
+
+  // ---------------------------------------------------------- malformed, at every door
+  for (const door of DOORS) {
+    const fault = door === 'imported file' ? 'malformed-import' : 'malformed';
+    if (fault === 'malformed-import') {
+      // The import reads the file itself, so the malformed one is handed to it directly.
+      const said = await page.evaluate(async () => {
+        window.__reset();
+        window.__installCloud();
+        const before = localStorage.getItem('scheduleData:v2');
+        const running = importBackup({
+          target: {
+            value: 'x',
+            files: [new File([JSON.stringify({ workers: [], places: [] })], 'b.json',
+              { type: 'application/json' })]
+          }
+        });
+        await new Promise(done => setTimeout(done, 400));
+        const modal = document.getElementById('askModal');
+        const told = {
+          visible: modal.style.display !== 'none',
+          title: document.getElementById('askTitle').textContent,
+          message: document.getElementById('askMessage').textContent
+        };
+        document.getElementById('askOk').click();
+        await new Promise(done => setTimeout(done, 200));
+        await running;
+        return { told, same: localStorage.getItem('scheduleData:v2') === before,
+          pending: localStorage.getItem('farkad:pendingReplace'),
+          saves: window.__cloud.saves.length };
+      });
+      check('a malformed file: the modal is on screen', said.told.visible);
+      check('a malformed file: it is not reported as loaded',
+        !SUCCESS_LINES.includes(said.told.title) && !SUCCESS_LINES.includes(said.told.message),
+        JSON.stringify(said.told));
+      check('a malformed file: it says the file could not be read',
+        said.told.title === 'הקובץ לא נטען', JSON.stringify(said.told));
+      check('a malformed file: the disk is untouched', said.same);
+      check('a malformed file: nothing was written down', said.pending === null,
+        String(said.pending));
+      check('a malformed file: and nothing was sent', said.saves === 0, String(said.saves));
+      await page.waitForTimeout(150);
+      continue;
+    }
+
+    const out = await attempt(door, 'malformed');
+    check(`${door}, malformed: the result modal is on screen`, out.said.visible,
+      JSON.stringify(out.said));
+    check(`${door}, malformed: it says exactly "לא בוצע שחזור"`,
+      out.said.title === 'לא בוצע שחזור', JSON.stringify(out.said));
+    check(`${door}, malformed: and names it as not a whole record`,
+      out.said.message.indexOf('אינו רישום שלם') !== -1, JSON.stringify(out.said));
+    check(`${door}, malformed: the disk is byte-for-byte what it was`,
+      out.disk === out.before.disk);
+    check(`${door}, malformed: the queue is byte-for-byte what it was`,
+      out.queue === out.before.queue);
+    check(`${door}, malformed: nothing was written down`, out.pending === null,
+      String(out.pending));
+    check(`${door}, malformed: nothing was sent`, out.saves === out.before.saves,
+      `${out.before.saves} -> ${out.saves}`);
+    if (door === 'way back') {
+      check('way back, malformed: the way back is still on the stack',
+        out.undo === out.before.undo, String(out.undo));
+    }
+  }
+
+  // ---------------------------------------------------------- a restore point that will not parse
+  {
+    const out = await attempt('restore point', 'unparseable');
+    check('unreadable restore point: the modal is on screen, not silence', out.said.visible,
+      JSON.stringify(out.said));
+    check('unreadable restore point: it says exactly "לא בוצע שחזור"',
+      out.said.title === 'לא בוצע שחזור', JSON.stringify(out.said));
+    check('unreadable restore point: and says it could not be read',
+      out.said.message.indexOf('לא נקרא') !== -1, JSON.stringify(out.said));
+    check('unreadable restore point: the disk is untouched', out.disk === out.before.disk);
+  }
+
+  // ---------------------------------------------------------- the real transaction faults
+  const FAULTS = [
+    ['cloud copy', 'prepare', 'לא בוצע שחזור', 'ממתין לשליחה'],
+    ['restore point', 'local-save', 'לא בוצע שחזור', 'לא שינינו כלום'],
+    ['way back', 'queue-prune', 'השחזור לא הושלם', 'תור השליחה'],
+    ['restore point', 'finalize', 'שוחזר במכשיר הזה', 'עדיין לא הגיע לענן'],
+    ['cloud copy', 'ordering', 'שוחזר במכשיר הזה', 'עדיין לא הגיע לענן']
+  ];
+
+  for (const [door, fault, title, phrase] of FAULTS) {
+    const out = await attempt(door, fault);
+    const where = `${door}, ${fault}`;
+
+    check(`${where}: the result modal is on screen`, out.said.visible, JSON.stringify(out.said));
+    check(`${where}: it never reports a plain success`,
+      !SUCCESS_LINES.includes(out.said.title) && !SUCCESS_LINES.includes(out.said.message),
+      JSON.stringify(out.said));
+    check(`${where}: it says exactly "${title}"`, out.said.title === title,
+      JSON.stringify(out.said));
+    check(`${where}: and names what happened`, out.said.message.indexOf(phrase) !== -1,
+      JSON.stringify(out.said));
+
+    if (fault === 'prepare' || fault === 'local-save') {
+      check(`${where}: nothing on the disk changed`, out.disk === out.before.disk);
+      check(`${where}: no restore was written down`, out.pending === null, String(out.pending));
+      check(`${where}: and nothing was sent`, out.saves === out.before.saves,
+        `${out.before.saves} -> ${out.saves}`);
+    }
+    if (fault === 'queue-prune') {
+      check(`${where}: the restored state IS on the disk`,
+        out.diskDays === '2026-07-01', out.diskDays);
+      check(`${where}: the transaction is still on the disk to finish it`,
+        out.pending !== null && out.pendingRead === true, String(out.pending));
+      check(`${where}: the superseded entry is still queued, not lost`,
+        out.queued.indexOf('days.2026-08-18.actual.w_02') !== -1, JSON.stringify(out.queued));
+      check(`${where}: and nothing was sent`, out.saves === out.before.saves,
+        `${out.before.saves} -> ${out.saves}`);
+    }
+    if (fault === 'finalize') {
+      check(`${where}: the restored state is on the disk`,
+        out.diskDays === '2026-07-01', out.diskDays);
+      check(`${where}: it did reach the cloud`, out.saves > out.before.saves,
+        `${out.before.saves} -> ${out.saves}`);
+      check(`${where}: and the record is kept because it could not be cleared`,
+        out.pending !== null, String(out.pending));
+    }
+    if (fault === 'ordering') {
+      check(`${where}: the restore was NOT sent past the open write`,
+        out.saves === out.before.saves, `${out.before.saves} -> ${out.saves}`);
+      check(`${where}: the restored state is on this device, as it was told`,
+        out.diskDays === '2026-07-01', out.diskDays);
+      check(`${where}: the transaction is kept so it can still run`,
+        out.pending !== null && out.pendingRead === true, String(out.pending));
+      check(`${where}: and nothing claims to be synced`, out.status !== 'synced', out.status);
+    }
+    check(`${where}: the status does not claim synced`,
+      fault === 'prepare' || fault === 'local-save' || out.status !== 'synced', out.status);
+  }
+
+  // ---------------------------------------------------------- two close-and-reopen cycles
+  //
+  // The queue-prune failure, followed by the app being closed and opened twice, with the
+  // fault gone. The transaction has to finish itself and lose nothing on the way.
+  await attempt('way back', 'queue-prune');
+  for (const round of ['first', 'second']) {
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => ({
+      screen: Object.keys(State.schedule.days).sort().join(),
+      disk: Object.keys(
+        JSON.parse(localStorage.getItem('scheduleData:v2') || '{}').days || {}).sort().join(),
+      pending: localStorage.getItem('farkad:pendingReplace'),
+      blocked: farkadWritesBlocked()
+    }));
+    check(`after the ${round} reopen the superseded day has not come back`,
+      after.screen === '2026-07-01', after.screen);
+    check(`after the ${round} reopen the disk says the same`,
+      after.disk === '2026-07-01', after.disk);
+    check(`after the ${round} reopen recording is not blocked`, after.blocked === false);
+  }
+
+  // ---------------------------------------------------------- and the control
+  //
+  // Without this, every check above would pass on an app that never reports success at
+  // all.
+  await installHelpers();
+  {
+    const done = await page.evaluate(async () => {
+      window.__reset();
+      window.__installCloud();
+      const running = restoreSnapshot('2026-08-01');
+      await new Promise(wait => setTimeout(wait, 250));
+      document.getElementById('askOk').click();
+      await running;
+      await new Promise(wait => setTimeout(wait, 200));
+      const told = {
+        visible: document.getElementById('askModal').style.display !== 'none',
+        // A plain string reaches askTell as the message, not the title, which is why
+        // the checks above compare both fields against the success lines.
+        said: document.getElementById('askTitle').textContent
+          + document.getElementById('askMessage').textContent
+      };
+      document.getElementById('askOk').click();
+      return {
+        told,
+        days: Object.keys(State.schedule.days).sort().join(),
+        saves: window.__cloud.saves.length,
+        pending: localStorage.getItem('farkad:pendingReplace')
+      };
+    });
+    check('a restore that finished says exactly "שוחזר."', done.told.said === 'שוחזר.',
+      JSON.stringify(done.told));
+    check('and the modal is on screen saying it', done.told.visible);
+    check('and it really did happen', done.days === '2026-07-01', done.days);
+    check('reaching the cloud', done.saves > 0, String(done.saves));
+    check('with nothing left pending', done.pending === null, String(done.pending));
+  }
+
   await page.context().close();
 }
 
@@ -2082,7 +2746,12 @@ async function seedRoster(page) {
     { name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from(broken, 'utf8') });
   await page.waitForTimeout(400);
   check('a file whose roster does not survive reading is refused, not imported empty',
-    (await page.textContent('#askMessage')).includes('אינו קובץ גיבוי תקין'));
+    (await page.textContent('#askMessage')).includes('לא השתנו'));
+  // And it says WHAT is wrong with it. "Not a valid backup" is true and useless when the
+  // file reads perfectly and the trouble is a man with no id.
+  check('and names the problem rather than calling the file unreadable',
+    (await page.textContent('#askMessage')).includes('בלי מזהה'),
+    await page.textContent('#askMessage'));
   await page.click('#askOk');
   await page.waitForTimeout(200);
   check('and the existing data is untouched',
@@ -2640,12 +3309,13 @@ async function seedRoster(page) {
   // day edits already did; advance paths were dropped on the floor.
   const survived = await page.evaluate(() => {
     const record = { id: 'a_pending1', workerId: 'w_02', date: '2026-08-12', amount: 111, note: '' };
-    FarkadSync._edits.set('advances.a_pending1', record);
-    FarkadSync._edits.set('advances.a_gone', null);
+    FarkadSync.clearOutbox();
+    FarkadSync.queue('advances.a_pending1', record);
+    FarkadSync.queue('advances.a_gone', null);
     const incoming = { workers: [], places: [], days: {},
       advances: { a_gone: { id: 'a_gone', workerId: 'w_01', date: '2026-08-12', amount: 999, note: '' } } };
     FarkadSync.reapplyPending(incoming);
-    FarkadSync._edits.clear();
+    FarkadSync.clearOutbox();
     return { kept: incoming.advances.a_pending1, tombstoned: 'a_gone' in incoming.advances };
   });
   check('a pending advance is re-applied on top of an arriving snapshot',
@@ -2678,10 +3348,11 @@ async function seedRoster(page) {
 
   // and a roster edit in flight is not dropped by a snapshot landing on top of it
   const kept = await page.evaluate(() => {
-    FarkadSync._edits.set('workers', State.schedule.workers);
+    FarkadSync.clearOutbox();
+    FarkadSync.queue('workers', State.schedule.workers);
     const incoming = { workers: [{ id: 'w_01', name: 'דוד', active: true }], places: [], days: {} };
     FarkadSync.reapplyPending(incoming);
-    FarkadSync._edits.clear();
+    FarkadSync.clearOutbox();
     return incoming.workers.map(w => w.id);
   });
   check('a just-added worker survives the snapshot that arrives mid-send',
@@ -2691,10 +3362,10 @@ async function seedRoster(page) {
   // and a stamp but no roster. That is unfinished, not broken - it used to lock the
   // status on "sync error" for good while writes were in fact landing.
   const fresh = await page.evaluate(() => {
-    FarkadSync._edits.clear();
+    FarkadSync.clearOutbox();
     FarkadSync.setStatus('connecting');
     FarkadSync.receive({ days: { '2026-08-12': { actual: {} } }, updatedAt: '2026-08-12T10:00:00Z' });
-    return { status: FarkadSync.status, queued: [...FarkadSync._edits.keys()] };
+    return { status: FarkadSync.status, queued: FarkadSync.pendingPaths() };
   });
   check('a server document with no roster yet is not treated as a failure',
     fresh.status === 'synced', JSON.stringify(fresh));
@@ -2780,6 +3451,17 @@ async function seedRoster(page) {
     fetch('sw.js').then(r => r.text()).then(t => (t.match(/farkad-(v\d+)/) || [])[1]));
   check('the shell version and the app version agree',
     swVersion === APP_VERSION_EXPECTED, `sw=${swVersion} app=${APP_VERSION_EXPECTED}`);
+
+  // Three strings now say which build this is - the cache name, the scripts, and the
+  // page - and the whole point of the third is that a session where they disagree is
+  // running two builds at once. Bumping two of the three is exactly the mistake this
+  // catches, and it would otherwise show up as the app refusing to record.
+  const pageVersion = await page.evaluate(() =>
+    fetch('index.html').then(r => r.text())
+      .then(t => (t.match(/name="farkad-build" content="(v\d+)"/) || [])[1]));
+  check('and so does the build stamped on the page',
+    pageVersion === APP_VERSION_EXPECTED,
+    `page=${pageVersion} app=${APP_VERSION_EXPECTED}`);
   await page.context().close();
 }
 
@@ -3575,6 +4257,7 @@ async function seedRoster(page) {
 }
 
 await browser.close();
+await server.close();
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

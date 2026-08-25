@@ -4,7 +4,41 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v58';
+const APP_VERSION = 'v77';
+
+// Is the page in front of us from the same build as these scripts?
+//
+// It should be impossible: the service worker serves the document and the scripts from
+// one version's cache and never mixes them. But "impossible" is what the old
+// network-first document was too, and a page from one build running a sync layer from
+// another writes edits in a shape the other half does not read - which is a data
+// failure, not a rendering one. So it is checked rather than assumed, and if it ever
+// does happen the app stops writing instead of writing something nobody can read back.
+function pageBuild() {
+    const tag = document.querySelector('meta[name="farkad-build"]');
+    return tag ? tag.getAttribute('content') : null;
+}
+
+function checkBuildConsistency() {
+    const page = pageBuild();
+    if (!page || page === APP_VERSION) return;
+
+    // Through Recovery, which is what everything that writes asks before writing. It
+    // cannot be acknowledged away - a reload is the fix, and until then this page and
+    // these scripts disagree about what a record looks like.
+    Recovery.halt('build', `הדף מגרסה ${page} והתוכנה מגרסה ${APP_VERSION}.`);
+
+    const banner = document.getElementById('crashBanner');
+    if (!banner) return;
+
+    clear(banner);
+    banner.appendChild(el('span', null,
+        `⚠️ העדכון לא הושלם: הדף מגרסה ${page} והתוכנה מגרסה ${APP_VERSION}. ` +
+        'הרישום שכבר נשמר במכשיר בטוח, אבל אין לרשום עכשיו - רענן כדי להשלים את העדכון.'));
+    banner.appendChild(button('רענן', 'btn-secondary', () => location.reload()));
+    banner.style.display = '';
+    console.error('Farkad build mismatch:', page, APP_VERSION);
+}
 
 let currentView = 'day';
 
@@ -117,6 +151,7 @@ window.onload = () => {
     takeDailySnapshot();
     render();
 
+    checkBuildConsistency();
     watchForCrashes();
     watchModals();
     registerOffline();

@@ -69,13 +69,28 @@ function migrateV1(v1) {
     schedule.workers = migrateWorkers(v1 && v1.workers);
     schedule.places = migratePlaces(v1 && v1.places);
 
+    // A name resolves to a place only while exactly ONE place carries it.
+    //
+    // The duplicate used to be reported and then ignored: the first place to claim the
+    // name kept it, so every cell reading "הרצליה" was attached to whichever of the two
+    // happened to be listed first. That is a guess, made silently, about which client is
+    // invoiced for somebody's day - and the whole point of this file is that it does not
+    // guess. An ambiguous name is removed from the map, so every cell using it becomes a
+    // question for a person instead.
     const placesByName = new Map();
+    const ambiguous = new Set();
+
     schedule.places.forEach(place => {
+        if (ambiguous.has(place.name)) return;
+
         if (placesByName.has(place.name)) {
+            placesByName.delete(place.name);
+            ambiguous.add(place.name);
             issues.push({
                 kind: 'duplicate-place-name',
                 value: place.name,
-                message: `שני מקומות בשם "${place.name}" - ההקצאות אליהם אינן ניתנות להפרדה.`
+                message: `שני אתרים בשם "${place.name}" - הימים שנרשמו בשם הזה לא שויכו ` +
+                    'לאף אחד מהם, ומחכים להחלטה.'
             });
         } else {
             placesByName.set(place.name, place.id);
@@ -160,7 +175,9 @@ function migrateV1(v1) {
             workerId: worker.id,
             workerName: worker.name,
             suggestion: suggestSplit(value, placesByName),
-            message: `"${value}" אינו שם של מקום קיים - יש להחליט ידנית.`
+            message: ambiguous.has(value)
+                ? `"${value}" הוא שם של יותר מאתר אחד - יש לבחור ידנית לאיזה מהם שייך היום.`
+                : `"${value}" אינו שם של מקום קיים - יש להחליט ידנית.`
         });
     });
 
