@@ -649,6 +649,21 @@ async function seedRoster(page) {
   check('the dialog names the man before he goes',
     (await page.textContent('#askTitle')).includes('טעות'),
     await page.textContent('#askTitle'));
+
+  // One more tap in the same place as the last tap is not a decision. The name has to be
+  // typed, and a wrong one is refused rather than accepted quietly.
+  await page.fill('#askInput', 'טעו');
+  await page.click('#askOk');
+  await page.waitForTimeout(250);
+  check('a name that does not match is refused',
+    (await page.isVisible('#askModal')) === true
+    && (await page.textContent('#askError')).length > 0,
+    await page.textContent('#askError'));
+  check('and nobody has been deleted on the strength of it',
+    (await page.evaluate(() => State.schedule.workers.length)) === before,
+    String(await page.evaluate(() => State.schedule.workers.length)));
+
+  await page.fill('#askInput', 'טעות');
   await page.click('#askOk');
   await page.waitForTimeout(300);
 
@@ -1103,10 +1118,19 @@ async function seedRoster(page) {
   check('an edit still in the queue survives a snapshot landing on top of it',
     survived.mine === 1 && survived.theirs === 1, JSON.stringify(survived));
 
+  // That snapshot carried a day for w_05 and a roster that does not have him, so an
+  // archived identity is created for him rather than leaving the day belonging to
+  // nobody - see reinstateReferenced. The crew is w_09 plus that recovered row.
+  const recovered = await page.evaluate(() => State.schedule.workers
+    .map(worker => ({ id: worker.id, active: worker.active })));
+  check('a day naming somebody the roster lost gets an identity back',
+    recovered.length === 2 && recovered.some(w => w.id === 'w_05' && w.active === false),
+    JSON.stringify(recovered));
+
   await page.evaluate(() => { window.__fake.onSnapshot({ nonsense: true }); });
   await page.waitForTimeout(200);
   check('a malformed remote document cannot wipe the schedule',
-    (await page.evaluate(() => State.schedule.workers.length)) === 1);
+    (await page.evaluate(() => State.schedule.workers.length)) === 2);
   check('and is reported as an error',
     (await page.evaluate(() => FarkadSync.status)) === 'error');
 
@@ -3145,7 +3169,14 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
       scrollable: content.scrollHeight > content.clientHeight
         ? getComputedStyle(content).overflowY === 'auto' : true,
       lastReachable: last.contains(hit) || last === hit,
-      lastClearOfTabs: lastBox.bottom <= Math.max(tabs.top, lastBox.bottom)
+      // NOT "above the tab bar": a sheet is drawn over the tabs on purpose, and the
+      // check that used to be here read lastBox.bottom <= Math.max(tabs.top,
+      // lastBox.bottom) - true of every rectangle ever measured, asserted nowhere, and
+      // therefore a line of test that could not fail. What has to hold is that the last
+      // button ends inside the viewport rather than under the edge of the screen.
+      tabsTop: tabs.top,
+      lastBottom: lastBox.bottom,
+      lastInsideViewport: lastBox.bottom <= window.innerHeight + 1 && lastBox.top >= 0
     };
   });
   check(`${label}: a sheet opens over the day screen`, sheet.opened === true,
@@ -3158,6 +3189,108 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     sheet.scrollable === true, JSON.stringify(sheet));
   check(`${label}: and its last button can be pressed`, sheet.lastReachable === true,
     JSON.stringify(sheet));
+  check(`${label}: with its last button inside the screen`,
+    sheet.lastInsideViewport === true, JSON.stringify(sheet));
+
+  // ---------------------------------------------- a sheet with more in it than fits
+  //
+  // The one that used to run off the bottom of the screen. Eight sites fit; a crew
+  // working two dozen does not, and the button at the end of that list is the one that
+  // says "absent" - the answer given most often on the days somebody is missing.
+  const tall = await page.evaluate(async () => {
+    document.querySelectorAll('.modal').forEach(node => { node.style.display = 'none'; });
+    State.schedule.places = Array.from({ length: 24 }, (unused, i) => ({
+      id: `p_${String(i + 1).padStart(2, '0')}`, name: `אתר ${i + 1}`, active: true
+    }));
+    State.save();
+    showView('day');
+    await new Promise(done => setTimeout(done, 200));
+    openAssignSheet(State.schedule.workers[0].id);
+    await new Promise(done => setTimeout(done, 350));
+
+    const content = document.querySelector('#assignSheet .sheet-content');
+    const overflowing = content.scrollHeight > content.clientHeight + 1;
+    // Scrolled inside the sheet itself, which is what a thumb on the sheet does.
+    content.scrollTop = content.scrollHeight;
+    await new Promise(done => setTimeout(done, 250));
+
+    const buttons = [...content.querySelectorAll('button')].filter(b => b.offsetParent !== null);
+    const last = buttons[buttons.length - 1];
+    const box = last.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+
+    // And again with a real iPhone home-indicator strip substituted, which is the
+    // condition the sheet is actually used under.
+    document.documentElement.style.setProperty('--safe-bottom', '34px');
+    await new Promise(done => setTimeout(done, 250));
+    content.scrollTop = content.scrollHeight;
+    await new Promise(done => setTimeout(done, 200));
+    const inset = last.getBoundingClientRect();
+    const insetHit = document.elementFromPoint(
+      inset.left + inset.width / 2, inset.top + inset.height / 2);
+    document.documentElement.style.removeProperty('--safe-bottom');
+
+    return {
+      overflowing,
+      places: document.querySelectorAll('#assignSheet .sheet-place').length,
+      sheetBottom: content.getBoundingClientRect().bottom,
+      viewport: window.innerHeight,
+      label: last.textContent.slice(0, 20),
+      reachable: last.contains(hit) || last === hit,
+      onScreen: box.bottom <= window.innerHeight + 1 && box.top >= 0,
+      clearOfIndicator: inset.bottom <= window.innerHeight - 34 + 1,
+      reachableOverIndicator: last.contains(insetHit) || last === insetHit
+    };
+  });
+  check(`${label}: a sheet listing 24 sites really does overflow`,
+    tall.overflowing === true && tall.places === 24, JSON.stringify(tall));
+  check(`${label}: the overflowing sheet still ends inside the viewport`,
+    tall.sheetBottom <= tall.viewport + 1, JSON.stringify(tall));
+  check(`${label}: its last action is on screen once scrolled to`,
+    tall.onScreen === true, JSON.stringify(tall));
+  check(`${label}: and a tap on it lands on the button`,
+    tall.reachable === true, JSON.stringify(tall));
+  check(`${label}: with a real 34px home indicator it still clears it`,
+    tall.clearOfIndicator === true, JSON.stringify(tall));
+  check(`${label}: and is still the thing a tap lands on`,
+    tall.reachableOverIndicator === true, JSON.stringify(tall));
+
+  // ---------------------------------------------- the archive stays folded
+  const folded = await page.evaluate(async () => {
+    closeAssignSheet();
+    State.schedule.workers[0].active = false;
+    State.schedule.workers[1].active = false;
+    State.save();
+    showView('roster');
+    render();
+    await new Promise(done => setTimeout(done, 300));
+
+    const box = document.querySelector('#workerList .roster-archive');
+    if (!box) return { present: false };
+    const rows = [...box.querySelectorAll('.roster-row')];
+    const measured = {
+      present: true,
+      closed: box.hasAttribute('open') === false,
+      rows: rows.length,
+      visibleWhileClosed: rows.filter(row => row.getBoundingClientRect().height > 0).length,
+      summary: box.querySelector('summary').textContent
+    };
+    // Opened only AFTER the measurement above, which is the whole point of it.
+    box.open = true;
+    return measured;
+  });
+  check(`${label}: the archive section is folded shut`,
+    folded.present === true && folded.closed === true, JSON.stringify(folded));
+  check(`${label}: and an archived worker is not drawn at all until it is opened`,
+    folded.visibleWhileClosed === 0 && folded.rows === 2, JSON.stringify(folded));
+
+  const opened = await page.evaluate(async () => {
+    await new Promise(done => setTimeout(done, 200));
+    const box = document.querySelector('#workerList .roster-archive');
+    const rows = [...box.querySelectorAll('.roster-row')];
+    return { visible: rows.filter(row => row.getBoundingClientRect().height > 0).length };
+  });
+  check(`${label}: opening it shows them`, opened.visible === 2, JSON.stringify(opened));
 
   await page.context().close();
 }
@@ -3170,22 +3303,46 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const page = await open();
   await seedRoster(page);
 
-  const insets = await page.evaluate(() => {
-    // env() resolves to 0 in a desktop browser, so the declaration is checked by
-    // substituting a real inset and seeing the padding move.
-    document.documentElement.style.setProperty('--probe', '34px');
-    const read = selector => getComputedStyle(document.querySelector(selector)).paddingBottom;
+  // env(safe-area-inset-bottom) is 0 in every desktop browser, which is exactly the
+  // condition the bug hides under: a bar that reserves nothing looks perfect here and
+  // sits under the home indicator on the phone. So the inset is SUBSTITUTED - --safe-bottom
+  // is the one place env() is read - and every bar has to move by the 34px an iPhone
+  // actually takes. Counting stylesheet rules, which is what this used to do, proves
+  // only that somebody typed the words.
+  const insets = await page.evaluate(async () => {
+    const read = selector => parseFloat(
+      getComputedStyle(document.querySelector(selector)).paddingBottom);
+    const before = { actions: read('.day-actions'), app: read('.app') };
+
+    document.documentElement.style.setProperty('--safe-bottom', '34px');
+    if (typeof scheduleBarMeasure === 'function') scheduleBarMeasure();
+    await new Promise(done => setTimeout(done, 250));
+
+    const after = { actions: read('.day-actions'), app: read('.app') };
+    const bar = document.querySelector('.day-actions').getBoundingClientRect();
     return {
-      actions: read('.day-actions'),
-      app: read('.app'),
+      before, after,
+      barBottom: Math.round(bar.bottom),
+      viewport: window.innerHeight,
       declared: Array.from(document.styleSheets)
         .flatMap(sheet => Array.from(sheet.cssRules || []))
         .map(rule => rule.cssText || '')
-        .filter(text => text.includes('safe-area-inset-bottom')).length
+        .filter(text => text.includes('--safe-bottom')).length
     };
   });
-  check('the fixed bars reserve the iPhone home-indicator strip',
-    insets.declared >= 3, `${insets.declared} rules`);
+  check('the home-indicator strip is read from one place the whole app shares',
+    insets.declared >= 6, `${insets.declared} rules`);
+  check('a real 34px inset pushes the day bar up off the bottom edge',
+    Math.round(insets.after.actions - insets.before.actions) === 34,
+    JSON.stringify(insets));
+  check('and the page reserves that much more at its foot as well',
+    insets.after.app - insets.before.app >= 34, JSON.stringify(insets));
+
+  await page.evaluate(() => {
+    document.documentElement.style.removeProperty('--safe-bottom');
+    if (typeof scheduleBarMeasure === 'function') scheduleBarMeasure();
+  });
+  await page.waitForTimeout(250);
 
   // The page reserves exactly what the bars are taking, and no longer a number somebody
   // wrote down once. On a wide screen the tabs are part of the header rather than a bar,

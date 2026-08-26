@@ -720,8 +720,21 @@ function rosterDocument(schedule) {
 //
 // So the array is the floor and the map is laid over it: the map wins per person, because
 // it is the authoritative per-entity form, and nobody is dropped for being absent from
-// it. Nothing is ever removed from a roster anyway - people are archived, never deleted -
-// so a union cannot resurrect anyone.
+// it.
+//
+// And a NULL in the map is a removal that wins over the array.
+//
+// Skipping the nulls was the older reading, and it rested on "nothing is ever removed
+// from a roster anyway". That stopped being true the moment deleting shipped, and the
+// consequence was measured: a phone that had been offline still had the man in its whole
+// array, sent that array on reconnecting, and the union put him back on every device -
+// days, rates and all - with nothing on screen to explain the return. The array is the
+// stale form by construction: it is whole, so it is always somebody's whole opinion from
+// whenever they last looked. A tombstone is a statement about ONE person made at a known
+// moment, and it has to outrank an array that merely has not heard.
+//
+// Removed here rather than skipped, so a stale array entry cannot be the floor the
+// tombstone is laid over.
 //
 // Order: the order field first, then anyone it had not heard of, in the order the array
 // had them. An order written by a device that has not yet seen a new man must not remove
@@ -735,6 +748,7 @@ function mergeRoster(list, map, order) {
     const entries = (map && typeof map === 'object') ? map : {};
     Object.keys(entries).forEach(id => {
         if (entries[id]) byId.set(String(id), entries[id]);
+        else byId.delete(String(id));
     });
 
     const out = [];
@@ -752,6 +766,103 @@ function mergeRoster(list, map, order) {
     });
 
     return out;
+}
+
+// ---------------------------------------------------------------- work outranks a tombstone
+//
+// The invariant: no day and no advance may exist without a worker the app can name.
+//
+// A tombstone says "this man is not in the crew". It does not say "this man never
+// existed", and it cannot, because the evidence is not all in one place at one time:
+// a second phone can be holding a day for him recorded while it was offline, and that
+// day arrives AFTER the deletion. Discarding the day to keep the deletion tidy would
+// throw away somebody's work - a real day on a real site that somebody has to be paid
+// for. Keeping the day with nobody attached is no better: the reports walk the roster,
+// so the day and its pay simply stop being counted, and the document fails its own
+// validation with nothing able to repair it.
+//
+// So the work wins, and it wins by RESTORING AN IDENTITY rather than by cancelling the
+// removal: the man comes back archived, out of the daily list, present in every report
+// the day belongs to. His name comes back with him when anything still remembers it;
+// when nothing does, the id is shown, which is the honest thing to put in front of
+// somebody who then has to say who this was.
+//
+// Note what does NOT come back: an id with no day and no advance behind it. That is the
+// whole difference between this and the resurrection bug - a stale array is not work.
+function referencedEntityIds(schedule) {
+    const workers = new Set();
+    const places = new Set();
+
+    const days = (schedule && schedule.days) || {};
+    Object.keys(days).forEach(date => {
+        ['plan', 'actual'].forEach(layer => {
+            const side = (days[date] || {})[layer];
+            if (!side || typeof side !== 'object') return;
+            Object.keys(side).forEach(workerId => {
+                workers.add(String(workerId));
+                const record = side[workerId];
+                const entries = (record && Array.isArray(record.entries)) ? record.entries : [];
+                entries.forEach(entry => {
+                    if (entry && entry.placeId !== undefined && entry.placeId !== null) {
+                        places.add(String(entry.placeId));
+                    }
+                });
+            });
+        });
+    });
+
+    const advances = (schedule && schedule.advances) || {};
+    Object.keys(advances).forEach(id => {
+        const item = advances[id];
+        if (item && item.workerId !== undefined && item.workerId !== null) {
+            workers.add(String(item.workerId));
+        }
+    });
+
+    return { workers, places };
+}
+
+// What a recovered identity is called when NOBODY still has the name - not this device,
+// not the document. Built by a function rather than written out where it is used, so the
+// sync layer can ask "is this a real name or a placeholder?" without matching strings:
+// a placeholder must never be pushed over a name another phone still knows.
+function recoveredEntityName(kind, id) {
+    return (kind === 'workers' ? 'עובד שנמחק (' : 'אתר שנמחק (') + id + ')';
+}
+
+// Whatever is referenced and missing, put back - archived, and named as recovered.
+// Returns which ids it had to reinstate, so a caller can say so; the sync layer works out
+// the same set from the snapshot it just adopted rather than threading it through.
+function reinstateReferenced(schedule, remembered) {
+    const known = {
+        workers: new Set((schedule.workers || []).map(item => String(item.id))),
+        places: new Set((schedule.places || []).map(item => String(item.id)))
+    };
+    const referenced = referencedEntityIds(schedule);
+    const recovered = { workers: [], places: [] };
+    const names = (remembered && typeof remembered === 'object') ? remembered : {};
+
+    const nameFor = (kind, id) => {
+        const held = (names[kind] && names[kind][id]) || null;
+        const name = held && held.name ? String(held.name) : '';
+        return name || recoveredEntityName(kind, id);
+    };
+
+    referenced.workers.forEach(id => {
+        if (known.workers.has(id)) return;
+        schedule.workers.push({
+            id, name: nameFor('workers', id), idNumber: '', phone: '',
+            dailyRate: 0, hourlyRate: 0, active: false
+        });
+        recovered.workers.push(id);
+    });
+    referenced.places.forEach(id => {
+        if (known.places.has(id)) return;
+        schedule.places.push({ id, name: nameFor('places', id), active: false });
+        recovered.places.push(id);
+    });
+
+    return recovered;
 }
 
 function advancePath(id) {

@@ -14,6 +14,45 @@ import { suite, check, same, given, report } from './runner.mjs';
 const TICK = 6;
 const wait = () => settle(TICK * 5);
 
+// One phone off the network while the other stays on it. cloud.online is the whole
+// cloud, which is a different situation entirely - every write carries updatedBy, so the
+// device that made it is on the request.
+function offlineFor(cloud, deviceId) {
+    cloud.reject = (kind, payload) => {
+        const from = payload && (payload.updatedBy
+            || (payload.data && payload.data.updatedBy));
+        if (from !== deviceId) return null;
+        const error = new Error('client is offline');
+        error.code = 'unavailable';
+        return error;
+    };
+}
+
+// A phone with no network. Neither of the two obvious spellings is that: cloud.online
+// takes the WHOLE cloud down, and Sync.disconnect() is the app signing out - it leaves
+// the subscription running, so snapshots keep arriving at a phone that is supposed to be
+// in somebody's pocket underground. An outage is both directions stopping at once.
+async function unplugged(device, cloud) {
+    const before = cloud.subscribers.length;
+    await connected(device, cloud);
+    const mine = cloud.subscribers.slice(before);
+
+    return {
+        away() {
+            cloud.subscribers = cloud.subscribers.filter(fn => !mine.includes(fn));
+            offlineFor(cloud, device.id);
+        },
+        async back() {
+            cloud.reject = null;
+            mine.forEach(fn => cloud.subscribers.push(fn));
+            // Firestore hands a subscriber the current document when it comes back.
+            mine.forEach(fn => fn(JSON.parse(JSON.stringify(cloud.doc))));
+            device.Sync.flush();
+            await settle(TICK * 40);
+        }
+    };
+}
+
 function connected(device, cloud) {
     device.Sync.pushDelayMs = TICK;
     device.Sync.connect(cloud.adapter);
@@ -5284,19 +5323,46 @@ function crew(options = {}) {
     device.State.save({ silent: true });
 
     const said = [];
-    device.ctx.askConfirm = () => Promise.resolve(options.answer !== false);
+    const asked = [];
+    device.ctx.askConfirm = question => {
+        asked.push(question);
+        return Promise.resolve(options.answer !== false);
+    };
+    // Deleting asks for the name to be TYPED. The default answer is the name typed
+    // correctly, so a test that is about something else does not have to care; a test
+    // that is about the typing passes its own.
+    device.ctx.askText = question => {
+        asked.push(question);
+        if (options.typed !== undefined) return Promise.resolve(options.typed);
+        const title = String((question && question.title) || '');
+        const name = title.replace('למחוק את ', '').replace('?', '');
+        return Promise.resolve(name);
+    };
     device.ctx.askTell = message => {
         said.push(typeof message === 'string' ? message : String(message.title || ''));
         return Promise.resolve();
     };
-    return { device, said };
+    return { device, said, asked };
 }
 
 const workerIds = device => device.State.schedule.workers.map(worker => worker.id).join();
 
-{
-    suite('a worker nobody ever recorded can be deleted');
+// Whether a document says anything about this id beyond "not here": a record in either
+// form. A bare tombstone names nobody and cannot resurrect anybody.
+function a_nameInDocument(document, id) {
+    const doc = document || {};
+    if ((doc.workers || []).some(item => item && String(item.id) === id)) return true;
+    const map = (doc.roster && doc.roster.workers) || {};
+    return Boolean(map[id]);
+}
 
+{
+    suite('a worker this phone has never told anybody about can be deleted');
+
+    // The one case deleting exists for, and the only one it is safe in: a name typed by
+    // mistake on a device that has never handed it to a cloud. No adapter has ever seen
+    // him, so no other phone can be holding a day for him, so there is nothing that can
+    // arrive later and be orphaned by his removal.
     const { device } = crew();
     const added = device.State.nextWorkerId();
     device.State.schedule.workers.push(
@@ -5304,10 +5370,8 @@ const workerIds = device => device.State.schedule.workers.map(worker => worker.i
     given('he was added', device.State.commitRoster() === true);
     given('and nothing is recorded against him',
         device.call('workerFootprint', device.State.schedule, added).days.length === 0);
-
-    const cloud = makeCloud();
-    await connected(device, cloud);
-    await wait();
+    given('and this device has never shared him',
+        device.Sync.wasShared('workers', added) === false);
 
     await device.call('deleteWorker', added);
     await wait();
@@ -5315,9 +5379,6 @@ const workerIds = device => device.State.schedule.workers.map(worker => worker.i
     check('he is off the screen', !workerIds(device).includes(added), workerIds(device));
     check('and off the disk',
         !String(device.raw('scheduleData:v2')).includes(added));
-    check('the roster the cloud holds does not have him either',
-        !device.call('normaliseSchedule', cloud.doc).workers.some(w => w.id === added),
-        JSON.stringify(device.call('normaliseSchedule', cloud.doc).workers.map(w => w.id)));
 
     // Closed and opened again.
     const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
@@ -5325,21 +5386,195 @@ const workerIds = device => device.State.schedule.workers.map(worker => worker.i
     check('he does not come back at the next open',
         !workerIds(again).includes(added), workerIds(again));
 
-    // And the other phone, reading the same document, does not put him back.
-    const other = makeDevice({ deviceId: 'd_other' });
-    other.State.load();
-    other.Sync.pushDelayMs = TICK;
-    other.Sync.connect(cloud.adapter);
-    await settle(TICK * 40);
-    check('and the second phone does not resurrect him',
-        !workerIds(other).includes(added), workerIds(other));
-    check('while the two who are still here arrived',
-        workerIds(other) === 'w_01,w_02', workerIds(other));
+    // And when this device finally does connect, the cloud never hears the name at all:
+    // the tombstone replaced the pending roster write on the same field path.
+    const cloud = makeCloud();
+    await connected(again, cloud);
+    await wait();
+    check('the cloud never learns who he was',
+        !a_nameInDocument(cloud.doc, added), JSON.stringify(cloud.doc));
+    check('and nothing in it could ever put him back',
+        !again.call('normaliseSchedule', cloud.doc).workers.some(w => w.id === added),
+        JSON.stringify(cloud.doc.workers.map(w => w.id)));
 
     // A new man never gets his id back.
     const minted = [device.State.nextWorkerId(), device.State.nextWorkerId()];
     check('and his id is never handed out again',
         !minted.includes(added) && minted[0] !== minted[1], JSON.stringify(minted));
+}
+
+{
+    suite('a stale offline roster cannot resurrect a deleted worker');
+
+    // THE MEASURED SEQUENCE. Two phones know him; one deletes him; the other was away
+    // with the old crew in its pocket and comes back having changed something else
+    // entirely. Before the fix the second phone's whole array was the last word and put
+    // him back on every device, days and rates and all, with nothing on screen to
+    // explain the return.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' }).device;
+    await connected(a, cloud);
+    await wait();
+
+    const doomed = a.State.nextWorkerId();
+    a.State.schedule.workers.push(
+        { id: doomed, name: 'זמני', active: true, dailyRate: 0, hourlyRate: 0 });
+    a.State.commitRoster();
+    await wait();
+    given('both phones can see him', JSON.stringify(cloud.doc).includes(doomed));
+
+    // The second phone catches up, then goes offline holding that roster.
+    const b = crew({ deviceId: 'd_b' }).device;
+    b.State.load();
+    const bLink = await unplugged(b, cloud);
+    await wait();
+    given('the second phone has him too', workerIds(b).includes(doomed));
+    bLink.away();
+
+    // He is deleted on A. He is shared by now, so the screen would not offer it - this
+    // is the model being driven directly, which is what makes the merge the thing under
+    // test rather than the button.
+    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
+    given('A removed him', a.State.commitRoster({ workers: [doomed] }) === true);
+    await wait();
+    check('the cloud holds a tombstone rather than a hole',
+        cloud.doc.roster.workers[doomed] === null,
+        JSON.stringify(cloud.doc.roster.workers));
+
+    // B, still on the old roster, edits something unrelated and reconnects.
+    b.State.schedule.places.push({ id: 'p_09', name: 'רמלה', active: true });
+    b.State.commitRoster();
+    await wait();
+    await bLink.back();
+
+    check('the deleted man does not come back to the cloud',
+        !a.call('normaliseSchedule', cloud.doc).workers.some(w => w.id === doomed),
+        JSON.stringify(cloud.doc.workers.map(w => w.id)));
+    check('nor to the phone that deleted him',
+        !workerIds(a).includes(doomed), workerIds(a));
+    check('nor to the phone that was behind',
+        !workerIds(b).includes(doomed), workerIds(b));
+    check('while the unrelated edit did land',
+        b.State.schedule.places.some(place => place.id === 'p_09'));
+
+    // And it stays gone across a reopen, which is what a stored null buys that a deleted
+    // field does not.
+    const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
+    reopened.State.load();
+    const back = makeCloud({ doc: JSON.parse(JSON.stringify(cloud.doc)) });
+    await connected(reopened, back);
+    await wait();
+    check('and he is still gone at the next open',
+        !workerIds(reopened).includes(doomed), workerIds(reopened));
+}
+
+for (const [label, record] of [
+    ['day', (device, id) => device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-12', id, 'actual', 'p_01'))],
+    ['advance', (device, id) => device.State.commit(device.call('addAdvance',
+        device.State.schedule, id, '2026-08-12', 300, ''))]
+]) {
+    suite(`an offline ${label} that arrives after a deletion is not orphaned`);
+
+    // The other measured sequence. B records real work while it is away; A cannot see
+    // it and removes the man; B reconnects. The work must not be discarded to keep the
+    // deletion tidy, and it must not sit in the document belonging to nobody.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' }).device;
+    await connected(a, cloud);
+    await wait();
+
+    const doomed = a.State.nextWorkerId();
+    a.State.schedule.workers.push(
+        { id: doomed, name: 'יוסי', active: true, dailyRate: 400, hourlyRate: 0 });
+    a.State.commitRoster();
+    await wait();
+
+    const b = crew({ deviceId: 'd_b' }).device;
+    b.State.load();
+    const bLink = await unplugged(b, cloud);
+    await wait();
+    given('both phones know him', workerIds(b).includes(doomed));
+
+    // B goes away and does a day's work on him. Nothing leaves it and nothing reaches
+    // it, so it still has him on its own roster - which is what makes it the last place
+    // his name exists once A has removed him.
+    bLink.away();
+    record(b, doomed);
+    await wait();
+    given(`B has a queued ${label}`, b.Sync.pendingCount() > 0);
+
+    // A, which can see none of that, is asked to delete him. The screen refuses,
+    // because he has been shared - that is the whole point of the rule.
+    const blockers = a.global('deletionBlockers');
+    check('the model refuses a permanent deletion for a shared worker',
+        blockers(doomed).some(reason => reason.includes('נשלח למכשירים אחרים')),
+        JSON.stringify(blockers(doomed)));
+
+    // Driven past the screen anyway, which is the state an older build could reach and
+    // the state a document may already be in. The work still has to survive it.
+    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
+    a.State.commitRoster({ workers: [doomed] });
+    await wait();
+
+    await bLink.back();
+
+    const document = cloud.doc;
+    check(`the cloud kept the ${label}`,
+        JSON.stringify(document.days || {}).includes(doomed)
+        || JSON.stringify(document.advances || {}).includes(doomed),
+        JSON.stringify({ days: document.days, advances: document.advances }));
+    check('and no reference is left pointing at nobody',
+        a.call('fullScheduleProblems', document).length === 0,
+        JSON.stringify(a.call('fullScheduleProblems', document)));
+
+    const seen = a.call('normaliseSchedule', document).workers.find(w => w.id === doomed);
+    check('the man has an identity again in the shared document', Boolean(seen),
+        JSON.stringify(document.roster && document.roster.workers));
+    check('archived rather than back in the crew', seen && seen.active === false,
+        JSON.stringify(seen));
+    check('and under his own name, which the phone holding the work still knew',
+        seen && seen.name === 'יוסי', seen && seen.name);
+
+    await settle(TICK * 40);
+    check('the phone that deleted him sees the same thing rather than a hole',
+        Boolean(a.State.worker(doomed)) && a.State.worker(doomed).active === false,
+        JSON.stringify(a.State.worker(doomed)));
+
+    const paid = b.call('payrollReport', b.State.schedule, '2026-08-01', '2026-08-31')
+        .find(row => row.workerId === doomed);
+    check(`the ${label} is counted for him rather than lost`,
+        Boolean(paid) && (paid.attendanceDays > 0 || paid.advances > 0),
+        JSON.stringify(paid));
+}
+
+{
+    suite('an id with no work behind it is not reinstated');
+
+    // The other half of the same rule, and the thing that keeps it from being the
+    // resurrection bug wearing a different hat: a stale array entry is not work.
+    const device = crew().device;
+    const document = {
+        workers: [
+            { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
+            { id: 'w_gone', name: 'רפאים', active: true, dailyRate: 400, hourlyRate: 0 }
+        ],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        roster: { workers: { w_gone: null }, workerOrder: ['w_01'] },
+        days: {}, advances: {}, updatedAt: '2026-08-12T10:00:00.000Z', updatedBy: 'd_a'
+    };
+
+    const merged = device.call('normaliseSchedule', document);
+    check('the tombstone beats the stale array',
+        !merged.workers.some(w => w.id === 'w_gone'),
+        JSON.stringify(merged.workers.map(w => w.id)));
+
+    document.days = { '2026-08-12': { plan: {}, actual: { w_gone: { entries: [{ placeId: 'p_01' }] } } } };
+    const withWork = device.call('normaliseSchedule', document);
+    const back = withWork.workers.find(w => w.id === 'w_gone');
+    check('but a day behind the same id brings the identity back', Boolean(back));
+    check('archived, and named from what the document still held',
+        back && back.active === false && back.name === 'רפאים', JSON.stringify(back));
 }
 
 for (const [label, mark] of [
@@ -5465,21 +5700,34 @@ for (const [label, arm] of [
     await wait();
     device.setQuota(null);
 
+    // Each branch is asserted against the state it is SUPPOSED to end in, named here in
+    // full. "The screen and the reopen agree" is not that assertion: they agree just as
+    // happily when both of them have lost the man, and that is a way this can fail.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+
     if (label === 'the journal will not write') {
+        // Nothing durable took the deletion, so the deletion did not happen. He is on
+        // the screen, on the disk, and in the queue exactly as he was.
         check('the man is back on the screen', workerIds(device).includes(added),
             workerIds(device));
         check('and the disk never lost him', device.raw('scheduleData:v2') === diskBefore);
         check('and the queue is untouched',
             device.raw(device.Sync.activeOutboxKey()) === queueBefore);
+        check('the next open has him too', workerIds(again).includes(added),
+            workerIds(again));
+        check('and the crew is the one it started as',
+            workerIds(again) === `w_01,w_02,${added}`, workerIds(again));
     } else {
-        // The journal took it, so the deletion IS durable - the schedule blob is the
-        // thing that failed, and the journal rebuilds it at the next open. What must not
-        // happen is the screen and the disk describing two different crews.
-        const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
-        again.State.load();
-        check('the screen and the next open agree on the crew',
-            workerIds(again) === workerIds(device),
-            `${workerIds(again)} vs ${workerIds(device)}`);
+        // The journal took it, so the deletion IS durable even though the schedule blob
+        // refused: the journal is what rebuilds the schedule at the next open, and the
+        // intended end state is a crew without him, on the screen and at the next open.
+        check('the deletion stands on the screen', !workerIds(device).includes(added),
+            workerIds(device));
+        check('and the next open rebuilds a crew without him',
+            !workerIds(again).includes(added), workerIds(again));
+        check('with the two men who were always there',
+            workerIds(again) === 'w_01,w_02', workerIds(again));
     }
 
     // Archiving, the same way.
@@ -5493,9 +5741,269 @@ for (const [label, arm] of [
 
     const reopened = makeDevice({ storage: second.device.dump(), deviceId: 'd_here' });
     reopened.State.load();
-    check('archiving too: the screen and the next open agree',
-        reopened.State.worker('w_01').active === second.device.State.worker('w_01').active,
-        `${reopened.State.worker('w_01').active} vs ${second.device.State.worker('w_01').active}`);
+    const archivedNow = label === 'the journal will not write' ? true : false;
+
+    check('archiving: the screen holds the state that is actually durable',
+        second.device.State.worker('w_01').active === archivedNow,
+        String(second.device.State.worker('w_01').active));
+    check('and the next open holds the same one',
+        reopened.State.worker('w_01').active === archivedNow,
+        String(reopened.State.worker('w_01').active));
+    check('his day survives either way',
+        reopened.call('entriesFor',
+            reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+}
+
+{
+    suite('archiving and restoring reach the other phone');
+
+    // The baseline editRoster measures against used to be the very objects the app then
+    // worked in, so setting worker.active = false changed the man AND the record he was
+    // about to be compared with. editRoster found no difference and sent nothing: this
+    // phone showed him archived and the other one still had him at work, with no error
+    // anywhere and no second chance - the next edit compared equal too.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' });
+    await connected(a.device, cloud);
+    a.device.State.commit(a.device.call('assignPlace',
+        a.device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    a.device.State.commit(a.device.call('addAdvance',
+        a.device.State.schedule, 'w_01', '2026-08-12', 100, ''));
+    await wait();
+
+    const b = crew({ deviceId: 'd_b' });
+    b.device.State.load();
+    await connected(b.device, cloud);
+    await settle(TICK * 20);
+    given('both phones have the crew', workerIds(b.device).includes('w_01'));
+    given('and his day', b.device.call('entriesFor',
+        b.device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+
+    // Archived on the phone that ADOPTED the snapshot, which is where the fault lives:
+    // its State.schedule holds the very objects normaliseSchedule produced, and those
+    // were the objects the baseline was built from. Archiving on the phone that seeded
+    // the document compares against a separately parsed copy and passes either way.
+    await b.device.call('setWorkerArchived', 'w_01', true);
+    await settle(TICK * 40);
+
+    check('the archiving reaches the other phone',
+        a.device.State.worker('w_01') && a.device.State.worker('w_01').active === false,
+        JSON.stringify(a.device.State.worker('w_01')));
+    check('and the cloud says so too',
+        cloud.doc.roster.workers.w_01.active === false,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+
+    // Closed and reopened, both of them, against the same document.
+    const a2 = makeDevice({ storage: a.device.dump(), deviceId: 'd_a' });
+    a2.State.load();
+    a2.ctx.askConfirm = () => Promise.resolve(true);
+    a2.ctx.askTell = () => Promise.resolve();
+    a2.ctx.askText = question => Promise.resolve(String(question.title));
+    await connected(a2, cloud);
+    const b2 = makeDevice({ storage: b.device.dump(), deviceId: 'd_b' });
+    b2.State.load();
+    b2.ctx.askConfirm = () => Promise.resolve(true);
+    b2.ctx.askTell = () => Promise.resolve();
+    b2.ctx.askText = question => Promise.resolve(String(question.title));
+    await connected(b2, cloud);
+    await settle(TICK * 20);
+    given('he is still archived on both after a reopen',
+        a2.State.worker('w_01').active === false && b2.State.worker('w_01').active === false);
+
+    await b2.call('setWorkerArchived', 'w_01', false);
+    await settle(TICK * 40);
+
+    check('putting him back reaches the other phone as well',
+        a2.State.worker('w_01') && a2.State.worker('w_01').active === true,
+        JSON.stringify(a2.State.worker('w_01')));
+    check('his day never moved',
+        b2.call('entriesFor', b2.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+    check('and neither did his advance',
+        b2.call('advancesTotal', b2.State.schedule, 'w_01', '2026-08-01', '2026-08-31') === 100,
+        String(b2.call('advancesTotal', b2.State.schedule, 'w_01', '2026-08-01', '2026-08-31')));
+}
+
+{
+    suite('a snapshot that arrives while the archive question is open');
+
+    // The question is open for as long as somebody takes to read it, and the schedule
+    // can be replaced outright underneath it. Everything after the await has to be done
+    // against the schedule as it is THEN.
+    const { device } = crew();
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    device.ctx.askConfirm = () => {
+        // A whole new schedule object, which is what receive() installs - the worker
+        // captured before the question is now an orphan nothing on screen points at.
+        const other = makeCloud();
+        void other;
+        device.State.schedule = device.call('normaliseSchedule', {
+            workers: [
+                { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
+                { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
+            ],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: { '2026-08-12': { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } } } },
+            advances: {}, updatedAt: '2026-08-12T09:00:00.000Z', updatedBy: 'd_other'
+        });
+        return Promise.resolve(true);
+    };
+
+    await device.call('setWorkerArchived', 'w_01', true);
+    await wait();
+
+    check('the man on screen is the one that was archived',
+        device.State.worker('w_01').active === false,
+        JSON.stringify(device.State.worker('w_01')));
+    check('and the day that arrived with the snapshot is still there',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    reopened.State.load();
+    check('the disk holds the same man, not the one that was captured first',
+        reopened.State.worker('w_01').active === false,
+        JSON.stringify(reopened.State.worker('w_01')));
+}
+
+{
+    suite('deleting asks for the name to be typed, not for one more tap');
+
+    // The difference between archiving and deleting is the whole of what this screen
+    // does, and a confirmation that is one more tap in the same place as the last tap is
+    // not a decision.
+    const { device } = crew();
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    let asked = null;
+    device.ctx.askText = question => { asked = question; return Promise.resolve(null); };
+    device.ctx.askConfirm = () => Promise.resolve(true);
+
+    await device.call('deleteWorker', added);
+    await wait();
+
+    check('it is the typing dialog that is opened', Boolean(asked), String(asked));
+    check('and it asks for the name', String(asked.message).includes('הקלד את שם העובד'),
+        String(asked.message));
+    check('the right name is accepted', asked.validate('טעות') === null,
+        String(asked.validate('טעות')));
+    check('a near miss is not', typeof asked.validate('טעו') === 'string',
+        String(asked.validate('טעו')));
+    check('and another name is not', typeof asked.validate('דוד') === 'string',
+        String(asked.validate('דוד')));
+    check('backing out of it deletes nobody', workerIds(device).includes(added),
+        workerIds(device));
+}
+
+{
+    suite('a snapshot that arrives while the delete question is open');
+
+    const { device, said } = crew();
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    given('he was added and is deletable', device.State.commitRoster() === true
+        && device.global('deletionBlockers')(added).length === 0);
+
+    // The day arrives from another phone WHILE the name is being typed.
+    device.ctx.askText = question => {
+        device.State.commit(device.call('assignPlace',
+            device.State.schedule, '2026-08-12', added, 'actual', 'p_01'));
+        return Promise.resolve(String(question.title).replace('למחוק את ', '').replace('?', ''));
+    };
+
+    await device.call('deleteWorker', added);
+    await wait();
+
+    check('he is not deleted', workerIds(device).includes(added), workerIds(device));
+    check('the day that arrived is still his',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', added, 'actual').length === 1);
+    check('and the refusal was said out loud',
+        said.some(line => line.includes('לא נמחק')), JSON.stringify(said));
+}
+
+for (const [label, act] of [
+    ['archive', device => device.call('setWorkerArchived', 'w_01', true)],
+    ['delete', device => device.call('deleteWorker', 'w_01')]
+]) {
+    suite(`saying no to ${label} changes nothing at all`);
+
+    const { device } = crew({ answer: false, typed: null });
+    const diskBefore = device.raw('scheduleData:v2');
+    const queueBefore = device.raw(device.Sync.activeOutboxKey());
+    const rendersBefore = device.renders.count;
+
+    await act(device);
+    await wait();
+
+    check('the crew is untouched', workerIds(device) === 'w_01,w_02', workerIds(device));
+    check('and he is still at work', device.State.worker('w_01').active === true);
+    check('the disk is byte for byte what it was',
+        device.raw('scheduleData:v2') === diskBefore);
+    check('the queue is byte for byte what it was',
+        device.raw(device.Sync.activeOutboxKey()) === queueBefore);
+    check('and nothing was redrawn as if something had happened',
+        device.renders.count === rendersBefore,
+        `${rendersBefore} -> ${device.renders.count}`);
+}
+
+{
+    suite('the archive warning says what the record says, and no more');
+
+    // The schema has no paid, open or settled state on an advance - it is an amount on a
+    // date. The warning used to read "שטרם קוזזו", not yet deducted, which is a fact
+    // about somebody's money that nothing in this app knows.
+    const { device, asked } = crew();
+    device.State.commit(device.call('addAdvance',
+        device.State.schedule, 'w_01', '2026-08-12', 250, ''));
+    device.State.commit(device.call('addAdvance',
+        device.State.schedule, 'w_01', '2026-08-13', 150, ''));
+
+    await device.call('setWorkerArchived', 'w_01', true);
+    await wait();
+
+    const message = String((asked[asked.length - 1] || {}).message || '');
+    check('the count and the total are both in it',
+        message.includes('2') && message.includes('400'), message);
+    check('and it claims nothing about them being settled or not',
+        !message.includes('קוזז') && !message.includes('טרם'), message);
+    await device.call('setWorkerArchived', 'w_02', true);
+    await wait();
+    check('a man with no advances is asked nothing about them',
+        !String((asked[asked.length - 1] || {}).message || '').includes('מקדמות'),
+        String((asked[asked.length - 1] || {}).message || ''));
+}
+
+{
+    suite('putting a man back into a crew that already has his name');
+
+    const { device, asked } = crew();
+    device.State.schedule.workers.push(
+        { id: 'w_03', name: 'דוד', active: false, dailyRate: 400, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    await device.call('setWorkerArchived', 'w_03', false);
+    await wait();
+
+    check('the clash is said before he is put back',
+        asked.some(question => String(question.title || '').includes('כבר יש עובד פעיל בשם')),
+        JSON.stringify(asked.map(q => q.title)));
+    check('and on a yes he does come back',
+        device.State.worker('w_03').active === true);
+
+    // And on a no, nothing moves.
+    const second = crew({ answer: false });
+    second.device.State.schedule.workers.push(
+        { id: 'w_03', name: 'דוד', active: false, dailyRate: 400, hourlyRate: 0 });
+    second.device.State.commitRoster();
+    await second.device.call('setWorkerArchived', 'w_03', false);
+    await wait();
+    check('refusing the clash leaves him in the archive',
+        second.device.State.worker('w_03').active === false);
 }
 
 {
@@ -5518,10 +6026,15 @@ for (const [label, arm] of [
 
     check('a roster entry alone does not hold the deletion',
         device.Sync.queueNamesWorker(added) === false);
+    check('and nothing has been handed to the cloud yet',
+        device.Sync.wasShared('workers', added) === false);
     await device.call('deleteWorker', added);
     await wait();
     check('so the name typed by mistake can go, cloud or no cloud',
         !workerIds(device).includes(added), workerIds(device));
+    check('and the write that would have carried him was replaced, not queued behind him',
+        !String(device.raw(device.Sync.activeOutboxKey()) || '').includes(`"name":"חדש"`),
+        String(device.raw(device.Sync.activeOutboxKey())));
 
     // A queued DAY is a different thing, and it does hold.
     const second = crew();
@@ -5542,6 +6055,63 @@ for (const [label, arm] of [
         workerIds(second.device));
     check('with the reason said out loud',
         second.said.some(line => line.includes('לא נמחק')), JSON.stringify(second.said));
+}
+
+{
+    suite('once a write has been handed over, the name can never be deleted again');
+
+    // Where the line is, exactly. Not "was it acknowledged" - a write can land on the
+    // server and its answer be lost on the way back, and the SDK holds an offline write
+    // and sends it later without asking. The honest moment is the handover: from then on
+    // this device cannot say the name never left it, so from then on it archives.
+    const { device } = crew();
+    const cloud = makeCloud({ online: false });
+    await connected(device, cloud);
+
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.commitRoster();
+    given('nothing has gone out yet', device.Sync.wasShared('workers', added) === false);
+
+    // The send is attempted and REFUSED - the cloud is offline. It still counts.
+    await settle(TICK * 20);
+    given('the send was attempted', cloud.attempts.length > 0);
+    check('a refused send still counts as handed over',
+        device.Sync.wasShared('workers', added) === true);
+
+    const blockers = device.global('deletionBlockers');
+    check('so the screen stops offering to delete him',
+        blockers(added).some(reason => reason.includes('נשלח למכשירים אחרים')),
+        JSON.stringify(blockers(added)));
+
+    await device.call('deleteWorker', added);
+    await wait();
+    check('and driving the function directly does not delete him either',
+        workerIds(device).includes(added), workerIds(device));
+
+    // Across a close and reopen, which is the whole reason the ledger is on disk: the
+    // question is asked in a session that did not watch the write go out.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('the ledger survives the app being closed',
+        again.Sync.wasShared('workers', added) === true);
+    check('and a man who was never shared is still deletable after a reopen',
+        again.Sync.wasShared('workers', 'w_never') === false);
+}
+
+{
+    suite('an unreadable shared-ledger refuses every deletion');
+
+    // Unreadable is not "nothing was ever shared". It is no idea, and no idea is not a
+    // reason to delete somebody - the same rule the queue check has always used.
+    const device = makeDevice({ deviceId: 'd_here' });
+    device.putRaw('farkad:sharedIds:v1', '{ this is not json');
+    device.State.load();
+
+    check('a damaged ledger reads as shared', device.Sync.wasShared('workers', 'w_01') === true);
+    check('and so does anything else asked of it',
+        device.Sync.wasShared('places', 'p_01') === true);
 }
 
 report();

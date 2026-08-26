@@ -5,10 +5,19 @@
 // already invoiced.
 //
 // Deleting exists for one case only, and the model decides whether it applies: a name
-// typed by mistake, or a man added twice, with nothing at all recorded against him. See
-// workerFootprint in js/model/schema.js. Neither action is offered in the list any more -
-// both live inside the worker's own screen, where his name is on the dialog and there is
-// room to say what each one does.
+// typed by mistake, with nothing at all recorded against him AND no phone but this one
+// that has ever heard of him. See workerFootprint in js/model/schema.js for the first
+// half and FarkadSync.wasShared for the second.
+//
+// The second half is not caution, it is the only honest reading of what this device can
+// know. Once an id has left here, another phone can be holding a day for him recorded
+// while it was offline - hours old, arriving tomorrow - and nothing on this screen can
+// see it. Deleting on the strength of "nothing is recorded THAT I CAN SEE" is how a
+// day of somebody's work ends up in the document belonging to nobody. So a man who has
+// been shared is archived, never deleted, and his identity is kept.
+//
+// Neither action is offered in the list - both live inside the worker's own screen,
+// where his name is on the dialog and there is room to say what each one does.
 
 function renderRoster() {
     renderWorkerList();
@@ -295,65 +304,131 @@ function renderWorkerFormActions() {
         return;
     }
 
-    const footprint = workerFootprint(State.schedule, worker.id);
-    const queued = typeof FarkadSync !== 'undefined' && FarkadSync.queueNamesWorker
-        ? FarkadSync.queueNamesWorker(worker.id) : false;
-    const midTransaction = typeof FarkadSync !== 'undefined' && FarkadSync.pendingReplace
-        ? Boolean(FarkadSync.pendingReplace()) : false;
+    const blocked = deletionBlockers(worker.id);
 
     box.appendChild(button('🗄️ העבר לארכיון', 'btn-secondary',
         () => setWorkerArchived(worker.id, true)));
 
-    // Deleting is offered only when there is nothing anywhere that names him: no day in
-    // either layer, no advance, nothing still queued, and no restore in flight. Anything
-    // else and the button is not there to be pressed by mistake - the sentence under it
-    // says which of those it is.
-    if (footprint.days.length === 0 && footprint.advances.length === 0
-        && !queued && !midTransaction) {
+    // Deleting is offered only when nothing anywhere names him and nowhere else has ever
+    // heard of him. Anything else and the button is not there to be pressed by mistake -
+    // the sentence under it says which of those it is.
+    if (blocked.length === 0) {
         box.appendChild(button('🗑️ מחק עובד', 'btn-danger', () => deleteWorker(worker.id)));
-        box.appendChild(el('p', 'hint', 'אין לו רישומים, ולכן אפשר למחוק אותו לגמרי.'));
+        box.appendChild(el('p', 'hint',
+            'הוא לא נשלח לשום מכשיר אחר ואין לו רישומים, ולכן אפשר למחוק אותו לגמרי.'));
         return;
     }
 
-    box.appendChild(el('p', 'hint', whyNotDeletable(footprint, queued, midTransaction)));
+    box.appendChild(el('p', 'hint', whyNotDeletable(blocked)));
 }
 
-function whyNotDeletable(footprint, queued, midTransaction) {
-    const reasons = [];
-    if (footprint.days.length > 0) reasons.push(`${footprint.days.length} ימים רשומים`);
-    if (footprint.advances.length > 0) reasons.push(`${footprint.advances.length} מקדמות`);
-    if (queued) reasons.push('רישומים שממתינים לשליחה');
-    if (midTransaction) reasons.push('שחזור שממתין להסתיים');
+// Every reason this man cannot be permanently deleted, asked of the model and of the
+// queue rather than of the screen. Empty means deletable. Read in two places on purpose:
+// once to decide what to draw, and again at the moment of the write - a snapshot can
+// arrive while the confirmation is open.
+function deletionBlockers(workerId) {
+    const footprint = workerFootprint(State.schedule, workerId);
+    const sync = typeof FarkadSync !== 'undefined' ? FarkadSync : null;
+    const blocked = [];
 
-    return `יש לו ${reasons.join(' ו')} - אי אפשר למחוק, רק להעביר לארכיון. ` +
+    if (footprint.days.length > 0) blocked.push(`${footprint.days.length} ימים רשומים`);
+    if (footprint.advances.length > 0) blocked.push(`${footprint.advances.length} מקדמות`);
+    if (sync && sync.queueNamesWorker && sync.queueNamesWorker(workerId)) {
+        blocked.push('רישומים שממתינים לשליחה');
+    }
+    if (sync && sync.pendingReplace && sync.pendingReplace()) {
+        blocked.push('שחזור שממתין להסתיים');
+    }
+    // The one that is not about this device at all.
+    if (sync && sync.wasShared && sync.wasShared('workers', workerId)) {
+        blocked.push('הוא כבר נשלח למכשירים אחרים');
+    }
+    return blocked;
+}
+
+function whyNotDeletable(blocked) {
+    return `${blocked.join(', ')} - אי אפשר למחוק, רק להעביר לארכיון. ` +
         'הכל יישמר בדוחות ההיסטוריים.';
 }
 
 // Out of the crew, and nothing else. Every day, every rate and every advance stays where
 // it is; the reports still resolve his name on days that were already invoiced.
+//
+// Everything after the await is done against the schedule as it is THEN. A confirmation
+// is open for as long as somebody takes to read it, and a snapshot arriving in that gap
+// replaces State.schedule outright - so the worker captured before the question was
+// asked can be an object no longer in the list, and writing to it changes nothing that
+// is on screen while every line here reports success.
 async function setWorkerArchived(workerId, archived) {
-    const worker = State.worker(workerId);
-    if (!worker) return;
+    const before = State.worker(workerId);
+    if (!before) return;
 
     if (archived) {
         const owed = openAdvanceBalance(State.schedule, workerId);
         const go = await askConfirm({
-            title: `להעביר את ${worker.name} לארכיון?`,
+            title: `להעביר את ${before.name} לארכיון?`,
             message: 'הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.'
-                // Said before, not after. Putting a man away while he is still holding
-                // cash is a thing somebody does by accident and finds out at settlement.
-                + (owed ? `\n\n⚠️ יש לו ${owed.count} מקדמות בסך ${Math.round(owed.total)} שטרם קוזזו.` : ''),
+                // What the record actually says, and nothing beyond it. It used to read
+                // "שטרם קוזזו" - not yet deducted - and the schema has no such state:
+                // an advance is an amount on a date, with nothing anywhere marking it
+                // paid, open or settled. The sentence was inventing a fact about
+                // somebody's money in the one dialog people read carefully.
+                + (owed ? `\n\nרשומות לו ${owed.count} מקדמות בסך ${Math.round(owed.total)} ₪.` : ''),
             ok: 'לארכיון'
         });
         if (!go) return;
     }
 
-    const was = worker.active;
-    worker.active = !archived;
+    // Fetched again, by id, from the schedule as it is now.
+    const worker = State.worker(workerId);
+    if (!worker) {
+        render();
+        await askTell({
+            title: 'לא בוצע',
+            message: 'העובד כבר אינו ברשימה במכשיר הזה. ייתכן שמכשיר אחר שינה את הצוות.'
+        });
+        return;
+    }
+
+    // Already where it was going. Nothing to write, and nothing to announce - a dialog
+    // that closes saying "done" over a change somebody else made is how two people end
+    // up sure they each did it.
+    if (worker.active === !archived) {
+        closeWorkerForm();
+        render();
+        return;
+    }
+
+    // Restoring somebody into a crew that already has that name. Said before the write,
+    // because two identical rows in the daily list is a mistake that gets recorded
+    // against the wrong man before anybody notices it.
+    if (!archived) {
+        const clash = State.schedule.workers.some(item =>
+            item.id !== worker.id && item.active !== false
+            && String(item.name).trim() === String(worker.name).trim());
+        if (clash) {
+            const go = await askConfirm({
+                title: `כבר יש עובד פעיל בשם ${worker.name}`,
+                message: 'שני עובדים באותו שם ברשימה היומית - קל לרשום יום על השם הלא נכון. ' +
+                    'אפשר להחזיר אותו ואז לשנות את השם.',
+                ok: 'החזר בכל זאת'
+            });
+            if (!go) return;
+            // And again after THAT question, for the same reason as above.
+            if (!State.worker(workerId) || State.worker(workerId).active !== false) {
+                render();
+                return;
+            }
+        }
+    }
+
+    const live = State.worker(workerId);
+    const was = live.active;
+    live.active = !archived;
     // commitRoster puts the screen back and says so if the write did not land, so a
     // failure here cannot leave the list showing something the disk does not hold.
     if (!State.commitRoster()) {
-        worker.active = was;
+        live.active = was;
         render();
         return;
     }
@@ -361,37 +436,33 @@ async function setWorkerArchived(workerId, archived) {
     render();
 }
 
-// For the name typed by mistake, and only that. renderWorkerFormActions has already
-// established that nothing anywhere names him.
+// For the name typed by mistake on a phone that has never told anybody about him, and
+// only that. deletionBlockers decides; this function asks it again at the write.
 async function deleteWorker(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
 
-    // Checked AGAIN, here, at the moment of the write. The button was drawn when the
-    // screen opened, and a snapshot from another phone can have arrived since with a day
-    // recorded against this very man.
-    const footprint = workerFootprint(State.schedule, workerId);
-    const queued = typeof FarkadSync !== 'undefined' && FarkadSync.queueNamesWorker
-        ? FarkadSync.queueNamesWorker(workerId) : false;
-    if (footprint.days.length > 0 || footprint.advances.length > 0 || queued
-        || (typeof FarkadSync !== 'undefined' && FarkadSync.pendingReplace
-            && FarkadSync.pendingReplace())) {
-        renderWorkerFormActions();
-        askTell({
-            title: 'לא נמחק',
-            message: 'בינתיים נרשם משהו על שמו, ולכן אי אפשר למחוק אותו. אפשר להעביר לארכיון.'
-        });
-        return;
-    }
+    if (deletionBlockers(workerId).length > 0) return refuseDeletion();
 
-    // By name, because the dialog is the last thing between a tap and a man being gone.
-    const go = await askConfirm({
+    // By NAME, typed. The button was drawn once and this is permanent: a confirmation
+    // that is one more tap in the same place as the last tap is not a decision, and the
+    // difference between archiving and deleting is the whole of what this screen does.
+    const typed = await askText({
         title: `למחוק את ${worker.name}?`,
-        message: 'אין לו אף יום רשום ואף מקדמה, ולכן לא ייפגע שום דוח. ' +
-            'המחיקה סופית - להחזיר אותו צריך להוסיף אותו מחדש.',
-        ok: 'מחק'
+        message: 'המחיקה סופית. להמשיך - הקלד את שם העובד במדויק.',
+        placeholder: worker.name,
+        ok: 'מחק לצמיתות',
+        validate: value => (String(value).trim() === String(worker.name).trim()
+            ? null : 'השם אינו זהה.')
     });
-    if (!go) return;
+    if (typed === null) return;
+
+    // Everything, again, against the schedule as it is now - including the man himself,
+    // who can have been archived or removed on another phone while the box was open.
+    const live = State.worker(workerId);
+    if (!live) { render(); return; }
+    if (String(live.name).trim() !== String(worker.name).trim()) return refuseDeletion();
+    if (deletionBlockers(workerId).length > 0) return refuseDeletion();
 
     const before = State.schedule.workers.slice();
     State.schedule.workers = State.schedule.workers.filter(item => item.id !== workerId);
@@ -408,6 +479,15 @@ async function deleteWorker(workerId) {
 
     closeWorkerForm();
     render();
+}
+
+function refuseDeletion() {
+    renderWorkerFormActions();
+    return askTell({
+        title: 'לא נמחק',
+        message: 'בינתיים השתנה משהו על שמו, ולכן אי אפשר למחוק אותו. אפשר להעביר לארכיון - ' +
+            'כל הימים והמקדמות שלו יישמרו.'
+    });
 }
 
 // ---------------------------------------------------------------- places

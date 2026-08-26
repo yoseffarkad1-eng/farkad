@@ -391,7 +391,12 @@ const State = {
 
 // Accepts anything shaped roughly right and fills in what is missing, so a document
 // written by an older build - or a half-finished remote write - cannot crash the app.
-function normaliseSchedule(raw) {
+// `hints` carries names this device already knows for ids the document itself no longer
+// names - see reinstateReferenced. A phone holding a day for somebody who was deleted
+// elsewhere is usually the last place his name still exists, and reinstating him as
+// "עובד שנמחק" when the phone doing the reinstating can read his name off its own roster
+// would be losing information it has in its hand.
+function normaliseSchedule(raw, hints) {
     const schedule = emptySchedule();
     if (!raw || typeof raw !== 'object') return schedule;
 
@@ -451,9 +456,42 @@ function normaliseSchedule(raw) {
         };
     });
 
+    // The invariant, enforced here because here is where every route in meets: a
+    // snapshot, a boot from disk, an imported file, a restored backup. Anything with a
+    // day or an advance behind it gets an identity back - archived - rather than being
+    // left as work belonging to nobody. See reinstateReferenced in js/model/schema.js.
+    //
+    // The names are looked up in the RAW roster before they are handed over, tombstones
+    // included: a stale whole array that no longer grants membership still remembers
+    // what the man was called, and a recovered row reading "עובד שנמחק" when the name is
+    // sitting right there would be worse than useless to the person reading the report.
+    reinstateReferenced(schedule, rememberedNames(raw, hints));
+
     schedule.updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
     schedule.updatedBy = typeof raw.updatedBy === 'string' ? raw.updatedBy : null;
     return schedule;
+}
+
+// Every name the document has for an id, in either form, membership aside.
+function rememberedNames(raw, hints) {
+    const out = { workers: {}, places: {} };
+    ['workers', 'places'].forEach(kind => {
+        // The caller's memory first, so anything the document itself still says wins.
+        const given = (hints && hints[kind] && typeof hints[kind] === 'object') ? hints[kind] : {};
+        Object.keys(given).forEach(id => {
+            if (given[id] && given[id].name) out[kind][String(id)] = { name: String(given[id].name) };
+        });
+        (Array.isArray(raw[kind]) ? raw[kind] : []).forEach(item => {
+            if (item && item.id) out[kind][String(item.id)] = { name: String(item.name || '') };
+        });
+        const map = (raw.roster && typeof raw.roster === 'object') ? raw.roster[kind] : null;
+        if (!map || typeof map !== 'object') return;
+        Object.keys(map).forEach(id => {
+            const item = map[id];
+            if (item && item.name) out[kind][String(id)] = { name: String(item.name) };
+        });
+    });
+    return out;
 }
 
 function normaliseLayer(side) {
