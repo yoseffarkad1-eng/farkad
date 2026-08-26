@@ -5,9 +5,9 @@
 // already invoiced.
 //
 // Deleting exists for one case only, and the model decides whether it applies: a name
-// typed by mistake, with nothing at all recorded against him AND no phone but this one
-// that has ever heard of him. See workerFootprint in js/model/schema.js for the first
-// half and FarkadSync.wasShared for the second.
+// typed by mistake, with nothing at all recorded against him AND provably made on this
+// phone and never sent anywhere. See workerFootprint in js/model/schema.js for the first
+// half and the provenance block in js/sync/sync.js for the second.
 //
 // The second half is not caution, it is the only honest reading of what this device can
 // know. Once an id has left here, another phone can be holding a day for him recorded
@@ -130,13 +130,34 @@ function workerRow(worker) {
 // write rather than a per-field one - there is no field path that means "the order
 // changed". It goes through commitRoster, which sends the two roster fields and not the
 // whole document: reordering mid-evening must not overwrite the other two phones' work.
+//
+// The move is measured in the ACTIVE list, not in the array.
+//
+// The array holds archived men too, in among the others, and they are not on this screen:
+// [A, X-archived, B] moved A down one array slot and left the visible order reading A, B
+// exactly as before. The order really had changed - the write went out, the other phones
+// took it - and on screen nothing whatever happened, so the answer was to press it again,
+// and again. One press has to be one visible change or it is not a control.
+//
+// Swapping the two ACTIVE men, rather than shuffling one slot, is also what keeps the
+// archived rows where they were: they are not part of this order and must not be dragged
+// around by it.
 function moveWorker(workerId, direction) {
     const workers = State.schedule.workers;
-    const from = workers.findIndex(worker => worker.id === workerId);
-    const to = from + direction;
-    if (from < 0 || to < 0 || to >= workers.length) return;
+    const active = workers
+        .map((worker, index) => ({ worker, index }))
+        .filter(item => item.worker.active !== false);
 
-    workers.splice(to, 0, workers.splice(from, 1)[0]);
+    const at = active.findIndex(item => item.worker.id === workerId);
+    const to = at + direction;
+    if (at < 0 || to < 0 || to >= active.length) return;
+
+    const here = active[at].index;
+    const there = active[to].index;
+    const held = workers[here];
+    workers[here] = workers[there];
+    workers[there] = held;
+
     State.commitRoster();
     render();
 }
@@ -226,9 +247,16 @@ function editWorker(workerId) {
 }
 
 async function saveWorkerForm() {
-    const name = document.getElementById('workerFormName').value.trim();
     const problem = document.getElementById('workerFormError');
-    if (!name) {
+    const read = () => ({
+        name: document.getElementById('workerFormName').value.trim(),
+        idNumber: document.getElementById('workerFormId').value.trim(),
+        phone: document.getElementById('workerFormPhone').value.trim(),
+        dailyRate: Number(document.getElementById('workerFormDaily').value) || 0,
+        hourlyRate: Number(document.getElementById('workerFormHourly').value) || 0
+    });
+
+    if (!read().name) {
         // Beside the field, not in a dialog over it: the person is looking at the field.
         problem.textContent = 'נא להזין שם עובד.';
         document.getElementById('workerFormName').focus();
@@ -236,40 +264,98 @@ async function saveWorkerForm() {
     }
     problem.textContent = '';
 
+    // Both questions are asked against the schedule as it is at the moment of asking, and
+    // asked AGAIN after every answer. A confirmation is open for as long as somebody takes
+    // to read it, and another phone's snapshot can replace the whole schedule in that gap:
+    // the clash that was true when the question went up can be gone, a new one can have
+    // appeared, and the man being edited can have been archived or removed outright.
+    //
     // Two workers called the same thing is realistic - and the day screen shows nothing
     // but names, so from that point on nobody can tell which row is whose, including at
     // the moment their pay is worked out. It is allowed, but never by accident.
-    const clash = State.schedule.workers.find(worker =>
-        worker.id !== editingWorkerId && worker.active !== false && worker.name === name);
-    if (clash) {
-        const go = await askConfirm({
-            title: `כבר יש עובד בשם ${name}`,
-            message: 'במסך היומי רואים רק שמות, ואי אפשר יהיה להבדיל ביניהם. עדיף להוסיף שם משפחה או כינוי.',
-            ok: 'הוסף בכל זאת'
-        });
-        if (!go) {
+    const askedAbout = { name: null, phone: null };
+
+    for (let round = 0; round < 4; round += 1) {
+        const typed = read();
+        if (!typed.name) {
+            problem.textContent = 'נא להזין שם עובד.';
             document.getElementById('workerFormName').focus();
             return;
         }
+
+        // The man himself, re-fetched. Editing a worker a snapshot has taken away must
+        // not write into an object nothing is holding any more - Object.assign(null, ...)
+        // throws, and the throw lands in the middle of a save with the form still open.
+        if (editingWorkerId && !State.worker(editingWorkerId)) {
+            closeWorkerForm();
+            render();
+            await askTell({
+                title: 'העובד כבר אינו ברשימה',
+                message: 'מכשיר אחר הסיר או שינה את העובד הזה בזמן העריכה, ולכן העריכה לא נשמרה.'
+            });
+            return;
+        }
+
+        const clash = State.schedule.workers.find(worker =>
+            worker.id !== editingWorkerId && worker.active !== false
+            && worker.name === typed.name);
+        if (clash && askedAbout.name !== typed.name) {
+            const go = await askConfirm({
+                title: `כבר יש עובד בשם ${typed.name}`,
+                message: 'במסך היומי רואים רק שמות, ואי אפשר יהיה להבדיל ביניהם. עדיף להוסיף שם משפחה או כינוי.',
+                ok: 'הוסף בכל זאת'
+            });
+            if (!go) {
+                document.getElementById('workerFormName').focus();
+                return;
+            }
+            askedAbout.name = typed.name;
+            continue;
+        }
+
+        // The number is the thing that tells two men with one name apart, so the same
+        // number twice is usually the same man entered twice. Archived rows count: the
+        // one about to be added again is exactly the one the daily list is not showing.
+        const sharing = workersSharingPhone(State.schedule, typed.phone, editingWorkerId);
+        if (sharing.length > 0 && askedAbout.phone !== normalisePhone(typed.phone)) {
+            const names = sharing
+                .map(worker => worker.active === false ? `${worker.name} (בארכיון)` : worker.name)
+                .join(', ');
+            const go = await askConfirm({
+                title: `הטלפון הזה כבר רשום אצל ${names}`,
+                message: `${typed.name} והמספר ${typed.phone} - בדרך כלל זה אותו אדם שנרשם פעמיים, ` +
+                    'ואז חצי מהימים נרשמים על השורה שאף אחד לא מסתכל עליה. ' +
+                    'אפשר להמשיך אם באמת מדובר בשני אנשים.',
+                ok: 'שמור בכל זאת'
+            });
+            if (!go) {
+                document.getElementById('workerFormPhone').focus();
+                return;
+            }
+            askedAbout.phone = normalisePhone(typed.phone);
+            continue;
+        }
+
+        // Nothing left to ask, and everything just checked against the state that is
+        // about to be written to.
+        if (editingWorkerId) {
+            const worker = State.worker(editingWorkerId);
+            if (!worker) continue;
+            Object.assign(worker, typed);
+        } else {
+            State.schedule.workers.push(Object.assign(
+                { id: State.nextWorkerId(), active: true }, typed));
+        }
+
+        closeWorkerForm();
+        State.commitRoster();
+        render();
+        return;
     }
 
-    const idNumber = document.getElementById('workerFormId').value.trim();
-    const phone = document.getElementById('workerFormPhone').value.trim();
-    const dailyRate = Number(document.getElementById('workerFormDaily').value) || 0;
-    const hourlyRate = Number(document.getElementById('workerFormHourly').value) || 0;
-
-    if (editingWorkerId) {
-        const worker = State.worker(editingWorkerId);
-        Object.assign(worker, { name, idNumber, phone, dailyRate, hourlyRate });
-    } else {
-        State.schedule.workers.push({
-            id: State.nextWorkerId(), name, idNumber, phone, dailyRate, hourlyRate, active: true
-        });
-    }
-
-    closeWorkerForm();
-    State.commitRoster();
-    render();
+    // Four rounds of the two questions and the state is still moving under us. Better to
+    // say so than to keep asking the same thing.
+    problem.textContent = 'הנתונים השתנו במכשיר אחר בזמן העריכה. נסה שוב.';
 }
 
 function closeWorkerForm() {
@@ -339,9 +425,12 @@ function deletionBlockers(workerId) {
     if (sync && sync.pendingReplace && sync.pendingReplace()) {
         blocked.push('שחזור שממתין להסתיים');
     }
-    // The one that is not about this device at all.
-    if (sync && sync.wasShared && sync.wasShared('workers', workerId)) {
-        blocked.push('הוא כבר נשלח למכשירים אחרים');
+    // The one that is not about this device at all: unless this device can PROVE it made
+    // him and PROVE he never left, he is archived. Absent proof is not proof of absence -
+    // a phone upgrading from v78 has no record of anybody, and every one of those workers
+    // may be on two other phones right now.
+    if (!(sync && sync.provenLocalOnly && sync.provenLocalOnly('workers', workerId))) {
+        blocked.push('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום');
     }
     return blocked;
 }
@@ -399,26 +488,50 @@ async function setWorkerArchived(workerId, archived) {
         return;
     }
 
-    // Restoring somebody into a crew that already has that name. Said before the write,
-    // because two identical rows in the daily list is a mistake that gets recorded
-    // against the wrong man before anybody notices it.
+    // Restoring somebody into a crew that already has his name or his number. Said before
+    // the write, because two indistinguishable rows in the daily list is a mistake that
+    // gets recorded against the wrong man before anybody notices it.
+    //
+    // Recomputed after EVERY answer, and against the schedule as it is then: a snapshot
+    // can arrive while the question is up, and the crew it lands with may have a clash the
+    // first question knew nothing about - or may have resolved the one it asked about.
     if (!archived) {
-        const clash = State.schedule.workers.some(item =>
-            item.id !== worker.id && item.active !== false
-            && String(item.name).trim() === String(worker.name).trim());
-        if (clash) {
-            const go = await askConfirm({
-                title: `כבר יש עובד פעיל בשם ${worker.name}`,
-                message: 'שני עובדים באותו שם ברשימה היומית - קל לרשום יום על השם הלא נכון. ' +
-                    'אפשר להחזיר אותו ואז לשנות את השם.',
-                ok: 'החזר בכל זאת'
-            });
-            if (!go) return;
-            // And again after THAT question, for the same reason as above.
-            if (!State.worker(workerId) || State.worker(workerId).active !== false) {
-                render();
-                return;
+        const answered = { name: null, phone: null };
+
+        for (let round = 0; round < 4; round += 1) {
+            const live = State.worker(workerId);
+            if (!live || live.active !== false) { render(); return; }
+
+            const named = State.schedule.workers.filter(item =>
+                item.id !== live.id && item.active !== false
+                && String(item.name).trim() === String(live.name).trim());
+            if (named.length > 0 && answered.name !== String(live.name).trim()) {
+                const go = await askConfirm({
+                    title: `כבר יש עובד פעיל בשם ${live.name}`,
+                    message: 'שני עובדים באותו שם ברשימה היומית - קל לרשום יום על השם הלא נכון. ' +
+                        'אפשר להחזיר אותו ואז לשנות את השם.',
+                    ok: 'החזר בכל זאת'
+                });
+                if (!go) return;
+                answered.name = String(live.name).trim();
+                continue;
             }
+
+            const sharing = workersSharingPhone(State.schedule, live.phone, live.id)
+                .filter(item => item.active !== false);
+            if (sharing.length > 0 && answered.phone !== normalisePhone(live.phone)) {
+                const go = await askConfirm({
+                    title: `הטלפון של ${live.name} רשום גם אצל ${sharing.map(item => item.name).join(', ')}`,
+                    message: 'אותו מספר על שתי שורות פעילות זה בדרך כלל אותו אדם פעמיים. ' +
+                        'אפשר להחזיר אותו אם באמת מדובר בשני אנשים.',
+                    ok: 'החזר בכל זאת'
+                });
+                if (!go) return;
+                answered.phone = normalisePhone(live.phone);
+                continue;
+            }
+
+            break;
         }
     }
 

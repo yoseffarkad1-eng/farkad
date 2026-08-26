@@ -1354,6 +1354,149 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- one man, one number
+//
+// The phone number is in the roster for exactly one reason: two men called the same
+// thing is ordinary on a site, and the number is what tells them apart. So the same
+// number on two rows almost always means the same man was entered twice - and from then
+// on half his days are recorded against the row nobody is looking at.
+{
+  const page = await open();
+  await page.evaluate(() => {
+    State.schedule.workers = [
+      { id: 'w_01', name: 'דוד כהן', phone: '052-884-1930', active: true,
+        dailyRate: 400, hourlyRate: 50 },
+      { id: 'w_02', name: 'שרה לוי', phone: '050-1234567', active: true,
+        dailyRate: 350, hourlyRate: 0 },
+      { id: 'w_03', name: 'סאמר חוסיין', phone: '054-7788990', active: false,
+        dailyRate: 380, hourlyRate: 0 }
+    ];
+    State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    State.date = '2026-08-12';
+    State.save();
+    showView('roster');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const addWorker = async (name, phone) => {
+    await page.getByRole('button', { name: '+ הוסף עובד' }).click();
+    await page.waitForTimeout(200);
+    await page.fill('#workerFormName', name);
+    await page.evaluate(() => { document.getElementById('workerFormMore').open = true; });
+    await page.fill('#workerFormPhone', phone);
+    await page.getByRole('button', { name: 'שמור' }).last().click();
+    await page.waitForTimeout(300);
+  };
+
+  // Written differently, and the same number. This is the whole point: nobody types it
+  // the same way twice, and a string comparison finds none of them.
+  await addWorker('דוד', '+972-52-884-1930');
+  check('the same number in another format is caught',
+    (await page.isVisible('#askModal')) === true
+    && (await page.textContent('#askTitle')).includes('הטלפון הזה כבר רשום'),
+    await page.textContent('#askTitle'));
+  check('and the dialog names the man who already has it',
+    (await page.textContent('#askTitle')).includes('דוד כהן'),
+    await page.textContent('#askTitle'));
+
+  // Cancelled: the form stays open with everything still typed into it.
+  await page.click('#askCancel');
+  await page.waitForTimeout(250);
+  check('saying no keeps the form open',
+    (await page.isVisible('#workerFormModal')) === true);
+  check('with the name still typed', (await page.inputValue('#workerFormName')) === 'דוד');
+  check('and the number still typed',
+    (await page.inputValue('#workerFormPhone')) === '+972-52-884-1930');
+  check('and nobody was added',
+    (await page.evaluate(() => State.schedule.workers.length)) === 3,
+    String(await page.evaluate(() => State.schedule.workers.length)));
+
+  // Confirmed: two people really can share a phone, and saying so is allowed.
+  await page.getByRole('button', { name: 'שמור' }).last().click();
+  await page.waitForTimeout(250);
+  await page.click('#askOk');
+  await page.waitForTimeout(350);
+  check('confirming it deliberately does add him',
+    (await page.evaluate(() => State.schedule.workers.length)) === 4,
+    String(await page.evaluate(() => State.schedule.workers.length)));
+  check('and the number is kept as it was typed',
+    (await page.evaluate(() => State.schedule.workers[3].phone)) === '+972-52-884-1930');
+
+  // An ARCHIVED man with that number. He is the one the daily list is not showing, which
+  // is exactly why he is the one somebody enters again.
+  await addWorker('סאמר', '054 778 8990');
+  check('an archived worker with the same number is found too',
+    (await page.isVisible('#askModal')) === true
+    && (await page.textContent('#askTitle')).includes('סאמר חוסיין'),
+    await page.textContent('#askTitle'));
+  check('and is named as being in the archive',
+    (await page.textContent('#askTitle')).includes('בארכיון'),
+    await page.textContent('#askTitle'));
+  await page.click('#askCancel');
+  await page.waitForTimeout(200);
+  await page.evaluate(() => closeWorkerForm());
+  await page.waitForTimeout(200);
+
+  // A snapshot arriving while the question is open. Everything after the await has to be
+  // asked again, against the schedule as it is THEN - including whether the man being
+  // edited is still there at all.
+  await page.evaluate(() => {
+    document.querySelectorAll('.modal').forEach(node => { node.style.display = 'none'; });
+    render();
+  });
+  await page.waitForTimeout(200);
+
+  const raced = await page.evaluate(async () => {
+    editWorker('w_02');
+    await new Promise(done => setTimeout(done, 150));
+    document.getElementById('workerFormMore').open = true;
+    document.getElementById('workerFormPhone').value = '052-884-1930';
+
+    // The person is reading the question; the other phone removes this very worker.
+    // askTell is stubbed alongside it: the save tells somebody when the man it was
+    // editing has gone, and a real dialog here would sit waiting for a tap forever.
+    const original = window.askConfirm;
+    const toldOriginal = window.askTell;
+    const told = [];
+    window.askTell = message => {
+        told.push(String((message && message.title) || message));
+        return Promise.resolve();
+    };
+    window.askConfirm = () => {
+      State.schedule = normaliseSchedule({
+        workers: [{ id: 'w_01', name: 'דוד כהן', phone: '052-884-1930', active: true,
+          dailyRate: 400, hourlyRate: 50 }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: {}, advances: {},
+        updatedAt: '2030-01-01T00:00:00.000Z', updatedBy: 'other'
+      });
+      return Promise.resolve(true);
+    };
+
+    let threw = null;
+    try { await saveWorkerForm(); } catch (error) { threw = String(error && error.message); }
+    window.askConfirm = original;
+    window.askTell = toldOriginal;
+
+    return {
+      threw, told,
+      workers: State.schedule.workers.map(worker => worker.id),
+      formOpen: getComputedStyle(document.getElementById('workerFormModal')).display !== 'none'
+    };
+  });
+  check('a snapshot during the question does not throw the save',
+    raced.threw === null, String(raced.threw));
+  check('and the worker it removed is not written back',
+    raced.workers.join() === 'w_01', JSON.stringify(raced.workers));
+  check('the person is told why the edit did not save',
+    raced.told.some(line => line.includes('כבר אינו ברשימה')), JSON.stringify(raced.told));
+  check('and the form is not left sitting open over a worker who is gone',
+    raced.formOpen === false, JSON.stringify(raced));
+
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- manifest
 {
   const page = await open();
@@ -3291,6 +3434,88 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     return { visible: rows.filter(row => row.getBoundingClientRect().height > 0).length };
   });
   check(`${label}: opening it shows them`, opened.visible === 2, JSON.stringify(opened));
+
+  // ---------------------------------------------- the home indicator, on the phone
+  //
+  // env(safe-area-inset-bottom) is 0 in every desktop browser, which is exactly the
+  // condition the bug hides under: bars that reserve nothing look perfect here and sit
+  // under the strip the system draws on the phone. --safe-bottom is the one place env()
+  // is read, so substituting a real 34px moves everything that ought to move - and the
+  // last man in a crew of thirty has to stay reachable while it does.
+  const inset = await page.evaluate(async () => {
+    showView('day');
+    await new Promise(done => setTimeout(done, 250));
+    window.scrollTo(0, document.body.scrollHeight);
+    await new Promise(done => setTimeout(done, 250));
+
+    const measure = () => {
+      const style = getComputedStyle(document.documentElement);
+      const tabs = document.querySelector('.tabs').getBoundingClientRect();
+      const dock = document.querySelector('.day-actions').getBoundingClientRect();
+      return {
+        navVar: parseFloat(style.getPropertyValue('--nav-h')),
+        tabsHeight: Math.round(tabs.height),
+        dockTop: Math.round(dock.top),
+        appPad: parseFloat(getComputedStyle(document.querySelector('.app')).paddingBottom)
+      };
+    };
+
+    const before = measure();
+    document.documentElement.style.setProperty('--safe-bottom', '34px');
+    if (typeof scheduleBarMeasure === 'function') scheduleBarMeasure();
+    await new Promise(done => setTimeout(done, 300));
+    window.scrollTo(0, document.body.scrollHeight);
+    await new Promise(done => setTimeout(done, 300));
+    const after = measure();
+
+    const rows = document.querySelectorAll('#dayView .worker-list .wrow');
+    const last = rows[rows.length - 1];
+    const box = last.getBoundingClientRect();
+    const bars = ['.tabs', '.day-actions']
+      .map(selector => document.querySelector(selector).getBoundingClientRect());
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+
+    const dockButtons = [...document.querySelectorAll('.day-actions button')]
+      .filter(node => node.offsetParent !== null);
+    const action = dockButtons[dockButtons.length - 1];
+    const actionBox = action.getBoundingClientRect();
+    const actionHit = document.elementFromPoint(
+      actionBox.left + actionBox.width / 2, actionBox.top + actionBox.height / 2);
+
+    document.documentElement.style.removeProperty('--safe-bottom');
+    if (typeof scheduleBarMeasure === 'function') scheduleBarMeasure();
+
+    return {
+      before, after,
+      lastText: last.textContent.slice(0, 20),
+      lastBottom: Math.round(box.bottom),
+      barsTop: Math.round(Math.min(...bars.map(bar => bar.top))),
+      lastReachable: last.contains(hit),
+      actionLabel: action.textContent.slice(0, 18),
+      actionBottom: Math.round(actionBox.bottom),
+      actionClearsIndicator: actionBox.bottom <= window.innerHeight - 34 + 1,
+      actionReachable: action.contains(actionHit) || action === actionHit
+    };
+  });
+
+  check(`${label}: the tab bar grows by the home-indicator strip`,
+    inset.after.tabsHeight - inset.before.tabsHeight === 34, JSON.stringify(inset));
+  check(`${label}: and the measured --nav-h grows with it`,
+    inset.after.navVar - inset.before.navVar === 34, JSON.stringify(inset));
+  check(`${label}: the day actions move up rather than under it`,
+    inset.after.dockTop < inset.before.dockTop, JSON.stringify(inset));
+  check(`${label}: the page reserves more at its foot`,
+    inset.after.appPad > inset.before.appPad, JSON.stringify(inset));
+  check(`${label}: the thirtieth man is still the last row`,
+    inset.lastText.includes('30'), JSON.stringify(inset));
+  check(`${label}: still clear of the bars with the indicator in place`,
+    inset.lastBottom <= inset.barsTop, JSON.stringify(inset));
+  check(`${label}: and still the thing a tap lands on`,
+    inset.lastReachable === true, JSON.stringify(inset));
+  check(`${label}: the last action clears the home indicator`,
+    inset.actionClearsIndicator === true, JSON.stringify(inset));
+  check(`${label}: and can still be pressed`,
+    inset.actionReachable === true, JSON.stringify(inset));
 
   await page.context().close();
 }

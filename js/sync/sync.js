@@ -75,10 +75,17 @@ const REPLACE_KEY = 'farkad:pendingReplace';
 // See freezeLegacyReplacement.
 const LEGACY_UPGRADE_KEY = 'farkad:pendingReplace:v71';
 
-// Which entity ids have provably LEFT this device. See markShared/wasShared: it is the
-// whole of what makes a permanent deletion safe to offer, so it is kept on disk rather
-// than in memory - the question is asked in a later session than the one that answered it.
-const SHARED_IDS_KEY = 'farkad:sharedIds:v1';
+// Where every worker and site on this device CAME FROM. See the provenance block below:
+// it is the whole of what makes a permanent deletion safe to offer, so it is kept on disk
+// rather than in memory - the question is asked in a later session than the one that
+// answered it.
+//
+// A new key rather than the old farkad:sharedIds:v1, and deliberately so. That record
+// answered "has this id left?", and its absence therefore read as "nothing has ever
+// left" - which is exactly what an upgraded v78 phone looks like, and its whole crew
+// would have been offered for deletion on the first offline open. The question has to be
+// the other way round: "was this id made here?", whose absence answers no.
+const PROVENANCE_KEY = 'farkad:provenance:v1';
 
 const REPLACE_VERSION = 2;
 const SCHEDULE_KEY = 'scheduleData:v2';     // must match V2_KEY in state.js
@@ -677,63 +684,122 @@ const FarkadSync = {
         });
     },
 
-    // ------------------------------------------------------------ proven local-only
+    // ------------------------------------------------------------ provenance
     //
     // A permanent deletion is offered for one kind of entity only: one this device can
-    // PROVE never left it. Everything else is archived, because once an id is on another
-    // phone there is no statement this device can make about the future - that phone can
-    // be holding a day for him right now, recorded offline, and nothing here can see it.
+    // PROVE it made and PROVE never left. Everything else is archived, because once an id
+    // is on another phone there is no statement this device can make about the future -
+    // that phone can be holding a day for him right now, recorded offline, and nothing
+    // here can see it.
     //
-    // The proof has exactly two clauses, and both are recorded at the moment they become
-    // true rather than guessed at afterwards:
+    // Two facts, both written down when they happen, and BOTH required:
     //
-    //   1. No write naming the id has ever been HANDED TO an adapter by this device.
-    //      Marked in flush(), at the point the patch goes to the adapter - not on
-    //      acknowledgment. A write can land on the server and its answer be lost, so
-    //      "we sent it" is the honest line, not "it was confirmed".
+    //   mine - the id was minted on this device, by this build, in State.nextWorkerId or
+    //          nextPlaceId. That is the only way an id can be born here. A worker read out
+    //          of a v78 schedule at upgrade, one that arrived in a backup file, one that
+    //          came out of a restore - none of them pass through that function, so none of
+    //          them is ever in this set.
     //
-    //   2. The id has never appeared in a snapshot RECEIVED from the cloud. Marked in
-    //      rememberRemoteRoster, which sees every snapshot this device adopts.
+    //   sent - a payload naming the id has been handed to an adapter, or the id has been
+    //          seen in a snapshot. Recorded at the HANDOVER, not on acknowledgment: a
+    //          write can land on the server and its answer be lost, so "we sent it" is
+    //          the honest line.
     //
-    // What makes clause 1 sound rather than hopeful is that the outbox is keyed by field
+    // The direction of the question is the whole point. The record this replaced asked
+    // "has it left?", so a MISSING record answered "nothing has ever left" - and a phone
+    // upgrading from v78 has no record at all, which would have offered its entire crew
+    // for permanent deletion on the first offline open. Asking "was it made here?" makes
+    // absence answer no. Unreadable, refused, half-written, missing, migrated, imported,
+    // restored: every one of them fails closed, and closed means archive.
+    //
+    // What makes `sent` sound rather than hopeful is that the outbox is keyed by field
     // path: queueing roster.workers.w_x = null REPLACES the pending roster.workers.w_x
-    // entry outright, and the legacy array entry beside it is replaced by the new array
-    // at the same moment. So an id that is still unsent is not merely "probably unused" -
-    // deleting it removes the only writes that would ever have carried it, and the cloud
-    // never hears the name at all.
-    //
-    // Written to disk, because the question is asked in a later session than the one
-    // that answered it. Unreadable is not "never shared" - it is no idea, and no idea is
-    // not a reason to delete somebody.
-    _sharedIds: null,
+    // entry outright, and the legacy array beside it is replaced by the new array at the
+    // same moment. So an id that is still unsent is not merely "probably unused" -
+    // deleting it removes the only writes that would ever have carried it.
+    _provenance: null,
 
-    loadSharedIds() {
-        if (this._sharedIds) return this._sharedIds;
+    loadProvenance() {
+        if (this._provenance) return this._provenance;
 
-        // Store speaks strings, so this record is JSON like the queue is.
-        const raw = Store.get(SHARED_IDS_KEY);
-        let readable = { workers: [], places: [], readable: true };
-        if (raw !== null && raw !== undefined && raw !== '') {
-            let parsed = null;
-            try { parsed = JSON.parse(raw); } catch (error) { parsed = null; }
-            readable = (isPlainObject(parsed)
-                && Array.isArray(parsed.workers) && Array.isArray(parsed.places))
-                ? { workers: parsed.workers, places: parsed.places, readable: true }
-                : { workers: [], places: [], readable: false };
+        const blank = () => ({ workers: new Set(), places: new Set() });
+
+        // durableGet, not get: what matters is what the NEXT session will find. A value
+        // that only ever reached the session cache is exactly the value that will not be
+        // there when the question is asked again.
+        const raw = Store.durableGet(PROVENANCE_KEY);
+        if (raw === null || raw === undefined || raw === '') {
+            // Nothing was ever written. Intact, and empty - so nothing is mine, and
+            // nothing can be deleted. This is the v78 upgrade, and it is not a fault.
+            this._provenance = { mine: blank(), sent: blank(), damaged: false, durable: true };
+            return this._provenance;
         }
 
-        this._sharedIds = {
-            workers: new Set(readable.workers.map(String)),
-            places: new Set(readable.places.map(String)),
-            readable: readable.readable
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch (error) { parsed = null; }
+        const half = side => isPlainObject(side)
+            && Array.isArray(side.workers) && Array.isArray(side.places);
+        if (!isPlainObject(parsed) || !half(parsed.mine) || !half(parsed.sent)) {
+            // Damaged, and left exactly as it is. The bytes may name people who HAVE
+            // left, and writing an empty record over them would turn "no idea" into a
+            // confident lie. Nothing is deletable while it reads like this, so there is
+            // nothing the app needs from it badly enough to overwrite it.
+            this._provenance = { mine: blank(), sent: blank(), damaged: true, durable: false };
+            return this._provenance;
+        }
+
+        this._provenance = {
+            mine: {
+                workers: new Set(parsed.mine.workers.map(String)),
+                places: new Set(parsed.mine.places.map(String))
+            },
+            sent: {
+                workers: new Set(parsed.sent.workers.map(String)),
+                places: new Set(parsed.sent.places.map(String))
+            },
+            damaged: false,
+            durable: true
         };
-        return this._sharedIds;
+        return this._provenance;
     },
 
-    // Every id this write carries out of the device, in whichever form it carries it:
-    // the per-person paths, the legacy whole arrays, and a whole-document seed or save.
-    markShared(payload) {
+    // Written and read back. A record that only lived in memory would forget across a
+    // close and reopen, and forgetting here means offering to delete somebody who is on
+    // three other phones. The answer is RETURNED, and every caller acts on it.
+    //
+    // `durable` goes back to true when a write finally lands: a device that was full an
+    // hour ago is not condemned to refuse for the rest of the session.
+    saveProvenance() {
+        const held = this.loadProvenance();
+        if (held.damaged) return false;
+
+        const list = set => [...set];
+        const stored = Store.setVerified(PROVENANCE_KEY, JSON.stringify({
+            mine: { workers: list(held.mine.workers), places: list(held.mine.places) },
+            sent: { workers: list(held.sent.workers), places: list(held.sent.places) }
+        }));
+        held.durable = Boolean(stored);
+        return held.durable;
+    },
+
+    // An id born here, this second. The only door into `mine`.
+    markLocallyMinted(kind, id) {
+        if (kind !== 'workers' && kind !== 'places') return false;
+        const held = this.loadProvenance();
+        if (held.damaged) return false;
+        held.mine[kind].add(String(id));
+        return this.saveProvenance();
+    },
+
+    // Every id a payload carries out of the device, in whichever form it carries it: the
+    // per-entity paths, the legacy whole arrays, a day, an advance, or a whole document.
+    //
+    // A day path names a worker as surely as a roster entry does - days.<date>.<layer>.<id>
+    // puts that id in the cloud, and the phone reading it needs him to exist. Leaving days
+    // and advances out of this was the same mistake as leaving out the arrays.
+    idsLeaving(payload) {
         const found = { workers: new Set(), places: new Set() };
+        if (!isPlainObject(payload)) return found;
 
         const fromList = (kind, list) => {
             (Array.isArray(list) ? list : []).forEach(item => {
@@ -746,65 +812,105 @@ const FarkadSync = {
             if (!isPlainObject(map)) return;
             Object.keys(map).forEach(id => found[kind].add(String(id)));
         };
-
-        if (isPlainObject(payload)) {
-            Object.keys(payload).forEach(path => {
-                const parts = path.split('.');
-                if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
-                    fromList(parts[0], payload[path]);
-                    return;
-                }
-                if (parts[0] === 'roster' && parts.length === 3
-                    && (parts[1] === 'workers' || parts[1] === 'places')) {
-                    // The tombstone too. A null names the id just as loudly as a record
-                    // does, and it is the write that tells the other phones he existed.
-                    found[parts[1]].add(String(parts[2]));
-                    return;
-                }
-                if (parts.length === 1 && parts[0] === 'roster') {
-                    const roster = payload[path];
-                    if (isPlainObject(roster)) {
-                        fromMap('workers', roster.workers);
-                        fromMap('places', roster.places);
-                    }
+        const fromEntries = record => {
+            const entries = (record && Array.isArray(record.entries)) ? record.entries : [];
+            entries.forEach(entry => {
+                if (entry && entry.placeId !== undefined && entry.placeId !== null) {
+                    found.places.add(String(entry.placeId));
                 }
             });
-            // A whole document - a seed, a save, or a snapshot - rather than a patch.
-            fromList('workers', payload.workers);
-            fromList('places', payload.places);
-            if (isPlainObject(payload.roster)) {
-                fromMap('workers', payload.roster.workers);
-                fromMap('places', payload.roster.places);
+        };
+
+        Object.keys(payload).forEach(path => {
+            const parts = path.split('.');
+            const value = payload[path];
+
+            if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+                fromList(parts[0], value);
+                return;
             }
-        }
-
-        const shared = this.loadSharedIds();
-        let changed = !shared.readable;
-        ['workers', 'places'].forEach(kind => {
-            found[kind].forEach(id => {
-                if (!shared[kind].has(id)) { shared[kind].add(id); changed = true; }
-            });
+            if (parts[0] === 'roster' && parts.length === 3
+                && (parts[1] === 'workers' || parts[1] === 'places')) {
+                // The tombstone too. A null names the id just as loudly as a record does,
+                // and it is the write that tells the other phones he existed.
+                found[parts[1]].add(String(parts[2]));
+                return;
+            }
+            if (parts.length === 1 && parts[0] === 'roster' && isPlainObject(value)) {
+                fromMap('workers', value.workers);
+                fromMap('places', value.places);
+                return;
+            }
+            if (parts[0] === 'days' && parts.length === 4) {
+                found.workers.add(String(parts[3]));
+                fromEntries(value);
+                return;
+            }
+            if (parts[0] === 'advances' && parts.length === 2 && isPlainObject(value)) {
+                if (value.workerId !== undefined && value.workerId !== null) {
+                    found.workers.add(String(value.workerId));
+                }
+            }
         });
-        if (!changed) return true;
 
-        // Read back. A ledger that only ever lived in memory would forget across a close
-        // and reopen, and forgetting here means offering to delete somebody who is on
-        // three other phones. If the disk will not hold it, the ledger stays unreadable -
-        // and unreadable refuses every deletion, which is the safe direction to fail in.
-        const stored = Store.set(SHARED_IDS_KEY, JSON.stringify({
-            workers: [...shared.workers],
-            places: [...shared.places]
-        }));
-        shared.readable = Boolean(stored) && shared.readable;
-        return shared.readable;
+        // A whole document - a seed, a save, or a snapshot - rather than a patch.
+        fromList('workers', payload.workers);
+        fromList('places', payload.places);
+        if (isPlainObject(payload.roster)) {
+            fromMap('workers', payload.roster.workers);
+            fromMap('places', payload.roster.places);
+        }
+        if (isPlainObject(payload.days) || isPlainObject(payload.advances)) {
+            const referenced = referencedEntityIds(payload);
+            referenced.workers.forEach(id => found.workers.add(id));
+            referenced.places.forEach(id => found.places.add(id));
+        }
+        return found;
     },
 
-    // True unless this device can prove the id never left it.
-    wasShared(kind, id) {
-        if (kind !== 'workers' && kind !== 'places') return true;
-        const shared = this.loadSharedIds();
-        if (!shared.readable) return true;
-        return shared[kind].has(String(id));
+    // Records that these ids are leaving, and says whether the caller may hand the
+    // payload over. See the handover in flush(): a false here holds the write in the
+    // queue rather than letting it out ahead of the proof that it went.
+    //
+    // A DAMAGED record answers true, and that is deliberate rather than a hole: while it
+    // reads like that nothing at all is deletable, so there is nothing for a missing
+    // record of this send to endanger. Refusing here instead would stop a phone with one
+    // corrupt key from ever syncing again, which is a much larger failure than the one
+    // being guarded against.
+    markSent(payload) {
+        const held = this.loadProvenance();
+        if (held.damaged) return true;
+
+        const found = this.idsLeaving(payload);
+        let changed = false;
+        ['workers', 'places'].forEach(kind => {
+            found[kind].forEach(id => {
+                if (!held.sent[kind].has(id)) { held.sent[kind].add(id); changed = true; }
+            });
+        });
+        // Nothing new to say, and the disk already agrees.
+        if (!changed && held.durable) return true;
+        return this.saveProvenance();
+    },
+
+    // A whole-document replacement puts a roster on this device that this device did not
+    // make. Whatever was minted here before is no longer what is on screen, and an id
+    // that survives the replacement arrived inside somebody else's document - so its
+    // provenance is exactly as unknown as everything else in there.
+    forgetLocalOrigin() {
+        const held = this.loadProvenance();
+        if (held.damaged) return false;
+        if (held.mine.workers.size === 0 && held.mine.places.size === 0) return held.durable;
+        held.mine = { workers: new Set(), places: new Set() };
+        return this.saveProvenance();
+    },
+
+    // The whole question, asked in one place: can this id be destroyed for good?
+    provenLocalOnly(kind, id) {
+        if (kind !== 'workers' && kind !== 'places') return false;
+        const held = this.loadProvenance();
+        if (held.damaged || !held.durable) return false;
+        return held.mine[kind].has(String(id)) && !held.sent[kind].has(String(id));
     },
 
     // Which fields are waiting. Not used on screen - the count is what a person needs -
@@ -1122,9 +1228,15 @@ const FarkadSync = {
 
         const key = todayStr();
         if (this._archivedOn === key) return;
+
+        // The daily copy is a whole document, so it takes the whole roster out of the
+        // device just as a save does - and the same rule applies to it. Not marked as
+        // archived-today either, so the next snapshot tries again once there is room.
+        const document = cloudDocument(schedule);
+        if (!this.markSent(document)) return;
         this._archivedOn = key;
 
-        Promise.resolve(this.adapter.archive(key, cloudDocument(schedule))).catch(error => {
+        Promise.resolve(this.adapter.archive(key, document)).catch(error => {
             // 'already-exists'/'permission-denied' here means another device got there
             // first, which is the intended outcome, not a fault worth reporting.
             console.info('Daily cloud copy not written:', error && error.code);
@@ -1305,13 +1417,29 @@ const FarkadSync = {
             ? stamp.updatedAt : new Date().toISOString();
         patch.updatedBy = syncDeviceId();
 
+        // BEFORE the handover, and it has to have reached the disk.
+        //
+        // The order is the guarantee. Marking after the send, or marking without reading
+        // the answer, both leave the same hole: the write goes out and lands, the record
+        // that says so is refused by a full disk, the queue is acknowledged and pruned,
+        // and at the next open this device knows only that it has a worker with nothing
+        // recorded against him and no proof he ever left - so it offers to delete a man
+        // the other two phones are using. Nothing about that sequence looks like a fault
+        // while it is happening.
+        //
+        // So the payload does not leave until the proof is durable. If it cannot be
+        // stored the queue keeps everything, the failure is reported as what it is, and
+        // the retry ladder tries again - by which time there may be room. Nothing local
+        // is lost either way: the journal already holds the edits.
+        if (!this.markSent(patch)) {
+            this._sending = new Map();
+            this.fail(new Error('the record of what has been sent could not be stored; the update is still queued'));
+            this.scheduleRetry();
+            return Promise.resolve();
+        }
+
         this._sending = sent;
         this._stamp = null;
-
-        // Before the handover, not after it. Once the adapter has the patch this device
-        // can no longer say the ids in it never left - the answer may be lost, but the
-        // write may still have landed. See markShared.
-        this.markShared(patch);
 
         // Through the chain, so that a whole-document replacement started after this one
         // cannot land before it. createDocument is inside the same slot on purpose - it
@@ -1400,7 +1528,13 @@ const FarkadSync = {
         if (typeof seed.updatedAt !== 'string') seed.updatedAt = new Date().toISOString();
         if (typeof seed.updatedBy !== 'string') seed.updatedBy = syncDeviceId();
 
-        this.markShared(seed);
+        // The seed carries the entire roster out of the device in one go, so the same
+        // rule applies to it as to an update - and a create that cannot be proven is a
+        // create that does not happen.
+        if (!this.markSent(seed)) {
+            return Promise.reject(
+                new Error('the record of what has been sent could not be stored; the document was not created'));
+        }
         return Promise.resolve(this.adapter.create(seed))
             .catch(error => {
                 if (error && error.code === 'already-exists') {
@@ -1551,6 +1685,15 @@ const FarkadSync = {
             return { stored: false, pruned: false };
         }
 
+        // This roster is not this device's any more. It came out of a backup file, a
+        // cloud copy or another phone's export, and an id that happens to survive the
+        // swap arrived inside somebody else's document - so its provenance is exactly as
+        // unknown as everything else in there. Whatever was minted here is forgotten, and
+        // permanent deletion goes back to being unavailable until something is made here
+        // again. A refusal to store that is fine on this path: it leaves the record
+        // unreadable, which refuses every deletion, which is where this is heading anyway.
+        this.forgetLocalOrigin();
+
         const pruned = this.dropSupersededEntries(envelope.supersedesSeq);
         if (typeof render === 'function') render();
         return { stored: true, pruned };
@@ -1668,7 +1811,11 @@ const FarkadSync = {
                     throw new Error(
                         'an earlier cloud write has not finished; the restore was not sent');
                 }
-                this.markShared(document);
+                // A whole-document save takes everybody out at once.
+                if (!this.markSent(document)) {
+                    return Promise.reject(new Error(
+                        'the record of what has been sent could not be stored; the replacement was not sent'));
+                }
                 return this.cloudWrite(() => this.adapter.save(document));
             })
             .then(() => {
@@ -2097,8 +2244,14 @@ const FarkadSync = {
         // The local roster is handed over as a name source: if this snapshot carries a
         // day for somebody it has itself forgotten, this device may be the last place
         // his name exists, and it is holding it right now.
-        const remote = normaliseSchedule(raw, rememberedNames(State.schedule));
+        const remote = normaliseSchedule(raw, rememberedEntities(State.schedule));
         this.rememberRemoteRoster(remote);
+
+        // Who this snapshot says is gone, learned once and used four times below.
+        const gone = tombstonedIds(raw);
+        // Before anything else can flush it: the queue is the one copy of the old roster
+        // that is still on its way OUT of this device.
+        this.sanitiseQueuedRosters(gone);
 
         // A document nobody has ever written to - a project connected for the first time.
         // Adopting it would empty this device to match an empty cloud, so this device's
@@ -2127,7 +2280,7 @@ const FarkadSync = {
 
         const previous = State.schedule;
         State.schedule = remote;
-        this.reapplyPending(State.schedule, tombstonedIds(raw));
+        this.reapplyPending(State.schedule, gone);
 
         // AGAIN, after the pending edits are back on top.
         //
@@ -2139,7 +2292,7 @@ const FarkadSync = {
         // Without this the queue would put the day on top of a roster that no longer has
         // him and send it that way, and the orphan the sequence is about would be one
         // this device created on its way past.
-        reinstateReferenced(State.schedule, rememberedNames(previous));
+        reinstateReferenced(State.schedule, rememberedEntities(previous));
 
         // persist, not save: save() would re-stamp the document as this device's, at this
         // device's clock, which is exactly the stamp everything else is compared against.
@@ -2168,7 +2321,14 @@ const FarkadSync = {
         // hole, and this device is the one holding the repair. The record it writes is a
         // real archived worker, so it settles the field rather than fighting the
         // tombstone - the next snapshot carries him and nothing here fires again.
-        if (this.repairsMissingIdentities(raw)) this.editRoster(State.schedule);
+        //
+        // The second half is the v78 reader: the document's own whole array still names
+        // somebody its map has tombstoned, so a frozen phone is still showing him. Either
+        // way the answer is the same write - the roster as this device now holds it, in
+        // both forms at once.
+        if (this.repairsMissingIdentities(raw) || this.conflictsWithLegacyArray(raw, gone)) {
+            this.editRoster(State.schedule);
+        }
 
         // The copy is taken from what the server holds at the first sight of it today -
         // before this evening's editing, which is the state worth being able to go back to.
@@ -2203,12 +2363,70 @@ const FarkadSync = {
             places: byId(schedule.places)
         };
         // Everything in a snapshot has, by definition, been somewhere other than here.
-        this.markShared(schedule);
+        // Nothing is handed over on this path, so a refused write cannot hold anything
+        // up - it just leaves the record undurable, which refuses every deletion.
+        this.markSent(schedule);
     },
 
     // Whether the roster now on screen holds anybody the snapshot's roster did not
     // grant. That can only be somebody normaliseSchedule reinstated, because there is no
     // other way into the list at this point in receive().
+    // ---------------------------------------------------------- the v78 reader
+    //
+    // A phone still on v78 does not read the per-entity map at all. It reads the whole
+    // arrays, and nothing else - so a tombstone means nothing to it, and a man removed on
+    // a v79 phone is still in its crew, on its day screen and in its reports. The keyed
+    // form being right is not the same as the roster being right.
+    //
+    // Two things have to happen for that reader to converge, and both are here because
+    // this is the moment the tombstone is learned about.
+
+    // The queued whole array is this device's opinion of the roster from BEFORE it heard.
+    // Flushing it as it stands puts the removed man back into the cloud's array, where the
+    // v78 reader finds him - and the fix cannot be at replay time only, because replay is
+    // in memory and the FLUSH reads what is stored. So the stored entry is rewritten, in
+    // one atomic journal write, the same way every other queue change is made.
+    sanitiseQueuedRosters(gone) {
+        if (!gone || (gone.workers.size === 0 && gone.places.size === 0)) return true;
+        this.loadOutbox();
+
+        const candidate = new Map();
+        let changed = false;
+        this._outbox.forEach((item, path) => {
+            const kind = path;
+            const removed = (kind === 'workers' || kind === 'places') ? gone[kind] : null;
+            if (removed && removed.size > 0 && Array.isArray(item.value)) {
+                const kept = item.value.filter(
+                    entry => !(entry && removed.has(String(entry.id))));
+                if (kept.length !== item.value.length) {
+                    changed = true;
+                    candidate.set(path, { value: kept, seq: item.seq, sent: item.sent });
+                    return;
+                }
+            }
+            candidate.set(path, item);
+        });
+        if (!changed) return true;
+        return this.adoptJournal(candidate);
+    },
+
+    // And the array already IN the document may name somebody the map has tombstoned -
+    // written by a v78 phone, or by this one before it heard. The two forms disagree, the
+    // v79 reader obeys the map and the v78 reader obeys the array, and they show different
+    // crews until somebody says so out loud.
+    //
+    // It cannot loop: the repair writes the array WITHOUT him, so the next snapshot has
+    // nothing to disagree about. If he has work behind him he is reinstated first, and
+    // then both forms carry him - which is the same convergence from the other side.
+    conflictsWithLegacyArray(raw, gone) {
+        if (!gone) return false;
+        return ['workers', 'places'].some(kind => {
+            if (gone[kind].size === 0) return false;
+            return (Array.isArray(raw[kind]) ? raw[kind] : [])
+                .some(item => item && gone[kind].has(String(item.id)));
+        });
+    },
+
     // Only an identity this device can actually NAME is written back.
     //
     // A placeholder is what a device produces when it has no idea who this was - and

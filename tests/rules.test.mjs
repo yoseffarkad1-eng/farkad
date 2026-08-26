@@ -13,7 +13,7 @@ import {
     assertSucceeds,
     assertFails
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, runTransaction, FieldPath } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 import { suite, check, report } from './runner.mjs';
 
@@ -239,6 +239,57 @@ async function denied(name, promise) {
         Boolean(after.data().days['2026-07-01'])
         && Boolean(after.data().roster.workers.w_01),
         JSON.stringify(Object.keys(after.data())));
+}
+
+// ---------------------------------------------------------------- the tombstone itself
+{
+    suite('a tombstone written the way the adapter writes it is a stored null');
+
+    // The whole removal protocol rests on one claim about Firestore that the app has
+    // never actually asked Firestore to confirm: updateDoc(ref, path, null) STORES a null
+    // at that path, it does not remove the field. deleteField() removes fields, and this
+    // app has never sent one.
+    //
+    // If that claim were wrong the tombstone would evaporate on the way to the server,
+    // the stale whole array would be the last word on that man, and he would come back on
+    // every phone - with the node suite passing, because the fake would be modelling the
+    // belief rather than the database. So it is asked here, of the real thing, through the
+    // same FieldPath the adapter builds: a dotted string would throw on days.2026-08-12,
+    // which is why the adapter constructs segments in the first place.
+    const db = as(ALLOWED);
+    await env.clearFirestore();
+    await passes('the document exists first', setDoc(doc(db, PATH), schedule({
+        roster: {
+            workers: { w_01: { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 } },
+            places: { p_01: { id: 'p_01', name: 'הרצליה', active: true } },
+            workerOrder: ['w_01'],
+            placeOrder: ['p_01']
+        }
+    })));
+
+    await passes('a null at roster.workers.<id> is accepted',
+        updateDoc(doc(db, PATH),
+            new FieldPath('roster', 'workers', 'w_01'), null,
+            new FieldPath('updatedAt'), '2026-08-12T10:00:00.000Z'));
+
+    const after = await getDoc(doc(db, PATH));
+    const roster = after.data().roster.workers;
+    check('the field is still THERE after the round trip',
+        Object.prototype.hasOwnProperty.call(roster, 'w_01'),
+        JSON.stringify(Object.keys(roster)));
+    check('and its value is null, not undefined and not missing',
+        roster.w_01 === null, JSON.stringify(roster.w_01));
+    check('while the site map beside it is untouched',
+        Boolean(after.data().roster.places.p_01),
+        JSON.stringify(Object.keys(after.data().roster.places)));
+
+    // And a second phone reading the document back sees the same thing, which is what
+    // mergeRoster is handed.
+    const second = await getDoc(doc(as(ALSO_ALLOWED), PATH));
+    check('a second device reads the same stored null',
+        Object.prototype.hasOwnProperty.call(second.data().roster.workers, 'w_01')
+        && second.data().roster.workers.w_01 === null,
+        JSON.stringify(second.data().roster.workers));
 }
 
 // ---------------------------------------------------------------- everything else

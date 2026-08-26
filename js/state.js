@@ -380,12 +380,27 @@ const State = {
             .filter(worker => isAbsent(this.schedule, this.date, worker.id, this.layer));
     },
 
+    // Minted here, and written down as minted here.
+    //
+    // This is the ONLY door into the provenance record's `mine` set, which is what makes
+    // a permanent deletion possible at all - see the provenance block in js/sync/sync.js.
+    // A worker read out of a v78 schedule at upgrade, one that arrives in a backup file
+    // and one that comes out of a restore all reach the roster without passing through
+    // here, so none of them is ever provably local, and none of them can be destroyed.
     nextWorkerId() {
-        return newEntityId('w');
+        const id = newEntityId('w');
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.markLocallyMinted) {
+            FarkadSync.markLocallyMinted('workers', id);
+        }
+        return id;
     },
 
     nextPlaceId() {
-        return newEntityId('p');
+        const id = newEntityId('p');
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.markLocallyMinted) {
+            FarkadSync.markLocallyMinted('places', id);
+        }
+        return id;
     }
 };
 
@@ -465,31 +480,40 @@ function normaliseSchedule(raw, hints) {
     // included: a stale whole array that no longer grants membership still remembers
     // what the man was called, and a recovered row reading "עובד שנמחק" when the name is
     // sitting right there would be worse than useless to the person reading the report.
-    reinstateReferenced(schedule, rememberedNames(raw, hints));
+    reinstateReferenced(schedule, rememberedEntities(raw, hints));
 
     schedule.updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
     schedule.updatedBy = typeof raw.updatedBy === 'string' ? raw.updatedBy : null;
     return schedule;
 }
 
-// Every name the document has for an id, in either form, membership aside.
-function rememberedNames(raw, hints) {
+// Every RECORD the document still has for an id, in either form, membership aside.
+//
+// Not just the name: a reinstated man keeps his phone, his identity number and both his
+// rates, and this is where they have to survive from. A stale whole array that no longer
+// grants membership is still the last full copy of him anybody holds.
+//
+// Later sources overwrite earlier ones, so the order is deliberate: what the caller
+// remembers first, then the document's array, then its keyed map - the most authoritative
+// form last.
+function rememberedEntities(raw, hints) {
     const out = { workers: {}, places: {} };
+    const keep = (kind, id, item) => {
+        if (!item) return;
+        out[kind][String(id)] = item;
+    };
+
     ['workers', 'places'].forEach(kind => {
-        // The caller's memory first, so anything the document itself still says wins.
         const given = (hints && hints[kind] && typeof hints[kind] === 'object') ? hints[kind] : {};
-        Object.keys(given).forEach(id => {
-            if (given[id] && given[id].name) out[kind][String(id)] = { name: String(given[id].name) };
-        });
+        Object.keys(given).forEach(id => keep(kind, id, given[id]));
+
         (Array.isArray(raw[kind]) ? raw[kind] : []).forEach(item => {
-            if (item && item.id) out[kind][String(item.id)] = { name: String(item.name || '') };
+            if (item && item.id) keep(kind, item.id, item);
         });
+
         const map = (raw.roster && typeof raw.roster === 'object') ? raw.roster[kind] : null;
         if (!map || typeof map !== 'object') return;
-        Object.keys(map).forEach(id => {
-            const item = map[id];
-            if (item && item.name) out[kind][String(id)] = { name: String(item.name) };
-        });
+        Object.keys(map).forEach(id => keep(kind, id, map[id]));
     });
     return out;
 }

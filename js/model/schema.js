@@ -626,6 +626,42 @@ function journalEntryProblems(path, value) {
 //
 // The difference is not a matter of judgement. It is this function.
 
+// ---------------------------------------------------------------- one man, one number
+//
+// The phone number is in the roster because two men called the same thing is ordinary on
+// a site, and the number is the thing that tells them apart - so the same number twice
+// almost always means the same man entered twice, which is how a day gets recorded
+// against the row nobody is looking at.
+//
+// Comparing the typed strings finds none of that. The same number is written 052-884-1930
+// here, 052 884 1930 there, and +972-52-884-1930 by whoever copied it out of WhatsApp.
+// Reduced to digits, with the Israeli country code folded back to the leading zero it
+// stands in for, all three are one number.
+function normalisePhone(value) {
+    const digits = String(value === undefined || value === null ? '' : value)
+        .replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    // +972-52-... and 972-52-... are the same nine digits as 052-...
+    if (digits.startsWith('972') && digits.length > 9) return '0' + digits.slice(3);
+    // A number typed without its leading zero: 52-884-1930.
+    if (!digits.startsWith('0') && digits.length === 9) return '0' + digits;
+    return digits;
+}
+
+function samePhone(one, other) {
+    const a = normalisePhone(one);
+    return a !== '' && a === normalisePhone(other);
+}
+
+// Everybody else already carrying this number - ARCHIVED INCLUDED. A man put away last
+// month is exactly the man somebody is about to enter again, and he is the one the daily
+// list is not showing.
+function workersSharingPhone(schedule, phone, exceptId) {
+    if (normalisePhone(phone) === '') return [];
+    return ((schedule && schedule.workers) || []).filter(worker =>
+        worker && String(worker.id) !== String(exceptId) && samePhone(worker.phone, phone));
+}
+
 // Everything in the record that names this worker. Empty means he can go.
 //
 // A day record counts even when it is empty. `{entries: []}` is not "no day" - it is a
@@ -830,7 +866,18 @@ function recoveredEntityName(kind, id) {
     return (kind === 'workers' ? 'עובד שנמחק (' : 'אתר שנמחק (') + id + ')';
 }
 
-// Whatever is referenced and missing, put back - archived, and named as recovered.
+// Whatever is referenced and missing, put back - archived, and as WHOLE as anything
+// still remembers him.
+//
+// Restoring a name and blanking everything else looked like a small compromise and is
+// not one. The phone number and the identity number are how a man is told apart from the
+// other man with the same name, and the two rates are what his days are worth: a day
+// recorded before rate-stamping shipped carries no rate of its own and is priced from
+// the roster, so zeroing the roster silently reprices his week to nothing. The record
+// this reinstates is the most complete one anybody still has - the document's own
+// arrays, its keyed map, or the roster of the phone doing the reinstating - and the only
+// field this function is entitled to decide is `active`.
+//
 // Returns which ids it had to reinstate, so a caller can say so; the sync layer works out
 // the same set from the snapshot it just adopted rather than threading it through.
 function reinstateReferenced(schedule, remembered) {
@@ -840,25 +887,31 @@ function reinstateReferenced(schedule, remembered) {
     };
     const referenced = referencedEntityIds(schedule);
     const recovered = { workers: [], places: [] };
-    const names = (remembered && typeof remembered === 'object') ? remembered : {};
+    const held = (remembered && typeof remembered === 'object') ? remembered : {};
 
-    const nameFor = (kind, id) => {
-        const held = (names[kind] && names[kind][id]) || null;
-        const name = held && held.name ? String(held.name) : '';
-        return name || recoveredEntityName(kind, id);
+    const recordFor = (kind, id) => {
+        const was = (held[kind] && held[kind][id]) || null;
+        const name = (was && was.name) ? String(was.name) : recoveredEntityName(kind, id);
+        if (kind === 'places') return { id, name, active: false };
+        return {
+            id,
+            name,
+            idNumber: String((was && was.idNumber) || ''),
+            phone: String((was && was.phone) || ''),
+            dailyRate: Number(was && was.dailyRate) || 0,
+            hourlyRate: Number(was && was.hourlyRate) || 0,
+            active: false
+        };
     };
 
     referenced.workers.forEach(id => {
         if (known.workers.has(id)) return;
-        schedule.workers.push({
-            id, name: nameFor('workers', id), idNumber: '', phone: '',
-            dailyRate: 0, hourlyRate: 0, active: false
-        });
+        schedule.workers.push(recordFor('workers', id));
         recovered.workers.push(id);
     });
     referenced.places.forEach(id => {
         if (known.places.has(id)) return;
-        schedule.places.push({ id, name: nameFor('places', id), active: false });
+        schedule.places.push(recordFor('places', id));
         recovered.places.push(id);
     });
 
