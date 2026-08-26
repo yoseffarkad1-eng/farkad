@@ -786,9 +786,48 @@ function detailRows() {
     return rows;
 }
 
-function exportReports() {
+// SheetJS, fetched only when somebody actually asks for a spreadsheet.
+//
+// It used to be a plain script tag in the head, which is the most expensive place a
+// third-party library can be: synchronous, before anything on the page, and on a slow
+// mobile connection it does not fail so much as sit there - taking the whole app down
+// with it for a feature used once a fortnight. Nothing is loaded now until the export
+// button is pressed, and if it does not arrive in a few seconds the CSV path takes over,
+// which is the same fallback as before and produces the same numbers.
+const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+let xlsxLoading = null;
+
+function loadXlsx(timeoutMs = 8000) {
+    if (typeof XLSX !== 'undefined') return Promise.resolve(true);
+    if (xlsxLoading) return xlsxLoading;
+
+    xlsxLoading = new Promise(resolve => {
+        let settled = false;
+        const finish = ok => {
+            if (settled) return;
+            settled = true;
+            // Not remembered as a failure: the next attempt may be on a better
+            // connection, and this is a button somebody presses again.
+            if (!ok) xlsxLoading = null;
+            resolve(ok && typeof XLSX !== 'undefined');
+        };
+
+        const tag = document.createElement('script');
+        tag.src = XLSX_URL;
+        tag.async = true;
+        tag.onload = () => finish(true);
+        tag.onerror = () => finish(false);
+        document.head.appendChild(tag);
+        setTimeout(() => finish(false), timeoutMs);
+    });
+    return xlsxLoading;
+}
+
+async function exportReports() {
     const stamp = `${REPORT_RANGE.from}_${REPORT_RANGE.to}`;
     const sheets = reportSheets();
+
+    await loadXlsx();
 
     // Falls back to CSV rather than failing when the SheetJS CDN is unreachable - which
     // on a building site is a normal Tuesday, not an exception.

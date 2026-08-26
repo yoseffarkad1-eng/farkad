@@ -19,7 +19,6 @@
 <meta name="farkad-build" content="v79">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -329,6 +328,13 @@
      every other script above must stay classic so the inline onclick handlers
      keep resolving on the global scope. It fails soft: if the SDK cannot be reached
      the app carries on local-only, which is what a building site needs anyway. -->
-<script type="module" src="js/sync/firebase-adapter.js"></script>
+<!-- NOT a plain module tag any more, and not the SheetJS tag that used to sit in the
+     head either. Both of them reach off the phone - gstatic here, cdnjs there - and a
+     deferred module and a synchronous script both hold up the document: on a site with
+     one bar of signal the request does not fail, it HANGS, and the app that was waiting
+     on window.onload to call State.load() and render() never drew anything at all. A
+     fortnight of records, intact on the disk, behind a white screen.
+     The adapter is imported by js/app.js AFTER the local boot, and its failure is caught
+     there. Nothing outside this origin is between a person and their own data. -->
 </body>
 </html>

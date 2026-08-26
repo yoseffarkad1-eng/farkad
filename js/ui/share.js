@@ -677,6 +677,15 @@ function exportRecoveryData() {
         records
     };
 
+    // The same handover the ordinary backup makes, attempted - but never a reason to
+    // stop. This file is the only way the unreadable bytes leave a phone, and refusing it
+    // because a bookkeeping write failed would be trading the data for the bookkeeping.
+    // When it does fail, the record stays as it was: which is either intact and unchanged,
+    // or damaged - and a damaged record already refuses every deletion.
+    if (typeof FarkadSync !== 'undefined' && FarkadSync.forgetLocalOrigin) {
+        FarkadSync.forgetLocalOrigin();
+    }
+
     const name = `farkad-recovery-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -687,7 +696,29 @@ function exportRecoveryData() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// A backup file is a handover to another device.
+//
+// It is opened on a second phone, imported, and worked on - which makes it exactly the
+// event the hard-delete rule is about, seen from the other end. The file leaving here
+// means nothing inside it can still be "made here and never left" afterwards, and the
+// device it left has no way of hearing what happens to it next.
+//
+// So the proof goes first and is read back, and the file is not handed over unless it
+// landed. Refusing to export is a real cost, and it is the smaller one: the alternative
+// is a worker who is on two phones with a delete button beside him on this one. The
+// recovery export - the one that exists to rescue data that cannot be read - is not
+// bound by this; see exportRecoveryData.
 function exportBackup() {
+    if (typeof FarkadSync !== 'undefined' && FarkadSync.forgetLocalOrigin
+        && !FarkadSync.forgetLocalOrigin(cloudDocument(State.schedule))) {
+        askTell({
+            title: 'הגיבוי לא יוצא',
+            message: 'לא הצלחנו לרשום במכשיר שהקובץ יצא ממנו, ולכן הגיבוי לא נוצר. ' +
+                'פנה מקום במכשיר ונסה שוב - הרישום עצמו לא נפגע.'
+        });
+        return;
+    }
+
     const name = `farkad-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(State.schedule, null, 1)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

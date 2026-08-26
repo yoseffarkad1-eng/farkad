@@ -148,7 +148,22 @@ function watchDayRollover() {
     });
 }
 
-window.onload = () => {
+// The boot, and what it is deliberately NOT waiting for.
+//
+// This used to hang off window.onload, which fires only once every subresource has
+// settled - and two of those were on the far side of the internet: SheetJS from cdnjs and
+// the Firebase SDK from gstatic. On a building site with one bar those requests do not
+// fail, they hang, and load never fires. State.load() was never called, render() was never
+// called, and a phone holding a fortnight of records showed a white screen with no error
+// on it, because nothing had gone wrong locally at all.
+//
+// DOMContentLoaded is the right event: the document is parsed, every same-origin script
+// here has run, and nothing outside this origin is between a person and their own data.
+// The crash handler is installed BEFORE the first read and the first draw, so a failure in
+// either is a banner rather than a dead screen.
+function boot() {
+    watchForCrashes();
+
     State.date = todayStr();
 
     const result = State.load();
@@ -157,7 +172,6 @@ window.onload = () => {
     render();
 
     checkBuildConsistency();
-    watchForCrashes();
     watchModals();
     registerOffline();
     watchConnection();
@@ -199,4 +213,40 @@ window.onload = () => {
                 'אל תרשום מחדש מעל הריק, נסה נקודת שחזור או קובץ גיבוי.'
         });
     }
-};
+
+    // Last, and off to one side. The cloud is a convenience on top of a record that is
+    // already on screen; if gstatic never answers, the import never settles and nothing
+    // here is waiting on it.
+    connectCloudLater();
+}
+
+// The one ES module in the app, imported after the local boot rather than by a tag in the
+// document. A tag - deferred or not - is fetched before DOMContentLoaded, and this one
+// pulls the Firebase SDK from gstatic, so the tag alone was enough to hold the whole app
+// behind a network that was not answering.
+function connectCloudLater() {
+    if (typeof Recovery !== 'undefined' && Recovery.blocked && Recovery.blocked()) return;
+    try {
+        import('./js/sync/firebase-adapter.js').catch(error => {
+            console.info('Cloud sync is not available in this session:', error && error.message);
+        });
+    } catch (error) {
+        console.info('Cloud sync could not be started:', error && error.message);
+    }
+}
+
+// Once, and never twice. A script that arrives after the document is already parsed gets
+// no DOMContentLoaded, and an app that boots twice reads the disk twice and draws over
+// its own first render.
+let booted = false;
+function bootOnce() {
+    if (booted) return;
+    booted = true;
+    boot();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootOnce, { once: true });
+} else {
+    bootOnce();
+}

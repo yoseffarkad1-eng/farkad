@@ -1354,6 +1354,305 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- an archived typo can still go
+{
+  // Archiving is not a way of making a mistake permanent. A name typed in error, made on
+  // this phone, never sent anywhere and with nothing recorded against it, is still a
+  // mistake after it has been put away - and leaving it in the archive for ever is not
+  // tidier, it is one more row somebody reads past every time they open this screen.
+  //
+  // Everybody else in there stays archive-only, and the sentence under the buttons says
+  // which of the two he is.
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(250);
+
+  // Made here, through the form, which is what puts him in the provenance record.
+  await page.getByRole('button', { name: '+ הוסף עובד' }).click();
+  await page.waitForTimeout(200);
+  await page.fill('#workerFormName', 'טעות');
+  await page.getByRole('button', { name: 'שמור' }).last().click();
+  await page.waitForTimeout(300);
+
+  // Archived from his own screen.
+  await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+  await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).click();
+  await page.waitForTimeout(200);
+  await page.click('#askOk');
+  await page.waitForTimeout(300);
+
+  check('he is in the archive',
+    (await page.textContent('.roster-archive')).includes('טעות'),
+    await page.textContent('.roster-archive'));
+
+  // Open his screen again, from inside the fold.
+  await page.evaluate(() => {
+    document.querySelector('#workerList .roster-archive').open = true;
+  });
+  await page.waitForTimeout(150);
+  await page.locator('.roster-archive .roster-row').filter({ hasText: 'טעות' })
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+
+  check('an archived typo is still offered the permanent delete',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
+  check('and the restore button is there beside it',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /החזר/ }).isVisible());
+
+  // By typed name, exactly as it is for an active one.
+  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
+  await page.waitForTimeout(250);
+  check('the dialog asks for the name to be typed',
+    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
+    await page.textContent('#askMessage'));
+  await page.fill('#askInput', 'טעות');
+  await page.click('#askOk');
+  await page.waitForTimeout(350);
+
+  check('and he is gone',
+    !(await page.textContent('#workerList')).includes('טעות'),
+    await page.textContent('#workerList'));
+
+  // The man with a day behind him is archived and stays that way.
+  await page.evaluate(() => {
+    State.commit(assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    render();
+  });
+  await page.locator('#workerList .roster-row').filter({ hasText: 'דוד' })
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+  await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).click();
+  await page.waitForTimeout(200);
+  await page.click('#askOk');
+  await page.waitForTimeout(300);
+
+  await page.evaluate(() => {
+    document.querySelector('#workerList .roster-archive').open = true;
+  });
+  await page.waitForTimeout(150);
+  await page.locator('.roster-archive .roster-row').filter({ hasText: 'דוד' })
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+
+  check('an archived worker with a day recorded is offered no delete at all',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0);
+  check('and the reason is on the screen',
+    (await page.textContent('#workerFormDanger')).includes('ימים רשומים'),
+    await page.textContent('#workerFormDanger'));
+
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- a refused write keeps the form
+{
+  // The order this gets wrong is expensive: close the form, then write, then find out the
+  // write was refused. What is on the screen at that point is a list without the edit in
+  // it and a form that has already thrown away everything that was typed - and there is
+  // nothing left to retype from.
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(250);
+
+  await page.getByRole('button', { name: '+ הוסף עובד' }).click();
+  await page.waitForTimeout(200);
+  await page.fill('#workerFormName', 'עובד חדש');
+  await page.fill('#workerFormDaily', '425');
+  await page.evaluate(() => { document.getElementById('workerFormMore').open = true; });
+  await page.fill('#workerFormPhone', '052-111-2233');
+
+  // The disk refuses everything from here on, exactly as a full phone does.
+  await page.evaluate(() => {
+    window.__realSet = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = () => {
+      const error = new Error('quota');
+      error.name = 'QuotaExceededError';
+      throw error;
+    };
+  });
+
+  await page.getByRole('button', { name: 'שמור' }).last().click();
+  await page.waitForTimeout(350);
+
+  const after = await page.evaluate(() => ({
+    formOpen: getComputedStyle(document.getElementById('workerFormModal')).display !== 'none',
+    name: document.getElementById('workerFormName').value,
+    daily: document.getElementById('workerFormDaily').value,
+    phone: document.getElementById('workerFormPhone').value,
+    error: document.getElementById('workerFormError').textContent,
+    workers: State.schedule.workers.map(worker => worker.name)
+  }));
+
+  check('a refused write leaves the form open', after.formOpen === true, JSON.stringify(after));
+  check('with the name still in it', after.name === 'עובד חדש', after.name);
+  check('the rate still in it', after.daily === '425', after.daily);
+  check('the phone still in it', after.phone === '052-111-2233', after.phone);
+  check('and it says so rather than failing quietly',
+    after.error.length > 0, after.error);
+  check('the half-made worker is not left in the list either',
+    !after.workers.includes('עובד חדש'), JSON.stringify(after.workers));
+
+  // The app also says out loud that the device would not take the write. Dismissed here
+  // so the form underneath can be used again - which is the point of leaving it open.
+  check('and the storage failure is reported in its own right',
+    await page.isVisible('#askModal'));
+  await page.click('#askOk');
+  await page.waitForTimeout(250);
+
+  // Storage comes back; the same form, still holding everything, saves.
+  await page.evaluate(() => { localStorage.setItem = window.__realSet; });
+  await page.getByRole('button', { name: 'שמור' }).last().click();
+  await page.waitForTimeout(350);
+
+  const saved = await page.evaluate(() => ({
+    formOpen: getComputedStyle(document.getElementById('workerFormModal')).display !== 'none',
+    workers: State.schedule.workers.map(worker => ({ name: worker.name, daily: worker.dailyRate }))
+  }));
+  check('and once the disk takes it, the form closes', saved.formOpen === false,
+    JSON.stringify(saved));
+  check('with everything that was typed', saved.workers.some(worker =>
+    worker.name === 'עובד חדש' && worker.daily === 425), JSON.stringify(saved.workers));
+
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- boot, with the world unplugged
+//
+// The failure this answers is the worst one this app has: a phone holding a fortnight of
+// records shows a white screen, and nothing has gone wrong locally at all. Both of the
+// third-party fetches - SheetJS from cdnjs, the Firebase SDK from gstatic - used to be in
+// the document, and on a site with one bar of signal a request does not fail, it HANGS.
+// window.onload waits for every subresource, so State.load() and render() were never
+// called.
+{
+  const page = await newPage();
+
+  // The two hosts are made to hang rather than to fail: a refusal would settle, and
+  // settling is exactly what does not happen on a bad connection.
+  const hung = [];
+  await page.route('**://cdnjs.cloudflare.com/**', route => {
+    hung.push('cdnjs');
+    // Never resolved, never aborted.
+  });
+  await page.route('**://*.gstatic.com/**', route => {
+    hung.push('gstatic');
+  });
+  await page.route('**://*.googleapis.com/**', route => { hung.push('googleapis'); });
+
+  // A fortnight of records, already on the disk before this page ever loads.
+  await page.addInitScript(() => {
+    localStorage.setItem('scheduleData:v2', JSON.stringify({
+      schemaVersion: 2,
+      workers: [
+        { id: 'w_01', name: 'דוד כהן', active: true, dailyRate: 400, hourlyRate: 50 },
+        { id: 'w_02', name: 'שרה לוי', active: true, dailyRate: 350, hourlyRate: 0 }
+      ],
+      places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+      days: { '2026-08-12': { plan: {}, actual: {
+        w_01: { entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 50 } } } } },
+      advances: {},
+      updatedAt: '2026-08-12T18:00:00.000Z', updatedBy: 'd_old'
+    }));
+  });
+
+  // NOT waitUntil: 'load' - that is the very thing that never arrives here.
+  const started = Date.now();
+  await page.goto(`${BASE}/index.html`, { waitUntil: 'commit' });
+
+  // The crew has to be on screen, and quickly. Ten seconds is not a performance budget,
+  // it is far longer than any of this should take and still shorter than a person's
+  // patience with a blank phone.
+  let drawn = false;
+  try {
+    await page.waitForFunction(
+      () => document.getElementById('dayView')
+        && document.getElementById('dayView').textContent.includes('דוד כהן'),
+      null, { timeout: 10000 });
+    drawn = true;
+  } catch (error) {
+    drawn = false;
+  }
+  const took = Date.now() - started;
+
+  check('the day screen draws while cdnjs and gstatic are hanging', drawn === true,
+    `${took}ms`);
+  check('and both men from the disk are on it',
+    (await page.textContent('#dayView')).includes('שרה לוי'),
+    (await page.textContent('#dayView')).slice(0, 80));
+  check('the day that was recorded is still there',
+    (await page.evaluate(() =>
+      entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 1);
+  check('and nothing was ever asked of cdnjs or gstatic to get there',
+    hung.length === 0, hung.join());
+
+  // Nothing outside this origin is in the document any more.
+  const external = await page.evaluate(() => [...document.querySelectorAll('script[src]')]
+    .map(node => node.getAttribute('src'))
+    .filter(src => /^https?:/.test(src)));
+  check('no third-party script is loaded by the document itself',
+    external.length === 0, JSON.stringify(external));
+
+  // And the app is usable, not merely painted: a day can be recorded with the world
+  // still unplugged.
+  await page.evaluate(() => {
+    State.commit(assignPlace(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_01'));
+    render();
+  });
+  check('a day can be recorded with the network still hanging',
+    (await page.evaluate(() =>
+      entriesFor(State.schedule, '2026-08-12', 'w_02', 'actual').length)) === 1);
+  check('and it reached the disk',
+    (await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('scheduleData:v2')).days['2026-08-12'].actual.w_02
+        .entries.length)) === 1);
+
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- a crash before the first draw
+{
+  // The crash handler has to be installed before State.load() and before render(), or the
+  // one failure it exists for - a boot that dies on its way to the first paint - is the
+  // one it cannot report. A dead white screen and a screen with a banner on it are the
+  // difference between "my phone lost everything" and "something went wrong, here is what".
+  const page = await newPage();
+
+  // Poisoned in the gap between the scripts running and boot() being called. This
+  // listener is registered before any of the app's, so it runs first on the same event -
+  // which puts a real exception inside the very first render, exactly where a boot-time
+  // failure lands.
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      window.renderDay = () => { throw new Error('boom during the first draw'); };
+    });
+  });
+  await page.goto(`${BASE}/index.html`, { waitUntil: 'commit' });
+
+  let shown = null;
+  try {
+    await page.waitForFunction(() => {
+      const node = document.getElementById('crashBanner');
+      return node && node.style.display === '' && node.textContent.length > 0;
+    }, null, { timeout: 8000 });
+    shown = await page.evaluate(() =>
+      document.getElementById('crashBanner').textContent.slice(0, 120));
+  } catch (error) {
+    shown = null;
+  }
+
+  check('a failure on the way to the first draw shows the banner rather than nothing',
+    shown !== null, String(shown));
+  check('and the banner says the saved records are not the casualty',
+    String(shown).includes('לא נפגע'), String(shown));
+  check('with the actual failure named on it',
+    String(shown).includes('boom during the first draw'), String(shown));
+
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- one man, one number
 //
 // The phone number is in the roster for exactly one reason: two men called the same

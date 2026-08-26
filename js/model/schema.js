@@ -638,13 +638,29 @@ function journalEntryProblems(path, value) {
 // Reduced to digits, with the Israeli country code folded back to the leading zero it
 // stands in for, all three are one number.
 function normalisePhone(value) {
-    const digits = String(value === undefined || value === null ? '' : value)
+    let digits = String(value === undefined || value === null ? '' : value)
         .replace(/[^0-9]/g, '');
     if (!digits) return '';
-    // +972-52-... and 972-52-... are the same nine digits as 052-...
-    if (digits.startsWith('972') && digits.length > 9) return '0' + digits.slice(3);
+
+    // 00972-... is the same call as +972-... - the two ways of writing an international
+    // prefix, one of them left over from a landline habit and both of them in real rosters.
+    if (digits.startsWith('00')) digits = digits.slice(2);
+
+    if (digits.startsWith('972') && digits.length > 9) {
+        // +972 (0) 52-... keeps the trunk zero the country code is standing in for, so it
+        // arrives with both. Whatever leading zeros are left after the code come off, and
+        // the one this country writes goes back on.
+        const rest = digits.slice(3).replace(/^0+/, '');
+        return rest ? '0' + rest : '';
+    }
+
     // A number typed without its leading zero: 52-884-1930.
     if (!digits.startsWith('0') && digits.length === 9) return '0' + digits;
+
+    // Too short to be anybody's phone - a country code on its own, or a couple of digits
+    // typed into the wrong field. Treated as no number at all, so it cannot match another
+    // one like it and report two men as the same man.
+    if (digits.length < 7) return '';
     return digits;
 }
 

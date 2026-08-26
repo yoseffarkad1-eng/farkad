@@ -6630,4 +6630,562 @@ for (const [label, act] of [
         cloud.writes.length === settled, `${settled} -> ${cloud.writes.length}`);
 }
 
+{
+    suite('a queue that could not be cleaned is never sent');
+
+    // The rewrite is refused - a full disk - so the ORIGINAL entry stays on the disk with
+    // the removed man still inside its whole array. Carrying on from there would adopt the
+    // snapshot, call the device synced, and then flush him straight back into the document
+    // where every v78 reader picks him up again.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' }).device;
+    await connected(a, cloud);
+    await wait();
+
+    const doomed = a.State.nextWorkerId();
+    a.State.schedule.workers.push(
+        { id: doomed, name: 'זמני', active: true, dailyRate: 0, hourlyRate: 0 });
+    a.State.commitRoster();
+    await wait();
+
+    const b = crew({ deviceId: 'd_b' }).device;
+    b.State.load();
+    const bLink = await unplugged(b, cloud);
+    await wait();
+    given('both phones know him', workerIds(b).includes(doomed));
+
+    // B goes away and edits the roster, so its queue holds a whole array with him in it.
+    bLink.away();
+    b.State.schedule.places.push({ id: 'p_09', name: 'רמלה', active: true });
+    b.State.commitRoster();
+    await wait();
+    // Empty once it has been acknowledged and pruned, which is the shape success takes.
+    const queuedNames = () => {
+        const raw = JSON.parse(String(b.raw(b.Sync.activeOutboxKey())) || '{}');
+        const entry = (raw.items || {}).workers;
+        return entry ? JSON.stringify(entry.value) : '';
+    };
+    given('B has him queued in a whole array', queuedNames().includes(doomed));
+    const queuedBefore = String(b.raw(b.Sync.activeOutboxKey()));
+
+    // A removes him. B comes back with no room to rewrite its queue.
+    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
+    a.State.commitRoster({ workers: [doomed] });
+    await settle(TICK * 30);
+    given('the cloud has the tombstone', cloud.doc.roster.workers[doomed] === null);
+
+    // Only what happens from HERE on. A's own early writes carried him quite properly -
+    // he was in the crew then.
+    //
+    // The final document is not enough on its own: the other phone repairs a disagreement
+    // it sees, so a stale array that DID go out would be tidied away behind us and this
+    // would pass over the very thing it is here for.
+    const fromWrite = cloud.writes.length;
+    const everSentHim = () => cloud.writes.slice(fromWrite).some(write => {
+        const carried = write.kind === 'update'
+            ? [write.patch && write.patch.workers]
+            : [write.data && write.data.workers];
+        return carried.some(list =>
+            Array.isArray(list) && list.some(item => item && item.id === doomed));
+    });
+
+    b.setQuota(key => String(key).startsWith('farkad:outbox'));
+    await bLink.back();
+
+    check('B does not call itself synced', b.Sync.status !== 'synced', b.Sync.status);
+    check('and no write ever carried him in a whole array', !everSentHim(),
+        JSON.stringify(cloud.writes.map(write => write.kind)));
+    check('and the queue is byte for byte what it was',
+        String(b.raw(b.Sync.activeOutboxKey())) === queuedBefore);
+    check('the removed man was NOT put back into the cloud',
+        !(cloud.doc.workers || []).some(item => item && item.id === doomed),
+        JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
+    check('so a frozen v78 reader does not see him either',
+        !v78Reader(cloud.doc).some(worker => worker.id === doomed),
+        JSON.stringify(v78Reader(cloud.doc).map(worker => worker.id)));
+
+    // Pushing harder: even a flush asked for directly is refused while the queue is dirty.
+    b.Sync.flush();
+    await settle(TICK * 30);
+    check('a flush while the queue is dirty sends nothing',
+        !(cloud.doc.workers || []).some(item => item && item.id === doomed),
+        JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
+    check('and still nothing has ever carried him out of this phone', !everSentHim(),
+        JSON.stringify(cloud.writes.map(write => write.kind)));
+
+    // The fault clears. No second snapshot arrives - the retry ladder has to be enough.
+    b.setQuota(null);
+    b.Sync.flush();
+    await settle(TICK * 60);
+
+    check('the queue is cleaned once there is room',
+        !queuedNames().includes(doomed), queuedNames());
+    check('the unrelated edit finally lands',
+        JSON.stringify(cloud.doc.places || []).includes('p_09'),
+        JSON.stringify((cloud.doc.places || []).map(item => item.id)));
+    check('and he is still absent from the array',
+        !(cloud.doc.workers || []).some(item => item && item.id === doomed),
+        JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
+    check('with the tombstone still the authority',
+        cloud.doc.roster.workers[doomed] === null,
+        JSON.stringify(cloud.doc.roster.workers[doomed]));
+    check('both phones agree he is gone',
+        !workerIds(a).includes(doomed) && !workerIds(b).includes(doomed),
+        `${workerIds(a)} | ${workerIds(b)}`);
+    check('and from first to last, no write ever put him back',
+        !everSentHim(), JSON.stringify(cloud.writes.map(write => write.kind)));
+}
+
+{
+    suite('the shapes an Israeli number is actually written in');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    const canonical = '0528841930';
+    [
+        '052-884-1930',
+        '+972-52-884-1930',
+        '+972 (0) 52-884-1930',
+        '00972-52-884-1930',
+        '00972 (0)52 884 1930',
+        '052 884 1930',
+        '0528841930',
+        '52-884-1930'
+    ].forEach(written => {
+        check(`${written} is ${canonical}`,
+            device.call('normalisePhone', written) === canonical,
+            device.call('normalisePhone', written));
+    });
+
+    check('a different number stays different',
+        device.call('normalisePhone', '+972-52-884-1931') !== canonical);
+    check('and nothing is not a number',
+        device.call('normalisePhone', '') === ''
+        && device.call('normalisePhone', '+972') === '');
+}
+
+{
+    suite('restoring from the archive gives up rather than writing into a moving crew');
+
+    // Four rounds of questions and the crew is still changing under them. Falling out of
+    // the loop and writing anyway would put him back into a clash nobody agreed to.
+    const { device, said } = crew();
+    device.State.schedule.workers.push(
+        { id: 'w_arch', name: 'דוד', active: false, phone: '052-884-1930',
+          dailyRate: 400, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    // Every answer changes the clash: the name matches, then the phone, then the name
+    // again - so no round is ever the last one.
+    let round = 0;
+    device.ctx.askConfirm = () => {
+        round += 1;
+        const live = device.State.worker('w_arch');
+        if (round % 2 === 1) {
+            live.name = `דוד ${round}`;
+            device.State.schedule.workers[0].name = `דוד ${round}`;
+        } else {
+            live.phone = `052-884-193${round}`;
+            device.State.schedule.workers[0].phone = `052-884-193${round}`;
+        }
+        return Promise.resolve(true);
+    };
+
+    await device.call('setWorkerArchived', 'w_arch', false);
+    await wait();
+
+    check('he is left in the archive', device.State.worker('w_arch').active === false,
+        String(device.State.worker('w_arch').active));
+    check('and the person is told why rather than nothing happening',
+        said.some(line => line.includes('לא הוחזר לעבודה')), JSON.stringify(said));
+    check('the questions did stop', round <= 5, String(round));
+}
+
+{
+    suite('a worker taken away mid-question is not written into');
+
+    const { device, said } = crew();
+    device.State.schedule.workers.push(
+        { id: 'w_arch', name: 'דוד', active: false, dailyRate: 400, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    // The clash question goes up; the other phone removes him while it is open.
+    device.ctx.askConfirm = () => {
+        device.State.schedule = device.call('normaliseSchedule', {
+            workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2030-01-01T00:00:00.000Z', updatedBy: 'other'
+        });
+        return Promise.resolve(true);
+    };
+
+    let threw = null;
+    try {
+        await device.call('setWorkerArchived', 'w_arch', false);
+    } catch (error) {
+        threw = String(error && error.message);
+    }
+    await wait();
+
+    check('nothing was thrown into the middle of the write', threw === null, String(threw));
+    check('and the person was told', said.some(line => line.includes('כבר אינו ברשימה')),
+        JSON.stringify(said));
+    check('the crew that arrived is what is on screen',
+        workerIds(device) === 'w_01', workerIds(device));
+}
+
+{
+    suite('an archived typo can still be deleted; an archived worker with a record cannot');
+
+    const { device } = crew();
+    device.ctx.askText = question => Promise.resolve(
+        String(question.title).replace('למחוק את ', '').replace('?', ''));
+
+    // Made here, never sent, nothing recorded - and then archived.
+    const typo = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: typo, name: 'טעות', active: false, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    check('the model still says he can go',
+        device.global('deletionBlockers')(typo).length === 0,
+        JSON.stringify(device.global('deletionBlockers')(typo)));
+
+    await device.call('deleteWorker', typo);
+    await wait();
+    check('and he goes', !workerIds(device).includes(typo), workerIds(device));
+
+    // A man with a day behind him, archived: archive-only, exactly as before.
+    device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    await device.call('setWorkerArchived', 'w_01', true);
+    await wait();
+    given('he is archived', device.State.worker('w_01').active === false);
+
+    check('the model refuses him',
+        device.global('deletionBlockers')('w_01').length > 0,
+        JSON.stringify(device.global('deletionBlockers')('w_01')));
+    await device.call('deleteWorker', 'w_01');
+    await wait();
+    check('and he stays, with his day', workerIds(device).includes('w_01'),
+        workerIds(device));
+    check('which is still on the sheet',
+        device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+}
+
+// ---------------------------------------------------------------- provenance, on the disk
+//
+// Everything below is about what the NEXT session reads, which is the only thing that
+// decides whether a man can be destroyed tomorrow.
+
+for (const [label, run] of [
+    ['a local restore', async device => {
+        const incoming = device.call('normaliseSchedule', {
+            workers: [{ id: 'w_imported', name: 'מיובא', active: true, dailyRate: 300, hourlyRate: 0 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T08:00:00.000Z', updatedBy: 'd_backup'
+        });
+        return device.Sync.replaceEverything(incoming);
+    }],
+    ['a cloud restore', async device => {
+        const cloud = makeCloud();
+        await connected(device, cloud);
+        await wait();
+        const incoming = device.call('normaliseSchedule', {
+            workers: [{ id: 'w_imported', name: 'מיובא', active: true, dailyRate: 300, hourlyRate: 0 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {},
+            updatedAt: '2026-08-01T08:00:00.000Z', updatedBy: 'd_backup'
+        });
+        return device.Sync.replaceEverything(incoming);
+    }]
+]) {
+    suite(`${label} that cannot record the loss of local origin does not finish`);
+
+    const { device } = crew();
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+    given('he is deletable before any of this',
+        device.Sync.provenLocalOnly('workers', mine) === true);
+    const provenanceBefore = device.raw('farkad:provenance:v1');
+
+    // The one write that is refused is the provenance record.
+    device.setQuota(key => key === 'farkad:provenance:v1');
+    const result = await run(device);
+    device.setQuota(null);
+
+    check('the restore reports that it did not finish', result.ok !== true,
+        JSON.stringify(result));
+    check('the provenance record on the disk was not changed',
+        device.raw('farkad:provenance:v1') === provenanceBefore,
+        String(device.raw('farkad:provenance:v1')));
+
+    // The proof is written BEFORE the schedule is swapped, so a refusal means the
+    // replacement never landed at all - which is the strongest form of the invariant:
+    // there is no worker from that document on this device to be deleted later.
+    check('not one worker from that document is on the device',
+        !workerIds(device).includes('w_imported'), workerIds(device));
+    check('and the crew that was here is untouched',
+        workerIds(device).includes(mine) && workerIds(device).includes('w_01'),
+        workerIds(device));
+
+    // THE POINT. Not what this session believes - what the next one reads.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('after a reopen the imported worker is still nowhere',
+        !workerIds(again).includes('w_imported'), workerIds(again));
+    check('and nothing from that document is claimed as local either',
+        again.Sync.provenLocalOnly('workers', 'w_imported') === false);
+
+    // Room again: the same restore now finishes, and everything in it - including the man
+    // this device minted itself - stops being provably local.
+    const third = makeDevice({ storage: again.dump(), deviceId: 'd_here' });
+    third.State.load();
+    third.ctx.askConfirm = () => Promise.resolve(true);
+    third.ctx.askTell = () => Promise.resolve();
+    third.ctx.askText = question => Promise.resolve(
+        String(question.title).replace('למחוק את ', '').replace('?', ''));
+
+    const retried = await run(third);
+    await wait();
+    check('the retry finishes once there is room', retried.ok === true,
+        JSON.stringify(retried));
+    check('and now the document really did land',
+        workerIds(third).includes('w_imported'), workerIds(third));
+    check('with nothing in it provably local',
+        third.Sync.provenLocalOnly('workers', 'w_imported') === false
+        && third.Sync.provenLocalOnly('workers', mine) === false);
+
+    const fourth = makeDevice({ storage: third.dump(), deviceId: 'd_here' });
+    fourth.State.load();
+    check('which is still true at the next open',
+        fourth.Sync.provenLocalOnly('workers', 'w_imported') === false
+        && fourth.Sync.provenLocalOnly('workers', mine) === false);
+    check('and the screen refuses the deletion',
+        fourth.global('deletionBlockers')('w_imported').length > 0,
+        JSON.stringify(fourth.global('deletionBlockers')('w_imported')));
+}
+
+{
+    suite('a restore that lands after the proof cannot leave the proof behind');
+
+    // The ordering, stated directly: if the schedule was replaced, the record that says
+    // this device no longer owns what it minted is already on the disk. There is no
+    // sequence in which one happened and the other did not.
+    const { device } = crew();
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    const incoming = device.call('normaliseSchedule', {
+        workers: [{ id: 'w_imported', name: 'מיובא', active: true, dailyRate: 300, hourlyRate: 0 }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: {}, advances: {},
+        updatedAt: '2026-08-01T08:00:00.000Z', updatedBy: 'd_backup'
+    });
+    const result = await device.Sync.replaceEverything(incoming);
+    given('the restore finished', result.ok === true, JSON.stringify(result));
+
+    const stored = JSON.parse(String(device.raw('farkad:provenance:v1')));
+    check('the generation on the disk moved on', Number(stored.gen) >= 1,
+        JSON.stringify(stored.gen));
+    check('and the disk claims nothing as locally made',
+        stored.mine.workers.length === 0, JSON.stringify(stored.mine));
+
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('so the next session offers no deletion at all',
+        again.Sync.provenLocalOnly('workers', 'w_imported') === false
+        && again.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
+    suite('a backup file is a handover, and the source device stops claiming him');
+
+    // The file is opened on another phone and worked on. The device it left has no way of
+    // hearing about that, so it cannot go on saying he never left.
+    const { device } = crew();
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+    given('he is deletable before the export',
+        device.Sync.provenLocalOnly('workers', mine) === true);
+
+    let downloaded = null;
+    device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
+    device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
+        appendChild: () => {}, click: () => {} });
+    device.ctx.askTell = () => Promise.resolve();
+
+    device.call('exportBackup');
+
+    check('the file was written', Boolean(downloaded) && downloaded.includes(mine));
+    check('and he is no longer provably local',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+    check('so the screen will not offer to delete him',
+        device.global('deletionBlockers')(mine).length > 0,
+        JSON.stringify(device.global('deletionBlockers')(mine)));
+
+    // The second phone imports it and records a day - the thing the source cannot see.
+    const other = makeDevice({ deviceId: 'd_other' });
+    other.State.load();
+    const imported = other.call('normaliseSchedule', JSON.parse(downloaded));
+    other.State.schedule = imported;
+    other.State.save({ silent: true });
+    other.State.commit(other.call('assignPlace',
+        other.State.schedule, '2026-08-12', mine, 'actual', 'p_01'));
+    check('the other phone really is holding work for him',
+        other.call('workerFootprint', other.State.schedule, mine).days.length === 1);
+
+    // And across a reopen of the source.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('the source device still refuses after a reopen',
+        again.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
+    suite('a backup that cannot record the handover is not handed over');
+
+    const { device } = crew();
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    let downloaded = null;
+    device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
+    device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
+        appendChild: () => {}, click: () => {} });
+    const said = [];
+    device.ctx.askTell = message => {
+        said.push(String((message && message.title) || message));
+        return Promise.resolve();
+    };
+
+    device.setQuota(key => key === 'farkad:provenance:v1');
+    device.call('exportBackup');
+    device.setQuota(null);
+
+    check('no file left the device', downloaded === null, String(downloaded));
+    check('and the person was told why', said.some(line => line.includes('לא יוצא')),
+        JSON.stringify(said));
+
+    // He was never handed over, so he is still a typo - which is the honest outcome, and
+    // the reason refusing the export is safe rather than merely strict.
+    check('he is still deletable, because nothing left',
+        device.Sync.provenLocalOnly('workers', mine) === true);
+
+    // With room again the export works and the claim is dropped.
+    device.call('exportBackup');
+    check('the second attempt writes the file', Boolean(downloaded));
+    check('and now he is not deletable',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('which survives the reopen',
+        again.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
+    suite('the recovery export is never blocked by bookkeeping');
+
+    // It exists to get unreadable bytes off a phone. Refusing it because a small record
+    // could not be updated would trade the data for the bookkeeping.
+    const device = makeDevice({ deviceId: 'd_here' });
+    device.putRaw('scheduleData:v2', '{ truncated');
+    device.State.load();
+
+    let downloaded = null;
+    device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
+    device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
+        appendChild: () => {}, click: () => {} });
+    device.ctx.askTell = () => Promise.resolve();
+
+    device.setQuota(key => key === 'farkad:provenance:v1');
+    device.call('exportRecoveryData');
+    device.setQuota(null);
+
+    check('the raw bytes still leave the phone', Boolean(downloaded), String(downloaded));
+    check('and they are the damaged record itself',
+        String(downloaded).includes('truncated'), String(downloaded).slice(0, 120));
+}
+
+{
+    suite('provenance is read from the disk, not from what this tab remembers');
+
+    // Two contexts share one localStorage: two tabs, or a tab and the installed app. The
+    // other one marks him sent - durably, correctly - and this one is still holding the
+    // copy it read at boot.
+    const { device } = crew();
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+    given('this tab has him as deletable',
+        device.Sync.provenLocalOnly('workers', mine) === true);
+
+    // The other context writes the disk directly - which is exactly what it looks like
+    // from in here.
+    const held = JSON.parse(String(device.raw('farkad:provenance:v1')));
+    held.sent.workers.push(mine);
+    device.putRaw('farkad:provenance:v1', JSON.stringify(held));
+
+    check('the answer follows the disk, not the cache',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+    check('and the screen stops offering it',
+        device.global('deletionBlockers')(mine).length > 0,
+        JSON.stringify(device.global('deletionBlockers')(mine)));
+
+    // And this tab's next write must not erase what the other one wrote.
+    const other = device.State.nextWorkerId();
+    const after = JSON.parse(String(device.raw('farkad:provenance:v1')));
+    check('a later write here keeps the fact the other tab recorded',
+        after.sent.workers.includes(mine), JSON.stringify(after.sent));
+    check('while still recording what this one minted',
+        after.mine.workers.includes(other), JSON.stringify(after.mine));
+    check('and the man the other tab sent stays undeletable',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
+    suite('a generation bump is not undone by a context holding the old one');
+
+    // The bump is the one deliberate way `mine` is cleared. A writer that read the record
+    // before it happened must not merge its copy back over the top.
+    const { device } = crew();
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    const before = JSON.parse(String(device.raw('farkad:provenance:v1')));
+    given('the record is at its first generation', Number(before.gen || 0) === 0);
+
+    check('the bump clears what was minted here',
+        device.Sync.forgetLocalOrigin() === true);
+    const after = JSON.parse(String(device.raw('farkad:provenance:v1')));
+    check('the generation moved on', Number(after.gen) === 1, JSON.stringify(after.gen));
+    check('and nothing is claimed as local any more',
+        after.mine.workers.length === 0, JSON.stringify(after.mine));
+    check('so he cannot be deleted', device.Sync.provenLocalOnly('workers', mine) === false);
+
+    // Whatever this device records next starts from the bumped record.
+    const later = device.State.nextWorkerId();
+    const now = JSON.parse(String(device.raw('farkad:provenance:v1')));
+    check('a later mint does not bring the old ones back',
+        now.mine.workers.join() === later, JSON.stringify(now.mine.workers));
+    check('and the generation is not rolled back',
+        Number(now.gen) === 1, JSON.stringify(now.gen));
+}
+
 report();

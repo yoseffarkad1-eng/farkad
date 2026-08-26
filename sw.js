@@ -51,6 +51,11 @@ const SHELL = [
     './js/ui/offline.js',
     './js/ui/install.js',
     './js/app.js',
+    // The cloud adapter and its configuration. Same-origin, imported at runtime, and
+    // therefore exactly as much a part of the offline shell as any other script here -
+    // an installed app that cannot fetch them signs nobody in and says nothing about why.
+    './js/sync/firebase-adapter.js',
+    './js/sync/firebase-config.js',
     './manifest.webmanifest',
     './icons/icon-192.png',
     './icons/icon-512.png'

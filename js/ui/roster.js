@@ -338,17 +338,39 @@ async function saveWorkerForm() {
 
         // Nothing left to ask, and everything just checked against the state that is
         // about to be written to.
+        //
+        // The write happens FIRST and its answer decides the rest. Closing the form and
+        // then committing meant a refused write - a full disk, a journal that would not
+        // take it - left the person looking at a list without their edit in it and a form
+        // that had already thrown away everything they typed. There is nothing to retype
+        // from at that point.
+        let undo = null;
         if (editingWorkerId) {
             const worker = State.worker(editingWorkerId);
             if (!worker) continue;
+            const before = {
+                name: worker.name, idNumber: worker.idNumber, phone: worker.phone,
+                dailyRate: worker.dailyRate, hourlyRate: worker.hourlyRate
+            };
+            undo = () => Object.assign(worker, before);
             Object.assign(worker, typed);
         } else {
-            State.schedule.workers.push(Object.assign(
-                { id: State.nextWorkerId(), active: true }, typed));
+            const added = Object.assign({ id: State.nextWorkerId(), active: true }, typed);
+            State.schedule.workers.push(added);
+            undo = () => {
+                State.schedule.workers = State.schedule.workers.filter(item => item !== added);
+            };
+        }
+
+        if (!State.commitRoster()) {
+            undo();
+            render();
+            // The form stays open, with every field exactly as it was typed.
+            problem.textContent = 'לא הצלחנו לשמור במכשיר. הפרטים נשארו כאן - נסה שוב.';
+            return;
         }
 
         closeWorkerForm();
-        State.commitRoster();
         render();
         return;
     }
@@ -387,6 +409,22 @@ function renderWorkerFormActions() {
             () => setWorkerArchived(worker.id, false)));
         box.appendChild(el('p', 'hint',
             'הימים והמקדמות שלו נשמרו כל הזמן הזה, והם יופיעו שוב במסך היומי.'));
+
+        // A typo does not become undeletable by being archived. If the same proof holds -
+        // made here, never sent anywhere, no day, no advance, nothing queued and no
+        // restore in flight - then he is still a name that was typed by mistake, and
+        // leaving him in the archive for ever is not tidier, it is just clutter that
+        // somebody has to read past every time they open this screen.
+        //
+        // Everybody else stays archive-only, and the sentence says which of the two he is.
+        const archivedBlockers = deletionBlockers(worker.id);
+        if (archivedBlockers.length === 0) {
+            box.appendChild(button('🗑️ מחק עובד', 'btn-danger', () => deleteWorker(worker.id)));
+            box.appendChild(el('p', 'hint',
+                'הוא לא נשלח לשום מכשיר אחר ואין לו רישומים, ולכן אפשר למחוק אותו לגמרי.'));
+        } else {
+            box.appendChild(el('p', 'hint', whyNotDeletable(archivedBlockers)));
+        }
         return;
     }
 
@@ -438,6 +476,16 @@ function deletionBlockers(workerId) {
 function whyNotDeletable(blocked) {
     return `${blocked.join(', ')} - אי אפשר למחוק, רק להעביר לארכיון. ` +
         'הכל יישמר בדוחות ההיסטוריים.';
+}
+
+// Said out loud, every time. Returning in silence here leaves somebody looking at a
+// screen where the thing they just tapped simply did not happen, and no reason for it.
+function workerMovedAway() {
+    render();
+    return askTell({
+        title: 'העובד כבר אינו ברשימה',
+        message: 'מכשיר אחר הסיר או שינה את העובד הזה בזמן השאלה, ולכן לא בוצע שינוי.'
+    });
 }
 
 // Out of the crew, and nothing else. Every day, every rate and every advance stays where
@@ -497,15 +545,24 @@ async function setWorkerArchived(workerId, archived) {
     // first question knew nothing about - or may have resolved the one it asked about.
     if (!archived) {
         const answered = { name: null, phone: null };
+        let settled = false;
 
         for (let round = 0; round < 4; round += 1) {
             const live = State.worker(workerId);
-            if (!live || live.active !== false) { render(); return; }
+            if (!live || live.active !== false) return workerMovedAway();
+
+            // Captured BEFORE the question, and that is the whole of what was agreed to.
+            // Reading it back off the worker afterwards records whatever he has become
+            // in the meantime - so a snapshot that renamed him while the dialog was open
+            // came out the far side as a name somebody had approved, when nobody had
+            // ever seen it.
+            const askedName = String(live.name).trim();
+            const askedPhone = normalisePhone(live.phone);
 
             const named = State.schedule.workers.filter(item =>
                 item.id !== live.id && item.active !== false
-                && String(item.name).trim() === String(live.name).trim());
-            if (named.length > 0 && answered.name !== String(live.name).trim()) {
+                && String(item.name).trim() === askedName);
+            if (named.length > 0 && answered.name !== askedName) {
                 const go = await askConfirm({
                     title: `כבר יש עובד פעיל בשם ${live.name}`,
                     message: 'שני עובדים באותו שם ברשימה היומית - קל לרשום יום על השם הלא נכון. ' +
@@ -513,13 +570,13 @@ async function setWorkerArchived(workerId, archived) {
                     ok: 'החזר בכל זאת'
                 });
                 if (!go) return;
-                answered.name = String(live.name).trim();
+                answered.name = askedName;
                 continue;
             }
 
             const sharing = workersSharingPhone(State.schedule, live.phone, live.id)
                 .filter(item => item.active !== false);
-            if (sharing.length > 0 && answered.phone !== normalisePhone(live.phone)) {
+            if (sharing.length > 0 && answered.phone !== askedPhone) {
                 const go = await askConfirm({
                     title: `הטלפון של ${live.name} רשום גם אצל ${sharing.map(item => item.name).join(', ')}`,
                     message: 'אותו מספר על שתי שורות פעילות זה בדרך כלל אותו אדם פעמיים. ' +
@@ -527,15 +584,33 @@ async function setWorkerArchived(workerId, archived) {
                     ok: 'החזר בכל זאת'
                 });
                 if (!go) return;
-                answered.phone = normalisePhone(live.phone);
+                answered.phone = askedPhone;
                 continue;
             }
 
+            settled = true;
             break;
+        }
+
+        // Four rounds and the crew is still moving under the questions. Falling out of
+        // the loop and writing anyway would put him back into a clash nobody agreed to -
+        // the last question asked was about a state that has already been replaced.
+        if (!settled) {
+            render();
+            await askTell({
+                title: 'לא הוחזר לעבודה',
+                message: 'הצוות משתנה כרגע ממכשיר אחר, ולכן לא הצלחנו לבדוק התנגשויות. ' +
+                    'נסה שוב בעוד רגע - הוא נשאר בארכיון, וכל הימים והמקדמות שלו שמורים.'
+            });
+            return;
         }
     }
 
+    // Fetched again, after every question. A snapshot answered while somebody was reading
+    // the last dialog can have taken him away entirely, and reading .active off nothing is
+    // an exception in the middle of a write.
     const live = State.worker(workerId);
+    if (!live) return workerMovedAway();
     const was = live.active;
     live.active = !archived;
     // commitRoster puts the screen back and says so if the write did not land, so a

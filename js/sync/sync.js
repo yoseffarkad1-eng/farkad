@@ -717,22 +717,27 @@ const FarkadSync = {
     // entry outright, and the legacy array beside it is replaced by the new array at the
     // same moment. So an id that is still unsent is not merely "probably unused" -
     // deleting it removes the only writes that would ever have carried it.
-    _provenance: null,
-
-    loadProvenance() {
-        if (this._provenance) return this._provenance;
-
+    // Read from the DISK on every question and every write.
+    //
+    // The version this replaced cached the record for the life of the session, and a
+    // phone runs more than one context: two tabs, or a tab and the installed app, share
+    // one localStorage. The other one marks a worker sent - durably, correctly - and this
+    // one is still holding the copy it read at boot, still offering to delete him. Worse,
+    // its next write is built from that stale copy and puts the disk BACK to it, erasing
+    // a fact somebody else had already written down.
+    //
+    // So there is no cache. The record is small, the reads are rare, and every decision
+    // and every write goes to the disk for the current state first. `sent` only ever
+    // grows; `mine` is cleared only by a generation bump, which is the one deliberate
+    // transition and is written as such, so a concurrent writer cannot re-add what the
+    // bump has just removed.
+    provenanceRecord() {
         const blank = () => ({ workers: new Set(), places: new Set() });
-
-        // durableGet, not get: what matters is what the NEXT session will find. A value
-        // that only ever reached the session cache is exactly the value that will not be
-        // there when the question is asked again.
         const raw = Store.durableGet(PROVENANCE_KEY);
         if (raw === null || raw === undefined || raw === '') {
             // Nothing was ever written. Intact, and empty - so nothing is mine, and
             // nothing can be deleted. This is the v78 upgrade, and it is not a fault.
-            this._provenance = { mine: blank(), sent: blank(), damaged: false, durable: true };
-            return this._provenance;
+            return { gen: 0, mine: blank(), sent: blank(), damaged: false };
         }
 
         let parsed = null;
@@ -744,11 +749,11 @@ const FarkadSync = {
             // left, and writing an empty record over them would turn "no idea" into a
             // confident lie. Nothing is deletable while it reads like this, so there is
             // nothing the app needs from it badly enough to overwrite it.
-            this._provenance = { mine: blank(), sent: blank(), damaged: true, durable: false };
-            return this._provenance;
+            return { gen: 0, mine: blank(), sent: blank(), damaged: true };
         }
 
-        this._provenance = {
+        return {
+            gen: Number(parsed.gen) || 0,
             mine: {
                 workers: new Set(parsed.mine.workers.map(String)),
                 places: new Set(parsed.mine.places.map(String))
@@ -757,38 +762,39 @@ const FarkadSync = {
                 workers: new Set(parsed.sent.workers.map(String)),
                 places: new Set(parsed.sent.places.map(String))
             },
-            damaged: false,
-            durable: true
+            damaged: false
         };
-        return this._provenance;
     },
 
-    // Written and read back. A record that only lived in memory would forget across a
-    // close and reopen, and forgetting here means offering to delete somebody who is on
-    // three other phones. The answer is RETURNED, and every caller acts on it.
+    // Read, change, write, read back - in that order, every time.
     //
-    // `durable` goes back to true when a write finally lands: a device that was full an
-    // hour ago is not condemned to refuse for the rest of the session.
-    saveProvenance() {
-        const held = this.loadProvenance();
+    // `change` is handed the record as the DISK has it this instant and returns the one
+    // it wants stored. Whatever it adds to `sent` is added to what is already there,
+    // because a device cannot un-send something; `mine` survives only while the
+    // generation is unchanged.
+    writeProvenance(change) {
+        const held = this.provenanceRecord();
         if (held.damaged) return false;
 
-        const list = set => [...set];
+        const next = change(held);
+        if (!next) return true;
+
+        const list = set => [...set].sort();
         const stored = Store.setVerified(PROVENANCE_KEY, JSON.stringify({
-            mine: { workers: list(held.mine.workers), places: list(held.mine.places) },
-            sent: { workers: list(held.sent.workers), places: list(held.sent.places) }
+            gen: next.gen,
+            mine: { workers: list(next.mine.workers), places: list(next.mine.places) },
+            sent: { workers: list(next.sent.workers), places: list(next.sent.places) }
         }));
-        held.durable = Boolean(stored);
-        return held.durable;
+        return Boolean(stored);
     },
 
     // An id born here, this second. The only door into `mine`.
     markLocallyMinted(kind, id) {
         if (kind !== 'workers' && kind !== 'places') return false;
-        const held = this.loadProvenance();
-        if (held.damaged) return false;
-        held.mine[kind].add(String(id));
-        return this.saveProvenance();
+        return this.writeProvenance(held => {
+            held.mine[kind].add(String(id));
+            return held;
+        });
     },
 
     // Every id a payload carries out of the device, in whichever form it carries it: the
@@ -878,38 +884,54 @@ const FarkadSync = {
     // corrupt key from ever syncing again, which is a much larger failure than the one
     // being guarded against.
     markSent(payload) {
-        const held = this.loadProvenance();
-        if (held.damaged) return true;
-
         const found = this.idsLeaving(payload);
-        let changed = false;
-        ['workers', 'places'].forEach(kind => {
-            found[kind].forEach(id => {
-                if (!held.sent[kind].has(id)) { held.sent[kind].add(id); changed = true; }
+        let done = true;
+
+        const stored = this.writeProvenance(held => {
+            let changed = false;
+            ['workers', 'places'].forEach(kind => {
+                found[kind].forEach(id => {
+                    if (!held.sent[kind].has(id)) { held.sent[kind].add(id); changed = true; }
+                });
             });
+            if (!changed) { done = false; return null; }
+            return held;
         });
-        // Nothing new to say, and the disk already agrees.
-        if (!changed && held.durable) return true;
-        return this.saveProvenance();
+        if (!done) return true;                 // the disk already said all of it
+        if (stored) return true;
+        return this.provenanceRecord().damaged; // damaged blocks deletion, so sending is safe
     },
 
-    // A whole-document replacement puts a roster on this device that this device did not
-    // make. Whatever was minted here before is no longer what is on screen, and an id
-    // that survives the replacement arrived inside somebody else's document - so its
-    // provenance is exactly as unknown as everything else in there.
-    forgetLocalOrigin() {
-        const held = this.loadProvenance();
-        if (held.damaged) return false;
-        if (held.mine.workers.size === 0 && held.mine.places.size === 0) return held.durable;
-        held.mine = { workers: new Set(), places: new Set() };
-        return this.saveProvenance();
+    // The generation bump: everything this device made stops being provably its own.
+    //
+    // A whole-document replacement puts a roster here that this device did not make, and
+    // an id that happens to survive the swap arrived inside somebody else's document. An
+    // export is the same event seen from the other end - the file can be opened on another
+    // phone, so nothing in it can still be "never left here" afterwards.
+    //
+    // The generation is what makes this safe against a second context: a writer holding
+    // an older generation has its `mine` dropped rather than merged back in.
+    forgetLocalOrigin(payload) {
+        const leaving = payload ? this.idsLeaving(payload) : null;
+        return this.writeProvenance(held => {
+            held.gen = (Number(held.gen) || 0) + 1;
+            held.mine = { workers: new Set(), places: new Set() };
+            if (leaving) {
+                ['workers', 'places'].forEach(kind => {
+                    leaving[kind].forEach(id => held.sent[kind].add(id));
+                });
+            }
+            return held;
+        });
     },
 
     // The whole question, asked in one place: can this id be destroyed for good?
     provenLocalOnly(kind, id) {
         if (kind !== 'workers' && kind !== 'places') return false;
-        const held = this.loadProvenance();
-        if (held.damaged || !held.durable) return false;
+        // The disk, now - not what this context read at boot, and not what it believes it
+        // wrote. Another tab may have marked him sent a second ago.
+        const held = this.provenanceRecord();
+        if (held.damaged) return false;
         return held.mine[kind].has(String(id)) && !held.sent[kind].has(String(id));
     },
 
@@ -1355,6 +1377,14 @@ const FarkadSync = {
             return Promise.resolve();
         }
 
+        // A roster edit that still names somebody the cloud has tombstoned. Nothing at
+        // all goes out until the queue has been cleaned, because the entries travel
+        // together and the whole array is in there with him.
+        if (this.staleRosterHeld()) {
+            this.scheduleRetry();
+            return Promise.resolve();
+        }
+
         clearTimeout(this._retryTimer);
         this._retryTimer = null;
 
@@ -1678,21 +1708,31 @@ const FarkadSync = {
             return { stored: false, pruned: false };
         }
 
+        // BEFORE the schedule is swapped, and its answer decides whether the swap happens
+        // at all.
+        //
+        // This roster is not this device's any more: it came out of a backup file, a cloud
+        // copy or another phone's export, and an id that happens to survive the swap
+        // arrived inside somebody else's document - so its provenance is exactly as unknown
+        // as everything else in there.
+        //
+        // Ignoring the refusal was a hole with a long fuse. The restore saved, reported
+        // success and cleared its transaction; this session refused deletions because the
+        // record it held said so; and the DISK still carried the old, perfectly valid list
+        // of everything this device had minted. Reopen tomorrow and a worker who arrived
+        // inside that backup is provably local again, with a delete button next to him.
+        //
+        // So it goes first, it is read back, and a refusal stops the replacement. The
+        // pending transaction stays on the disk, deletion stays blocked by it through any
+        // number of reopens, and the retry finishes the job once there is room.
+        if (!this.forgetLocalOrigin()) return { stored: false, pruned: false };
+
         State.schedule = next;
         if (!State.save()) {
             State.schedule = previous;
             if (typeof render === 'function') render();
             return { stored: false, pruned: false };
         }
-
-        // This roster is not this device's any more. It came out of a backup file, a
-        // cloud copy or another phone's export, and an id that happens to survive the
-        // swap arrived inside somebody else's document - so its provenance is exactly as
-        // unknown as everything else in there. Whatever was minted here is forgotten, and
-        // permanent deletion goes back to being unavailable until something is made here
-        // again. A refusal to store that is fine on this path: it leaves the record
-        // unreadable, which refuses every deletion, which is where this is heading anyway.
-        this.forgetLocalOrigin();
 
         const pruned = this.dropSupersededEntries(envelope.supersedesSeq);
         if (typeof render === 'function') render();
@@ -2249,9 +2289,21 @@ const FarkadSync = {
 
         // Who this snapshot says is gone, learned once and used four times below.
         const gone = tombstonedIds(raw);
+
         // Before anything else can flush it: the queue is the one copy of the old roster
         // that is still on its way OUT of this device.
-        this.sanitiseQueuedRosters(gone);
+        //
+        // And its answer is read. A refused rewrite leaves the ORIGINAL entry on the disk
+        // - which is right, the bytes are never destroyed - and that entry still carries
+        // the removed man in a whole array. Carrying on from here would adopt the
+        // snapshot, call the device synced, and then flush him back into the document,
+        // where every v78 reader picks him up again. So the snapshot is not adopted, the
+        // stale queue is barred from flushing, and the retry ladder comes back to it.
+        if (!this.sanitiseQueuedRosters(gone)) {
+            this.holdStaleRoster(gone);
+            return;
+        }
+        this.releaseStaleRoster();
 
         // A document nobody has ever written to - a project connected for the first time.
         // Adopting it would empty this device to match an empty cloud, so this device's
@@ -2408,6 +2460,35 @@ const FarkadSync = {
         });
         if (!changed) return true;
         return this.adoptJournal(candidate);
+    },
+
+    // A queue that could not be cleaned is a queue that must not go out.
+    //
+    // Held in memory AND recomputed from the next snapshot: the tombstones are in the
+    // document, so a device that is restarted learns them again the moment it reconnects.
+    // What must not happen in between is a flush, and flush() asks this before sending.
+    _staleRoster: null,
+
+    holdStaleRoster(gone) {
+        this._staleRoster = gone;
+        this.fail(new Error(
+            'a queued roster could not be cleaned of a removed worker; it is held back'));
+        this.scheduleRetry();
+    },
+
+    releaseStaleRoster() {
+        this._staleRoster = null;
+    },
+
+    // Tried again from the retry ladder, with no second snapshot needed: the tombstones
+    // were learned once and are remembered until the rewrite lands.
+    staleRosterHeld() {
+        if (!this._staleRoster) return false;
+        if (this.sanitiseQueuedRosters(this._staleRoster)) {
+            this.releaseStaleRoster();
+            return false;
+        }
+        return true;
     },
 
     // And the array already IN the document may name somebody the map has tombstoned -
