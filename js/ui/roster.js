@@ -1,6 +1,14 @@
-// Workers and sites. Both are archived rather than deleted: history has to keep
-// resolving, and a deleted worker would leave every past day pointing at a name that no
-// longer exists - including days already invoiced.
+// Workers and sites.
+//
+// Archiving is the ordinary way out: history has to keep resolving, and a deleted worker
+// would leave every past day pointing at a name that no longer exists - including days
+// already invoiced.
+//
+// Deleting exists for one case only, and the model decides whether it applies: a name
+// typed by mistake, or a man added twice, with nothing at all recorded against him. See
+// workerFootprint in js/model/schema.js. Neither action is offered in the list any more -
+// both live inside the worker's own screen, where his name is on the dialog and there is
+// room to say what each one does.
 
 function renderRoster() {
     renderWorkerList();
@@ -26,66 +34,87 @@ function renderWorkerList() {
         return;
     }
 
-    State.schedule.workers.forEach(worker => {
-        const row = el('div', worker.active === false ? 'roster-row roster-off' : 'roster-row');
+    const active = State.schedule.workers.filter(worker => worker.active !== false);
+    const archived = State.schedule.workers.filter(worker => worker.active === false);
 
-        const details = el('div', 'roster-details');
-        details.appendChild(el('strong', null, worker.name));
-        if (worker.idNumber) {
-            const line = el('div', 'roster-meta');
-            line.appendChild(el('span', null, 'זהות: '));
-            line.appendChild(ltr(worker.idNumber));
-            details.appendChild(line);
-        }
-        if (worker.phone) {
-            const line = el('div', 'roster-meta');
-            line.appendChild(el('span', null, '📞 '));
-            line.appendChild(ltr(worker.phone));
-            details.appendChild(line);
-        }
-        if (worker.dailyRate) {
-            const line = el('div', 'roster-meta');
-            line.appendChild(el('span', null, 'יומי: '));
-            line.appendChild(ltr(String(worker.dailyRate)));
-            if (worker.hourlyRate) {
-                line.appendChild(el('span', null, ' · שעה: '));
-                line.appendChild(ltr(String(worker.hourlyRate)));
-            }
-            details.appendChild(line);
-        }
-        if (worker.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
-        // Pairs that already exist - from an import, or from before this was checked.
-        if (worker.active !== false && hasDuplicateName(worker)) {
-            details.appendChild(el('span', 'badge badge-warn', 'שם כפול'));
-        }
-        row.appendChild(details);
+    if (active.length === 0) {
+        container.appendChild(emptyHint('כל העובדים בארכיון.'));
+    }
+    active.forEach(worker => container.appendChild(workerRow(worker)));
 
-        const actions = el('div', 'roster-actions');
+    if (archived.length === 0) return;
 
-        // Roster order is the order every other screen reads in - the day list, the
-        // sheet's run through the names, the pay sheet. Being able to set it puts the
-        // men who are recorded every single day at the top, where they are reached
-        // first. Arrows rather than dragging: a drag on a phone, held by a thumb over a
-        // list that scrolls, moves the wrong name often enough to be its own problem.
-        const index = State.schedule.workers.indexOf(worker);
+    // Folded, and at the bottom. They are not part of the working list any more, and a
+    // crew of six that reads as a crew of eleven is a crew somebody counts wrong.
+    const box = el('details', 'roster-archive');
+    const summary = el('summary', null, `ארכיון עובדים (${archived.length})`);
+    box.appendChild(summary);
+    archived.forEach(worker => box.appendChild(workerRow(worker)));
+    container.appendChild(box);
+}
+
+function workerRow(worker) {
+    const row = el('div', worker.active === false ? 'roster-row roster-off' : 'roster-row');
+
+    const details = el('div', 'roster-details');
+    details.appendChild(el('strong', null, worker.name));
+    if (worker.idNumber) {
+        const line = el('div', 'roster-meta');
+        line.appendChild(el('span', null, 'זהות: '));
+        line.appendChild(ltr(worker.idNumber));
+        details.appendChild(line);
+    }
+    if (worker.phone) {
+        const line = el('div', 'roster-meta');
+        line.appendChild(el('span', null, '📞 '));
+        line.appendChild(ltr(worker.phone));
+        details.appendChild(line);
+    }
+    if (worker.dailyRate) {
+        const line = el('div', 'roster-meta');
+        line.appendChild(el('span', null, 'יומי: '));
+        line.appendChild(ltr(String(worker.dailyRate)));
+        if (worker.hourlyRate) {
+            line.appendChild(el('span', null, ' · שעה: '));
+            line.appendChild(ltr(String(worker.hourlyRate)));
+        }
+        details.appendChild(line);
+    }
+    if (worker.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
+    // Pairs that already exist - from an import, or from before this was checked.
+    if (worker.active !== false && hasDuplicateName(worker)) {
+        details.appendChild(el('span', 'badge badge-warn', 'שם כפול'));
+    }
+    row.appendChild(details);
+
+    const actions = el('div', 'roster-actions');
+
+    // Roster order is the order every other screen reads in - the day list, the
+    // sheet's run through the names, the pay sheet. Being able to set it puts the
+    // men who are recorded every single day at the top, where they are reached
+    // first. Arrows rather than dragging: a drag on a phone, held by a thumb over a
+    // list that scrolls, moves the wrong name often enough to be its own problem.
+    // Only for the men who are actually on the daily screen. An archived name has no
+    // place in that order, and an arrow that lifted one out of the archive and back into
+    // the crew would be a very quiet way to put somebody back to work.
+    if (worker.active !== false) {
+        const active = State.schedule.workers.filter(other => other.active !== false);
+        const index = active.indexOf(worker);
         const up = button('▲', 'btn-icon', () => moveWorker(worker.id, -1), `העלה את ${worker.name}`);
         up.disabled = index === 0;
         const down = button('▼', 'btn-icon', () => moveWorker(worker.id, 1), `הורד את ${worker.name}`);
-        down.disabled = index === State.schedule.workers.length - 1;
+        down.disabled = index === active.length - 1;
         actions.appendChild(up);
         actions.appendChild(down);
+    }
 
-        actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${worker.name}`));
-        actions.appendChild(button(
-            worker.active === false ? '↩️' : '🗄️',
-            'btn-icon',
-            () => toggleWorkerActive(worker.id),
-            worker.active === false ? `החזר את ${worker.name}` : `העבר את ${worker.name} לארכיון`
-        ));
-        row.appendChild(actions);
+    // No archive icon here any more. Beside every name it was one mis-tap away from
+    // taking a man off the daily screen mid-evening, and the pencil next to it opens
+    // the screen where the same thing can be done deliberately, with his name on it.
+    actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${worker.name}`));
+    row.appendChild(actions);
 
-        container.appendChild(row);
-    });
+    return row;
 }
 
 // The roster is one array and its order is the whole point, so a move is a whole-list
@@ -164,6 +193,7 @@ function showAddWorkerModal() {
     document.getElementById('workerFormDaily').value = '';
     document.getElementById('workerFormHourly').value = '';
     document.getElementById('workerFormError').textContent = '';
+    renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
 }
 
@@ -182,6 +212,7 @@ function editWorker(workerId) {
     // Folded details that hold data would look like data that was lost.
     document.getElementById('workerFormMore').open =
         Boolean(worker.phone || worker.idNumber || worker.hourlyRate);
+    renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
 }
 
@@ -233,25 +264,149 @@ async function saveWorkerForm() {
 }
 
 function closeWorkerForm() {
-    document.getElementById('workerFormModal').style.display = 'none';
+    // Guarded like every other node read in this file: the screen is not always there,
+    // and the two actions below it must not fall over on their way out.
+    const modal = document.getElementById('workerFormModal');
+    if (modal) modal.style.display = 'none';
     editingWorkerId = null;
 }
 
-async function toggleWorkerActive(workerId) {
+// ---------------------------------------------------------------- inside the worker's screen
+//
+// Both ways out live here, and which one is offered is not a choice this file makes - it
+// asks the model what is recorded against the man and does what that allows.
+
+function renderWorkerFormActions() {
+    const box = document.getElementById('workerFormDanger');
+    if (!box) return;
+    clear(box);
+
+    // A worker who has not been saved yet has nothing to archive and nothing to delete.
+    if (!editingWorkerId) { box.style.display = 'none'; return; }
+    const worker = State.worker(editingWorkerId);
+    if (!worker) { box.style.display = 'none'; return; }
+    box.style.display = '';
+
+    if (worker.active === false) {
+        box.appendChild(button('↩️ החזר לעבודה', 'btn-secondary',
+            () => setWorkerArchived(worker.id, false)));
+        box.appendChild(el('p', 'hint',
+            'הימים והמקדמות שלו נשמרו כל הזמן הזה, והם יופיעו שוב במסך היומי.'));
+        return;
+    }
+
+    const footprint = workerFootprint(State.schedule, worker.id);
+    const queued = typeof FarkadSync !== 'undefined' && FarkadSync.queueNamesWorker
+        ? FarkadSync.queueNamesWorker(worker.id) : false;
+    const midTransaction = typeof FarkadSync !== 'undefined' && FarkadSync.pendingReplace
+        ? Boolean(FarkadSync.pendingReplace()) : false;
+
+    box.appendChild(button('🗄️ העבר לארכיון', 'btn-secondary',
+        () => setWorkerArchived(worker.id, true)));
+
+    // Deleting is offered only when there is nothing anywhere that names him: no day in
+    // either layer, no advance, nothing still queued, and no restore in flight. Anything
+    // else and the button is not there to be pressed by mistake - the sentence under it
+    // says which of those it is.
+    if (footprint.days.length === 0 && footprint.advances.length === 0
+        && !queued && !midTransaction) {
+        box.appendChild(button('🗑️ מחק עובד', 'btn-danger', () => deleteWorker(worker.id)));
+        box.appendChild(el('p', 'hint', 'אין לו רישומים, ולכן אפשר למחוק אותו לגמרי.'));
+        return;
+    }
+
+    box.appendChild(el('p', 'hint', whyNotDeletable(footprint, queued, midTransaction)));
+}
+
+function whyNotDeletable(footprint, queued, midTransaction) {
+    const reasons = [];
+    if (footprint.days.length > 0) reasons.push(`${footprint.days.length} ימים רשומים`);
+    if (footprint.advances.length > 0) reasons.push(`${footprint.advances.length} מקדמות`);
+    if (queued) reasons.push('רישומים שממתינים לשליחה');
+    if (midTransaction) reasons.push('שחזור שממתין להסתיים');
+
+    return `יש לו ${reasons.join(' ו')} - אי אפשר למחוק, רק להעביר לארכיון. ` +
+        'הכל יישמר בדוחות ההיסטוריים.';
+}
+
+// Out of the crew, and nothing else. Every day, every rate and every advance stays where
+// it is; the reports still resolve his name on days that were already invoiced.
+async function setWorkerArchived(workerId, archived) {
     const worker = State.worker(workerId);
     if (!worker) return;
 
-    if (worker.active !== false) {
-        const yes = await askConfirm({
+    if (archived) {
+        const owed = openAdvanceBalance(State.schedule, workerId);
+        const go = await askConfirm({
             title: `להעביר את ${worker.name} לארכיון?`,
-            message: 'הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.',
+            message: 'הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.'
+                // Said before, not after. Putting a man away while he is still holding
+                // cash is a thing somebody does by accident and finds out at settlement.
+                + (owed ? `\n\n⚠️ יש לו ${owed.count} מקדמות בסך ${Math.round(owed.total)} שטרם קוזזו.` : ''),
             ok: 'לארכיון'
         });
-        if (!yes) return;
+        if (!go) return;
     }
 
-    worker.active = worker.active === false;
-    State.commitRoster();
+    const was = worker.active;
+    worker.active = !archived;
+    // commitRoster puts the screen back and says so if the write did not land, so a
+    // failure here cannot leave the list showing something the disk does not hold.
+    if (!State.commitRoster()) {
+        worker.active = was;
+        render();
+        return;
+    }
+    closeWorkerForm();
+    render();
+}
+
+// For the name typed by mistake, and only that. renderWorkerFormActions has already
+// established that nothing anywhere names him.
+async function deleteWorker(workerId) {
+    const worker = State.worker(workerId);
+    if (!worker) return;
+
+    // Checked AGAIN, here, at the moment of the write. The button was drawn when the
+    // screen opened, and a snapshot from another phone can have arrived since with a day
+    // recorded against this very man.
+    const footprint = workerFootprint(State.schedule, workerId);
+    const queued = typeof FarkadSync !== 'undefined' && FarkadSync.queueNamesWorker
+        ? FarkadSync.queueNamesWorker(workerId) : false;
+    if (footprint.days.length > 0 || footprint.advances.length > 0 || queued
+        || (typeof FarkadSync !== 'undefined' && FarkadSync.pendingReplace
+            && FarkadSync.pendingReplace())) {
+        renderWorkerFormActions();
+        askTell({
+            title: 'לא נמחק',
+            message: 'בינתיים נרשם משהו על שמו, ולכן אי אפשר למחוק אותו. אפשר להעביר לארכיון.'
+        });
+        return;
+    }
+
+    // By name, because the dialog is the last thing between a tap and a man being gone.
+    const go = await askConfirm({
+        title: `למחוק את ${worker.name}?`,
+        message: 'אין לו אף יום רשום ואף מקדמה, ולכן לא ייפגע שום דוח. ' +
+            'המחיקה סופית - להחזיר אותו צריך להוסיף אותו מחדש.',
+        ok: 'מחק'
+    });
+    if (!go) return;
+
+    const before = State.schedule.workers.slice();
+    State.schedule.workers = State.schedule.workers.filter(item => item.id !== workerId);
+
+    // One write, through the ordinary safe path: the per-person tombstone, the order and
+    // the legacy array all go into a single journal entry, so the three of them cannot
+    // land apart. If it does not reach the disk, commitRoster puts the screen back and
+    // nothing here says otherwise.
+    if (!State.commitRoster({ workers: [workerId] })) {
+        State.schedule.workers = before;
+        render();
+        return;
+    }
+
+    closeWorkerForm();
     render();
 }
 

@@ -594,9 +594,26 @@ async function seedRoster(page) {
     (await page.evaluate(() => State.schedule.places.length)) === 3 &&
     (await page.textContent('#placeList')).includes('נתניה'));
 
-  // archive, never delete: history has to keep resolving
-  await page.locator('#workerList .roster-row').first().getByRole('button', { name: /לארכיון/ }).click();
-  await page.waitForTimeout(200);
+  // Archive, never delete: history has to keep resolving. The action is inside the
+  // worker's own screen now, not an icon beside every name in the list.
+  check('the list no longer carries an archive icon next to every name',
+    (await page.locator('#workerList .roster-row').first()
+      .getByRole('button', { name: /לארכיון/ }).count()) === 0);
+
+  await page.locator('#workerList .roster-row').first()
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+  check('his own screen offers the archive',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).isVisible());
+  // He has a day recorded, so deleting him is not on offer at all.
+  check('and does not offer to delete a worker who has days recorded',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0);
+  check('saying why, rather than leaving a button that does nothing',
+    (await page.textContent('#workerFormDanger')).includes('ימים רשומים'),
+    await page.textContent('#workerFormDanger'));
+
+  await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).click();
+  await page.waitForTimeout(250);
   await page.click('#askOk');
   await page.waitForTimeout(300);
   check('archiving keeps the worker in the data',
@@ -605,6 +622,43 @@ async function seedRoster(page) {
     (await page.evaluate(() => State.activeWorkers().length)) === 2);
   check('their recorded history survives',
     (await page.evaluate(() => entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 1);
+  check('and he is under the archive fold rather than in the working list',
+    (await page.textContent('.roster-archive')).includes('דוד'),
+    await page.textContent('.roster-archive'));
+
+  // A name typed by mistake, with nothing recorded against it, IS deletable - and the
+  // button for it is in his own screen, behind a dialog carrying his name.
+  await page.evaluate(() => {
+    State.schedule.workers.push({
+      id: State.nextWorkerId(), name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0
+    });
+    State.commitRoster();
+    render();
+  });
+  await page.waitForTimeout(250);
+  const before = await page.evaluate(() => State.schedule.workers.length);
+
+  await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+  check('a worker with nothing recorded is offered a delete',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
+
+  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
+  await page.waitForTimeout(250);
+  check('the dialog names the man before he goes',
+    (await page.textContent('#askTitle')).includes('טעות'),
+    await page.textContent('#askTitle'));
+  await page.click('#askOk');
+  await page.waitForTimeout(300);
+
+  check('and he is gone',
+    (await page.evaluate(() => State.schedule.workers.length)) === before - 1,
+    String(await page.evaluate(() => State.schedule.workers.length)));
+  check('gone from the list too',
+    !(await page.textContent('#workerList')).includes('טעות'));
+  check('and gone from the disk, not only the screen',
+    !(await page.evaluate(() => localStorage.getItem('scheduleData:v2') || '')).includes('טעות'));
 
   // A new worker must never reuse an archived id - and must not be one past the highest
   // either. Two phones holding the same roster used to hand the same next id to two
@@ -2928,6 +2982,186 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ------------------------------------------------- nothing hides under the bottom bars
+//
+// The complaint this answers: the tab bar and the copy/WhatsApp pair sat on top of the
+// last men in the list. Visible, and impossible to tap - the tap lands on the bar.
+//
+// Measured with bounding boxes rather than by reading the stylesheet, because the
+// stylesheet was never the thing that was wrong: it said 150px, and the bars were 168.
+// The question is whether the last row can be scrolled clear of them, and that is a
+// question about rectangles.
+for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 932]]) {
+  const page = await open({ viewport: { width, height }, deviceScaleFactor: 3 });
+
+  // Thirty men, which is a real crew for this app and long enough that the end of the
+  // list is well past the fold.
+  await page.evaluate(() => {
+    State.schedule.workers = Array.from({ length: 30 }, (unused, i) => ({
+      id: `w_${String(i + 1).padStart(2, '0')}`,
+      name: `עובד ${i + 1}`, active: true, dailyRate: 400, hourlyRate: 50
+    }));
+    State.schedule.places = [
+      { id: 'p_01', name: 'הרצליה', active: true },
+      { id: 'p_02', name: 'תל אביב', active: true }
+    ];
+    State.date = '2026-08-12';
+    State.save();
+    // By worker, which is the list the complaint was about: thirty names, and the last
+    // of them under the bars.
+    setDayMode('workers');
+    showView('day');
+  });
+  await page.waitForTimeout(400);
+
+  // What is actually covering the bottom of this viewport.
+  const bars = await page.evaluate(() => {
+    const boxes = ['.tabs', '.day-actions']
+      .map(sel => document.querySelector(sel))
+      .filter(node => node && getComputedStyle(node).position === 'fixed'
+        && getComputedStyle(node).display !== 'none')
+      .map(node => node.getBoundingClientRect());
+    return { top: Math.min(...boxes.map(box => box.top)), count: boxes.length };
+  });
+  check(`${label}: both bottom bars are floating over the day screen`,
+    bars.count === 2, JSON.stringify(bars));
+
+  // Scrolled to the very end, the last row must clear them.
+  const lastRow = await page.evaluate(async () => {
+    // Scrolled to the end of the page, which is what a thumb does. Not
+    // scrollIntoView({block:'end'}) - that pins the row's bottom to the viewport's
+    // bottom whatever the page reserves, so it would report a failure on a page that is
+    // perfectly correct and hide the one that is not.
+    window.scrollTo(0, document.body.scrollHeight);
+    await new Promise(done => setTimeout(done, 300));
+    const rows = document.querySelectorAll('#dayView .worker-list .wrow');
+    const last = rows[rows.length - 1];
+    const box = last.getBoundingClientRect();
+    const style = getComputedStyle(document.documentElement);
+    return {
+      bottom: box.bottom, height: box.height, text: last.textContent.slice(0, 20),
+      atEnd: Math.abs(window.scrollY + window.innerHeight - document.body.scrollHeight) < 3,
+      navVar: style.getPropertyValue('--nav-h').trim(),
+      actionsVar: style.getPropertyValue('--day-actions-h').trim()
+    };
+  });
+  check(`${label}: the page really is scrolled to its end`,
+    lastRow.atEnd === true, JSON.stringify(lastRow));
+  check(`${label}: and both bars were measured, not guessed at`,
+    lastRow.navVar !== '0px' && lastRow.actionsVar !== '0px', JSON.stringify(lastRow));
+
+  // The fix itself, stated directly: whatever is scrolling reserves at least as much
+  // room at its foot as the bars are covering. Every version of this that wrote a number
+  // into the stylesheet failed here on one phone or another.
+  const reserved = await page.evaluate(() => {
+    const covered = ['.tabs', '.day-actions']
+      .map(sel => document.querySelector(sel))
+      .filter(node => node && getComputedStyle(node).position === 'fixed'
+        && getComputedStyle(node).display !== 'none')
+      .reduce((sum, node) => sum + node.getBoundingClientRect().height, 0);
+    return {
+      covered: Math.round(covered),
+      pad: Math.round(parseFloat(getComputedStyle(document.querySelector('.app')).paddingBottom))
+    };
+  });
+  check(`${label}: the page reserves at least what the bars cover`,
+    reserved.pad >= reserved.covered, JSON.stringify(reserved));
+  check(`${label}: the last worker is the thirtieth`,
+    lastRow.text.includes('30'), JSON.stringify(lastRow));
+  check(`${label}: and its whole row is above the bars, not under them`,
+    lastRow.bottom <= bars.top, JSON.stringify({ lastRow, bars }));
+
+  // Not just visible - reachable. The point at the centre of the row has to belong to
+  // the row, and not to a bar drawn over it.
+  const reachable = await page.evaluate(() => {
+    const rows = document.querySelectorAll('#dayView .worker-list .wrow');
+    const last = rows[rows.length - 1];
+    const box = last.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return { inside: last.contains(hit), hit: hit ? hit.className : null };
+  });
+  check(`${label}: a tap in the middle of the last row lands on the row`,
+    reachable.inside === true, JSON.stringify(reachable));
+
+  // The same for the roster screen, whose last item is a button rather than a row - and
+  // where the day bar must not be floating at all.
+  await page.evaluate(async () => {
+    showView('roster');
+    await new Promise(done => setTimeout(done, 250));
+    window.scrollTo(0, document.body.scrollHeight);
+  });
+  await page.waitForTimeout(400);
+
+  const roster = await page.evaluate(() => {
+    const dayBar = document.querySelector('.day-actions');
+    const tabs = document.querySelector('.tabs').getBoundingClientRect();
+    const buttons = [...document.querySelectorAll('#rosterView button')]
+      .filter(node => node.offsetParent !== null);
+    const last = buttons[buttons.length - 1];
+    const box = last.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return {
+      dayBarShown: getComputedStyle(dayBar).display !== 'none',
+      clear: box.bottom <= tabs.top,
+      reachable: last.contains(hit) || last === hit,
+      label: last.textContent.slice(0, 24)
+    };
+  });
+  check(`${label}: the day screen's bar does not float over the roster`,
+    roster.dayBarShown === false, JSON.stringify(roster));
+  check(`${label}: the last button on the roster clears the tab bar`,
+    roster.clear === true, JSON.stringify(roster));
+  check(`${label}: and can actually be pressed`,
+    roster.reachable === true, JSON.stringify(roster));
+
+  // A sheet opened over all of it: the tab bar must not be drawn on top of it, and its
+  // own last button has to be reachable above the home indicator.
+  const sheet = await page.evaluate(async () => {
+    showView('day');
+    await new Promise(done => setTimeout(done, 250));
+    const row = document.querySelector('#dayView .worker-list .wrow');
+    const opener = row.querySelector('button') || row;
+    opener.click();
+    await new Promise(done => setTimeout(done, 350));
+
+    const open = [...document.querySelectorAll('.modal')]
+      .find(node => getComputedStyle(node).display !== 'none');
+    if (!open) return { opened: false };
+
+    const content = open.querySelector('.modal-content');
+    const box = content.getBoundingClientRect();
+    const tabs = document.querySelector('.tabs').getBoundingClientRect();
+    const buttons = [...content.querySelectorAll('button')].filter(b => b.offsetParent !== null);
+    const last = buttons[buttons.length - 1];
+    const lastBox = last.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      lastBox.left + lastBox.width / 2, lastBox.top + lastBox.height / 2);
+
+    return {
+      opened: true,
+      aboveTabs: Number(getComputedStyle(open).zIndex) > Number(getComputedStyle(
+        document.querySelector('.tabs')).zIndex),
+      fitsOnScreen: box.bottom <= window.innerHeight + 1,
+      scrollable: content.scrollHeight > content.clientHeight
+        ? getComputedStyle(content).overflowY === 'auto' : true,
+      lastReachable: last.contains(hit) || last === hit,
+      lastClearOfTabs: lastBox.bottom <= Math.max(tabs.top, lastBox.bottom)
+    };
+  });
+  check(`${label}: a sheet opens over the day screen`, sheet.opened === true,
+    JSON.stringify(sheet));
+  check(`${label}: the tab bar is not drawn on top of it`, sheet.aboveTabs === true,
+    JSON.stringify(sheet));
+  check(`${label}: it fits inside the viewport`, sheet.fitsOnScreen === true,
+    JSON.stringify(sheet));
+  check(`${label}: its contents scroll when there are more than fit`,
+    sheet.scrollable === true, JSON.stringify(sheet));
+  check(`${label}: and its last button can be pressed`, sheet.lastReachable === true,
+    JSON.stringify(sheet));
+
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- the bottom of an iPhone
 {
   // An installed app draws under the home indicator. Anything pinned to the bottom edge
@@ -2952,9 +3186,27 @@ async function seedRoster(page) {
   });
   check('the fixed bars reserve the iPhone home-indicator strip',
     insets.declared >= 3, `${insets.declared} rules`);
-  check('and fall back to the plain padding where there is no inset',
-    insets.actions === '10px' && insets.app === '120px',
-    JSON.stringify(insets));
+
+  // The page reserves exactly what the bars are taking, and no longer a number somebody
+  // wrote down once. On a wide screen the tabs are part of the header rather than a bar,
+  // so only the day pair is covering anything.
+  const reserved = await page.evaluate(() => {
+    const bar = document.querySelector('.day-actions');
+    const style = getComputedStyle(document.documentElement);
+    return {
+      navVar: style.getPropertyValue('--nav-h').trim(),
+      actionsVar: style.getPropertyValue('--day-actions-h').trim(),
+      actionsReal: Math.round(bar.getBoundingClientRect().height),
+      appPad: parseFloat(getComputedStyle(document.querySelector('.app')).paddingBottom)
+    };
+  });
+  check('the tab bar is not a floating bar on a wide screen',
+    reserved.navVar === '0px', JSON.stringify(reserved));
+  check('the day bar is measured rather than guessed at',
+    reserved.actionsVar === `${reserved.actionsReal}px`, JSON.stringify(reserved));
+  check('and the page leaves room for exactly that, plus a gap',
+    reserved.appPad >= reserved.actionsReal && reserved.appPad <= reserved.actionsReal + 40,
+    JSON.stringify(reserved));
 
   check('the page opts into drawing under the system bars at all',
     (await page.getAttribute('meta[name="viewport"]', 'content')).includes('viewport-fit=cover'));

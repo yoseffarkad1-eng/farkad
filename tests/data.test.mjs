@@ -5268,4 +5268,280 @@ for (const [label, arm] of [
     check('and the sheet says the rate changed mid-period', raised.mixedRates === true);
 }
 
+// ---------------------------------------------------------------- leaving the crew
+//
+// Two ways out, and only one of them is ever safe for a man with anything recorded
+// against him. Which one is offered is decided by the model, not by the screen.
+
+// A crew, a site, and the dialogs answered for us. `answer` is what the person taps.
+function crew(options = {}) {
+    const device = makeDevice({ deviceId: options.deviceId || 'd_here' });
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
+        { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
+    ];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+
+    const said = [];
+    device.ctx.askConfirm = () => Promise.resolve(options.answer !== false);
+    device.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : String(message.title || ''));
+        return Promise.resolve();
+    };
+    return { device, said };
+}
+
+const workerIds = device => device.State.schedule.workers.map(worker => worker.id).join();
+
+{
+    suite('a worker nobody ever recorded can be deleted');
+
+    const { device } = crew();
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    given('he was added', device.State.commitRoster() === true);
+    given('and nothing is recorded against him',
+        device.call('workerFootprint', device.State.schedule, added).days.length === 0);
+
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await wait();
+
+    await device.call('deleteWorker', added);
+    await wait();
+
+    check('he is off the screen', !workerIds(device).includes(added), workerIds(device));
+    check('and off the disk',
+        !String(device.raw('scheduleData:v2')).includes(added));
+    check('the roster the cloud holds does not have him either',
+        !device.call('normaliseSchedule', cloud.doc).workers.some(w => w.id === added),
+        JSON.stringify(device.call('normaliseSchedule', cloud.doc).workers.map(w => w.id)));
+
+    // Closed and opened again.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    check('he does not come back at the next open',
+        !workerIds(again).includes(added), workerIds(again));
+
+    // And the other phone, reading the same document, does not put him back.
+    const other = makeDevice({ deviceId: 'd_other' });
+    other.State.load();
+    other.Sync.pushDelayMs = TICK;
+    other.Sync.connect(cloud.adapter);
+    await settle(TICK * 40);
+    check('and the second phone does not resurrect him',
+        !workerIds(other).includes(added), workerIds(other));
+    check('while the two who are still here arrived',
+        workerIds(other) === 'w_01,w_02', workerIds(other));
+
+    // A new man never gets his id back.
+    const minted = [device.State.nextWorkerId(), device.State.nextWorkerId()];
+    check('and his id is never handed out again',
+        !minted.includes(added) && minted[0] !== minted[1], JSON.stringify(minted));
+}
+
+for (const [label, mark] of [
+    ['a day in actual', device => device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'))],
+    ['a day in plan', device => device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-12', 'w_01', 'plan', 'p_01'))],
+    ['a cleared day that is still a row', device => device.State.commit(
+        device.call('clearWorkerDay', device.State.schedule, '2026-08-12', 'w_01', 'actual'))],
+    ['an absence', device => device.State.commit(device.call('markAbsent',
+        device.State.schedule, '2026-08-12', 'w_01', 'actual'))],
+    ['an advance', device => device.State.commit(device.call('addAdvance',
+        device.State.schedule, 'w_01', '2026-08-12', 300, ''))]
+]) {
+    suite(`a worker with ${label} cannot be deleted`);
+
+    const { device, said } = crew();
+    mark(device);
+    const before = device.raw('scheduleData:v2');
+
+    check('the model sees what is recorded against him',
+        device.call('workerFootprint', device.State.schedule, 'w_01').days.length > 0
+        || device.call('workerFootprint', device.State.schedule, 'w_01').advances.length > 0,
+        JSON.stringify(device.call('workerFootprint', device.State.schedule, 'w_01')));
+
+    await device.call('deleteWorker', 'w_01');
+    await wait();
+
+    check('he is still here', workerIds(device) === 'w_01,w_02', workerIds(device));
+    check('the disk did not change', device.raw('scheduleData:v2') === before);
+    check('and he was told why, rather than nothing happening',
+        said.some(line => line.includes('לא נמחק')), JSON.stringify(said));
+
+    // Archiving him is allowed, and is what the screen offers instead.
+    await device.call('setWorkerArchived', 'w_01', true);
+    await wait();
+    check('archiving him is allowed',
+        Boolean(device.State.worker('w_01')) && device.State.worker('w_01').active === false,
+        JSON.stringify(device.State.worker('w_01')));
+}
+
+{
+    suite('an archived worker leaves the crew and keeps his record');
+
+    const { device } = crew();
+    device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    device.State.commit(device.call('addAdvance',
+        device.State.schedule, 'w_01', '2026-08-12', 100, ''));
+
+    const paidBefore = device.call('payrollReport',
+        device.State.schedule, '2026-08-01', '2026-08-31').find(row => row.workerId === 'w_01');
+    given('he has a day and an advance on the sheet',
+        paidBefore.attendanceDays === 1 && paidBefore.advances === 100);
+
+    await device.call('setWorkerArchived', 'w_01', true);
+    await wait();
+
+    check('he is out of the active crew',
+        device.State.activeWorkers().map(w => w.id).join() === 'w_02',
+        device.State.activeWorkers().map(w => w.id).join());
+    check('and off the day screen for a day he has nothing on',
+        !device.State.workersForDay('2026-08-13', 'actual').some(w => w.id === 'w_01'),
+        device.State.workersForDay('2026-08-13', 'actual').map(w => w.id).join());
+    check('but still on the day he actually worked, or the day would lose him',
+        device.State.workersForDay('2026-08-12', 'actual').some(w => w.id === 'w_01'));
+
+    const paidAfter = device.call('payrollReport',
+        device.State.schedule, '2026-08-01', '2026-08-31').find(row => row.workerId === 'w_01');
+    check('the old report still has his day',
+        paidAfter.attendanceDays === 1, String(paidAfter.attendanceDays));
+    check('and his advance', paidAfter.advances === 100, String(paidAfter.advances));
+    check('and his name', paidAfter.name === 'דוד', paidAfter.name);
+
+    // Closed, reopened, and brought back.
+    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    again.State.load();
+    again.ctx.askConfirm = () => Promise.resolve(true);
+    again.ctx.askTell = () => Promise.resolve();
+    check('he is still archived after a reopen',
+        again.State.worker('w_01').active === false);
+
+    await again.call('setWorkerArchived', 'w_01', false);
+    await wait();
+    check('and he can be put back to work',
+        again.State.activeWorkers().map(w => w.id).sort().join() === 'w_01,w_02',
+        again.State.activeWorkers().map(w => w.id).join());
+    check('with his day still where it was',
+        again.call('entriesFor', again.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+}
+
+{
+    suite('an open advance is said out loud before a man is put away');
+
+    const { device } = crew();
+    device.State.commit(device.call('addAdvance',
+        device.State.schedule, 'w_01', '2026-08-12', 250, ''));
+
+    const owed = device.call('openAdvanceBalance', device.State.schedule, 'w_01');
+    check('the balance is found', owed && owed.total === 250 && owed.count === 1,
+        JSON.stringify(owed));
+    check('and a man who took nothing has none',
+        device.call('openAdvanceBalance', device.State.schedule, 'w_02') === null);
+}
+
+for (const [label, arm] of [
+    ['the journal will not write', device => device.setQuota(key => key.startsWith('farkad:outbox'))],
+    ['the schedule will not write', device => device.setQuota(key => key === 'scheduleData:v2')]
+]) {
+    suite(`${label}, the screen goes back to what the disk holds`);
+
+    // Deleting.
+    const { device } = crew();
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    given('he was added', device.State.commitRoster() === true);
+    const diskBefore = device.raw('scheduleData:v2');
+    const queueBefore = device.raw(device.Sync.activeOutboxKey());
+
+    arm(device);
+    await device.call('deleteWorker', added);
+    await wait();
+    device.setQuota(null);
+
+    if (label === 'the journal will not write') {
+        check('the man is back on the screen', workerIds(device).includes(added),
+            workerIds(device));
+        check('and the disk never lost him', device.raw('scheduleData:v2') === diskBefore);
+        check('and the queue is untouched',
+            device.raw(device.Sync.activeOutboxKey()) === queueBefore);
+    } else {
+        // The journal took it, so the deletion IS durable - the schedule blob is the
+        // thing that failed, and the journal rebuilds it at the next open. What must not
+        // happen is the screen and the disk describing two different crews.
+        const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+        again.State.load();
+        check('the screen and the next open agree on the crew',
+            workerIds(again) === workerIds(device),
+            `${workerIds(again)} vs ${workerIds(device)}`);
+    }
+
+    // Archiving, the same way.
+    const second = crew();
+    second.device.State.commit(second.device.call('assignPlace',
+        second.device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    arm(second.device);
+    await second.device.call('setWorkerArchived', 'w_01', true);
+    await wait();
+    second.device.setQuota(null);
+
+    const reopened = makeDevice({ storage: second.device.dump(), deviceId: 'd_here' });
+    reopened.State.load();
+    check('archiving too: the screen and the next open agree',
+        reopened.State.worker('w_01').active === second.device.State.worker('w_01').active,
+        `${reopened.State.worker('w_01').active} vs ${second.device.State.worker('w_01').active}`);
+}
+
+{
+    suite('a queued DAY holds a deletion; a queued roster entry does not');
+
+    // The distinction that keeps this usable. A device with no cloud never acknowledges
+    // anything, so its journal holds every roster edit it has ever made - and counting
+    // those would mean a name typed by mistake could never be removed on the one kind of
+    // device where that happens most.
+    const { device } = crew();
+    const cloud = makeCloud({ online: false });
+    await connected(device, cloud);
+
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    given('he was added with no connection', device.State.commitRoster() === true);
+    given('and the queue does hold roster entries naming him',
+        String(device.raw(device.Sync.activeOutboxKey())).includes(added));
+
+    check('a roster entry alone does not hold the deletion',
+        device.Sync.queueNamesWorker(added) === false);
+    await device.call('deleteWorker', added);
+    await wait();
+    check('so the name typed by mistake can go, cloud or no cloud',
+        !workerIds(device).includes(added), workerIds(device));
+
+    // A queued DAY is a different thing, and it does hold.
+    const second = crew();
+    const cloud2 = makeCloud({ online: false });
+    await connected(second.device, cloud2);
+    const other = second.device.State.nextWorkerId();
+    second.device.State.schedule.workers.push(
+        { id: other, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    second.device.State.commitRoster();
+    second.device.State.commit(second.device.call('assignPlace',
+        second.device.State.schedule, '2026-08-12', other, 'actual', 'p_01'));
+
+    check('a queued day does hold it',
+        second.device.Sync.queueNamesWorker(other) === true);
+    await second.device.call('deleteWorker', other);
+    await wait();
+    check('and he stays', workerIds(second.device).includes(other),
+        workerIds(second.device));
+    check('with the reason said out loud',
+        second.said.some(line => line.includes('לא נמחק')), JSON.stringify(second.said));
+}
+
 report();

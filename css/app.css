@@ -137,11 +137,21 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* --nav-h and --day-actions-h are written by js/ui/bars.js from the bars themselves, and
+   are 0 when a bar is not floating over the bottom of the viewport. The safe-area inset
+   is NOT added on top of them: each bar already carries it in its own padding, so it is
+   inside the measurement, and adding it again leaves a strip of dead space under every
+   screen. The max() is for the case where there is no fixed bar at all - printing, or a
+   wide screen - where the home indicator still has to be cleared by something.
+   The 24px is the gap between the last row and the bar above it - the only number in this
+   calculation that is a choice rather than a measurement. */
+:root { --nav-h: 0px; --day-actions-h: 0px; --bars-h: calc(var(--nav-h) + var(--day-actions-h)); }
+
 .app {
     max-width: 1180px;
     margin: 0 auto;
-    padding: 0 16px 120px;
-    padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+    padding: 0 16px;
+    padding-bottom: max(calc(var(--bars-h) + 24px), calc(24px + env(safe-area-inset-bottom, 0px)));
 }
 
 h2 { font-size: 18px; margin: 0; }
@@ -544,8 +554,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    draws over them - reachable only by a tap that also swipes the app away. */
 .day-actions {
     position: fixed;
-    bottom: 0;
+    /* Directly on top of the tab bar, whatever height it turns out to have. The 62px that
+       used to be here was the tab bar's height on one phone. */
+    bottom: var(--nav-h, 0px);
     inset-inline: 0;
+    z-index: 44;
     display: flex;
     gap: 8px;
     justify-content: center;
@@ -555,6 +568,43 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-top: 1px solid var(--line);
     box-shadow: 0 -4px 16px -10px rgba(0, 0, 0, .4);
 }
+
+/* The two ways a worker leaves the crew, at the foot of his own screen. Set apart by a
+   rule so that neither is ever the button the thumb lands on by accident. */
+.worker-danger {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+}
+.worker-danger button { min-height: 46px; }
+
+/* Named for what it does, not coloured red all over: a full red button reads as the
+   primary action of the screen, which is the last thing this one is. */
+.btn-danger {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    font-weight: 600;
+}
+.btn-danger:hover { background: var(--danger); color: var(--paper); }
+.worker-danger .hint { margin: 0; }
+
+/* Archived names, folded away under the working list. */
+.roster-archive { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.roster-archive summary {
+    cursor: pointer;
+    color: var(--ink-2);
+    font-size: 14.5px;
+    padding: 8px 2px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+}
+.roster-archive .roster-row:last-child { border-bottom: none; }
 
 /* ---------------------------------------------------------------- pickers */
 
@@ -986,9 +1036,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    default. dvh, not vh: vh ignores the browser chrome and the keyboard. */
 @media (max-width: 700px) {
     .modal:not(.sheet) { align-items: flex-start; padding: 12px 12px 0; }
-    .modal:not(.sheet) .modal-content { max-height: calc(100dvh - 24px); }
+    .modal:not(.sheet) .modal-content {
+        max-height: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px));
+    }
 }
 
+/* Above both bottom bars. A dialog the tab bar draws over is a dialog whose last button
+   cannot be pressed - and the last button is usually the one that says no. */
 .modal {
     display: none;
     position: fixed;
@@ -1008,8 +1062,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding: 22px;
     width: 100%;
     max-width: 460px;
-    max-height: 88vh;
+    /* dvh, not vh: vh is measured against the viewport with the browser's chrome hidden,
+       so on a phone where it is showing the dialog is taller than the screen and its last
+       row sits below the fold. */
+    max-height: calc(100dvh - 32px - env(safe-area-inset-bottom, 0px));
     overflow-y: auto;
+    overscroll-behavior: contain;
 }
 .modal-wide { max-width: 680px; }
 
@@ -1099,7 +1157,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .empty-hint { color: var(--ink-3); font-size: 15px; padding: 14px 0; margin: 0; }
 
 @media (max-width: 700px) {
-    .app { padding: 0 12px; padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+    .app { padding-inline: 12px; }
     .site-grid { grid-template-columns: 1fr; }
     /* min-width, because the buttons inside are flex: 1 from a zero basis - so the
        toggle's own natural size collapses to almost nothing. It never looks too big for
@@ -1111,7 +1169,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .layer-toggle button { flex: 1; padding: 6px 4px; font-size: 13px; }
     .btn-today { margin-inline-start: auto; }
     .day-actions {
-        bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+        /* The tab bar below carries the home-indicator inset, so this one must not add a
+           second copy of it on top. */
         padding-bottom: 10px;
         border-top: none;
         box-shadow: none;
@@ -1271,8 +1330,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    tap it is undoing was made at the bottom of the screen with a thumb. */
 .undo-bar {
     position: fixed;
+    /* Above both bars, so the remedy for a mis-tap is never itself under one. */
+    bottom: calc(var(--bars-h) + 10px);
     inset-inline: 0;
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     z-index: 40;
     margin: 0 auto;
     max-width: 620px;
@@ -1292,7 +1352,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .undo-bar .btn-icon:hover { background: transparent; color: var(--paper); }
 
 @media (max-width: 700px) {
-    .undo-bar { inset-inline: 12px; bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+    .undo-bar { inset-inline: 12px; }
 }
 @media print { .undo-bar { display: none !important; } }
 
@@ -1495,7 +1555,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sheet-content {
     max-width: 560px;
     border-radius: 22px 22px 0 0;
-    max-height: 82vh;
+    /* dvh for the same reason as the dialog above, and it SCROLLS: a sheet listing thirty
+       sites used to run off the bottom of the screen with no way to reach the end of it. */
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 16px 16px 20px;
     /* After the shorthand, or it is overwritten by it. The sheet sits on the bottom edge
        of an iPhone, where the home indicator is drawn over anything in that strip. */

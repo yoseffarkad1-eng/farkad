@@ -633,6 +633,39 @@ const FarkadSync = {
         return waiting;
     },
 
+    // Is a WORK entry still queued against this man?
+    //
+    // A queue entry is an edit that has not reached the other two phones yet. A day or an
+    // advance naming somebody who is about to be deleted is the dangerous kind: it can
+    // land after the roster that no longer has him, and the phone receiving both is left
+    // with a day belonging to nobody - which its own validation then refuses, on a
+    // document nothing can repair.
+    //
+    // Roster entries naming him are deliberately NOT counted. They are what put him in
+    // the list, and the deletion queues a tombstone and a new list at a HIGHER sequence,
+    // so the later word wins wherever the two arrive. Counting them would mean a device
+    // that has never had a cloud - where nothing is ever acknowledged and the journal
+    // keeps everything - could never delete a name typed by mistake, which is the one
+    // case deleting exists for.
+    //
+    // Asked of the DISK, because that is what the next session will replay.
+    queueNamesWorker(workerId) {
+        const id = String(workerId);
+        const entries = this.durableJournalEntries();
+        // Unreadable is not "no references". It is "no idea", and no idea is not a reason
+        // to delete somebody.
+        if (!entries) return true;
+
+        return entries.some(([path, item]) => {
+            const parts = path.split('.');
+            if (parts[0] === 'days' && parts.length === 4) return parts[3] === id;
+            if (parts[0] === 'advances') {
+                return Boolean(item && item.value && String(item.value.workerId) === id);
+            }
+            return false;
+        });
+    },
+
     // Which fields are waiting. Not used on screen - the count is what a person needs -
     // but it is what makes "is that edit still queued?" answerable from outside without
     // reaching into the queue itself.
@@ -984,8 +1017,11 @@ const FarkadSync = {
     //
     // The whole arrays are still sent alongside, and that is deliberate: a phone that has
     // not updated reads them and sees a correct roster. They can stop being written once
-    // all three devices are past v78 - not before.
-    editRoster(schedule) {
+    // all three devices are past v79 - not before.
+    // `removed` names entities that are gone from the roster on purpose, so their
+    // tombstones go out even when this device has never seen a snapshot and therefore has
+    // no _remoteRoster to notice the absence against.
+    editRoster(schedule, removed) {
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
         // result here is the hardest kind to notice: a worker present but missing from
@@ -1017,9 +1053,11 @@ const FarkadSync = {
             // A null is how the wire says "not here any more": mergeRoster skips a falsy
             // entry, writeFieldPath deletes the field outright when seeding a new
             // document, and a phone still on the old build never reads `roster` at all.
-            Object.keys(known).forEach(id => {
-                if (!here.has(String(id))) put(`roster.${kind}.${id}`, null);
+            const gone = new Set(Object.keys(known).filter(id => !here.has(String(id))));
+            ((removed && removed[kind]) || []).forEach(id => {
+                if (!here.has(String(id))) gone.add(String(id));
             });
+            gone.forEach(id => put(`roster.${kind}.${id}`, null));
 
             put(`roster.${orderKey}`,
                 (schedule[kind] || []).filter(item => item && item.id).map(item => String(item.id)));

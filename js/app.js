@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v78';
+const APP_VERSION = 'v79';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -88,6 +88,11 @@ function render() {
     renderCopyButton();
     renderAccountBanner();
     updateSyncNotice();
+
+    // Last, because the two bars it measures have just been shown or hidden by the lines
+    // above. See js/ui/bars.js - the page reserves room for what is actually there, not
+    // for a number somebody wrote down once.
+    scheduleBarMeasure();
 }
 
 // A crash on a phone looks like nothing: half a screen, no console, no clue whether what
@@ -158,6 +163,7 @@ window.onload = () => {
     watchConnection();
     watchInstall();
     watchDayRollover();
+    watchBottomBars();
 
     if (result.migrated) {
         const count = (result.issues || []).length;

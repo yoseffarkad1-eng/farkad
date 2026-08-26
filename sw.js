@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v78';
+const VERSION = 'farkad-v79';
 
 const SHELL = [
     './',
@@ -35,6 +35,7 @@ const SHELL = [
     './js/sync/sync.js',
     './js/state.js',
     './js/ui/dom.js',
+    './js/ui/bars.js',
     './js/ui/ask.js',
     './js/ui/undo.js',
     './js/ui/modal.js',

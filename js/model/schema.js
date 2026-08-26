@@ -612,6 +612,61 @@ function journalEntryProblems(path, value) {
     return ['a path root nobody wrote'];
 }
 
+// ---------------------------------------------------------------- removing a worker
+//
+// Archiving and deleting are two different things and only one of them is ever safe.
+//
+// A worker with anything recorded against him is ARCHIVED: he leaves the daily screen and
+// the active list, and every day, every rate and every advance stays exactly where it is.
+// The reports still resolve his name, including on days already invoiced.
+//
+// Deleting is for the other case, and only that one: a name typed in by mistake, or a man
+// added twice, before anything was recorded. Nothing points at him, so nothing is left
+// pointing at nobody.
+//
+// The difference is not a matter of judgement. It is this function.
+
+// Everything in the record that names this worker. Empty means he can go.
+//
+// A day record counts even when it is empty. `{entries: []}` is not "no day" - it is a
+// day somebody opened and cleared, written down, and sitting in the document. Deleting
+// the man under it would leave the whole schedule failing its own validation, and every
+// restore on the device refused from then on.
+function workerFootprint(schedule, workerId) {
+    const id = String(workerId);
+    const days = [];
+    const advances = [];
+
+    const allDays = (schedule && schedule.days) || {};
+    Object.keys(allDays).forEach(date => {
+        ['plan', 'actual'].forEach(layer => {
+            const side = (allDays[date] || {})[layer];
+            if (!side || typeof side !== 'object') return;
+            if (Object.prototype.hasOwnProperty.call(side, id)) days.push({ date, layer });
+        });
+    });
+
+    const allAdvances = (schedule && schedule.advances) || {};
+    Object.keys(allAdvances).forEach(advance => {
+        const item = allAdvances[advance];
+        if (item && String(item.workerId) === id) advances.push(advance);
+    });
+
+    return { days, advances };
+}
+
+// What still has to be settled with a man before he is put away, said in a sentence, or
+// null when there is nothing. Not a bar on archiving - a debt is a reason to be told, not
+// a reason to be stopped.
+function openAdvanceBalance(schedule, workerId) {
+    const advances = workerFootprint(schedule, workerId).advances;
+    if (advances.length === 0) return null;
+
+    const total = advances.reduce(
+        (sum, id) => sum + (Number((schedule.advances[id] || {}).amount) || 0), 0);
+    return total > 0 ? { count: advances.length, total } : null;
+}
+
 // ---------------------------------------------------------------- the wire form
 //
 // The document as it is stored in the cloud. It is the local schedule plus the roster a
@@ -630,7 +685,7 @@ function journalEntryProblems(path, value) {
 //
 // The arrays are still written, and that is deliberate. A phone that has not updated yet
 // reads them and sees a correct roster; it cannot see `roster` and never writes to it.
-// They can be dropped once all three devices are past v78 - not before.
+// They can be dropped once all three devices are past v79 - not before.
 function cloudDocument(schedule) {
     const wire = JSON.parse(JSON.stringify(schedule));
     wire.roster = rosterDocument(schedule);

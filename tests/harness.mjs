@@ -32,7 +32,13 @@ const FILES = [
     // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls
     // askTell, but only inside functions - nothing at its top level touches either, and
     // registering Store.reclaim is exactly the behaviour a full-disk test needs.
-    'js/ui/share.js'
+    'js/ui/share.js',
+    // For deleting and archiving a worker. Those two decide what happens to somebody's
+    // record, so they are tested the way the data layer is - across a close and reopen,
+    // and against a second phone - rather than only through a browser. Same as the file
+    // above: DOM and dialogs are touched inside functions only, and the tests that call
+    // them answer askConfirm themselves.
+    'js/ui/roster.js'
 ];
 
 const SOURCE = FILES.map(file => ({ file, code: readFileSync(join(ROOT, file), 'utf8') }));

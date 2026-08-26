@@ -199,10 +199,12 @@ const State = {
     // A roster change: who exists, their rates, and the order they are read in. Saved and
     // SENT - a roster edit that only saved locally was overwritten by the next snapshot
     // from another phone, taking any days recorded against a new worker with it.
-    commitRoster() {
+    // `removed` is passed straight through to editRoster: see the note there. It is how a
+    // deletion reaches the other two phones on a device that has never had a snapshot.
+    commitRoster(removed) {
         const journalled = (typeof FarkadSync === 'undefined' || !FarkadSync.editRoster)
             ? !Store.available
-            : Boolean(FarkadSync.editRoster(this.schedule)) || !Store.available;
+            : Boolean(FarkadSync.editRoster(this.schedule, removed)) || !Store.available;
 
         if (!journalled) return this.refuseEdit();
 

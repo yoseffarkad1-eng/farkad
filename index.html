@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v78">
+<meta name="farkad-build" content="v79">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -249,6 +249,11 @@
             <button type="button" onclick="saveWorkerForm()">שמור</button>
             <button type="button" class="btn-secondary" onclick="closeWorkerForm()">ביטול</button>
         </div>
+        <!-- Archiving and, when nothing is recorded against him, deleting. Below the save
+             row and behind a rule, because they are not what this screen is for - and
+             built by renderWorkerFormActions, which asks the model which of them applies
+             rather than deciding here. -->
+        <div class="worker-danger" id="workerFormDanger"></div>
     </div>
 </div>
 
@@ -302,6 +307,7 @@
 <script src="js/sync/sync.js"></script>
 <script src="js/state.js"></script>
 <script src="js/ui/dom.js"></script>
+<script src="js/ui/bars.js"></script>
 <script src="js/ui/ask.js"></script>
 <script src="js/ui/undo.js"></script>
 <script src="js/ui/modal.js"></script>
