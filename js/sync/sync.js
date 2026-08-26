@@ -1261,6 +1261,9 @@ const FarkadSync = {
 
     disconnect() {
         this.adapter = null;
+        // Whatever this session heard belonged to a connection that is gone. The next one
+        // starts from silence, and the barrier closes again.
+        this._heardFromCloud = false;
         this._archivedOn = null;
         clearTimeout(this._timer);
         clearTimeout(this._retryTimer);
@@ -1485,16 +1488,34 @@ const FarkadSync = {
 
         // Oldest first, so a queue too big for one write drains in the order it was
         // made rather than leaving the earliest days for last.
+        // Nothing that carries a roster opinion until the first snapshot has arrived and
+        // been sanitised - see the block above noteCloudHeard. The rest of the queue is
+        // sent as usual, and `sent` is built from what ACTUALLY went out, so the entries
+        // held back here are not acknowledged and not pruned.
+        const held = !this._heardFromCloud;
         const patch = {};
         const sent = new Map();
+        let holding = false;
         [...this._outbox.entries()]
             .filter(([, item]) => !item.sent)
             .sort((a, b) => a[1].seq - b[1].seq)
+            .filter(([path]) => {
+                if (held && this.rosterShaped(path)) { holding = true; return false; }
+                return true;
+            })
             .slice(0, MAX_PATHS_PER_WRITE)
             .forEach(([path, item]) => {
                 patch[path] = item.value;
                 sent.set(path, item.seq);
             });
+
+        if (holding) {
+            // Something is being kept back, so this device is not up to date whatever
+            // else happens. The retry ladder comes round again, and the snapshot it is
+            // waiting for usually arrives long before that.
+            this.scheduleRetry();
+            if (this.status === 'synced') this.setStatus('connecting');
+        }
         if (Object.keys(patch).length === 0 && !this._stamp) return Promise.resolve();
 
         // EVERY write carries a stamp, not only the ones a local save happened to queue.
@@ -2347,9 +2368,13 @@ const FarkadSync = {
                 this.fail(new Error('remote document is not a schedule'));
                 return;
             }
+            // Authoritative: the document exists and has no roster in it, so there is
+            // nothing tombstoned for a queued array to contradict.
+            this.noteCloudHeard();
             if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
+            if (this.pendingCount() > 0) this.scheduleFlush();
             return;
         }
 
@@ -2376,11 +2401,18 @@ const FarkadSync = {
             return;
         }
         this.releaseStaleRoster();
+        // Heard, AND cleaned. Only now may a queued roster array leave this device: the
+        // barrier is about knowing what the document says, and the sanitation is about
+        // the queue agreeing with it. Either one alone is not enough.
+        this.noteCloudHeard();
 
         // A document nobody has ever written to - a project connected for the first time.
         // Adopting it would empty this device to match an empty cloud, so this device's
         // roster seeds it instead.
         if (!remote.updatedAt) {
+            // A document nobody has written to holds no tombstones either, and this is
+            // the server saying so rather than a guess.
+            this.noteCloudHeard();
             if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
@@ -2394,6 +2426,7 @@ const FarkadSync = {
         // from THAT phone looked like an echo of this one and was skipped.
         if (remote.updatedAt === State.schedule.updatedAt
             && remote.updatedBy === syncDeviceId()) {
+            this.noteCloudHeard();
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             return;
@@ -2514,14 +2547,27 @@ const FarkadSync = {
         if (!gone || (gone.workers.size === 0 && gone.places.size === 0)) return true;
         this.loadOutbox();
 
+        // Which queued path is a list of whom, in both of the forms a roster is queued
+        // in: the whole array a v78 phone reads, and the order list this build sends.
+        const listedKind = path => {
+            if (path === 'workers' || path === 'places') return path;
+            if (path === 'roster.workerOrder') return 'workers';
+            if (path === 'roster.placeOrder') return 'places';
+            return null;
+        };
+
         const candidate = new Map();
         let changed = false;
         this._outbox.forEach((item, path) => {
-            const kind = path;
-            const removed = (kind === 'workers' || kind === 'places') ? gone[kind] : null;
+            const kind = listedKind(path);
+            const removed = kind ? gone[kind] : null;
             if (removed && removed.size > 0 && Array.isArray(item.value)) {
-                const kept = item.value.filter(
-                    entry => !(entry && removed.has(String(entry.id))));
+                // An array of records, or an array of bare ids - the same question
+                // either way: is this the man the document says is gone?
+                const kept = item.value.filter(entry => {
+                    const id = entry && typeof entry === 'object' ? entry.id : entry;
+                    return !removed.has(String(id));
+                });
                 if (kept.length !== item.value.length) {
                     changed = true;
                     candidate.set(path, { value: kept, seq: item.seq, sent: item.sent });
@@ -2532,6 +2578,52 @@ const FarkadSync = {
         });
         if (!changed) return true;
         return this.adoptJournal(candidate);
+    },
+
+    // ---------------------------------------------------------- the first snapshot
+    //
+    // A persisted queue is older than anything this session knows.
+    //
+    // Device B closes with workers=[A, doomed] sitting in its outbox, in the whole-array
+    // form a v78 phone reads. Device A tombstones `doomed` in the meantime. B reopens:
+    // connect() subscribes AND schedules the persisted queue, and those two are not
+    // ordered with respect to each other. If the first snapshot is even slightly late -
+    // a cold radio, a captive portal, a server taking its time - the old array goes out
+    // first, and a v78 reader has the deleted man back in its crew. The device that did
+    // the deleting is not involved and cannot see it happen.
+    //
+    // The hold in `staleRosterHeld` cannot help: it lives in memory, and this is the
+    // first flush of a new session, so there is nothing in it to remember. What is needed
+    // is the other way round - not "do I know of a tombstone?" but "have I heard from the
+    // document at all yet?".
+    //
+    // So anything that could carry a roster opinion waits for the first authoritative
+    // answer. Days and advances are not held: they name one field each, they cannot
+    // resurrect anybody, and holding them would stop an evening's recording from leaving
+    // a phone for no safety at all.
+    _heardFromCloud: false,
+
+    // Set by every route out of receive() that has actually seen what the server holds,
+    // including a document that does not exist yet - "there is nothing there" is an
+    // authoritative answer, and there are no tombstones in it.
+    //
+    // And the moment the barrier opens, whatever it was holding is sent. Otherwise the
+    // held entries wait for the next thing that happens to schedule a flush, and if the
+    // snapshot that opened the barrier is this device's own echo - which is exactly what
+    // it is when a day was recorded while the roster waited - nothing ever does. The
+    // queue then sits there, correct and unsent, until the person edits again: the one
+    // failure this whole barrier exists to avoid asking of them.
+    noteCloudHeard() {
+        if (this._heardFromCloud) return;
+        this._heardFromCloud = true;
+        if (this.adapter && this.pendingCount() > 0) this.scheduleFlush();
+    },
+
+    // Whether this path may go out before the first snapshot has arrived.
+    rosterShaped(path) {
+        const parts = String(path).split('.');
+        if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) return true;
+        return parts[0] === 'roster';
     },
 
     // A queue that could not be cleaned is a queue that must not go out.
@@ -2558,6 +2650,13 @@ const FarkadSync = {
         if (!this._staleRoster) return false;
         if (this.sanitiseQueuedRosters(this._staleRoster)) {
             this.releaseStaleRoster();
+            // These tombstones came from a real snapshot, and the queue now agrees with
+            // it. That is the whole of the first-snapshot barrier's question answered,
+            // and it has to be recorded here: the snapshot that asked it was refused
+            // half way through and never reached the route that would have said so, so
+            // without this the roster waits for a snapshot that has already been and
+            // gone.
+            this.noteCloudHeard();
             return false;
         }
         return true;

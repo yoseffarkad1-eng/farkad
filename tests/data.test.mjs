@@ -6875,6 +6875,351 @@ for (const [label, act] of [
         device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
 }
 
+// ---------------------------------------------------------------- the first snapshot
+//
+// A persisted queue is older than anything the new session knows, and connect() does two
+// things that are not ordered with respect to each other: it subscribes, and it schedules
+// the queue. If the first snapshot is even slightly late, the old whole-array goes out
+// first and a v78 reader has the deleted man back.
+
+// A cloud whose first delivery to a NEW subscriber can be held open. Everything else -
+// writes, echoes, later snapshots - goes through the real adapter, so what is under test
+// is only the lateness of the first answer.
+function slowFirstSnapshot(cloud) {
+    const real = cloud.adapter;
+    let open = false;
+    const waiting = [];
+    return {
+        adapter: Object.assign({}, real, {
+            subscribe(onSnapshot, onError) {
+                const pending = [];
+                waiting.push(() => {
+                    // A late first delivery arrives as the CURRENT state, not as a
+                    // rewind: Firestore coalesces what it could not deliver.
+                    const last = pending.pop();
+                    pending.length = 0;
+                    if (last !== undefined) onSnapshot(last);
+                });
+                return real.subscribe(snapshot => {
+                    if (!open) { pending.push(snapshot); return; }
+                    onSnapshot(snapshot);
+                }, onError);
+            }
+        }),
+        deliver() {
+            open = true;
+            waiting.splice(0, waiting.length).forEach(fn => fn());
+        }
+    };
+}
+
+{
+    suite('a persisted roster array waits for the first snapshot');
+
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' }).device;
+    await connected(a, cloud);
+    await wait();
+
+    const doomed = a.State.nextWorkerId();
+    a.State.schedule.workers.push(
+        { id: doomed, name: 'זמני', active: true, dailyRate: 0, hourlyRate: 0 });
+    a.State.commitRoster();
+    await wait();
+
+    // B learns him, then goes away with a roster edit of its own still queued.
+    const b = crew({ deviceId: 'd_b' }).device;
+    b.State.load();
+    const link = await unplugged(b, cloud);
+    await wait();
+    given('B knows him', workerIds(b).includes(doomed));
+
+    link.away();
+    b.State.schedule.places.push({ id: 'p_09', name: 'רמלה', active: true });
+    b.State.commitRoster();
+    await wait();
+    given('B has a whole array queued with him in it',
+        String(b.raw(b.Sync.activeOutboxKey())).includes(doomed));
+
+    // A removes him while B is away.
+    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
+    a.State.commitRoster({ workers: [doomed] });
+    await settle(TICK * 30);
+    given('the cloud holds the tombstone', cloud.doc.roster.workers[doomed] === null);
+
+    // B CLOSES AND REOPENS. The memory hold is gone; the queue is not.
+    const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
+    reopened.State.load();
+    given('the queue survived the reopen',
+        String(reopened.raw(reopened.Sync.activeOutboxKey())).includes(doomed));
+    const queuedBefore = String(reopened.raw(reopened.Sync.activeOutboxKey()));
+    const fromWrite = cloud.writes.length;
+
+    // Connected to a cloud whose first snapshot is late - much later than the debounce.
+    // The radio is back: what is slow here is the first answer, not the network.
+    cloud.reject = null;
+    const slow = slowFirstSnapshot(cloud);
+    reopened.Sync.pushDelayMs = TICK;
+    reopened.Sync.connect(slow.adapter);
+    await settle(TICK * 40);
+
+    const carriedHim = () => cloud.writes.slice(fromWrite).some(write => {
+        const list = write.kind === 'update'
+            ? (write.patch && write.patch.workers)
+            : (write.data && write.data.workers);
+        return Array.isArray(list) && list.some(item => item && item.id === doomed);
+    });
+
+    check('nothing carrying a roster went out before the first snapshot',
+        !carriedHim(), JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
+    check('the queue is byte for byte what it was',
+        String(reopened.raw(reopened.Sync.activeOutboxKey())) === queuedBefore);
+    check('and the device does not call itself synced while it holds data back',
+        reopened.Sync.status !== 'synced', reopened.Sync.status);
+
+    // New local recording still works, and still reaches the disk, while the barrier holds.
+    reopened.State.commit(reopened.call('assignPlace',
+        reopened.State.schedule, '2026-08-13', 'w_01', 'actual', 'p_01'));
+    await settle(TICK * 20);
+    check('a day recorded now is durable locally',
+        String(reopened.raw('scheduleData:v2')).includes('2026-08-13'));
+    // A day names one field and cannot resurrect anybody, so it is not held - and it is
+    // the entry that proves the acknowledgement is built from what actually went out.
+    check('and it reaches the cloud without waiting for the roster',
+        JSON.stringify((cloud.doc && cloud.doc.days) || {}).includes('2026-08-13'),
+        JSON.stringify(Object.keys((cloud.doc && cloud.doc.days) || {})));
+    const queuedNow = JSON.parse(String(reopened.raw(reopened.Sync.activeOutboxKey())));
+    check('while the held roster entries are not marked as sent',
+        Object.keys(queuedNow.items)
+            .filter(path => path === 'workers' || path.startsWith('roster.'))
+            .every(path => queuedNow.items[path].sent === false),
+        JSON.stringify(Object.keys(queuedNow.items)));
+
+    // The snapshot finally arrives.
+    slow.deliver();
+    await settle(TICK * 60);
+
+    check('the removed man never reached the document',
+        !(cloud.doc.workers || []).some(item => item && item.id === doomed),
+        JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
+    check('nor a v78 reader of it',
+        !v78Reader(cloud.doc).some(worker => worker.id === doomed),
+        JSON.stringify(v78Reader(cloud.doc).map(worker => worker.id)));
+    check('and no write ever carried him', !carriedHim(),
+        JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
+    check('the unrelated site edit converges without a second edit',
+        JSON.stringify(cloud.doc.places || []).includes('p_09'),
+        JSON.stringify((cloud.doc.places || []).map(item => item.id)));
+    check('and the queue was cleaned rather than kept for ever',
+        !String(reopened.raw(reopened.Sync.activeOutboxKey())).includes(doomed),
+        String(reopened.raw(reopened.Sync.activeOutboxKey())).slice(0, 160));
+}
+
+{
+    suite('a first snapshot that errors, then a reconnect');
+
+    const cloud = makeCloud();
+    const device = crew({ deviceId: 'd_a' }).device;
+    device.State.schedule.workers.push(
+        { id: 'w_09', name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    let errored = null;
+    const broken = Object.assign({}, cloud.adapter, {
+        subscribe: (onSnapshot, onError) => { errored = onError; return () => {}; }
+    });
+    device.Sync.pushDelayMs = TICK;
+    device.Sync.connect(broken);
+    await settle(TICK * 20);
+    if (errored) errored(new Error('subscription failed'));
+    await settle(TICK * 20);
+
+    check('a subscription that failed is not a first snapshot',
+        cloud.doc === null, JSON.stringify(cloud.doc));
+    check('and the status does not claim to be synced',
+        device.Sync.status !== 'synced', device.Sync.status);
+
+    // Reconnected properly: the same queue converges with no new edit.
+    await connected(device, cloud);
+    await settle(TICK * 40);
+    check('the roster lands after the reconnect',
+        JSON.stringify(cloud.doc || {}).includes('w_09'),
+        JSON.stringify(cloud.doc && cloud.doc.workers));
+}
+
+{
+    suite('a missing document is an authoritative first snapshot');
+
+    // "There is nothing there" is an answer, not silence - and there are no tombstones in
+    // a document that does not exist, so a queued roster is safe to send.
+    const cloud = makeCloud();
+    const device = crew({ deviceId: 'd_a' }).device;
+    device.State.schedule.workers.push(
+        { id: 'w_09', name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    await connected(device, cloud);
+    await settle(TICK * 40);
+
+    check('the roster is written into the new document',
+        JSON.stringify(cloud.doc || {}).includes('w_09'),
+        JSON.stringify(cloud.doc && cloud.doc.workers));
+    check('and the device is synced', device.Sync.status === 'synced', device.Sync.status);
+}
+
+{
+    suite('a first snapshot whose cleaning is refused, in a session that just opened');
+
+    // The memory hold cannot be what saves this one: the device has only just opened, so
+    // there is nothing in memory to remember. The barrier is what holds it, and it goes
+    // on holding after the snapshot arrives, because the snapshot is only half the
+    // answer - the queue has to agree with it before anything may leave.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' }).device;
+    await connected(a, cloud);
+    await wait();
+
+    const doomed = a.State.nextWorkerId();
+    a.State.schedule.workers.push(
+        { id: doomed, name: 'זמני', active: true, dailyRate: 0, hourlyRate: 0 });
+    a.State.commitRoster();
+    await wait();
+
+    const b = crew({ deviceId: 'd_b' }).device;
+    b.State.load();
+    const link = await unplugged(b, cloud);
+    await wait();
+    given('B knows him', workerIds(b).includes(doomed));
+
+    link.away();
+    b.State.schedule.places.push({ id: 'p_09', name: 'רמלה', active: true });
+    b.State.commitRoster();
+    await wait();
+
+    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
+    a.State.commitRoster({ workers: [doomed] });
+    await settle(TICK * 30);
+    given('the cloud holds the tombstone', cloud.doc.roster.workers[doomed] === null);
+
+    const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
+    reopened.State.load();
+    const queuedBefore = String(reopened.raw(reopened.Sync.activeOutboxKey()));
+    given('the queue survived the reopen', queuedBefore.includes(doomed));
+
+    const fromWrite = cloud.writes.length;
+    const carriedHim = () => cloud.writes.slice(fromWrite).some(write => {
+        const list = write.kind === 'update'
+            ? (write.patch && write.patch.workers)
+            : (write.data && write.data.workers);
+        return Array.isArray(list) && list.some(item => item && item.id === doomed);
+    });
+
+    // No room to rewrite the queue, and the snapshot arrives late.
+    cloud.reject = null;
+    reopened.setQuota(key => String(key).startsWith('farkad:outbox'));
+    const slow = slowFirstSnapshot(cloud);
+    reopened.Sync.pushDelayMs = TICK;
+    reopened.Sync.connect(slow.adapter);
+    await settle(TICK * 20);
+    slow.deliver();
+    await settle(TICK * 40);
+
+    check('nothing carrying him went out', !carriedHim(),
+        JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
+    check('the queue is byte for byte what it was',
+        String(reopened.raw(reopened.Sync.activeOutboxKey())) === queuedBefore);
+    check('the device does not call itself synced',
+        reopened.Sync.status !== 'synced', reopened.Sync.status);
+    check('a v78 reader of the document does not see him',
+        !v78Reader(cloud.doc).some(worker => worker.id === doomed),
+        JSON.stringify(v78Reader(cloud.doc).map(worker => worker.id)));
+
+    // The disk clears. No second snapshot, no second edit: the retry ladder is the whole
+    // recovery, and the site the person actually typed has to arrive at the end of it.
+    reopened.setQuota(null);
+    reopened.Sync.flush();
+    await settle(TICK * 60);
+
+    check('the queue is cleaned once there is room', !carriedHim(),
+        JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
+    check('and the site edit converges with no second edit',
+        JSON.stringify(cloud.doc.places || []).includes('p_09'),
+        JSON.stringify((cloud.doc.places || []).map(item => item.id)));
+    check('and he is still not in the document',
+        !(cloud.doc.workers || []).some(item => item && item.id === doomed),
+        JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
+}
+
+{
+    suite('a cached first snapshot, then the current one');
+
+    // Firestore answers from its own cache first when it can. That answer is authoritative
+    // about a moment that has passed, and it can be older than the tombstone. So the
+    // barrier opens on it - and the guarantee for what happens next belongs to the repair:
+    // once the current snapshot arrives, the document's own array must agree with its own
+    // tombstone again, with nobody having to edit anything.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' }).device;
+    await connected(a, cloud);
+    await wait();
+
+    const doomed = a.State.nextWorkerId();
+    a.State.schedule.workers.push(
+        { id: doomed, name: 'זמני', active: true, dailyRate: 0, hourlyRate: 0 });
+    a.State.commitRoster();
+    await wait();
+
+    const b = crew({ deviceId: 'd_b' }).device;
+    b.State.load();
+    const link = await unplugged(b, cloud);
+    await wait();
+    link.away();
+    b.State.schedule.places.push({ id: 'p_09', name: 'רמלה', active: true });
+    b.State.commitRoster();
+    await wait();
+
+    // The cached copy: the document as it stood BEFORE the removal.
+    const cached = JSON.parse(JSON.stringify(cloud.doc));
+
+    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
+    a.State.commitRoster({ workers: [doomed] });
+    await settle(TICK * 30);
+    given('the cloud holds the tombstone', cloud.doc.roster.workers[doomed] === null);
+    given('the cached copy still has him as a man, not a tombstone',
+        cached.roster.workers[doomed] && cached.roster.workers[doomed].id === doomed);
+
+    const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
+    reopened.State.load();
+
+    // The cache answers first, the server second - which is the order Firestore uses.
+    const deliveries = [];
+    const cachedFirst = Object.assign({}, cloud.adapter, {
+        subscribe(onSnapshot, onError) {
+            deliveries.push(onSnapshot);
+            const stop = cloud.adapter.subscribe(onSnapshot, onError);
+            Promise.resolve().then(() => onSnapshot(JSON.parse(JSON.stringify(cached))));
+            return stop;
+        }
+    });
+    cloud.reject = null;
+    reopened.Sync.pushDelayMs = TICK;
+    reopened.Sync.connect(cachedFirst);
+    await settle(TICK * 60);
+
+    check('the site edit lands', JSON.stringify(cloud.doc.places || []).includes('p_09'),
+        JSON.stringify((cloud.doc.places || []).map(item => item.id)));
+    check('the tombstone was not undone', cloud.doc.roster.workers[doomed] === null,
+        JSON.stringify(cloud.doc.roster.workers[doomed]));
+    check('and the document agrees with itself again',
+        !(cloud.doc.workers || []).some(item => item && item.id === doomed),
+        JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
+    check('so a frozen v78 reader does not see him',
+        !v78Reader(cloud.doc).some(worker => worker.id === doomed),
+        JSON.stringify(v78Reader(cloud.doc).map(worker => worker.id)));
+    check('and this device does not show him either',
+        !workerIds(reopened).includes(doomed), workerIds(reopened));
+}
+
 // ---------------------------------------------------------------- two contexts at once
 //
 // One phone, two contexts: two tabs, or a tab and the installed app. They share one
