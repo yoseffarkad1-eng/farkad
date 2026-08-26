@@ -6223,7 +6223,9 @@ for (const [label, act] of [
 
     given('the v78 crew opened', workerIds(device) === 'w_01,w_02', workerIds(device));
     given('and there is no provenance record on the disk',
-        device.raw('farkad:provenance:v1') === null);
+        device.raw('farkad:provenance:v1') === null
+        && device.Store.keys().every(key => !String(key).startsWith('farkad:prov:')),
+        JSON.stringify(device.Store.keys().filter(key => String(key).startsWith('farkad:prov'))));
     given('and no cloud has ever been connected', device.Sync.adapter === null);
     given('and nothing at all is recorded against him',
         device.call('workerFootprint', device.State.schedule, 'w_01').days.length === 0
@@ -6339,7 +6341,7 @@ for (const [label, act] of [
     device.State.commitRoster();
 
     // The disk refuses the provenance record and nothing else.
-    device.setQuota(key => key === 'farkad:provenance:v1');
+    device.setQuota(key => String(key).startsWith('farkad:prov:'));
     await connected(device, cloud);
     await settle(TICK * 30);
 
@@ -6361,8 +6363,8 @@ for (const [label, act] of [
     check('once there is room the write goes out', cloud.attempts.length > 0);
     check('and the cloud has him', JSON.stringify(cloud.doc || {}).includes(added));
     check('the proof is on the disk now',
-        String(device.raw('farkad:provenance:v1')).includes(added),
-        String(device.raw('farkad:provenance:v1')));
+        device.raw(`farkad:prov:sent:workers:${added}`) === '1',
+        String(device.raw(`farkad:prov:sent:workers:${added}`)));
     check('so he can no longer be deleted',
         device.Sync.provenLocalOnly('workers', added) === false);
 
@@ -6873,6 +6875,220 @@ for (const [label, act] of [
         device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
 }
 
+// ---------------------------------------------------------------- two contexts at once
+//
+// One phone, two contexts: two tabs, or a tab and the installed app. They share one
+// localStorage, and none of the sequences below needs exotic timing - every one of them
+// is two ordinary operations whose reads happen before either write.
+//
+// The harness models this the only honest way: BOTH contexts are made to read first, and
+// only then is either allowed to write. A test that finishes one whole operation before
+// starting the other is not a race and cannot fail.
+
+// Two devices sharing one disk, which is what two tabs are.
+function twoTabs() {
+    const first = makeDevice({ deviceId: 'd_one' });
+    const disk = first.ctx.localStorage;
+    const second = makeDevice({ deviceId: 'd_one', storage: {} });
+    // The second context is given the SAME storage object, not a copy of it.
+    second.ctx.localStorage = disk;
+    second.Store.memory = {};
+    second.State.load();
+    return { first, second };
+}
+
+{
+    suite('two contexts marking two different workers cannot lose either fact');
+
+    // THE lost update. A reads, B reads, A writes X, B writes Y - and with one record
+    // holding both facts, B's write is built from a copy of the disk that predates A's.
+    const { first, second } = twoTabs();
+    const x = first.State.nextWorkerId();
+    const y = first.State.nextWorkerId();
+
+    // Both contexts read the world before either of them writes anything.
+    const readX = first.Sync.provenLocalOnly('workers', x);
+    const readY = second.Sync.provenLocalOnly('workers', y);
+    given('both read first', readX === true && readY === true);
+
+    // Now they write, in that order.
+    first.Sync.markSent({ [`roster.workers.${x}`]: { id: x, name: 'א' } });
+    second.Sync.markSent({ [`roster.workers.${y}`]: { id: y, name: 'ב' } });
+
+    check('X is recorded as having left', first.Sync.provenLocalOnly('workers', x) === false);
+    check('and so is Y', first.Sync.provenLocalOnly('workers', y) === false);
+    check('the second context agrees about X',
+        second.Sync.provenLocalOnly('workers', x) === false);
+    check('and about Y', second.Sync.provenLocalOnly('workers', y) === false);
+
+    // And in the opposite write order, from the same interleaved reads.
+    const pair = twoTabs();
+    const p = pair.first.State.nextWorkerId();
+    const q = pair.first.State.nextWorkerId();
+    pair.first.Sync.provenLocalOnly('workers', p);
+    pair.second.Sync.provenLocalOnly('workers', q);
+    pair.second.Sync.markSent({ [`roster.workers.${q}`]: { id: q, name: 'ד' } });
+    pair.first.Sync.markSent({ [`roster.workers.${p}`]: { id: p, name: 'ג' } });
+    check('written the other way round, both facts still stand',
+        pair.first.Sync.provenLocalOnly('workers', p) === false
+        && pair.first.Sync.provenLocalOnly('workers', q) === false);
+
+    // Across a close and reopen, which is the only reading that counts.
+    const reopened = makeDevice({ storage: pair.first.dump(), deviceId: 'd_one' });
+    reopened.State.load();
+    check('and the next session reads both',
+        reopened.Sync.provenLocalOnly('workers', p) === false
+        && reopened.Sync.provenLocalOnly('workers', q) === false);
+}
+
+{
+    suite('marking sent races minting, and neither is lost');
+
+    const { first, second } = twoTabs();
+    const sent = first.State.nextWorkerId();
+
+    // Both read. Then one records a send and the other mints a brand new man.
+    first.Sync.provenLocalOnly('workers', sent);
+    second.Sync.provenLocalOnly('workers', sent);
+
+    first.Sync.markSent({ [`roster.workers.${sent}`]: { id: sent, name: 'א' } });
+    const minted = second.State.nextWorkerId();
+
+    check('the man who left is not deletable',
+        first.Sync.provenLocalOnly('workers', sent) === false);
+    check('the man just made here is', first.Sync.provenLocalOnly('workers', minted) === true);
+    check('and both contexts read the same two answers',
+        second.Sync.provenLocalOnly('workers', sent) === false
+        && second.Sync.provenLocalOnly('workers', minted) === true);
+}
+
+{
+    suite('marking sent races a generation reset');
+
+    const { first, second } = twoTabs();
+    const worker = first.State.nextWorkerId();
+
+    first.Sync.provenLocalOnly('workers', worker);
+    second.Sync.provenLocalOnly('workers', worker);
+
+    // One context is exporting - which resets the generation - while the other records
+    // that this very worker has been sent to the cloud.
+    second.Sync.forgetLocalOrigin();
+    first.Sync.markSent({ [`roster.workers.${worker}`]: { id: worker, name: 'א' } });
+
+    check('the reset stands', Number(first.raw('farkad:prov:gen')) >= 1,
+        String(first.raw('farkad:prov:gen')));
+    check('the send stands too', first.raw(`farkad:prov:sent:workers:${worker}`) === '1');
+    check('and he is not deletable by either reading',
+        first.Sync.provenLocalOnly('workers', worker) === false
+        && second.Sync.provenLocalOnly('workers', worker) === false);
+
+    // The other order, from interleaved reads.
+    const pair = twoTabs();
+    const other = pair.first.State.nextWorkerId();
+    pair.first.Sync.provenLocalOnly('workers', other);
+    pair.second.Sync.provenLocalOnly('workers', other);
+    pair.first.Sync.markSent({ [`roster.workers.${other}`]: { id: other, name: 'ב' } });
+    pair.second.Sync.forgetLocalOrigin();
+    check('the other way round is the same answer',
+        pair.first.Sync.provenLocalOnly('workers', other) === false);
+}
+
+{
+    suite('two generation resets at once');
+
+    const { first, second } = twoTabs();
+    const worker = first.State.nextWorkerId();
+
+    const beforeOne = first.Sync.provGeneration();
+    const beforeTwo = second.Sync.provGeneration();
+    given('both contexts read the same generation', beforeOne === beforeTwo);
+
+    first.Sync.forgetLocalOrigin();
+    second.Sync.forgetLocalOrigin();
+
+    check('the generation moved on', first.Sync.provGeneration() > beforeOne,
+        String(first.Sync.provGeneration()));
+    check('and it never went backwards', second.Sync.provGeneration() >= beforeOne);
+    check('what was minted before is worthless in both',
+        first.Sync.provenLocalOnly('workers', worker) === false
+        && second.Sync.provenLocalOnly('workers', worker) === false);
+
+    const reopened = makeDevice({ storage: first.dump(), deviceId: 'd_one' });
+    reopened.State.load();
+    check('and after a reopen as well',
+        reopened.Sync.provenLocalOnly('workers', worker) === false);
+}
+
+{
+    suite('the v1 record is carried across without being destroyed');
+
+    // A phone that ran the previous build has one blob. It is read, every fact in it is
+    // written out as its own key and read back, and only then is the migration marked
+    // done - and the blob itself is left exactly where it is.
+    const blob = JSON.stringify({
+        gen: 2,
+        mine: { workers: ['w_mine'], places: [] },
+        sent: { workers: ['w_sent'], places: ['p_sent'] }
+    });
+    const device = makeDevice({ deviceId: 'd_here',
+        storage: { 'farkad:provenance:v1': blob } });
+    device.State.load();
+
+    check('the man it made here is still deletable',
+        device.Sync.provenLocalOnly('workers', 'w_mine') === true);
+    check('the man who left is not',
+        device.Sync.provenLocalOnly('workers', 'w_sent') === false);
+    check('nor the site that left',
+        device.Sync.provenLocalOnly('places', 'p_sent') === false);
+    check('the generation came across', device.Sync.provGeneration() === 2,
+        String(device.Sync.provGeneration()));
+    check('and the original record was not touched',
+        device.raw('farkad:provenance:v1') === blob);
+    check('the migration is marked done', device.raw('farkad:prov:migrated') === '1');
+
+    // A blob that will not parse is uncertainty, not emptiness.
+    const damaged = makeDevice({ deviceId: 'd_here',
+        storage: { 'farkad:provenance:v1': '{ truncated' } });
+    damaged.State.load();
+    check('a damaged record refuses every deletion',
+        damaged.Sync.provenLocalOnly('workers', 'w_mine') === false
+        && damaged.Sync.provenLocalOnly('places', 'p_01') === false);
+    check('and says so on the disk, for the next session too',
+        damaged.raw('farkad:prov:uncertain') === '1');
+    check('while the damaged bytes are left alone',
+        damaged.raw('farkad:provenance:v1') === '{ truncated');
+
+    // A migration that cannot be completed is uncertainty as well.
+    const full = makeDevice({ deviceId: 'd_here',
+        storage: { 'farkad:provenance:v1': blob },
+        quota: key => String(key).startsWith('farkad:prov:') });
+    full.State.load();
+    check('a migration that will not store fails closed',
+        full.Sync.provenLocalOnly('workers', 'w_mine') === false);
+    check('and is not marked done', full.raw('farkad:prov:migrated') === null);
+}
+
+{
+    suite('the recovery file carries everything deletion eligibility rests on');
+
+    const device = makeDevice({ deviceId: 'd_here' });
+    device.putRaw('scheduleData:v2', '{ truncated');
+    device.State.load();
+    const mine = device.State.nextWorkerId();
+    device.Sync.markSent({ [`roster.workers.${'w_sent'}`]: { id: 'w_sent' } });
+
+    const keys = Object.keys(device.global('Recovery').rawRecords());
+    check('the generation is in the file', keys.includes('farkad:prov:gen'),
+        JSON.stringify(keys.filter(key => key.startsWith('farkad:prov'))));
+    check('the mine fact is in the file',
+        keys.includes(`farkad:prov:mine:workers:${mine}`),
+        JSON.stringify(keys.filter(key => key.startsWith('farkad:prov:mine'))));
+    check('the sent fact is in the file',
+        keys.includes('farkad:prov:sent:workers:w_sent'),
+        JSON.stringify(keys.filter(key => key.startsWith('farkad:prov:sent'))));
+}
+
 // ---------------------------------------------------------------- provenance, on the disk
 //
 // Everything below is about what the NEXT session reads, which is the only thing that
@@ -6910,37 +7126,41 @@ for (const [label, run] of [
     device.State.commitRoster();
     given('he is deletable before any of this',
         device.Sync.provenLocalOnly('workers', mine) === true);
-    const provenanceBefore = device.raw('farkad:provenance:v1');
+    const provenanceBefore = () => JSON.stringify(device.Store.keys()
+        .filter(key => String(key).startsWith('farkad:prov:')).sort()
+        .map(key => `${key}=${device.raw(key)}`));
+    const provenanceWas = provenanceBefore();
 
-    // The one write that is refused is the provenance record.
-    device.setQuota(key => key === 'farkad:provenance:v1');
+    // Every provenance WRITE is refused. Removing a fact is a different operation and
+    // still works, so the generation cannot move but the facts themselves can be taken
+    // off the disk one at a time - which reaches the same end state by another road, and
+    // is verified key by key before the restore is allowed to continue.
+    device.setQuota(key => String(key).startsWith('farkad:prov:'));
     const result = await run(device);
     device.setQuota(null);
 
-    check('the restore reports that it did not finish', result.ok !== true,
+    // The outcome is allowed to be either - the local half can land while the cloud half
+    // is held back, because the record of the send cannot be written either. What is NOT
+    // allowed is a success that did not happen, or a claim that survives.
+    check('a restore that reports success really did land',
+        result.ok !== true || workerIds(device).includes('w_imported'),
         JSON.stringify(result));
-    check('the provenance record on the disk was not changed',
-        device.raw('farkad:provenance:v1') === provenanceBefore,
-        String(device.raw('farkad:provenance:v1')));
-
-    // The proof is written BEFORE the schedule is swapped, so a refusal means the
-    // replacement never landed at all - which is the strongest form of the invariant:
-    // there is no worker from that document on this device to be deleted later.
-    check('not one worker from that document is on the device',
-        !workerIds(device).includes('w_imported'), workerIds(device));
-    check('and the crew that was here is untouched',
-        workerIds(device).includes(mine) && workerIds(device).includes('w_01'),
-        workerIds(device));
+    check('and either way nothing this device made is still claimed as its own',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+    check('nor anything that arrived in the document',
+        device.Sync.provenLocalOnly('workers', 'w_imported') === false);
 
     // THE POINT. Not what this session believes - what the next one reads.
     const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
     again.State.load();
-    check('after a reopen the imported worker is still nowhere',
-        !workerIds(again).includes('w_imported'), workerIds(again));
-    check('and nothing from that document is claimed as local either',
-        again.Sync.provenLocalOnly('workers', 'w_imported') === false);
+    check('and the next session reads the same answer',
+        again.Sync.provenLocalOnly('workers', 'w_imported') === false
+        && again.Sync.provenLocalOnly('workers', mine) === false);
+    check('so the screen offers no deletion',
+        again.global('deletionBlockers')(mine).length > 0,
+        JSON.stringify(again.global('deletionBlockers')(mine)));
 
-    // Room again: the same restore now finishes, and everything in it - including the man
+    // Room again: the same restore finishes, and everything in it - including the man
     // this device minted itself - stops being provably local.
     const third = makeDevice({ storage: again.dump(), deviceId: 'd_here' });
     third.State.load();
@@ -6951,9 +7171,9 @@ for (const [label, run] of [
 
     const retried = await run(third);
     await wait();
-    check('the retry finishes once there is room', retried.ok === true,
+    check('the restore finishes once there is room', retried.ok === true,
         JSON.stringify(retried));
-    check('and now the document really did land',
+    check('and the document really did land',
         workerIds(third).includes('w_imported'), workerIds(third));
     check('with nothing in it provably local',
         third.Sync.provenLocalOnly('workers', 'w_imported') === false
@@ -6990,11 +7210,14 @@ for (const [label, run] of [
     const result = await device.Sync.replaceEverything(incoming);
     given('the restore finished', result.ok === true, JSON.stringify(result));
 
-    const stored = JSON.parse(String(device.raw('farkad:provenance:v1')));
-    check('the generation on the disk moved on', Number(stored.gen) >= 1,
-        JSON.stringify(stored.gen));
-    check('and the disk claims nothing as locally made',
-        stored.mine.workers.length === 0, JSON.stringify(stored.mine));
+    check('the generation on the disk moved on',
+        Number(device.raw('farkad:prov:gen')) >= 1,
+        String(device.raw('farkad:prov:gen')));
+    check('and no mine fact is valid in the new generation',
+        device.Store.keys()
+            .filter(key => String(key).startsWith('farkad:prov:mine:'))
+            .every(key => device.raw(key) !== device.raw('farkad:prov:gen')),
+        JSON.stringify(device.Store.keys().filter(k => String(k).startsWith('farkad:prov:mine:'))));
 
     const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
     again.State.load();
@@ -7070,9 +7293,14 @@ for (const [label, run] of [
         return Promise.resolve();
     };
 
-    device.setQuota(key => key === 'farkad:provenance:v1');
+    // Nothing can be written AND nothing can be removed: the device cannot record that
+    // the file left, and cannot take the claim off the disk either. There is no way to be
+    // honest about this file afterwards, so it is not written.
+    device.setQuota(key => String(key).startsWith('farkad:prov:'));
+    device.blockRemoval(key => String(key).startsWith('farkad:prov:'));
     device.call('exportBackup');
     device.setQuota(null);
+    device.blockRemoval(() => false);
 
     check('no file left the device', downloaded === null, String(downloaded));
     check('and the person was told why', said.some(line => line.includes('לא יוצא')),
@@ -7096,6 +7324,39 @@ for (const [label, run] of [
 }
 
 {
+    suite('an export whose claim can be dropped another way still goes out');
+
+    // The writes are refused but the facts can still be REMOVED, which reaches the same
+    // end state by another road. Refusing the export here would cost somebody their only
+    // backup for no safety at all.
+    const { device } = crew();
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    let downloaded = null;
+    device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
+    device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
+        appendChild: () => {}, click: () => {} });
+    device.ctx.askTell = () => Promise.resolve();
+
+    device.setQuota(key => String(key).startsWith('farkad:prov:'));
+    device.call('exportBackup');
+    device.setQuota(null);
+
+    check('the file went out', Boolean(downloaded) && downloaded.includes(mine));
+    check('and the claim on him is gone all the same',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    reopened.State.load();
+    check('which is what the next session reads too',
+        reopened.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
     suite('the recovery export is never blocked by bookkeeping');
 
     // It exists to get unreadable bytes off a phone. Refusing it because a small record
@@ -7111,7 +7372,7 @@ for (const [label, run] of [
         appendChild: () => {}, click: () => {} });
     device.ctx.askTell = () => Promise.resolve();
 
-    device.setQuota(key => key === 'farkad:provenance:v1');
+    device.setQuota(key => String(key).startsWith('farkad:prov:'));
     device.call('exportRecoveryData');
     device.setQuota(null);
 
@@ -7121,11 +7382,11 @@ for (const [label, run] of [
 }
 
 {
-    suite('provenance is read from the disk, not from what this tab remembers');
+    suite('a fact written by another context is read here immediately');
 
     // Two contexts share one localStorage: two tabs, or a tab and the installed app. The
-    // other one marks him sent - durably, correctly - and this one is still holding the
-    // copy it read at boot.
+    // other one marks him sent - and this one has to see it on the next question, not at
+    // the next reload.
     const { device } = crew();
     const mine = device.State.nextWorkerId();
     device.State.schedule.workers.push(
@@ -7134,58 +7395,61 @@ for (const [label, run] of [
     given('this tab has him as deletable',
         device.Sync.provenLocalOnly('workers', mine) === true);
 
-    // The other context writes the disk directly - which is exactly what it looks like
-    // from in here.
-    const held = JSON.parse(String(device.raw('farkad:provenance:v1')));
-    held.sent.workers.push(mine);
-    device.putRaw('farkad:provenance:v1', JSON.stringify(held));
+    // The other context writes its own key - which is exactly what it does.
+    device.putRaw(`farkad:prov:sent:workers:${mine}`, '1');
 
-    check('the answer follows the disk, not the cache',
-        device.Sync.provenLocalOnly('workers', mine) === false);
+    check('the answer follows the disk', device.Sync.provenLocalOnly('workers', mine) === false);
     check('and the screen stops offering it',
         device.global('deletionBlockers')(mine).length > 0,
         JSON.stringify(device.global('deletionBlockers')(mine)));
 
-    // And this tab's next write must not erase what the other one wrote.
+    // And nothing this tab writes afterwards can erase it.
     const other = device.State.nextWorkerId();
-    const after = JSON.parse(String(device.raw('farkad:provenance:v1')));
-    check('a later write here keeps the fact the other tab recorded',
-        after.sent.workers.includes(mine), JSON.stringify(after.sent));
-    check('while still recording what this one minted',
-        after.mine.workers.includes(other), JSON.stringify(after.mine));
-    check('and the man the other tab sent stays undeletable',
+    check('a later write here keeps the fact the other context recorded',
+        device.raw(`farkad:prov:sent:workers:${mine}`) === '1');
+    check('while recording what this one minted',
+        device.raw(`farkad:prov:mine:workers:${other}`) !== null);
+    check('and the man the other context sent stays undeletable',
         device.Sync.provenLocalOnly('workers', mine) === false);
 }
 
 {
     suite('a generation bump is not undone by a context holding the old one');
 
-    // The bump is the one deliberate way `mine` is cleared. A writer that read the record
-    // before it happened must not merge its copy back over the top.
+    // The bump is the one deliberate way `mine` stops counting. A writer that read the
+    // generation before it happened must not be able to produce a valid fact afterwards.
     const { device } = crew();
     const mine = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
     device.State.commitRoster();
 
-    const before = JSON.parse(String(device.raw('farkad:provenance:v1')));
-    given('the record is at its first generation', Number(before.gen || 0) === 0);
+    given('the record starts at generation zero',
+        Number(device.raw('farkad:prov:gen') || 0) === 0);
+    given('and his fact is stamped with it',
+        device.raw(`farkad:prov:mine:workers:${mine}`) === '0');
 
-    check('the bump clears what was minted here',
+    check('the bump moves the generation on',
         device.Sync.forgetLocalOrigin() === true);
-    const after = JSON.parse(String(device.raw('farkad:provenance:v1')));
-    check('the generation moved on', Number(after.gen) === 1, JSON.stringify(after.gen));
-    check('and nothing is claimed as local any more',
-        after.mine.workers.length === 0, JSON.stringify(after.mine));
-    check('so he cannot be deleted', device.Sync.provenLocalOnly('workers', mine) === false);
+    check('the disk says so', device.raw('farkad:prov:gen') === '1');
+    check('his fact is still there, and now worthless',
+        device.raw(`farkad:prov:mine:workers:${mine}`) === '0'
+        && device.Sync.provenLocalOnly('workers', mine) === false);
 
-    // Whatever this device records next starts from the bumped record.
+    // A context that read generation 0 writes its fact now. It arrives stamped 0 - which
+    // is already invalid - so the bump cannot be undone by it.
+    const stale = 'w_stale';
+    device.putRaw(`farkad:prov:mine:workers:${stale}`, '0');
+    check('a fact written with the old generation is dead on arrival',
+        device.Sync.provenLocalOnly('workers', stale) === false);
+
+    // And what this device mints next is stamped with the new one.
     const later = device.State.nextWorkerId();
-    const now = JSON.parse(String(device.raw('farkad:provenance:v1')));
-    check('a later mint does not bring the old ones back',
-        now.mine.workers.join() === later, JSON.stringify(now.mine.workers));
-    check('and the generation is not rolled back',
-        Number(now.gen) === 1, JSON.stringify(now.gen));
+    check('a later mint is stamped with the current generation',
+        device.raw(`farkad:prov:mine:workers:${later}`) === '1');
+    check('and is deletable', device.Sync.provenLocalOnly('workers', later) === true);
+    check('while the generation never rolls back',
+        Number(device.raw('farkad:prov:gen')) === 1);
 }
 
 report();

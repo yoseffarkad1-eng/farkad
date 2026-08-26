@@ -113,6 +113,22 @@ const Recovery = {
             if (held !== null) out[key] = held;
         });
 
+        // Where every worker and site on this device came from - the facts that decide
+        // whether a man can be permanently deleted. Whoever opens this file has to be
+        // able to work that out too: without them the record says what happened but not
+        // what this device believed it was allowed to do, which is exactly the question
+        // asked when somebody has gone missing from a roster.
+        //
+        // Written one key per fact, so they are enumerated rather than named - see the
+        // provenance block in js/sync/sync.js.
+        Store.keys()
+            .filter(key => key === 'farkad:provenance:v1' || key.startsWith('farkad:prov:'))
+            .sort()
+            .forEach(key => {
+                const held = Store.durableGet(key);
+                if (held !== null) out[key] = held;
+            });
+
         return out;
     },
 

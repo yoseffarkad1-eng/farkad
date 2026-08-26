@@ -85,7 +85,42 @@ const LEGACY_UPGRADE_KEY = 'farkad:pendingReplace:v71';
 // left" - which is exactly what an upgraded v78 phone looks like, and its whole crew
 // would have been offered for deletion on the first offline open. The question has to be
 // the other way round: "was this id made here?", whose absence answers no.
-const PROVENANCE_KEY = 'farkad:provenance:v1';
+const PROVENANCE_KEY = 'farkad:provenance:v1';        // the v1 blob, read once and kept
+
+// One durable key per FACT, and that is the whole design.
+//
+// The blob above was a single record read, mutated and written back. Two contexts on one
+// phone - two tabs, or a tab and the installed app - share one localStorage, and the
+// sequence that loses data needs no exotic timing: A reads, B reads, A writes {X sent},
+// B writes {Y sent}. Both writes verify their own bytes perfectly, and the fact that X
+// left the device is gone. X is then offered for permanent deletion while he is sitting
+// on somebody else's phone. Re-reading before writing does not fix it; it only shortens
+// the window, because read and write are two operations and nothing makes them one.
+//
+// So no record is ever rewritten. Each fact is its own key:
+//
+//   farkad:prov:sent:<kind>:<id>   this id has left the device. Written once, never
+//                                  removed - which is what makes `sent` monotonic by
+//                                  construction rather than by discipline.
+//   farkad:prov:mine:<kind>:<id>   this id was minted here, and the value is the
+//                                  GENERATION it was minted in.
+//   farkad:prov:gen                the current generation, only ever increased.
+//   farkad:prov:uncertain          something happened that this device cannot account
+//                                  for. Never cleared except by a deliberate reset.
+//   farkad:prov:migrated           the v1 blob has been carried over, verified.
+//
+// Two contexts writing about two different workers write two different keys and cannot
+// collide. A generation reset - a restore, an export - moves one small key, and every
+// mine fact minted under an older generation is invalidated at a stroke without being
+// touched; an older context that writes a mine fact afterwards stamps it with the
+// generation it read, so the fact arrives already invalid. There is no interleaving in
+// which a safety fact is lost.
+const PROV_PREFIX = 'farkad:prov:';
+const PROV_GEN_KEY = PROV_PREFIX + 'gen';
+const PROV_UNCERTAIN_KEY = PROV_PREFIX + 'uncertain';
+const PROV_MIGRATED_KEY = PROV_PREFIX + 'migrated';
+const provSentKey = (kind, id) => `${PROV_PREFIX}sent:${kind}:${id}`;
+const provMineKey = (kind, id) => `${PROV_PREFIX}mine:${kind}:${id}`;
 
 const REPLACE_VERSION = 2;
 const SCHEDULE_KEY = 'scheduleData:v2';     // must match V2_KEY in state.js
@@ -717,84 +752,96 @@ const FarkadSync = {
     // entry outright, and the legacy array beside it is replaced by the new array at the
     // same moment. So an id that is still unsent is not merely "probably unused" -
     // deleting it removes the only writes that would ever have carried it.
-    // Read from the DISK on every question and every write.
+    // ------------------------------------------------------------ reading the facts
     //
-    // The version this replaced cached the record for the life of the session, and a
-    // phone runs more than one context: two tabs, or a tab and the installed app, share
-    // one localStorage. The other one marks a worker sent - durably, correctly - and this
-    // one is still holding the copy it read at boot, still offering to delete him. Worse,
-    // its next write is built from that stale copy and puts the disk BACK to it, erasing
-    // a fact somebody else had already written down.
-    //
-    // So there is no cache. The record is small, the reads are rare, and every decision
-    // and every write goes to the disk for the current state first. `sent` only ever
-    // grows; `mine` is cleared only by a generation bump, which is the one deliberate
-    // transition and is written as such, so a concurrent writer cannot re-add what the
-    // bump has just removed.
-    provenanceRecord() {
-        const blank = () => ({ workers: new Set(), places: new Set() });
-        const raw = Store.durableGet(PROVENANCE_KEY);
-        if (raw === null || raw === undefined || raw === '') {
-            // Nothing was ever written. Intact, and empty - so nothing is mine, and
-            // nothing can be deleted. This is the v78 upgrade, and it is not a fault.
-            return { gen: 0, mine: blank(), sent: blank(), damaged: false };
+    // Every question goes to the disk. There is no cache: the other context is writing to
+    // the same storage this second, and a cached answer is a stale one by the time it
+    // matters.
+
+    provGeneration() {
+        const raw = Store.durableGet(PROV_GEN_KEY);
+        const value = Number(raw);
+        return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    },
+
+    // Anything at all that this device cannot account for. Set once and left set: an
+    // export whose record could not be written, a v1 blob that will not parse, a
+    // migration that did not complete. Absence of evidence is never read as safety.
+    provenanceUncertain() {
+        if (Store.durableGet(PROV_UNCERTAIN_KEY) !== null) return true;
+
+        // A v1 blob that is present, unmigrated and unreadable. It may name people who
+        // HAVE left, and there is no way to tell from here.
+        const blob = Store.durableGet(PROVENANCE_KEY);
+        if (blob === null || Store.durableGet(PROV_MIGRATED_KEY) !== null) return false;
+        try {
+            const parsed = JSON.parse(blob);
+            return !isPlainObject(parsed) || !isPlainObject(parsed.mine) || !isPlainObject(parsed.sent);
+        } catch (error) {
+            return true;
         }
+    },
+
+    // Written once, and its failure is a fact in itself: if this cannot be stored, the
+    // device is refusing writes, and refusing every deletion is the only safe reading.
+    noteProvenanceUncertain() {
+        return Store.setVerified(PROV_UNCERTAIN_KEY, '1');
+    },
+
+    // The v1 blob, carried across into per-fact keys. Non-destructive: the blob is left
+    // exactly where it is, and the marker that says it has been carried over is written
+    // only once EVERY fact in it has been read back off the disk. A partial migration is
+    // therefore indistinguishable from none, and both fail closed.
+    migrateProvenance() {
+        if (Store.durableGet(PROV_MIGRATED_KEY) !== null) return true;
+        const blob = Store.durableGet(PROVENANCE_KEY);
+        if (blob === null || blob === '') return true;
 
         let parsed = null;
-        try { parsed = JSON.parse(raw); } catch (error) { parsed = null; }
+        try { parsed = JSON.parse(blob); } catch (error) { parsed = null; }
         const half = side => isPlainObject(side)
             && Array.isArray(side.workers) && Array.isArray(side.places);
         if (!isPlainObject(parsed) || !half(parsed.mine) || !half(parsed.sent)) {
-            // Damaged, and left exactly as it is. The bytes may name people who HAVE
-            // left, and writing an empty record over them would turn "no idea" into a
-            // confident lie. Nothing is deletable while it reads like this, so there is
-            // nothing the app needs from it badly enough to overwrite it.
-            return { gen: 0, mine: blank(), sent: blank(), damaged: true };
+            this.noteProvenanceUncertain();
+            return false;
         }
 
-        return {
-            gen: Number(parsed.gen) || 0,
-            mine: {
-                workers: new Set(parsed.mine.workers.map(String)),
-                places: new Set(parsed.mine.places.map(String))
-            },
-            sent: {
-                workers: new Set(parsed.sent.workers.map(String)),
-                places: new Set(parsed.sent.places.map(String))
-            },
-            damaged: false
-        };
+        const gen = Number(parsed.gen) || 0;
+        let whole = true;
+        ['workers', 'places'].forEach(kind => {
+            parsed.sent[kind].forEach(id => {
+                if (!Store.setVerified(provSentKey(kind, String(id)), '1')) whole = false;
+            });
+            parsed.mine[kind].forEach(id => {
+                if (!Store.setVerified(provMineKey(kind, String(id)), String(gen))) whole = false;
+            });
+        });
+        if (gen > this.provGeneration() && !Store.setVerified(PROV_GEN_KEY, String(gen))) {
+            whole = false;
+        }
+        if (!whole) {
+            this.noteProvenanceUncertain();
+            return false;
+        }
+        return Store.setVerified(PROV_MIGRATED_KEY, '1');
     },
 
-    // Read, change, write, read back - in that order, every time.
+    // An id born here, this second. The only door into a `mine` fact.
     //
-    // `change` is handed the record as the DISK has it this instant and returns the one
-    // it wants stored. Whatever it adds to `sent` is added to what is already there,
-    // because a device cannot un-send something; `mine` survives only while the
-    // generation is unchanged.
-    writeProvenance(change) {
-        const held = this.provenanceRecord();
-        if (held.damaged) return false;
-
-        const next = change(held);
-        if (!next) return true;
-
-        const list = set => [...set].sort();
-        const stored = Store.setVerified(PROVENANCE_KEY, JSON.stringify({
-            gen: next.gen,
-            mine: { workers: list(next.mine.workers), places: list(next.mine.places) },
-            sent: { workers: list(next.sent.workers), places: list(next.sent.places) }
-        }));
-        return Boolean(stored);
-    },
-
-    // An id born here, this second. The only door into `mine`.
+    // Stamped with the generation it was minted in, so a restore or an export that moves
+    // the generation on invalidates it without having to find it - and a context still
+    // holding an older generation writes a fact that is already invalid.
     markLocallyMinted(kind, id) {
         if (kind !== 'workers' && kind !== 'places') return false;
-        return this.writeProvenance(held => {
-            held.mine[kind].add(String(id));
-            return held;
-        });
+        this.migrateProvenance();
+
+        const gen = this.provGeneration();
+        // Written out even when it is zero, so the recovery file says which generation
+        // these facts belong to rather than leaving whoever opens it to infer it from an
+        // absent key. Best effort: reading treats absence as zero either way.
+        if (Store.durableGet(PROV_GEN_KEY) === null) Store.setVerified(PROV_GEN_KEY, String(gen));
+
+        return Store.setVerified(provMineKey(kind, String(id)), String(gen));
     },
 
     // Every id a payload carries out of the device, in whichever form it carries it: the
@@ -878,61 +925,86 @@ const FarkadSync = {
     // payload over. See the handover in flush(): a false here holds the write in the
     // queue rather than letting it out ahead of the proof that it went.
     //
-    // A DAMAGED record answers true, and that is deliberate rather than a hole: while it
-    // reads like that nothing at all is deletable, so there is nothing for a missing
-    // record of this send to endanger. Refusing here instead would stop a phone with one
-    // corrupt key from ever syncing again, which is a much larger failure than the one
-    // being guarded against.
+    // One key per id, so two contexts marking two different workers cannot overwrite one
+    // another - which was the whole of the lost update this replaced.
     markSent(payload) {
+        this.migrateProvenance();
         const found = this.idsLeaving(payload);
-        let done = true;
 
-        const stored = this.writeProvenance(held => {
-            let changed = false;
-            ['workers', 'places'].forEach(kind => {
-                found[kind].forEach(id => {
-                    if (!held.sent[kind].has(id)) { held.sent[kind].add(id); changed = true; }
-                });
+        let whole = true;
+        ['workers', 'places'].forEach(kind => {
+            found[kind].forEach(id => {
+                const key = provSentKey(kind, id);
+                // Already on the disk. Written once and never rewritten, so there is
+                // nothing to do and nothing that can go wrong.
+                if (Store.durableGet(key) !== null) return;
+                if (!Store.setVerified(key, '1')) whole = false;
             });
-            if (!changed) { done = false; return null; }
-            return held;
         });
-        if (!done) return true;                 // the disk already said all of it
-        if (stored) return true;
-        return this.provenanceRecord().damaged; // damaged blocks deletion, so sending is safe
+        if (whole) return true;
+
+        // The record of the send cannot be stored, so the send does not happen. The one
+        // exception is a device that is already uncertain: nothing is deletable there, so
+        // there is nothing for a missing record to endanger, and refusing to sync as well
+        // would be a much larger failure than the one being guarded against.
+        return this.provenanceUncertain();
     },
 
     // The generation bump: everything this device made stops being provably its own.
     //
     // A whole-document replacement puts a roster here that this device did not make, and
-    // an id that happens to survive the swap arrived inside somebody else's document. An
-    // export is the same event seen from the other end - the file can be opened on another
-    // phone, so nothing in it can still be "never left here" afterwards.
+    // an export is the same event seen from the other end - the file can be opened on
+    // another phone, so nothing in it can still be "never left here" afterwards.
     //
-    // The generation is what makes this safe against a second context: a writer holding
-    // an older generation has its `mine` dropped rather than merged back in.
+    // One key moves and every mine fact in the old generation is invalidated at once.
+    // Two contexts doing this at the same time both write the same next number and both
+    // get the effect they asked for; a context still holding the old number cannot undo
+    // it, because a mine fact stamped with an older generation is already invalid.
     forgetLocalOrigin(payload) {
-        const leaving = payload ? this.idsLeaving(payload) : null;
-        return this.writeProvenance(held => {
-            held.gen = (Number(held.gen) || 0) + 1;
-            held.mine = { workers: new Set(), places: new Set() };
-            if (leaving) {
-                ['workers', 'places'].forEach(kind => {
-                    leaving[kind].forEach(id => held.sent[kind].add(id));
-                });
-            }
-            return held;
+        this.migrateProvenance();
+
+        const next = this.provGeneration() + 1;
+        const moved = Store.setVerified(PROV_GEN_KEY, String(next));
+
+        // Belt, braces, and string. If the generation will not move, the uncertainty flag
+        // says the same thing in one byte; if that will not store either, the mine facts
+        // themselves are removed one at a time. Any one of the three closes the hole, and
+        // the caller is told whether one of them did.
+        let closed = moved;
+        if (!closed) closed = this.noteProvenanceUncertain();
+        if (!closed) closed = this.dropLocalOriginFacts();
+
+        if (payload) this.markSent(payload);
+        return closed;
+    },
+
+    // Every mine fact, removed. Only ever a fallback for a device that will not take a
+    // write - the generation is the ordinary mechanism.
+    dropLocalOriginFacts() {
+        const prefix = PROV_PREFIX + 'mine:';
+        let gone = true;
+        Store.keys().filter(key => key.startsWith(prefix)).forEach(key => {
+            Store.remove(key);
+            if (Store.durableGet(key) !== null) gone = false;
         });
+        return gone;
     },
 
     // The whole question, asked in one place: can this id be destroyed for good?
     provenLocalOnly(kind, id) {
         if (kind !== 'workers' && kind !== 'places') return false;
-        // The disk, now - not what this context read at boot, and not what it believes it
-        // wrote. Another tab may have marked him sent a second ago.
-        const held = this.provenanceRecord();
-        if (held.damaged) return false;
-        return held.mine[kind].has(String(id)) && !held.sent[kind].has(String(id));
+        // A migration that has not completed leaves facts on the disk in a form this does
+        // not read, so it is asked to finish first - and if it cannot, the device is
+        // uncertain and the answer below is no.
+        this.migrateProvenance();
+        if (this.provenanceUncertain()) return false;
+
+        const key = String(id);
+        if (Store.durableGet(provSentKey(kind, key)) !== null) return false;
+
+        const minted = Store.durableGet(provMineKey(kind, key));
+        if (minted === null) return false;
+        return Number(minted) === this.provGeneration();
     },
 
     // Which fields are waiting. Not used on screen - the count is what a person needs -
