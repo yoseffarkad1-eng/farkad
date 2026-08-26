@@ -984,7 +984,7 @@ const FarkadSync = {
     //
     // The whole arrays are still sent alongside, and that is deliberate: a phone that has
     // not updated reads them and sees a correct roster. They can stop being written once
-    // all three devices are past v77 - not before.
+    // all three devices are past v78 - not before.
     editRoster(schedule) {
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
