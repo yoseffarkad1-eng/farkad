@@ -91,6 +91,15 @@ function renderRangePicker() {
         bar.appendChild(el('label', null, 'עד'));
         bar.appendChild(dateInput('to'));
         wrap.appendChild(bar);
+
+        // Said out loud, because the numbers underneath look exactly like the ones under
+        // "תקופת החשבון" and they do not mean the same thing. The account periods run
+        // Friday to Thursday and are what the crew is actually paid on; a window typed by
+        // hand is a way of LOOKING at the same days - it settles nothing, it changes no
+        // account, and two hand-picked windows can count the same day twice.
+        wrap.appendChild(el('p', 'hint',
+            'טווח שנבחר ידנית - לצפייה בלבד. הוא לא סוגר חשבון ולא משנה את תקופות ' +
+            'החשבון הקבועות, וטווחים שנבחרים ידנית עלולים לחפוף.'));
     }
 
     const actions = el('div', 'range-actions');
@@ -128,8 +137,40 @@ function dateInput(key) {
     const input = document.createElement('input');
     input.type = 'date';
     input.value = REPORT_RANGE[key];
+    input.setAttribute('aria-label', key === 'from' ? 'מתאריך' : 'עד תאריך');
+
+    // The browser's own guard rail, and not the only one: on some phones a date can still
+    // be typed straight into the field, so the handler refuses an inverted range too.
+    if (key === 'from' && REPORT_RANGE.to) input.max = REPORT_RANGE.to;
+    if (key === 'to' && REPORT_RANGE.from) input.min = REPORT_RANGE.from;
+
     input.addEventListener('change', () => {
-        if (input.value) { REPORT_RANGE[key] = input.value; render(); }
+        if (!input.value) return;
+
+        const from = key === 'from' ? input.value : REPORT_RANGE.from;
+        const to = key === 'to' ? input.value : REPORT_RANGE.to;
+
+        // A period that ends before it starts contains nothing, and every report under it
+        // then reads "אין רישומים בטווח הזה" - which is the same sentence the app shows
+        // for a fortnight nobody worked. One of those is a typo and the other is a fact
+        // about the crew, and they must not look alike on payday.
+        //
+        // Refused rather than quietly swapped: a swap answers a question nobody asked,
+        // and the totals underneath it look like the answer to the one that was typed.
+        if (from > to) {
+            input.value = REPORT_RANGE[key];
+            if (typeof askTell === 'function') {
+                askTell({
+                    title: 'הטווח הפוך',
+                    message: 'תאריך ההתחלה מאוחר מתאריך הסיום, ולכן הוא לא שונה. ' +
+                        'בחר קודם את תאריך ההתחלה ואז את הסיום.'
+                });
+            }
+            return;
+        }
+
+        REPORT_RANGE[key] = input.value;
+        render();
     });
     return input;
 }
@@ -276,7 +317,7 @@ function renderPayrollTable() {
     const mixed = rows.filter(row => row.mixedRates);
     if (mixed.length > 0) {
         section.appendChild(el('p', 'hint',
-            `בתקופה הזו השתנה השכר היומי של ${mixed.map(row => row.name).join(', ')}. ` +
+            `בתקופה הזו השתנה השכר היומי של ${mixed.map(row => isolate(row.name)).join(', ')}. ` +
             'כל יום מחושב לפי השכר שהיה בזמן שנרשם, ולכן הסכום אינו מספר הימים כפול ' +
             'השכר שמופיע כאן.'));
     }
@@ -288,7 +329,7 @@ function renderPayrollTable() {
     if (unpriced.length > 0) {
         section.appendChild(el('p', 'hint hint-warn',
             `⚠️ ${unpriced.length} עובדים בלי שכר יומי, ולכן הסכום למטה חסר אותם: ` +
-            `${unpriced.map(row => row.name).join(', ')}. הוסף להם שכר במסך "עובדים ואתרים".`));
+            `${unpriced.map(row => isolate(row.name)).join(', ')}. הוסף להם שכר במסך "עובדים ואתרים".`));
     }
     return section;
 }
@@ -333,14 +374,20 @@ function renderInvoiceTable() {
     });
 
     const table = buildTable(headers, body);
+    // "ימי-עובד", not "סה"כ". The column adds up how many men were on that site on how
+    // many days - four men for three days is twelve - and a bare total under a column of
+    // dates gets read as "the site worked twelve days", which is the number a client
+    // would be billed on. They are different numbers and only one of them is here.
     table.appendChild(totalRow(
-        ['סה"כ'].concat(places.map(place => place.workerDays))
+        ['סה"כ ימי-עובד'].concat(places.map(place => place.workerDays))
             .concat([places.reduce((sum, place) => sum + place.workerDays, 0)]),
         headers
     ));
 
     section.appendChild(scrollWrap(table));
-    section.appendChild(el('p', 'hint', 'כל מספר הוא מספר העובדים שעבדו באתר באותו יום.'));
+    section.appendChild(el('p', 'hint',
+        'כל מספר הוא מספר העובדים שעבדו באתר באותו יום. השורה התחתונה היא ימי-עובד: ' +
+        'עובד אחד ביום אחד באתר. היא אינה מספר הימים שהאתר עבד.'));
     return section;
 }
 
@@ -442,7 +489,7 @@ function renderAdvanceAdd(worker) {
 
     box.appendChild(button('+ מקדמה', 'btn-secondary', async () => {
         const amount = await askText({
-            title: `מקדמה ל${worker.name}`,
+            title: `מקדמה ל${isolate(worker.name)}`,
             message: 'כמה קיבל על החשבון? הסכום יירד מהתשלום בסוף התקופה.',
             placeholder: '500',
             // The digit keyboard, the way every other amount field in the app gets it.
@@ -498,7 +545,7 @@ function workerStatementText(workerId) {
     const priced = Number(worker.dailyRate) > 0;
 
     const lines = [
-        `📄 ${worker.name} - ${formatFullDate(parseLocalDate(REPORT_RANGE.from))} עד ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`,
+        `📄 ${isolate(worker.name)} - ${formatFullDate(parseLocalDate(REPORT_RANGE.from))} עד ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`,
         ''
     ];
 

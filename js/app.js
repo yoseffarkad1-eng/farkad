@@ -88,6 +88,9 @@ function render() {
     renderCopyButton();
     renderAccountBanner();
     updateSyncNotice();
+    // Only if it is open. Everything on it - the backup age, the restore points, the
+    // cloud copies - is answered by state that changes while it is on screen.
+    if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not

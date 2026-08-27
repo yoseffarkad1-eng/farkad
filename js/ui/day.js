@@ -241,7 +241,7 @@ function bulkAssign(place) {
         assignPlace(State.schedule, date, worker.id, 'actual', place.id, RATE_NORMAL));
     if (!State.commitMany(changes)) return;
 
-    offerUndo(`${workers.length} עובדים נרשמו ב${place.name}`, () => {
+    offerUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`, () => {
         State.commitMany(workers.map(worker =>
             clearWorkerDay(State.schedule, date, worker.id, 'actual')));
     });
@@ -385,9 +385,9 @@ function renderDayWorkerList() {
             row.appendChild(button('✕', 'btn-icon', () => {
                 // One tap on one row out of twelve, on a phone, at night. It will be the
                 // wrong row sometimes, so it is undoable rather than guarded by a dialog.
-                editWithUndo(worker.id, `הרישום של ${worker.name} נמחק`,
+                editWithUndo(worker.id, `הרישום של ${isolate(worker.name)} נמחק`,
                     () => clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
-            }, `נקה את ${worker.name}`));
+            }, `נקה את ${isolate(worker.name)}`));
         }
 
         list.appendChild(row);
@@ -567,9 +567,9 @@ function renderAssignmentRow(place, workerId) {
     row.appendChild(renderRateControl(place.id, workerId, entry));
 
     row.appendChild(button('✕', 'btn-icon', () => {
-        editWithUndo(workerId, `${worker ? worker.name : ''} הוסר מ${place.name}`,
+        editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
             () => unassignPlace(State.schedule, State.date, workerId, State.layer, place.id));
-    }, `הסר את ${worker ? worker.name : ''} מ${place.name}`));
+    }, `הסר את ${isolate(worker ? worker.name : '')} מ${isolate(place.name)}`));
 
     return row;
 }
@@ -625,10 +625,10 @@ function renderUnassignedTray(unrecorded) {
     const chips = el('div', 'chips');
     unrecorded.forEach(worker => {
         const chip = el('div', 'chip');
-        chip.appendChild(button(worker.name, 'chip-main', () => openPlacePicker(worker.id), `שבץ את ${worker.name}`));
+        chip.appendChild(button(worker.name, 'chip-main', () => openPlacePicker(worker.id), `שבץ את ${isolate(worker.name)}`));
         chip.appendChild(button('נעדר', 'chip-side', () => {
             State.commit(markAbsent(State.schedule, State.date, worker.id, State.layer));
-        }, `סמן את ${worker.name} כנעדר`));
+        }, `סמן את ${isolate(worker.name)} כנעדר`));
         chips.appendChild(chip);
     });
     tray.appendChild(chips);
@@ -650,9 +650,9 @@ function renderAbsentTray() {
         const chip = el('div', 'chip chip-absent');
         chip.appendChild(el('span', 'chip-main', worker.name));
         chip.appendChild(button('✕', 'chip-side', () => {
-            editWithUndo(worker.id, `ההיעדרות של ${worker.name} בוטלה`,
+            editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`,
                 () => clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
-        }, `בטל היעדרות של ${worker.name}`));
+        }, `בטל היעדרות של ${isolate(worker.name)}`));
         chips.appendChild(chip);
     });
     tray.appendChild(chips);

@@ -2,6 +2,26 @@
 // assembling HTML strings, so a worker or site named with a bracket is text and never
 // markup - names are free text typed by a person and end up on screen everywhere.
 
+// Somebody's name, or a site's, dropped into a Hebrew sentence without being reordered
+// by it.
+//
+// The bidi algorithm decides direction per RUN, not per word, so a name that is not
+// plain Hebrew - "Ali", "מוחמד 2", a site called "B7", a phone number - is a
+// left-to-right run inside a right-to-left sentence, and it slides to wherever the
+// algorithm puts it. In practice the name jumps across the verb: "הרישום של Ali 2 נמחק"
+// renders with the number and the name on the wrong side of the words around them, and a
+// sentence about deleting one man reads as though it is about another. On the undo bar
+// that sentence is the only record of what just happened.
+//
+// U+2068 FIRST STRONG ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE is exactly what <bdi>
+// does, in a plain string - which is what these sentences are, all the way through
+// offerUndo, askConfirm and every aria-label. Invisible, ignored by screen readers, and
+// it travels through textContent unharmed.
+function isolate(name) {
+    const text = name === null || name === undefined ? '' : String(name);
+    return `\u2068${text}\u2069`;
+}
+
 function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;

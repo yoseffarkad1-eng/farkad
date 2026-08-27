@@ -33,52 +33,66 @@
         </div>
 
         <nav class="tabs" role="tablist">
-            <button type="button" class="tab" id="tab-day" role="tab" onclick="showView('day')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></svg></span><span>היום</span></button>
-            <button type="button" class="tab" id="tab-week" role="tab" onclick="showView('week')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18M9 10v11M15 10v11"/></svg></span><span>שבוע</span></button>
-            <button type="button" class="tab" id="tab-roster" role="tab" onclick="showView('roster')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.7-3.2 2.9-4.8 5.5-4.8s4.8 1.6 5.5 4.8"/><circle cx="17" cy="9.5" r="2.5"/><path d="M16.2 14.6c2.3.2 3.9 1.6 4.4 4.2"/></svg></span><span class="tab-long">עובדים ואתרים</span><span class="tab-short">צוות</span></button>
-            <button type="button" class="tab" id="tab-reports" role="tab" onclick="showView('reports')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><rect x="5.5" y="11" width="3.4" height="9" rx="1"/><rect x="10.3" y="6" width="3.4" height="14" rx="1"/><rect x="15.1" y="14" width="3.4" height="6" rx="1"/></svg></span><span>דוחות</span></button>
+            <button type="button" class="tab" id="tab-day" role="tab" aria-controls="dayView" onclick="showView('day')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></svg></span><span>היום</span></button>
+            <button type="button" class="tab" id="tab-week" role="tab" aria-controls="weekView" onclick="showView('week')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18M9 10v11M15 10v11"/></svg></span><span>שבוע</span></button>
+            <button type="button" class="tab" id="tab-roster" role="tab" aria-controls="rosterView" onclick="showView('roster')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.7-3.2 2.9-4.8 5.5-4.8s4.8 1.6 5.5 4.8"/><circle cx="17" cy="9.5" r="2.5"/><path d="M16.2 14.6c2.3.2 3.9 1.6 4.4 4.2"/></svg></span><span class="tab-long">עובדים ואתרים</span><span class="tab-short">צוות</span></button>
+            <button type="button" class="tab" id="tab-reports" role="tab" aria-controls="reportsView" onclick="showView('reports')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><rect x="5.5" y="11" width="3.4" height="9" rx="1"/><rect x="10.3" y="6" width="3.4" height="14" rx="1"/><rect x="15.1" y="14" width="3.4" height="6" rx="1"/></svg></span><span>דוחות</span></button>
         </nav>
 
         <div class="topbar-actions">
-            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
+            <!-- Everything that is not "who worked where". Not a fifth tab: four is what
+                 fits across a phone with a legible word under each icon, and the fifth
+                 would have been the one nobody presses on a screen everybody uses. -->
+            <button type="button" class="btn-icon" id="settingsBtn" onclick="openSettings()"
+                    aria-label="הגדרות וכלים" aria-haspopup="dialog">⋯</button>
         </div>
     </header>
 
-    <div class="banner banner-warn" id="storageBanner" style="display:none"></div>
+    <div class="banner banner-warn" id="storageBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- What the account still needs before it can be settled. Written on the screen
          rather than pushed as a notification: an installed web app on iOS cannot
          schedule a local one, and a reminder that needs a server behind it is a
          reminder that stops arriving the day the server does. -->
-    <div class="banner banner-warn" id="accountBanner" style="display:none"></div>
-    <div class="banner banner-warn" id="recoveryBanner" style="display:none"></div>
-    <div class="banner banner-warn" id="crashBanner" style="display:none"></div>
+    <div class="banner banner-warn" id="accountBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-warn" id="recoveryBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-warn" id="crashBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- The boot sentinel's banner, written out in full here and never built in code.
          Every other banner on this page is assembled by el() from js/ui/dom.js - and the
          one failure this banner exists for is the one where those scripts are the thing
          that did not arrive. So the words are in the document, the sentinel only reveals
          them, and the only DOM call in the whole path is getElementById. -->
-    <div class="banner banner-warn" id="bootBanner" style="display:none">
+    <div class="banner banner-warn" id="bootBanner" role="status" aria-live="polite" style="display:none">
         <span>⚠️ האפליקציה לא נטענה במלואה. מה שכבר נשמר במכשיר לא נפגע ולא נמחק - רענן את הדף. אם זה חוזר, נסה שוב כשיש חיבור טוב יותר.</span>
         <span class="crash-detail" id="bootBannerDetail"></span>
         <button type="button" class="btn-secondary" onclick="location.reload()">רענן</button>
     </div>
-    <div class="banner banner-warn" id="updateBanner" style="display:none"></div>
-    <div class="banner banner-warn" id="offlineBanner" style="display:none"></div>
-    <div class="banner banner-warn" id="migrationBanner" style="display:none"></div>
-    <div class="banner banner-info" id="installBanner" style="display:none"></div>
+    <div class="banner banner-warn" id="updateBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-warn" id="offlineBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-warn" id="migrationBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-info" id="installBanner" role="status" aria-live="polite" style="display:none"></div>
 
     <main>
-        <section id="dayView"></section>
-        <section id="weekView" style="display:none"></section>
+        <section id="dayView" role="tabpanel" aria-labelledby="tab-day"></section>
+        <section id="weekView" role="tabpanel" aria-labelledby="tab-week" style="display:none"></section>
 
-        <section id="rosterView" style="display:none">
+        <section id="rosterView" role="tabpanel" aria-labelledby="tab-roster" style="display:none">
             <div class="roster-columns">
                 <div class="roster-panel">
                     <div class="panel-head">
                         <h2>עובדים</h2>
                         <button type="button" class="btn-add" onclick="showAddWorkerModal()">+ הוסף עובד</button>
                         <button type="button" class="btn-secondary" onclick="openQuickStart()">📋 הדבק רשימה</button>
+                        <!-- The order every other screen reads in. A mode of its own, and
+                             not two arrows beside the pencil: each press used to be a
+                             write, and the mis-tap that reorders the crew was one
+                             thumb-width from the one that opens a man's details. -->
+                        <button type="button" class="btn-secondary" onclick="openReorder()">↕ סדר מחדש</button>
                     </div>
+                    <!-- What a move in the reorder list is announced through. It lives
+                         out here rather than inside the list, because the list is redrawn
+                         on every move and a live region that is destroyed and rebuilt is
+                         a live region that announces nothing. -->
+                    <div class="reorder-live" id="reorderLive" role="status" aria-live="polite"></div>
                     <div id="workerList"></div>
                 </div>
 
@@ -91,35 +105,12 @@
                 </div>
             </div>
 
-            <div class="roster-panel">
-                <div class="panel-head"><h2>גיבוי</h2></div>
-                <div class="backup-actions">
-                    <button type="button" class="btn-secondary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
-                    <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
-                    <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
-                    <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
-                </div>
-                <div class="restore-points" id="restorePoints"></div>
-                <!-- Copies kept in the cloud, one per day, which a deletion cannot
-                     follow: the rules there allow create and nothing else. Hidden
-                     entirely while sync is off. -->
-                <div class="restore-points" id="cloudRestorePoints"></div>
-                <p class="hint" id="backupAge"></p>
-                <!-- Which version is actually running, and the way to move off it. An
-                     installed app can sit on a cached build for a long time and there is
-                     nothing on any other screen that would say so. -->
-                <p class="hint app-version">
-                    <span id="appVersion"></span>
-                    <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button>
-                </p>
-                <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
-            </div>
         </section>
 
-        <section id="reportsView" style="display:none"></section>
+        <section id="reportsView" role="tabpanel" aria-labelledby="tab-reports" style="display:none"></section>
     </main>
 
-    <p class="storage-notice" id="storageNotice">הנתונים נשמרים במכשיר הזה בלבד.</p>
+    <p class="storage-notice" id="storageNotice" role="status" aria-live="polite">הנתונים נשמרים במכשיר הזה בלבד.</p>
 
     <!-- The side drawer of days: every working day of the account period, by full name,
          one tap away - and costing the main screen nothing until the ☰ is pressed. -->
@@ -138,7 +129,7 @@
 
     <!-- One step of undo for the taps that destroy something. Above the action bar, so
          a mis-tap and its remedy are in the same place. -->
-    <div class="undo-bar" id="undoBar" style="display:none"></div>
+    <div class="undo-bar" id="undoBar" role="status" aria-live="polite" style="display:none"></div>
 
     <div class="day-actions">
         <!-- The label is written by renderCopyButton, which names the day it will copy
@@ -149,13 +140,68 @@
 
 </div>
 
+<!-- הגדרות וכלים. Opened by the ⋯ in the header; the tab bar underneath it does not
+     move, so the way out is the same ✕ that closes every other sheet in this app. -->
+<div class="settings-panel" id="settingsPanel" role="dialog" aria-modal="true"
+     aria-labelledby="settingsTitle" aria-hidden="true">
+    <div class="settings-head">
+        <h2 id="settingsTitle" tabindex="-1">הגדרות וכלים</h2>
+        <button type="button" class="btn-icon" onclick="closeSettings()" aria-label="סגור">✕</button>
+    </div>
+    <div class="settings-body">
+        <section class="settings-group">
+            <h3>גיבוי</h3>
+            <div class="backup-actions">
+                <button type="button" class="btn-secondary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
+                <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
+                <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
+                <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
+            </div>
+            <div class="restore-points" id="restorePoints"></div>
+            <!-- Copies kept in the cloud, one per day, which a deletion cannot follow:
+                 the rules there allow create and nothing else. Hidden entirely while
+                 sync is off. -->
+            <div class="restore-points" id="cloudRestorePoints"></div>
+            <p class="hint" id="backupAge"></p>
+            <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
+        </section>
+
+        <section class="settings-group">
+            <h3>החשבון בענן</h3>
+            <!-- Ships hidden and is shown by the adapter once a project actually answers:
+                 with no Firebase behind it, a "connect to the cloud" button is a door
+                 onto nothing. It lived in the header, where it was the widest thing on a
+                 phone and pressed about twice a year. -->
+            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
+            <p class="hint">הסנכרון עובד ברקע. המצב שלו כתוב בתחתית כל מסך.</p>
+        </section>
+
+        <section class="settings-group">
+            <h3>הגרסה במכשיר</h3>
+            <!-- Which version is actually running, and the way to move off it. An
+                 installed app can sit on a cached build for a long time and there is
+                 nothing on any other screen that would say so. -->
+            <p class="hint app-version">
+                <span id="appVersion"></span>
+                <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button>
+            </p>
+        </section>
+    </div>
+</div>
+
 <div class="modal sheet" id="assignSheet">
     <div class="modal-content sheet-content">
         <div class="sheet-head">
             <h3 id="assignSheetTitle"></h3>
             <span class="sheet-meta" id="assignSheetMeta"></span>
         </div>
-        <div id="assignSheetBody"></div>
+        <!-- Three parts, and only the middle one scrolls: the name has to stay on screen
+             while the sites are chosen, and the way out has to stay under the thumb. With
+             one scrolling box, a site list longer than the screen carried both of them
+             away - so the answer to "who is this?" and the way to close the sheet were
+             both a scroll back up. -->
+        <div class="sheet-body" id="assignSheetBody"></div>
+        <div class="sheet-foot" id="assignSheetFoot"></div>
     </div>
 </div>
 
@@ -396,6 +442,7 @@
 <script src="js/ui/migration.js"></script>
 <script src="js/ui/offline.js"></script>
 <script src="js/ui/install.js"></script>
+<script src="js/ui/settings.js"></script>
 <script src="js/app.js"></script>
 
 <!-- Cloud sync, live against the farkad-schedule project - see docs/firebase-setup.md.

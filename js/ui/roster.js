@@ -22,10 +22,9 @@
 function renderRoster() {
     renderWorkerList();
     renderPlaceList();
-    renderBackupAge();
-    renderRestorePoints();
-    renderCloudRestorePoints();
-    renderAppVersion();
+    // The backup, the restore points and the version live on הגדרות וכלים now - see
+    // js/ui/settings.js. This screen is about people and sites; it was also about files,
+    // which on a phone meant scrolling past thirty men to reach the backup button.
 }
 
 function renderAppVersion() {
@@ -45,6 +44,11 @@ function renderWorkerList() {
 
     const active = State.schedule.workers.filter(worker => worker.active !== false);
     const archived = State.schedule.workers.filter(worker => worker.active === false);
+
+    if (reorderDraft) {
+        renderReorderList(container, active);
+        return;
+    }
 
     if (active.length === 0) {
         container.appendChild(emptyHint('כל העובדים בארכיון.'));
@@ -106,60 +110,306 @@ function workerRow(worker) {
     // Only for the men who are actually on the daily screen. An archived name has no
     // place in that order, and an arrow that lifted one out of the archive and back into
     // the crew would be a very quiet way to put somebody back to work.
-    if (worker.active !== false) {
-        const active = State.schedule.workers.filter(other => other.active !== false);
-        const index = active.indexOf(worker);
-        const up = button('▲', 'btn-icon', () => moveWorker(worker.id, -1), `העלה את ${worker.name}`);
-        up.disabled = index === 0;
-        const down = button('▼', 'btn-icon', () => moveWorker(worker.id, 1), `הורד את ${worker.name}`);
-        down.disabled = index === active.length - 1;
-        actions.appendChild(up);
-        actions.appendChild(down);
-    }
 
     // No archive icon here any more. Beside every name it was one mis-tap away from
     // taking a man off the daily screen mid-evening, and the pencil next to it opens
     // the screen where the same thing can be done deliberately, with his name on it.
-    actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${worker.name}`));
+    actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
     row.appendChild(actions);
 
     return row;
 }
 
-// The roster is one array and its order is the whole point, so a move is a whole-list
-// write rather than a per-field one - there is no field path that means "the order
-// changed". It goes through commitRoster, which sends the two roster fields and not the
-// whole document: reordering mid-evening must not overwrite the other two phones' work.
+// ---------------------------------------------------------------- reorder mode
 //
-// The move is measured in the ACTIVE list, not in the array.
+// Roster order is the order every other screen reads in: the day list, the sheet's run
+// through the names, the pay sheet. Getting the men who are recorded every single day to
+// the top is worth a screen of its own.
 //
-// The array holds archived men too, in among the others, and they are not on this screen:
-// [A, X-archived, B] moved A down one array slot and left the visible order reading A, B
-// exactly as before. The order really had changed - the write went out, the other phones
-// took it - and on screen nothing whatever happened, so the answer was to press it again,
-// and again. One press has to be one visible change or it is not a control.
+// The arrows beside every name were that screen, and they were wrong in two ways. Each
+// press was a WRITE - one commitRoster, one cloud round trip, one entry in the queue -
+// so moving somebody from the bottom of a crew of thirty to the top was twenty-nine
+// writes, twenty-eight of which described an order nobody wanted. And they were beside
+// the pencil, which meant the mis-tap that reorders the crew was one thumb-width from
+// the one that opens a man's details.
 //
-// Swapping the two ACTIVE men, rather than shuffling one slot, is also what keeps the
-// archived rows where they were: they are not part of this order and must not be dragged
-// around by it.
-function moveWorker(workerId, direction) {
-    const workers = State.schedule.workers;
-    const active = workers
-        .map((worker, index) => ({ worker, index }))
-        .filter(item => item.worker.active !== false);
+// So: a mode. A DRAFT order that lives in memory, moved by dragging or by four buttons
+// per row, saved once, and thrown away by cancelling. Nothing leaves this device until
+// the person says the order is right.
 
-    const at = active.findIndex(item => item.worker.id === workerId);
-    const to = at + direction;
-    if (at < 0 || to < 0 || to >= active.length) return;
+// The draft, and what the crew looked like when it was taken. Both null when the mode is
+// closed, which is also what every render below tests.
+let reorderDraft = null;
+let reorderBase = null;
+// Where a drag started, so the row being carried can be drawn differently.
+let reorderHeld = null;
 
-    const here = active[at].index;
-    const there = active[to].index;
-    const held = workers[here];
-    workers[here] = workers[there];
-    workers[there] = held;
+function activeWorkerIds() {
+    return State.schedule.workers
+        .filter(worker => worker.active !== false)
+        .map(worker => worker.id);
+}
 
-    State.commitRoster();
+function openReorder() {
+    reorderDraft = activeWorkerIds();
+    reorderBase = reorderDraft.join();
     render();
+    const list = document.getElementById('workerList');
+    const first = list && list.querySelector('.reorder-row button');
+    if (first && first.focus) first.focus();
+}
+
+function closeReorder() {
+    reorderDraft = null;
+    reorderBase = null;
+    reorderHeld = null;
+    const line = document.getElementById('reorderLive');
+    if (line) line.textContent = '';
+    render();
+}
+
+// The whole array, rebuilt from a draft order of the ACTIVE men.
+//
+// The archived rows keep the slots they already had: they are not part of this order and
+// must not be dragged around by it - an archived man who moved to the top of the array
+// would be back on the daily screen at the next merge, which is a very quiet way to put
+// somebody back to work.
+function reorderedWorkers(all, draftIds) {
+    const byId = new Map(all.map(worker => [worker.id, worker]));
+    const queue = draftIds.map(id => byId.get(id)).filter(Boolean);
+    let next = 0;
+    return all.map(worker =>
+        (worker.active === false ? worker : (queue[next++] || worker)));
+}
+
+// Has the crew itself changed while this draft was open?
+//
+// Another phone can add a man, archive one, or delete one mid-reorder, and the snapshot
+// in memory then describes a crew that no longer exists. Saving it would drop whoever
+// arrived and resurrect whoever left - silently, because an order is not something
+// anybody proof-reads. Compared as SETS: the order is exactly what is allowed to differ.
+function reorderDraftStale(all, draftIds) {
+    const now = all.filter(worker => worker.active !== false).map(worker => worker.id);
+    if (now.length !== draftIds.length) return true;
+    return now.slice().sort().join() !== draftIds.slice().sort().join();
+}
+
+// One move inside the draft. `to` is clamped rather than refused: a jump to the top from
+// the top is not an error, it is a no-op, and saying so would be noise.
+function moveDraftTo(workerId, to) {
+    if (!reorderDraft) return;
+    const at = reorderDraft.indexOf(workerId);
+    if (at < 0) return;
+    const target = Math.max(0, Math.min(reorderDraft.length - 1, to));
+    if (target === at) return;
+    reorderDraft.splice(at, 1);
+    reorderDraft.splice(target, 0, workerId);
+    renderWorkerList();
+    announceReorder(workerId);
+}
+
+// Said out loud, for the person who cannot see the list move. The alternative is a screen
+// where four buttons do something invisible.
+function announceReorder(workerId) {
+    const line = document.getElementById('reorderLive');
+    if (!line || !reorderDraft) return;
+    const worker = State.worker(workerId);
+    if (!worker) return;
+    line.textContent =
+        `${isolate(worker.name)} במקום ${reorderDraft.indexOf(workerId) + 1} מתוך ${reorderDraft.length}`;
+}
+
+function saveReorder() {
+    if (!reorderDraft) return;
+
+    // Read the world again at the last moment, not at the first.
+    if (reorderDraftStale(State.schedule.workers, reorderDraft)) {
+        const fresh = activeWorkerIds();
+        reorderDraft = fresh;
+        reorderBase = fresh.join();
+        render();
+        askTell({
+            title: 'רשימת העובדים השתנתה',
+            message: 'מכשיר אחר הוסיף או הוציא עובד בזמן הסידור, ולכן הסדר לא נשמר. ' +
+                'הרשימה שעל המסך מעודכנת - סדר אותה שוב ושמור.'
+        });
+        return;
+    }
+
+    if (reorderDraft.join() === reorderBase) {
+        closeReorder();
+        return;
+    }
+
+    State.schedule.workers = reorderedWorkers(State.schedule.workers, reorderDraft);
+
+    // ONE write for the whole order, whatever it took to arrive at it.
+    if (!State.commitRoster()) {
+        // The order is still on screen and still in the draft: nothing has been lost,
+        // and the storage notice already names the actual problem.
+        askTell({
+            title: 'הסדר לא נשמר',
+            message: 'לא הצלחנו לכתוב את הסדר החדש במכשיר. הסדר שעל המסך נשמר כאן ' +
+                'בינתיים - פנה מקום ונסה לשמור שוב.'
+        });
+        return;
+    }
+    closeReorder();
+}
+
+function renderReorderList(container, active) {
+    const byId = new Map(active.map(worker => [worker.id, worker]));
+
+    const head = el('div', 'reorder-head');
+    head.appendChild(el('p', 'hint',
+        'גרור בידית, או השתמש בכפתורים. שום דבר לא נשמר עד שלוחצים "שמור סדר".'));
+    container.appendChild(head);
+
+    const list = el('div', 'reorder-list');
+    list.setAttribute('role', 'list');
+
+    reorderDraft.forEach((id, index) => {
+        const worker = byId.get(id);
+        if (!worker) return;
+        list.appendChild(reorderRow(worker, index));
+    });
+    container.appendChild(list);
+
+    const foot = el('div', 'reorder-foot');
+    foot.appendChild(button('שמור סדר', 'btn-add', saveReorder));
+    foot.appendChild(button('ביטול', 'btn-secondary', closeReorder));
+    container.appendChild(foot);
+}
+
+function reorderRow(worker, index) {
+    const row = el('div', reorderHeld === worker.id ? 'reorder-row reorder-carrying' : 'reorder-row');
+    row.setAttribute('role', 'listitem');
+    row.dataset.workerId = worker.id;
+
+    const handle = el('span', 'reorder-handle', '⠿');
+    handle.setAttribute('aria-hidden', 'true');
+    row.appendChild(handle);
+
+    const name = el('div', 'reorder-name');
+    name.appendChild(el('strong', null, worker.name));
+    name.appendChild(el('span', 'reorder-place', `${index + 1} מתוך ${reorderDraft.length}`));
+    row.appendChild(name);
+
+    const moves = el('div', 'reorder-moves');
+    const jumpTop = button('⤒', 'btn-icon', () => moveDraftTo(worker.id, 0),
+        `העבר את ${isolate(worker.name)} לראש הרשימה`);
+    const up = button('▲', 'btn-icon', () => moveDraftTo(worker.id, index - 1),
+        `העלה את ${isolate(worker.name)} מקום אחד`);
+    const down = button('▼', 'btn-icon', () => moveDraftTo(worker.id, index + 1),
+        `הורד את ${isolate(worker.name)} מקום אחד`);
+    const jumpEnd = button('⤓', 'btn-icon', () => moveDraftTo(worker.id, reorderDraft.length - 1),
+        `העבר את ${isolate(worker.name)} לסוף הרשימה`);
+    jumpTop.disabled = index === 0;
+    up.disabled = index === 0;
+    down.disabled = index === reorderDraft.length - 1;
+    jumpEnd.disabled = index === reorderDraft.length - 1;
+    [jumpTop, up, down, jumpEnd].forEach(node => moves.appendChild(node));
+
+    // The exact position, for a crew of thirty where "up one" thirty times is not a
+    // control. Typed rather than dragged, and it is the same move underneath.
+    moves.appendChild(button('מקום…', 'btn-secondary reorder-exact', () => askExactPlace(worker.id),
+        `בחר מקום מדויק ל${isolate(worker.name)}`));
+    row.appendChild(moves);
+
+    row.addEventListener('pointerdown', event => startReorderDrag(event, worker.id));
+    return row;
+}
+
+function askExactPlace(workerId) {
+    const worker = State.worker(workerId);
+    if (!worker || !reorderDraft) return;
+    const total = reorderDraft.length;
+
+    askText({
+        title: `לאיזה מקום להעביר את ${isolate(worker.name)}?`,
+        message: `מספר בין 1 ל-${total}.`,
+        value: String(reorderDraft.indexOf(workerId) + 1)
+    }).then(answer => {
+        if (answer === null || answer === undefined || String(answer).trim() === '') return;
+        const wanted = Number(String(answer).trim());
+        if (!Number.isInteger(wanted) || wanted < 1 || wanted > total) {
+            askTell(`המקום חייב להיות מספר שלם בין 1 ל-${total}.`);
+            return;
+        }
+        moveDraftTo(workerId, wanted - 1);
+    });
+}
+
+// Dragging, by pointer, on a list that scrolls.
+//
+// Not HTML5 drag-and-drop: it does not fire on touch at all, which is every phone this
+// app runs on. Pointer events do, and they are the same three handlers for a mouse.
+let reorderDragging = null;
+
+function startReorderDrag(event, workerId) {
+    // Only from the handle, and only with the primary button. Anywhere else on the row is
+    // the buttons, and a drag that starts under a thumb resting on ▲ moves the wrong man.
+    if (!event.target.classList || !event.target.classList.contains('reorder-handle')) return;
+    if (event.button !== undefined && event.button !== 0) return;
+
+    event.preventDefault();
+    reorderHeld = workerId;
+    reorderDragging = { workerId, scrolling: null };
+    renderWorkerList();
+
+    document.addEventListener('pointermove', onReorderDrag);
+    document.addEventListener('pointerup', endReorderDrag);
+    document.addEventListener('pointercancel', endReorderDrag);
+}
+
+function onReorderDrag(event) {
+    if (!reorderDragging || !reorderDraft) return;
+    event.preventDefault();
+
+    // The row the pointer is over, decided by midpoints rather than by hit testing: the
+    // row being carried is under the finger, so hit testing always returns itself.
+    const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+    let target = reorderDraft.length - 1;
+    for (let i = 0; i < rows.length; i += 1) {
+        const box = rows[i].getBoundingClientRect();
+        if (event.clientY < box.top + box.height / 2) { target = i; break; }
+    }
+
+    if (reorderDraft.indexOf(reorderDragging.workerId) !== target) {
+        moveDraftTo(reorderDragging.workerId, target);
+    }
+
+    autoScrollWhileDragging(event.clientY);
+}
+
+// A list of thirty does not fit a phone, and a finger holding a row cannot also scroll.
+// So the page moves when the row is carried near either edge.
+function autoScrollWhileDragging(clientY) {
+    const edge = 90;
+    const height = window.innerHeight || 0;
+    let step = 0;
+    if (clientY < edge) step = -14;
+    else if (clientY > height - edge) step = 14;
+
+    if (step === 0) {
+        if (reorderDragging && reorderDragging.scrolling) {
+            clearInterval(reorderDragging.scrolling);
+            reorderDragging.scrolling = null;
+        }
+        return;
+    }
+    if (!reorderDragging || reorderDragging.scrolling) return;
+    reorderDragging.scrolling = setInterval(() => window.scrollBy(0, step), 16);
+}
+
+function endReorderDrag() {
+    if (reorderDragging && reorderDragging.scrolling) clearInterval(reorderDragging.scrolling);
+    reorderDragging = null;
+    reorderHeld = null;
+    document.removeEventListener('pointermove', onReorderDrag);
+    document.removeEventListener('pointerup', endReorderDrag);
+    document.removeEventListener('pointercancel', endReorderDrag);
+    renderWorkerList();
 }
 
 function hasDuplicateName(worker) {
@@ -197,12 +447,12 @@ function renderPlaceList() {
         row.appendChild(details);
 
         const actions = el('div', 'roster-actions');
-        actions.appendChild(button('✏️', 'btn-icon', () => renamePlaceById(place.id), `שנה שם ${place.name}`));
+        actions.appendChild(button('✏️', 'btn-icon', () => renamePlaceById(place.id), `שנה שם ${isolate(place.name)}`));
         actions.appendChild(button(
             place.active === false ? '↩️' : '🗄️',
             'btn-icon',
             () => togglePlaceActive(place.id),
-            place.active === false ? `החזר את ${place.name}` : `העבר את ${place.name} לארכיון`
+            place.active === false ? `החזר את ${isolate(place.name)}` : `העבר את ${isolate(place.name)} לארכיון`
         ));
         row.appendChild(actions);
 
@@ -319,7 +569,7 @@ async function saveWorkerForm() {
         const sharing = workersSharingPhone(State.schedule, typed.phone, editingWorkerId);
         if (sharing.length > 0 && askedAbout.phone !== normalisePhone(typed.phone)) {
             const names = sharing
-                .map(worker => worker.active === false ? `${worker.name} (בארכיון)` : worker.name)
+                .map(worker => worker.active === false ? `${isolate(worker.name)} (בארכיון)` : worker.name)
                 .join(', ');
             const go = await askConfirm({
                 title: `הטלפון הזה כבר רשום אצל ${names}`,
@@ -636,7 +886,7 @@ async function deleteWorker(workerId) {
     // that is one more tap in the same place as the last tap is not a decision, and the
     // difference between archiving and deleting is the whole of what this screen does.
     const typed = await askText({
-        title: `למחוק את ${worker.name}?`,
+        title: `למחוק את ${isolate(worker.name)}?`,
         message: 'המחיקה סופית. להמשיך - הקלד את שם העובד במדויק.',
         placeholder: worker.name,
         ok: 'מחק לצמיתות',
@@ -729,7 +979,7 @@ async function togglePlaceActive(placeId) {
 
     if (place.active !== false) {
         const yes = await askConfirm({
-            title: `להעביר את ${place.name} לארכיון?`,
+            title: `להעביר את ${isolate(place.name)} לארכיון?`,
             message: 'הימים שכבר נרשמו יישמרו, והאתר לא יופיע ברשימת האתרים.',
             ok: 'לארכיון'
         });

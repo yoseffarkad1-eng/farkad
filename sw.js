@@ -50,6 +50,7 @@ const SHELL = [
     './js/ui/migration.js',
     './js/ui/offline.js',
     './js/ui/install.js',
+    './js/ui/settings.js',
     './js/app.js',
     // The cloud adapter and its configuration. Same-origin, imported at runtime, and
     // therefore exactly as much a part of the offline shell as any other script here -

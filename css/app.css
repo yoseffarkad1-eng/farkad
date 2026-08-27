@@ -225,8 +225,26 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
 
 /* On a phone the tabs live where the thumb is: a fixed bar along the bottom. */
 @media (max-width: 700px) {
-    .topbar { position: static; border-bottom: none; padding: 12px 0 4px; margin-bottom: 10px; }
+    /* The header on a phone belongs to the day, not to the app's own name.
+       
+       The brand strip was 76px of "פרקד" above every screen - a logo nobody needs on a
+       tool they opened on purpose - and it pushed the date, which is the one thing that
+       decides where every tap lands, below the fold on a small phone. So the strip
+       shrinks to one line with the ⋯ on it, and the day's own header takes the top of the
+       screen and STAYS there while the crew scrolls underneath: the date is the context
+       for every row in the list, and a list you have scrolled is a list whose date you
+       can no longer see. */
+    .topbar {
+        position: static;
+        border-bottom: none;
+        padding: 6px 0 2px;
+        margin-bottom: 6px;
+        gap: 8px;
+    }
     .brand-sub { display: none; }
+    .brand-mark { width: 28px; height: 28px; font-size: 14px; border-radius: 8px; }
+    .brand strong { font-size: 16px; }
+    .topbar-actions { margin-inline-start: auto; }
     .tabs {
         position: fixed;
         bottom: 0;
@@ -300,6 +318,195 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .btn-icon:hover { background: var(--surface-2); color: var(--ink); }
 
+/* The one icon button that is a way IN rather than a way out, so it is written in the
+   text colour rather than the quiet one: --ink-3 on paper is 3.2:1, which is under the
+   4.5:1 a small glyph needs and exactly the sort of thing that reads fine to whoever
+   chose it and not at all on a site at four in the afternoon. */
+#settingsBtn { color: var(--ink-2); font-size: 20px; letter-spacing: 2px; }
+
+/* ---------------------------------------------------------------- a thumb's worth
+   
+   44px, on a phone, for everything a finger is meant to land on.
+   
+   Not a guideline followed on faith: the men using this are in work gloves on a site,
+   and the difference between a 30px chip and a 44px one is the difference between
+   marking somebody present and marking the man under him present. The numbers below
+   were measured on the real screens - the mode toggle was 26px, the day chips 30, the
+   week cells 28 - so this is a floor under what is already there rather than a redesign.
+   
+   Height AND width: a 20px-wide × button is as unhittable as a short one.
+   
+   The date picker behind the day title is deliberately exempt. It is aria-hidden, out of
+   the tab order and 5px across on purpose: it exists so the browser's own calendar can be
+   opened from the title button, and nothing is ever meant to hit it directly. */
+@media (max-width: 700px) {
+    button,
+    select,
+    input[type="text"],
+    input[type="date"]:not([aria-hidden="true"]),
+    input[type="number"],
+    input[type="email"],
+    input[type="password"] {
+        min-height: 44px;
+    }
+
+    /* Icon-only buttons are square: a ✕ with a 15px glyph in it is 20px wide otherwise. */
+    .btn-icon { min-width: 44px; }
+
+    /* The week grid is a table of tap targets, and the row height is set by the cell. */
+    .week-cell { height: 44px; }
+
+    /* These carry their own padding and would otherwise stay short inside a flex row. */
+    .chip-main, .chip-side, .tab, .step-btn, .btn-today, .btn-add { min-height: 44px; }
+}
+
+/* ---------------------------------------------------------------- reorder mode
+
+   A list you can carry a name up and down. The row is deliberately taller than a roster
+   row: it is dragged with a thumb, on a list that is also scrolling, and the four jump
+   buttons beside the handle each need a target of their own. */
+.reorder-head { padding: 0 2px 6px; }
+.reorder-live {
+    /* Announced, not drawn. The list itself is the visible answer. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.reorder-list { display: flex; flex-direction: column; gap: 6px; }
+
+.reorder-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    min-height: 56px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    /* The browser must not start its own text selection or pan gesture on a row that is
+       about to be dragged: on a phone that is the difference between carrying a name and
+       scrolling the page with a name stuck to the finger. */
+    touch-action: none;
+    user-select: none;
+}
+.reorder-carrying {
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px -12px rgba(0, 0, 0, .45);
+    opacity: .92;
+}
+
+.reorder-handle {
+    font-size: 22px;
+    line-height: 1;
+    color: var(--ink-3);
+    padding: 10px 6px;
+    cursor: grab;
+    touch-action: none;
+}
+
+.reorder-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.reorder-name strong { font-size: 15px; }
+.reorder-place { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.reorder-moves { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.reorder-moves .btn-icon { font-size: 15px; }
+.reorder-exact { font-size: 13px; padding: 6px 10px; }
+
+.reorder-foot {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line-soft);
+}
+.reorder-foot button { flex: 1; min-height: 48px; }
+
+@media (max-width: 700px) {
+    /* Two lines on a phone: the handle and the name, then the controls under them.
+       Side by side, six controls left the name about forty pixels - "דוד כהן" broke
+       across two lines and "1 מתוך 5" across three, on a screen whose entire job is to
+       show which name is where. */
+    .reorder-row { flex-wrap: wrap; row-gap: 4px; padding: 10px; }
+    .reorder-handle { order: 0; }
+    .reorder-name { order: 1; flex: 1 1 auto; }
+    .reorder-place { white-space: nowrap; }
+    .reorder-moves {
+        order: 2;
+        flex: 1 1 100%;
+        justify-content: space-between;
+        gap: 4px;
+    }
+    /* The row's own controls are the accessible alternative to dragging, so they keep
+       their size here whatever else shrinks. */
+    .reorder-moves .btn-icon { min-width: 44px; min-height: 44px; }
+    .reorder-exact { min-height: 44px; }
+}
+
+/* ---------------------------------------------------------------- settings sheet
+
+   Full screen on a phone, a wide card on a laptop. It covers the app rather than
+   pushing it aside: everything on it is a decision about the device, not about the day
+   underneath, and a half-visible list behind a settings panel is an invitation to tap
+   the wrong thing. */
+.settings-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: var(--paper);
+    display: none;
+    flex-direction: column;
+}
+.settings-panel.open { display: flex; }
+
+.settings-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+.settings-head h2 { font-size: 18px; }
+/* The heading takes focus when the sheet opens, so a screen reader says where it has
+   arrived before it starts naming controls. It is not a control itself. */
+.settings-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+.settings-body {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px;
+    padding-bottom: calc(24px + var(--safe-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+.settings-group { display: flex; flex-direction: column; gap: 10px; }
+.settings-group h3 { margin: 0; font-size: 16px; }
+
+@media (min-width: 701px) {
+    .settings-panel.open {
+        /* A band across the top, and the sheet centred inside it by its own margins.
+           left:50% + translateX was the obvious spelling and it is the wrong one in an
+           RTL document: the two halves add up instead of cancelling and the sheet lands
+           off the side of the screen, visible to a test and to nobody else. */
+        inset: 24px 0 auto 0;
+        margin-inline: auto;
+        width: min(560px, calc(100vw - 48px));
+        max-height: calc(100vh - 48px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: 0 24px 60px -30px rgba(0, 0, 0, .55);
+        overflow: hidden;
+    }
+}
+
 /* ---------------------------------------------------------------- banners */
 
 .banner {
@@ -340,6 +547,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding: 10px 12px;
     margin-bottom: 10px;
     box-shadow: var(--shadow);
+}
+
+/* On a phone the day's own header takes the top of the screen and STAYS there while the
+   crew scrolls underneath: the date is the context for every row in the list, and a list
+   you have scrolled is a list whose date you can no longer see.
+
+   After the rule above, not inside the phone block further up: `position: relative` there
+   is the same specificity and later in the file, so it won. Sticky that is silently
+   overridden looks exactly like sticky that works, until the page is scrolled. */
+@media (max-width: 700px) {
+    .day-header {
+        position: sticky;
+        top: 0;
+        z-index: 35;
+    }
 }
 
 .day-nav {
@@ -568,13 +790,30 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     z-index: 44;
     display: flex;
     gap: 8px;
+    align-items: center;
     justify-content: center;
+    /* One dock, one height. 64px is the smallest a two-button row can be and still give
+       both of them a 44px target with air around it, and stating it here means the dock
+       does not change height between a one-line label and a two-line one - a bar that
+       grows by twenty pixels when the date changes moves the whole list under it. */
+    min-height: 64px;
+    box-sizing: border-box;
     padding: 10px 16px;
-    padding-bottom: calc(10px + var(--safe-bottom));
+    /* The home indicator is cleared ONCE, by whichever bar is actually at the bottom.
+       This one sits on top of the tab bar, which already carries the inset in its own
+       padding - adding it again put a strip of dead space inside this dock and pushed
+       its buttons up off the thumb. When there is no tab bar under it (a wide screen,
+       printing) --nav-h is 0 and the whole inset lands here, where it belongs. */
+    padding-bottom: calc(10px + max(0px, var(--safe-bottom) - var(--nav-h, 0px)));
     background: var(--surface);
     border-top: 1px solid var(--line);
     box-shadow: 0 -4px 16px -10px rgba(0, 0, 0, .4);
 }
+
+/* Both buttons are the same size, and both are a thumb's worth. They used to inherit
+   whatever height their label happened to need, so the WhatsApp button - two words -
+   was taller than the copy button beside it. */
+.day-actions button { min-height: 44px; flex: 1 1 0; max-width: 260px; }
 
 /* The two ways a worker leaves the crew, at the foot of his own screen. Set apart by a
    rule so that neither is ever the button the thumb lands on by accident. */
@@ -969,8 +1208,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .week-table { min-width: 0; width: 100%; table-layout: fixed; border-radius: var(--radius-sm); overflow: hidden; }
     .week-table th, .week-table td { padding: 3px 1px; }
 
-    /* The corner label has no room; the column keeps its width for the names. */
-    .week-table .corner { font-size: 0; width: 78px; }
+    /* The corner label has no room; the column keeps its width for the names.
+       70px rather than 78: the seven day columns have to be 44px wide to be tapped at
+       all, and 70 + 7x44 is what fits across the narrowest phone this app runs on. The
+       names were already being ellipsized at 78. */
+    .week-table .corner { font-size: 0; width: 70px; }
+    .week-table td.week-cell, .week-table th:not(.corner) { min-width: 44px; }
     .week-table .name-cell {
         font-size: 12px;
         padding: 4px 6px;
@@ -1332,7 +1575,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .step-btn {
     font-size: 14px;
     padding: 8px 10px;
-    min-height: 40px;
+    /* 44, not 40. This is the button somebody reaches for having just realised they
+       marked the wrong man, and four pixels is the difference between undoing it and
+       tapping the one beside it. */
+    min-height: 44px;
     white-space: nowrap;
 }
 .step-btn:disabled { opacity: .35; }
@@ -1567,15 +1813,36 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sheet-content {
     max-width: 560px;
     border-radius: 22px 22px 0 0;
-    /* dvh for the same reason as the dialog above, and it SCROLLS: a sheet listing thirty
-       sites used to run off the bottom of the screen with no way to reach the end of it. */
+    /* dvh for the same reason as the dialog above. Three parts, and only the middle one
+       scrolls: a sheet listing thirty sites used to carry the name and the way out off
+       the top and bottom of the screen with it. */
     max-height: calc(100dvh - 48px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    padding: 0;
+}
+.sheet-body {
+    flex: 1 1 auto;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 16px 16px 20px;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 16px;
+}
+.sheet-foot {
+    flex: 0 0 auto;
+    padding: 0 16px 16px;
     /* After the shorthand, or it is overwritten by it. The sheet sits on the bottom edge
        of an iPhone, where the home indicator is drawn over anything in that strip. */
-    padding-bottom: calc(20px + var(--safe-bottom));
+    padding-bottom: calc(16px + var(--safe-bottom));
+    background: var(--surface);
+}
+.sheet-note {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--ink-3);
+    text-align: center;
 }
 @media (min-width: 641px) {
     .sheet { align-items: center; padding: 16px; }
@@ -1586,14 +1853,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    "where did THIS one work?" - answered thirty times an evening, and the only thing
    that changes between answers. The count sits under it, quiet. */
 .sheet-head {
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
     gap: 3px;
     margin-bottom: 14px;
-    padding-bottom: 10px;
+    padding: 16px 16px 10px;
     border-bottom: 1px solid var(--line-soft);
+    background: var(--surface);
 }
 .sheet-head h3 { margin: 0; font-size: 27px; line-height: 1.15; }
 .sheet-meta { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }

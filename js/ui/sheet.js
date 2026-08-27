@@ -108,12 +108,12 @@ function renderAssignSheet() {
             on ? 'sheet-place sheet-place-on' : 'sheet-place',
             () => {
                 if (on) {
-                    editWithUndo(worker.id, `${worker.name} הוסר מ${place.name}`, () =>
+                    editWithUndo(worker.id, `${isolate(worker.name)} הוסר מ${isolate(place.name)}`, () =>
                         unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id));
                     renderAssignSheet();
                     return;
                 }
-                editWithUndo(worker.id, `${worker.name} נרשם ב${place.name}`, () =>
+                editWithUndo(worker.id, `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () =>
                     assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
                 // A second site in a day is normal here, so picking one cannot assume the
                 // worker is finished - only move on when this is their first.
@@ -153,7 +153,7 @@ function renderAssignSheet() {
                     // Through undo because leaving 'שעות נוספות' discards the hours that
                     // were typed into it, and a mis-tap on this row is otherwise silent
                     // and permanent.
-                    editWithUndo(worker.id, `${worker.name}: ${RATE_LABELS[rate]}`, () =>
+                    editWithUndo(worker.id, `${isolate(worker.name)}: ${RATE_LABELS[rate]}`, () =>
                         setRate(State.schedule, State.date, worker.id, State.layer,
                             entry.placeId, rate, rate === RATE_EXTRA ? entryExtraHours(entry) : 0));
                     renderAssignSheet();
@@ -171,7 +171,7 @@ function renderAssignSheet() {
                 hours.placeholder = 'ש׳';
                 hours.setAttribute('aria-label', `שעות נוספות ב${place ? place.name : ''}`);
                 hours.addEventListener('change', () => {
-                    editWithUndo(worker.id, `${worker.name}: ${hours.value || 0} שעות נוספות`, () =>
+                    editWithUndo(worker.id, `${isolate(worker.name)}: ${hours.value || 0} שעות נוספות`, () =>
                         setRate(State.schedule, State.date, worker.id, State.layer,
                             entry.placeId, RATE_EXTRA, hours.value));
                     renderAssignSheet();
@@ -184,21 +184,29 @@ function renderAssignSheet() {
         body.appendChild(rates);
     }
 
+    const foot = document.getElementById('assignSheetFoot');
+    clear(foot);
+
     const actions = el('div', 'sheet-actions');
     actions.appendChild(button(absent ? '✓ נעדר' : 'נעדר', absent ? 'chip-on' : 'btn-secondary', () => {
         if (absent) {
-            editWithUndo(worker.id, `ההיעדרות של ${worker.name} בוטלה`, () =>
+            editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`, () =>
                 clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
             renderAssignSheet();
             return;
         }
-        editWithUndo(worker.id, `${worker.name} נרשם כנעדר`, () =>
+        editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`, () =>
             markAbsent(State.schedule, State.date, worker.id, State.layer));
         advanceSheet();
     }));
     actions.appendChild(button('דלג ›', 'btn-secondary', advanceSheet));
-    actions.appendChild(button('סיום', 'btn-secondary', closeAssignSheet));
-    body.appendChild(actions);
+    // "סגור", not "סיום" and certainly not "שמור". Every tap on this sheet has already
+    // been written and sent by the time the finger leaves the glass - there is nothing
+    // here to save, and a button that says there is teaches somebody that closing without
+    // pressing it loses the evening. It does not, and they should not have to wonder.
+    actions.appendChild(button('סגור', 'btn-secondary', closeAssignSheet));
+    foot.appendChild(actions);
+    foot.appendChild(el('p', 'sheet-note', 'כל בחירה נשמרת מיד. אין מה לשמור כאן.'));
 }
 
 // ---------------------------------------------------------------- pickers
@@ -236,7 +244,7 @@ function renderWorkerPicker() {
     const unrecorded = new Set(State.unrecorded().map(w => w.id));
 
     document.getElementById('workerPickerTitle').textContent =
-        `הוסף עובדים ל${place.name} · ${here.size} רשומים`;
+        `הוסף עובדים ל${isolate(place.name)} · ${here.size} רשומים`;
 
     const container = document.getElementById('workerPickerList');
     container.innerHTML = '';
@@ -266,8 +274,8 @@ function renderWorkerPicker() {
 
         row.appendChild(button(inHere ? '✓ נמצא' : '+ הוסף', inHere ? 'btn-on' : 'btn-add', () => {
             const label = inHere
-                ? `${worker.name} הוסר מ${place.name}`
-                : `${worker.name} נוסף ל${place.name}`;
+                ? `${isolate(worker.name)} הוסר מ${isolate(place.name)}`
+                : `${isolate(worker.name)} נוסף ל${isolate(place.name)}`;
             editWithUndo(worker.id, label, () => (inHere
                 ? unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id)
                 : assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL)));
@@ -286,13 +294,13 @@ async function clearWorkerPicker() {
 
     const here = workersAtPlace(State.schedule, State.date, place.id, State.layer);
     if (here.length === 0) {
-        askTell(`אף אחד לא רשום ב${place.name} ביום הזה.`);
+        askTell(`אף אחד לא רשום ב${isolate(place.name)} ביום הזה.`);
         return;
     }
 
     const ok = await askConfirm({
-        title: `לרוקן את ${place.name}?`,
-        message: `${here.length} עובדים יוסרו מ${place.name} ביום הזה. שאר הימים לא ייגעו.`,
+        title: `לרוקן את ${isolate(place.name)}?`,
+        message: `${here.length} עובדים יוסרו מ${isolate(place.name)} ביום הזה. שאר הימים לא ייגעו.`,
         ok: 'רוקן'
     });
     if (!ok) return;
@@ -307,7 +315,7 @@ async function clearWorkerPicker() {
     if (!State.commitMany(here.map(workerId =>
         unassignPlace(State.schedule, date, workerId, layer, place.id)))) return;
 
-    offerUndo(`${here.length} עובדים הוסרו מ${place.name}`, () => {
+    offerUndo(`${here.length} עובדים הוסרו מ${isolate(place.name)}`, () => {
         State.commitMany(previous.map(item =>
             setWorkerDay(State.schedule, date, item.workerId, layer, item.record)));
     });
@@ -325,7 +333,7 @@ function openPlacePicker(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
 
-    document.getElementById('placePickerTitle').textContent = `לאן הלך ${worker.name}?`;
+    document.getElementById('placePickerTitle').textContent = `לאן הלך ${isolate(worker.name)}?`;
 
     const container = document.getElementById('placePickerList');
     container.innerHTML = '';
@@ -336,7 +344,7 @@ function openPlacePicker(workerId) {
     State.activePlaces().forEach(place => {
         const inHere = current.has(place.id);
         container.appendChild(button(
-            inHere ? `✓ ${place.name}` : place.name,
+            inHere ? `✓ ${isolate(place.name)}` : place.name,
             inHere ? 'place-btn place-on' : 'place-btn',
             () => {
                 const change = inHere

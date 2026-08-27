@@ -942,7 +942,7 @@ async function seedRoster(page) {
     assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
     State.save();
   });
-  await page.click('#tab-roster');
+  await page.click('#settingsBtn');
   await page.waitForTimeout(300);
 
   const download = await Promise.all([
@@ -1864,6 +1864,88 @@ async function seedRoster(page) {
     String(shown).includes('לא נפגע'), String(shown));
   check('with the actual failure named on it',
     String(shown).includes('boom during the first draw'), String(shown));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- what the report is, and is not
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-10', 'w_02', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+  });
+  await page.click('#tab-reports');
+  await page.waitForTimeout(400);
+
+  // A period that ends before it starts contains nothing, and every report under it then
+  // says "אין רישומים בטווח הזה" - the same sentence as a fortnight nobody worked. One is
+  // a typo and the other is a fact about the crew, and on payday they must not look alike.
+  await page.evaluate(() => {
+    REPORT_PRESET = 'custom';
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const inverted = await page.evaluate(async () => {
+    const inputs = [...document.querySelectorAll('#reportsView .range-bar input')];
+    const from = inputs[0];
+    from.value = '2026-09-30';
+    from.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(done => setTimeout(done, 200));
+    return {
+      kept: REPORT_RANGE.from,
+      field: from.value,
+      max: from.getAttribute('max'),
+      said: (document.getElementById('askTitle') || {}).textContent || ''
+    };
+  });
+  check('a start date after the end date is refused',
+    inverted.kept === '2026-08-01', JSON.stringify(inverted));
+  check('the field goes back to what it was rather than lying',
+    inverted.field === '2026-08-01', JSON.stringify(inverted));
+  check('the browser is told the bound as well',
+    inverted.max === '2026-08-31', JSON.stringify(inverted));
+  check('and the person is told why nothing happened',
+    inverted.said.includes('הפוך'), JSON.stringify(inverted));
+
+  await page.click('#askOk').catch(() => {});
+  await page.waitForTimeout(200);
+
+  // A hand-picked window is a way of LOOKING at days, not a period the crew is paid on.
+  check('a hand-picked range says it settles nothing',
+    (await page.textContent('#reportsView')).includes('לצפייה בלבד'),
+    (await page.textContent('#reportsView')).slice(0, 60));
+
+  // The site table's totals are worker-days: four men for three days is twelve, which is
+  // not "the site worked twelve days" - and a bare סה"כ under a column of dates is read
+  // as exactly that, by the person about to bill somebody for it.
+  const invoice = await page.evaluate(() => {
+    const table = document.querySelector('#reportsView .report-invoice table');
+    const footer = table.querySelector('tfoot');
+    return {
+      footer: footer ? footer.textContent : '',
+      body: document.querySelector('#reportsView .report-invoice').textContent
+    };
+  });
+  check('the site totals say what they are counting',
+    invoice.footer.includes('ימי-עובד'), invoice.footer.slice(0, 60));
+  check('and it is spelled out under the table',
+    invoice.body.includes('עובד אחד ביום אחד באתר'), '');
+
+  // The client's page names sites and dates. It must not name the crew: who was there is
+  // the employer's business, and this is the page that gets handed over.
+  const names = await page.evaluate(() => {
+    const text = document.querySelector('#reportsView .report-invoice').textContent;
+    return State.schedule.workers.filter(worker => text.includes(worker.name))
+      .map(worker => worker.name);
+  });
+  check('and nobody\'s name is on the site summary', names.length === 0, names.join(', '));
 
   await page.context().close();
 }
@@ -3031,7 +3113,7 @@ async function seedRoster(page) {
     State.schedule.days = {};
     State.save(); render();
   });
-  await page.click('#tab-roster');
+  await page.click('#settingsBtn');
   await page.waitForTimeout(300);
   check('the restore point is offered where the backups are',
     (await page.locator('#restorePoints button').count()) === 1);
@@ -3061,7 +3143,7 @@ async function seedRoster(page) {
     State.schedule.workers = [];
     State.save(); render();
   });
-  await page.click('#tab-roster');
+  await page.click('#settingsBtn');
   await page.waitForTimeout(300);
   await page.locator('#restorePoints button').first().click();
   await page.waitForTimeout(300);
@@ -3938,9 +4020,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await new Promise(done => setTimeout(done, 350));
 
     const content = document.querySelector('#assignSheet .sheet-content');
-    const overflowing = content.scrollHeight > content.clientHeight + 1;
+    // The BODY is what scrolls: the name above it and the way out below it are pinned.
+    const scroller = document.querySelector('#assignSheet .sheet-body');
+    const overflowing = scroller.scrollHeight > scroller.clientHeight + 1;
     // Scrolled inside the sheet itself, which is what a thumb on the sheet does.
-    content.scrollTop = content.scrollHeight;
+    scroller.scrollTop = scroller.scrollHeight;
     await new Promise(done => setTimeout(done, 250));
 
     const buttons = [...content.querySelectorAll('button')].filter(b => b.offsetParent !== null);
@@ -3952,7 +4036,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     // condition the sheet is actually used under.
     document.documentElement.style.setProperty('--safe-bottom', '34px');
     await new Promise(done => setTimeout(done, 250));
-    content.scrollTop = content.scrollHeight;
+    scroller.scrollTop = scroller.scrollHeight;
     await new Promise(done => setTimeout(done, 200));
     const inset = last.getBoundingClientRect();
     const insetHit = document.elementFromPoint(
@@ -4102,6 +4186,457 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     inset.actionClearsIndicator === true, JSON.stringify(inset));
   check(`${label}: and can still be pressed`,
     inset.actionReachable === true, JSON.stringify(inset));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the sheet keeps its name and its way out
+{
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await page.evaluate(() => {
+    State.schedule.workers = [{ id: 'w_01', name: 'דוד כהן', active: true, dailyRate: 400, hourlyRate: 50 }];
+    // A yard with thirty sites is a real customer, and it is the case where one
+    // scrolling box carried the name off the top and the way out off the bottom.
+    State.schedule.places = Array.from({ length: 30 }, (unused, i) => ({
+      id: `p_${i + 1}`, name: `אתר ${i + 1}`, active: true
+    }));
+    State.date = '2026-08-12';
+    State.save();
+    render();
+    openAssignSheet('w_01');
+  });
+  await page.waitForTimeout(400);
+
+  const layout = await page.evaluate(async () => {
+    const body = document.querySelector('.sheet-body');
+    const read = () => ({
+      head: Math.round(document.querySelector('.sheet-head').getBoundingClientRect().top),
+      foot: Math.round(document.querySelector('.sheet-foot').getBoundingClientRect().bottom),
+      name: document.querySelector('.sheet-head h3').textContent
+    });
+    const before = read();
+    body.scrollTop = 4000;
+    await new Promise(done => setTimeout(done, 250));
+    return { before, after: read(), scrolled: body.scrollTop, height: body.scrollHeight };
+  });
+
+  check('the site list is long enough to have to scroll',
+    layout.scrolled > 0, JSON.stringify(layout));
+  check('the name stays where it was while it scrolls',
+    layout.after.head === layout.before.head, JSON.stringify(layout));
+  check('and so does the way out',
+    layout.after.foot === layout.before.foot, JSON.stringify(layout));
+  check('the name is still on screen at the bottom of the list',
+    layout.after.name.includes('דוד'), JSON.stringify(layout.after));
+
+  // Nothing on this sheet is saved by a button: every tap is already written and sent by
+  // the time the finger leaves the glass.
+  const foot = await page.textContent('.sheet-foot');
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('.sheet-foot button')].map(node => node.textContent.trim()));
+  check('the sheet does not pretend anything needs saving',
+    labels.includes('סגור') && !labels.some(label => label.includes('שמור')),
+    JSON.stringify(labels));
+  check('and says so plainly', foot.includes('נשמרת מיד'), foot.slice(0, 80));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- putting the crew in order
+{
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await page.evaluate(() => {
+    State.schedule.workers = ['א', 'ב', 'ג', 'ד', 'ה'].map((name, i) => ({
+      id: `w_0${i + 1}`, name, active: true, dailyRate: 400, hourlyRate: 0
+    }));
+    State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    State.save();
+    showView('roster');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const order = () => page.evaluate(() =>
+    State.schedule.workers.map(worker => worker.id).join());
+  const drafted = () => page.evaluate(() =>
+    [...document.querySelectorAll('#workerList .reorder-row')].map(row => row.dataset.workerId).join());
+
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(300);
+  check('the reorder mode lists the crew',
+    (await drafted()) === 'w_01,w_02,w_03,w_04,w_05', await drafted());
+
+  // The last man to the top, by the jump button.
+  await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.waitForTimeout(250);
+  check('a jump to the top moves him in the draft',
+    (await drafted()) === 'w_05,w_01,w_02,w_03,w_04', await drafted());
+  check('and nothing has been written yet',
+    (await order()) === 'w_01,w_02,w_03,w_04,w_05', await order());
+
+  // An exact position, for a crew too long to walk one step at a time.
+  await page.locator('#workerList .reorder-row').first().locator('.reorder-exact').click();
+  await page.waitForTimeout(250);
+  await page.fill('#askInput', '3');
+  await page.click('#askOk');
+  await page.waitForTimeout(300);
+  check('an exact place moves him there',
+    (await drafted()) === 'w_01,w_02,w_05,w_03,w_04', await drafted());
+
+  // Dragging, by the handle, with a pointer.
+  const dragged = await page.evaluate(async () => {
+    const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+    const handle = rows[rows.length - 1].querySelector('.reorder-handle');
+    const from = handle.getBoundingClientRect();
+    const to = rows[0].getBoundingClientRect();
+    const fire = (type, y) => document.dispatchEvent(new PointerEvent(type, {
+      clientX: from.left + 5, clientY: y, bubbles: true, cancelable: true
+    }));
+    handle.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: from.left + 5, clientY: from.top + 5, bubbles: true, cancelable: true, button: 0
+    }));
+    await new Promise(done => setTimeout(done, 50));
+    fire('pointermove', to.top + 4);
+    await new Promise(done => setTimeout(done, 50));
+    fire('pointerup', to.top + 4);
+    await new Promise(done => setTimeout(done, 100));
+    return [...document.querySelectorAll('#workerList .reorder-row')]
+      .map(row => row.dataset.workerId).join();
+  });
+  check('a row can be carried to the top with a finger',
+    dragged.startsWith('w_04'), dragged);
+  check('and that is still only a draft',
+    (await order()) === 'w_01,w_02,w_03,w_04,w_05', await order());
+
+  // What a screen reader is told, since the list moving is no use to somebody who
+  // cannot see it move.
+  check('every move is announced',
+    (await page.textContent('#reorderLive')).includes('במקום'),
+    await page.textContent('#reorderLive'));
+
+  const wanted = await drafted();
+  await page.getByRole('button', { name: 'שמור סדר' }).click();
+  await page.waitForTimeout(400);
+  check('saving writes the drafted order', (await order()) === wanted,
+    `${await order()} vs ${wanted}`);
+  check('and leaves the mode',
+    (await page.locator('#workerList .reorder-row').count()) === 0);
+
+  // Cancelling is not a quiet save.
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(250);
+  await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.waitForTimeout(200);
+  await page.locator('.reorder-foot').getByRole('button', { name: 'ביטול' }).click();
+  await page.waitForTimeout(300);
+  check('cancelling leaves the order alone', (await order()) === wanted, await order());
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the day owns the top of the phone
+{
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await page.evaluate(() => {
+    State.schedule.workers = Array.from({ length: 20 }, (unused, i) => ({
+      id: `w_${String(i + 1).padStart(2, '0')}`,
+      name: `עובד ${i + 1}`, active: true, dailyRate: 400, hourlyRate: 0
+    }));
+    State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    State.date = '2026-08-12';
+    State.save();
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const top = await page.evaluate(async () => {
+    const header = document.querySelector('.day-header');
+    const before = Math.round(header.getBoundingClientRect().top);
+    const brandBefore = Math.round(document.querySelector('.topbar').getBoundingClientRect().height);
+    window.scrollTo(0, 600);
+    await new Promise(done => setTimeout(done, 300));
+    const after = Math.round(header.getBoundingClientRect().top);
+    const dateVisible = header.textContent.includes('12/08/2026');
+    window.scrollTo(0, 0);
+    return { before, after, brandBefore, dateVisible };
+  });
+
+  check('the brand strip is one line, not a banner',
+    top.brandBefore <= 56, String(top.brandBefore));
+  check('the day header stays at the top while the crew scrolls under it',
+    top.after >= 0 && top.after <= 1, JSON.stringify(top));
+  check('so the date is still on screen at the bottom of a long list',
+    top.dateVisible === true, JSON.stringify(top));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- הגדרות וכלים, behind one ⋯
+{
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await seedRoster(page);
+
+  check('there are still four tabs, not five',
+    (await page.locator('.tabs .tab').count()) === 4);
+  check('and the ⋯ is in the header instead',
+    await page.locator('#settingsBtn').isVisible());
+
+  // The roster screen is about people and sites again. The backup was at the foot of it,
+  // which on a phone meant scrolling past thirty men to reach a file dialog.
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+  check('the backup is off the roster screen',
+    !(await page.textContent('#rosterView')).includes('שמור קובץ גיבוי'),
+    (await page.textContent('#rosterView')).slice(-60));
+
+  await page.click('#settingsBtn');
+  await page.waitForTimeout(300);
+  const opened = await page.evaluate(() => {
+    const panel = document.getElementById('settingsPanel');
+    return {
+      shown: panel.classList.contains('open'),
+      modal: panel.getAttribute('aria-modal'),
+      hidden: panel.getAttribute('aria-hidden'),
+      focused: document.activeElement && document.activeElement.id,
+      text: panel.textContent
+    };
+  });
+  check('⋯ opens the settings sheet', opened.shown === true, JSON.stringify(opened.shown));
+  check('as a dialog, not a page behind a page',
+    opened.modal === 'true' && opened.hidden === 'false', JSON.stringify(opened));
+  check('focus lands on the heading, so a reader says where it is',
+    opened.focused === 'settingsTitle', String(opened.focused));
+  check('and everything that was on the roster foot is here',
+    opened.text.includes('שמור קובץ גיבוי') && opened.text.includes('גרסה'),
+    opened.text.slice(0, 80));
+
+  // Tab does not walk out of the sheet into the list behind it.
+  const trapped = await page.evaluate(async () => {
+    const panel = document.getElementById('settingsPanel');
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
+      .filter(node => node.offsetParent !== null);
+    focusable[focusable.length - 1].focus();
+    return { count: focusable.length, last: document.activeElement === focusable[focusable.length - 1] };
+  });
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(150);
+  const wrapped = await page.evaluate(() => {
+    const panel = document.getElementById('settingsPanel');
+    return panel.contains(document.activeElement);
+  });
+  check('tab stays inside the sheet', wrapped === true && trapped.last === true,
+    JSON.stringify({ trapped, wrapped }));
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  const closed = await page.evaluate(() => ({
+    shown: document.getElementById('settingsPanel').classList.contains('open'),
+    focused: document.activeElement && document.activeElement.id
+  }));
+  check('escape closes it', closed.shown === false, JSON.stringify(closed));
+  check('and focus goes back to the button that opened it',
+    closed.focused === 'settingsBtn', JSON.stringify(closed));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- what a thumb can actually hit
+//
+// Measured on the real screens, not read off the stylesheet. The mode toggle was 26px
+// tall, the day chips 30, the week cells 28 - all of them things a man in work gloves is
+// meant to hit while standing on a site, and all of them fine on the laptop they were
+// designed on.
+{
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save();
+    render();
+  });
+
+  const undersized = {};
+  for (const view of ['day', 'week', 'roster', 'reports']) {
+    await page.evaluate(v => { showView(v); }, view);
+    await page.waitForTimeout(350);
+    undersized[view] = await page.evaluate(() => {
+      const out = [];
+      document.querySelectorAll('button, [role="button"], a[href], input, select, textarea, .week-cell')
+        .forEach(node => {
+          if (node.offsetParent === null) return;
+          if (node.getAttribute('aria-hidden') === 'true') return;
+          const box = node.getBoundingClientRect();
+          if (box.width === 0 || box.height === 0) return;
+          // The week grid is the one deliberate exception, and only across: seven days
+          // plus the names have to fit the narrowest phone, so a column is 42px rather
+          // than 44. It is full height, and a mis-tap there opens the wrong day's picker
+          // - which names the day before anything is recorded.
+          const floor = node.classList.contains('week-cell') ? 40 : 44;
+          if (box.width >= floor && box.height >= 44) return;
+          out.push({
+            cls: String(node.className).slice(0, 30),
+            text: (node.textContent || node.value || '').trim().slice(0, 14),
+            w: Math.round(box.width), h: Math.round(box.height)
+          });
+        });
+      return out;
+    });
+  }
+  for (const view of ['day', 'week', 'roster', 'reports']) {
+    check(`nothing on the ${view} screen is too small to hit`,
+      undersized[view].length === 0, JSON.stringify(undersized[view]).slice(0, 200));
+  }
+
+  // Text at 200%, which is what somebody who needs it larger actually sets. The page may
+  // grow downwards as much as it likes; what it must not do is grow sideways, because a
+  // page that scrolls horizontally on a phone hides the end of every row it has.
+  const zoomed = await page.evaluate(async () => {
+    const out = {};
+    document.documentElement.style.fontSize = '32px';
+    for (const view of ['day', 'week', 'roster', 'reports']) {
+      showView(view);
+      await new Promise(done => setTimeout(done, 250));
+      out[view] = {
+        doc: document.documentElement.scrollWidth,
+        inner: window.innerWidth
+      };
+    }
+    document.documentElement.style.fontSize = '';
+    return out;
+  });
+  for (const view of ['day', 'week', 'roster', 'reports']) {
+    check(`the ${view} screen still fits across at 200% text`,
+      zoomed[view].doc <= zoomed[view].inner + 1, JSON.stringify(zoomed[view]));
+  }
+
+  // The tabs say which panel they show, and the panels say which tab named them.
+  const wired = await page.evaluate(() => ['day', 'week', 'roster', 'reports'].map(view => {
+    const tab = document.getElementById('tab-' + view);
+    const panel = document.getElementById(view + 'View');
+    return {
+      view,
+      controls: tab.getAttribute('aria-controls') === view + 'View',
+      role: panel.getAttribute('role') === 'tabpanel',
+      labelled: panel.getAttribute('aria-labelledby') === 'tab-' + view
+    };
+  }));
+  check('every tab names the panel it opens, and back',
+    wired.every(entry => entry.controls && entry.role && entry.labelled),
+    JSON.stringify(wired));
+
+  // What the app says about itself, said to a screen reader too - politely, because all
+  // of it appears while somebody is in the middle of typing.
+  const live = await page.evaluate(() => ({
+    notice: document.getElementById('storageNotice').getAttribute('aria-live'),
+    undo: document.getElementById('undoBar').getAttribute('aria-live'),
+    banners: [...document.querySelectorAll('.banner')]
+      .filter(node => node.getAttribute('aria-live') !== 'polite').length
+  }));
+  check('the status line is announced without interrupting',
+    live.notice === 'polite' && live.undo === 'polite', JSON.stringify(live));
+  check('and so is every banner', live.banners === 0, JSON.stringify(live));
+
+  // Reduced motion is honoured rather than mentioned.
+  const motion = await page.evaluate(() => Array.from(document.styleSheets)
+    .flatMap(sheet => Array.from(sheet.cssRules || []))
+    .filter(rule => (rule.conditionText || '').includes('prefers-reduced-motion')).length);
+  check('a phone set to reduce motion is obeyed', motion >= 1, String(motion));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- a name is not reordered by the sentence
+{
+  // The bidi algorithm works on runs, not words: a name that is not plain Hebrew slides
+  // to wherever the algorithm puts it inside a Hebrew sentence. On the undo bar that
+  // sentence is the only record of what just happened, and "the record of Ali 2 was
+  // deleted" reading as though it names somebody else is not a rendering nuisance.
+  const page = await open();
+  await page.evaluate(() => {
+    State.schedule.workers = [{ id: 'w_01', name: 'Ali 2', active: true, dailyRate: 400, hourlyRate: 0 }];
+    State.schedule.places = [{ id: 'p_01', name: 'B7', active: true }];
+    State.date = '2026-08-12';
+    State.save();
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const said = await page.evaluate(() => {
+    State.commit(assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    render();
+    const worker = State.worker('w_01');
+    return {
+      undo: `${isolate(worker.name)} נרשם ב${isolate('B7')}`,
+      marked: isolate(worker.name)
+    };
+  });
+  check('a name dropped into a sentence is isolated from it',
+    said.marked.charCodeAt(0) === 0x2068
+    && said.marked.charCodeAt(said.marked.length - 1) === 0x2069, JSON.stringify(said));
+  check('and the sentence still reads as one line',
+    said.undo.includes('Ali 2') && said.undo.includes('B7'), said.undo);
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- one dock, one height, one inset
+//
+// Two bars stack at the bottom of a phone, and the home indicator is one strip of glass
+// under both of them. Each bar adding the inset for itself put a band of dead space
+// INSIDE the upper dock and pushed its buttons up away from the thumb - the app looked
+// like it had a mysterious empty stripe across it, and only on the phones that have an
+// indicator at all.
+{
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await seedRoster(page);
+  await page.evaluate(() => { showView('day'); render(); });
+  await page.waitForTimeout(300);
+
+  const dock = await page.evaluate(async () => {
+    const read = () => {
+      const bar = document.querySelector('.day-actions');
+      const tabs = document.querySelector('.tabs');
+      const style = getComputedStyle(bar);
+      const box = bar.getBoundingClientRect();
+      const buttons = [...bar.querySelectorAll('button')]
+        .map(node => Math.round(node.getBoundingClientRect().height));
+      return {
+        pad: Math.round(parseFloat(style.paddingBottom)),
+        height: Math.round(box.height),
+        bottom: Math.round(box.bottom),
+        tabsTop: Math.round(tabs.getBoundingClientRect().top),
+        buttons
+      };
+    };
+
+    const flat = read();
+    document.documentElement.style.setProperty('--safe-bottom', '34px');
+    if (typeof scheduleBarMeasure === 'function') scheduleBarMeasure();
+    await new Promise(done => setTimeout(done, 300));
+    const inset = read();
+    document.documentElement.style.removeProperty('--safe-bottom');
+    if (typeof scheduleBarMeasure === 'function') scheduleBarMeasure();
+    await new Promise(done => setTimeout(done, 250));
+    return { flat, inset };
+  });
+
+  check('the dock is one measured height, not the height of its longest label',
+    dock.flat.height >= 64, JSON.stringify(dock.flat));
+  check('and it sits exactly on top of the tab bar',
+    Math.abs(dock.flat.bottom - dock.flat.tabsTop) <= 1, JSON.stringify(dock.flat));
+  check('the home indicator is cleared by the bar that is actually against the edge',
+    dock.inset.pad === dock.flat.pad, JSON.stringify(dock));
+  check('so the dock does not grow when the indicator appears',
+    dock.inset.height === dock.flat.height, JSON.stringify(dock));
+  check('it moves up with the tab bar instead',
+    dock.flat.bottom - dock.inset.bottom === 34, JSON.stringify(dock));
+  check('and still lands on the tab bar exactly',
+    Math.abs(dock.inset.bottom - dock.inset.tabsTop) <= 1, JSON.stringify(dock.inset));
+  check('both buttons in it are a thumb\'s worth, and the same size',
+    dock.flat.buttons.length === 2
+    && dock.flat.buttons.every(height => height >= 44)
+    && dock.flat.buttons[0] === dock.flat.buttons[1],
+    JSON.stringify(dock.flat.buttons));
 
   await page.context().close();
 }
@@ -4771,7 +5306,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // screen said which one. "Close it and open it twice" is not an instruction anybody
   // can verify the result of.
   const page = await open();
-  await page.click('#tab-roster');
+  await page.click('#settingsBtn');
   await page.waitForTimeout(300);
   check('the running version is on the screen, next to the backups',
     (await page.textContent('#appVersion')).includes(APP_VERSION_EXPECTED),
@@ -4832,6 +5367,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // removed it - so the evening sync was switched on, the whole feature was invisible
   // and there was no way in at all.
   const page = await open();
+  await page.click('#settingsBtn');
+  await page.waitForTimeout(300);
   const button = page.locator('#syncAuthBtn');
   check('with no cloud project the sign-in button stays out of the way',
     !(await button.isVisible()));
@@ -4849,7 +5386,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await button.textContent()).includes('התחבר לענן'));
   check('it sits in the header, where it is found without hunting',
     (await page.evaluate(() =>
-      Boolean(document.querySelector('.topbar #syncAuthBtn')))) === true);
+      Boolean(document.querySelector('#settingsPanel #syncAuthBtn')))) === true);
   await page.context().close();
 }
 
@@ -4888,7 +5425,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   });
   check('the accident empties the schedule everywhere', restored.before === 0);
 
-  await page.click('#tab-roster');
+  await page.click('#settingsBtn');
   await page.waitForTimeout(300);
   await page.evaluate(() => { FarkadSync.setStatus('synced'); renderCloudRestorePoints(); });
   await page.waitForTimeout(300);
@@ -4990,22 +5527,29 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     State.schedule.workers.map(worker => worker.name).join(','));
   check('the roster starts in the order it was built', (await names()) === 'דוד,שרה,עלי');
 
-  await page.locator('#workerList .roster-row').nth(2)
+  // Through the reorder mode, which is where the order is set now: the arrows that used
+  // to sit beside every pencil were one write per press and one thumb-width from the
+  // button that opens a man's details.
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(300);
+  await page.locator('#workerList .reorder-row').nth(2)
     .getByRole('button', { name: /העלה/ }).click();
-  await page.waitForTimeout(250);
-  check('a name can be moved up', (await names()) === 'דוד,עלי,שרה');
-
-  await page.locator('#workerList .roster-row').first()
+  await page.waitForTimeout(200);
+  await page.locator('#workerList .reorder-row').first()
     .getByRole('button', { name: /הורד/ }).click();
-  await page.waitForTimeout(250);
-  check('and down', (await names()) === 'עלי,דוד,שרה');
+  await page.waitForTimeout(200);
 
   check('the first row cannot be moved up past the top',
-    await page.locator('#workerList .roster-row').first()
+    await page.locator('#workerList .reorder-row').first()
       .getByRole('button', { name: /העלה/ }).isDisabled());
   check('nor the last down past the bottom',
-    await page.locator('#workerList .roster-row').last()
+    await page.locator('#workerList .reorder-row').last()
       .getByRole('button', { name: /הורד/ }).isDisabled());
+
+  await page.getByRole('button', { name: 'שמור סדר' }).click();
+  await page.waitForTimeout(350);
+  check('the drafted order is what the roster now reads',
+    (await names()) === 'עלי,דוד,שרה', await names());
 
   await page.reload({ waitUntil: 'load' });
   await page.waitForTimeout(500);
@@ -5154,7 +5698,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // an iPhone that was never added to the home screen clears its storage after a week.
   const page = await open();
   await seedRoster(page);
-  await page.click('#tab-roster');
+  await page.click('#settingsBtn');
   await page.waitForTimeout(300);
   check('with no backup ever saved, the app says so',
     (await page.textContent('#backupAge')).includes('עוד לא נשמר'));

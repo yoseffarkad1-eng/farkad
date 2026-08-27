@@ -6468,7 +6468,7 @@ for (const [label, act] of [
 }
 
 {
-    suite('one press of the arrow is one visible change');
+    suite('one move is one visible change');
 
     // [active, archived, active]: moving the first man down one ARRAY slot stepped over
     // the archived row, which is not on this screen - so the write went out, the other
@@ -6487,21 +6487,27 @@ for (const [label, act] of [
 
     given('the visible order starts as A then B', activeOrder() === 'w_a,w_b');
 
-    device.call('moveWorker', 'w_a', 1);
-    check('one press moves him past the man he can see',
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_a', 1);
+    device.call('saveReorder');
+    check('one move puts him past the man he can see',
         activeOrder() === 'w_b,w_a', activeOrder());
     check('and the archived row has not moved',
         allOrder() === 'w_b,w_x,w_a', allOrder());
 
-    device.call('moveWorker', 'w_a', -1);
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_a', 0);
+    device.call('saveReorder');
     check('and back again', activeOrder() === 'w_a,w_b', activeOrder());
     check('with the archived row still where it was',
         allOrder() === 'w_a,w_x,w_b', allOrder());
 
-    // The ends do nothing, rather than something invisible.
+    // The ends clamp, rather than doing something invisible.
     const before = allOrder();
-    device.call('moveWorker', 'w_a', -1);
-    device.call('moveWorker', 'w_b', 1);
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_a', -1);
+    device.call('moveDraftTo', 'w_b', 9);
+    device.call('saveReorder');
     check('the top man cannot go up and the bottom man cannot go down',
         allOrder() === before, `${before} -> ${allOrder()}`);
 }
@@ -6527,17 +6533,151 @@ for (const [label, act] of [
 
     given('three men with three archived rows between them', active() === 'w_a,w_b,w_c');
 
-    // Every press, from every position, moves exactly one place in the visible list.
-    device.call('moveWorker', 'w_c', -1);
-    check('the last man moves up one', active() === 'w_a,w_c,w_b', active());
-    device.call('moveWorker', 'w_c', -1);
-    check('and up one again', active() === 'w_c,w_a,w_b', active());
-    device.call('moveWorker', 'w_a', 1);
-    check('a man in the middle moves down one', active() === 'w_c,w_b,w_a', active());
+    // Every move, from every position, moves exactly one place in the VISIBLE list -
+    // and the whole run of them is one write at the end.
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_c', 1);
+    device.call('moveDraftTo', 'w_c', 0);
+    device.call('moveDraftTo', 'w_a', 2);
+    device.call('saveReorder');
+    check('the visible order is exactly what was drafted',
+        active() === 'w_c,w_b,w_a', active());
     check('and the archived men have not moved at all',
         archived() === 'w_x1,w_x2,w_x3', archived());
     check('while the crew is still the same six',
         device.State.schedule.workers.length === 6);
+    check('and nobody was quietly taken out of the archive',
+        device.State.schedule.workers.filter(worker => worker.active === false).length === 3);
+}
+
+{
+    suite('the whole reorder is one write, not one per press');
+
+    // The arrows this replaces sent a write per press. Moving a man from the bottom of a
+    // crew of thirty to the top was twenty-nine writes, twenty-eight of them describing
+    // an order nobody wanted - each one a cloud round trip, and each one a state the
+    // other two phones drew.
+    const cloud = makeCloud();
+    const { device } = crew();
+    device.State.schedule.workers = ['a', 'b', 'c', 'd', 'e'].map(letter => ({
+        id: `w_${letter}`, name: letter, active: true, dailyRate: 400, hourlyRate: 0
+    }));
+    device.State.save({ silent: true });
+    await connected(device, cloud);
+    await settle(TICK * 30);
+
+    const from = cloud.writes.length;
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_e', 0);
+    device.call('moveDraftTo', 'w_d', 1);
+    device.call('moveDraftTo', 'w_c', 2);
+    await settle(TICK * 20);
+    check('nothing has been sent while the order is still a draft',
+        cloud.writes.length === from, String(cloud.writes.length - from));
+    check('and nothing has been written to the disk either',
+        String(device.raw('scheduleData:v2')).indexOf('w_a') <
+        String(device.raw('scheduleData:v2')).indexOf('w_e'),
+        'the saved order is still the old one');
+
+    device.call('saveReorder');
+    await settle(TICK * 40);
+    check('the crew is in the drafted order',
+        device.State.schedule.workers.map(worker => worker.id).join() === 'w_e,w_d,w_c,w_a,w_b',
+        device.State.schedule.workers.map(worker => worker.id).join());
+    check('and it left as one write', cloud.writes.length - from === 1,
+        String(cloud.writes.length - from));
+}
+
+{
+    suite('a draft nobody saved changes nothing');
+
+    const { device } = crew();
+    device.State.schedule.workers = ['a', 'b', 'c'].map(letter => ({
+        id: `w_${letter}`, name: letter, active: true, dailyRate: 400, hourlyRate: 0
+    }));
+    device.State.save({ silent: true });
+    const before = device.State.schedule.workers.map(worker => worker.id).join();
+
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_c', 0);
+    device.call('closeReorder');
+
+    check('cancelling leaves the order exactly as it was',
+        device.State.schedule.workers.map(worker => worker.id).join() === before, before);
+    check('and the disk agrees',
+        String(device.raw('scheduleData:v2')).indexOf('w_a') <
+        String(device.raw('scheduleData:v2')).indexOf('w_c'));
+}
+
+{
+    suite('a draft taken before the crew changed is refused');
+
+    // Another phone adds a man, archives one or deletes one while somebody is dragging
+    // names about. The snapshot in memory then describes a crew that no longer exists,
+    // and saving it would drop whoever arrived and resurrect whoever left - silently,
+    // because an order is not something anybody proof-reads.
+    const { device, said } = crew();
+    device.State.schedule.workers = ['a', 'b', 'c'].map(letter => ({
+        id: `w_${letter}`, name: letter, active: true, dailyRate: 400, hourlyRate: 0
+    }));
+    device.State.save({ silent: true });
+
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_c', 0);
+
+    // The other phone's edit lands mid-draft.
+    device.State.schedule.workers.push(
+        { id: 'w_new', name: 'חדש', active: true, dailyRate: 400, hourlyRate: 0 });
+    device.State.save({ silent: true });
+
+    device.call('saveReorder');
+
+    check('the stale order is not written',
+        device.State.schedule.workers.map(worker => worker.id).join() === 'w_a,w_b,w_c,w_new',
+        device.State.schedule.workers.map(worker => worker.id).join());
+    check('the person is told why', said.some(message => message.includes('השתנתה')),
+        JSON.stringify(said));
+    check('and the man who arrived is not lost',
+        device.State.schedule.workers.some(worker => worker.id === 'w_new'));
+
+    // The redrawn draft describes the crew as it is now, so a second attempt works.
+    device.call('moveDraftTo', 'w_new', 0);
+    device.call('saveReorder');
+    check('a second attempt, on the fresh list, does save',
+        device.State.schedule.workers.map(worker => worker.id).join() === 'w_new,w_a,w_b,w_c',
+        device.State.schedule.workers.map(worker => worker.id).join());
+}
+
+{
+    suite('an order that cannot be stored is not reported as saved');
+
+    const { device, said } = crew();
+    device.State.schedule.workers = ['a', 'b', 'c'].map(letter => ({
+        id: `w_${letter}`, name: letter, active: true, dailyRate: 400, hourlyRate: 0
+    }));
+    device.State.save({ silent: true });
+
+    device.call('openReorder');
+    device.call('moveDraftTo', 'w_c', 0);
+    // Everything refused, not only the schedule: an order the JOURNAL holds is durable -
+    // it rebuilds at the next boot with no cloud involved - so a device with room for the
+    // queue has genuinely saved the work, whatever the schedule file did. This is the
+    // device with room for neither.
+    device.setQuota(() => true);
+    device.call('saveReorder');
+
+    check('the refusal is said out loud', said.some(message => message.includes('לא נשמר')),
+        JSON.stringify(said));
+    check('and the draft is still open, so the work is not lost',
+        device.global('reorderDraft') !== null,
+        JSON.stringify(device.global('reorderDraft')));
+
+    // With room again, the same draft saves.
+    device.setQuota(null);
+    device.call('saveReorder');
+    check('and it saves once there is room',
+        device.State.schedule.workers.map(worker => worker.id).join() === 'w_c,w_a,w_b',
+        device.State.schedule.workers.map(worker => worker.id).join());
 }
 
 {
