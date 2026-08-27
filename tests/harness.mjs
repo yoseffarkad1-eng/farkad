@@ -27,6 +27,7 @@ const FILES = [
     'js/recovery.js',
     'js/model/schema.js',
     'js/model/migrate.js',
+    'js/model/ledger.js',
     'js/state.js',
     'js/sync/sync.js',
     // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls

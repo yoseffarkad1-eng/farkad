@@ -471,6 +471,19 @@ function normaliseSchedule(raw, hints) {
         };
     });
 
+    // The ledger, carried through unchanged. Entries are append-only and this is a
+    // read: an entry that will not parse is DROPPED from the fold rather than repaired,
+    // because a repaired entry is a claim about money that nobody made.
+    const ledger = (raw.ledger && typeof raw.ledger === 'object') ? raw.ledger : {};
+    const entries = (ledger.advances && typeof ledger.advances === 'object')
+        ? ledger.advances : {};
+    Object.keys(entries).forEach(id => {
+        const entry = entries[id];
+        if (!entry || typeof entry !== 'object') return;
+        if (!entry.advanceId || !entry.kind) return;
+        schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
+    });
+
     // The invariant, enforced here because here is where every route in meets: a
     // snapshot, a boot from disk, an imported file, a restored backup. Anything with a
     // day or an advance behind it gets an identity back - archived - rather than being

@@ -32,6 +32,7 @@ const SHELL = [
     './js/dates.js',
     './js/model/schema.js',
     './js/model/migrate.js',
+    './js/model/ledger.js',
     './js/sync/sync.js',
     './js/state.js',
     './js/ui/dom.js',
