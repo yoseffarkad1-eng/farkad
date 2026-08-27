@@ -77,5 +77,6 @@ function renderSettings() {
     if (typeof renderRestorePoints === 'function') renderRestorePoints();
     if (typeof renderCloudRestorePoints === 'function') renderCloudRestorePoints();
     if (typeof renderBackupAge === 'function') renderBackupAge();
+    if (typeof renderStorageRoom === 'function') renderStorageRoom();
     if (typeof renderAppVersion === 'function') renderAppVersion();
 }

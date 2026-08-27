@@ -5745,6 +5745,66 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- room on the device
+{
+  // C1. Every message this app had about space arrived at the moment a write was refused
+  // - the moment there is nothing to do but lose the tap. The data suite proves the
+  // arithmetic; this proves it reaches a screen, and reaches the right one. The budget is
+  // moved rather than the record grown: four years of records is not something to build
+  // in a browser to test a sentence.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save();
+  });
+  await page.click('#settingsBtn');
+  await page.waitForTimeout(300);
+  check('on an ordinary device the space line says nothing at all',
+    (await page.textContent('#storageRoom')).trim() === '');
+
+  const tighten = (factor) => page.evaluate((f) => {
+    Store.budget = Store.used() + Math.round(State.durableText.length * 2 * f);
+    render();
+  }, factor);
+
+  await tighten(1.5);
+  await page.waitForTimeout(200);
+  const tight = await page.textContent('#storageRoom');
+  check('with room for one more copy it asks for a backup',
+    tight.includes('גיבוי') && tight.includes('נקודות השחזור'));
+  check('and says it as a warning, like the backup line beside it',
+    (await page.locator('#storageRoom').getAttribute('class')).includes('hint-warn'));
+
+  await tighten(0.5);
+  await page.waitForTimeout(200);
+  check('with room for none it says the way back is what has gone',
+    (await page.textContent('#storageRoom')).includes('אין מקום לשמור מצב קודם'));
+
+  // The settings panel is a place somebody goes. The line under the board is on every
+  // screen, which is where a person who is not looking for this will meet it.
+  check('and the line under the board carries it too',
+    (await page.textContent('#storageNotice')).includes('אין מקום לשמור מצב קודם'));
+  check('without taking the sync state down with it',
+    (await page.textContent('#storageNotice')).includes('הנתונים נשמרים במכשיר הזה בלבד'));
+
+  // The banner is for a change that was NOT written down. This is the opposite: what
+  // stopped is the way back, and the recording carries on.
+  const banner = await page.locator('#storageBanner').isVisible();
+  check('the top banner is left for the failure that loses a tap', banner === false);
+
+  const recorded = await page.evaluate(() => State.commit(
+    assignPlace(State.schedule, '2026-08-15', 'w_02', 'actual', 'p_02')));
+  check('and a day recorded at that moment is still recorded', recorded === true);
+
+  await page.evaluate(() => { Store.budget = 5 * 1024 * 1024; render(); });
+  await page.waitForTimeout(200);
+  check('room made, and the app stops mentioning it',
+    (await page.textContent('#storageRoom')).trim() === '' &&
+    !(await page.textContent('#storageNotice')).includes('אין מקום'));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- printed in colour
 {
   // Site colours are inline styles, and by default a browser prints backgrounds only if

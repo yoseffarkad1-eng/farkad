@@ -3043,5 +3043,14 @@ function updateSyncNotice() {
         text += ` (${waiting} ממתינים לשליחה)`;
     }
 
+    // Deliberately not the banner. The banner is for a change that was NOT written down;
+    // this is the opposite - everything is saved, and what has stopped is the ability to
+    // keep a way back. Appended rather than substituted, because the sync state is the
+    // other half of the same question and a device can sit in this condition for months:
+    // hiding "מסונכרן" behind it for a year would be its own bug.
+    if (typeof capacityState === 'function' && capacityState() === 'critical') {
+        text += ' ⚠️ אין מקום לשמור מצב קודם - ייצא קובץ גיבוי.';
+    }
+
     notice.textContent = text;
 }

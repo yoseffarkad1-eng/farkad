@@ -8269,4 +8269,196 @@ for (const [label, run] of [
         Number(device.raw('farkad:prov:gen')) === 1);
 }
 
+// ---------------------------------------------------------------- room on the device
+//
+// C1. Measured on a crew of thirty over a working year, the record is about 1.2 MiB and
+// the device can be holding eight copies of it: the live one, three restore points, the
+// undo slot and three more in the stack. Against the 5 MiB an iPhone gives an origin,
+// that arithmetic runs out - and it runs out quietly. Around two and a half years the
+// way back can no longer be written, and around four the record itself no longer fits.
+//
+// Neither of those loses anything: every one of the G-series tests above still holds at
+// that size, and a refused write is still refused honestly. What was missing is that the
+// FIRST time anybody hears about it is the moment a tap is lost. These tests are about
+// the warning arriving while there is still something to do about it.
+//
+// The budget is set small rather than the data built large: four years of records is
+// twenty seconds of setup to prove arithmetic that Store.budget states in one line.
+{
+    suite('C1: the device fills up, and it says so before it is full');
+
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const Store = device.Store;
+    const stored = device.dump();
+    const byHand = Object.keys(stored)
+        .reduce((n, key) => n + (key.length + String(stored[key]).length) * 2, 0);
+    check('used() counts every key and value on the device', Store.used() === byHand);
+    check('and counts them in the two bytes a browser charges for a character',
+        Store.used() > JSON.stringify(stored).length);
+
+    const copy = device.State.durableText.length * 2;
+    given('the record has been saved and can be measured', copy > 0);
+
+    Store.budget = 5 * 1024 * 1024;
+    check('a phone with a year ahead of it says nothing at all',
+        device.call('capacityState') === 'ok');
+
+    // Room for one more copy, and not two.
+    Store.budget = Store.used() + Math.round(copy * 1.5);
+    check('with one copy of room left, it is called tight',
+        device.call('capacityState') === 'tight');
+
+    // Room for none.
+    Store.budget = Store.used() + Math.round(copy * 0.5);
+    check('with none, it is called critical',
+        device.call('capacityState') === 'critical');
+
+    // The whole point: this is a warning, not a post-mortem.
+    const saved = device.State.save();
+    check('and at critical the record still saves - the warning is early, not late', saved);
+    check('an edit made at critical is still recorded',
+        record(device, '2026-08-13', 'w_02', 'p_02') === true);
+}
+
+{
+    suite('C1: tight is the last moment a way back can still be written');
+
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const Store = device.Store;
+    const copy = device.State.durableText.length * 2;
+
+    // A real device refuses the write that does not fit, which is what makes the state
+    // above worth reporting rather than a number on a settings screen.
+    Store.budget = Store.used() + Math.round(copy * 1.5);
+    device.setQuota((key, value) => {
+        const held = device.dump();
+        const had = Object.prototype.hasOwnProperty.call(held, key)
+            ? (key.length + String(held[key]).length) * 2 : 0;
+        const used = Object.keys(held)
+            .reduce((n, k) => n + (k.length + String(held[k]).length) * 2, 0);
+        return used - had + (key.length + String(value).length) * 2 > Store.budget;
+    });
+
+    check('at tight, the way back is still written',
+        device.call('pushUndoState', device.State.schedule) === true);
+
+    // Now the record has grown by a copy of itself and there is no longer room for
+    // another. The state says so, and the write it predicts does fail.
+    check('having taken it, the device is now critical',
+        device.call('capacityState') === 'critical');
+    check('and the next way back is refused, exactly as the warning said',
+        device.call('pushUndoState', device.State.schedule) === false);
+}
+
+{
+    suite('C1: a full album is not the same as a full device');
+
+    // The first version of this counted what was stored and nothing else, and so called a
+    // healthy phone at one year of use critical: three restore points and the live record
+    // is four copies, which is over the budget on paper, while Store.reclaim can hand back
+    // any of the three the moment a real write needs the room. A warning that fires on a
+    // device in perfect health is a warning somebody learns to scroll past.
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const Store = device.global('Store');
+    const copy = device.State.durableText.length * 2;
+
+    ['2026-08-25', '2026-08-26', '2026-08-27'].forEach(day => {
+        device.setToday(day);
+        device.call('takeDailySnapshot');
+    });
+    given('three restore points were taken', device.call('snapshotDates').length === 3);
+    given('and they are most of what is stored', Store.used() > copy * 3);
+
+    // Less room than is currently spent, and more than enough once the album goes.
+    Store.budget = Math.round(copy * 3.5);
+    check('a device whose room is in its restore points is not called critical',
+        device.call('capacityState') !== 'critical');
+
+    // And the claim behind that: a real write refused for space still gets through,
+    // because reclaim gives a photograph back to pay for it.
+    device.setQuota((key, value) => {
+        const held = device.dump();
+        const had = Object.prototype.hasOwnProperty.call(held, key)
+            ? (key.length + String(held[key]).length) * 2 : 0;
+        const used = Object.keys(held)
+            .reduce((n, k) => n + (k.length + String(held[k]).length) * 2, 0);
+        return used - had + (key.length + String(value).length) * 2 > Store.budget;
+    });
+    check('and the way back it says is possible is in fact written',
+        device.call('pushUndoState', device.State.schedule) === true);
+    check('paid for out of the album, which is what the album is for',
+        device.call('snapshotDates').length < 3);
+}
+
+{
+    suite('C1: the warning is not shouted at the wrong people');
+
+    const empty = makeDevice();
+    check('a device that has saved nothing has nothing to warn about',
+        empty.call('capacityState') === 'ok');
+
+    const blocked = makeDevice();
+    seed(blocked);
+    blocked.global('Store').available = false;
+    check('a browser that refuses storage entirely is not a space problem - it has its own line',
+        blocked.call('capacityState') === 'ok');
+
+    const roomy = makeDevice();
+    seed(roomy);
+    record(roomy, '2026-08-12', 'w_01', 'p_01');
+    roomy.global('Store').budget = 5 * 1024 * 1024;
+    check('and an ordinary device says nothing', roomy.call('capacityState') === 'ok');
+}
+
+{
+    suite('C1: the answer is kept, but never past the thing that changes it');
+
+    // The sync line under the board is redrawn constantly, and adding up what is stored
+    // means reading the whole record back. So the answer is cached - and a cache that
+    // outlives its own inputs is how a warning ends up describing last week.
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const Store = device.global('Store');
+    Store.budget = 5 * 1024 * 1024;
+
+    // Count the reads rather than time them: what is being claimed is that the second
+    // question does not go back to the device, and that is a fact about calls. Counted
+    // from cold, before anything has asked - an answer already cached would make the
+    // first question look as cheap as the second and prove nothing.
+    const realUsed = Store.used;
+    let reads = 0;
+    Store.used = function counted() { reads += 1; return realUsed.call(this); };
+
+    const answers = [device.call('capacityState'), device.call('capacityState'),
+        device.call('capacityState')];
+    given('it starts out with room', answers[0] === 'ok');
+    check('asked three times with nothing changed, the device is read once', reads === 1);
+    check('and the answer does not drift between the askings',
+        answers[1] === answers[0] && answers[2] === answers[0]);
+
+    reads = 0;
+    record(device, '2026-08-14', 'w_03', 'p_01');
+    device.call('capacityState');
+    check('a saved edit sends it back to the device', reads === 1);
+
+    reads = 0;
+    Store.budget = Store.used() + 8;
+    reads = 0;
+    check('and so does moving the budget it is measured against',
+        device.call('capacityState') === 'critical' && reads === 1);
+
+    Store.used = realUsed;
+}
+
 report();

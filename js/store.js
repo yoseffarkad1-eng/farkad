@@ -175,6 +175,34 @@ const Store = {
         }
     },
 
+    // What the browser will let this origin hold, in bytes.
+    //
+    // Nobody publishes this number in a form a page can read: navigator.storage.estimate()
+    // answers for the origin's whole quota - IndexedDB, caches, everything - and reports
+    // gigabytes on a phone whose localStorage stops at five megabytes. So it is a constant,
+    // and it is the SMALLEST of the ones that matter: Safari and iOS Safari give 5 MiB per
+    // origin, Chrome about twice that. This app is for a phone in a pocket on a building
+    // site, so the phone's number is the one to plan against - and warning a little early
+    // on a roomier browser costs nothing, while warning late on the small one costs the
+    // evening's records.
+    budget: 5 * 1024 * 1024,
+
+    // How much of that this app is already holding.
+    //
+    // Browsers charge in UTF-16 code units - two bytes a character - and charge for the
+    // key as well as the value. Counting characters and calling them bytes understates a
+    // Hebrew record by half, and it is exactly that half which decides whether the next
+    // copy still fits.
+    used() {
+        let bytes = 0;
+        this.keys().forEach(key => {
+            const value = this.get(key);
+            if (value === null) return;
+            bytes += (key.length + String(value).length) * 2;
+        });
+        return bytes;
+    },
+
     // Everything this session can see: what is on the disk, plus anything written this
     // session that did not reach it. A restore point held only in memory is still a
     // restore point, and the list that offers them reads this.

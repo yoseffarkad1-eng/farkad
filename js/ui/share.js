@@ -797,6 +797,113 @@ function daysBetween(from, to) {
     return Math.round((end - start) / 86400000);
 }
 
+// ---------------------------------------------------------------- room on the device
+//
+// Every message this app has about space arrives at the moment a write is refused, which
+// is the moment there is nothing left to do but lose the tap. This is the same fact, said
+// while it can still be acted on.
+//
+// What is measured is not "how full is the device" but "does another WHOLE COPY of the
+// record still fit". That is what stops working first and stops working silently: every
+// restore point and every way back is a full copy of the schedule, so once one no longer
+// fits, the safety net is gone while ordinary recording carries on looking exactly as it
+// did. Measured at thirty men and a working year, a copy is about 1.2 MiB and eight of
+// them can be on the device at once - the live record, three restore points, the undo slot
+// and three more in the stack. The album is thinned automatically long before that, but
+// the arithmetic is why this warning exists at all.
+//
+// The size of a copy is read from the text that last landed on the disk rather than by
+// serialising the schedule again: State.durableText is already that string, and
+// JSON.stringify of four years of records is fourteen milliseconds that would be spent on
+// every redraw of the sync line.
+function copyBytes() {
+    if (typeof State === 'undefined') return 0;
+    if (typeof State.durableText === 'string') return State.durableText.length * 2;
+
+    // Before the first save of this session there is nothing confirmed to measure, and
+    // nothing yet worth protecting either.
+    return 0;
+}
+
+// What Store.reclaim would be able to give back if a write ran out of room.
+//
+// Store must not decide what is expendable, so it asks the file that owns the disposable
+// data - this one - and the answer has always been "the oldest restore point". Counting
+// that here is what keeps the message honest: a device with three photographs still in
+// the album has room for a way back, it just has to spend a photograph to get it, and
+// telling somebody there is no room at all while the app can still make some would be a
+// warning they would learn to ignore.
+function reclaimableBytes() {
+    return snapshotDates().reduce((bytes, date) => {
+        const key = SNAPSHOT_PREFIX + date;
+        const value = Store.get(key);
+        return value === null ? bytes : bytes + (key.length + String(value).length) * 2;
+    }, 0);
+}
+
+// 'ok' | 'tight' | 'critical'.
+//
+// tight     - room for one more copy, and not two. The restore points are on their way out.
+// critical  - room for none. Recording still works; keeping a way back does not.
+//
+// A device the browser will not let this app write to at all is not a space problem, and
+// updateSyncNotice says so far more directly. Not this function's business.
+let capacityCache = { text: false, keys: -1, budget: -1, state: 'ok' };
+
+function capacityState() {
+    if (typeof Store === 'undefined' || !Store.available) return 'ok';
+
+    const copy = copyBytes();
+    if (copy === 0) return 'ok';
+
+    // The sync line under the board is redrawn on every render, and adding up what is
+    // stored means reading every value back - on this device the biggest of them is the
+    // record itself. So the answer is kept until something that could change it does:
+    // a save, which replaces durableText, or a key appearing or leaving.
+    //
+    // It is a threshold, not a ledger. A restore point swapped for another of much the
+    // same size leaves both signals unchanged and the cached answer standing, which is
+    // correct to within far less than the distance between the thresholds.
+    //
+    // The budget is in the key as well. It never moves in the app - it is a constant one
+    // line up - but a cache that silently ignores one of its own inputs is a trap for
+    // whoever changes that line next, and it cost nothing to close.
+    //
+    // A restore point taken or dropped moves the key count, so the reclaimable half of
+    // the sum is covered by the same two signals.
+    const keys = Store.keys().length;
+    if (capacityCache.text === State.durableText
+        && capacityCache.keys === keys
+        && capacityCache.budget === Store.budget) {
+        return capacityCache.state;
+    }
+
+    const free = Store.budget - Store.used() + reclaimableBytes();
+    const state = free < copy ? 'critical' : (free < copy * 2 ? 'tight' : 'ok');
+
+    capacityCache = { text: State.durableText, keys, budget: Store.budget, state };
+    return state;
+}
+
+// The line in the backup card, beside the one about how old the last backup is - the same
+// place, because it prompts the same action.
+function renderStorageRoom() {
+    const line = document.getElementById('storageRoom');
+    if (!line) return;
+
+    const state = capacityState();
+    if (state === 'ok') {
+        line.textContent = '';
+        line.className = 'hint';
+        return;
+    }
+
+    line.textContent = state === 'critical'
+        ? 'אין מקום לשמור מצב קודם. הרישום נשמר כרגיל, אבל אין דרך חזרה - ייצא קובץ גיבוי ופנה מקום במכשיר.'
+        : 'המקום במכשיר הולך ואוזל. שמור קובץ גיבוי - נקודות השחזור הן הראשונות שייעלמו.';
+    line.className = 'hint hint-warn';
+}
+
 // What a backup file actually contains, decided before anything is replaced.
 //
 // A file saved by the OLD app passes a naive "has workers and places" check and then
