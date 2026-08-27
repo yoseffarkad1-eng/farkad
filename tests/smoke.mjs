@@ -2696,12 +2696,28 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
-// ---------------------------------------------------------------- no accidental zoom
+// ---------------------------------------------------------------- zoom is not ours to refuse
 {
   const page = await open();
   const viewport = await page.getAttribute('meta[name="viewport"]', 'content');
-  check('the page refuses to zoom under a stray pinch',
-    viewport.includes('maximum-scale=1') && viewport.includes('user-scalable=no'), viewport);
+
+  // This used to assert the opposite, and the opposite was wrong.
+  //
+  // maximum-scale=1 + user-scalable=no was put here to stop iOS magnifying the page when
+  // a small field takes focus. That is a real problem and this is not its fix: the fix is
+  // the 16px floor on every field, which is checked immediately below and has been in
+  // place for as long as the lock has. What the lock actually did was take pinch-zoom
+  // away from everybody - on an app whose users are in their sixties, reading names and
+  // four-figure sums off a phone in daylight, on a site.
+  //
+  // Safari has ignored it since iOS 10, which made it a rule that punished Android and
+  // Chrome users only. And "the layout survives 200% text" (checked in its own block) is
+  // not a substitute: text scaling is a setting somebody changes once, zoom is what you
+  // do to ONE number you cannot quite read.
+  check('the page does not take zoom away from the people using it',
+    !viewport.includes('user-scalable=no') && !viewport.includes('maximum-scale'), viewport);
+  check('while still drawing under the system bars',
+    viewport.includes('viewport-fit=cover'), viewport);
 
   await seedRoster(page);
   await page.evaluate(() => {
