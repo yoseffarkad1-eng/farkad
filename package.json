@@ -5,7 +5,8 @@
   "description": "Day and pay record for a construction crew. A PWA of classic scripts with no build step - this file exists so the tests can be run, not to introduce one.",
   "type": "module",
   "scripts": {
-    "test": "npm run test:data",
+    "test": "npm run test:build && npm run test:data",
+    "test:build": "node tests/build.test.mjs",
     "test:data": "node tests/data.test.mjs",
     "test:smoke": "node tests/smoke.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.mjs\"",
