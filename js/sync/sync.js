@@ -2546,7 +2546,10 @@ const FarkadSync = {
         Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
 
         const previous = State.schedule;
-        State.schedule = remote;
+        // Ledger entries are append-only against the other phones too: a device that has
+        // never heard of one has not disagreed with it. See mergeLedgerInto.
+        State.schedule = (typeof mergeLedgerInto === 'function')
+            ? mergeLedgerInto(remote, previous) : remote;
         this.reapplyPending(State.schedule, gone);
 
         // AGAIN, after the pending edits are back on top.
@@ -2892,6 +2895,17 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 schedule.advances = schedule.advances || {};
                 if (value === null) delete schedule.advances[parts[1]];
                 else schedule.advances[parts[1]] = value;
+                return;
+            }
+
+            // ledger.advances.<entry id>. Re-applied like anything else, and never
+            // removed: an entry is the record that an amount was once written down, and
+            // an arriving snapshot that does not have it yet has not disagreed with it.
+            if (parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'advances') {
+                if (value === null) return;
+                schedule.ledger = schedule.ledger || { advances: {} };
+                schedule.ledger.advances = schedule.ledger.advances || {};
+                schedule.ledger.advances[parts[2]] = value;
                 return;
             }
 
