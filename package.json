@@ -6,9 +6,12 @@
   "type": "module",
   "scripts": {
     "test": "npm run test:build && npm run test:data",
+    "test:all": "npm run test:build && npm run test:data && npm run test:smoke && npm run test:print && npm run test:mobile",
     "test:build": "node tests/build.test.mjs",
     "test:data": "node tests/data.test.mjs",
     "test:smoke": "node tests/smoke.mjs",
+    "test:print": "node tests/print.test.mjs",
+    "test:mobile": "node tests/mobile.test.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.mjs\"",
     "serve": "python3 -m http.server 8802",
     "shot": "node tests/shot.mjs",

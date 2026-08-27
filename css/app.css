@@ -226,7 +226,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
 /* On a phone the tabs live where the thumb is: a fixed bar along the bottom. */
 @media (max-width: 700px) {
     /* The header on a phone belongs to the day, not to the app's own name.
-       
+
        The brand strip was 76px of "פרקד" above every screen - a logo nobody needs on a
        tool they opened on purpose - and it pushed the date, which is the one thing that
        decides where every tap lands, below the fold on a small phone. So the strip
@@ -325,21 +325,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #settingsBtn { color: var(--ink-2); font-size: 20px; letter-spacing: 2px; }
 
 /* ---------------------------------------------------------------- a thumb's worth
-   
+
    44px, on a phone, for everything a finger is meant to land on.
-   
+
    Not a guideline followed on faith: the men using this are in work gloves on a site,
    and the difference between a 30px chip and a 44px one is the difference between
    marking somebody present and marking the man under him present. The numbers below
    were measured on the real screens - the mode toggle was 26px, the day chips 30, the
    week cells 28 - so this is a floor under what is already there rather than a redesign.
-   
+
    Height AND width: a 20px-wide × button is as unhittable as a short one.
-   
+
    The date picker behind the day title is deliberately exempt. It is aria-hidden, out of
    the tab order and 5px across on purpose: it exists so the browser's own calendar can be
    opened from the title button, and nothing is ever meant to hit it directly. */
-@media (max-width: 700px) {
+@media (max-width: 700px), (pointer: coarse) {
     button,
     select,
     input[type="text"],
@@ -358,6 +358,18 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* These carry their own padding and would otherwise stay short inside a flex row. */
     .chip-main, .chip-side, .tab, .step-btn, .btn-today, .btn-add { min-height: 44px; }
+}
+
+/* A phone held sideways is 844 pixels wide and still a phone.
+
+   The block above used to be width-only, so turning the phone moved the whole app onto
+   the wide layout and the tab bar went back to 35px pills - the four controls pressed
+   more than anything else in the app, below the size a finger can hit, on the one
+   orientation where the screen is shortest and the thumb is furthest away. Asked by
+   POINTER instead, the floor follows the finger onto any screen it is on. */
+@media (pointer: coarse) {
+    .tab { min-height: 44px; }
+    .tabs .tab { padding-block: 8px; }
 }
 
 /* ---------------------------------------------------------------- reorder mode
@@ -562,6 +574,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         top: 0;
         z-index: 35;
     }
+}
+
+/* Except on a screen too short to give it away.
+
+   A phone held sideways is about 320 pixels tall. The day header is most of that, the tab
+   bar and the dock take the rest, and a sticky header then holds the last man in the crew
+   underneath itself: scrolled to the bottom of the list, his row is on screen and a tap on
+   it lands on the header instead. Below 500px of height the header goes back to scrolling
+   with the page - the date is one flick away rather than always visible, which is the
+   right trade when the alternative is a list that cannot be used at all.
+
+   The progress bar goes with it, for the same reason and by the same measurement: it is
+   the second thing pinned to the top of that screen, and between them they were holding
+   the last man in the crew underneath - his row on screen, and a tap on it landing on the
+   bar above. */
+@media (max-height: 500px) {
+    .day-header, .progress { position: static !important; }
 }
 
 .day-nav {
@@ -2071,3 +2100,100 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     flex-wrap: wrap;
 }
 .app-version button { font-size: 13px; padding: 6px 12px; }
+
+/* ================================================================ print, fail-safe
+
+   THE RULE: on paper, nothing prints unless it is the screen being printed.
+
+   What was here before was an allow-list of things to hide - the top bar, the day dock,
+   the drawer, the undo bar - written one at a time as each was noticed. Every overlay
+   added since was printable by default, and the worst of them was the worker-days modal:
+   open it from a name in the pay sheet, press print, and the modal's full-screen backdrop
+   went onto the paper over the report. A grey page, a fragment of one man's days, and the
+   sheet somebody is about to be paid from underneath it.
+
+   So the list is inverted. Everything outside the view being printed is chrome and is
+   gone, whether it is open or shut, whether it existed when this was written or not:
+
+     - body's own children, other than the app itself, are every modal, sheet and panel
+       in this document. All of them, always.
+     - the app's own children, other than <main>, are the header, the tab bar inside it,
+       every banner, the storage notice, the drawer, the undo bar and the day dock.
+     - <main>'s hidden views are already display:none, so what is left is the one view
+       on screen, which is the thing the person pressed print on.
+
+   Nothing here touches state: no modal is closed, no view is switched, no field is
+   cleared. The screen is exactly as it was when print is cancelled. */
+@media print {
+    /* Every dialog, sheet, panel and settings screen in the document. */
+    body > *:not(.app) { display: none !important; }
+
+    /* Everything the app draws around the view: header, tabs, banners, notice,
+       drawer, undo bar, day dock. */
+    .app > *:not(main) { display: none !important; }
+
+    /* Belt and braces, by name as well as by position: an overlay moved somewhere else
+       in the document tomorrow is still not printable. */
+    .modal,
+    .sheet,
+    .settings-panel,
+    .drawer-wrap,
+    .drawer-backdrop,
+    .day-drawer,
+    .undo-bar,
+    .day-actions,
+    .tabs,
+    .topbar,
+    .banner,
+    .storage-notice,
+    .reorder-live,
+    .reorder-foot,
+    .reorder-head,
+    .day-picker-input {
+        display: none !important;
+    }
+
+    /* Nothing floats on paper. A fixed or sticky element that survived both rules above
+       would print at the top of the FIRST page and sit over whatever is there - which is
+       how a sticky day header becomes a stripe across a pay sheet. There is no way to
+       select "position: fixed" in CSS, so every position is taken back to static and the
+       page becomes one ordinary flow. */
+    * {
+        position: static !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
+    /* White, all the way down. The app's paper colour is a light grey, and a background
+       on any wrapper is a full page of grey once print backgrounds are enabled - which
+       they are, deliberately, for the site colour badges. */
+    html,
+    body,
+    .app,
+    main,
+    main > section,
+    .report,
+    .roster-panel,
+    .setup-card {
+        background: #fff !important;
+    }
+
+    /* The pay sheet, on paper.
+
+       thead as a header-group so the columns are named again at the top of every page:
+       a second page of numbers with no headings is a page nobody can check. tfoot is NOT
+       a footer-group - that would repeat the totals on every page, and a total that
+       appears three times is three numbers to reconcile - it just must not be split. */
+    .report-table thead { display: table-header-group !important; }
+    .report-table tfoot { display: table-row-group !important; page-break-inside: avoid; }
+    .report-table tr { page-break-inside: avoid; }
+    .report-table { width: 100% !important; }
+
+    /* No trailing blank page. The invoice starts on a fresh page only when there is a
+       pay sheet in front of it, and the last report on the page does not push a margin
+       past the end of the content. */
+    .report:last-child { margin-bottom: 0 !important; }
+    .report:first-child { page-break-before: auto !important; }
+    .report-invoice:first-child { page-break-before: auto !important; }
+    main > section:last-child > *:last-child { margin-bottom: 0 !important; }
+}

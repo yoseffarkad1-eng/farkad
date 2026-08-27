@@ -112,6 +112,39 @@ function makeDocument() {
 
 let deviceCount = 0;
 
+// Ids in this app are random by design - two phones offline cannot agree on a counter -
+// and a suite built on them is a suite whose failing run cannot be repeated. With
+// FARKAD_SEED set, every device gets the same stream of numbers it got last time, so a
+// failure that took nine hundred writes to produce can be produced again.
+//
+// Without it, Math is the real one: the default run stays adversarial, and an id
+// collision that only happens on real randomness is not hidden by a fixed seed.
+function seededMath(index) {
+    const seed = process.env.FARKAD_SEED;
+    if (!seed) return Math;
+
+    // mulberry32: small, fast, and good enough for ids in a test. The device index is
+    // mixed in so two devices in one run do not mint the same id.
+    let state = (Number(seed) || hashOf(String(seed))) + index * 0x9e3779b9;
+    const random = () => {
+        state |= 0;
+        state = (state + 0x6d2b79f5) | 0;
+        let t = Math.imul(state ^ (state >>> 15), 1 | state);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    const copy = Object.create(Math);
+    Object.defineProperty(copy, 'random', { value: random, enumerable: true });
+    return copy;
+}
+
+function hashOf(text) {
+    let value = 0;
+    for (let i = 0; i < text.length; i += 1) value = (Math.imul(value, 31) + text.charCodeAt(i)) | 0;
+    return value;
+}
+
 // One phone. `storage` carries over a previous device's localStorage contents, which is
 // how "close the app and open it again" is spelled: makeDevice({ storage: old.dump() }).
 export function makeDevice(options = {}) {
@@ -132,7 +165,7 @@ export function makeDevice(options = {}) {
             log: () => {}, info: () => {}, warn: () => {}, error: () => {}
         },
         setTimeout, clearTimeout, setInterval, clearInterval,
-        Date, Math, JSON, Object, Array, String, Number, Boolean,
+        Date, Math: seededMath(deviceCount), JSON, Object, Array, String, Number, Boolean,
         Promise, Map, Set, Error, RegExp, isNaN, isFinite, parseInt, parseFloat,
         // The app calls render() after every commit. Counting the calls is occasionally
         // the only way to tell "wrote and redrew" from "wrote and did not".

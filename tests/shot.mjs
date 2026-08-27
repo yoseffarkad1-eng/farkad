@@ -5,6 +5,12 @@
 // The suites can say a button is 44px and that a bar clears the one below it. They cannot
 // say whether the screen is worth looking at, and a phone layout that is wrong is usually
 // wrong in a way that is obvious in a picture and invisible in a measurement.
+//
+// It is a SUPPLEMENT, and it is not evidence. Every layout requirement this app has -
+// four widths, both colour schemes, with and without a home indicator, portrait and
+// landscape, 200% text, the sheet, the settings screen, reorder mode, the dock, the
+// touch targets, the date, the banners, the last man in the crew - is an assertion in
+// tests/mobile.test.mjs. A picture nobody looks at proves nothing at all.
 import { serve } from './serve.mjs';
 const { chromium } = await import('playwright');
 const [out = 'shot.png', view = 'day', w = '390', h = '844'] = process.argv.slice(2);
