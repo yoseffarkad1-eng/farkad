@@ -512,3 +512,56 @@ anything found under it on an old device is still a real copy worth keeping.
 - **Safety** — a different GitHub account, never accessed. The only repository touched is
   `yoseffarkad1-eng/farkad`, and the only branch pushed in this phase is
   `claude/farkad-data-safety`.
+
+## v79 release blockers — what was found and closed
+
+This section is about the v79 branch only. `main` is `1dec586` and still serves v78;
+nothing here has been merged, published or deployed.
+
+### Was any earlier v79 ever served?
+
+No. The three build markers were bumped to v79 in `4bce096`, and that commit exists only
+on this feature branch:
+
+```
+git log -S"farkad-v79" origin/main -- sw.js     # no output: never on main
+git show origin/main:sw.js     | grep VERSION   # const VERSION = 'farkad-v78'
+git show origin/main:js/app.js | grep APP_      # const APP_VERSION = 'v78'
+git show origin/main:index.html | grep build    # content="v79" -> v78
+```
+
+The production origin deploys from `main`, so no phone has ever been served a build
+calling itself v79. The markers therefore stay at v79 rather than being bumped again:
+there is no older v79 cache anywhere for this one to collide with.
+
+`tests/build.test.mjs` now checks that invariant on every run — the page `<meta>`, the
+scripts' `APP_VERSION`, the service worker's cache name, and the shell list against every
+local asset the page and the scripts actually load, including the one imported at runtime.
+
+### The cloud that was never there
+
+`import('./js/sync/firebase-adapter.js')` from inside `js/app.js` is resolved against the
+SCRIPT's URL, not the document's — so the app asked for `/js/js/sync/firebase-adapter.js`,
+got a 404, and swallowed it in the `catch` that exists for a phone with no signal. Every
+v79 build so far was local-only on every device: no sign-in button, no snapshots, edits
+piling up in a queue with nowhere to go, and nothing on any screen saying so.
+
+It was not found by reading the code. It was found by making a test honest: the assertion
+`hung.length === 0` passed both when nothing off-origin is between a person and their data
+AND when the deferred import had not started yet. Watching the ordering instead — the
+first draw, then the request — the request never came.
+
+### The rest
+
+- **The first snapshot.** A persisted roster queue no longer flushes before the document
+  has answered, so a phone that closed with a roster edit queued cannot put a deleted
+  worker back in front of a v78 reader.
+- **Recovery.** A device that boots onto a damaged record now paints its banner (the
+  damaged-queue case reported itself before the UI existed and was never repainted, so
+  the one button that turns writing back on was invisible), and acknowledging starts the
+  cloud that boot skipped instead of leaving the phone local-only for the session.
+- **The rescue file.** It is still never refused, and it now invalidates every "made here
+  and never sent" claim on the device — verifiably, or, when the device cannot write at
+  all, by refusing to answer that question for as long as the disk refuses.
+- **The boot sentinel.** An inline script before every application script, depending on
+  nothing, that turns a white screen into a sentence when a script 404s or will not parse.

@@ -52,6 +52,16 @@
     <div class="banner banner-warn" id="accountBanner" style="display:none"></div>
     <div class="banner banner-warn" id="recoveryBanner" style="display:none"></div>
     <div class="banner banner-warn" id="crashBanner" style="display:none"></div>
+    <!-- The boot sentinel's banner, written out in full here and never built in code.
+         Every other banner on this page is assembled by el() from js/ui/dom.js - and the
+         one failure this banner exists for is the one where those scripts are the thing
+         that did not arrive. So the words are in the document, the sentinel only reveals
+         them, and the only DOM call in the whole path is getElementById. -->
+    <div class="banner banner-warn" id="bootBanner" style="display:none">
+        <span>⚠️ האפליקציה לא נטענה במלואה. מה שכבר נשמר במכשיר לא נפגע ולא נמחק - רענן את הדף. אם זה חוזר, נסה שוב כשיש חיבור טוב יותר.</span>
+        <span class="crash-detail" id="bootBannerDetail"></span>
+        <button type="button" class="btn-secondary" onclick="location.reload()">רענן</button>
+    </div>
     <div class="banner banner-warn" id="updateBanner" style="display:none"></div>
     <div class="banner banner-warn" id="offlineBanner" style="display:none"></div>
     <div class="banner banner-warn" id="migrationBanner" style="display:none"></div>
@@ -298,6 +308,71 @@
     </div>
 </div>
 
+<!-- The boot sentinel. FIRST, before a single line of the application, and deliberately
+     tiny.
+
+     Everything else that reports a failure on this page is part of the application:
+     watchForCrashes needs app.js, the banner it draws needs el() and clear() from
+     js/ui/dom.js, and Recovery needs Store. All of which is fine for a crash INSIDE a
+     running app, and useless for the failure where one of those files is the thing that
+     404'd, or arrived truncated, or would not parse. There the page is white, the phone
+     says nothing, and the person is left to guess whether a fortnight of records is gone.
+
+     So this depends on nothing: no el, no clear, no State, no Store, no app.js. It reads
+     one element that is already in the document, sets a string on it, and shows it. It
+     never touches localStorage - the record on the device is not this script's business
+     and nothing here may put it at risk.
+
+     It stands down the moment the app takes over error reporting, so a failure inside a
+     booted app is reported by the app, with the detail it can give, in its own banner.
+     One banner, whichever of the two fires. -->
+<script>
+(function () {
+    var spoke = false;
+    var live = true;
+
+    function show(detail) {
+        if (!live || spoke) return;
+        // If the app's own crash banner is already up, this one has nothing to add.
+        var crash = document.getElementById('crashBanner');
+        if (crash && crash.dataset && crash.dataset.shown) { live = false; return; }
+
+        var host = document.getElementById('bootBanner');
+        if (!host) return;
+        spoke = true;
+        var line = document.getElementById('bootBannerDetail');
+        // The actual failure, small and last. Without it the only way to find out what
+        // broke is a developer console, which is not a thing anyone has on a site.
+        if (line) line.textContent = String(detail === undefined ? '' : detail).slice(0, 160);
+        host.style.display = '';
+    }
+
+    // Capture phase, because a script or a stylesheet that does not load fires its error
+    // on the element and it does not bubble. That is the whole of this file's first job.
+    window.addEventListener('error', function (event) {
+        var target = event && event.target;
+        if (target && target !== window && (target.src || target.href)) {
+            show((target.src || target.href) + ' - לא נטען');
+            return;
+        }
+        if (event && event.message) show(event.message);
+    }, true);
+
+    window.addEventListener('unhandledrejection', function (event) {
+        var reason = event && event.reason;
+        show(reason && reason.message ? reason.message : reason);
+    });
+
+    window.farkadBootSentinel = {
+        // Called by the app the moment its own crash handler is installed. From there on
+        // the app reports its own failures and this one is silent - no second banner, and
+        // no reload offered over a screen that is working.
+        standDown: function () { live = false; },
+        spoke: function () { return spoke; },
+        live: function () { return live; }
+    };
+})();
+</script>
 <script src="js/store.js"></script>
 <script src="js/recovery.js"></script>
 <script src="js/dates.js"></script>

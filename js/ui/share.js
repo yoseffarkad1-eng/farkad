@@ -680,11 +680,19 @@ function exportRecoveryData() {
     // The same handover the ordinary backup makes, attempted - but never a reason to
     // stop. This file is the only way the unreadable bytes leave a phone, and refusing it
     // because a bookkeeping write failed would be trading the data for the bookkeeping.
-    // When it does fail, the record stays as it was: which is either intact and unchanged,
-    // or damaged - and a damaged record already refuses every deletion.
-    if (typeof FarkadSync !== 'undefined' && FarkadSync.forgetLocalOrigin) {
-        FarkadSync.forgetLocalOrigin();
-    }
+    //
+    // It is still READ, though, because the two outcomes are not the same phone
+    // afterwards. This file carries the whole schedule, so anybody it reaches has every
+    // worker on this device: from here on, "he was made here and has never left" is not
+    // something this phone can say about anyone. When the record of that lands, the
+    // generation moves and the old claims are dead. When it cannot land, the claim is not
+    // quietly left standing - the device is marked uncertain for as long as it is open,
+    // and a disk that refuses this write refuses the probe in canRecordProvenance too, so
+    // the refusal survives the app being closed and opened again.
+    const recorded = typeof FarkadSync !== 'undefined' && FarkadSync.forgetLocalOrigin
+        ? FarkadSync.forgetLocalOrigin()
+        : true;
+    if (!recorded && FarkadSync.noteHandoverUnrecorded) FarkadSync.noteHandoverUnrecorded();
 
     const name = `farkad-recovery-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
@@ -694,6 +702,25 @@ function exportRecoveryData() {
     link.download = name;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    // What is said afterwards, and what is carefully NOT said.
+    //
+    // A click on a link is not a file on a phone. On iOS the sheet can be dismissed, the
+    // save can be cancelled, and the app is told nothing either way - so this never says
+    // the file was saved, or that it is in Files, or that the data is now safe. It says
+    // what actually happened, which is that the app handed the file over, and asks the
+    // one person who can check to go and check.
+    if (typeof askTell === 'function') {
+        askTell({
+            title: recorded ? 'הקובץ נמסר לדפדפן' : 'הקובץ נמסר, אבל לא נרשם במכשיר',
+            message: recorded
+                ? `${name} - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר, והעתק אותו למקום נוסף. ` +
+                    'האפליקציה לא יכולה לדעת אם השמירה הצליחה.'
+                : `${name} - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר. ` +
+                    'לא הצלחנו לרשום במכשיר שהקובץ יצא ממנו, ולכן מחיקה לצמיתות תישאר חסומה ' +
+                    'עד שיהיה מקום פנוי - הארכיון עובד כרגיל.'
+        });
+    }
 }
 
 // A backup file is a handover to another device.

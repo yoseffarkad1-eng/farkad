@@ -133,10 +133,32 @@ const Recovery = {
     },
 
     // Pressed only after the export. Resumes writing if every damaged record was copied.
+    //
+    // And resumes the cloud with it. A device that boots onto a damaged record never
+    // starts the sync module at all - the import is skipped while writes are blocked -
+    // and nothing used to start it afterwards. So the phone came back to life local-only
+    // and stayed that way for the rest of the session: recording all evening, reporting
+    // itself as an ordinary local app, with the other two phones seeing none of it, and
+    // the queue growing behind a connection that was never going to be made.
+    //
+    // Idempotent on the other side of this call: starting the cloud twice in one session
+    // must be no different from starting it once. And it happens only when the
+    // acknowledgement actually released the device - a record whose bytes could not be
+    // copied holds everything, and nothing about pressing a button changes that.
     acknowledge() {
         this.acknowledged = true;
         this.paint();
-        return !this.blocked();
+        const resumed = !this.blocked();
+        if (!resumed) return false;
+
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.releaseRecoveryHold) {
+            FarkadSync.releaseRecoveryHold();
+        }
+        // Defined in app.js, which the data suite does not load - and a guard that
+        // silently answers "no" in the suite is not a guard, so what it does instead is
+        // tested through the hook itself.
+        if (typeof connectCloudLater === 'function') connectCloudLater();
+        return true;
     },
 
     paint() {

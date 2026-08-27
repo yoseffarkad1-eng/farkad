@@ -119,6 +119,8 @@ const PROV_PREFIX = 'farkad:prov:';
 const PROV_GEN_KEY = PROV_PREFIX + 'gen';
 const PROV_UNCERTAIN_KEY = PROV_PREFIX + 'uncertain';
 const PROV_MIGRATED_KEY = PROV_PREFIX + 'migrated';
+// Written and read back to find out whether this device can still record anything at all.
+const PROV_PROBE_KEY = PROV_PREFIX + 'probe';
 const provSentKey = (kind, id) => `${PROV_PREFIX}sent:${kind}:${id}`;
 const provMineKey = (kind, id) => `${PROV_PREFIX}mine:${kind}:${id}`;
 
@@ -768,6 +770,7 @@ const FarkadSync = {
     // export whose record could not be written, a v1 blob that will not parse, a
     // migration that did not complete. Absence of evidence is never read as safety.
     provenanceUncertain() {
+        if (this._uncertainNow) return true;
         if (Store.durableGet(PROV_UNCERTAIN_KEY) !== null) return true;
 
         // A v1 blob that is present, unmigrated and unreadable. It may name people who
@@ -786,6 +789,56 @@ const FarkadSync = {
     // device is refusing writes, and refusing every deletion is the only safe reading.
     noteProvenanceUncertain() {
         return Store.setVerified(PROV_UNCERTAIN_KEY, '1');
+    },
+
+    // Something HAS left this device and the record of it did not land.
+    //
+    // Not the same as a failed attempt to record one: a backup that is refused because
+    // the bookkeeping write failed never leaves, so nothing about the device changed and
+    // everybody on it is still provably local. This is for the one export that is handed
+    // over anyway - the rescue file, which exists to get unreadable bytes off a phone and
+    // is never refused. There the file is gone and the proof is not, so every question
+    // about who was only ever here is answered "cannot tell" for as long as the app is
+    // open, and the disk that refused this write refuses the probe in canRecordProvenance
+    // too, so the refusal survives a reopen on the same broken device.
+    noteHandoverUnrecorded() {
+        this._uncertainNow = true;
+        // Still tried, in case there is room now. Either way the answer above stands.
+        return Store.setVerified(PROV_UNCERTAIN_KEY, '1');
+    },
+
+    // Set for this session only. Everything else about provenance is read off the disk.
+    _uncertainNow: false,
+
+    // Whether this device can record a provenance fact AT ALL, asked once and remembered.
+    //
+    // The question behind the question: a phone that cannot write down that somebody's
+    // record left it cannot be trusted to have written it down the last time one did.
+    // Permanent deletion is the one action here with nothing behind it, so on a device
+    // whose disk is refusing, the answer to "can I prove this man never left?" is no -
+    // and it is no again after the app is closed and reopened, because the disk is still
+    // refusing.
+    //
+    // A probe rather than a flag: Store.full only knows about writes that have already
+    // been tried, and the first thing a fresh session does is not a provenance write.
+    _canRecord: null,
+
+    canRecordProvenance() {
+        if (this._canRecord !== null) return this._canRecord;
+        // OPTIONAL, and read back by hand. setVerified would be the obvious call and it
+        // is the wrong one: a write that is not optional runs Store's reclaim ladder, and
+        // the only thing that ladder can delete is restore points. Drawing the roster
+        // asks this question once per person, so the obvious call would have a screen
+        // that merely SHOWS a crew quietly eating the history it exists to protect.
+        //
+        // The value MOVES every session, and that is the whole of the test. Writing a
+        // constant and reading it back proves only that a previous session managed it:
+        // a phone whose disk started refusing between then and now would read its own
+        // old probe, call itself able to record, and go on offering to destroy people.
+        const next = String((Number(Store.durableGet(PROV_PROBE_KEY)) || 0) + 1);
+        Store.set(PROV_PROBE_KEY, next, { optional: true });
+        this._canRecord = Store.durableGet(PROV_PROBE_KEY) === next;
+        return this._canRecord;
     },
 
     // The v1 blob, carried across into per-fact keys. Non-destructive: the blob is left
@@ -993,6 +1046,8 @@ const FarkadSync = {
     // The whole question, asked in one place: can this id be destroyed for good?
     provenLocalOnly(kind, id) {
         if (kind !== 'workers' && kind !== 'places') return false;
+        // A device that cannot write cannot prove anything. See canRecordProvenance.
+        if (!this.canRecordProvenance()) return false;
         // A migration that has not completed leaves facts on the disk in a form this does
         // not read, so it is asked to finish first - and if it cannot, the device is
         // uncertain and the answer below is no.
@@ -1231,8 +1286,19 @@ const FarkadSync = {
     },
 
     connect(adapter) {
+        // One subscription per session, whatever calls this and however often.
+        //
+        // onAuthStateChanged fires again on a token refresh, on a re-sign-in, and after
+        // Recovery is acknowledged and the cloud is started for the first time in a
+        // session that booted blocked. Every one of those used to add a listener beside
+        // the last one, so the same snapshot arrived twice and receive() ran twice on it
+        // - two adoptions, two archive attempts, and two flushes racing each other with
+        // the same queue behind them.
+        this.stopListening();
+
         this.adapter = adapter;
         this.loadOutbox();
+        this._recoveryHold = false;
         this.setStatus('connecting');
 
         // A site loses signal for minutes at a time and gets it back with nobody
@@ -1247,10 +1313,11 @@ const FarkadSync = {
             });
         }
 
-        adapter.subscribe(
+        const stop = adapter.subscribe(
             snapshot => this.receive(snapshot),
             error => this.fail(error)
         );
+        this._unsubscribe = typeof stop === 'function' ? stop : null;
 
         // Anything left over from a previous session goes out as soon as there is
         // somewhere to send it. The replacement goes first: the queued field edits
@@ -1275,6 +1342,49 @@ const FarkadSync = {
         // out, or the auth token expiring, must not be a way to lose edits that were
         // never sent - they are still true, and the next sign-in is where they go.
         this.setStatus('off');
+    },
+
+    // Whatever this session was listening to, stopped. Called before subscribing again,
+    // never on sign-out: disconnect() deliberately leaves the connection alone, because
+    // signing out is not a reason to stop hearing what the other phones are doing until
+    // the page is gone.
+    _unsubscribe: null,
+
+    stopListening() {
+        const stop = this._unsubscribe;
+        this._unsubscribe = null;
+        if (typeof stop !== 'function') return;
+        try {
+            stop();
+        } catch (error) {
+            console.error('Could not stop the previous subscription:', error);
+        }
+    },
+
+    // ------------------------------------------------------- held back by Recovery
+    //
+    // A device that opened onto a damaged record does not start the cloud at all: the
+    // import is skipped, so nothing connects, and until v79 nothing ever started it
+    // again either. Acknowledging the damage turned writing back on and left this
+    // device alone with them - recording all evening, saying "הנתונים נשמרים במכשיר
+    // הזה בלבד", with the other two phones seeing none of it.
+    //
+    // So the state is named rather than left looking like an ordinary local-only app,
+    // and acknowledging is what releases it.
+    _recoveryHold: false,
+
+    holdForRecovery() {
+        this._recoveryHold = true;
+        if (this.status === 'off') this.setStatus('blocked');
+    },
+
+    releaseRecoveryHold() {
+        this._recoveryHold = false;
+        // Back to 'off' and no further: the cloud is starting, not started. The adapter
+        // says 'connecting' when it actually connects, and a project with no Firebase
+        // configured never does - "מתחבר לענן…" for ever would be a worse lie than the
+        // one this replaces.
+        if (this.status === 'blocked') this.setStatus('off');
     },
 
     setStatus(status, error) {
@@ -2911,6 +3021,7 @@ function updateSyncNotice() {
 
     const messages = {
         off: 'הנתונים נשמרים במכשיר הזה בלבד.',
+        blocked: 'הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד.',
         connecting: 'מתחבר לענן…',
         synced: 'מסונכרן בין המכשירים.',
         offline: 'אין חיבור - השינויים יישלחו כשהחיבור יחזור.',

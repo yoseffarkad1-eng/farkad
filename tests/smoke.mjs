@@ -1532,15 +1532,20 @@ async function seedRoster(page) {
 
   // The two hosts are made to hang rather than to fail: a refusal would settle, and
   // settling is exactly what does not happen on a bad connection.
+  //
+  // WHEN each request was made is recorded, not only whether one was. The assertion
+  // underneath this used to be `hung.length === 0` at a moment chosen by the test - which
+  // is true both when nothing off-origin is between a person and their data AND when the
+  // deferred import simply had not started yet. One of those is the fix and the other is
+  // the bug wearing its clothes, and the old check could not tell them apart.
   const hung = [];
-  await page.route('**://cdnjs.cloudflare.com/**', route => {
-    hung.push('cdnjs');
+  const record = host => route => {
+    hung.push({ host, at: Date.now() });
     // Never resolved, never aborted.
-  });
-  await page.route('**://*.gstatic.com/**', route => {
-    hung.push('gstatic');
-  });
-  await page.route('**://*.googleapis.com/**', route => { hung.push('googleapis'); });
+  };
+  await page.route('**://cdnjs.cloudflare.com/**', record('cdnjs'));
+  await page.route('**://*.gstatic.com/**', record('gstatic'));
+  await page.route('**://*.googleapis.com/**', record('googleapis'));
 
   // A fortnight of records, already on the disk before this page ever loads.
   await page.addInitScript(() => {
@@ -1575,7 +1580,8 @@ async function seedRoster(page) {
   } catch (error) {
     drawn = false;
   }
-  const took = Date.now() - started;
+  const drawnAt = Date.now();
+  const took = drawnAt - started;
 
   check('the day screen draws while cdnjs and gstatic are hanging', drawn === true,
     `${took}ms`);
@@ -1585,8 +1591,42 @@ async function seedRoster(page) {
   check('the day that was recorded is still there',
     (await page.evaluate(() =>
       entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length)) === 1);
-  check('and nothing was ever asked of cdnjs or gstatic to get there',
-    hung.length === 0, hung.join());
+  // Ordering, not absence. Nothing off this origin may be asked for on the way to the
+  // first draw; what happens afterwards is a different claim, made honestly below.
+  const beforeDraw = hung.filter(entry => entry.at <= drawnAt);
+  check('and nothing off this origin was asked for on the way to that screen',
+    beforeDraw.length === 0, JSON.stringify(beforeDraw));
+
+  // And the other half, which the old assertion could not distinguish itself from: the
+  // deferred import really does happen. A check that passes because the work has not
+  // started yet is not a check, so this waits for the app to say it has started it and
+  // then insists the request came after the screen.
+  //
+  // Watched from OUT HERE, on the requests themselves, rather than by asking the page
+  // whether it thinks it started. This is the check that found the bug it was written
+  // for: import('./js/sync/firebase-adapter.js') inside a classic script resolves
+  // against the SCRIPT's url, so the app asked for /js/js/sync/..., took the 404 into
+  // the catch that exists for a phone with no signal, and ran local-only for ever with
+  // nothing on screen saying so. The page thought it had started the import. Only the
+  // wire knew it had not.
+  let importStarted = false;
+  for (let waited = 0; waited < 8000 && !importStarted; waited += 200) {
+    importStarted = hung.some(entry => entry.host === 'gstatic');
+    if (!importStarted) await page.waitForTimeout(200);
+  }
+  check('the cloud import does start - after the draw, not instead of it',
+    importStarted === true, JSON.stringify(hung.map(entry => entry.host)));
+
+  const sdk = hung.filter(entry => entry.host === 'gstatic');
+  check('and the SDK is fetched only once the crew is already on screen',
+    sdk.length > 0 && sdk.every(entry => entry.at > drawnAt),
+    JSON.stringify({ requests: sdk.length, drawnAt, first: sdk[0] && sdk[0].at }));
+
+  // The spreadsheet library is a different rule again: not deferred, not requested at
+  // all until somebody presses export. Nothing here has.
+  check('and the spreadsheet library is not fetched at all until it is asked for',
+    hung.every(entry => entry.host !== 'cdnjs'),
+    JSON.stringify(hung.map(entry => entry.host)));
 
   // Nothing outside this origin is in the document any more.
   const external = await page.evaluate(() => [...document.querySelectorAll('script[src]')]
@@ -1609,6 +1649,181 @@ async function seedRoster(page) {
       JSON.parse(localStorage.getItem('scheduleData:v2')).days['2026-08-12'].actual.w_02
         .entries.length)) === 1);
 
+  await page.context().close();
+}
+
+// ------------------------------------------------- the export, and the CDN it may need
+//
+// SheetJS is fetched from a CDN, which on a building site is a request that hangs rather
+// than fails. Two rules follow: it is not asked for until somebody presses export, and
+// when it does not arrive the numbers still come off the phone.
+{
+  const page = await open();
+  const asked = [];
+  await page.route('**://cdnjs.cloudflare.com/**', route => {
+    asked.push(Date.now());
+    // Hangs, the way it does on one bar of signal.
+  });
+
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_02', 'actual', 'p_01');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+  });
+  await page.click('#tab-reports');
+  await page.waitForTimeout(400);
+
+  check('opening the reports asks the CDN for nothing', asked.length === 0,
+    String(asked.length));
+
+  // Pressed for real, from the screen, and the CSV files caught as they are saved.
+  const files = [];
+  page.on('download', download => files.push(download.suggestedFilename()));
+  await page.evaluate(() => { loadXlsx(600); });
+  await page.locator('#reportsView button').filter({ hasText: 'יצוא' }).click();
+  await page.waitForTimeout(2500);
+
+  check('pressing export is what fetches it', asked.length > 0, String(asked.length));
+  // Three files, one per report. The names the browser hands back are sanitised - the
+  // real ones are Hebrew - so what is counted is the saves, not the spelling.
+  check('and when it does not arrive the numbers come out as three files anyway',
+    files.length === 3, files.join(', '));
+  check('the person is told which format they got, rather than left guessing',
+    (await page.textContent('#askModal')).includes('CSV'),
+    await page.textContent('#askModal'));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- a script that never arrived
+//
+// Every other failure report on this page is part of the application: watchForCrashes
+// needs app.js, the banner it draws needs el() from js/ui/dom.js, Recovery needs Store.
+// Which is fine for a crash inside a running app, and useless for the failure where one
+// of those files is the thing that 404'd or arrived truncated. There the phone shows
+// white, says nothing, and the person is left to guess whether a fortnight of records is
+// gone with it.
+{
+  const broken = [
+    { what: 'the store script, before anything else has run',
+      url: '**/js/store.js', mode: 'missing' },
+    { what: 'a model script that will not parse',
+      url: '**/js/model/schema.js', mode: 'syntax' },
+    { what: 'a UI script from the middle of the list',
+      url: '**/js/ui/day.js', mode: 'missing' },
+    { what: 'app.js itself, so nothing ever boots',
+      url: '**/js/app.js', mode: 'missing' }
+  ];
+
+  for (const { what, url, mode } of broken) {
+    const page = await newPage();
+    // Something already recorded on this phone. The sentinel must not go anywhere near it.
+    await page.addInitScript(() => {
+      localStorage.setItem('scheduleData:v2', JSON.stringify({
+        schemaVersion: 2,
+        workers: [{ id: 'w_01', name: 'דוד כהן', active: true, dailyRate: 400, hourlyRate: 0 }],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days: { '2026-08-12': { plan: {}, actual: {
+          w_01: { entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } } } } },
+        advances: {}, updatedAt: '2026-08-12T18:00:00.000Z', updatedBy: 'd_old'
+      }));
+    });
+    const before = '2026-08-12';
+
+    let documentLoads = 0;
+    page.on('request', request => {
+      if (request.isNavigationRequest()) documentLoads += 1;
+    });
+
+    await page.route(url, route => {
+      if (mode === 'missing') {
+        route.fulfill({ status: 404, contentType: 'text/plain', body: 'not here' });
+        return;
+      }
+      route.fulfill({ status: 200, contentType: 'text/javascript', body: 'function ( {' });
+    });
+
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'commit' });
+
+    let said = null;
+    try {
+      await page.waitForFunction(() => {
+        const node = document.getElementById('bootBanner');
+        return node && node.style.display === '' && node.textContent.length > 0;
+      }, null, { timeout: 8000 });
+      said = await page.textContent('#bootBanner');
+    } catch (error) {
+      said = null;
+    }
+
+    check(`${what}: the screen says so instead of staying white`, said !== null,
+      String(said).slice(0, 60));
+    check(`${what}: and says the saved record is not the casualty`,
+      String(said).includes('לא נפגע'), String(said).slice(0, 120));
+
+    // The one thing this script may never do.
+    const kept = await page.evaluate(() => localStorage.getItem('scheduleData:v2'));
+    check(`${what}: the record on the device is untouched`,
+      typeof kept === 'string' && kept.includes(before === undefined ? '' : '2026-08-12'),
+      String(kept).slice(0, 40));
+
+    // One banner, and no reload loop: the sentinel offers a refresh, it never takes one.
+    const crashShown = await page.evaluate(() => {
+      const node = document.getElementById('crashBanner');
+      return Boolean(node && node.style.display === '' && node.textContent.length > 0);
+    });
+    check(`${what}: one banner, not two`, crashShown === false);
+    await page.waitForTimeout(800);
+    check(`${what}: and the page did not reload itself`, documentLoads === 1,
+      String(documentLoads));
+
+    await page.context().close();
+  }
+}
+
+// ------------------------------------------------- and a boot that worked
+{
+  // The sentinel stands down the moment the app installs its own handler, so an ordinary
+  // session never sees it - and a crash inside a booted app is reported by the app, with
+  // the detail it can give, in its own banner.
+  const page = await open();
+  check('a healthy boot shows no sentinel banner',
+    (await page.evaluate(() =>
+      document.getElementById('bootBanner').style.display)) === 'none');
+  check('and the sentinel has handed over',
+    (await page.evaluate(() => window.farkadBootSentinel.live())) === false);
+  await page.context().close();
+}
+
+// ------------------------------------------------- the cloud import failing is not a crash
+{
+  // The one deferred import in the app is allowed to fail: it is caught, the app is
+  // local-only, and that is a normal Tuesday on a building site. It must not raise the
+  // banner that means "this app did not load".
+  const page = await newPage();
+  await page.route('**/js/sync/firebase-adapter.js', route =>
+    route.fulfill({ status: 404, contentType: 'text/plain', body: 'not here' }));
+  await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+  await page.waitForTimeout(1200);
+
+  check('the app boots with the cloud module missing',
+    (await page.evaluate(() => document.getElementById('dayView').children.length > 0)));
+  check('and no banner claims the app failed to load',
+    (await page.evaluate(() =>
+      document.getElementById('bootBanner').style.display)) === 'none');
+  check('nor the crash banner',
+    (await page.evaluate(() =>
+      document.getElementById('crashBanner').style.display)) === 'none');
+  check('a day can still be recorded',
+    (await page.evaluate(() => {
+      State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+      State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+      State.commit(assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+      return entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').length;
+    })) === 1);
   await page.context().close();
 }
 
@@ -2481,6 +2696,78 @@ async function seedRoster(page) {
   await page.waitForTimeout(200);
   check('acknowledging resumes recording, the copy having been confirmed',
     (await page.evaluate(() => farkadWritesBlocked())) === false);
+  await page.context().close();
+}
+
+// ------------------------------------------------- the cloud after a Recovery resume
+//
+// A device that boots onto a damaged record does not import the sync module at all - and
+// until v79 nothing started it afterwards either. Acknowledging turned writing back on and
+// left the phone local-only for the rest of the session, with the other two seeing none of
+// what was recorded on it.
+{
+  // No service worker in this one: a request the worker serves or fetches on the page's
+  // behalf is not the page's request, and the stub below would never see it. What is
+  // being measured is the app's decision to import.
+  const page = await newPage({ serviceWorkers: 'block' });
+  const asked = [];
+  // Answered with a stub, so what is measured is the app's decision to import rather than
+  // whether gstatic is reachable from wherever this suite is being run.
+  await page.route('**/js/sync/firebase-adapter.js', route => {
+    asked.push(route.request().url());
+    route.fulfill({
+      status: 200,
+      contentType: 'text/javascript',
+      body: 'window.farkadAdapterLoads = (window.farkadAdapterLoads || 0) + 1;\n'
+    });
+  });
+
+  await page.addInitScript(() => {
+    // Half a write. The days inside are still plain text, which is why it is never
+    // deleted - and why the app stops writing until somebody has taken a copy.
+    localStorage.setItem('farkad:outbox',
+      '{"seq":7,"items":{"days.2026-08-12.actual.w_01":{"value":{"entr');
+  });
+  await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+  await page.waitForTimeout(600);
+
+  check('a damaged record blocks writing at boot',
+    (await page.evaluate(() => farkadWritesBlocked())) === true);
+  check('and the sync module was never asked for', asked.length === 0, asked.join());
+  check('the status says the sync is held, not that this is a local-only app',
+    (await page.evaluate(() => FarkadSync.status)) === 'blocked',
+    await page.evaluate(() => FarkadSync.status));
+  check('the notice on screen says so too',
+    (await page.textContent('#storageNotice')).includes('מושהה'),
+    await page.textContent('#storageNotice'));
+
+  await page.locator('#recoveryBanner button').filter({ hasText: 'הבנתי' }).click();
+  await page.waitForTimeout(600);
+
+  check('acknowledging resumes recording',
+    (await page.evaluate(() => farkadWritesBlocked())) === false);
+  check('and asks for the sync module exactly once', asked.length === 1, asked.join());
+  check('the held status is cleared',
+    (await page.evaluate(() => FarkadSync.status)) !== 'blocked',
+    await page.evaluate(() => FarkadSync.status));
+
+  // Idempotent on this side too: the resume hook is called from the banner, and it is
+  // also called at the end of every boot. Two calls must not mean two adapters.
+  const again = await page.evaluate(() => {
+    const before = cloudStarted;
+    connectCloudLater();
+    connectCloudLater();
+    return { before, after: cloudStarted, loads: window.farkadAdapterLoads };
+  });
+  await page.waitForTimeout(400);
+  check('the cloud was recorded as started', again.before === true && again.after === true,
+    JSON.stringify(again));
+  check('and calling the hook again asks for nothing more',
+    asked.length === 1, asked.join());
+  check('one adapter, once',
+    (await page.evaluate(() => window.farkadAdapterLoads)) === 1,
+    String(await page.evaluate(() => window.farkadAdapterLoads)));
+
   await page.context().close();
 }
 
@@ -4364,10 +4651,29 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const page = await open();
   await seedRoster(page);
 
-  const sent = await page.evaluate(() => {
+  const sent = await page.evaluate(async () => {
     const paths = [];
-    FarkadSync.adapter = { update: patch => { paths.push(...Object.keys(patch)); return Promise.resolve(); } };
+    // Connected properly rather than by assigning .adapter: since v79 a queued roster
+    // waits for the first snapshot, and a fake that never delivers one is a phone that
+    // has not heard from the document yet - which is exactly the state where holding it
+    // back is the correct behaviour, not the bug this test is about.
+    FarkadSync.connect({
+      update: patch => { paths.push(...Object.keys(patch)); return Promise.resolve(); },
+      save: () => Promise.resolve(),
+      create: () => Promise.resolve(),
+      archive: () => Promise.resolve(),
+      archiveDates: () => Promise.resolve([]),
+      archiveRead: () => Promise.resolve(null),
+      subscribe: onSnapshot => {
+        // What the adapter hands over for a project with no document yet.
+        Promise.resolve().then(() =>
+          onSnapshot({ workers: [], places: [], days: {}, updatedAt: null }));
+        return () => {};
+      }
+    });
     FarkadSync.pushDelayMs = 0;
+    await new Promise(resolve => setTimeout(resolve, 50));
+    paths.length = 0;
 
     State.schedule.workers.push({ id: 'w_09', name: 'יוסי', active: true, dailyRate: 400, hourlyRate: 0 });
     State.commitRoster();

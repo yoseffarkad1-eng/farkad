@@ -7220,6 +7220,338 @@ function slowFirstSnapshot(cloud) {
         !workerIds(reopened).includes(doomed), workerIds(reopened));
 }
 
+{
+    suite('asking whether somebody can be deleted costs nothing');
+
+    // The question is answered partly by trying to write - a device that cannot record
+    // that a man left cannot claim he never did. That write must be an OPTIONAL one: the
+    // only thing Store's reclaim ladder can delete is restore points, so a question asked
+    // while the roster is on screen would quietly eat the history it exists to protect.
+    const device = crew().device;
+    device.State.save({ silent: true });
+    device.call('takeDailySnapshot');
+    const points = () => device.Store.keys()
+        .filter(key => String(key).startsWith('scheduleData:snap:')).sort();
+    given('there is a restore point to lose', points().length > 0);
+
+    // Minted BEFORE the disk fills: minting is a real write and is allowed to reclaim.
+    // What must not reclaim is the question asked about him afterwards.
+    const mine = device.State.nextWorkerId();
+    const kept = points();
+    given('and it survived the minting', kept.length > 0);
+
+    // A full disk, which is the only condition under which reclaim runs at all.
+    device.setQuota(() => true);
+    device.call('deletionBlockers', 'w_01');
+    device.Sync.provenLocalOnly('workers', mine);
+    device.Sync.provenLocalOnly('workers', 'w_01');
+
+    same('the restore points are all still there', points(), kept);
+    check('and the answer on a device that cannot write is no',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+// ------------------------------------------------- the rescue file leaves the device
+//
+// The recovery export is the one file that must never be refused: it exists to get bytes
+// off a phone that cannot read them. But it carries the whole schedule, so once it has
+// been handed over, "he was made here and has never left" is not something this device
+// can say about anybody - and permanent deletion is the one action with nothing behind it.
+
+// Enough browser for a download to happen. What is under test is what the app records
+// before it hands the file over, not the browser's part in taking it.
+function catchDownloads(device) {
+    const saved = [];
+    let lastBody = null;
+    device.ctx.Blob = function Blob(parts) { lastBody = String((parts || []).join('')); };
+    device.ctx.URL = {
+        createObjectURL: () => 'blob:farkad',
+        revokeObjectURL: () => {}
+    };
+    device.ctx.document.createElement = () => ({
+        style: {},
+        setAttribute: () => {},
+        appendChild: () => {},
+        click() { saved.push({ name: this.download, body: lastBody }); }
+    });
+    return saved;
+}
+
+{
+    suite('the rescue file ends the proof that anybody was only ever here');
+
+    const { device, said } = crew();
+    const files = catchDownloads(device);
+
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.save({ silent: true });
+    given('he can be proved local before the file leaves',
+        device.Sync.provenLocalOnly('workers', mine) === true);
+
+    device.call('exportRecoveryData');
+
+    check('the file was handed over', files.length === 1,
+        JSON.stringify(files.map(file => file.name)));
+    check('and it carries the raw records',
+        String(files[0].body).includes('farkad-recovery'), String(files[0].body).slice(0, 60));
+    check('he can no longer be proved local',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+    check('so the screen offers the archive rather than the delete',
+        device.call('deletionBlockers', mine)
+            .includes('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום'),
+        JSON.stringify(device.call('deletionBlockers', mine)));
+    check('and nothing claims the file reached anywhere',
+        said.every(message => !/נשמר בקבצים|נשמר במכשיר|הקובץ נשמר/.test(message)),
+        JSON.stringify(said));
+    check('what it says is that the browser has it now',
+        said.some(message => message.includes('נמסר')), JSON.stringify(said));
+
+    // Across a close and reopen, which is the only reading that counts.
+    const reopened = makeDevice({ storage: device.dump(), deviceId: device.id });
+    reopened.State.load();
+    check('and the next session agrees',
+        reopened.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
+    suite('the export does not touch the bytes it is rescuing');
+
+    const broken = '{"seq":7,"items":{"days.2026-08-12.actual.w_01":{"value":{"entr';
+    const device = makeDevice({ storage: { 'farkad:outbox': broken } });
+    seed(device);
+    catchDownloads(device);
+
+    const quarantined = device.raw('farkad:outbox:damaged');
+    given('the bytes were copied somewhere safe', quarantined === broken);
+
+    device.call('exportRecoveryData');
+
+    check('the damaged original is exactly where it was',
+        device.raw('farkad:outbox') === broken, String(device.raw('farkad:outbox')));
+    check('and so is the quarantined copy',
+        device.raw('farkad:outbox:damaged') === quarantined,
+        String(device.raw('farkad:outbox:damaged')));
+}
+
+{
+    suite('a rescue file the device cannot write down is still handed over');
+
+    // The disk refuses every provenance write AND every removal - which is the only way
+    // all three of forgetLocalOrigin's fallbacks can fail at once. The file still leaves,
+    // because it is the only copy of unreadable bytes there will ever be; what must not
+    // happen is the device carrying on as though nothing left it.
+    const { device, said } = crew();
+    const files = catchDownloads(device);
+
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.save({ silent: true });
+    given('he starts provable', device.Sync.provenLocalOnly('workers', mine) === true);
+
+    device.setQuota(key => String(key).startsWith('farkad:prov:'));
+    device.blockRemoval(key => String(key).startsWith('farkad:prov:'));
+
+    device.call('exportRecoveryData');
+
+    check('the file is not refused', files.length === 1,
+        JSON.stringify(files.map(file => file.name)));
+    check('and the device stops claiming he never left',
+        device.Sync.provenLocalOnly('workers', mine) === false);
+    check('the person is told the handover was not written down',
+        said.some(message => message.includes('לא נרשם')), JSON.stringify(said));
+
+    // Reopened with the same disk fault, which is what a full or refusing device does:
+    // the probe fails, so the device still cannot prove anything about anybody.
+    //
+    // (A disk that heals between the two is the one case nothing here can recover: the
+    // fact that the file left was never written anywhere. The person was told so at the
+    // time, in the message above, rather than the app quietly forgetting it.)
+    const reopened = makeDevice({
+        storage: device.dump(),
+        deviceId: device.id,
+        quota: key => String(key).startsWith('farkad:prov:')
+    });
+    reopened.State.load();
+    check('and the next session cannot prove it either',
+        reopened.Sync.provenLocalOnly('workers', mine) === false);
+    check('while the archive is still offered',
+        reopened.call('deletionBlockers', mine).length > 0,
+        JSON.stringify(reopened.call('deletionBlockers', mine)));
+}
+
+// ------------------------------------------------------- coming back from Recovery
+//
+// A device that opens onto a damaged record does not start the cloud at all. Acknowledging
+// the damage turns writing back on - and used to leave the phone alone with it for the
+// rest of the session: recording all evening, calling itself an ordinary local-only app,
+// with the other two phones seeing none of it.
+
+{
+    suite('acknowledging the damage starts the cloud that boot skipped');
+
+    const broken = '{"seq":7,"items":{"days.2026-08-12.actual.w_01":{"value":{"entr';
+    const device = makeDevice({ storage: { 'farkad:outbox': broken } });
+    seed(device);
+
+    // What app.js does, standing in for it: the suite does not load app.js, so the hook
+    // is what is tested here and the real one is exercised in the smoke suite.
+    let started = 0;
+    device.ctx.connectCloudLater = () => { started += 1; return true; };
+
+    given('writing is blocked at boot', device.call('farkadWritesBlocked') === true);
+    device.Sync.holdForRecovery();
+    check('and the cloud says so rather than looking local-only',
+        device.Sync.status === 'blocked', device.Sync.status);
+
+    check('acknowledging releases the device',
+        device.global('Recovery').acknowledge() === true);
+    check('and asks for the cloud exactly once', started === 1, String(started));
+    check('the held status is cleared', device.Sync.status === 'off', device.Sync.status);
+
+    // Pressed twice, which is what a banner button gets. The hook is asked again, and
+    // it is the HOOK that has to be idempotent - one import, one adapter, one
+    // subscription - which the smoke suite proves against the real one in app.js.
+    check('a second press is still a release, not a refusal',
+        device.global('Recovery').acknowledge() === true);
+    check('and the status has not gone backwards', device.Sync.status === 'off',
+        device.Sync.status);
+
+    // And connecting from there behaves like any other connection.
+    const cloud = makeCloud();
+    await connected(device, cloud);
+    await settle(TICK * 30);
+    check('the device connects and syncs', device.Sync.status === 'synced',
+        device.Sync.status);
+    check('and the roster it was holding is in the document',
+        JSON.stringify(cloud.doc || {}).includes('w_01'),
+        JSON.stringify(cloud.doc && cloud.doc.workers));
+}
+
+{
+    suite('a record whose bytes could not be copied starts nothing');
+
+    const broken = '{"seq":7,"items":{"days.2026-08-12.actual.w_01":{"value":{"entr';
+    const device = makeDevice({ storage: { 'farkad:outbox': broken }, quota: () => true });
+
+    let started = 0;
+    device.ctx.connectCloudLater = () => { started += 1; return true; };
+    device.Sync.holdForRecovery();
+
+    check('acknowledging does not release it',
+        device.global('Recovery').acknowledge() === false);
+    check('the cloud is not started', started === 0, String(started));
+    check('and the status still says the sync is held',
+        device.Sync.status === 'blocked', device.Sync.status);
+    check('writing is still blocked', device.call('farkadWritesBlocked') === true);
+}
+
+{
+    suite('connecting twice leaves one subscription, not two');
+
+    // onAuthStateChanged fires again on a token refresh and on a re-sign-in, and after a
+    // Recovery resume the cloud is started in a session that already had a connection.
+    // Two listeners meant every snapshot arrived twice: two adoptions, two archive
+    // attempts, and two flushes racing each other over one queue.
+    const cloud = makeCloud();
+    const device = crew().device;
+
+    await connected(device, cloud);
+    await settle(TICK * 20);
+    given('one listener', cloud.subscribers.length === 1,
+        String(cloud.subscribers.length));
+
+    device.Sync.connect(cloud.adapter);
+    await settle(TICK * 20);
+    check('still one listener after a second connect', cloud.subscribers.length === 1,
+        String(cloud.subscribers.length));
+
+    let seen = 0;
+    const counting = Object.assign({}, cloud.adapter, {
+        subscribe(onSnapshot, onError) {
+            return cloud.adapter.subscribe(snapshot => { seen += 1; onSnapshot(snapshot); },
+                onError);
+        }
+    });
+    device.Sync.connect(counting);
+    await settle(TICK * 20);
+    const before = seen;
+    record(device, '2026-08-14', 'w_01', 'p_01');
+    await settle(TICK * 30);
+    check('one write is heard back once', seen - before === 1, String(seen - before));
+    check('and the document has the day',
+        JSON.stringify(cloud.doc.days || {}).includes('2026-08-14'),
+        JSON.stringify(Object.keys(cloud.doc.days || {})));
+}
+
+{
+    suite('a cloud resumed after Recovery still waits for the first snapshot');
+
+    // The resume must not become a way round the barrier: a queue that was persisted
+    // before the damage is exactly the queue that has not heard from the document.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' }).device;
+    await connected(a, cloud);
+    await wait();
+
+    const doomed = a.State.nextWorkerId();
+    a.State.schedule.workers.push(
+        { id: doomed, name: 'זמני', active: true, dailyRate: 0, hourlyRate: 0 });
+    a.State.commitRoster();
+    await wait();
+
+    const b = crew({ deviceId: 'd_b' }).device;
+    b.State.load();
+    const link = await unplugged(b, cloud);
+    await wait();
+    link.away();
+    b.State.schedule.places.push({ id: 'p_09', name: 'רמלה', active: true });
+    b.State.commitRoster();
+    await wait();
+
+    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
+    a.State.commitRoster({ workers: [doomed] });
+    await settle(TICK * 30);
+    given('the cloud holds the tombstone', cloud.doc.roster.workers[doomed] === null);
+
+    // The phone reopens onto a damaged record beside its queue, and is acknowledged.
+    const storage = b.dump();
+    storage['farkad:pendingReplace'] = '{"schedule":{"workers":[';
+    const reopened = makeDevice({ storage, deviceId: 'd_b' });
+    reopened.State.load();
+    let started = 0;
+    reopened.ctx.connectCloudLater = () => { started += 1; return true; };
+    given('it booted blocked', reopened.call('farkadWritesBlocked') === true);
+    given('and it was acknowledged',
+        reopened.global('Recovery').acknowledge() === true && started === 1);
+
+    cloud.reject = null;
+    const fromWrite = cloud.writes.length;
+    const slow = slowFirstSnapshot(cloud);
+    reopened.Sync.pushDelayMs = TICK;
+    reopened.Sync.connect(slow.adapter);
+    await settle(TICK * 40);
+
+    const carriedHim = () => cloud.writes.slice(fromWrite).some(write => {
+        const list = write.kind === 'update'
+            ? (write.patch && write.patch.workers)
+            : (write.data && write.data.workers);
+        return Array.isArray(list) && list.some(item => item && item.id === doomed);
+    });
+    check('the resumed cloud sent no roster before the first snapshot', !carriedHim(),
+        JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
+
+    slow.deliver();
+    await settle(TICK * 60);
+    check('and after it, still none of him', !carriedHim(),
+        JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
+    check('a v78 reader does not see him',
+        !v78Reader(cloud.doc).some(worker => worker.id === doomed),
+        JSON.stringify(v78Reader(cloud.doc).map(worker => worker.id)));
+}
+
 // ---------------------------------------------------------------- two contexts at once
 //
 // One phone, two contexts: two tabs, or a tab and the installed app. They share one

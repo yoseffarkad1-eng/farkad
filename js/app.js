@@ -99,7 +99,20 @@ function render() {
 // was typed survived. This says so, says the record on the device is untouched, and
 // offers the one action that helps.
 function watchForCrashes() {
+    // The handover. Up to this line the inline sentinel in index.html is the only thing
+    // that would have said anything at all; from here the app reports its own failures,
+    // with the detail it can give. Exactly one of the two ever speaks.
+    if (window.farkadBootSentinel && window.farkadBootSentinel.standDown) {
+        window.farkadBootSentinel.standDown();
+    }
+
     const show = detail => {
+        // The sentinel got there first - a script that never arrived, before any of this
+        // was running. Its banner names the real failure; a second one underneath it,
+        // saying something vaguer about the same thing, helps nobody.
+        if (window.farkadBootSentinel && window.farkadBootSentinel.spoke
+            && window.farkadBootSentinel.spoke()) return;
+
         const banner = document.getElementById('crashBanner');
         if (!banner || banner.dataset.shown) return;
         banner.dataset.shown = '1';
@@ -171,6 +184,15 @@ function boot() {
     takeDailySnapshot();
     render();
 
+    // The recovery banner, painted here rather than only where the damage is found.
+    //
+    // sync.js reads its outbox the moment it loads - before js/ui/dom.js exists - so a
+    // damaged QUEUE reported itself into a paint() that could not draw anything and was
+    // never asked again. Writing was blocked, the banner was invisible, and the one
+    // button that turns writing back on was on it: the phone was read-only for the rest
+    // of its life with nothing on screen saying why, or what to do about it.
+    if (typeof Recovery !== 'undefined') Recovery.paint();
+
     checkBuildConsistency();
     watchModals();
     registerOffline();
@@ -224,15 +246,53 @@ function boot() {
 // document. A tag - deferred or not - is fetched before DOMContentLoaded, and this one
 // pulls the Firebase SDK from gstatic, so the tag alone was enough to hold the whole app
 // behind a network that was not answering.
+// Called twice on purpose: once at the end of boot, and again if Recovery is
+// acknowledged later in the session. Both have to be safe, so this is idempotent - one
+// import, one adapter, one subscription - and it reports whether the cloud is on its way
+// rather than leaving the caller to guess.
+let cloudStarted = false;
+
+// Where the cloud adapter lives, relative to the page. Same-origin, precached in the
+// service worker's shell, and imported only after the local boot has drawn.
+const ADAPTER_URL = 'js/sync/firebase-adapter.js';
+
 function connectCloudLater() {
-    if (typeof Recovery !== 'undefined' && Recovery.blocked && Recovery.blocked()) return;
+    if (cloudStarted) return true;
+
+    // Blocked means blocked: no import, no connection, and the status says so instead of
+    // looking like an ordinary local-only phone. Recovery.acknowledge() calls back here.
+    if (typeof Recovery !== 'undefined' && Recovery.blocked && Recovery.blocked()) {
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.holdForRecovery) {
+            FarkadSync.holdForRecovery();
+        }
+        return false;
+    }
+
+    cloudStarted = true;
     try {
-        import('./js/sync/firebase-adapter.js').catch(error => {
+        // Resolved against the DOCUMENT, not against this file.
+        //
+        // `import('./js/sync/firebase-adapter.js')` from inside a classic script is
+        // resolved against the script's own URL - so from js/app.js it asked for
+        // /js/js/sync/firebase-adapter.js, got a 404, and the catch below wrote one line
+        // into a console nobody on a building site has. The app looked entirely normal
+        // and was local-only for ever: no sign-in button, no snapshots, every edit piling
+        // up in a queue with nowhere to go, on all three phones at once.
+        //
+        // The path is spelled once, above, so the service worker's shell list and this
+        // can be checked against each other by tests/build.test.mjs.
+        import(new URL(ADAPTER_URL, document.baseURI).href).catch(error => {
+            // An import that never arrived is not an import that happened. Letting a
+            // later resume try again is the difference between a phone that reconnects
+            // when the signal comes back and one that has to be closed and reopened.
+            cloudStarted = false;
             console.info('Cloud sync is not available in this session:', error && error.message);
         });
     } catch (error) {
+        cloudStarted = false;
         console.info('Cloud sync could not be started:', error && error.message);
     }
+    return cloudStarted;
 }
 
 // Once, and never twice. A script that arrives after the document is already parsed gets
