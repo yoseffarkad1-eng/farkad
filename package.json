@@ -11,6 +11,7 @@
     "test:smoke": "node tests/smoke.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.mjs\"",
     "serve": "python3 -m http.server 8802",
+    "shot": "node tests/shot.mjs",
     "browsers": "playwright install chromium"
   },
   "devDependencies": {
