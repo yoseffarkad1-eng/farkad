@@ -21,6 +21,21 @@ function measureBottomBars() {
     root.style.setProperty('--nav-h', barHeight(document.querySelector('.tabs')) + 'px');
     root.style.setProperty('--day-actions-h',
         barHeight(document.querySelector('.day-actions')) + 'px');
+    // The sticky strip at the top, measured for the same reason the bottom ones are:
+    // the day header pins itself right under it, and a written-down height would be
+    // wrong on the first phone with a different inset.
+    root.style.setProperty('--topbar-h', stickyHeight(document.querySelector('.topbar')) + 'px');
+}
+
+// Sticky occupies its strip while stuck; barHeight below deliberately counts only
+// `fixed`, so the top bar gets its own reading.
+function stickyHeight(node) {
+    if (!node || typeof getComputedStyle !== 'function') return 0;
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return 0;
+    if (style.position !== 'sticky' && style.position !== 'fixed') return 0;
+    const box = node.getBoundingClientRect();
+    return Math.max(0, Math.round(box.height));
 }
 
 // How much of the bottom of the viewport this element is covering, or 0.

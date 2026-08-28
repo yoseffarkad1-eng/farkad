@@ -6381,8 +6381,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // day is being edited is pinned and never scrolls away
   check('the now-editing line names the day and date together',
     (await page.textContent('.now-editing')).includes('12/08'));
+  // The progress rides inside the sticky day header now - one box, so nothing can
+  // bury it. What is pinned is the box that carries the line.
   check('and it is pinned, not scrolled away',
-    (await page.locator('.progress').evaluate(n => getComputedStyle(n).position)) === 'sticky');
+    (await page.locator('.progress').evaluate(n =>
+      getComputedStyle(n.closest('.day-header') || n).position)) === 'sticky');
 
   await page.getByRole('button', { name: 'יום קודם', exact: true }).click();
   await page.getByRole('button', { name: 'יום קודם', exact: true }).click();

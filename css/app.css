@@ -1819,7 +1819,7 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 
 .progress-bar {
     flex: 1;
-    height: 8px;
+    height: 4px;
     background: var(--surface-2);
     border-radius: 999px;
     overflow: hidden;
@@ -2372,3 +2372,62 @@ body.reorder-dragging .reorder-list::after {
     background: linear-gradient(to top, var(--accent-soft), transparent);
 }
 .reorder-changed { margin-inline-start: 6px; }
+
+/* The progress row as the day header's own last row: the card chrome comes off and a
+   hairline joins it to the rows above. One sticky box - nothing left to bury it. */
+.day-header .progress {
+    position: static;
+    margin: 10px -12px -10px;
+    border: none;
+    border-top: 1px solid var(--line-soft);
+    border-radius: 0 0 var(--radius) var(--radius);
+    box-shadow: none;
+}
+@media (min-width: 701px) {
+    .day-header .progress { top: auto; }
+    /* The progress used to pin alone on a wide screen; it lives in the header now, so
+       the header takes over the pinning - under the sticky desktop top bar. */
+    .day-header { position: sticky; top: 62px; z-index: 20; }
+}
+
+/* The wall between undo and redo - see day.js. */
+.bar-div {
+    width: 1px;
+    height: 22px;
+    background: var(--line);
+    align-self: center;
+    flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+    /* The brand row pays rent it does not earn on a phone: the person knows which app
+       they opened, and its 30-odd pixels come straight out of the list. The ⋯ keeps the
+       strip, thin, and the strip carries the notch inset for everything under it. */
+    .topbar .brand { display: none; }
+    .topbar {
+        padding-top: max(6px, env(safe-area-inset-top));
+        min-height: 40px;
+        z-index: 36;
+    }
+    /* Right under the measured strip above when it is pinned; the phone's top bar is
+       static and measures 0, so this is top: 0 there - and the header then carries the
+       notch inset itself, being the thing actually against the edge in an installed
+       app. env() is 0 in a browser tab, so the padding is just the padding. */
+    .day-header { top: var(--topbar-h, 0px); padding-top: max(10px, env(safe-area-inset-top)); }
+}
+
+/* Inside the header the date on the progress line is a twin of the one on the nav row
+   ten pixels up: hidden from eyes, kept for the live region that announces the line. */
+.day-header .progress .now-editing {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+.day-mode-row { margin: 0 0 10px; }
+@media (max-width: 700px) {
+    .day-header .progress { padding: 7px 12px 9px; }
+    .day-header { padding-bottom: 8px; }
+}
