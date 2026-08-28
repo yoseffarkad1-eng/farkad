@@ -6631,6 +6631,164 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the worker's own record
+{
+  // The היסטוריה block on the worker's screen, the advances line and one-tap restore on
+  // an archived row, and the shared-number hint under the phone field as it is typed.
+  const page = await open();
+  await seedRoster(page);
+
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-13', 'w_01', 'actual', 'p_01');
+    State.save();
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-08-12', 200, ''));
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-08-13', 150, ''));
+    showView('roster');
+    render();
+  });
+  await page.waitForTimeout(250);
+
+  const readHistory = () => page.evaluate(() => {
+    const box = document.getElementById('workerFormHistory');
+    return {
+      shown: box.style.display !== 'none',
+      text: box.textContent,
+      rows: [...box.querySelectorAll('.worker-history-row')].map(row => row.textContent)
+    };
+  });
+
+  await page.locator('#workerList .roster-row').filter({ hasText: 'דוד' })
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+
+  const history = await readHistory();
+  check('the history block is on the worker\'s own screen',
+    history.shown && history.text.includes('היסטוריה'), JSON.stringify(history));
+  check('with his days counted',
+    history.rows[0] === 'ימים רשומים2', JSON.stringify(history.rows));
+  check('and his advances counted and summed',
+    history.rows[1] === 'מקדמות רשומות2 בסך 350 ₪', JSON.stringify(history.rows));
+  // The schema has no paid, open or settled state on an advance, so the block must not
+  // pretend to know one - the same honesty the archive dialog already keeps.
+  check('and it claims nothing about a debt being open',
+    !history.text.includes('חוב'), history.text);
+
+  // A worker who has not been saved yet has no record to read.
+  await page.evaluate(() => { closeWorkerForm(); showAddWorkerModal(); });
+  await page.waitForTimeout(200);
+  check('a brand new worker gets no history block',
+    (await readHistory()).shown === false);
+  await page.evaluate(() => closeWorkerForm());
+
+  // Into the archive, straight through the data - the archive dialog has its own tests.
+  await page.evaluate(() => {
+    State.worker('w_01').active = false;
+    State.commitRoster();
+    render();
+    document.querySelector('#workerList .roster-archive').open = true;
+  });
+  await page.waitForTimeout(250);
+
+  const row = page.locator('.roster-archive .roster-row').filter({ hasText: 'דוד' });
+  check('an archived row says what money is on the books',
+    (await row.textContent()).includes('מקדמות רשומות: 350 ₪'), await row.textContent());
+  check('and carries its own restore button',
+    await row.getByRole('button', { name: /החזר/ }).isVisible());
+
+  // Archived, his screen also says the last date anything was written for him - not
+  // "archived since", which the record does not hold.
+  await row.getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+  const archivedHistory = await readHistory();
+  check('an archived worker\'s history names his last recorded date',
+    archivedHistory.rows[2] === 'רישום אחרון13/08/2026', JSON.stringify(archivedHistory.rows));
+  await page.evaluate(() => closeWorkerForm());
+  await page.waitForTimeout(200);
+
+  // One tap, no dialog: his name and number clash with nobody, so nothing needs asking.
+  await row.getByRole('button', { name: /החזר/ }).click();
+  await page.waitForTimeout(300);
+  check('one tap puts him back in the crew',
+    (await page.evaluate(() => State.worker('w_01').active)) === true);
+  check('durably, not only on screen',
+    (await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('scheduleData:v2')).workers
+        .find(worker => worker.id === 'w_01').active)) === true);
+  await page.evaluate(() => showView('day'));
+  await page.waitForTimeout(250);
+  check('and he is back on the day screen',
+    (await page.textContent('#dayView')).includes('דוד'));
+
+  // The row's button is the SAME guarded flow as the form's - a clash is still asked
+  // about, and a no still leaves him where he was.
+  await page.evaluate(() => {
+    State.worker('w_01').active = false;
+    State.schedule.workers.push({
+      id: State.nextWorkerId(), name: 'דוד', active: true, dailyRate: 0, hourlyRate: 0
+    });
+    State.commitRoster();
+    showView('roster');
+    render();
+    document.querySelector('#workerList .roster-archive').open = true;
+  });
+  await page.waitForTimeout(250);
+  await page.locator('.roster-archive .roster-row').filter({ hasText: 'דוד' })
+    .getByRole('button', { name: /החזר/ }).click();
+  await page.waitForTimeout(250);
+  check('restoring into a namesake is asked about, from the row too',
+    (await page.isVisible('#askModal'))
+    && (await page.textContent('#askTitle')).includes('כבר יש עובד פעיל בשם'),
+    await page.textContent('#askTitle'));
+  await page.click('#askCancel');
+  await page.waitForTimeout(250);
+  check('and a no leaves him in the archive',
+    (await page.evaluate(() => State.worker('w_01').active)) === false);
+
+  // The shared-number hint, live under the field as the number is typed. The archived
+  // man is exactly the one the daily list is not showing, so he is found and named too.
+  await page.evaluate(() => {
+    State.worker('w_01').phone = '052-884-1930';
+    State.worker('w_02').phone = '054-788-8990';
+    State.commitRoster();
+    showAddWorkerModal();
+    document.getElementById('workerFormMore').open = true;
+  });
+  await page.waitForTimeout(200);
+  check('a fresh form shows no hint',
+    (await page.evaluate(() =>
+      document.getElementById('workerFormPhoneHint').style.display)) === 'none');
+
+  // Typed in the international spelling, found against the local one.
+  await page.fill('#workerFormPhone', '+972-52-884-1930');
+  await page.waitForTimeout(200);
+  const hint = await page.evaluate(() => {
+    const node = document.getElementById('workerFormPhoneHint');
+    return { shown: node.style.display !== 'none', text: node.textContent };
+  });
+  check('typing an archived man\'s number raises the hint',
+    hint.shown && hint.text.includes('המספר הזה כבר רשום אצל'), JSON.stringify(hint));
+  check('naming him, and saying where he is',
+    hint.text.includes('דוד') && hint.text.includes('(בארכיון)'), hint.text);
+  check('and saying it is allowed, with a caution rather than a block',
+    hint.text.includes('אפשר לשמור, אבל בדוק שאין כפילות'), hint.text);
+
+  await page.fill('#workerFormPhone', '0547888990');
+  await page.waitForTimeout(200);
+  check('an active holder is named the moment her number is typed',
+    (await page.evaluate(() =>
+      document.getElementById('workerFormPhoneHint').textContent)).includes('שרה'));
+
+  await page.fill('#workerFormPhone', '');
+  await page.waitForTimeout(200);
+  check('and clearing the field clears the hint',
+    (await page.evaluate(() =>
+      document.getElementById('workerFormPhoneHint').style.display)) === 'none');
+  await page.evaluate(() => closeWorkerForm());
+
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- the chevrons' pixels
 {
   // The old ‹ › pseudo-elements read correctly in the SOURCE and rendered backwards on

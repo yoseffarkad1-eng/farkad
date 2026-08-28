@@ -18,6 +18,12 @@
 //
 // Neither action is offered in the list - both live inside the worker's own screen,
 // where his name is on the dialog and there is room to say what each one does.
+//
+// Restoring is the one exception, and the asymmetry is the point: archiving takes a man
+// off tonight's screen and deleting is for ever, but a restore puts a name back where
+// every mistake about it is seen immediately and undone from the same screen it was made
+// on. So an archived row carries its restore button, one tap - through the same guarded
+// flow as the button inside the form, clashes asked and all.
 
 function renderRoster() {
     renderWorkerList();
@@ -35,6 +41,9 @@ function renderAppVersion() {
 function renderWorkerList() {
     const container = document.getElementById('workerList');
     if (!container) return;
+    // Whether the archive fold was open before this redraw. A restore renders, and a
+    // person putting two men back should not have to reopen the fold between them.
+    const archiveWasOpen = Boolean(container.querySelector('.roster-archive[open]'));
     clear(container);
 
     if (State.schedule.workers.length === 0) {
@@ -70,24 +79,33 @@ function renderWorkerList() {
     // Folded, and at the bottom. They are not part of the working list any more, and a
     // crew of six that reads as a crew of eleven is a crew somebody counts wrong.
     const box = el('details', 'roster-archive');
-    // The count of archived men who still have advances on the books rides on the fold:
-    // money does not go to the archive with the man, and a fold that hid it would be
-    // where an open balance goes to be forgotten.
+    if (archiveWasOpen) box.open = true;
+    // The count of archived men who still have advances on the books rides on the fold,
+    // and each of their rows carries its own sum: money does not go to the archive with
+    // the man, and a fold that hid it would be where an open balance goes to be
+    // forgotten. The sum is what the record says and nothing more - a count of amounts
+    // on dates, with nothing anywhere marking one paid, open or settled.
     // One pass over the advances, not a footprint walk per archived man: this render
     // runs on every pointermove of a reorder drag.
-    const advanceHolders = new Set(
-        Object.values(State.schedule.advances || {}).map(item => item && item.workerId));
-    const owing = archived.filter(worker => advanceHolders.has(worker.id)).length;
+    const advanceTotals = new Map();
+    Object.values(State.schedule.advances || {}).forEach(item => {
+        if (!item) return;
+        advanceTotals.set(item.workerId,
+            (advanceTotals.get(item.workerId) || 0) + (Number(item.amount) || 0));
+    });
+    const owing = archived.filter(worker => advanceTotals.has(worker.id)).length;
     const summary = el('summary', null, owing === 0
         ? `ארכיון עובדים (${archived.length})`
         : `ארכיון עובדים (${archived.length}) · ` +
             (owing === 1 ? 'לאחד מהם יש מקדמה רשומה' : `ל-${owing} מהם יש מקדמות רשומות`));
     box.appendChild(summary);
-    archived.forEach(worker => box.appendChild(workerRow(worker)));
+    archived.forEach(worker => box.appendChild(workerRow(worker, advanceTotals)));
     container.appendChild(box);
 }
 
-function workerRow(worker) {
+// `archiveAdvances` rides in only for the rows under the fold: a Map of workerId to the
+// summed advances, built in renderWorkerList's single pass over the record.
+function workerRow(worker, archiveAdvances) {
     const row = el('div', worker.active === false ? 'roster-row roster-off' : 'roster-row');
 
     const details = el('div', 'roster-details');
@@ -117,7 +135,16 @@ function workerRow(worker) {
         }
     }
     details.appendChild(line);
-    if (worker.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
+    if (worker.active === false) {
+        details.appendChild(el('span', 'badge', 'לא פעיל'));
+        // The money he left with, on the row itself. "רשומות", not "open" or "owed":
+        // an advance in this schema is an amount on a date, and whether it was ever
+        // settled is a fact this device does not hold - see the archive dialog below.
+        if (archiveAdvances && archiveAdvances.has(worker.id)) {
+            details.appendChild(el('div', 'roster-meta roster-advances',
+                `מקדמות רשומות: ${Math.round(archiveAdvances.get(worker.id))} ₪`));
+        }
+    }
     // Pairs that already exist - from an import, or from before this was checked.
     if (worker.active !== false && hasDuplicateName(worker)) {
         details.appendChild(el('span', 'badge badge-warn', 'שם כפול'));
@@ -145,6 +172,15 @@ function workerRow(worker) {
     // No archive icon here any more. Beside every name it was one mis-tap away from
     // taking a man off the daily screen mid-evening, and the pencil next to it opens
     // the screen where the same thing can be done deliberately, with his name on it.
+    //
+    // Restore is the one row action, and only on archived rows - see the note at the top
+    // of this file. Not a fork of the flow: the same setWorkerArchived the form button
+    // calls, four rounds of name and phone re-checks included.
+    if (worker.active === false) {
+        actions.appendChild(button('↩️ החזרה', 'btn-secondary roster-restore',
+            () => setWorkerArchived(worker.id, false),
+            `החזר את ${isolate(worker.name)} לעבודה`));
+    }
     actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
     row.appendChild(actions);
 
@@ -563,6 +599,7 @@ function showAddWorkerModal() {
     document.getElementById('workerFormDaily').value = '';
     document.getElementById('workerFormHourly').value = '';
     document.getElementById('workerFormError').textContent = '';
+    workerPhoneTyped();
     renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
 }
@@ -582,8 +619,40 @@ function editWorker(workerId) {
     // Folded details that hold data would look like data that was lost.
     document.getElementById('workerFormMore').open =
         Boolean(worker.phone || worker.idNumber || worker.hourlyRate);
+    // A number that already clashes is said the moment the screen opens, not only once
+    // somebody happens to retype it.
+    workerPhoneTyped();
     renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
+}
+
+// The typed number, checked as it is typed - against everybody, archived included,
+// because the archived man is exactly the one the daily list is not showing.
+//
+// Advisory, in amber, under the field. The BLOCKING question stays in saveWorkerForm and
+// is not touched by this: it asks against the schedule at the moment of the write, which
+// can differ from the schedule this hint was drawn against. The hint saves the retyping;
+// the confirm is the gate.
+function workerPhoneTyped() {
+    const field = document.getElementById('workerFormPhone');
+    const hint = document.getElementById('workerFormPhoneHint');
+    if (!field || !hint) return;
+
+    const sharing = typeof workersSharingPhone === 'function'
+        ? workersSharingPhone(State.schedule, field.value.trim(), editingWorkerId)
+        : [];
+    if (sharing.length === 0) {
+        hint.style.display = 'none';
+        hint.textContent = '';
+        return;
+    }
+    // Named the way the save-time question names them, so the two read as one voice.
+    const names = sharing
+        .map(worker => worker.active === false ? `${isolate(worker.name)} (בארכיון)` : worker.name)
+        .join(', ');
+    hint.textContent =
+        `המספר הזה כבר רשום אצל ${names} - אפשר לשמור, אבל בדוק שאין כפילות.`;
+    hint.style.display = '';
 }
 
 async function saveWorkerForm() {
@@ -733,7 +802,59 @@ function closeWorkerForm() {
 // Both ways out live here, and which one is offered is not a choice this file makes - it
 // asks the model what is recorded against the man and does what that allows.
 
+// What the record holds against his name, on his own screen. Counts and sums, read
+// straight off the model and never editable here - the same numbers deletionBlockers
+// weighs, shown before anybody has to wonder why the delete button is not there.
+//
+// The vocabulary is deliberate: "רשומות", never "open" or "unpaid". An advance in this
+// schema is an amount on a date, with nothing anywhere marking it paid, open or settled -
+// see the archive dialog below - so a sum is the whole of what can honestly be said.
+function renderWorkerFormHistory() {
+    const box = document.getElementById('workerFormHistory');
+    if (!box) return;
+    clear(box);
+
+    // A worker who has not been saved yet has no history to read.
+    const worker = editingWorkerId ? State.worker(editingWorkerId) : null;
+    if (!worker) { box.style.display = 'none'; return; }
+    box.style.display = '';
+
+    box.appendChild(el('h4', 'worker-history-title', 'היסטוריה'));
+
+    const days = workerFootprint(State.schedule, worker.id).days;
+
+    // The count and the sum in one pass over the advances - not a lookup per id.
+    let count = 0;
+    let total = 0;
+    Object.values(State.schedule.advances || {}).forEach(item => {
+        if (!item || String(item.workerId) !== String(worker.id)) return;
+        count += 1;
+        total += Number(item.amount) || 0;
+    });
+
+    const line = (label, value) => {
+        const item = el('div', 'worker-history-row');
+        item.appendChild(el('span', 'worker-history-label', label));
+        item.appendChild(el('strong', 'worker-history-value', value));
+        box.appendChild(item);
+    };
+
+    line('ימים רשומים', String(days.length));
+    line('מקדמות רשומות', count === 0 ? '0' : `${count} בסך ${Math.round(total)} ₪`);
+
+    // For an archived man: since WHEN is not in the record - v79 keeps active:false and
+    // nothing more - so no "בארכיון מאז" is invented here. What the record does hold is
+    // the last date anything was written for him, and the dates are already in hand.
+    if (worker.active === false && days.length > 0) {
+        const last = days.reduce(
+            (max, item) => (item.date > max ? item.date : max), days[0].date);
+        const parsed = parseLocalDate(last);
+        if (parsed) line('רישום אחרון', formatFullDate(parsed));
+    }
+}
+
 function renderWorkerFormActions() {
+    renderWorkerFormHistory();
     const box = document.getElementById('workerFormDanger');
     if (!box) return;
     clear(box);
