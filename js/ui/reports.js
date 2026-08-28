@@ -343,6 +343,15 @@ function renderPayrollTable() {
     if (anyRate) footer.push(bidiAmount(Math.round(totals.amount - totals.advances)));
     table.appendChild(totalRow(footer, headers));
 
+    // The net is the last cell of every row - the column order is the ledger's - and it
+    // is also the number the whole sheet exists to produce. The class lets the phone
+    // stylesheet lead each card with it; the table itself, the data-labels and the
+    // printed order stay exactly as they are.
+    if (anyRate) {
+        table.querySelectorAll('tbody tr').forEach(tr =>
+            tr.lastElementChild.classList.add('cell-net'));
+    }
+
     // The name opens that worker's days. On payday somebody asks why the number is what
     // it is, and the answer has to be reachable from the number itself.
     table.querySelectorAll('tbody tr').forEach((tr, index) => {
