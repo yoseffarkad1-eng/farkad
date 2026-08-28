@@ -79,7 +79,7 @@
             <div class="roster-columns">
                 <div class="roster-panel">
                     <div class="panel-head">
-                        <h2>עובדים</h2>
+                        <h2 id="workersHeading">עובדים</h2>
                         <button type="button" class="btn-add" onclick="showAddWorkerModal()">+ הוסף עובד</button>
                         <button type="button" class="btn-secondary" onclick="openQuickStart()">📋 הדבק רשימה</button>
                         <!-- The order every other screen reads in. A mode of its own, and
@@ -98,7 +98,7 @@
 
                 <div class="roster-panel">
                     <div class="panel-head">
-                        <h2>אתרי עבודה</h2>
+                        <h2 id="placesHeading">אתרי עבודה</h2>
                         <button type="button" class="btn-add" onclick="showAddPlaceModal()">+ הוסף אתר</button>
                     </div>
                     <div id="placeList"></div>
@@ -302,10 +302,14 @@
         <p class="hint" id="askMessage"></p>
         <input id="askInput" type="text" onkeydown="askKeydown(event)"/>
         <p class="ask-error" id="askError"></p>
+        <!-- askChoice's named answers; hidden whenever an ordinary two-button question
+             is being asked. Stacked, so three verbs are three full-width targets. -->
+        <div class="modal-actions ask-choices" id="askChoices" style="display:none"></div>
         <div class="modal-actions">
             <button type="button" id="askOk" onclick="askAccept()">אישור</button>
             <button type="button" class="btn-secondary" id="askCancel" onclick="askCancel()">ביטול</button>
         </div>
+        <p class="hint ask-footer" id="askFooter" style="display:none"></p>
     </div>
 </div>
 
@@ -340,7 +344,7 @@
             <input dir="ltr" id="workerFormId" inputmode="numeric" placeholder="מספר זהות" type="text"/>
             <input dir="ltr" id="workerFormHourly" inputmode="decimal" placeholder="שכר לשעה נוספת" type="number" min="0" step="1"/>
         </details>
-        <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום.</p>
+        <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום. שינוי שכר חל מהיום והלאה - ימים שכבר נרשמו שומרים את השכר שהיה בזמן הרישום.</p>
         <div class="modal-actions">
             <button type="button" onclick="saveWorkerForm()">שמור</button>
             <button type="button" class="btn-secondary" onclick="closeWorkerForm()">ביטול</button>

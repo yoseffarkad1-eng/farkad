@@ -2343,3 +2343,32 @@ body.writes-blocked .day-actions button {
     color: var(--danger);
     white-space: nowrap;
 }
+
+/* Three named answers, stacked: each verb is its own full-width row, and the safe one
+   (הישארות) is last - furthest from where the thumb entered the dialog. */
+.ask-choices { flex-direction: column; }
+.ask-choices button { width: 100%; min-height: 48px; }
+.ask-footer { margin-top: 10px; }
+
+/* The auto-scroll bands, visible only mid-drag: thin gradients at the list's edges
+   naming the zone where a held row scrolls the rest into reach. */
+body.reorder-dragging .reorder-list { position: relative; }
+body.reorder-dragging .reorder-list::before,
+body.reorder-dragging .reorder-list::after {
+    content: '';
+    position: sticky;
+    display: block;
+    inset-inline: 0;
+    height: 14px;
+    z-index: 2;
+    pointer-events: none;
+}
+body.reorder-dragging .reorder-list::before {
+    top: 0;
+    background: linear-gradient(to bottom, var(--accent-soft), transparent);
+}
+body.reorder-dragging .reorder-list::after {
+    bottom: 0;
+    background: linear-gradient(to top, var(--accent-soft), transparent);
+}
+.reorder-changed { margin-inline-start: 6px; }

@@ -21,8 +21,23 @@ function askElements() {
         input: document.getElementById('askInput'),
         error: document.getElementById('askError'),
         ok: document.getElementById('askOk'),
-        cancel: document.getElementById('askCancel')
+        cancel: document.getElementById('askCancel'),
+        choices: document.getElementById('askChoices'),
+        footer: document.getElementById('askFooter')
     };
+}
+
+// Shared cleanup for the optional pieces: every ask starts from a dialog with no
+// leftover choice buttons and no leftover footer from the question before it.
+function askResetExtras(parts, settings) {
+    if (parts.choices) {
+        parts.choices.textContent = '';
+        parts.choices.style.display = 'none';
+    }
+    if (parts.footer) {
+        parts.footer.textContent = (settings && settings.footer) || '';
+        parts.footer.style.display = settings && settings.footer ? '' : 'none';
+    }
 }
 
 // Asks for a line of text. Resolves with the trimmed string, or null if cancelled.
@@ -48,6 +63,7 @@ function askText(options) {
     parts.cancel.style.display = '';
     parts.cancel.textContent = 'ביטול';
 
+    askResetExtras(parts, settings);
     askValidate = settings.validate || null;
     parts.modal.style.display = 'flex';
     // Focused and selected: renaming a site is usually a small correction, not a retype.
@@ -73,6 +89,7 @@ function askConfirm(options) {
     parts.cancel.style.display = '';
     parts.cancel.textContent = settings.cancel || 'ביטול';
 
+    askResetExtras(parts, settings);
     askValidate = null;
     parts.modal.style.display = 'flex';
     parts.ok.focus();
@@ -95,9 +112,48 @@ function askTell(options) {
     parts.ok.textContent = settings.ok || 'סגור';
     parts.cancel.style.display = 'none';
 
+    askResetExtras(parts, settings);
     askValidate = null;
     parts.modal.style.display = 'flex';
     parts.ok.focus();
+
+    return new Promise(resolve => { askResolve = resolve; });
+}
+
+// One question, several named answers. Resolves with the chosen label, or null when
+// dismissed (Escape, the backdrop) - which callers treat as the do-nothing answer, so
+// a slipped finger never saves and never discards.
+function askChoice(options) {
+    const parts = askElements();
+    if (!parts.modal || !parts.choices) return Promise.resolve(null);
+
+    const settings = options || {};
+    parts.title.textContent = settings.title || '';
+    parts.message.textContent = settings.message || '';
+    parts.message.style.display = settings.message ? '' : 'none';
+    parts.input.style.display = 'none';
+    parts.error.textContent = '';
+    parts.ok.style.display = 'none';
+    parts.cancel.style.display = 'none';
+    askResetExtras(parts, settings);
+
+    parts.choices.style.display = '';
+    (settings.choices || []).forEach((label, index) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        if (index > 0) btn.className = 'btn-secondary';
+        btn.textContent = label;
+        btn.onclick = () => {
+            parts.ok.style.display = '';
+            askClose(label);
+        };
+        parts.choices.appendChild(btn);
+    });
+
+    askValidate = null;
+    parts.modal.style.display = 'flex';
+    const first = parts.choices.querySelector('button');
+    if (first) first.focus();
 
     return new Promise(resolve => { askResolve = resolve; });
 }
@@ -122,7 +178,13 @@ function askAccept() {
 }
 
 function askCancel() {
-    askClose(askElements().input.style.display === 'none' ? false : null);
+    const parts = askElements();
+    if (parts.choices && parts.choices.style.display !== 'none') {
+        parts.ok.style.display = '';
+        askClose(null);
+        return;
+    }
+    askClose(parts.input.style.display === 'none' ? false : null);
 }
 
 function askClose(result) {

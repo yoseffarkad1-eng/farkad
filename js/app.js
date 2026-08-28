@@ -46,6 +46,13 @@ const VIEWS = ['day', 'week', 'roster', 'reports'];
 
 function showView(view) {
     if (!VIEWS.includes(view)) return;
+    // An open reorder draft owns the door. A tab tapped mid-sort used to throw the
+    // unsaved order away without a word; now the mode asks its three-answer question
+    // and the switch proceeds only once the draft is saved or knowingly discarded.
+    if (typeof reorderDraft !== 'undefined' && reorderDraft && view !== 'roster') {
+        confirmReorderExit().then(allowed => { if (allowed) showView(view); });
+        return;
+    }
     // The offer to undo belongs to the screen the change was made on. Left floating over
     // the reports it is just a bar in the way, on top of numbers it has nothing to do with.
     hideUndo();

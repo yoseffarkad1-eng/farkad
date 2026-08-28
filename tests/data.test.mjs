@@ -5981,7 +5981,7 @@ for (const [label, arm] of [
     await wait();
 
     check('it is the typing dialog that is opened', Boolean(asked), String(asked));
-    check('and it asks for the name', String(asked.message).includes('הקלד את שם העובד'),
+    check('and it asks for the name', String(asked.message).includes('הקלדת שם העובד'),
         String(asked.message));
     check('the right name is accepted', asked.validate('טעות') === null,
         String(asked.validate('טעות')));

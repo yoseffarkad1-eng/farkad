@@ -646,9 +646,11 @@ async function seedRoster(page) {
 
   await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
   await page.waitForTimeout(250);
+  // The title carries the ACT (מחיקת עובד) and the message carries the man - along
+  // with the three things that were just checked about him.
   check('the dialog names the man before he goes',
-    (await page.textContent('#askTitle')).includes('טעות'),
-    await page.textContent('#askTitle'));
+    (await page.textContent('#askMessage')).includes('טעות'),
+    await page.textContent('#askMessage'));
 
   // One more tap in the same place as the last tap is not a decision. The name has to be
   // typed, and a wrong one is refused rather than accepted quietly.
@@ -1451,7 +1453,7 @@ async function seedRoster(page) {
   await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
   await page.waitForTimeout(250);
   check('the dialog asks for the name to be typed',
-    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
+    (await page.textContent('#askMessage')).includes('הקלדת שם העובד'),
     await page.textContent('#askMessage'));
   await page.fill('#askInput', 'טעות');
   await page.click('#askOk');
@@ -4528,7 +4530,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await page.textContent('#reorderLive'));
 
   const wanted = await drafted();
-  await page.getByRole('button', { name: 'שמור סדר' }).click();
+  await page.getByRole('button', { name: 'שמירה ויציאה' }).click();
   await page.waitForTimeout(400);
   check('saving writes the drafted order', (await order()) === wanted,
     `${await order()} vs ${wanted}`);
@@ -4540,7 +4542,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.waitForTimeout(250);
   await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(200);
-  await page.locator('.reorder-foot').getByRole('button', { name: 'ביטול' }).click();
+  await page.locator('.reorder-foot').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
+  await page.waitForTimeout(250);
+  // Discarding a changed order is a decision, and the door asks its three-answer
+  // question before anything is thrown away.
+  check('leaving with unsaved changes asks first', await page.isVisible('#askChoices'));
+  await page.locator('#askChoices').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
   await page.waitForTimeout(300);
   check('cancelling leaves the order alone', (await order()) === wanted, await order());
 
@@ -5867,7 +5874,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await page.locator('#workerList .reorder-row').last()
       .getByRole('button', { name: /הורד/ }).isDisabled());
 
-  await page.getByRole('button', { name: 'שמור סדר' }).click();
+  await page.getByRole('button', { name: 'שמירה ויציאה' }).click();
   await page.waitForTimeout(350);
   check('the drafted order is what the roster now reads',
     (await names()) === 'עלי,דוד,שרה', await names());
