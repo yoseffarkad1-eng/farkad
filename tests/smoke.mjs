@@ -6020,6 +6020,169 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the chip strip
+{
+  // The pay sheet says four days; the strip above the detail rows says WHICH four,
+  // each date in the calendar's own shorthand, ×2 where a day pays twice.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-13', 'w_01', 'actual', 'p_01');
+    markAbsent(State.schedule, '2026-08-14', 'w_01', 'actual');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    showView('reports');
+    openWorkerDays('w_01');
+  });
+  await page.waitForTimeout(300);
+
+  const chips = await page.evaluate(() =>
+    [...document.querySelectorAll('#workerDaysBody .wday-chip')].map(chip => ({
+      text: chip.textContent.replace('×2', '').trim(),
+      doubled: Boolean(chip.querySelector('.wday-chip-x2'))
+    })));
+  check('one chip per attendance date, the absence not among them',
+    chips.length === 4, JSON.stringify(chips));
+  check('each chip is the one-letter weekday mark and the short date',
+    chips.map(c => c.text).join(',') === 'ב׳ 10/08,ג׳ 11/08,ד׳ 12/08,ה׳ 13/08',
+    JSON.stringify(chips));
+  check('the doubled days carry ×2, and only they do',
+    chips.map(c => c.doubled).join(',') === 'false,true,true,false',
+    JSON.stringify(chips));
+  check('the strip sits above the first day row',
+    await page.evaluate(() => {
+      const strip = document.querySelector('#workerDaysBody .wday-chips');
+      return Boolean(strip) && strip.nextElementSibling.classList.contains('wday');
+    }));
+  check('and nothing in it is a control',
+    (await page.locator('#workerDaysBody .wday-chips button').count()) === 0);
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the site bars
+{
+  // On screen the billing page is a bar per site; the date-by-site grid stays in the
+  // DOM because it is the thing that prints. Same counts, two shapes, one reader each.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-10', 'w_02', 'actual', 'p_02');
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_02', 'actual', 'p_01');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    REPORT_SECTION = 'sites';
+    showView('reports');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const bars = await page.evaluate(() =>
+    [...document.querySelectorAll('.invoice-bars .invoice-bar-row')].map(row => ({
+      name: row.querySelector('.invoice-bar-name').textContent,
+      count: row.querySelector('.invoice-bar-count').textContent,
+      width: row.querySelector('.invoice-bar-fill').style.width,
+      painted: row.querySelector('.invoice-swatch').style.background !== ''
+    })));
+  check('every site with work gets a bar row', bars.length === 2, JSON.stringify(bars));
+  check('the counts are the worker-days the invoice bills',
+    bars[0].count === '3' && bars[1].count === '1', JSON.stringify(bars));
+  check('the busiest site fills its bar and the rest are proportional to it',
+    bars[0].width === '100%' && bars[1].width === '33%', JSON.stringify(bars));
+  check('each swatch is painted with the site\'s own colour',
+    bars.every(bar => bar.painted), JSON.stringify(bars));
+  check('the total band closes the list with the unit named',
+    (await page.textContent('.invoice-bars-total')).includes('סה״כ ימי עובד־אתר') &&
+    (await page.textContent('.invoice-bars-total')).includes('4'));
+  check('the bars name no worker, like the paper they stand in for',
+    !(await page.textContent('.invoice-bars')).includes('דוד') &&
+    !(await page.textContent('.invoice-bars')).includes('שרה'));
+
+  check('the bars are what the screen shows', await page.locator('.invoice-bars').isVisible());
+  check('while the grid waits whole in the DOM, unseen',
+    (await page.locator('.report-invoice tbody tr').count()) === 2 &&
+    !(await page.locator('.report-invoice .invoice-grid').isVisible()));
+
+  await page.emulateMedia({ media: 'print' });
+  await page.waitForTimeout(200);
+  check('paper swaps them: the grid prints',
+    (await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.report-invoice .invoice-grid')).display)) !== 'none');
+  check('and the bars do not',
+    (await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.invoice-bars')).display)) === 'none');
+  await page.emulateMedia({ media: 'screen' });
+  await page.waitForTimeout(200);
+
+  await page.locator('.invoice-picker').getByRole('button', { name: 'הרצליה' }).click();
+  await page.waitForTimeout(300);
+  check('the client picker narrows the bars the way it narrows the grid',
+    (await page.locator('.invoice-bars .invoice-bar-row').count()) === 1 &&
+    (await page.textContent('.invoice-bars')).includes('הרצליה'));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the ledger fold
+{
+  // The v80 record is readable the moment the boot migration mirrors an advance - and
+  // ONLY readable: the writer is gated off, so the fold holds not a single control.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-08-10', 150, ''));
+    State.migrateLedger();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    showView('reports');
+    openWorkerDays('w_01');
+  });
+  await page.waitForTimeout(300);
+
+  const fold = await page.evaluate(() => {
+    const node = document.querySelector('#workerDaysBody .wday-ledger');
+    if (!node) return null;
+    return {
+      open: node.open,
+      title: node.querySelector('summary').textContent,
+      entries: [...node.querySelectorAll('.ledger-entry')].map(entry => entry.textContent),
+      controls: node.querySelectorAll('button, input, select, textarea').length
+    };
+  });
+  check('the fold is there, closed, named for the record it reads',
+    Boolean(fold) && fold.open === false && fold.title.includes('היסטוריה מלאה'),
+    JSON.stringify(fold));
+  check('the migrated advance is listed by its mandated kind, date and amount',
+    fold.entries.length === 1 && fold.entries[0].includes('מקדמה')
+    && fold.entries[0].includes('10/08/2026') && fold.entries[0].includes('150'),
+    JSON.stringify(fold.entries));
+  check('and says where the entry came from',
+    fold.entries[0].includes('הועתק מהרישום הקיים'), JSON.stringify(fold.entries));
+  check('read-only means read only: no control of any kind inside the fold',
+    fold.controls === 0, String(fold.controls));
+  check('because the gate itself is still closed',
+    (await page.evaluate(() => ledgerWritesEnabled())) === false);
+
+  await page.evaluate(() => openWorkerDays('w_02'));
+  await page.waitForTimeout(200);
+  check('a worker the ledger says nothing about gets no fold at all',
+    (await page.locator('#workerDaysBody .wday-ledger').count()) === 0);
+
+  // A build that never loaded the ledger file must show the modal, minus the fold.
+  await page.evaluate(() => { advanceHistory = undefined; openWorkerDays('w_01'); });
+  await page.waitForTimeout(200);
+  check('without the reader the modal still opens, the fold simply absent',
+    (await page.locator('#workerDaysModal').isVisible()) &&
+    (await page.locator('#workerDaysBody .wday-ledger').count()) === 0);
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- backup age
 {
   // While sync is off, this file is the only copy that survives losing the phone - and
