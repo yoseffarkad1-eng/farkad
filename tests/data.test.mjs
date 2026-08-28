@@ -4994,9 +4994,12 @@ for (const [label, arm] of [
     check('with nothing quarantined',
         !again.global('Recovery').problems.some(p => p.key.startsWith('farkad:outbox')),
         JSON.stringify(again.global('Recovery').problems.map(p => p.key)));
+    // Still in it, not "and nothing else": the reopen is a boot, and a boot with an
+    // unmirrored advance on the disk writes that advance's ledger entry - one more
+    // queued path, and a legitimate one. What this check pins is that no entry is LOST.
     check('and every entry still in it',
-        again.Sync.pendingPaths().length === device.Sync.pendingPaths().length,
-        `${again.Sync.pendingPaths().length} vs ${device.Sync.pendingPaths().length}`);
+        device.Sync.pendingPaths().every(path => again.Sync.pendingPaths().includes(path)),
+        `${again.Sync.pendingPaths().length} holds ${device.Sync.pendingPaths().length}`);
 }
 
 {
@@ -8721,6 +8724,83 @@ function withAdvances(device, rows) {
     check('and the entry that was migrated is the same entry, not a new one',
         reopened.call('ledgerEntries', reopened.State.schedule)
             .some(entry => entry.id === entryId));
+}
+
+
+{
+    suite('the boot mirrors the advances into the ledger, unasked');
+
+    const { device } = crew();
+    withAdvances(device, [
+        { workerId: 'w_01', date: '2026-08-03', amount: 500 },
+        { workerId: 'w_02', date: '2026-08-05', amount: 300 }
+    ]);
+    given('two advances and no entries - this build recorded them the old way, then',
+        device.call('ledgerEntries', device.State.schedule).length >= 0);
+
+    // The reopen IS the migration: nobody calls anything.
+    const booted = makeDevice({ storage: device.dump(), deviceId: device.id });
+    booted.State.load();
+    const entries = booted.call('ledgerEntries', booted.State.schedule);
+    check('the reopen wrote one given entry per advance',
+        entries.length === 2 && entries.every(e => e.kind === 'given'),
+        JSON.stringify(entries.map(e => e.kind)));
+    check('and the field it mirrored is byte-identical',
+        JSON.stringify(booted.State.schedule.advances) === JSON.stringify(device.State.schedule.advances));
+    check('and the entries are on the disk, not only in memory',
+        JSON.parse(booted.Store.get('scheduleData:v2')).ledger !== undefined
+        && Object.keys(JSON.parse(booted.Store.get('scheduleData:v2')).ledger.advances).length === 2,
+        booted.Store.get('scheduleData:v2') ? 'blob present' : 'no blob');
+
+    // A second boot has nothing to add - and nothing queued to send twice.
+    const queued = booted.Sync.pendingPaths().filter(path => path.startsWith('ledger.')).length;
+    const again = makeDevice({ storage: booted.dump(), deviceId: booted.id });
+    again.State.load();
+    check('a second boot adds nothing',
+        again.call('ledgerEntries', again.State.schedule).length === 2);
+    check('and queues nothing new for it',
+        again.Sync.pendingPaths().filter(path => path.startsWith('ledger.')).length <= queued,
+        `${queued} then ${again.Sync.pendingPaths().filter(path => path.startsWith('ledger.')).length}`);
+
+    // The parity question the gate decision will be made on, asked the way the
+    // settings screen asks it.
+    const parity = again.State.ledgerParity();
+    check('the ledger agrees with the field it mirrors',
+        parity.agrees === true, JSON.stringify(parity));
+    // Content, not blessing: bend the old field underneath and the report says so.
+    const bent = Object.keys(again.State.schedule.advances)[0];
+    again.State.schedule.advances[bent].amount = 999;
+    const disagree = again.State.ledgerParity();
+    check('and reports a disagreement instead of assuming one away',
+        disagree.agrees === false && disagree.different.length === 1,
+        JSON.stringify(disagree));
+}
+
+{
+    suite('a boot that cannot write still opens, and the next one catches up');
+
+    const { device } = crew();
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500 }]);
+
+    // A device whose storage refuses everything: the boot must not be the thing that
+    // breaks, and the un-mirrored advance must not be the thing that is lost.
+    const cramped = makeDevice({ storage: device.dump(), deviceId: device.id });
+    const realSet = cramped.Store.set;
+    cramped.Store.set = () => false;
+    cramped.State.load();
+    check('the app came up with the advance readable',
+        Object.keys(cramped.State.schedule.advances).length === 1);
+    check('and the refused mirror left no half-written entry behind',
+        cramped.call('ledgerEntries', cramped.State.schedule).length === 0,
+        JSON.stringify(cramped.call('ledgerEntries', cramped.State.schedule)));
+    cramped.Store.set = realSet;
+
+    // Room again: the next boot finishes what the cramped one could not.
+    const healthy = makeDevice({ storage: device.dump(), deviceId: device.id });
+    healthy.State.load();
+    check('the next healthy boot mirrors it',
+        healthy.call('ledgerEntries', healthy.State.schedule).length === 1
+        && healthy.call('ledgerEntries', healthy.State.schedule)[0].kind === 'given');
 }
 
 report();
