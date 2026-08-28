@@ -1035,6 +1035,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     margin-bottom: 14px;
 }
 .panel-head {
+    /* Four children and a counted heading: without the wrap the row forced the layout
+       viewport past 320 and the whole app rendered offset. */
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1303,9 +1306,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     background: var(--surface);
     color: var(--ink);
 }
-.advance-form .layer-toggle { margin-inline-start: 0; margin-bottom: 6px; }
-.advance-form .layer-toggle button { flex: 1; min-height: 44px; }
+.advance-form .layer-toggle {
+    margin-inline-start: 0;
+    margin-bottom: 6px;
+    /* The card and the toggle track shared --surface-2 and the control dissolved into
+       its own background - bare text does not read as a button. */
+    background: var(--surface);
+    border: 1px solid var(--line);
+}
+.advance-form .layer-toggle button { flex: 1; min-height: 44px; font-size: 15px; }
+.advance-form .modal-actions { align-items: stretch; }
 .advance-form .modal-actions button { flex: 1; min-height: 44px; }
+/* The save carries a two-word label; an even split wrapped it to two lines and floated
+   it above its neighbour. */
+.advance-form .modal-actions button:not(.btn-secondary) { flex: 1.6; }
 
 @media (max-width: 700px) {
     .wday { grid-template-columns: 1fr 70px; }
@@ -2324,13 +2338,15 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
    render), the recording surfaces say so with their bodies, not only with a banner: the
    lists dim and the dock's buttons go quiet. The banner at the top stays at full
    strength - it is the explanation. */
-body.writes-blocked #dayView .day-list,
-body.writes-blocked #dayView .site-cards,
-body.writes-blocked #dayView .day-tray { opacity: .55; }
-body.writes-blocked .day-actions button {
-    opacity: .5;
-    pointer-events: none;
-}
+body.writes-blocked #dayView .worker-list,
+body.writes-blocked #dayView .site-grid,
+body.writes-blocked #dayView .tray { opacity: .55; }
+body.writes-blocked .day-actions button { opacity: .5; }
+/* Only the WRITING button goes dead. The WhatsApp message is read-only and is exactly
+   the escape hatch a quarantined phone's owner needs - tonight's roster still has to
+   reach the crew from somewhere. */
+body.writes-blocked .day-actions #copyDayBtn { pointer-events: none; }
+body.writes-blocked .day-actions .btn-success { opacity: 1; }
 .progress-blocked {
     display: inline-flex;
     align-items: center;
@@ -2348,6 +2364,10 @@ body.writes-blocked .day-actions button {
    (הישארות) is last - furthest from where the thumb entered the dialog. */
 .ask-choices { flex-direction: column; }
 .ask-choices button { width: 100%; min-height: 48px; }
+/* The destructive middle answer gets air on both sides: 8px between "save and leave"
+   and "leave without saving" was one thumb-slip, and the modal is top-anchored on a
+   phone, so the bottom row is the NEAREST one to a thumb coming off the tab bar. */
+.ask-choices button + button { margin-top: 14px; }
 .ask-footer { margin-top: 10px; }
 
 /* The auto-scroll bands, visible only mid-drag: thin gradients at the list's edges
@@ -2386,8 +2406,10 @@ body.reorder-dragging .reorder-list::after {
 @media (min-width: 701px) {
     .day-header .progress { top: auto; }
     /* The progress used to pin alone on a wide screen; it lives in the header now, so
-       the header takes over the pinning - under the sticky desktop top bar. */
-    .day-header { position: sticky; top: 62px; z-index: 20; }
+       the header takes over the pinning - under the sticky desktop top bar, at its
+       MEASURED height: the bar is 67px at 1024 and 73px at 932, and a written-down 62
+       buried the header's first pixels under it. */
+    .day-header { position: sticky; top: var(--topbar-h, 62px); z-index: 20; }
 }
 
 /* The wall between undo and redo - see day.js. */
@@ -2400,19 +2422,18 @@ body.reorder-dragging .reorder-list::after {
 }
 
 @media (max-width: 700px) {
-    /* The brand row pays rent it does not earn on a phone: the person knows which app
-       they opened, and its 30-odd pixels come straight out of the list. The ⋯ keeps the
-       strip, thin, and the strip carries the notch inset for everything under it. */
+    /* The brand row goes: the person knows which app they opened, and what its absence
+       buys is quiet, not pixels - the strip's height is its 44px ⋯ either way. The
+       notch inset is paid ONCE, by the day header below, which is the element actually
+       pinned against the edge once the page scrolls; this static strip paying it too
+       cost 78 raw pixels on a notched phone. */
     .topbar .brand { display: none; }
-    .topbar {
-        padding-top: max(6px, env(safe-area-inset-top));
-        min-height: 40px;
-        z-index: 36;
-    }
-    /* Right under the measured strip above when it is pinned; the phone's top bar is
-       static and measures 0, so this is top: 0 there - and the header then carries the
-       notch inset itself, being the thing actually against the edge in an installed
-       app. env() is 0 in a browser tab, so the padding is just the padding. */
+    .topbar { padding: 6px 0; }
+    /* top: 0, spelled honestly: the phone top bar is STATIC (the phone block above
+       overrides the base sticky), it scrolls away, and stickyHeight() measures a
+       static bar as 0 - so the var resolves to 0 here and the header is the thing at
+       the edge. It carries the notch inset for that reason; env() is 0 in a browser
+       tab, so the padding is just the padding. */
     .day-header { top: var(--topbar-h, 0px); padding-top: max(10px, env(safe-area-inset-top)); }
 }
 
@@ -2430,4 +2451,11 @@ body.reorder-dragging .reorder-list::after {
 @media (max-width: 700px) {
     .day-header .progress { padding: 7px 12px 9px; }
     .day-header { padding-bottom: 8px; }
+}
+
+/* With one client's site chosen (body.client-scoped, set by renderReports), the printed
+   page follows the same rule as the export button: the client's grid, and nothing that
+   names the crew or the money. */
+@media print {
+    body.client-scoped .report-payroll { display: none !important; }
 }

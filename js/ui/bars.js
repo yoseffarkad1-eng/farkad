@@ -65,6 +65,10 @@ function barHeight(node) {
 // not start hiding bars; no keyboard is shorter than 150px.
 function keyboardHeight() {
     if (typeof window === 'undefined' || !window.visualViewport) return 0;
+    // Pinch-zoom shrinks the visual viewport exactly like a keyboard does, and zoom is
+    // deliberately allowed here: at 1.25x on a tall phone the difference already
+    // clears the keyboard floor, and the bars would vanish under somebody's zoom.
+    if (window.visualViewport.scale > 1.01) return 0;
     const covered = window.innerHeight - window.visualViewport.height;
     return covered > 150 ? Math.round(covered) : 0;
 }

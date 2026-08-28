@@ -64,9 +64,7 @@ function renderDay() {
     // sticky box it spent its scrolled life buried under the header - same top, lower
     // z - taking המשך with it, and a tap where the button appeared to be landed on
     // "יום הבא". One box cannot bury itself.
-    const stuck = root.querySelector('.day-header');
-    if (stuck) stuck.appendChild(renderProgress());
-    else root.appendChild(renderProgress());
+    root.querySelector('.day-header').appendChild(renderProgress());
     root.appendChild(renderModeToggle());
     root.appendChild(renderBulkRow());
 
@@ -186,10 +184,9 @@ function renderProgress() {
     const wrap = el('div', left === 0 ? 'progress progress-done' : 'progress');
 
     const line = el('div', 'progress-line');
-    // Inside the header the date is already on the row above; this copy is for the
-    // ANNOUNCEMENT (the live region reads the whole line) and for the empty-roster
-    // screens where the progress stands alone. The stylesheet hides it visually when
-    // the header carries it.
+    // Inside the header the date is already on the row above; this copy exists for
+    // the ANNOUNCEMENT - the live region reads the whole line, and a count with no
+    // day attached answers the wrong question out loud. The stylesheet hides it.
     const now = el('strong', 'now-editing');
     now.textContent = `${hebrewDayName(date)} · ${formatShortDate(date)}`;
     line.appendChild(now);

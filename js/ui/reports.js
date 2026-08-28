@@ -50,6 +50,12 @@ function renderReports() {
     // Both sections are built and both are in the DOM, whichever is chosen: the print
     // stylesheet prints the record, not the screen's current answer to it. The one not
     // being looked at is set aside on screen only.
+    // With one client's site chosen, the printer follows the same rule as the export
+    // button beside it: the pay sheet stays out of the client's hands. The body class
+    // is what the print stylesheet keys on.
+    if (document.body && document.body.classList) {
+        document.body.classList.toggle('client-scoped', Boolean(scopedExportPlace()));
+    }
     const payroll = renderPayrollTable();
     const invoice = renderInvoiceTable();
     if (REPORT_SECTION === 'sites') payroll.classList.add('report-offscreen');
@@ -334,8 +340,12 @@ function renderPayrollTable() {
     // The band names what it totals and over how many people. Thirty rows of cards end
     // in one number, and "סה״כ" alone does not say whether that number is the gross,
     // the net, or the count of anything - nor that all thirty are inside it.
+    // Counting only the men whose money is actually inside the number: a worker with
+    // no daily rate contributes nothing to the total, and a denominator that includes
+    // him asserts a coverage the warning four lines down denies.
+    const paid = rows.filter(row => row.amount !== null).length;
     const footer = [anyRate
-        ? `סה״כ לתשלום · ${countedIn(rows.length, 'עובד אחד', 'עובדים')}`
+        ? `סה״כ לתשלום · ${countedIn(paid, 'עובד אחד', 'עובדים')}`
         : 'סה״כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
     if (anyRate) footer.push('', Math.round(totals.amount));
@@ -431,7 +441,7 @@ function renderInvoiceTable() {
         ? chosen.days.map(day => day.date)
         : all.dates;
 
-    const headers = ['תאריך'].concat(places.map(place => place.name)).concat(['סה"כ']);
+    const headers = ['תאריך'].concat(places.map(place => place.name)).concat(['סה״כ']);
     const body = dates.map(date => {
         const parsed = parseLocalDate(date);
         const counts = places.map(place => all.countAt(place.placeId, date));
@@ -545,7 +555,9 @@ function renderAdvanceRow(item) {
     const parsed = parseLocalDate(item.date);
 
     const when = el('div', 'wday-date');
-    when.appendChild(el('strong', null, ADVANCE_METHOD_LABELS[item.method] || 'מקדמה'));
+    when.appendChild(el('strong', null,
+        Object.prototype.hasOwnProperty.call(ADVANCE_METHOD_LABELS, item.method)
+            ? ADVANCE_METHOD_LABELS[item.method] : 'מקדמה'));
     when.appendChild(el('span', null, formatFullDate(parsed)));
     row.appendChild(when);
 
@@ -608,22 +620,41 @@ function openAdvanceForm(worker, actions) {
     amountInput.placeholder = '500';
     field('סכום', amountInput);
 
-    // Dated today when today falls inside the period being viewed, and otherwise on
-    // the period's last day - an advance filed outside the account it belongs to
-    // would be deducted from the wrong fortnight. That stays the rule: the date can be
-    // corrected, but only inside the period on screen.
+    // Dated today, and correctable only inside the account that contains today. The
+    // clamp used to follow the VIEWED range - and from the "חודש שעבר" preset that
+    // filed live cash into a fortnight that was printed and paid weeks ago, where the
+    // date window would never deduct it. The account an advance belongs to is the one
+    // containing the day the money changed hands, not whatever window is on screen.
     const today = todayStr();
+    const accountFrom = accountStart(parseLocalDate(today));
+    const accountTo = new Date(accountFrom);
+    accountTo.setDate(accountFrom.getDate() + 13);
     const dateInput = document.createElement('input');
     dateInput.type = 'date';
-    dateInput.value = (today >= REPORT_RANGE.from && today <= REPORT_RANGE.to)
-        ? today : REPORT_RANGE.to;
-    dateInput.min = REPORT_RANGE.from;
-    dateInput.max = REPORT_RANGE.to;
+    dateInput.value = today;
+    dateInput.min = toLocalDateStr(accountFrom);
+    dateInput.max = toLocalDateStr(accountTo);
     field('תאריך', dateInput);
+    // The native control renders in the OS locale - 08/28 on a phone set to English -
+    // while every date this app shows is 28/08. The read-back line says the chosen day
+    // the way the rest of the screen says it.
+    const dateEcho = el('p', 'hint advance-date-echo');
+    const sayDate = () => {
+        const parsed = parseLocalDate(dateInput.value);
+        dateEcho.textContent = parsed
+            ? `${hebrewDayName(parsed)}, ${formatFullDate(parsed)}` : '';
+    };
+    dateInput.addEventListener('change', sayDate);
+    dateInput.addEventListener('input', sayDate);
+    sayDate();
+    form.appendChild(dateEcho);
 
     const noteInput = document.createElement('input');
     noteInput.type = 'text';
     noteInput.placeholder = 'למשל: על חשבון סוף התקופה';
+    // A pasted essay would be journalled and saved with the schedule; the cap keeps a
+    // note a note.
+    noteInput.maxLength = 120;
     field('הערה (לא חובה)', noteInput);
 
     // מזומן is the default because it is what an advance on a site almost always is -
@@ -657,17 +688,27 @@ function openAdvanceForm(worker, actions) {
     };
 
     const save = () => {
-        const amount = Number(amountInput.value.trim());
-        if (!amountInput.value.trim() || isNaN(amount) || amount <= 0) {
-            error.textContent = 'הכנס סכום גדול מאפס.';
+        // Validated to the same standard the wire check will later demand - a value
+        // the read path rejects (Infinity stringifies to null, a malformed date) would
+        // pass commit today and quarantine the whole record on the next launch.
+        // Arabic-Indic digits are typed on real phones here and are normalised, whole
+        // shekels only; 'Number' alone also reads '0x10' and '1e5', which nobody meant.
+        const typed = amountInput.value.trim()
+            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+        const amount = Number(typed);
+        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0 || amount > 10000000) {
+            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
             amountInput.focus();
             return;
         }
-        // Some phones let a date be typed straight into the field, past min and max.
+        // Some phones let a date be typed straight into the field, past min and max -
+        // and a lexical compare would pass '2026-13-45'. The same isRealDate the wire
+        // check runs, run here first.
         const date = dateInput.value;
-        if (!date || date < REPORT_RANGE.from || date > REPORT_RANGE.to) {
-            error.textContent = 'בחר תאריך בתוך התקופה המוצגת - מקדמה מחוץ לה ' +
-                'תנוכה מהחשבון הלא נכון.';
+        if (!isRealDate(date) || date < dateInput.min || date > dateInput.max) {
+            error.textContent = 'בחר תאריך בתוך תקופת החשבון הנוכחית - מקדמה מחוץ לה ' +
+                'תנוכה מהתקופה הלא נכונה.';
             return;
         }
 
@@ -681,7 +722,7 @@ function openAdvanceForm(worker, actions) {
     };
 
     const buttons = el('div', 'modal-actions');
-    buttons.appendChild(button('רישום המקדמה', null, save));
+    buttons.appendChild(button('שמור מקדמה', null, save));
     buttons.appendChild(button('ביטול', 'btn-secondary', close));
     form.appendChild(buttons);
 
@@ -744,7 +785,7 @@ function workerStatementText(workerId) {
     // Both numbers, in the message the man actually receives. He is the one person who
     // will check the total against the days, and one count could not explain it.
     const summary = workerDaysSummary(days);
-    lines.push('סה"כ ' + countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות'));
+    lines.push('סה״כ ' + countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות'));
     lines.push(workUnitsLine(summary));
     if (priced) lines.push(`נצבר: ${Math.round(earned)}`);
 
@@ -834,7 +875,9 @@ function renderWorkerDayRow(day, worker) {
         // whole card reads as an arithmetic mistake on the one screen that exists to
         // settle that argument.
         if (day.historic && day.dailyRate > 0) {
-            money.appendChild(el('span', 'wday-rate', `לפי ${day.dailyRate} ליום`));
+            money.appendChild(el('span', 'wday-rate', day.doubled
+                ? `לפי ${day.dailyRate} ליום × 2`
+                : `לפי ${day.dailyRate} ליום`));
         }
     }
     row.appendChild(money);
@@ -867,8 +910,12 @@ function renderWorkerDaysTotal(days, worker) {
     if (rateLine) what.appendChild(el('span', 'wday-derive', rateLine));
     row.appendChild(what);
 
+    // Gated on what the DAYS say, not on the roster's rate today: six stamped days at
+    // 450 are 2,700 whether or not the man still has a rate on the roster, and a card
+    // that prints the equation while refusing the sum reads as an argument with itself.
+    const knowsMoney = summary.amount !== null || total > 0;
     row.appendChild(el('div', 'wday-money',
-        Number(worker.dailyRate) > 0 ? String(Math.round(total)) : '—'));
+        knowsMoney ? String(Math.round(total)) : '—'));
     return row;
 }
 
@@ -877,10 +924,12 @@ function renderWorkerDaysTotal(days, worker) {
 // four dates on his fingers.
 function deriveUnitsLine(summary) {
     const normal = summary.attendanceDays - summary.doubleDays;
+    // Digits as operands: the whole point of the line is arithmetic somebody can
+    // follow, and words make poor operands. The labels ride beside the numbers.
     const parts = [];
-    if (normal > 0) parts.push(countedIn(normal, 'יום רגיל אחד', 'ימים רגילים'));
-    parts.push(countedIn(summary.doubleDays, 'יום כפול אחד', 'ימים כפולים') + ' × 2');
-    return parts.join(' + ') + ' = ' + countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר');
+    if (normal > 0) parts.push(`${normal} רגילים`);
+    parts.push(`${summary.doubleDays} כפולים × 2`);
+    return parts.join(' + ') + ` = ${summary.payUnits} ימי שכר`;
 }
 
 // "6 ימי שכר × 450 = 2,700" - but only when that multiplication is the truth: one rate
@@ -890,6 +939,10 @@ function deriveUnitsLine(summary) {
 function singleRateLine(days, summary, total) {
     const worked = days.filter(day => !day.absent);
     if (worked.length === 0) return null;
+    // Hours priced at zero pass the product check invisibly: the total excludes them,
+    // the product agrees with the total, and the equation asserts nothing is missing
+    // while the line above it lists the missing hours. No equation over any overtime.
+    if (summary.extraHours > 0) return null;
 
     const rates = new Set(worked.map(day => day.dailyRate));
     if (rates.size !== 1) return null;
@@ -899,7 +952,7 @@ function singleRateLine(days, summary, total) {
     const product = summary.payUnits * rate;
     if (Math.round(total) !== product) return null;
     return countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר') +
-        ` × ${rate} = ${product.toLocaleString('en-US')}`;
+        ` × ${rate.toLocaleString('en-US')} = ${product.toLocaleString('en-US')}`;
 }
 
 // "6 ימי שכר · מתוכם 2 ימים כפולים · 3 שעות נוספות", with the parts that are zero left
@@ -1011,18 +1064,21 @@ function payrollSheetRows() {
 
 function invoiceSheetRows() {
     const invoice = invoiceByDate(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
-    // The export follows the same choice as the screen: exporting every site while the
-    // screen shows one would send the client a file about four sites.
-    const chosen = invoice.places.find(p => p.placeId === INVOICE_PLACE);
+    // Narrowed by the SAME predicate that decides whose file this is. The sticky
+    // INVOICE_PLACE alone once narrowed the bookkeeper's workbook too: chosen on the
+    // billing side, remembered after switching to לפי עובד, and three sites' days
+    // quietly missing from a file named דוחות.
+    const scoped = scopedExportPlace();
+    const chosen = scoped ? invoice.places.find(p => p.placeId === scoped.placeId) : null;
     const places = chosen ? [chosen] : invoice.places;
     const dates = chosen ? chosen.days.map(day => day.date) : invoice.dates;
 
-    const rows = [['תאריך'].concat(places.map(p => p.name)).concat(['סה"כ'])];
+    const rows = [['תאריך'].concat(places.map(p => p.name)).concat(['סה״כ'])];
     dates.forEach(date => {
         const counts = places.map(p => invoice.countAt(p.placeId, date));
         rows.push([date].concat(counts).concat([counts.reduce((a, b) => a + b, 0)]));
     });
-    rows.push(['סה"כ'].concat(places.map(p => p.workerDays))
+    rows.push(['סה״כ'].concat(places.map(p => p.workerDays))
         .concat([places.reduce((sum, p) => sum + p.workerDays, 0)]));
     return rows;
 }
@@ -1152,8 +1208,10 @@ async function exportReports() {
         // report anybody can act on.
         askTell({
             title: 'היצוא נכשל',
+            // The raw error is English inside a Hebrew paragraph; LRI/PDI keep its
+            // punctuation on its own side after the slice.
             message: 'קובץ ה-Excel לא נוצר. לא שינינו כלום. ' +
-                String((error && error.message) || error).slice(0, 160)
+                '\u2066' + String((error && error.message) || error).slice(0, 160) + '\u2069'
         });
     }
 }

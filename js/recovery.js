@@ -67,6 +67,11 @@ const Recovery = {
         if (this.problems.some(problem => problem.key === id)) return;
         this.problems.push({ key: id, raw: null, copy: null, message, mustHold: true });
         this.paint();
+        // The held state is worn by the whole screen (body class, dimming, the badge on
+        // the progress row) and those are drawn by render - which already ran by the
+        // time a boot-time halt lands. Without this, the block is invisible until the
+        // person loses an edit to it.
+        if (typeof render === 'function') render();
     },
 
     // True while nothing may be written to this device.
@@ -149,6 +154,9 @@ const Recovery = {
         this.acknowledged = true;
         this.paint();
         const resumed = !this.blocked();
+        // Both ways: a release must un-dim the screen it dimmed, and a refusal to
+        // release (mustHold) must keep it visibly held.
+        if (typeof render === 'function') render();
         if (!resumed) return false;
 
         if (typeof FarkadSync !== 'undefined' && FarkadSync.releaseRecoveryHold) {

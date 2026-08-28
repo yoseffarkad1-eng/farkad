@@ -38,9 +38,9 @@ const State = {
 
         // Only now is the schedule this session will actually hold standing: disk read,
         // journal replayed, any unfinished restore completed. The advances on it are
-        // mirrored into the ledger here, before the first render - not that a render
-        // could tell: the screens read the fold, and the fold answers the same with the
-        // mirror written or refused.
+        // mirrored into the ledger here, before the first render. The screens still
+        // read the legacy field either way - the mirror exists so the ledger can be
+        // JUDGED against it for a while before anything depends on the fold.
         this.migrateLedger();
         return result;
     },
@@ -166,23 +166,37 @@ const State = {
         // Quarantine and build mismatch. What is already saved stays saved and nothing
         // new is written - the migration least of all, being the one edit nobody made.
         if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+        // A device whose storage refuses everything holds the record in memory only.
+        // journalBatch answers true there (an ordinary edit IS allowed to stand in
+        // memory), but a mirror that exists only until the tab closes is not a mirror,
+        // and the save below would raise the "השינוי האחרון לא נשמר" banner at boot
+        // over a change nobody made.
+        if (typeof Store !== 'undefined' && !Store.available) return false;
 
         const result = migrateAdvancesToLedger(this.schedule, syncDeviceId());
         // Nothing to mirror, nothing written: a second boot leaves the disk alone.
         if (result.added.length === 0) return true;
 
-        const journalled = this.journalBatch(Object.keys(result.paths)
-            .map(path => ({ path, value: result.paths[path] })));
+        const entries = Object.keys(result.paths)
+            .map(path => ({ path, value: result.paths[path] }));
+        const journalled = this.journalBatch(entries);
         if (!journalled) {
             // Nowhere durable. The entries were only ever in memory - the legacy field
             // still holds every one of these advances, so nothing is lost by waiting.
-            Object.keys(result.paths).forEach(path => {
-                delete this.schedule.ledger.advances[path.split('.')[2]];
+            // Removed by the id each entry carries, not by parsing its path.
+            entries.forEach(entry => {
+                delete this.schedule.ledger.advances[entry.value.id];
             });
             return false;
         }
 
+        // The mirror stays as silent as its comment promises: a blob write that fails
+        // here will fail identically on the next real edit, and THAT one may honestly
+        // raise the banner - a boot alarm about an edit nobody made teaches people to
+        // ignore the banner that matters.
+        const hadFailed = this.saveFailed;
         this.save();
+        this.saveFailed = hadFailed;
         return true;
     },
 
@@ -270,6 +284,10 @@ const State = {
             FarkadSync.reloadJournal();
             FarkadSync.replayJournal(this.schedule, FarkadSync.supersededFloor());
         }
+        // The fresh parse is a new object; without re-pinning, the next successful save
+        // would read the identity change as "a restore landed" and fire an unasked-for
+        // ledger mirror over an ordinary refused edit.
+        this.mirrored = this.schedule;
         return true;
     },
 
@@ -368,7 +386,22 @@ const State = {
         // claiming "אין מקום" over it sends somebody to delete photos that will not
         // help; the banner at the top of the screen carries the real story.
         if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
-            if (typeof askTell === 'function') {
+            // The backup export still works in every held state (its own writes go
+            // through paths the hold does not cover), and it is the way tonight's
+            // roster continues from another phone - withholding it here withheld the
+            // one working exit.
+            if (typeof askConfirm === 'function' && typeof exportBackup === 'function') {
+                askConfirm({
+                    title: 'הרישום לא נשמר',
+                    message: 'הרישום מושבת כרגע - הסיבה כתובה בהודעה שבראש המסך. השינוי ' +
+                        'בוטל כדי שלא ייראה כאילו נרשם. מה שכבר שמור לא נפגע. ' +
+                        'אפשר לייצא קובץ גיבוי ולהמשיך ממכשיר אחר.',
+                    ok: 'ייצוא קובץ גיבוי',
+                    cancel: 'סגור'
+                }).then(wantsBackup => {
+                    if (wantsBackup && typeof Blob !== 'undefined') exportBackup();
+                });
+            } else if (typeof askTell === 'function') {
                 askTell({
                     title: 'הרישום לא נשמר',
                     message: 'הרישום מושבת כרגע - הסיבה כתובה בהודעה שבראש המסך. השינוי ' +

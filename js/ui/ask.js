@@ -30,6 +30,18 @@ function askElements() {
 // Shared cleanup for the optional pieces: every ask starts from a dialog with no
 // leftover choice buttons and no leftover footer from the question before it.
 function askResetExtras(parts, settings) {
+    // A question opened over an unanswered question: the displaced promise must not
+    // hang forever - an awaiting caller (the reorder exit guard) would suspend with it
+    // and pin the whole app to one tab. Resolved as a dismissal, which every caller
+    // already treats as "do nothing".
+    if (askResolve) {
+        const stale = askResolve;
+        askResolve = null;
+        stale(null);
+    }
+    // askChoice hides the confirm button; every other entry point must get it back, or
+    // one interrupted choice leaves every later dialog with no way to say yes.
+    if (parts.ok) parts.ok.style.display = '';
     if (parts.choices) {
         parts.choices.textContent = '';
         parts.choices.style.display = 'none';
@@ -133,9 +145,9 @@ function askChoice(options) {
     parts.message.style.display = settings.message ? '' : 'none';
     parts.input.style.display = 'none';
     parts.error.textContent = '';
+    askResetExtras(parts, settings);
     parts.ok.style.display = 'none';
     parts.cancel.style.display = 'none';
-    askResetExtras(parts, settings);
 
     parts.choices.style.display = '';
     (settings.choices || []).forEach((label, index) => {

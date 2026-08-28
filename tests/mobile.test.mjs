@@ -135,12 +135,15 @@ for (const width of WIDTHS) {
             await setInset(page, inset);
 
             // Nothing scrolls sideways. A page that does hides the end of every row.
+            // Against clientWidth, not innerWidth: on an overflowing layout Chromium
+            // widens the layout viewport to fit (shrink-to-fit), and doc <= inner then
+            // passes on exactly the broken screens.
             const across = await page.evaluate(() => ({
                 doc: document.documentElement.scrollWidth,
-                inner: window.innerWidth
+                client: document.documentElement.clientWidth
             }));
             check(`${label}: the page does not scroll sideways`,
-                across.doc <= across.inner + 1, JSON.stringify(across));
+                across.doc <= across.client + 1, JSON.stringify(across));
 
             const small = await undersized(page);
             check(`${label}: everything a finger lands on is a finger's size`,
@@ -276,10 +279,11 @@ for (const width of WIDTHS) {
     await setInset(page, 34);
 
     const across = await page.evaluate(() => ({
-        doc: document.documentElement.scrollWidth, inner: window.innerWidth
+        doc: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth
     }));
     check(`${label}: the page does not scroll sideways`,
-        across.doc <= across.inner + 1, JSON.stringify(across));
+        across.doc <= across.client + 1, JSON.stringify(across));
 
     const small = await undersized(page);
     check(`${label}: everything a finger lands on is a finger's size`,
@@ -311,7 +315,7 @@ for (const width of WIDTHS) {
             await new Promise(done => setTimeout(done, 200));
             out[view] = {
                 doc: document.documentElement.scrollWidth,
-                inner: window.innerWidth
+                inner: document.documentElement.clientWidth
             };
         }
         showView('day');

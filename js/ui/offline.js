@@ -130,14 +130,16 @@ function applyUpdate() {
 // site and is not an error - but silently looking identical to being online is.
 function watchConnection() {
     const paint = () => {
+        // The grey line under the board and the settings panel's mirror of it answer
+        // the same question as the banner - the three change together or they read as
+        // three apps. Above the banner guard, so a missing banner element cannot take
+        // the line down with it.
+        if (typeof updateSyncNotice === 'function') updateSyncNotice();
+        if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
         const banner = document.getElementById('offlineBanner');
         if (!banner) return;
         banner.style.display = navigator.onLine ? 'none' : '';
         banner.textContent = '📴 אין חיבור. הרישום נשמר במכשיר ויסונכרן כשהחיבור יחזור.';
-        // The grey line under the board answers the same question and used to keep
-        // saying מסונכרן until the write watchdog noticed - the banner and the line
-        // change together or they read as two apps.
-        if (typeof updateSyncNotice === 'function') updateSyncNotice();
     };
 
     window.addEventListener('online', paint);

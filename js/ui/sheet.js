@@ -200,7 +200,8 @@ function renderAssignSheet() {
         // person typing them should not find that out on payday.
         if (entries.some(entry => entryRate(entry) === RATE_EXTRA)) {
             rates.appendChild(el('p', 'sheet-note', worker.hourlyRate > 0
-                ? `שעות נוספות מחושבות לפי שכר שעה (${worker.hourlyRate} ₪ ל${isolate(worker.name)}).`
+                ? `שעות נוספות מחושבות לפי שכר השעה של ${isolate(worker.name)} - ` +
+                    `${worker.hourlyRate} ₪ לשעה.`
                 : 'לעובד אין שכר שעה - השעות יירשמו בלי סכום.'));
         }
         body.appendChild(rates);
@@ -438,6 +439,17 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
     // with nothing on screen to catch it.
     const withAbsences = !(options && options.skipAbsences);
 
+    // Snapshotted BEFORE the change-building below: assignPlace and markAbsent mutate
+    // the schedule the moment they are called, so a snapshot taken after the loop
+    // reads the copy back as "no change" and the undo offer never appears. Date and
+    // layer are captured now - by undo time the person may be on another day.
+    const dateAtCopy = State.date;
+    const layerAtCopy = State.layer;
+    const held = targets.map(worker => ({
+        id: worker.id,
+        before: snapshotWorkerDay(dateAtCopy, layerAtCopy, worker.id)
+    }));
+
     const changes = [];
     targets.forEach(worker => {
         if (isAbsent(State.schedule, fromDate, worker.id, fromLayer)) {
@@ -461,17 +473,6 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
         return;
     }
 
-    // Snapshotted per worker BEFORE the write, so the copy can be taken back the way
-    // any single tap can: the bulk chips on this same screen are undoable, and a bulk
-    // copy that was not taught somebody that undo is a lottery. Date and layer are
-    // captured now - by undo time the person may be looking at another day.
-    const dateAtCopy = State.date;
-    const layerAtCopy = State.layer;
-    const held = targets.map(worker => ({
-        id: worker.id,
-        before: snapshotWorkerDay(dateAtCopy, layerAtCopy, worker.id)
-    }));
-
     // One save and one render for the whole copy, but every path is still sent - see
     // State.commitMany. No "copied N workers" over a copy that was refused: commit has
     // already said what happened.
@@ -484,19 +485,28 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
         .filter(item => JSON.stringify(item.before) !== JSON.stringify(item.after));
     if (touched.length > 0) {
         const count = touched.length;
+        // The undo (and the redo) restore only rows that still hold what this copy
+        // left there - a row another phone edited in between is that phone's answer,
+        // and dragging it back would re-make the mistake somewhere new.
+        const restoreTo = side => () => State.commitMany(touched
+            .filter(item => JSON.stringify(snapshotWorkerDay(dateAtCopy, layerAtCopy, item.id))
+                === JSON.stringify(side === 'before' ? item.after : item.before))
+            .map(item => setWorkerDay(State.schedule, dateAtCopy, item.id, layerAtCopy,
+                side === 'before' ? item.before : item.after)));
         offerUndo(count === 1 ? `הועתק עובד אחד ${source}` : `הועתקו ${count} עובדים ${source}`,
-            () => State.commitMany(touched.map(item =>
-                setWorkerDay(State.schedule, dateAtCopy, item.id, layerAtCopy, item.before))),
-            () => State.commitMany(touched.map(item =>
-                setWorkerDay(State.schedule, dateAtCopy, item.id, layerAtCopy, item.after))));
+            restoreTo('before'), restoreTo('after'));
     }
 
-    askTell(`הועתקו ${countCopied(changes)} עובדים ${source}. רק מי שלא היה רשום עודכן.`);
+    const copied = countCopied(changes);
+    askTell(copied === 1
+        ? `הועתק עובד אחד ${source}. רק מי שלא היה רשום עודכן.`
+        : `הועתקו ${copied} עובדים ${source}. רק מי שלא היה רשום עודכן.`);
 }
 
 // Workers, not writes: a worker copied into two sites produced two changes on the same
 // path, and reporting that as "2 workers copied" is simply wrong.
 function countCopied(changes) {
+    changes = changes.filter(change => change && change.path);
     return new Set(changes.map(change => change.path)).size;
 }
 

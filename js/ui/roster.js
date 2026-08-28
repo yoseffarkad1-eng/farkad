@@ -73,12 +73,15 @@ function renderWorkerList() {
     // The count of archived men who still have advances on the books rides on the fold:
     // money does not go to the archive with the man, and a fold that hid it would be
     // where an open balance goes to be forgotten.
-    const owing = archived.filter(worker =>
-        (openAdvanceBalance(State.schedule, worker.id) || { count: 0 }).count > 0).length;
+    // One pass over the advances, not a footprint walk per archived man: this render
+    // runs on every pointermove of a reorder drag.
+    const advanceHolders = new Set(
+        Object.values(State.schedule.advances || {}).map(item => item && item.workerId));
+    const owing = archived.filter(worker => advanceHolders.has(worker.id)).length;
     const summary = el('summary', null, owing === 0
         ? `ארכיון עובדים (${archived.length})`
         : `ארכיון עובדים (${archived.length}) · ` +
-            (owing === 1 ? 'לאחד מהם מקדמות רשומות' : `ל-${owing} מהם מקדמות רשומות`));
+            (owing === 1 ? 'לאחד מהם יש מקדמה רשומה' : `ל-${owing} מהם יש מקדמות רשומות`));
     box.appendChild(summary);
     archived.forEach(worker => box.appendChild(workerRow(worker)));
     container.appendChild(box);
@@ -213,6 +216,9 @@ async function confirmReorderExit() {
     const moved = reorderMovedIds().length;
     if (moved === 0) { closeReorder(); return true; }
 
+    // The harness loads roster.js without ask.js; a guard beats a ReferenceError that
+    // would strand the draft open and pin the app to this tab.
+    if (typeof askChoice !== 'function') { closeReorder(); return true; }
     const answer = await askChoice({
         title: 'יציאה מסידור העובדים',
         message: moved === 1
@@ -337,16 +343,19 @@ function renderReorderList(container, active) {
     if (moved > 0) {
         foot.appendChild(el('p', 'hint reorder-moved-count', moved === 1
             ? 'שינוי אחד לא נשמר'
-            : `${moved} שינויים לא שמורים`));
+            : `${moved} שינויים לא נשמרו`));
     }
     const save = button('שמירה ויציאה', 'btn-add', saveReorder);
     // Mid-drag the finger owns the list; a save that fires under it would write
     // whatever order the row happened to be passing through.
     save.disabled = Boolean(reorderDragging);
     foot.appendChild(save);
-    foot.appendChild(button('יציאה בלי לשמור', 'btn-secondary', () => { confirmReorderExit(); }));
+    // The explicit button IS the answer - asking "leave without saving?" back at the
+    // person who just pressed exactly those words is a doubt loop, not a guard. The
+    // guard exists for the implicit exits (a tab tapped mid-sort).
+    foot.appendChild(button('יציאה בלי לשמור', 'btn-secondary', closeReorder));
     foot.appendChild(el('p', 'hint',
-        'הסדר נשמר כרשומה אחת לכל המכשירים — או שנשמר כולו, או שלא נשמר כלל.'));
+        'השמירה היא הכל או כלום - או שכל הסדר נשמר בבת אחת, או ששום דבר לא משתנה.'));
     container.appendChild(foot);
 }
 
@@ -432,11 +441,14 @@ function startReorderDrag(event, workerId) {
     // The edge bands appear only while a row is actually in the air - painted, they say
     // where holding the row will scroll, and gone the moment the finger lets go.
     if (document.body && document.body.classList) document.body.classList.add('reorder-dragging');
-    renderWorkerList();
 
+    // Listeners BEFORE the render: a throw inside renderWorkerList must not leave the
+    // drag armed with no way to end it - a stranded reorderDragging keeps the save
+    // button disabled for the rest of the session.
     document.addEventListener('pointermove', onReorderDrag);
     document.addEventListener('pointerup', endReorderDrag);
     document.addEventListener('pointercancel', endReorderDrag);
+    renderWorkerList();
 }
 
 function onReorderDrag(event) {
@@ -798,21 +810,15 @@ function deletionBlockers(workerId) {
     if (!(sync && sync.provenLocalOnly && sync.provenLocalOnly('workers', workerId))) {
         blocked.push('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום');
     }
-    // While writes are held - quarantine, a build mismatch - the tombstone this delete
-    // ends in cannot land, and the button would walk somebody through typing a name
-    // into a refusal.
-    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
-        blocked.push('הרישום מושבת כרגע - ראה את ההודעה שבראש המסך');
-    }
     return blocked;
 }
 
 function whyNotDeletable(blocked) {
-    // The enumeration names WHICH blocker; the sentence after it is the rule itself,
-    // said the way the design says it, so the refusal teaches the policy and not only
-    // this man's case.
-    return `${blocked.join(', ')} - לעובד עם היסטוריה אין מחיקה, רק העברה לארכיון, ` +
-        'כך שדוחות ותשלומי עבר נשמרים תמיד.';
+    // The enumeration names WHICH blocker; the rule after it stays causeless, because
+    // the blockers are not all history - a provenance gap is not היסטוריה, and a
+    // sentence that asserts the wrong cause teaches the wrong rule.
+    return `${blocked.join(', ')}. אי אפשר למחוק, רק להעביר לארכיון - ` +
+        'כך דוחות ותשלומי עבר נשמרים תמיד.';
 }
 
 // Said out loud, every time. Returning in silence here leaves somebody looking at a
@@ -979,7 +985,7 @@ async function deleteWorker(workerId) {
     const typed = await askText({
         title: 'מחיקת עובד',
         message: `ל${isolate(worker.name)} אין אף יום רשום, אף מקדמה ואף רישום שממתין ` +
-            'לשליחה. המחיקה סופית ולא ניתנת לשחזור. לאישור, הקלדת שם העובד:',
+            'לשליחה. המחיקה סופית ולא ניתנת לשחזור. לאישור, הקלד את שם העובד במדויק:',
         placeholder: worker.name,
         ok: 'מחיקה סופית',
         footer: 'נשמר במכשיר ויסתנכרן כשיש חיבור.',

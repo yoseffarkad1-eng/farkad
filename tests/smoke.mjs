@@ -1453,7 +1453,7 @@ async function seedRoster(page) {
   await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
   await page.waitForTimeout(250);
   check('the dialog asks for the name to be typed',
-    (await page.textContent('#askMessage')).includes('הקלדת שם העובד'),
+    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
     await page.textContent('#askMessage'));
   await page.fill('#askInput', 'טעות');
   await page.click('#askOk');
@@ -2464,7 +2464,8 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('choosing extra hours states the hourly rate they are priced by',
     (await page.textContent('#assignSheetBody'))
-      .includes('שעות נוספות מחושבות לפי שכר שעה (50 ₪ ל'),
+      .includes('שעות נוספות מחושבות לפי שכר השעה של') &&
+    (await page.textContent('#assignSheetBody')).includes('50 ₪ לשעה'),
     await page.textContent('#assignSheetBody'));
 
   // עלי has no hourly rate, and the hint must say so rather than implying a sum.
@@ -4537,19 +4538,24 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('and leaves the mode',
     (await page.locator('#workerList .reorder-row').count()) === 0);
 
-  // Cancelling is not a quiet save.
+  // Cancelling is not a quiet save. The guard belongs to the IMPLICIT exits - a tab
+  // tapped mid-sort asks its three-answer question - while the footer's explicit
+  // discard button IS the answer and acts at once.
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(250);
   await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(200);
-  await page.locator('.reorder-foot').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
+  await page.click('#tab-day');
   await page.waitForTimeout(250);
-  // Discarding a changed order is a decision, and the door asks its three-answer
-  // question before anything is thrown away.
-  check('leaving with unsaved changes asks first', await page.isVisible('#askChoices'));
-  await page.locator('#askChoices').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
+  check('a tab tapped over unsaved changes asks first', await page.isVisible('#askChoices'));
+  await page.locator('#askChoices').getByRole('button', { name: 'הישארות' }).click();
+  await page.waitForTimeout(250);
+  check('staying keeps the draft on screen',
+    (await page.locator('#workerList .reorder-row').count()) > 0);
+  await page.locator('.reorder-foot').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
   await page.waitForTimeout(300);
-  check('cancelling leaves the order alone', (await order()) === wanted, await order());
+  check('the explicit discard acts at once, and leaves the order alone',
+    (await order()) === wanted, await order());
 
   await page.context().close();
 }
@@ -4691,7 +4697,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   check('the restore group carries the guard sentence, above its doors',
     (await page.textContent('#settingsPanel'))
-      .includes('שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר תמיד כגיבוי מקומי לפני.'));
+      .includes('שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר כגיבוי מקומי לפני כן.'));
 
   // The raw export used to be reachable only AFTER damage was detected - from the
   // recovery banner - which is exactly backwards for an emergency door.
@@ -4713,28 +4719,50 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await page.textContent('#installState')).includes('בדפדפן'),
     await page.textContent('#installState'));
 
-  // The v80 parity line. This build carries ledgerAgreesWithAdvances, so the line is
-  // there - quiet on agreement, a warning on disagreement, and gone when no check is
-  // reachable at all.
+  // The v80 parity line answers in three registers: quiet agreement, a quiet "not yet
+  // copied" for a device that is merely behind, and a warning only when the mirror and
+  // the record genuinely disagree. With no advances at all it says nothing - there is
+  // nothing to agree about.
+  check('with no advances the parity line says nothing',
+    (await page.textContent('#ledgerParity')).trim() === '' &&
+    !(await page.locator('#ledgerParity').isVisible()));
+
+  await page.evaluate(() => {
+    State.schedule.advances['a_smoke'] = { id: 'a_smoke', workerId: 'w_x', date: '2026-08-01', amount: 100 };
+    State.ledgerParity = () => ({ agrees: true, missing: [], different: [], orphaned: [] });
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
   check('with the ledger agreeing, the parity line is quiet',
-    (await page.textContent('#ledgerParity')) === 'פנקס המקדמות (v80) תואם את הרישום הקיים.' &&
+    (await page.textContent('#ledgerParity')).includes('פנקס המקדמות (v80)') &&
+    !(await page.textContent('#ledgerParity')).includes('אינו תואם') &&
     !(await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
     await page.textContent('#ledgerParity'));
 
   await page.evaluate(() => {
-    window.FarkadLedger = { ledgerAgreesWithAdvances: () => ({ agrees: false, missing: ['a_1'], different: [] }) };
+    State.ledgerParity = () => ({ agrees: false, missing: ['a_smoke'], different: [], orphaned: [] });
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
+  check('merely behind reads as "not yet", quietly',
+    (await page.textContent('#ledgerParity')).includes('טרם הועתק') &&
+    !(await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#ledgerParity'));
+
+  await page.evaluate(() => {
+    State.ledgerParity = () => ({ agrees: false, missing: [], different: ['a_smoke'], orphaned: [] });
     renderSettings();
   });
   await page.waitForTimeout(200);
   check('a disagreement warns against flipping the write gate',
     (await page.textContent('#ledgerParity'))
-      .includes('אינו תואם את הרישום — אל תפעילו את הכתיבה החדשה') &&
+      .includes('אינו תואם את המקדמות הרשומות') &&
     (await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
     await page.textContent('#ledgerParity'));
 
   await page.evaluate(() => {
-    window.FarkadLedger = undefined;
-    window.ledgerAgreesWithAdvances = undefined;
+    delete State.schedule.advances['a_smoke'];
+    State.ledgerParity = () => { throw new Error('gone'); };
     renderSettings();
   });
   await page.waitForTimeout(200);
