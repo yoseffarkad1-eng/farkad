@@ -25,6 +25,11 @@ function renderRoster() {
     // The backup, the restore points and the version live on הגדרות וכלים now - see
     // js/ui/settings.js. This screen is about people and sites; it was also about files,
     // which on a phone meant scrolling past thirty men to reach the backup button.
+    //
+    // The reorder panel covers this screen while a draft is open, and it is redrawn
+    // with it: the crew can change under the draft - another phone's edit landing - and
+    // a panel showing yesterday's list is how the stale-save refusal gets earned twice.
+    renderReorderPanel();
 }
 
 function renderAppVersion() {
@@ -44,11 +49,6 @@ function renderWorkerList() {
 
     const active = State.schedule.workers.filter(worker => worker.active !== false);
     const archived = State.schedule.workers.filter(worker => worker.active === false);
-
-    if (reorderDraft) {
-        renderReorderList(container, active);
-        return;
-    }
 
     if (active.length === 0) {
         container.appendChild(emptyHint('כל העובדים בארכיון.'));
@@ -164,6 +164,14 @@ function workerRow(worker) {
 // So: a mode. A DRAFT order that lives in memory, moved by dragging or by four buttons
 // per row, saved once, and thrown away by cancelling. Nothing leaves this device until
 // the person says the order is right.
+//
+// The mode's stage is #reorderPanel in index.html - a panel over the whole screen, cut
+// like the settings sheet and on its tier. It was drawn inline where the worker list
+// is, which left the sites panel beside the draft and the tab bar under it: three ways
+// to wander out of unsaved work, on the one screen whose whole point is that nothing is
+// saved yet. The panel has a fixed head (the title and the way back), a fixed foot (the
+// two verbs and the unsaved count), and the list scrolling between them; the way back,
+// the tabs and Escape all route through confirmReorderExit below.
 
 // The draft, and what the crew looked like when it was taken. Both null when the mode is
 // closed, which is also what every render below tests.
@@ -182,9 +190,12 @@ function openReorder() {
     reorderDraft = activeWorkerIds();
     reorderBase = reorderDraft.join();
     render();
-    const list = document.getElementById('workerList');
-    const first = list && list.querySelector('.reorder-row button');
-    if (first && first.focus) first.focus();
+    renderReorderPanel();
+    document.addEventListener('keydown', reorderKeydown);
+    // The heading, not the first row's button: a screen reader should say where it has
+    // arrived before it starts naming controls - the settings sheet's own contract.
+    const title = document.getElementById('reorderTitle');
+    if (title && title.focus) title.focus();
 }
 
 function closeReorder() {
@@ -193,7 +204,39 @@ function closeReorder() {
     reorderHeld = null;
     const line = document.getElementById('reorderLive');
     if (line) line.textContent = '';
+    document.removeEventListener('keydown', reorderKeydown);
+    renderReorderPanel();
     render();
+    // Focus goes back to the button the mode was entered from, so the keyboard carries
+    // on from where the person was - not from the top of the document.
+    const opener = document.getElementById('reorderOpenBtn');
+    if (opener && opener.focus) opener.focus();
+}
+
+// The settings sheet's keyboard contract, on this panel: Escape is the way back and
+// asks the same question the back button does; Tab stays inside. Both stand down while
+// a dialog is open on top - the exit question is itself asked through askModal, and a
+// second Escape must answer IT, not stack another copy of it.
+function reorderKeydown(event) {
+    if (typeof topModal === 'function' && topModal()) return;
+    if (event.key === 'Escape') { confirmReorderExit(); return; }
+    if (event.key !== 'Tab') return;
+
+    const panel = document.getElementById('reorderPanel');
+    if (!panel) return;
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
+        .filter(node => node.offsetParent !== null && !node.disabled);
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
 }
 
 // How many rows sit somewhere other than where the crew's saved order has them. The
@@ -261,7 +304,7 @@ function moveDraftTo(workerId, to) {
     if (target === at) return;
     reorderDraft.splice(at, 1);
     reorderDraft.splice(target, 0, workerId);
-    renderWorkerList();
+    renderReorderList();
     announceReorder(workerId);
 }
 
@@ -314,13 +357,36 @@ function saveReorder() {
     closeReorder();
 }
 
-function renderReorderList(container, active) {
-    const byId = new Map(active.map(worker => [worker.id, worker]));
+// The panel itself: open when a draft is, closed - and emptied, so no stale rows sit in
+// a hidden dialog - when there is none. The head is static markup in index.html; the
+// list and the foot are drawn here.
+function renderReorderPanel() {
+    const panel = document.getElementById('reorderPanel');
+    if (!panel) return;
 
-    const head = el('div', 'reorder-head');
-    head.appendChild(el('p', 'hint',
-        'גרור בידית, או השתמש בכפתורים. שום דבר לא נשמר עד שלוחצים "שמירה ויציאה".'));
-    container.appendChild(head);
+    const open = Boolean(reorderDraft);
+    panel.classList.toggle('open', open);
+    panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) {
+        renderReorderList();
+        return;
+    }
+    const host = document.getElementById('reorderList');
+    if (host) clear(host);
+    const foot = document.getElementById('reorderFoot');
+    if (foot) clear(foot);
+}
+
+function renderReorderList() {
+    const host = document.getElementById('reorderList');
+    if (!host || !reorderDraft) return;
+    clear(host);
+
+    // From the world as it is NOW, not as it was at openReorder: a worker another phone
+    // archived mid-draft simply stops being drawn, and the save below is what says why.
+    const byId = new Map(State.schedule.workers
+        .filter(worker => worker.active !== false)
+        .map(worker => [worker.id, worker]));
 
     const list = el('div', 'reorder-list');
     list.setAttribute('role', 'list');
@@ -330,24 +396,32 @@ function renderReorderList(container, active) {
         if (!worker) return;
         list.appendChild(reorderRow(worker, index));
     });
-    container.appendChild(list);
+    host.appendChild(list);
 
-    const foot = el('div', 'reorder-foot');
+    renderReorderFoot();
+}
+
+function renderReorderFoot() {
+    const foot = document.getElementById('reorderFoot');
+    if (!foot) return;
+    clear(foot);
+
     const moved = reorderMovedIds().length;
     if (moved > 0) {
         foot.appendChild(el('p', 'hint reorder-moved-count', moved === 1
             ? 'שינוי אחד לא נשמר'
             : `${moved} שינויים לא שמורים`));
     }
+    const actions = el('div', 'reorder-foot-actions');
     const save = button('שמירה ויציאה', 'btn-add', saveReorder);
     // Mid-drag the finger owns the list; a save that fires under it would write
     // whatever order the row happened to be passing through.
     save.disabled = Boolean(reorderDragging);
-    foot.appendChild(save);
-    foot.appendChild(button('יציאה בלי לשמור', 'btn-secondary', () => { confirmReorderExit(); }));
+    actions.appendChild(save);
+    actions.appendChild(button('יציאה בלי לשמור', 'btn-secondary', () => { confirmReorderExit(); }));
+    foot.appendChild(actions);
     foot.appendChild(el('p', 'hint',
         'הסדר נשמר כרשומה אחת לכל המכשירים — או שנשמר כולו, או שלא נשמר כלל.'));
-    container.appendChild(foot);
 }
 
 function reorderRow(worker, index) {
@@ -432,7 +506,7 @@ function startReorderDrag(event, workerId) {
     // The edge bands appear only while a row is actually in the air - painted, they say
     // where holding the row will scroll, and gone the moment the finger lets go.
     if (document.body && document.body.classList) document.body.classList.add('reorder-dragging');
-    renderWorkerList();
+    renderReorderList();
 
     document.addEventListener('pointermove', onReorderDrag);
     document.addEventListener('pointerup', endReorderDrag);
@@ -445,7 +519,7 @@ function onReorderDrag(event) {
 
     // The row the pointer is over, decided by midpoints rather than by hit testing: the
     // row being carried is under the finger, so hit testing always returns itself.
-    const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+    const rows = [...document.querySelectorAll('#reorderList .reorder-row')];
     let target = reorderDraft.length - 1;
     for (let i = 0; i < rows.length; i += 1) {
         const box = rows[i].getBoundingClientRect();
@@ -460,13 +534,18 @@ function onReorderDrag(event) {
 }
 
 // A list of thirty does not fit a phone, and a finger holding a row cannot also scroll.
-// So the page moves when the row is carried near either edge.
+// So the LIST moves when the row is carried near either edge - the panel's own scroll
+// box, not the page: the panel is fixed over the page, and scrolling the document under
+// it would move nothing anybody can see. The bands are measured from the box's edges,
+// which is also where the stylesheet paints them.
 function autoScrollWhileDragging(clientY) {
+    const box = document.getElementById('reorderScroll');
+    if (!box) return;
+    const frame = box.getBoundingClientRect();
     const edge = 90;
-    const height = window.innerHeight || 0;
     let step = 0;
-    if (clientY < edge) step = -14;
-    else if (clientY > height - edge) step = 14;
+    if (clientY < frame.top + edge) step = -14;
+    else if (clientY > frame.bottom - edge) step = 14;
 
     if (step === 0) {
         if (reorderDragging && reorderDragging.scrolling) {
@@ -476,7 +555,7 @@ function autoScrollWhileDragging(clientY) {
         return;
     }
     if (!reorderDragging || reorderDragging.scrolling) return;
-    reorderDragging.scrolling = setInterval(() => window.scrollBy(0, step), 16);
+    reorderDragging.scrolling = setInterval(() => { box.scrollTop += step; }, 16);
 }
 
 function endReorderDrag() {
@@ -487,7 +566,7 @@ function endReorderDrag() {
     document.removeEventListener('pointermove', onReorderDrag);
     document.removeEventListener('pointerup', endReorderDrag);
     document.removeEventListener('pointercancel', endReorderDrag);
-    renderWorkerList();
+    renderReorderList();
 }
 
 function hasDuplicateName(worker) {
