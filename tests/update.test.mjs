@@ -56,9 +56,23 @@ for (const item of ['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 
 // The three strings that name a build. They are checked against each other at boot -
 // checkBuildConsistency() stops the app writing when the page and the scripts disagree -
 // so a deploy that moved only one of them would be testing the crash banner instead.
+// The real pair. `old` is whatever the tree is stamped with right now - read from the
+// copy rather than written into it, so this suite cannot pass by deploying a build that
+// does not exist - and `new` is the candidate that will replace it. Synthetic names would
+// have proved the machinery and not the release.
+const stampedBuild = await (async () => {
+    const html = await readFile(join(dir, 'index.html'), 'utf8');
+    const sw = await readFile(join(dir, 'sw.js'), 'utf8');
+    const app = (html.match(/<meta name="farkad-build" content="([^"]*)">/) || [])[1];
+    const cache = (sw.match(/const VERSION = '([^']*)';/) || [])[1];
+    return { app, cache };
+})();
+given('the copy is stamped with a build at all',
+    Boolean(stampedBuild.app) && Boolean(stampedBuild.cache));
+
 const BUILDS = {
-    old: { app: 'v79', cache: 'farkad-v79' },
-    new: { app: 'v79-deploy-test', cache: 'farkad-v79-deploy-test' }
+    old: stampedBuild,
+    new: { app: 'v87', cache: 'farkad-v87' }
 };
 
 async function deploy(build) {
@@ -326,6 +340,133 @@ const cacheNames = page => page.evaluate(() => caches.keys());
         text.includes('מעודכנת'), text.slice(0, 60));
     check('and names the build it is on, so the answer can be checked',
         text.includes(BUILDS.old.app), text.slice(0, 60));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- a half-fetched update
+//
+// The install is all-or-nothing, and the reason is what happens if it is not: a shell
+// with one file missing ACTIVATES, the activate handler deletes the complete old cache,
+// and the next offline launch opens an app with some of its scripts gone and nothing
+// pointing at why. Somebody on a site with no signal is then holding a phone that will
+// not open, and the record of the week is inside it.
+{
+    suite('an update that cannot fetch its whole shell leaves the old build serving');
+
+    await deploy(BUILDS.old);
+    const page = await newPage();
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(page);
+    given('the old build is installed and in charge',
+        (await cacheNames(page)).includes(BUILDS.old.cache));
+
+    // The new build is deployed, and one of its shell files cannot be fetched. Taken off
+    // the SERVER rather than intercepted in the browser: the fetches that build a shell
+    // come from the service worker, and route() does not see those. The old cache already
+    // holds its own copy, so this changes what can be installed and nothing else.
+    await deploy(BUILDS.new);
+    const hidden = join(dir, 'js/ui/reports.js');
+    const hiddenBody = await readFile(hidden, 'utf8');
+    await rm(hidden);
+
+    await page.evaluate(() => navigator.serviceWorker.getRegistration()
+        .then(reg => reg && reg.update()).catch(() => {}));
+    await page.waitForTimeout(2500);
+
+    const names = await cacheNames(page);
+    check('the old cache is still there, whole',
+        names.includes(BUILDS.old.cache), JSON.stringify(names));
+    check('and nothing is waiting to take over',
+        (await page.evaluate(() => navigator.serviceWorker.getRegistration()
+            .then(reg => Boolean(reg && reg.waiting)))) === false);
+
+    // The page still opens, offline, from the build that did install.
+    await writeFile(hidden, hiddenBody);
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(500);
+    check('the phone is still running the build it was running',
+        (await buildOnScreen(page)).script === BUILDS.old.app,
+        JSON.stringify(await buildOnScreen(page)));
+    check('with every script it needs',
+        (await page.evaluate(() => typeof payrollRows === 'function')) === true);
+
+    // And the retry on a later visit finds the whole shell and takes.
+    await page.evaluate(() => navigator.serviceWorker.getRegistration()
+        .then(reg => reg && reg.update()).catch(() => {}));
+    await page.waitForFunction(() => navigator.serviceWorker.getRegistration()
+        .then(reg => Boolean(reg && reg.waiting)), null, { timeout: 20000, polling: 200 });
+    check('a later visit installs it after all',
+        (await cacheNames(page)).includes(BUILDS.new.cache),
+        JSON.stringify(await cacheNames(page)));
+    check('and the old cache is still whole while the new one waits',
+        (await cacheNames(page)).includes(BUILDS.old.cache),
+        JSON.stringify(await cacheNames(page)));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- one build per session
+//
+// While the old build is the one in charge, nothing may change what it serves. A session
+// runs one build end to end, and a cache mutated underneath a running client is two.
+{
+    suite('a waiting update does not touch the cache the phone is running from');
+
+    await deploy(BUILDS.old);
+    const page = await newPage();
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(page);
+
+    const shellOf = name => page.evaluate(async cacheName => {
+        const cache = await caches.open(cacheName);
+        const keys = await cache.keys();
+        const out = {};
+        for (const request of keys) {
+            const response = await cache.match(request);
+            out[new URL(request.url).pathname] = (await response.text()).length;
+        }
+        return out;
+    }, name);
+
+    const before = await shellOf(BUILDS.old.cache);
+    given('the old cache holds a shell', Object.keys(before).length > 20);
+
+    await deploy(BUILDS.new);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration()
+        .then(reg => reg && reg.update()).catch(() => {}));
+    await page.waitForFunction(() => navigator.serviceWorker.getRegistration()
+        .then(reg => Boolean(reg && reg.waiting)), null, { timeout: 20000, polling: 200 });
+
+    const after = await shellOf(BUILDS.old.cache);
+    check('every file in the running build\u2019s cache is byte-for-byte what it was',
+        JSON.stringify(after) === JSON.stringify(before),
+        JSON.stringify(Object.keys(after).filter(key => after[key] !== before[key])));
+    check('and the page is still running the old build',
+        (await buildOnScreen(page)).script === BUILDS.old.app,
+        JSON.stringify(await buildOnScreen(page)));
+    check('while the new one waits in its own cache',
+        (await cacheNames(page)).includes(BUILDS.new.cache),
+        JSON.stringify(await cacheNames(page)));
+
+    // The handover, and only then does the old cache go.
+    await page.evaluate(() => navigator.serviceWorker.getRegistration()
+        .then(reg => reg && reg.waiting && reg.waiting.postMessage('skip-waiting')));
+    // Waited for rather than slept through: how long an activation takes is not this
+    // test's business, and a fixed pause is how a suite comes to pass on a fast machine
+    // and fail on the one that matters.
+    await page.waitForFunction(() => navigator.serviceWorker.getRegistration()
+        .then(reg => Boolean(reg && reg.active && !reg.waiting)), null,
+        { timeout: 20000, polling: 100 });
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(600);
+    check('after the handover the phone is on the new build',
+        (await buildOnScreen(page)).script === BUILDS.new.app,
+        JSON.stringify(await buildOnScreen(page)));
+    check('and the old cache is the one that went, not the new one',
+        !(await cacheNames(page)).includes(BUILDS.old.cache)
+        && (await cacheNames(page)).includes(BUILDS.new.cache),
+        JSON.stringify(await cacheNames(page)));
 
     await page.context().close();
 }
