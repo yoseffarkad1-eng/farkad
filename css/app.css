@@ -1295,6 +1295,80 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     .report-table tfoot tr { background: var(--surface-2); }
     .report .table-scroll { border: none; background: none; overflow: visible; }
+
+    /* The pay card leads with its answer. In the table the net is the LAST column,
+       which on a card put the one number payday is about below six others. The cells
+       are reordered visually only - flex order over the same tds, so the DOM, the
+       data-labels and the printed column order are untouched. */
+    .report-payroll .report-table tbody tr { display: flex; flex-wrap: wrap; }
+    /* flex-basis 100%, not width: a width still lets a zero-basis neighbour onto the
+       same line, and the labelled row below must never share one with the name. */
+    .report-payroll .report-table tbody td { flex: 0 0 100%; order: 8; }
+    .report-payroll .report-table tbody td:first-child { order: 1; }
+
+    /* נותר לתשלום, first and at the hero size: the amount a screen is about is 36/800.
+       The column header stays לתשלום; the card says what REMAINS, because the row
+       above it on screen is a man asking what he is still owed. */
+    .report-payroll .report-table tbody td.cell-net {
+        order: 0;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+        padding: 4px 0 2px;
+        font-size: 36px;
+        font-weight: 800;
+        line-height: 1.15;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+    }
+    .report-payroll .report-table tbody td.cell-net::before {
+        content: 'נותר לתשלום';
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1.3;
+    }
+
+    /* The four counts the money is checked against, as one labelled row: the number,
+       and under it the word saying which count it is. A column nobody used this
+       fortnight is dropped from the table itself (renderPayrollTable), so this row
+       only ever shows what is true. */
+    .report-payroll .report-table tbody td[data-label="ימי נוכחות"],
+    .report-payroll .report-table tbody td[data-label="ימי שכר"],
+    .report-payroll .report-table tbody td[data-label="מתוכם כפולים"],
+    .report-payroll .report-table tbody td[data-label="מקדמות"] {
+        order: 2;
+        /* Just under a quarter each: four to the row - a rounding-proof 100% - and
+           never on anyone else's line. */
+        flex: 1 1 24%;
+        min-width: 0;
+        flex-direction: column-reverse;
+        justify-content: center;
+        align-items: center;
+        gap: 2px;
+        padding: 6px 0 4px;
+        font-size: 16px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+    }
+    .report-payroll .report-table tbody td[data-label="ימי נוכחות"]::before,
+    .report-payroll .report-table tbody td[data-label="ימי שכר"]::before,
+    .report-payroll .report-table tbody td[data-label="מתוכם כפולים"]::before,
+    .report-payroll .report-table tbody td[data-label="מקדמות"]::before {
+        font-size: 14px;
+        line-height: 1.25;
+        text-align: center;
+    }
+
+    /* What is left - the hours, the absences, the rate, the gross - stays on the card
+       and steps back: it is the working, not the answer. */
+    .report-payroll .report-table tbody td[data-label="שעות נוספות"],
+    .report-payroll .report-table tbody td[data-label="נעדר"],
+    .report-payroll .report-table tbody td[data-label="שכר יומי"],
+    .report-payroll .report-table tbody td[data-label="נצבר"] {
+        font-size: 14px;
+        color: var(--ink-2);
+    }
 }
 
 /* The reports' period controls: chips first, calendars only on request. */
@@ -1336,6 +1410,55 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .invoice-picker-label { color: var(--ink-2); font-size: 13px; margin-inline-end: 4px; }
 @media print { .invoice-picker { display: none !important; } }
 
+/* The site report's two shapes. On screen: a row per site - swatch, name, proportional
+   bar, count - because the on-screen question is how the period spread across the
+   sites. On paper: the date-by-site grid, because the client is billed day by day. The
+   grid stays in the DOM and only the screen looks away from it. */
+.invoice-bars { margin-bottom: 12px; }
+.invoice-bars-head { color: var(--ink-2); font-size: 14px; font-weight: 600; padding: 2px 0 4px; }
+.invoice-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.invoice-swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+.invoice-bar-name { font-size: 15.5px; font-weight: 600; }
+.invoice-bar-track {
+    flex: 1 1 60px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+    display: flex;
+}
+/* Anchored to the inline start, so the bar grows the way the page reads. */
+.invoice-bar-fill { height: 100%; border-radius: 3px; margin-inline-end: auto; }
+.invoice-bar-count {
+    min-width: 28px;
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+}
+.invoice-bars-total {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+}
+.invoice-bars-total strong { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+@media screen { .report-invoice .invoice-grid { display: none; } }
+@media print { .invoice-bars { display: none !important; } }
+
 /* A name in the pay sheet is a way in, so it looks like one - but it stays a table cell
    and does not turn the row into a wall of buttons. */
 .link-cell {
@@ -1375,6 +1498,29 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .wday-total .wday-what { color: var(--ink-2); font-weight: 400; font-size: 14px; }
 
+/* The attendance dates as chips above the rows: which dates the count on the sheet is
+   made of, ×2 where a day pays twice. Tokens only, nothing interactive, wraps freely. */
+.wday-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 2px 0 10px;
+}
+.wday-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    padding: 2px 9px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.wday-chip-x2 { font-size: 12px; font-weight: 700; color: var(--warn); }
+
 /* Money already handed over, marked as money going the other way so it is never read as
    another day worked. */
 .wday-advance .wday-date strong { color: var(--warn); }
@@ -1410,6 +1556,40 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     color: var(--ink-2);
 }
 .wday-bridge { margin-top: 8px; }
+
+/* The v80 record, collapsed under the advances. Rows only - the gate is closed, so the
+   fold holds no control of any kind, and the summary is the one thing to press. */
+.wday-ledger { margin-top: 12px; border-top: 1px solid var(--line-soft); }
+.wday-ledger summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+/* Flex removes the native marker on most engines; say open/shut ourselves, both ways. */
+.wday-ledger summary::before { content: '▸'; font-size: 12px; color: var(--ink-3); }
+.wday-ledger[open] summary::before { content: '▾'; }
+.wday-ledger summary::-webkit-details-marker { display: none; }
+.ledger-entry {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 10px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 14px;
+}
+.ledger-what { display: flex; align-items: baseline; gap: 8px; }
+.ledger-kind { font-weight: 600; }
+.ledger-date { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ledger-amount { font-weight: 700; font-variant-numeric: tabular-nums; text-align: end; }
+.ledger-note { grid-column: 1 / -1; color: var(--ink-3); font-size: 12.5px; }
+.ledger-origin { grid-column: 1 / -1; color: var(--ink-3); font-size: 12.5px; }
 
 /* The advance form, in place of the one-question prompt: amount, date, note, and how
    the money moved. Tokens only, so dark mode needs nothing of its own. */

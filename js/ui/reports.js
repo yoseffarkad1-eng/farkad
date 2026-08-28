@@ -353,6 +353,15 @@ function renderPayrollTable() {
     if (anyRate) footer.push(bidiAmount(Math.round(totals.amount - totals.advances)));
     table.appendChild(totalRow(footer, headers));
 
+    // The net is the last cell of every row - the column order is the ledger's - and it
+    // is also the number the whole sheet exists to produce. The class lets the phone
+    // stylesheet lead each card with it; the table itself, the data-labels and the
+    // printed order stay exactly as they are.
+    if (anyRate) {
+        table.querySelectorAll('tbody tr').forEach(tr =>
+            tr.lastElementChild.classList.add('cell-net'));
+    }
+
     // The name opens that worker's days. On payday somebody asks why the number is what
     // it is, and the answer has to be reachable from the number itself.
     table.querySelectorAll('tbody tr').forEach((tr, index) => {
@@ -435,6 +444,13 @@ function renderInvoiceTable() {
 
     section.appendChild(renderInvoicePicker(all.places));
 
+    // The screen's answer: one row per site. The question asked at a glance here is
+    // "how much of the period was each site", and a date-by-site grid answers it only
+    // after arithmetic. The grid is still built below, whole, because it is what the
+    // client is handed on paper - the bars are screen-only and the grid print-only,
+    // and both read the same workerDays.
+    section.appendChild(renderInvoiceBars(places));
+
     // Only the dates this site actually worked. A client's page with a run of empty rows
     // for days their site was closed reads as a mistake.
     const dates = chosen
@@ -461,16 +477,57 @@ function renderInvoiceTable() {
         headers
     ));
 
-    section.appendChild(scrollWrap(table));
+    // Kept in the DOM and kept whole, hidden from the screen only: the print stylesheet
+    // still gets the full date-by-site grid, and the tests that pin the paper pin THIS.
+    const grid = scrollWrap(table);
+    grid.classList.add('invoice-grid');
+    section.appendChild(grid);
     section.appendChild(el('p', 'hint',
-        'כל מספר הוא מספר העובדים שעבדו באתר באותו יום. השורה התחתונה היא ימי עובד־אתר: ' +
-        'עובד אחד ביום אחד באתר. היא אינה מספר הימים שהאתר עבד.'));
+        'המספר ליד כל אתר הוא ימי עובד־אתר: עובד אחד ביום אחד באתר. הוא אינו מספר ' +
+        'הימים שהאתר עבד. בהדפסה יוצא הפירוט המלא - שורה לכל תאריך, עמודה לכל אתר.'));
     // The counting rule, spelled out: this number lives beside two others that sound
     // like it, and the person about to bill from it must not expect them to reconcile.
     section.appendChild(el('p', 'hint',
         'עובד בשני אתרים נספר פעם אחת בכל אתר; ימי עובד־אתר אינם ימי נוכחות ואינם ' +
         'ימי שכר — אין לצפות שהסכומים יתאימו.'));
     return section;
+}
+
+// The on-screen shape of the site report: the site's own colour, its name, its
+// ימי עובד־אתר, and a bar proportional to the busiest site so the period's spread is
+// visible without reading a grid. Counts only - the screen version of this page names
+// no worker, exactly like the paper one. Nothing here is interactive; the picker above
+// narrows it and the total band closes it.
+function renderInvoiceBars(places) {
+    const wrap = el('div', 'invoice-bars');
+    wrap.appendChild(el('div', 'invoice-bars-head', 'ימי עובד־אתר לפי אתר'));
+
+    const most = places.reduce((max, place) => Math.max(max, place.workerDays), 0);
+    places.forEach(place => {
+        const row = el('div', 'invoice-bar-row');
+        row.appendChild(paintSite(el('span', 'invoice-swatch'), place.placeId));
+
+        const name = el('span', 'invoice-bar-name');
+        appendSiteName(name, place.placeId, place.name);
+        row.appendChild(name);
+
+        const track = el('span', 'invoice-bar-track');
+        const fill = el('span', 'invoice-bar-fill');
+        fill.style.width = `${most > 0 ? Math.round((place.workerDays / most) * 100) : 0}%`;
+        fill.style.background = siteColorVar(place.placeId);
+        track.appendChild(fill);
+        row.appendChild(track);
+
+        row.appendChild(el('span', 'invoice-bar-count', String(place.workerDays)));
+        wrap.appendChild(row);
+    });
+
+    const total = el('div', 'invoice-bars-total');
+    total.appendChild(el('span', null, 'סה״כ ימי עובד־אתר'));
+    total.appendChild(el('strong', null,
+        String(places.reduce((sum, place) => sum + place.workerDays, 0))));
+    wrap.appendChild(total);
+    return wrap;
 }
 
 // The chips are not printed - by then the choice has been made and the heading says it.
@@ -521,6 +578,8 @@ function openWorkerDays(workerId) {
     if (days.length === 0 && advances.length === 0) {
         body.appendChild(emptyHint('אין רישומים בטווח הזה.'));
     } else {
+        const strip = renderAttendanceChips(days);
+        if (strip) body.appendChild(strip);
         days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
         body.appendChild(renderWorkerDaysTotal(days, worker));
         // Named before the rows begin: money that went the other way is its own block,
@@ -539,8 +598,33 @@ function openWorkerDays(workerId) {
         }
     }
 
+    // After the period's advances: the whole record of them, folded shut. Read-only by
+    // construction - see renderWorkerLedger.
+    const ledger = renderWorkerLedger(worker.id);
+    if (ledger) body.appendChild(ledger);
+
     body.appendChild(renderAdvanceAdd(worker));
     document.getElementById('workerDaysModal').style.display = 'flex';
+}
+
+// The attendance dates in one line above the day rows: a chip per date the man was on a
+// site, the traditional one-letter weekday mark and the short date, ×2 on a doubled day.
+// The count on the pay sheet says FOUR; this is which four, at a glance, before the rows
+// spell out where and for how much. Nothing here is a button - the rows below carry the
+// detail - so the chips owe no thumb size, only legibility.
+function renderAttendanceChips(days) {
+    const worked = days.filter(day => !day.absent);
+    if (worked.length === 0) return null;
+
+    const strip = el('div', 'wday-chips');
+    worked.forEach(day => {
+        const parsed = parseLocalDate(day.date);
+        const chip = el('span', 'wday-chip',
+            `${HEBREW_DAY_LETTERS[parsed.getDay()]} ${formatShortDate(parsed)}`);
+        if (day.doubled) chip.appendChild(el('span', 'wday-chip-x2', '×2'));
+        strip.appendChild(chip);
+    });
+    return strip;
 }
 
 // How the money moved, when that was recorded. An advance from before the field existed
@@ -740,6 +824,72 @@ async function removeAdvanceRow(item) {
     if (!ok) return;
     State.commit(removeAdvance(State.schedule, item.id));
     openWorkerDays(item.workerId);
+}
+
+// What a ledger entry IS, in the ledger's own three words. Not the method labels above:
+// a kind says what happened to the record, not how money moved.
+const LEDGER_KIND_LABELS = { given: 'מקדמה', corrected: 'תיקון', cancelled: 'בוטל' };
+
+// היסטוריה מלאה: every ledger entry that concerns this worker, oldest first, folded
+// shut under the advances. Strictly a reading of the v80 record - the writer is gated
+// off (ledger.js LEDGER_WRITES), so there is not a single button in here and nothing
+// this renders can change an entry. Feature-detected, because the modal must survive a
+// build where the ledger file is not loaded; empty ledgers render nothing at all.
+function renderWorkerLedger(workerId) {
+    if (typeof advanceHistory !== 'function' || typeof ledgerEntries !== 'function') {
+        return null;
+    }
+
+    // An advance concerns this man if any of its entries names him - a correction that
+    // moved it to somebody else is still part of the story of what he was handed.
+    const ids = [];
+    ledgerEntries(State.schedule).forEach(entry => {
+        if (String(entry.workerId || '') !== String(workerId)) return;
+        if (ids.indexOf(String(entry.advanceId)) === -1) ids.push(String(entry.advanceId));
+    });
+
+    let entries = [];
+    ids.forEach(id => { entries = entries.concat(advanceHistory(State.schedule, id)); });
+    if (entries.length === 0) return null;
+
+    // Read out in the order things happened. A migrated entry carries no `at` on
+    // purpose (ledger.js: a fabricated timestamp would be the ledger's first lie), so
+    // its advance date stands in for ordering; ties fall back to the entry id, the same
+    // tie-break the fold uses.
+    entries.sort((a, b) => {
+        const at = String(a.at || a.date || '');
+        const bt = String(b.at || b.date || '');
+        if (at !== bt) return at < bt ? -1 : 1;
+        return String(a.id) < String(b.id) ? -1 : 1;
+    });
+
+    const fold = el('details', 'wday-ledger');
+    fold.appendChild(el('summary', null, 'היסטוריה מלאה (פנקס v80)'));
+    entries.forEach(entry => fold.appendChild(renderLedgerEntry(entry)));
+    return fold;
+}
+
+function renderLedgerEntry(entry) {
+    const row = el('div', 'ledger-entry');
+
+    const what = el('div', 'ledger-what');
+    what.appendChild(el('strong', 'ledger-kind',
+        LEDGER_KIND_LABELS[entry.kind] || String(entry.kind || '')));
+    const parsed = parseLocalDate(entry.date);
+    if (parsed) what.appendChild(el('span', 'ledger-date', formatFullDate(parsed)));
+    row.appendChild(what);
+
+    // A cancellation carries no amount, and a correction may only move a date - the
+    // amount cell is filled only when the entry actually states one.
+    const amount = Number(entry.amount);
+    row.appendChild(el('div', 'ledger-amount',
+        entry.amount !== undefined && isFinite(amount) ? bidiAmount(Math.round(amount)) : ''));
+
+    if (entry.note) row.appendChild(el('div', 'ledger-note', entry.note));
+    if (entry.origin === 'migration') {
+        row.appendChild(el('div', 'ledger-origin', 'הועתק מהרישום הקיים'));
+    }
+    return row;
 }
 
 // The statement the worker gets on payday, in the same shape as the screen it came from:

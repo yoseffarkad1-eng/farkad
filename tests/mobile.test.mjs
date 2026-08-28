@@ -904,6 +904,98 @@ for (const width of WIDTHS) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- the pay card
+//
+// Below 700px each payroll row is a card, and the card leads with נותר לתשלום: the net
+// first at the hero size, the four counts it is checked against on one labelled row
+// under it. All of that is flex order over the same table cells, so what is asserted
+// here is geometry - which box is highest - plus the one class the stylesheet needs.
+for (const width of [320, 390]) {
+    suite(`${width}px: the pay card leads with the net`);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await page.evaluate(() => {
+        // A double day and an advance, so every one of the four labelled counts is a
+        // column the table actually grew.
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
+        assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_1', RATE_DOUBLE);
+        State.commit(addAdvance(State.schedule, 'w_01', '2026-08-11', 100, ''));
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(300);
+
+    const card = await page.evaluate(() => {
+        const tr = document.querySelector('.report-payroll tbody tr');
+        const net = tr ? tr.querySelector('td.cell-net') : null;
+        if (!net) return { present: false };
+        const style = getComputedStyle(net);
+        const metricTops = ['ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'מקדמות']
+            .map(label => tr.querySelector(`td[data-label="${label}"]`))
+            .filter(Boolean)
+            .map(node => Math.round(node.getBoundingClientRect().top));
+        return {
+            present: true,
+            netTop: Math.round(net.getBoundingClientRect().top),
+            otherTops: [...tr.querySelectorAll('td')].filter(td => td !== net)
+                .map(td => Math.round(td.getBoundingClientRect().top)),
+            size: style.fontSize,
+            weight: style.fontWeight,
+            label: getComputedStyle(net, '::before').content,
+            metricTops,
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+
+    check(`${width}px: the net cell carries the class the stylesheet leads with`,
+        card.present === true, JSON.stringify(card));
+    check(`${width}px: and it is the first thing on the card`,
+        card.present && card.otherTops.every(top => card.netTop < top),
+        JSON.stringify({ net: card.netTop, others: card.otherTops }));
+    check(`${width}px: at the hero size the ramp names`,
+        card.size === '36px' && Number(card.weight) >= 800,
+        JSON.stringify({ size: card.size, weight: card.weight }));
+    check(`${width}px: under the card's own name for the number`,
+        String(card.label).includes('נותר לתשלום'), JSON.stringify(card.label));
+    check(`${width}px: the four counts share one labelled row beneath it`,
+        card.metricTops.length === 4 && new Set(card.metricTops).size === 1,
+        JSON.stringify(card.metricTops));
+    check(`${width}px: and the card does not widen the page`,
+        card.across === true);
+
+    await page.context().close();
+}
+
+{
+    suite('above the card breakpoint the pay sheet is still a table');
+
+    // The print suite depends on the table staying a table, and an A4 page is about
+    // 794px wide - so at desktop width the same DOM must lay out as rows and columns.
+    const page = await open({ width: 900, height: 800, touch: false });
+    await page.evaluate(() => {
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
+        State.commit(addAdvance(State.schedule, 'w_01', '2026-08-11', 100, ''));
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(300);
+
+    const table = await page.evaluate(() => ({
+        row: getComputedStyle(document.querySelector('.report-payroll tbody tr')).display,
+        head: getComputedStyle(document.querySelector('.report-payroll thead')).display,
+        net: document.querySelectorAll('.report-payroll tbody td.cell-net').length
+    }));
+    check('a row is a table row again', table.row === 'table-row', table.row);
+    check('the headings are back over the columns', table.head !== 'none', table.head);
+    check('and the class rides along doing nothing', table.net > 0, String(table.net));
+
+    await page.context().close();
+}
+
 // ---------------------------------------------------------------- the dock
 
 for (const width of [320, 390]) {
