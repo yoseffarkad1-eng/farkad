@@ -439,7 +439,16 @@ for (const scenario of [
 
     const page = await open();
     await seed(page, 8);
-    await page.waitForTimeout(200);
+
+    // Selected, not merely rendered. This suite used to print without choosing, and got
+    // the invoice on the paper because BOTH reports printed - which was the leak. Asking
+    // for the client's report is now the only way to get it, and is what the person
+    // sending one actually does.
+    await page.evaluate(() => {
+        if (typeof REPORT_SECTION !== 'undefined') REPORT_SECTION = 'sites';
+        render();
+    });
+    await page.waitForTimeout(300);
 
     const buffer = await page.pdf({ format: 'A4', printBackground: true });
     const pdf = readPdf(buffer);
@@ -459,6 +468,108 @@ for (const scenario of [
         }
     });
     check('and it names nobody', named.length === 0, JSON.stringify(named));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- what the client may see
+//
+// The leak this file existed to catch and did not.
+//
+// Both reports are always in the document; the one not being looked at carries
+// .report-offscreen. That class was hidden under @media screen ONLY, so selecting a
+// client's report and pressing print produced a PDF whose second page was the PAYROLL -
+// every worker's name, every daily rate, the gross and the net - addressed to the client.
+//
+// It survived because the assertions here searched the pages they had already classified
+// as invoice pages. The leaked page is a payroll page, so it was never in the set being
+// searched. A privacy test that only looks where it expects the answer is not a privacy
+// test: this one reads EVERY page of the document and fails on anything that belongs to
+// the crew rather than to the client.
+{
+    suite('a client\'s report carries nothing about the crew');
+
+    const page = await open();
+    await page.evaluate(() => {
+        // Names and rates chosen to be unmistakable in a text dump: nothing else in the
+        // app produces them, so a match is the leak and not a coincidence.
+        State.schedule.workers = [
+            { id: 'w_01', name: 'זהבצחוקי', active: true, dailyRate: 777, hourlyRate: 55 },
+            { id: 'w_02', name: 'קרמבולה', active: true, dailyRate: 888, hourlyRate: 60 }
+        ];
+        State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+        ['2026-08-10', '2026-08-11', '2026-08-12'].forEach(date => {
+            assignPlace(State.schedule, date, 'w_01', 'actual', 'p_01');
+            assignPlace(State.schedule, date, 'w_02', 'actual', 'p_01');
+        });
+        State.schedule.advances = { w_01: [{ id: 'a1', date: '2026-08-05', amount: 512, note: '' }] };
+        State.save();
+        showView('reports');
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        if (typeof REPORT_SECTION !== 'undefined') REPORT_SECTION = 'sites';
+        render();
+    });
+    await page.waitForTimeout(500);
+
+    // The user's route, dialog and all: a detail modal left open is the ordinary state of
+    // somebody who checked a number before printing.
+    const opened = await page.evaluate(() => {
+        if (typeof openWorkerDays === 'function') { openWorkerDays('w_01'); return true; }
+        return false;
+    });
+    await page.waitForTimeout(300);
+
+    const buffer = await page.pdf({ format: 'A4', printBackground: true });
+    const { pages } = readPdf(buffer);
+    // Every page. Not the pages already believed to be the client's.
+    const whole = pages.map(pageText).join('\n');
+    const shows = phrase => says(whole, phrase);
+
+    check('the client gets the report he was sent', shows('חיוב'),
+        JSON.stringify(pages.map(item => pageText(item).slice(0, 24))));
+
+    check('and not a worker\'s name', !shows('זהבצחוקי') && !shows('קרמבולה'),
+        JSON.stringify(pages.map((item, i) => shows('זהבצחוקי') ? i : null).filter(i => i !== null)));
+    check('nor the payroll\'s title', !shows('שכר - לפי עובד'), '');
+    check('nor a daily rate', !whole.includes('777') && !whole.includes('888'), '');
+    check('nor an advance handed over in cash', !whole.includes('512'), '');
+    check('nor the words the pay sheet totals with', !shows('לתשלום'), '');
+
+    if (opened) {
+        // And the modal that was open over it is not on the paper either.
+        check('nor the dialog that was open while he pressed print',
+            !shows('ימים של'), '');
+    }
+
+    await page.context().close();
+}
+
+{
+    suite('and the pay sheet carries nothing about the client');
+
+    // The same failure in the other direction: printing payroll must not append the
+    // client's report to the back of it.
+    const page = await open();
+    await page.evaluate(() => {
+        State.schedule.workers = [{ id: 'w_01', name: 'זהבצחוקי', active: true, dailyRate: 777 }];
+        State.schedule.places = [{ id: 'p_01', name: 'קוממיות', active: true }];
+        assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+        State.save();
+        showView('reports');
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        if (typeof REPORT_SECTION !== 'undefined') REPORT_SECTION = 'workers';
+        render();
+    });
+    await page.waitForTimeout(500);
+
+    const { pages } = readPdf(await page.pdf({ format: 'A4', printBackground: true }));
+    const whole = pages.map(pageText).join('\n');
+
+    check('the pay sheet is what was printed', says(whole, 'שכר - לפי עובד'), '');
+    check('and the client\'s report is not behind it', !says(whole, 'חיוב - לפי אתר'),
+        JSON.stringify(pages.map(item => pageText(item).slice(0, 24))));
 
     await page.context().close();
 }
