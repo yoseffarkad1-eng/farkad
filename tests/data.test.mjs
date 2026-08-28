@@ -8977,4 +8977,186 @@ function withAdvances(device, rows) {
     check('the advance can still be removed', !(id in (reopened.State.schedule.advances || {})));
 }
 
+// ---------------------------------------------------------------- the vehicles
+//
+// V1. Five vehicles: one each for two of the men, three for a third. Three hundred a day
+// for a vehicle that went out - not per trip, not per site, and not scaled by whether the
+// man driving it worked a full day. Paid to whoever OWNS it, and paid whether or not he
+// was on a site himself.
+//
+// The design decision underneath these tests: an evening where all five went out writes
+// NOTHING. Five confirmations every night is how an app stops being used. Only the
+// exception is stored - and the price of that default is the risk that adding a vehicle
+// today quietly repays every month already settled, which is what the rate history is for.
+{
+    suite('V1: a vehicle earns for the man who owns it');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+    s.vehicles = [
+        { id: 'v_01', name: 'טנדר לבן', ownerId: 'w_01', active: true,
+            rates: [{ from: '2026-08-01', amount: 300 }] },
+        { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: true,
+            rates: [{ from: '2026-08-01', amount: 300 }] }
+    ];
+    device.State.save({ silent: true });
+
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    record(device, '2026-08-13', 'w_01', 'p_01');
+
+    const pay = date => device.call('vehiclePayFor', s, 'w_01', date, date);
+    same('a day with work is a day the vehicle went out', pay('2026-08-12'), { days: 1, amount: 300 });
+    same('and a day with none is not', pay('2026-08-20'), { days: 0, amount: 0 });
+
+    // The man who did not work that day, whose vehicle did.
+    same('the owner is paid even though he was nowhere near it',
+        device.call('vehiclePayFor', s, 'w_02', '2026-08-12', '2026-08-12'), { days: 1, amount: 300 });
+
+    const rows = device.call('payrollReport', s, '2026-08-01', '2026-08-31');
+    const david = rows.find(row => row.workerId === 'w_01');
+    const sara = rows.find(row => row.workerId === 'w_02');
+    check('the pay sheet counts his vehicle days', david.vehicleDays === 2, String(david.vehicleDays));
+    check('and prices them', david.vehicleAmount === 600, String(david.vehicleAmount));
+    check('two days at 400 plus two vehicle days at 300', david.amount === 1400, String(david.amount));
+    check('a man who worked nowhere is still owed for his vehicle',
+        sara.attendanceDays === 0 && sara.amount === 600, JSON.stringify({ d: sara.attendanceDays, a: sara.amount }));
+}
+
+{
+    suite('V1: three vehicles are three payments');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+    s.vehicles = ['v_01', 'v_02', 'v_03'].map(id => ({
+        id, name: id, ownerId: 'w_03', active: true, rates: [{ from: '2026-08-01', amount: 300 }]
+    }));
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    same('all three go out on a working day and all three are paid',
+        device.call('vehiclePayFor', s, 'w_03', '2026-08-12', '2026-08-12'), { days: 3, amount: 900 });
+
+    const owner = device.call('payrollReport', s, '2026-08-01', '2026-08-31')
+        .find(row => row.workerId === 'w_03');
+    check('the owner is owed 900 without setting foot on a site', owner.amount === 900,
+        String(owner.amount));
+}
+
+{
+    suite('V1: the ordinary evening writes nothing, the exception writes one field');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+    s.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    check('nothing about vehicles is stored on an ordinary day',
+        !('vehiclesOff' in s.days['2026-08-12']), JSON.stringify(Object.keys(s.days['2026-08-12'])));
+
+    const off = device.call('setVehicleOut', s, '2026-08-12', 'v_01', false);
+    device.State.commit(off);
+    same('taking one off the road is one field', off.value, ['v_01']);
+    same('and it is not paid for', device.call('vehiclePayFor', s, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 0, amount: 0 });
+
+    const back = device.call('setVehicleOut', s, '2026-08-12', 'v_01', true);
+    device.State.commit(back);
+    check('putting it back removes the field rather than storing an empty list',
+        !('vehiclesOff' in s.days['2026-08-12']), JSON.stringify(s.days['2026-08-12'].vehiclesOff));
+    check('and the field is cleared on the other phones too', back.value === null,
+        JSON.stringify(back.value));
+    same('it is paid for again', device.call('vehiclePayFor', s, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 1, amount: 300 });
+}
+
+{
+    suite('V1: adding a vehicle does not repay last month');
+
+    // The one that would have cost real money. The default is "they all went out", so a
+    // vehicle with no start date would earn for every day in the record - including the
+    // month that was counted, paid and closed.
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+    ['2026-07-06', '2026-07-07', '2026-08-12'].forEach(date => record(device, date, 'w_01', 'p_01'));
+
+    s.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save({ silent: true });
+
+    same('July, already paid, is untouched',
+        device.call('vehiclePayFor', s, 'w_01', '2026-07-01', '2026-07-31'), { days: 0, amount: 0 });
+    same('August, from the day it was added, is not',
+        device.call('vehiclePayFor', s, 'w_01', '2026-08-01', '2026-08-31'), { days: 1, amount: 300 });
+
+    // And the same protection when the price changes.
+    s.vehicles[0].rates.push({ from: '2026-09-01', amount: 350 });
+    record(device, '2026-09-02', 'w_01', 'p_01');
+    check('a raise is worth the old price before it and the new price after',
+        device.call('vehicleRateOn', s.vehicles[0], '2026-08-12') === 300
+        && device.call('vehicleRateOn', s.vehicles[0], '2026-09-02') === 350);
+    same('so August still comes to what it came to',
+        device.call('vehiclePayFor', s, 'w_01', '2026-08-01', '2026-08-31'), { days: 1, amount: 300 });
+}
+
+{
+    suite('V1: a day nobody worked is not a day five vehicles earned');
+
+    const device = makeDevice();
+    seed(device);
+    const s = device.State.schedule;
+    s.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save({ silent: true });
+
+    device.State.commit(device.call('markAbsent', s, '2026-08-12', 'w_01', 'actual', true));
+    same('a day of absences and nothing else pays for no vehicle',
+        device.call('vehiclePayFor', s, 'w_01', '2026-08-12', '2026-08-12'), { days: 0, amount: 0 });
+
+    record(device, '2026-08-12', 'w_02', 'p_01');
+    same('one man on a site is enough to have needed the vehicle',
+        device.call('vehiclePayFor', s, 'w_01', '2026-08-12', '2026-08-12'), { days: 1, amount: 300 });
+
+    s.vehicles[0].active = false;
+    same('and a vehicle no longer in the crew earns nothing',
+        device.call('vehiclePayFor', s, 'w_01', '2026-08-12', '2026-08-12'), { days: 0, amount: 0 });
+}
+
+{
+    suite('V1: the vehicles survive the app being closed, and reach the other phone');
+
+    const device = makeDevice();
+    seed(device);
+    device.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר לבן', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save();
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    const kept = reopened.State.schedule.vehicles;
+    check('a reopened phone still has them', Array.isArray(kept) && kept.length === 1,
+        JSON.stringify(kept));
+    check('with the owner and the price intact',
+        kept[0].ownerId === 'w_01' && kept[0].rates[0].amount === 300, JSON.stringify(kept[0]));
+
+    // A build that has never heard of vehicles must not be handed something it will choke
+    // on, and a record written before this feature must not arrive here as a crash.
+    const older = makeDevice();
+    seed(older);
+    delete older.State.schedule.vehicles;
+    older.State.save();
+    const upgraded = makeDevice({ storage: older.dump() });
+    upgraded.State.load();
+    same('a record from before vehicles existed reads as none of them',
+        upgraded.call('vehiclePayFor', upgraded.State.schedule, 'w_01', '2026-01-01', '2026-12-31'),
+        { days: 0, amount: 0 });
+    check('and the pay sheet still adds up', Array.isArray(
+        upgraded.call('payrollReport', upgraded.State.schedule, '2026-01-01', '2026-12-31')));
+}
+
 report();

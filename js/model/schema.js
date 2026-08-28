@@ -52,6 +52,11 @@ function emptySchedule() {
         workers: [],
         places: [],
         days: {},
+        // The crew's vehicles. One each for two of the men and three for a third, and a
+        // vehicle earns for the person who OWNS it, not the one who drives it.
+        //
+        // See vehiclesOutOn() below for why nothing is written on an ordinary evening.
+        vehicles: [],
         // Money handed over before settlement day, keyed by its own id so two people
         // recording an advance at the same moment write to different fields.
         advances: {},
@@ -1021,6 +1026,124 @@ function advancesTotal(schedule, workerId, fromDate, toDate) {
         .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
+// ---------------------------------------------------------------- vehicles
+//
+// A vehicle is paid a flat amount for a day it went out. Not per trip, not per site, and
+// not scaled by whether the man driving it worked a full day - three hundred is three
+// hundred. It is paid to the person who OWNS the vehicle, and he is paid it whether or
+// not he was on a site himself: three of these belong to one man, and on a day all three
+// go out without him he is owed for all three.
+//
+// The rare case of somebody taking his own car needs no second mechanism. He owns a
+// vehicle, and owning one is the whole of what this pays for.
+
+// What a vehicle was worth on a given date.
+//
+// The rate lives in a short history on the vehicle rather than as one number, for the
+// same reason a worker's day rate is stamped into the day: raising it must not repay
+// last month. Each entry is the amount from that date onward; before the first one the
+// vehicle earns nothing, which is what keeps adding a vehicle today from rewriting a
+// period that has already been settled.
+function vehicleRateOn(vehicle, date) {
+    if (!vehicle || !Array.isArray(vehicle.rates)) return 0;
+
+    let amount = 0;
+    vehicle.rates
+        .filter(entry => entry && typeof entry.from === 'string' && entry.from <= date)
+        .sort((a, b) => (a.from < b.from ? -1 : 1))
+        .forEach(entry => { amount = Number(entry.amount) || 0; });
+    return amount;
+}
+
+// Did anybody actually work on this date?
+//
+// A vehicle goes out because there is work. A day with nobody on a site - a Saturday, a
+// day of rain, a date opened by mistake - is not a day five vehicles earned fifteen
+// hundred shekels between them. An absence is not work either: a man marked absent is
+// the reason the vehicle stayed where it was.
+function anyWorkOn(schedule, date) {
+    const side = (schedule.days[date] || {}).actual || {};
+    return Object.keys(side).some(workerId => {
+        const record = side[workerId];
+        return record && !record.absent && Array.isArray(record.entries) && record.entries.length > 0;
+    });
+}
+
+// The vehicles that count on a date, with what each was worth.
+//
+// The default is that they all went out, and only the EXCEPTION is written down. Five
+// vehicles leaving the yard every morning is the ordinary day, and asking somebody to
+// confirm it five times every evening is asking him to stop using the app. So an evening
+// with nothing said about vehicles is an evening they all went; days[date].vehiclesOff
+// names the ones that did not, and it is empty almost always.
+//
+// The cost of that choice is that a vehicle added today would otherwise earn for every
+// day in the record, including months already paid. The rate history is what stops it:
+// no rate before the day it was added means no money before the day it was added.
+function vehiclesOutOn(schedule, date) {
+    if (!Array.isArray(schedule.vehicles) || schedule.vehicles.length === 0) return [];
+    if (!anyWorkOn(schedule, date)) return [];
+
+    const off = (schedule.days[date] || {}).vehiclesOff;
+    const stayed = Array.isArray(off) ? off : [];
+
+    return schedule.vehicles
+        .filter(vehicle => vehicle && vehicle.active !== false)
+        .filter(vehicle => !stayed.includes(vehicle.id))
+        .map(vehicle => ({ vehicle, amount: vehicleRateOn(vehicle, date) }))
+        .filter(item => item.amount > 0);
+}
+
+// What one person is owed for his vehicles across a period.
+function vehiclePayFor(schedule, workerId, fromDate, toDate) {
+    let days = 0;
+    let amount = 0;
+
+    Object.keys(schedule.days || {})
+        .filter(date => date >= fromDate && date <= toDate)
+        .forEach(date => {
+            vehiclesOutOn(schedule, date)
+                .filter(item => item.vehicle.ownerId === workerId)
+                .forEach(item => { days += 1; amount += item.amount; });
+        });
+
+    return { days, amount };
+}
+
+// Mark a vehicle as having stayed in the yard, or take that mark back. Returns the change
+// for State.commit, the same shape every other edit here returns.
+function setVehicleOut(schedule, date, vehicleId, out) {
+    if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
+    const day = schedule.days[date];
+
+    const stayed = Array.isArray(day.vehiclesOff) ? day.vehiclesOff.slice() : [];
+    const at = stayed.indexOf(vehicleId);
+
+    // Nothing to do - already in the state being asked for. A change with no path is
+    // journalled as nothing and sent as nothing, which is what State.commit does with it.
+    if (out && at >= 0) stayed.splice(at, 1);
+    else if (!out && at < 0) stayed.push(vehicleId);
+    else return { path: null };
+
+    // An empty list is deleted rather than stored: the ordinary evening writes nothing,
+    // and a field that is always there saying "nothing" is a field on every device's
+    // document forever.
+    if (stayed.length === 0) {
+        delete day.vehiclesOff;
+        return { path: `days.${date}.vehiclesOff`, value: null };
+    }
+
+    day.vehiclesOff = stayed;
+    return { path: `days.${date}.vehiclesOff`, value: stayed };
+}
+
+function nextVehicleId(schedule) {
+    const used = new Set((schedule.vehicles || []).map(vehicle => String(vehicle.id)));
+    let n = 1;
+    while (used.has(`v_${String(n).padStart(2, '0')}`)) n += 1;
+    return `v_${String(n).padStart(2, '0')}`;
+}
+
 function makeEntry(placeId, rate, extraHours) {
     const entry = { placeId: String(placeId) };
 
@@ -1387,6 +1510,22 @@ function payrollReport(schedule, fromDate, toDate) {
         // What was earned and what is still owed are two different numbers, and paying
         // the first one twice is the whole reason advances are recorded at all.
         row.advances = advancesTotal(schedule, worker.id, fromDate, toDate);
+
+        // What his vehicles earned, kept as its own number rather than folded into the
+        // day rate. It is a different thing being paid for - the vehicle went out, and
+        // whether he went with it is not the question - so a sheet that added the two
+        // together would show a man 5 days at 450 coming to 3750 and explain nothing.
+        const vehicles = vehiclePayFor(schedule, worker.id, fromDate, toDate);
+        row.vehicleDays = vehicles.days;
+        row.vehicleAmount = vehicles.amount;
+
+        // A man who did not work but whose vehicle did is still owed. amount is null only
+        // when a rate is missing for days he DID work; nothing here is unpriced.
+        if (row.vehicleAmount > 0 && row.amount === null && row.attendanceDays === 0) {
+            row.amount = 0;
+        }
+        if (row.amount !== null) row.amount += row.vehicleAmount;
+
         row.netAmount = row.amount === null ? null : row.amount - row.advances;
 
         return row;

@@ -6185,6 +6185,89 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the crew's vehicles
+{
+  // A vehicle is paid a flat amount for a day it went out, to the man who OWNS it -
+  // whether or not he was on a site himself. Added through the screen rather than by
+  // writing the array, because what is being checked is that a person can do this.
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+
+  check('the crew screen offers somewhere to put them',
+    await page.locator('#vehicleList').isVisible());
+  check('and says so while there are none',
+    (await page.textContent('#vehicleList')).includes('אין רכבים'));
+
+  await page.getByRole('button', { name: '+ הוסף רכב' }).click();
+  await page.waitForTimeout(250);
+  await page.fill('#askInput', 'טנדר לבן');
+  await page.getByRole('button', { name: 'המשך' }).click();
+  await page.waitForTimeout(250);
+  await page.getByRole('button', { name: 'דוד', exact: true }).click();
+  await page.waitForTimeout(250);
+  await page.fill('#askInput', '300');
+  await page.click('#askOk');
+  await page.waitForTimeout(400);
+
+  const listed = await page.textContent('#vehicleList');
+  check('the vehicle is on the list', listed.includes('טנדר לבן'), listed.slice(0, 60));
+  check('with the man who owns it', listed.includes('דוד'), listed.slice(0, 60));
+  check('and what it is worth a day', listed.includes('300'), listed.slice(0, 60));
+
+  const stored = await page.evaluate(() => State.schedule.vehicles[0]);
+  check('it is owned by an id, not by a name that could change',
+    stored.ownerId === 'w_01', JSON.stringify(stored));
+  check('and it starts earning today, not in a month already paid',
+    stored.rates.length === 1 && stored.rates[0].from === new Date().toISOString().slice(0, 10),
+    JSON.stringify(stored.rates));
+
+  // The money, on the sheet that gets printed.
+  await page.evaluate(() => {
+    const today = todayStr();
+    assignPlace(State.schedule, today, 'w_02', 'actual', 'p_01');
+    State.save();
+    showView('reports');
+    REPORT_RANGE.from = today;
+    REPORT_RANGE.to = today;
+    render();
+  });
+  await page.waitForTimeout(400);
+
+  const sheet = await page.textContent('.report-payroll');
+  check('the pay sheet grows a vehicle column', sheet.includes('ימי רכב'), sheet.slice(0, 80));
+  const owed = await page.evaluate(() => {
+    const rows = payrollRows();
+    const owner = rows.find(row => row.workerId === 'w_01');
+    return { days: owner.vehicleDays, amount: owner.vehicleAmount, total: owner.amount };
+  });
+  check('the owner is paid for the day his vehicle went out, though he did not work',
+    owed.days === 1 && owed.amount === 300 && owed.total === 300, JSON.stringify(owed));
+
+  // The exception, on the evening it happens.
+  await page.evaluate(() => { showView('day'); State.date = todayStr(); render(); });
+  await page.waitForTimeout(350);
+  const tray = await page.textContent('.tray:last-of-type');
+  check('the day screen lists the vehicles', tray.includes('טנדר לבן'), tray.slice(0, 50));
+  check('and says it went out', tray.includes('יצא'), tray.slice(0, 50));
+
+  await page.getByRole('button', { name: /טנדר לבן/ }).first().click();
+  await page.waitForTimeout(350);
+  check('one tap says it did not',
+    (await page.textContent('.tray:last-of-type')).includes('לא יצא'));
+  check('and that day is no longer paid for',
+    (await page.evaluate(() => vehiclePayFor(State.schedule, 'w_01', todayStr(), todayStr()))).amount === 0);
+  check('the undo bar offers it back', await page.locator('#undoBar').isVisible());
+
+  await page.getByRole('button', { name: 'בטל', exact: true }).first().click();
+  await page.waitForTimeout(350);
+  check('and taking it back pays for it again',
+    (await page.evaluate(() => vehiclePayFor(State.schedule, 'w_01', todayStr(), todayStr()))).amount === 300);
+
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- printed in colour
 {
   // Site colours are inline styles, and by default a browser prints backgrounds only if

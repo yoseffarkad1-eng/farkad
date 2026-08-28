@@ -22,6 +22,7 @@
 function renderRoster() {
     renderWorkerList();
     renderPlaceList();
+    renderVehicleList();
     // The backup, the restore points and the version live on הגדרות וכלים now - see
     // js/ui/settings.js. This screen is about people and sites; it was also about files,
     // which on a phone meant scrolling past thirty men to reach the backup button.
@@ -536,6 +537,169 @@ function renderPlaceList() {
 
         container.appendChild(row);
     });
+}
+
+// ---------------------------------------------------------------- vehicles
+//
+// A vehicle is paid a flat amount for a day it went out, to whoever OWNS it. The price
+// lives in a short history rather than as one number: changing it must not repay last
+// month, so a new price is added with the date it starts from and the days before it keep
+// the price they were worth. See vehicleRateOn() in js/model/schema.js.
+
+function renderVehicleList() {
+    const container = document.getElementById('vehicleList');
+    if (!container) return;
+    clear(container);
+
+    const vehicles = State.schedule.vehicles || [];
+    if (vehicles.length === 0) {
+        container.appendChild(emptyHint('אין רכבים. הוסף רכב כדי שיחושב בשכר.'));
+        return;
+    }
+
+    vehicles.forEach(vehicle => {
+        const row = el('div', vehicle.active === false ? 'roster-row roster-off' : 'roster-row');
+
+        const details = el('div', 'roster-details');
+        details.appendChild(el('strong', null, vehicle.name));
+
+        const owner = State.worker(vehicle.ownerId);
+        const rate = vehicleRateOn(vehicle, todayStr());
+        const meta = el('div', 'roster-meta');
+        // Whose it is, then what it is worth. Both in one line, because the question asked
+        // of this list is "who gets paid for that van".
+        meta.appendChild(el('span', null, owner ? owner.name : 'ללא בעלים'));
+        meta.appendChild(el('span', null, ' · '));
+        meta.appendChild(el('span', null, `${bidiAmount(rate)} ליום`));
+        details.appendChild(meta);
+
+        if (vehicle.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
+        row.appendChild(details);
+
+        const actions = el('div', 'roster-actions');
+        actions.appendChild(button('✏️', 'btn-icon', () => renameVehicle(vehicle.id),
+            `שנה שם ${isolate(vehicle.name)}`));
+        actions.appendChild(button('₪', 'btn-icon', () => changeVehicleRate(vehicle.id),
+            `שנה את המחיר של ${isolate(vehicle.name)}`));
+        actions.appendChild(button(vehicle.active === false ? '↩️' : '🗄️', 'btn-icon',
+            () => toggleVehicleActive(vehicle.id),
+            vehicle.active === false
+                ? `החזר את ${isolate(vehicle.name)}`
+                : `העבר את ${isolate(vehicle.name)} לארכיון`));
+        row.appendChild(actions);
+
+        container.appendChild(row);
+    });
+}
+
+// A whole number of shekels, or null when the person backed out. Typed rather than
+// stepped: a rate is entered once and changed twice a year.
+async function askAmount(title, value, ok, message) {
+    const typed = await askText({
+        title,
+        message,
+        value: String(value),
+        ok: ok || 'שמור',
+        inputmode: 'numeric',
+        dir: 'ltr',
+        validate: text => {
+            const number = Number(String(text).trim());
+            if (!isFinite(number) || number < 0) return 'צריך מספר.';
+            return null;
+        }
+    });
+    if (typed === null || typed === undefined || typed === '') return null;
+    return Math.round(Number(String(typed).trim()));
+}
+
+async function showAddVehicleModal() {
+    if (State.activeWorkers().length === 0) {
+        askTell('הוסף קודם עובד - לרכב צריך להיות בעלים שמקבל עליו את התשלום.');
+        return;
+    }
+
+    const name = await askText({
+        title: 'הוסף רכב',
+        placeholder: 'למשל: טנדר לבן',
+        ok: 'המשך',
+        validate: value => (value ? null : 'צריך שם לרכב.')
+    });
+    if (!name) return;
+
+    // askChoice answers with the label it was given, so the owner is looked back up by
+    // name - and two men with the same name would be indistinguishable here, which is why
+    // the list is numbered when that happens.
+    const crew = State.activeWorkers();
+    const labels = crew.map((worker, index) =>
+        (crew.filter(other => other.name === worker.name).length > 1
+            ? `${worker.name} (${index + 1})`
+            : worker.name));
+    const chosen = await askChoice({ title: `מי הבעלים של ${name}?`, choices: labels });
+    if (!chosen) return;
+    const owner = crew[labels.indexOf(chosen)];
+    if (!owner) return;
+
+    const amount = await askAmount('כמה הרכב מקבל ליום?', 300, 'הוסף');
+    if (amount === null) return;
+
+    if (!Array.isArray(State.schedule.vehicles)) State.schedule.vehicles = [];
+    State.schedule.vehicles.push({
+        id: nextVehicleId(State.schedule),
+        name,
+        ownerId: owner.id,
+        active: true,
+        // From TODAY, deliberately. The pay sheet counts a vehicle on every day work was
+        // recorded, so a vehicle with no start date would earn for months that have
+        // already been counted and paid.
+        rates: [{ from: todayStr(), amount }]
+    });
+    State.commitRoster();
+    render();
+}
+
+async function renameVehicle(vehicleId) {
+    const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
+    if (!vehicle) return;
+
+    const name = await askText({ title: 'שם חדש לרכב', value: vehicle.name,
+        validate: value => (value ? null : 'צריך שם לרכב.') });
+    if (!name || name === vehicle.name) return;
+
+    vehicle.name = name;
+    State.commitRoster();
+    render();
+}
+
+async function changeVehicleRate(vehicleId) {
+    const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
+    if (!vehicle) return;
+
+    const today = todayStr();
+    const current = vehicleRateOn(vehicle, today);
+    const amount = await askAmount(`מחיר חדש ל${vehicle.name}`, current, 'שמור',
+        'המחיר החדש חל מהיום. ימים שכבר נרשמו נשארים במחיר שהיו בו.');
+    if (amount === null || amount === current) return;
+
+    // Appended, never edited in place: the old price is what last month was worth, and
+    // overwriting it is how a raise silently restates a period that was already settled.
+    if (!Array.isArray(vehicle.rates)) vehicle.rates = [];
+    const sameDay = vehicle.rates.find(entry => entry.from === today);
+    if (sameDay) sameDay.amount = amount;
+    else vehicle.rates.push({ from: today, amount });
+
+    State.commitRoster();
+    render();
+}
+
+async function toggleVehicleActive(vehicleId) {
+    const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
+    if (!vehicle) return;
+
+    // Archived, never deleted - the days it already earned on are part of a pay sheet
+    // somebody may still print.
+    vehicle.active = vehicle.active === false;
+    State.commitRoster();
+    render();
 }
 
 // ---------------------------------------------------------------- workers

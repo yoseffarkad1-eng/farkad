@@ -248,8 +248,13 @@ function payrollRows() {
     // Advances keep a row alive on their own: a man who took 500 on the 1st and then
     // worked nothing would otherwise vanish from the sheet - and with him the 500,
     // which next period is out of range too and never deducted anywhere.
+    //
+    // A vehicle does the same, and for the same reason. Its owner is paid for the days it
+    // went out whether or not he was on a site, so a man with three vans and a fortnight
+    // off is owed real money and had no row to be owed it on.
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
-        .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0);
+        .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
+            || row.vehicleDays > 0);
 }
 
 function invoiceRows() {
@@ -300,13 +305,22 @@ function renderPayrollTable() {
     // and hiding it because the rates are blank made 500 shekels disappear in silence.
     const anyAdvance = rows.some(row => row.advances > 0);
 
+    // Vehicles get their own two columns, on the same rule as the advances: they appear
+    // once somebody owns one that went out. Two columns and not one, because the days and
+    // the money answer different questions - and separate from the day rate, because a
+    // vehicle is paid for going out and the man's day is paid for his working. Adding
+    // them together is how five days at 450 comes to 3750 and explains nothing.
+    const anyVehicle = rows.some(row => row.vehicleDays > 0);
+
     const headers = ['עובד'].concat(columns.map(column => column.header));
+    if (anyVehicle) headers.push('ימי רכב', 'שכר רכב');
     if (anyRate) headers.push('שכר יומי', 'נצבר');
     if (anyAdvance) headers.push('מקדמות');
     if (anyRate) headers.push('לתשלום');
 
     const table = buildTable(headers, rows.map(row => {
         const cells = [row.name].concat(columns.map(column => column.value(row)));
+        if (anyVehicle) cells.push(row.vehicleDays || 0, Math.round(row.vehicleAmount || 0));
         if (anyRate) {
             cells.push(row.dailyRate);
             // null, not 0: a worker whose rate was never entered owes an unknown amount,
@@ -997,11 +1011,16 @@ function payrollSheetRows() {
     // This file is the one that reaches the bookkeeper, and it used to write the gross
     // amount under 'לתשלום' - the heading the screen uses for the net - so the two
     // disagreed by exactly the advances, and the paper won.
+    // The vehicle columns are always here, unlike on the screen where they appear only
+    // when somebody owns one. A spreadsheet is compared against last month's, and a file
+    // whose columns move depending on whether a van went out is a file that cannot be.
     return [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
-        'נעדר', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
+        'נעדר', 'ימי רכב', 'שכר רכב', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
         .concat(payrollRows().map(row => [
             row.name, row.attendanceDays, row.payUnits, row.doubleDays,
-            row.extraHours, row.absent, row.dailyRate,
+            row.extraHours, row.absent,
+            row.vehicleDays || 0, Math.round(row.vehicleAmount || 0),
+            row.dailyRate,
             row.amount === null ? '' : Math.round(row.amount),
             row.advances > 0 ? -Math.round(row.advances) : 0,
             row.netAmount === null ? '' : Math.round(row.netAmount),

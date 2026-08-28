@@ -80,6 +80,8 @@ function renderDay() {
     root.appendChild(grid);
     root.appendChild(renderUnassignedTray(State.unrecorded()));
     root.appendChild(renderAbsentTray());
+    const vehicles = renderVehicleTray();
+    if (vehicles) root.appendChild(vehicles);
 }
 
 function renderSetupCard(title, text, label, onClick) {
@@ -669,6 +671,54 @@ function renderUnassignedTray(unrecorded) {
         }, `סמן את ${isolate(worker.name)} כנעדר`));
         chips.appendChild(chip);
     });
+    tray.appendChild(chips);
+    return tray;
+}
+
+// The vehicles, on the evenings where one of them did not go out.
+//
+// They all went out is the ordinary day and is what the pay sheet assumes, so this tray
+// exists for the exception - and shows every vehicle rather than only the ones staying
+// behind, because a list of what did NOT happen is a list nobody can check against the
+// yard. Green for went out, and one tap to say otherwise.
+//
+// Returns null when there are no vehicles at all: an empty tray on the busiest screen in
+// the app is a row of nothing to read every evening.
+function renderVehicleTray() {
+    const vehicles = (State.schedule.vehicles || []).filter(item => item.active !== false);
+    if (vehicles.length === 0) return null;
+
+    const off = (State.schedule.days[State.date] || {}).vehiclesOff || [];
+    const tray = el('div', 'tray');
+    tray.appendChild(el('h4', null, 'רכבים'));
+
+    const chips = el('div', 'chips');
+    vehicles.forEach(vehicle => {
+        const out = !off.includes(vehicle.id);
+        const chip = el('div', out ? 'chip chip-vehicle' : 'chip chip-vehicle chip-absent');
+        chip.appendChild(button(
+            `${vehicle.name} · ${out ? 'יצא' : 'לא יצא'}`,
+            'chip-main',
+            () => {
+                // offerUndo rather than editWithUndo: that one snapshots a WORKER's day
+                // and puts it back, and a vehicle is not a worker - handing it an id no
+                // worker has would take a snapshot of nothing and restore it over
+                // somebody. The way back here is simply the same switch thrown again.
+                const date = State.date;
+                if (!State.commit(setVehicleOut(State.schedule, date, vehicle.id, !out))) return;
+                render();
+                offerUndo(
+                    out ? `${isolate(vehicle.name)} סומן כלא יצא`
+                        : `${isolate(vehicle.name)} סומן כיצא`,
+                    () => State.commit(setVehicleOut(State.schedule, date, vehicle.id, out)),
+                    () => State.commit(setVehicleOut(State.schedule, date, vehicle.id, !out)));
+            },
+            out
+                ? `סמן ש${isolate(vehicle.name)} לא יצא היום`
+                : `סמן ש${isolate(vehicle.name)} יצא היום`));
+        chips.appendChild(chip);
+    });
+
     tray.appendChild(chips);
     return tray;
 }

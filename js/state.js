@@ -555,6 +555,27 @@ function normaliseSchedule(raw, hints) {
             active: p.active !== false
         }));
 
+    // The vehicles, rebuilt field by field like everything else here - this function
+    // starts from an empty schedule and copies across what it recognises, so a field it
+    // has never heard of is a field that disappears at the next reopen. Which is what
+    // happened to these the first time, and is why they were tested before they were
+    // drawn.
+    //
+    // The rate history is the part worth being careful with: it is what stops a raise
+    // repaying last month, so an entry without a date it applies from is dropped rather
+    // than guessed at.
+    schedule.vehicles = (Array.isArray(raw.vehicles) ? raw.vehicles : [])
+        .filter(v => v && v.id)
+        .map(v => ({
+            id: String(v.id),
+            name: String(v.name || ''),
+            ownerId: String(v.ownerId || ''),
+            active: v.active !== false,
+            rates: (Array.isArray(v.rates) ? v.rates : [])
+                .filter(entry => entry && typeof entry.from === 'string' && entry.from)
+                .map(entry => ({ from: String(entry.from), amount: Number(entry.amount) || 0 }))
+        }));
+
     const days = (raw.days && typeof raw.days === 'object') ? raw.days : {};
     Object.keys(days).forEach(date => {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
