@@ -1090,24 +1090,46 @@ function ledgerEntryProblems(id, value) {
     if (value.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
         return ['a ledger entry with a date that is not a date'];
     }
+    return [];
+}
 
-    // The gate, enforced where every write passes rather than where a writer remembers
-    // to ask. LEDGER_WRITES is false and nothing in the app calls the three record
-    // functions - today. It is one wired-up button away from a phone sending entries the
-    // other two phones cannot read, and the constant alone would not stop it: a gate that
-    // lives in a comment beside its writers is a gate held open by good manners.
-    //
-    // The one write the closed gate sanctions is the boot mirror, and it is recognised by
-    // all three of the things it actually is - the deterministic id every phone mints for
-    // the same advance, the origin the migration stamps, and the kind. Nothing that says
-    // 'corrected' or 'cancelled' passes on the strength of the stamp: a correction is
-    // precisely the entry the gate exists to hold, being the one that changes what a man
-    // is handed on a phone that cannot read it.
-    if (typeof ledgerWritesEnabled === 'function' && !ledgerWritesEnabled()) {
-        const mirrored = String(value.kind) === 'given'
-            && String(value.origin) === 'migration'
-            && String(id) === 'le_mig_' + String(value.advanceId);
-        if (!mirrored) return ['a ledger entry while the writer gate is closed'];
+// The same entry, asked the question a NEW write has to answer: may this build write it
+// down at all?
+//
+// Separate from the shape check on purpose. Everything durable is read back through
+// journalEntryProblems - the outbox at every boot, a snapshot from another phone - and a
+// gate applied there would not be containment, it would be this build refusing to read
+// history it already holds, or history another device sent it. Blocking local writing must
+// never become deleting what arrived from elsewhere. So the gate lives here, on the way
+// out, and the readers keep reading.
+//
+// Fails CLOSED. A build that has lost ledgerWritesEnabled, ledgerMigrationOpen or
+// mirrorsLegacyAdvance cannot answer the question, and an unanswerable question about
+// whether money may be written down is answered no.
+function ledgerWriteProblems(id, value, schedule) {
+    const problems = ledgerEntryProblems(id, value);
+    if (problems.length > 0) return problems;
+
+    const open = typeof ledgerWritesEnabled === 'function' && ledgerWritesEnabled();
+    if (open) return [];
+
+    const migrating = typeof ledgerMigrationOpen === 'function' && ledgerMigrationOpen();
+    const mirrors = typeof mirrorsLegacyAdvance === 'function'
+        && mirrorsLegacyAdvance(schedule, id, value);
+    if (migrating && mirrors) return [];
+
+    return ['a ledger entry while the writer gate is closed'];
+}
+
+// Every rule journalEntryProblems has, plus the ones that only apply to something being
+// written for the first time. The write boundary asks this; the readers ask the other.
+function journalWriteProblems(path, value, schedule) {
+    const problems = journalEntryProblems(path, value);
+    if (problems.length > 0) return problems;
+
+    const parts = String(path).split('.');
+    if (parts[0] === 'ledger' && parts[1] === 'advances' && parts.length === 3) {
+        return ledgerWriteProblems(parts[2], value, schedule);
     }
     return [];
 }

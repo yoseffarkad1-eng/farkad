@@ -173,6 +173,14 @@ const State = {
         // over a change nobody made.
         if (typeof Store !== 'undefined' && !Store.available) return false;
 
+        // The whole mirror inside the one door the closed gate has - building the
+        // entries and journalling them are one act, and a capability that closed between
+        // the two would be a capability that was never open where it mattered. See
+        // runLedgerMigration; what walks through it is still checked against the record.
+        return runLedgerMigration(() => this.writeLedgerMirror());
+    },
+
+    writeLedgerMirror() {
         const result = migrateAdvancesToLedger(this.schedule, syncDeviceId());
         // Nothing to mirror, nothing written: a second boot leaves the disk alone.
         if (result.added.length === 0) return true;
@@ -682,27 +690,42 @@ function normaliseSchedule(raw, hints) {
         };
     });
 
-    // The ledger, carried through unchanged. Entries are append-only and this is a
-    // read: an entry that will not parse is DROPPED from the fold rather than repaired,
-    // because a repaired entry is a claim about money that nobody made.
+    // A copy that is equal to what it copied, for a value that came out of JSON and may
+    // be an object, an array, a string, a number, a boolean or null. Structured rather
+    // than field-by-field, because the whole point at this line is to carry across fields
+    // this build has never heard of.
+    function deepCopyValue(value) {
+        if (value === null || typeof value !== 'object') return value;
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            // Nothing that reached here came from anywhere but JSON.parse, so this is the
+            // impossible branch. Keeping the original is still better than dropping it.
+            return value;
+        }
+    }
+
+    // The ledger, carried through unchanged.
     const ledger = (raw.ledger && typeof raw.ledger === 'object') ? raw.ledger : {};
     const entries = (ledger.advances && typeof ledger.advances === 'object')
         ? ledger.advances : {};
+    // Every entry, exactly as it was found. This function rebuilds the schedule the
+    // session will hold, and that rebuilt schedule is what save() writes back over the
+    // disk - so an entry dropped here was not being left out of the fold, it was being
+    // DELETED, on an ordinary boot, by a device that never told anybody. It is the
+    // ledger's one promise, broken by the file that carries it.
+    //
+    // And nothing is repaired on the way through either. The old line reconciled a record
+    // whose id disagreed with its key by overwriting the record's id with the key, which
+    // is editing a financial record to make it pass; a future field this build has never
+    // heard of used to survive only by accident of the clone. Readability is decided in
+    // ONE place (ledgerEntryReadable) and it decides what is FOLDED, never what is kept.
+    //
+    // A JSON copy rather than the object itself: `raw` may be a snapshot another device
+    // is still holding, and the live schedule must not alias it. Exact for anything that
+    // came out of JSON, which is everything that reaches this line.
     Object.keys(entries).forEach(id => {
-        const entry = entries[id];
-        // Unreadable is not "not there". This function rebuilds the schedule the session
-        // will hold, and that rebuilt schedule is what save() writes back over the disk -
-        // so an entry dropped here was not being left out of the fold, it was being
-        // DELETED, on an ordinary boot, by a device that never told anybody. It is the
-        // ledger's one promise, broken by the file that carries it.
-        //
-        // So the bytes come across exactly as they were found, and ledgerEntries goes on
-        // refusing to fold them: a repaired entry is a claim about money nobody made.
-        if (!entry || typeof entry !== 'object' || !entry.advanceId || !entry.kind) {
-            schedule.ledger.advances[id] = entry;
-            return;
-        }
-        schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
+        schedule.ledger.advances[id] = deepCopyValue(entries[id]);
     });
 
     // The invariant, enforced here because here is where every route in meets: a

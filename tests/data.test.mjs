@@ -8539,11 +8539,27 @@ for (const [label, run] of [
 // ledger says the same thing as that field, on real data, before anything depends on it.
 
 // The migration, committed the way every other edit is: journalled, saved and queued.
+// Standing in for State.migrateLedger: the mirror is built and journalled inside the one
+// door the closed gate has, because that is the only way it happens in the app.
 function commitMigration(device) {
-    const result = device.call('migrateAdvancesToLedger', device.State.schedule, device.id);
-    device.State.commitMany(Object.keys(result.paths)
-        .map(path => ({ path, value: result.paths[path] })));
-    return result;
+    return device.call('runLedgerMigration', () => {
+        const result = device.call('migrateAdvancesToLedger', device.State.schedule, device.id);
+        device.State.commitMany(Object.keys(result.paths)
+            .map(path => ({ path, value: result.paths[path] })));
+        return result;
+    });
+}
+
+// An entry as a build with the writer gate OPEN would have left it: in the schedule and
+// on the disk. Since v87 the three record functions refuse while the gate is closed and
+// the journal refuses anything that is not the boot mirror - that is the whole of C1 and
+// C2 - so a suite about READING history has to lay that history down itself, the way the
+// day the gate opens will. The record functions still do the writing, inside the door, so
+// what is being read back is exactly what they produce.
+function seedLedgerEntry(device, build) {
+    const written = device.call('runLedgerMigration', () => build());
+    device.State.save();
+    return written;
 }
 
 function withAdvances(device, rows) {
@@ -8565,9 +8581,7 @@ function withAdvances(device, rows) {
     given('three advances are on the device',
         Object.keys(device.State.schedule.advances).length === 3);
 
-    const result = device.call('migrateAdvancesToLedger', device.State.schedule, device.id);
-    device.State.commitMany(Object.keys(result.paths)
-        .map(path => ({ path, value: result.paths[path] })));
+    const result = commitMigration(device);
 
     check('every advance became an entry', result.added.length === 3,
         JSON.stringify(result.added));
@@ -8592,7 +8606,8 @@ function withAdvances(device, rows) {
         JSON.stringify(entries.map(entry => ({ at: entry.at, origin: entry.origin }))));
 
     // Run again - a second boot, another device, a re-import.
-    const second = device.call('migrateAdvancesToLedger', device.State.schedule, device.id);
+    const second = device.call('runLedgerMigration',
+        () => device.call('migrateAdvancesToLedger', device.State.schedule, device.id));
     check('running it again adds nothing', second.added.length === 0,
         JSON.stringify(second.added));
     check('and the ledger still holds exactly three entries',
@@ -8610,7 +8625,7 @@ function withAdvances(device, rows) {
     const advanceId = written.value.id;
     commitMigration(device);
 
-    device.State.commit(device.call('recordAdvanceCorrected', device.State.schedule, advanceId,
+    seedLedgerEntry(device, () => device.call('recordAdvanceCorrected', device.State.schedule, advanceId,
         { amount: 300, note: 'תוקן' }, '2026-08-12T09:00:00.000Z', device.id));
 
     const folded = device.call('foldLedger', device.State.schedule);
@@ -8632,7 +8647,7 @@ function withAdvances(device, rows) {
 
     // A correction can move an advance to the right man, which is the correction a
     // mutation loses most completely.
-    device.State.commit(device.call('recordAdvanceCorrected', device.State.schedule, advanceId,
+    seedLedgerEntry(device, () => device.call('recordAdvanceCorrected', device.State.schedule, advanceId,
         { workerId: 'w_02' }, '2026-08-13T09:00:00.000Z', device.id));
     const moved = device.call('foldLedger', device.State.schedule)[advanceId];
     check('it can be moved to the man it actually belonged to',
@@ -8650,7 +8665,7 @@ function withAdvances(device, rows) {
     const advanceId = written.value.id;
     commitMigration(device);
 
-    device.State.commit(device.call('recordAdvanceCancelled', device.State.schedule, advanceId,
+    seedLedgerEntry(device, () => device.call('recordAdvanceCancelled', device.State.schedule, advanceId,
         'נרשם פעמיים', '2026-08-12T09:00:00.000Z', device.id));
 
     check('it is out of the fold',
@@ -8699,7 +8714,7 @@ function withAdvances(device, rows) {
     // And a cancellation on THIS phone is not undone by the old field still being there,
     // because the cancellation is the newer information.
     commitMigration(device);
-    device.State.commit(device.call('recordAdvanceCancelled', device.State.schedule,
+    seedLedgerEntry(device, () => device.call('recordAdvanceCancelled', device.State.schedule,
         'a_fromv79', 'לא ניתן', '2026-08-12T09:00:00.000Z', device.id));
     check('a cancelled advance is not resurrected by the field it came from',
         device.call('currentAdvances', device.State.schedule).a_fromv79 === undefined,
@@ -8761,7 +8776,7 @@ function withAdvances(device, rows) {
     device.State.commit(written);
     commitMigration(device);
     const entryId = device.call('ledgerEntries', device.State.schedule)[0].id;
-    device.State.commit(device.call('recordAdvanceCorrected', device.State.schedule,
+    seedLedgerEntry(device, () => device.call('recordAdvanceCorrected', device.State.schedule,
         written.value.id, { amount: 300 }, '2026-08-12T09:00:00.000Z', device.id));
 
     await connected(device, cloud);
@@ -9848,114 +9863,377 @@ function withAdvances(device, rows) {
         after.length > 0, JSON.stringify(after));
 }
 
-// ---------------------------------------------------------------- L1: the gate at the wire
+// ================================================================ the closed writer gate
 //
-// LEDGER_WRITES is false and nothing in the app calls the three writers - today. The gate
-// is a constant read by one function nobody is obliged to ask, so the whole containment
-// rests on every future caller remembering to ask it. It is one wired-up button away from
-// a phone sending entries the other two phones cannot read.
+// LEDGER_WRITES is false until every phone is known to be past v79, and until then this
+// build must not create a ledger entry that the other two cannot read. The gate used to be
+// a constant read by one function nobody was obliged to ask; these four suites are what
+// makes it a gate.
 //
-// The place a rule about writing belongs is the write. Every edit in this app, the boot
-// mirror included, goes through journalEntryProblems on its way to the disk and the wire:
-// while the gate is closed, the only ledger entry that passes is the mirror of an advance
-// the legacy field already holds.
+// The exception - the boot mirror - is the dangerous part. An exception described by the
+// FIELDS of the record it lets through is not an exception, it is a password written on
+// the thing it guards: mint 'le_mig_a_anything', stamp origin: 'migration', put any man,
+// any day and any amount inside it, and walk through. So the door is a capability held
+// open only for the length of the migration, AND what walks through it is checked against
+// the advance it claims to mirror.
+
+// ---------------------------------------------------------------- L1: a forged mirror
 {
-    suite('L1: while the gate is closed the wire takes the mirror and nothing else');
+    suite('L1: the migration exception cannot be forged');
 
     const { device } = crew();
-    const mirror = {
-        id: 'le_mig_a_1', advanceId: 'a_1', kind: 'given', workerId: 'w_01',
-        date: '2026-08-03', amount: 500, note: '', at: '', by: 'd1', origin: 'migration'
-    };
-    const handWritten = {
-        id: 'le_x', advanceId: 'a_1', kind: 'given', workerId: 'w_01',
-        date: '2026-08-03', amount: 500
-    };
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500, note: 'מזומן' }]);
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    const legacy = device.State.schedule.advances[advanceId];
+
+    // The genuine article, exactly as migrateAdvancesToLedger builds it.
+    const mirror = () => ({
+        id: 'le_mig_' + advanceId, advanceId, kind: 'given',
+        workerId: String(legacy.workerId), date: String(legacy.date),
+        amount: Number(legacy.amount), note: String(legacy.note || ''),
+        at: '', by: device.id, origin: 'migration'
+    });
+    const asWrite = (id, value) => device.call('journalWriteProblems',
+        'ledger.advances.' + id, value, device.State.schedule);
+    // Asked the way the app asks it: inside the door, which is the ONLY place the mirror
+    // is written from. Outside it nothing passes at all, which is the check after this.
+    const inDoor = (id, value) => device.call('runLedgerMigration', () => asWrite(id, value));
 
     given('the gate is closed', device.call('ledgerWritesEnabled') === false);
-    check('the boot mirror still gets through',
-        device.call('journalEntryProblems', 'ledger.advances.le_mig_a_1', mirror).length === 0,
-        JSON.stringify(device.call('journalEntryProblems', 'ledger.advances.le_mig_a_1', mirror)));
-    check('an entry nobody mirrored does not',
-        device.call('journalEntryProblems', 'ledger.advances.le_x', handWritten).length > 0,
-        JSON.stringify(device.call('journalEntryProblems', 'ledger.advances.le_x', handWritten)));
-    check('and the refusal says the gate rather than the shape',
-        device.call('journalEntryProblems', 'ledger.advances.le_x', handWritten)
-            .some(problem => problem.includes('closed')),
-        JSON.stringify(device.call('journalEntryProblems', 'ledger.advances.le_x', handWritten)));
+    check('the real mirror passes, inside the door',
+        inDoor('le_mig_' + advanceId, mirror()).length === 0,
+        JSON.stringify(inDoor('le_mig_' + advanceId, mirror())));
+    check('and the same entry is refused outside it',
+        asWrite('le_mig_' + advanceId, mirror()).length > 0,
+        JSON.stringify(asWrite('le_mig_' + advanceId, mirror())));
 
-    // A correction is the entry the gate exists for: it is the one that would change what
-    // a man is handed on a phone that cannot read it.
-    const correction = { id: 'le_c', advanceId: 'a_1', kind: 'corrected', amount: 300,
-        origin: 'migration' };
-    check('and calling it a migration does not let a correction through',
-        device.call('journalEntryProblems', 'ledger.advances.le_c', correction).length > 0,
-        JSON.stringify(device.call('journalEntryProblems', 'ledger.advances.le_c', correction)));
+    // Every forgery below is inside the door, holding the capability. What refuses them is
+    // the record itself.
+    const forged = (what, changes, id) => {
+        const value = Object.assign(mirror(), changes);
+        const key = id || value.id;
+        check(what, inDoor(key, value).length > 0, JSON.stringify(inDoor(key, value)));
+    };
+
+    forged('an advance that does not exist',
+        { id: 'le_mig_a_ghost', advanceId: 'a_ghost' });
+    forged('a real advance for a different amount', { amount: 5000 });
+    forged('a real advance handed to a different man', { workerId: 'w_02' });
+    forged('a real advance moved to a different day', { date: '2026-08-04' });
+    forged('a real advance with a note nobody wrote', { note: 'שונה' });
+    forged('a timestamp the migration refuses to invent',
+        { at: '2026-08-12T09:00:00.000Z' });
+    forged('a second fact riding along inside the mirror',
+        { method: 'transfer' });
+    forged('a correction wearing the migration stamp',
+        { kind: 'corrected', amount: 300 });
+    forged('a cancellation wearing it',
+        { kind: 'cancelled' });
+    // The id is derived from the advance, so it is checked against the advance rather
+    // than merely looking derived.
+    forged('an id that only looks deterministic',
+        { id: 'le_mig_a_other' }, 'le_mig_a_other');
+    forged('and the deterministic id pointed at somebody else’s advance',
+        { advanceId: 'a_other' });
 }
 
-// ---------------------------------------------------------------- L2: an entry that will not parse
-//
-// normaliseSchedule rebuilds the schedule from the raw record and drops any ledger entry
-// without an advanceId or a kind. That is right for the FOLD - a repaired entry is a claim
-// about money nobody made - but the rebuilt schedule is what save() then writes back, so
-// the entry was not being excluded from the reading. It was being deleted from the disk,
-// on an ordinary boot, by a device that never told anybody.
-//
-// It is the ledger's one promise, broken by the file that carries it: an entry is never
-// removed. The bytes stay; the fold goes on ignoring them.
+// ---------------------------------------------------------------- L2: fail closed
 {
-    suite('L2: an unreadable ledger entry survives the boot that cannot read it');
+    suite('L2: a gate that cannot answer says no');
 
     const { device } = crew();
-    device.State.commit(
-        device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, ''));
-    commitMigration(device);
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500, note: '' }]);
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    const legacy = device.State.schedule.advances[advanceId];
+    const mirror = {
+        id: 'le_mig_' + advanceId, advanceId, kind: 'given',
+        workerId: String(legacy.workerId), date: String(legacy.date),
+        amount: Number(legacy.amount), note: '', at: '', by: device.id, origin: 'migration'
+    };
+    const inDoor = () => device.call('runLedgerMigration', () => device.call(
+        'journalWriteProblems', 'ledger.advances.' + mirror.id, mirror,
+        device.State.schedule));
 
-    // Put a damaged entry into the raw record the way a half-written sync would: the id
-    // is there, the kind is gone.
+    given('the mirror passes while every part of the gate is present',
+        inDoor().length === 0, JSON.stringify(inDoor()));
+
+    // A build that has lost a piece of its own gate cannot answer the question, and an
+    // unanswerable question about whether money may be written down is answered no. The
+    // old line asked `typeof ledgerWritesEnabled === 'function' && !ledgerWritesEnabled()`,
+    // which is a gate that opens itself the moment it goes missing.
+    // An ordinary entry, the thing the gate exists to refuse. Asked from INSIDE the door,
+    // because that is the strongest position an attacker can reach.
+    const plain = { id: 'le_plain', advanceId, kind: 'given', workerId: 'w_01',
+        date: '2026-08-03', amount: 500 };
+    const plainInDoor = () => device.call('runLedgerMigration', () => device.call(
+        'journalWriteProblems', 'ledger.advances.le_plain', plain, device.State.schedule));
+    const without = (name, ask) => {
+        const had = device.ctx[name];
+        device.ctx[name] = undefined;
+        const answer = ask();
+        device.ctx[name] = had;
+        return answer;
+    };
+
+    given('an ordinary entry is refused while the gate is whole',
+        plainInDoor().length > 0, JSON.stringify(plainInDoor()));
+    check('a build that has lost ledgerWritesEnabled still refuses it',
+        without('ledgerWritesEnabled', plainInDoor).length > 0,
+        JSON.stringify(without('ledgerWritesEnabled', plainInDoor)));
+    check('and the writer itself refuses too',
+        without('ledgerWritesEnabled',
+            () => device.call('appendLedgerEntry', device.State.schedule, plain)) === null);
+
+    // The other two pieces are what LETS the mirror through, so losing either of them
+    // closes the door rather than opening it - the mirror waits for the next boot, which
+    // is the ending the migration was built to have.
+    check('without the door itself, not even the mirror is written',
+        without('ledgerMigrationOpen', inDoor).length > 0,
+        JSON.stringify(without('ledgerMigrationOpen', inDoor)));
+    check('without the check against the record, not even the mirror is written',
+        without('mirrorsLegacyAdvance', inDoor).length > 0,
+        JSON.stringify(without('mirrorsLegacyAdvance', inDoor)));
+    check('and the gate is whole again afterwards', inDoor().length === 0);
+    check('with nothing added to the schedule by any of it',
+        Object.keys(device.State.schedule.ledger.advances).length === 0,
+        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
+}
+
+// ---------------------------------------------------------------- L3: the real boundary
+//
+// A unit assertion that a validator returned an error is evidence, not proof. What has to
+// be true is that nothing durable holds a non-migration entry: not the schedule in memory,
+// not the blob on the disk, not the journal, not the queue, not what would be sent to the
+// cloud, and not what the app reads back after being closed and reopened.
+{
+    suite('L3: with the gate closed nothing durable takes a forged entry');
+
+    const cloud = makeCloud();
+    const { device } = crew();
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500, note: '' }]);
+    commitMigration(device);
+    await connected(device, cloud);
+    await wait();
+
+    const mirrorId = 'le_mig_' + Object.keys(device.State.schedule.advances)[0];
+    given('the honest mirror is on the device', Boolean(
+        device.State.schedule.ledger.advances[mirrorId]));
+
+    const forged = { id: 'le_forged', advanceId: 'a_ghost', kind: 'given',
+        workerId: 'w_01', date: '2026-08-03', amount: 9999, origin: 'migration' };
+
+    // 1. The three writers. Each returns nothing and leaves the schedule alone.
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    check('recordAdvanceGiven writes nothing',
+        device.call('recordAdvanceGiven', device.State.schedule, 'a_new', 'w_01',
+            '2026-08-04', 700, '', '', device.id) === null);
+    check('recordAdvanceCorrected writes nothing',
+        device.call('recordAdvanceCorrected', device.State.schedule, advanceId,
+            { amount: 1 }, '', device.id) === null);
+    check('recordAdvanceCancelled writes nothing',
+        device.call('recordAdvanceCancelled', device.State.schedule, advanceId,
+            '', '', device.id) === null);
+    check('appendLedgerEntry writes nothing',
+        device.call('appendLedgerEntry', device.State.schedule, forged) === null);
+    check('and the schedule in memory is untouched by any of them',
+        Object.keys(device.State.schedule.ledger.advances).join() === mirrorId,
+        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
+
+    // 2. The journal and the queue, asked directly with a hand-built entry.
+    const queued = device.Sync.queueBatch([{ path: 'ledger.advances.le_forged',
+        value: forged }]);
+    check('the queue refuses the write outright', queued === false, String(queued));
+    check('and it is not in the outbox',
+        !device.Sync.pendingPaths().includes('ledger.advances.le_forged'),
+        JSON.stringify(device.Sync.pendingPaths()));
+
+    // 3. State.commit, which is what every screen calls.
+    const committed = device.State.commit({ path: 'ledger.advances.le_forged',
+        value: forged });
+    check('State.commit refuses it too', committed === false, String(committed));
+
+    // 4. A direct save after a writer was attempted - the bypass that skips the journal
+    //    entirely. Nothing was mutated above, so there is nothing for save to carry.
+    device.State.save();
+    await wait();
+    const blob = JSON.parse(device.raw('scheduleData:v2'));
+    check('the durable record holds only the mirror',
+        Object.keys(blob.ledger.advances).join() === mirrorId,
+        JSON.stringify(Object.keys(blob.ledger.advances)));
+
+    // 5. What the cloud was told.
+    check('and the cloud was never told about it',
+        !((cloud.doc || {}).ledger || {}).advances
+        || !Object.keys(cloud.doc.ledger.advances).includes('le_forged'),
+        JSON.stringify(Object.keys((((cloud.doc || {}).ledger) || {}).advances || {})));
+
+    // 6. Closed and reopened.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and it is not there after the app is closed and reopened',
+        !reopened.State.schedule.ledger.advances.le_forged,
+        JSON.stringify(Object.keys(reopened.State.schedule.ledger.advances)));
+    check('while the honest mirror still is',
+        Boolean(reopened.State.schedule.ledger.advances[mirrorId]));
+}
+
+// ---------------------------------------------------------------- L4: what arrived from elsewhere
+//
+// Blocking local writing must never become refusing history somebody else already wrote.
+// A phone on a later build, with the gate open, sends real entries; this one cannot write
+// them and must still keep every one.
+{
+    suite('L4: a closed gate does not refuse what another phone already recorded');
+
+    const cloud = makeCloud();
+    const { device } = crew();
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500, note: '' }]);
+    commitMigration(device);
+    await connected(device, cloud);
+    await wait();
+
+    // The other phone's document: the same advance, plus a correction this build would
+    // never be allowed to write.
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    device.Sync.receive({
+        workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: {},
+        advances: device.State.schedule.advances,
+        ledger: { advances: {
+            le_theirs: { id: 'le_theirs', advanceId, kind: 'corrected', amount: 300,
+                at: '2026-08-12T09:00:00.000Z', by: 'd_other' }
+        } },
+        updatedAt: '2026-08-12T09:00:01.000Z',
+        updatedBy: 'd_other'
+    });
+    await settle(TICK * 20);
+
+    check('their correction is adopted, not refused',
+        Boolean(device.State.schedule.ledger.advances.le_theirs),
+        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
+    check('and the fold reads it',
+        device.call('foldLedger', device.State.schedule)[advanceId].amount === 300,
+        JSON.stringify(device.call('foldLedger', device.State.schedule)));
+
+    device.State.save();
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('it survives the close and reopen',
+        Boolean(reopened.State.schedule.ledger.advances.le_theirs),
+        JSON.stringify(Object.keys(reopened.State.schedule.ledger.advances)));
+}
+
+// ---------------------------------------------------------------- L5: unreadable, of every shape
+//
+// normaliseSchedule used to drop an entry it could not read - which is not excluding it
+// from the fold, it is DELETING it, on an ordinary boot, because the schedule this
+// function rebuilds is what save() writes back over the disk.
+//
+// Preserving only the shape the first test happened to use would have been the same bug
+// one step along. An entry can be unreadable and still carry both fields: an unknown kind
+// from a later build, an amount that is not a number, a date that is not a date, a record
+// whose id disagrees with its key, a value that is not a record at all. Every one of them
+// is carried through byte for byte, and readability is decided in one place for the fold,
+// the boot, the parity check and the line the person reads.
+{
+    suite('L5: every unreadable shape survives, exactly');
+
+    const shapes = {
+        le_future: { id: 'le_future', advanceId: 'a_1', kind: 'reversed', amount: 500 },
+        le_nokind: { id: 'le_nokind', advanceId: 'a_1', amount: 500 },
+        le_noadvance: { id: 'le_noadvance', kind: 'given', workerId: 'w_01',
+            date: '2026-08-03', amount: 500 },
+        le_badamount: { id: 'le_badamount', advanceId: 'a_1', kind: 'given',
+            workerId: 'w_01', date: '2026-08-03', amount: 'חמש מאות' },
+        le_baddate: { id: 'le_baddate', advanceId: 'a_1', kind: 'given', workerId: 'w_01',
+            date: 'שלישי', amount: 500 },
+        le_mismatch: { id: 'le_somethingelse', advanceId: 'a_1', kind: 'given',
+            workerId: 'w_01', date: '2026-08-03', amount: 500 },
+        le_extra: { id: 'le_extra', advanceId: 'a_1', kind: 'settled', workerId: 'w_01',
+            date: '2026-08-03', amount: 500, settledAgainst: 'period_2026_08',
+            nested: { deep: [1, 2, { three: true }] } },
+        le_null: null,
+        le_text: 'לא רשומה'
+    };
+    const original = JSON.stringify(shapes);
+
+    const { device } = crew();
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500, note: '' }]);
+    commitMigration(device);
+    const mirrorId = 'le_mig_' + Object.keys(device.State.schedule.advances)[0];
+
+    // Seeded into the raw record the way a half-written sync or a later build leaves it.
     const disk = device.dump();
     const raw = JSON.parse(disk['scheduleData:v2']);
-    raw.ledger.advances.le_broken = { id: 'le_broken', advanceId: 'a_1', amount: 500 };
+    Object.keys(shapes).forEach(id => { raw.ledger.advances[id] = shapes[id]; });
     disk['scheduleData:v2'] = JSON.stringify(raw);
 
+    const held = dev => {
+        const out = {};
+        Object.keys(shapes).forEach(id => { out[id] = dev.State.schedule.ledger.advances[id]; });
+        return JSON.stringify(out);
+    };
+    const onDisk = dev => {
+        const stored = JSON.parse(dev.raw('scheduleData:v2')).ledger.advances;
+        const out = {};
+        Object.keys(shapes).forEach(id => { out[id] = stored[id]; });
+        return JSON.stringify(out);
+    };
+
+    // 1. boot
     const reopened = makeDevice({ storage: disk });
     reopened.State.load();
-    given('the fold does not count it',
+    check('every shape survives the boot, byte for byte', held(reopened) === original,
+        held(reopened));
+    check('and none of them is folded',
         reopened.call('ledgerEntries', reopened.State.schedule)
-            .every(entry => entry.id !== 'le_broken'));
+            .every(entry => !Object.keys(shapes).includes(String(entry.id))),
+        JSON.stringify(reopened.call('ledgerEntries', reopened.State.schedule)
+            .map(entry => entry.id)));
 
-    // An ordinary edit, which is what writes the rebuilt schedule back over the record.
-    reopened.State.commit(
-        reopened.call('addAdvance', reopened.State.schedule, 'w_01', '2026-08-05', 200, ''));
+    // 2. an ordinary edit, and 3. the save it causes
+    record(reopened, '2026-08-12', 'w_01', 'p_01');
+    reopened.State.save();
+    check('an unrelated edit does not disturb them', onDisk(reopened) === original,
+        onDisk(reopened));
 
-    const after = JSON.parse(reopened.dump()['scheduleData:v2']);
-    check('the bytes are still on the disk',
-        Boolean(after.ledger && after.ledger.advances && after.ledger.advances.le_broken),
-        JSON.stringify(Object.keys((after.ledger || {}).advances || {})));
-    check('unchanged, not repaired into a claim nobody made',
-        JSON.stringify((after.ledger.advances || {}).le_broken)
-            === JSON.stringify({ id: 'le_broken', advanceId: 'a_1', amount: 500 }),
-        JSON.stringify((after.ledger.advances || {}).le_broken));
-    check('and the readable entries are still readable',
-        reopened.call('ledgerEntries', reopened.State.schedule).length === 1,
-        String(reopened.call('ledgerEntries', reopened.State.schedule).length));
+    // 4. closed and reopened again
+    const again = makeDevice({ storage: reopened.dump() });
+    again.State.load();
+    check('nor does closing and reopening', held(again) === original, held(again));
 
-    // Kept is not enough. The rule is that nothing unreadable is deleted, overwritten OR
-    // treated as empty, and the third one is where a quiet keep becomes a lie: the parity
-    // check would go on reporting agreement over a ledger holding bytes it cannot read,
-    // and that verdict is the one thing anybody consults before opening the writer.
-    // Mirrored first, so nothing else is outstanding: a verdict of disagreement that
-    // comes from an advance simply awaiting its mirror would pass this check without
-    // saying anything about the unreadable entry at all.
-    commitMigration(reopened);
-    const verdict = reopened.State.ledgerParity();
-    given('nothing is merely behind', (verdict.missing || []).length === 0
-        && (verdict.different || []).length === 0
-        && (verdict.orphaned || []).length === 0, JSON.stringify(verdict));
-    check('the parity check names what it could not read',
-        (verdict.unreadable || []).includes('le_broken'), JSON.stringify(verdict));
-    check('and the unreadable entry alone is enough to refuse agreement',
-        verdict.agrees === false, JSON.stringify(verdict));
+    // 5. an older cloud snapshot arriving, which carries no ledger at all
+    const cloud = makeCloud();
+    await connected(again, cloud);
+    await settle(TICK * 30);
+    again.Sync.receive({ workers: again.State.schedule.workers,
+        places: again.State.schedule.places, days: {},
+        advances: again.State.schedule.advances,
+        updatedAt: '2026-09-01T00:00:00.000Z', updatedBy: 'd_other' });
+    await settle(TICK * 20);
+    check('nor a snapshot from a phone that has never heard of a ledger',
+        held(again) === original, held(again));
+
+    // 6. and the export/import round trip
+    const exported = JSON.stringify(again.State.schedule);
+    const imported = again.call('normaliseSchedule', JSON.parse(exported));
+    const importedHeld = {};
+    Object.keys(shapes).forEach(id => { importedHeld[id] = imported.ledger.advances[id]; });
+    check('nor being exported and read back in',
+        JSON.stringify(importedHeld) === original, JSON.stringify(importedHeld));
+
+    // 7. and the verdict says so, in a number the person can act on
+    const verdict = again.State.ledgerParity();
+    check('the parity check names every one of them',
+        Object.keys(shapes).every(id => verdict.unreadable.includes(id)),
+        JSON.stringify(verdict.unreadable));
+    check('and refuses to call that agreement', verdict.agrees === false,
+        JSON.stringify(verdict));
+    check('while the honest mirror is still readable',
+        again.call('ledgerEntries', again.State.schedule)
+            .some(entry => entry.id === mirrorId),
+        JSON.stringify(again.call('ledgerEntries', again.State.schedule).map(e => e.id)));
 }
 
 report();

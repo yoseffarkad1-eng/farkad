@@ -1179,6 +1179,20 @@ const FarkadSync = {
         if (!entries || entries.length === 0) return true;
         if (farkadWritesBlocked() || !this._activeKey) return false;
 
+        // The write boundary, and the place a rule about writing belongs. Every edit in
+        // this app arrives here on its way to the disk and the wire - an ordinary commit,
+        // a bulk one, the boot mirror - and until v87 nothing was checked until the queue
+        // was read BACK, where a single bad entry condemns the whole record as damaged.
+        // Refusing the batch instead means the edit is rolled back and the person is told,
+        // which is what a refused edit has always meant here.
+        //
+        // Asked of the live schedule, because the one write the closed ledger gate allows
+        // is verified against the advance it claims to mirror. See ledgerWriteProblems.
+        const schedule = (typeof State !== 'undefined' && State) ? State.schedule : null;
+        const refused = entries.filter(entry => entry && entry.path
+            && journalWriteProblems(entry.path, entry.value, schedule).length > 0);
+        if (refused.length > 0) return false;
+
         // The copy. Entries are Map values shared with _outbox, so a shallow clone of
         // each is enough: nothing here mutates one in place.
         const candidate = new Map(this._outbox);

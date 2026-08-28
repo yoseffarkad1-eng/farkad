@@ -45,6 +45,116 @@ function ledgerWritesEnabled() {
     return LEDGER_WRITES === true;
 }
 
+// ---------------------------------------------------------------- the one door
+//
+// The closed gate has exactly one exception - the boot mirror - and an exception
+// described by FIELDS is not an exception, it is a password written on the record it
+// guards. A caller who knows the shape can mint 'le_mig_a_whatever', stamp
+// origin: 'migration', put any man, any day and any amount inside it, and walk through.
+//
+// So the door is a CAPABILITY, held open for the length of the migration and by nothing
+// else, and what walks through it is still checked against the record: the entry must
+// mirror an advance the legacy field actually holds, field for field, and say nothing the
+// advance does not already say. Either half alone is a hole. Both together mean a forged
+// entry has to be identical to a real advance to pass - at which point it is not forged,
+// it is the mirror.
+//
+// A counter rather than a flag: the migration is re-entered by the same boot on a
+// restore, and a flag would be closed by the inner finish while the outer is still going.
+let LEDGER_MIGRATION_DEPTH = 0;
+
+function ledgerMigrationOpen() {
+    return LEDGER_MIGRATION_DEPTH > 0;
+}
+
+// The only thing that opens the door. State.migrateLedger wraps the WHOLE mirror in it -
+// building the entries and journalling them are one act, and a window that closes between
+// the two is a window that was never open where it mattered.
+function runLedgerMigration(fn) {
+    LEDGER_MIGRATION_DEPTH += 1;
+    try {
+        return fn();
+    } finally {
+        LEDGER_MIGRATION_DEPTH -= 1;
+    }
+}
+
+// Everything the migration writes, and nothing else. A field this build does not put in a
+// mirror entry is a fact somebody is smuggling past a closed gate.
+const MIRROR_FIELDS = ['id', 'advanceId', 'kind', 'workerId', 'date', 'amount', 'note',
+    'at', 'by', 'origin'];
+
+// Is this entry the mirror of an advance the record actually holds - exactly?
+//
+// Asked of the SCHEDULE, not of the entry. The entry's own fields are the thing under
+// suspicion; the advance it claims to mirror is the only witness that is not.
+function mirrorsLegacyAdvance(schedule, id, value) {
+    if (!schedule || !isPlainObject(value)) return false;
+
+    // The kind first: a correction or a cancellation is precisely what the gate exists to
+    // hold, being the entry that changes what a man is handed on a phone that cannot read
+    // it. No stamp makes one of those a mirror.
+    if (String(value.kind) !== 'given') return false;
+    if (String(value.origin) !== 'migration') return false;
+
+    // The id is derived from the advance, so it is checked against the advance rather
+    // than merely looking derived.
+    const advanceId = String(value.advanceId || '');
+    if (!advanceId) return false;
+    if (String(id) !== 'le_mig_' + advanceId) return false;
+
+    const legacy = (schedule.advances || {})[advanceId];
+    if (!isPlainObject(legacy)) return false;
+
+    if (String(value.workerId) !== String(legacy.workerId)) return false;
+    if (String(value.date) !== String(legacy.date)) return false;
+    if ((Number(value.amount) || 0) !== (Number(legacy.amount) || 0)) return false;
+    if (String(value.note || '') !== String(legacy.note || '')) return false;
+
+    // An old advance has no timestamp and the migration refuses to invent one. A mirror
+    // arriving with an `at` is a claim about WHEN that nobody made.
+    if (String(value.at || '') !== '') return false;
+
+    // Nothing extra. Not a field this build does not know, and not a second financial
+    // fact riding along inside one that it does.
+    return Object.keys(value).every(field => MIRROR_FIELDS.includes(field));
+}
+
+// Can this build read this entry?
+//
+// One decision, asked in four places - the fold, the boot normalisation, the parity check
+// and the line the person reads. They used to each have their own idea of it, so an entry
+// could be folded by one and preserved as unreadable by another, which is two different
+// answers about the same money.
+//
+// Strict, and deliberately so: anything this build cannot fully account for is unreadable,
+// and unreadable means carried through untouched rather than repaired into a claim.
+function ledgerEntryReadable(id, entry) {
+    if (!isPlainObject(entry)) return false;
+    // The key and the record must agree. They used to be reconciled by overwriting the
+    // record's id with the key, which is editing a financial record to make it pass.
+    if (String(entry.id || '') !== String(id)) return false;
+    if (!entry.advanceId) return false;
+    if (!['given', 'corrected', 'cancelled'].includes(String(entry.kind))) return false;
+    if (entry.amount !== undefined && !Number.isFinite(Number(entry.amount))) return false;
+    if (entry.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(entry.date))) {
+        return false;
+    }
+    if (String(entry.kind) === 'given') {
+        if (!entry.workerId) return false;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(entry.date))) return false;
+        if (!Number.isFinite(Number(entry.amount))) return false;
+    }
+    return true;
+}
+
+// The ids in a ledger this build cannot read. Kept on the disk, left out of the fold, and
+// named to the person - see ledgerAgreesWithAdvances and the settings line.
+function unreadableLedgerIds(schedule) {
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    return Object.keys(held).filter(id => !ledgerEntryReadable(id, held[id]));
+}
+
 function ledgerEntryId() {
     return 'le_' + newEntityId('x').slice(2);
 }
@@ -58,15 +168,16 @@ function ledgerPath(entryId) {
 function ledgerEntries(schedule) {
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     return Object.keys(held)
+        // Keyed lookup, so an entry whose record disagrees with its key is unreadable
+        // rather than quietly folded under the wrong id.
+        .filter(id => ledgerEntryReadable(id, held[id]))
         .map(id => held[id])
         // Readable, not merely present. Since v87 the disk keeps an entry this build
         // cannot parse rather than deleting it at boot, so the filter that decides what
-        // the FOLD is built from has to name what it can actually read: an id, an advance
-        // behind it, and one of the three kinds this file knows how to apply. An entry of
-        // an unknown kind used to reach foldAdvance, be silently ignored there, and count
-        // as a ledger entry everywhere else - including in the parity check.
-        .filter(entry => entry && entry.id && entry.advanceId
-            && ['given', 'corrected', 'cancelled'].includes(String(entry.kind)))
+        // the FOLD is built from has to name what it can actually read - and it asks the
+        // one function that decides that for the whole app, so the fold and the parity
+        // check cannot come to different answers about the same bytes.
+        .filter(entry => ledgerEntryReadable(entry && entry.id, entry))
         .sort((a, b) => {
             const at = String(a.at || '');
             const bt = String(b.at || '');
@@ -171,6 +282,18 @@ function advanceHistory(schedule, advanceId) {
 // the caller, in the same commit, for as long as the gate below is closed.
 
 function appendLedgerEntry(schedule, entry) {
+    // The gate, at the mutation itself. Every path out of this app to the disk and the
+    // wire is guarded, but the object in memory is written HERE - and a caller that
+    // mutates the schedule and then calls State.save() never passes a journal at all.
+    // So the writer refuses first, and there is nothing for a later save to carry.
+    //
+    // Missing gate code is a closed gate. `typeof` rather than a bare call because a
+    // build that dropped ledgerWritesEnabled would otherwise throw here and be caught
+    // somewhere upstream as "the edit failed", which is a fail-open dressed as an error.
+    const open = typeof ledgerWritesEnabled === 'function' && ledgerWritesEnabled();
+    const migrating = typeof ledgerMigrationOpen === 'function' && ledgerMigrationOpen();
+    if (!open && !migrating) return null;
+
     // An entry may bring its own id. The migration must: two phones mirroring the same
     // advance have to mint the SAME key, or the union keeps both and the fold's winner
     // is decided by whichever random id sorts later.
@@ -257,6 +380,10 @@ function migrateAdvancesToLedger(schedule, deviceId) {
             by: String(deviceId || ''),
             origin: 'migration'
         });
+        // Refused: the door is not open. Nothing is added and nothing is claimed - the
+        // legacy field still holds every one of these advances, and the next boot asks
+        // again. See appendLedgerEntry.
+        if (!written) return;
         added.push(String(id));
         paths[written.path] = written.value;
     });
@@ -323,9 +450,7 @@ function ledgerAgreesWithAdvances(schedule) {
     // the same record treated as empty, one step further along. This verdict is the one
     // thing anybody consults before opening the writer, and it must not say the ledger
     // agrees with the record when part of the ledger has not been read at all.
-    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
-    const readable = new Set(ledgerEntries(schedule).map(entry => String(entry.id)));
-    const unreadable = Object.keys(held).filter(id => !readable.has(String(id)));
+    const unreadable = unreadableLedgerIds(schedule);
 
     return {
         agrees: missing.length === 0 && different.length === 0
