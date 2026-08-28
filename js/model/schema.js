@@ -393,7 +393,8 @@ function dayProblems(raw, known) {
         // recorded. The bytes were never overwritten, which is why teaching the reader
         // about the field is enough to open those records again.
         const extra = Object.keys(day)
-            .filter(key => key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff');
+            .filter(key => key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff'
+                && key !== 'vehicles');
         if (extra.length > 0) {
             problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
             return;
@@ -410,8 +411,27 @@ function dayProblems(raw, known) {
                 return;
             }
         }
+        if (day.vehicles !== undefined) {
+            if (!isPlainObject(day.vehicles)) {
+                problems.push('מצב הרכבים ב-' + date + ' אינו תקין.');
+                return;
+            }
+            const badId = Object.keys(day.vehicles).find(id => !isSafeSegment(id));
+            if (badId !== undefined) {
+                problems.push('ליום ' + date + ' יש רכב עם מזהה שאינו תקין.');
+                return;
+            }
+            const badState = Object.keys(day.vehicles).find(id => {
+                const item = day.vehicles[id];
+                return !isPlainObject(item) || typeof item.out !== 'boolean';
+            });
+            if (badState !== undefined) {
+                problems.push('מצב הרכב ' + badState + ' ב-' + date + ' אינו תקין.');
+                return;
+            }
+        }
         if (day.plan === undefined && day.actual === undefined
-            && day.vehiclesOff === undefined) {
+            && day.vehiclesOff === undefined && day.vehicles === undefined) {
             problems.push('ליום ' + date + ' אין רישום כלל.');
             return;
         }
@@ -581,6 +601,16 @@ function journalEntryProblems(path, value) {
         // days.<date>.vehiclesOff - the vehicles that stayed in the yard that day, or a
         // null taking the whole list back. Three segments rather than four, and it was
         // refused here, so the edit was written to this phone's disk and never left it.
+        // days.<date>.vehicles.<vehicleId> - one vehicle's state for one day.
+        if (parts.length === 4 && parts[2] === 'vehicles') {
+            if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
+            if (!isSafeSegment(parts[3])) return ['a vehicle path with an unusable id'];
+            if (value === null) return [];
+            if (!isPlainObject(value)) return ['a vehicle state that is not a record'];
+            if (typeof value.out !== 'boolean') return ['a vehicle state that says nothing'];
+            return [];
+        }
+
         if (parts.length === 3 && parts[2] === 'vehiclesOff') {
             if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
             if (value === null) return [];
@@ -1122,12 +1152,27 @@ function vehiclesOutOn(schedule, date) {
     if (!Array.isArray(schedule.vehicles) || schedule.vehicles.length === 0) return [];
     if (!anyWorkOn(schedule, date)) return [];
 
-    const off = (schedule.days[date] || {}).vehiclesOff;
-    const stayed = Array.isArray(off) ? off : [];
+    const day = schedule.days[date] || {};
+
+    // Two shapes, and the newer one wins per vehicle.
+    //
+    // vehiclesOff was one array, so it was one field on the wire: two phones marking two
+    // different vans on the same evening each wrote the whole list, and whichever landed
+    // second replaced the other's. One exception gone, and a van paid three hundred for a
+    // day it spent in the yard. The canonical form is one field per vehicle - see
+    // setVehicleOut - and the array is still READ because it is on phones and in
+    // documents already.
+    const perVehicle = isPlainObject(day.vehicles) ? day.vehicles : {};
+    const legacy = Array.isArray(day.vehiclesOff) ? day.vehiclesOff : [];
+    const stayedIn = id => {
+        const said = perVehicle[id];
+        if (said && typeof said === 'object' && said.out !== undefined) return said.out === false;
+        return legacy.indexOf(id) !== -1;
+    };
 
     return schedule.vehicles
         .filter(vehicle => vehicle && vehicle.active !== false)
-        .filter(vehicle => !stayed.includes(vehicle.id))
+        .filter(vehicle => !stayedIn(vehicle.id))
         .map(vehicle => ({ vehicle, amount: vehicleRateOn(vehicle, date) }))
         .filter(item => item.amount > 0);
 }
@@ -1150,29 +1195,35 @@ function vehiclePayFor(schedule, workerId, fromDate, toDate) {
 
 // Mark a vehicle as having stayed in the yard, or take that mark back. Returns the change
 // for State.commit, the same shape every other edit here returns.
+// One field per vehicle per day, so two phones marking two different vans on the same
+// evening never touch the same bytes. The whole-array form this replaced lost one of the
+// two exceptions every time, which is a van paid for a day it spent in the yard.
+//
+// The state is written out rather than deleted when a vehicle goes back on the road: the
+// old array may still say it stayed in, and on a day both shapes speak the newer one has
+// to be able to say so. An evening where nothing unusual happened still writes nothing at
+// all - this is only reached when somebody taps.
+// Whether a vehicle is marked as having stayed in on a date, in either shape. The screen
+// needs this on days with no work, where vehiclesOutOn says nothing about any of them.
+function isVehicleHeldIn(schedule, date, vehicleId) {
+    const day = (schedule.days || {})[date] || {};
+    const said = isPlainObject(day.vehicles) ? day.vehicles[vehicleId] : null;
+    if (said && typeof said.out === 'boolean') return said.out === false;
+    return Array.isArray(day.vehiclesOff) && day.vehiclesOff.indexOf(vehicleId) !== -1;
+}
+
 function setVehicleOut(schedule, date, vehicleId, out) {
     if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
     const day = schedule.days[date];
 
-    const stayed = Array.isArray(day.vehiclesOff) ? day.vehiclesOff.slice() : [];
-    const at = stayed.indexOf(vehicleId);
+    const said = isPlainObject(day.vehicles) ? day.vehicles[vehicleId] : null;
+    const legacy = Array.isArray(day.vehiclesOff) && day.vehiclesOff.indexOf(vehicleId) !== -1;
+    const before = (said && said.out !== undefined) ? said.out !== false : !legacy;
+    if (before === Boolean(out)) return { path: null };
 
-    // Nothing to do - already in the state being asked for. A change with no path is
-    // journalled as nothing and sent as nothing, which is what State.commit does with it.
-    if (out && at >= 0) stayed.splice(at, 1);
-    else if (!out && at < 0) stayed.push(vehicleId);
-    else return { path: null };
-
-    // An empty list is deleted rather than stored: the ordinary evening writes nothing,
-    // and a field that is always there saying "nothing" is a field on every device's
-    // document forever.
-    if (stayed.length === 0) {
-        delete day.vehiclesOff;
-        return { path: `days.${date}.vehiclesOff`, value: null };
-    }
-
-    day.vehiclesOff = stayed;
-    return { path: `days.${date}.vehiclesOff`, value: stayed };
+    if (!isPlainObject(day.vehicles)) day.vehicles = {};
+    day.vehicles[vehicleId] = { out: Boolean(out) };
+    return { path: `days.${date}.vehicles.${vehicleId}`, value: { out: Boolean(out) } };
 }
 
 function nextVehicleId(schedule) {

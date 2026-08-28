@@ -644,6 +644,20 @@ function normaliseSchedule(raw, hints) {
             ? day.vehiclesOff.filter(id => id && typeof id === 'string').map(String)
             : [];
         if (off.length > 0) schedule.days[date].vehiclesOff = off;
+
+        // The canonical per-vehicle form beside it. Both are kept: the array is what a
+        // phone still on v83 reads, and this is what two phones can write at once
+        // without one erasing the other.
+        if (day.vehicles && typeof day.vehicles === 'object') {
+            const states = {};
+            Object.keys(day.vehicles).forEach(id => {
+                const item = day.vehicles[id];
+                if (item && typeof item === 'object' && typeof item.out === 'boolean') {
+                    states[id] = { out: item.out };
+                }
+            });
+            if (Object.keys(states).length > 0) schedule.days[date].vehicles = states;
+        }
     });
 
     // Advances arrive keyed by id. A null value is a deletion another device sent and

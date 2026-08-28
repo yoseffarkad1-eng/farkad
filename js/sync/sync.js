@@ -2965,6 +2965,17 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 return;
             }
 
+            // days.<date>.vehicles.<vehicleId> - one vehicle's state for one day, which
+            // is the form that lets two phones mark two different vans at once.
+            if (parts.length === 4 && parts[0] === 'days' && parts[2] === 'vehicles') {
+                const date = parts[1];
+                if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
+                if (!schedule.days[date].vehicles) schedule.days[date].vehicles = {};
+                if (value === null) delete schedule.days[date].vehicles[parts[3]];
+                else schedule.days[date].vehicles[parts[3]] = value;
+                return;
+            }
+
             if (parts.length === 4 && parts[0] === 'days') {
                 const [, date, layer, workerId] = parts;
                 if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };

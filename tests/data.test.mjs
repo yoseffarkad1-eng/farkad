@@ -9063,16 +9063,16 @@ function withAdvances(device, rows) {
 
     const off = device.call('setVehicleOut', s, '2026-08-12', 'v_01', false);
     device.State.commit(off);
-    same('taking one off the road is one field', off.value, ['v_01']);
+    same('taking one off the road is one field, named for that vehicle', off.value,
+        { out: false });
     same('and it is not paid for', device.call('vehiclePayFor', s, 'w_01', '2026-08-12', '2026-08-12'),
         { days: 0, amount: 0 });
 
     const back = device.call('setVehicleOut', s, '2026-08-12', 'v_01', true);
     device.State.commit(back);
-    check('putting it back removes the field rather than storing an empty list',
-        !('vehiclesOff' in s.days['2026-08-12']), JSON.stringify(s.days['2026-08-12'].vehiclesOff));
-    check('and the field is cleared on the other phones too', back.value === null,
-        JSON.stringify(back.value));
+    same('putting it back says it went out, in its own field',
+        s.days['2026-08-12'].vehicles, { v_01: { out: true } });
+    same('and that is what the other phones are told', back.value, { out: true });
     same('it is paid for again', device.call('vehiclePayFor', s, 'w_01', '2026-08-12', '2026-08-12'),
         { days: 1, amount: 300 });
 }
@@ -9236,8 +9236,9 @@ function withAdvances(device, rows) {
 
     const change = device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', false);
     check('marking one as having stayed in is accepted', device.State.commit(change) === true);
-    same('and it is on the disk', JSON.parse(device.raw('scheduleData:v2')).days['2026-08-12'].vehiclesOff,
-        ['v_01']);
+    same('and it is on the disk',
+        JSON.parse(device.raw('scheduleData:v2')).days['2026-08-12'].vehicles,
+        { v_01: { out: false } });
 
     // The whole of the point: close, and open again.
     const reopened = makeDevice({ storage: device.dump() });
@@ -9247,8 +9248,8 @@ function withAdvances(device, rows) {
         reopened.call('farkadWritesBlocked') === false);
     check('the day that was recorded is still there',
         reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
-    same('and so is the exception', (reopened.State.schedule.days['2026-08-12'] || {}).vehiclesOff,
-        ['v_01']);
+    same('and so is the exception', (reopened.State.schedule.days['2026-08-12'] || {}).vehicles,
+        { v_01: { out: false } });
     same('so the vehicle is still not paid for',
         reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
         { days: 0, amount: 0 });
@@ -9268,17 +9269,19 @@ function withAdvances(device, rows) {
     // What the queue is allowed to carry is decided by the path validator, and a path it
     // refuses is an edit that never leaves this phone.
     same('the queued path is one the wire accepts',
-        device.call('journalEntryProblems', 'days.2026-08-12.vehiclesOff', ['v_01']), []);
+        device.call('journalEntryProblems', 'days.2026-08-12.vehicles.v_01', { out: false }), []);
     check('and the edit is actually in the queue',
-        String(device.raw('farkad:outbox')).includes('vehiclesOff'),
-        String(device.raw('farkad:outbox')).slice(0, 120));
+        String(device.raw('farkad:outbox')).includes('days.2026-08-12.vehicles.v_01'),
+        String(device.raw('farkad:outbox')).slice(0, 140));
 
     // Taking it back empties the list, which travels as a deletion rather than as [].
     const back = device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', true);
     device.State.commit(back);
-    check('putting it back sends a deletion, not an empty list', back.value === null);
+    // Written out rather than deleted: the old whole-array form may still say it stayed
+    // in, and on a day both shapes speak the newer one has to be able to say otherwise.
+    same('putting it back says so, rather than going quiet', back.value, { out: true });
     same('and that is a path the wire accepts too',
-        device.call('journalEntryProblems', 'days.2026-08-12.vehiclesOff', null), []);
+        device.call('journalEntryProblems', back.path, back.value), []);
 
     const again = makeDevice({ storage: device.dump() });
     again.State.load();
@@ -9300,8 +9303,11 @@ function withAdvances(device, rows) {
         active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
     written.State.save({ silent: true });
     record(written, '2026-08-12', 'w_01', 'p_01');
-    written.State.commit(
-        written.call('setVehicleOut', written.State.schedule, '2026-08-12', 'v_01', false));
+    // Written the way v83 wrote it - the whole-array form, by hand. setVehicleOut writes
+    // the per-vehicle form now, and this suite is about a record made by the build that
+    // did not have it.
+    written.State.schedule.days['2026-08-12'].vehiclesOff = ['v_01'];
+    written.State.save({ silent: true });
 
     const disk = written.dump();
     given('the record on that disk carries the field', JSON.parse(disk['scheduleData:v2'])
@@ -9492,7 +9498,7 @@ function withAdvances(device, rows) {
         (reopened.State.schedule.vehicles || []).some(item => item.id === 'v_keep'),
         JSON.stringify(reopened.State.schedule.vehicles));
     same('and still knows it stayed in the yard',
-        (reopened.State.schedule.days['2026-08-12'] || {}).vehiclesOff, ['v_keep']);
+        (reopened.State.schedule.days['2026-08-12'] || {}).vehicles, { v_keep: { out: false } });
     same('so it is not paid for',
         reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
         { days: 0, amount: 0 });
@@ -9587,6 +9593,92 @@ function withAdvances(device, rows) {
         other.call('entriesFor', other.State.schedule, '2026-08-11', 'w_01', 'actual').length === 1);
     check('and nothing is still owed', reopened.Sync.pendingCount() === 0,
         String(reopened.Sync.pendingCount()));
+}
+
+// ---------------------------------------------------------------- V6: two vans, two phones, one evening
+//
+// A2.2. days.<date>.vehiclesOff was one array, so it was one field on the wire: phone A
+// marks the white van as having stayed in, phone B marks the transit, and whichever write
+// lands second replaces the whole list. One of the two exceptions is gone and the vehicle
+// is paid three hundred for a day it spent in the yard.
+//
+// The canonical form is now one field per vehicle per day - days.<date>.vehicles.<id> -
+// so two phones marking different vans never touch the same bytes. The old array is still
+// READ, because it is on phones and in documents already.
+{
+    suite('V6: two phones marking different vans keep both');
+
+    const cloud = makeCloud();
+    const a = makeDevice();
+    seed(a);
+    a.State.schedule.vehicles = [
+        { id: 'v_white', name: 'לבן', ownerId: 'w_01', active: true,
+            rates: [{ from: '2026-08-01', amount: 300 }] },
+        { id: 'v_transit', name: 'טרנזיט', ownerId: 'w_02', active: true,
+            rates: [{ from: '2026-08-01', amount: 300 }] }
+    ];
+    a.State.save({ silent: true });
+    record(a, '2026-08-12', 'w_01', 'p_01');
+    await connected(a, cloud);
+
+    const b = makeDevice({ storage: a.dump() });
+    b.State.load();
+    await connected(b, cloud);
+    given('both phones see both vans', (b.State.schedule.vehicles || []).length === 2);
+
+    // Neither has finished before the other starts.
+    const offA = a.call('setVehicleOut', a.State.schedule, '2026-08-12', 'v_white', false);
+    const offB = b.call('setVehicleOut', b.State.schedule, '2026-08-12', 'v_transit', false);
+    check('each writes its own field, not the whole list',
+        offA.path !== offB.path, `${offA.path} / ${offB.path}`);
+    a.State.commit(offA);
+    b.State.commit(offB);
+    await wait();
+    await wait();
+
+    const third = makeDevice();
+    await connected(third, cloud);
+    await wait();
+
+    same('the white van is not paid for',
+        third.call('vehiclePayFor', third.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 0, amount: 0 });
+    same('and neither is the transit',
+        third.call('vehiclePayFor', third.State.schedule, 'w_02', '2026-08-12', '2026-08-12'),
+        { days: 0, amount: 0 });
+}
+
+{
+    suite('V6: a record written by v83 still reads');
+
+    // The old array is on phones and in documents already. It is read, and a vehicle it
+    // names stays unpaid.
+    const device = makeDevice();
+    seed(device);
+    device.State.schedule.vehicles = [{ id: 'v_old', name: 'ישן', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    // Written the way v83 wrote it, by hand.
+    device.State.schedule.days['2026-08-12'].vehiclesOff = ['v_old'];
+    device.State.save({ silent: true });
+
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    same('the old list is still obeyed',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 0, amount: 0 });
+    check('and the bytes it was written as are still there',
+        Array.isArray((reopened.State.schedule.days['2026-08-12'] || {}).vehiclesOff),
+        JSON.stringify(reopened.State.schedule.days['2026-08-12']));
+
+    // Saying it went out after all must beat the old list rather than fight it.
+    reopened.State.commit(
+        reopened.call('setVehicleOut', reopened.State.schedule, '2026-08-12', 'v_old', true));
+    same('and putting it back on the road is heard over the old list',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 1, amount: 300 });
 }
 
 report();

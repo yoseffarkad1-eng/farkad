@@ -699,16 +699,30 @@ function renderVehicleTray() {
     const vehicles = (State.schedule.vehicles || []).filter(item => item.active !== false);
     if (vehicles.length === 0) return null;
 
-    const off = (State.schedule.days[State.date] || {}).vehiclesOff || [];
+    // Asked of the model rather than read out of the day record. There are two shapes -
+    // the per-vehicle state this build writes and the whole-array form v83 wrote - and
+    // unpacking either of them here is how the screen and the pay sheet come to disagree
+    // about whether a van went out.
+    const outToday = new Set(vehiclesOutOn(State.schedule, State.date)
+        .map(item => item.vehicle.id));
+    const worked = anyWorkOn(State.schedule, State.date);
+
     const tray = el('div', 'tray');
     tray.appendChild(el('h4', null, 'רכבים'));
 
     const chips = el('div', 'chips');
     vehicles.forEach(vehicle => {
-        const out = !off.includes(vehicle.id);
-        const chip = el('div', out ? 'chip chip-vehicle' : 'chip chip-vehicle chip-absent');
+        const out = worked ? outToday.has(vehicle.id) : !isVehicleHeldIn(State.schedule, State.date, vehicle.id);
+        // On a day nobody worked the pay sheet pays nothing for any vehicle, so the chip
+        // must not say יצא - it would be the screen promising money the report will not
+        // pay. It says nothing either way until there is work for a vehicle to have gone
+        // out to.
+        const state = !worked ? 'neutral' : (out ? 'out' : 'in');
+        const chip = el('div', state === 'out'
+            ? 'chip chip-vehicle'
+            : 'chip chip-vehicle chip-absent');
         chip.appendChild(button(
-            `${vehicle.name} · ${out ? 'יצא' : 'לא יצא'}`,
+            `${vehicle.name} · ${state === 'out' ? 'יצא' : (state === 'in' ? 'לא יצא' : 'אין עבודה')}`,
             'chip-main',
             () => {
                 // offerUndo rather than editWithUndo: that one snapshots a WORKER's day
