@@ -4538,20 +4538,20 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('and leaves the mode',
     (await page.locator('#reorderList .reorder-row').count()) === 0);
 
-  // Cancelling is not a quiet save. The guard belongs to the IMPLICIT exits - a tab
-  // tapped mid-sort asks its three-answer question - while the footer's explicit
-  // discard button IS the answer and acts at once.
+  // Cancelling is not a quiet save. The panel is modal now, so the implicit exit is
+  // its back affordance - which asks the three-answer question - while the footer's
+  // explicit discard button IS the answer and acts at once.
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(250);
   await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(200);
-  await page.click('#tab-day');
+  await page.locator('.reorder-back').click();
   await page.waitForTimeout(250);
-  check('a tab tapped over unsaved changes asks first', await page.isVisible('#askChoices'));
+  check('the back door over unsaved changes asks first', await page.isVisible('#askChoices'));
   await page.locator('#askChoices').getByRole('button', { name: 'הישארות' }).click();
   await page.waitForTimeout(250);
   check('staying keeps the draft on screen',
-    (await page.locator('#workerList .reorder-row').count()) > 0);
+    (await page.locator('#reorderList .reorder-row').count()) > 0);
   await page.locator('.reorder-foot').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
   await page.waitForTimeout(300);
   check('the explicit discard acts at once, and leaves the order alone',
