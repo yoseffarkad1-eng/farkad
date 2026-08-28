@@ -9729,4 +9729,60 @@ function withAdvances(device, rows) {
     }
 }
 
+// ---------------------------------------------------------------- V8: archiving must not rewrite August
+//
+// active is a flag about TODAY and vehiclesOutOn was applying it to every date in the
+// record. So archiving a van in September changed what August came to: a period that was
+// counted, printed and paid went from three hundred to nought, and nothing on any screen
+// said why. The same mistake the day rates were stamped to prevent.
+{
+    suite('V8: a van archived today is still paid for the days it worked');
+
+    const device = makeDevice();
+    seed(device);
+    device.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const august = device.call('payrollReport', device.State.schedule, '2026-08-01', '2026-08-31')
+        .find(row => row.workerId === 'w_01');
+    given('August was worth something', august.vehicleAmount === 300);
+
+    // Closed and opened again, the way a fortnight is: the report is not being read out
+    // of the same memory that wrote it.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+
+    // Archived in September, through the app rather than by setting the flag.
+    reopened.setToday('2026-09-15');
+    reopened.call('toggleVehicleActive', 'v_01');
+
+    const after = reopened.call('payrollReport', reopened.State.schedule, '2026-08-01', '2026-08-31')
+        .find(row => row.workerId === 'w_01');
+    check('August still says what it said', after.vehicleAmount === 300,
+        String(after.vehicleAmount));
+    check('and so does the day count', after.vehicleDays === 1, String(after.vehicleDays));
+    check('and the total somebody was paid', after.amount === august.amount,
+        `${august.amount} -> ${after.amount}`);
+
+    // And it stops from the day it was archived, not before it.
+    record(reopened, '2026-09-20', 'w_01', 'p_01');
+    same('a day after the archiving is not paid for',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-09-20', '2026-09-20'),
+        { days: 0, amount: 0 });
+    check('and it is gone from the day screen\'s list',
+        (reopened.State.schedule.vehicles || []).filter(v => v.active !== false).length === 0);
+
+    // Put back on the road, and the days in between stay unpaid.
+    reopened.setToday('2026-10-01');
+    reopened.call('toggleVehicleActive', 'v_01');
+    same('the days it was off the road stay off the books',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-09-20', '2026-09-20'),
+        { days: 0, amount: 0 });
+    same('and August is still August',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-01', '2026-08-31'),
+        { days: 1, amount: 300 });
+}
+
 report();

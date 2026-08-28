@@ -678,6 +678,13 @@ function journalEntryProblems(path, value) {
                 if (typeof value !== 'boolean') return ['a vehicle field that is not a flag'];
                 return [];
             }
+            if (field === 'service') {
+                if (!Array.isArray(value)) return ['a service history that is not a list'];
+                const bad = value.find(entry => !isPlainObject(entry)
+                    || typeof entry.from !== 'string' || !isRealDate(entry.from)
+                    || typeof entry.active !== 'boolean');
+                return bad === undefined ? [] : ['a service entry with no date or no state'];
+            }
             if (field === 'rates') {
                 if (!Array.isArray(value)) return ['a vehicle price history that is not a list'];
                 const bad = value.find(entry => !isPlainObject(entry)
@@ -1193,7 +1200,7 @@ function vehiclesOutOn(schedule, date) {
     };
 
     return schedule.vehicles
-        .filter(vehicle => vehicle && vehicle.active !== false)
+        .filter(vehicle => vehicle && !vehicleRetiredOn(vehicle, date))
         .filter(vehicle => !stayedIn(vehicle.id))
         .map(vehicle => ({ vehicle, amount: vehicleRateOn(vehicle, date) }))
         .filter(item => item.amount > 0);
@@ -1225,6 +1232,41 @@ function vehiclePayFor(schedule, workerId, fromDate, toDate) {
 // old array may still say it stayed in, and on a day both shapes speak the newer one has
 // to be able to say so. An evening where nothing unusual happened still writes nothing at
 // all - this is only reached when somebody taps.
+// Was this vehicle off the books on that date?
+//
+// `active` is a flag about TODAY, and it was being applied to every date in the record:
+// archiving a van in September changed what August came to, from three hundred to nought,
+// on a period that had been counted, printed and paid. It is the same mistake the day
+// rates were stamped to prevent.
+//
+// So archiving writes the date it happened - `retiredFrom` - and only days from that date
+// onward stop paying. Putting the van back clears it, and the days it spent off the road
+// stay off the books, because the periods either side of them are what they were.
+//
+// A van marked inactive with no date on it is one archived by the build before this, and
+// there is no way to know when. Guessing would restate a real period in one direction or
+// the other, so it keeps the behaviour it was archived under - off the books everywhere -
+// and it is the one case this cannot date. Nothing in production has been archived under
+// that build; the feature and the fix are hours apart.
+function vehicleRetiredOn(vehicle, date) {
+    if (!vehicle) return true;
+
+    // A dated history, the same shape as the price one above and for the same reason. A
+    // single flag cannot say "off the road in September and back in October": clearing it
+    // paid for the days in between, which is the past being restated in the other
+    // direction. Each entry is what was true from that date onward.
+    if (Array.isArray(vehicle.service) && vehicle.service.length > 0) {
+        let active = true;
+        vehicle.service
+            .filter(entry => entry && typeof entry.from === 'string' && entry.from <= date)
+            .sort((a, b) => (a.from < b.from ? -1 : 1))
+            .forEach(entry => { active = entry.active !== false; });
+        return !active;
+    }
+
+    return vehicle.active === false;
+}
+
 // Whether a vehicle is marked as having stayed in on a date, in either shape. The screen
 // needs this on days with no work, where vehiclesOutOn says nothing about any of them.
 function isVehicleHeldIn(schedule, date, vehicleId) {

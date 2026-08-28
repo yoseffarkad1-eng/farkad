@@ -828,7 +828,17 @@ async function toggleVehicleActive(vehicleId) {
 
     // Archived, never deleted - the days it already earned on are part of a pay sheet
     // somebody may still print.
-    vehicle.active = vehicle.active === false;
+    //
+    // And DATED. `active` alone is a flag about today, and the report applied it to every
+    // date in the record: archiving a van in September changed what August came to. The
+    // date is what stops the past being restated - see vehicleRetiredOn.
+    const goingBack = vehicle.active === false;
+    vehicle.active = goingBack;
+    if (!Array.isArray(vehicle.service)) vehicle.service = [];
+    const today = todayStr();
+    const sameDay = vehicle.service.find(entry => entry.from === today);
+    if (sameDay) sameDay.active = goingBack;
+    else vehicle.service.push({ from: today, active: goingBack });
     State.commitRoster();
     render();
 }

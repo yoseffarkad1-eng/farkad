@@ -620,6 +620,11 @@ function normaliseSchedule(raw, hints) {
             name: String(v.name || ''),
             ownerId: String(v.ownerId || ''),
             active: v.active !== false,
+            // When it was on the road and when it was not, dated. Without this `active`
+            // is a flag about today applied to every date in the record.
+            service: (Array.isArray(v.service) ? v.service : [])
+                .filter(entry => entry && typeof entry.from === 'string' && entry.from)
+                .map(entry => ({ from: String(entry.from), active: entry.active !== false })),
             rates: (Array.isArray(v.rates) ? v.rates : [])
                 .filter(entry => entry && typeof entry.from === 'string' && entry.from)
                 .map(entry => ({ from: String(entry.from), amount: Number(entry.amount) || 0 }))
