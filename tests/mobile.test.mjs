@@ -583,6 +583,48 @@ for (const width of [320, 390]) {
     check(`${width}px: it does not widen the page`, across.doc <= across.inner + 1,
         JSON.stringify(across));
 
+    // A crew of thirty is taller than any phone, so this mode is only usable if the list
+    // scrolls. It did not: touch-action: none was set on the whole ROW, and in this mode
+    // the rows are the screen - a finger anywhere on the list was a finger the browser had
+    // been told not to pan with. Reported from a real iPhone, invisible to every
+    // assertion here, and invisible to a mouse.
+    const panning = await page.evaluate(() => {
+        const blocked = node => {
+            const value = getComputedStyle(node).touchAction;
+            return value === 'none' || value === 'pan-x' || value === 'pinch-zoom';
+        };
+        const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+        return {
+            rows: rows.filter(blocked).length,
+            handles: [...document.querySelectorAll('.reorder-handle')].filter(blocked).length,
+            ancestors: (() => {
+                let node = rows[0], n = 0;
+                while (node && node !== document.documentElement) {
+                    if (blocked(node) && !node.classList.contains('reorder-handle')) n += 1;
+                    node = node.parentElement;
+                }
+                return n;
+            })()
+        };
+    });
+    check(`${width}px: a finger on the list can still scroll it`,
+        panning.rows === 0 && panning.ancestors === 0, JSON.stringify(panning));
+    check(`${width}px: and the handle still owns the drag`, panning.handles > 0,
+        JSON.stringify(panning));
+
+    const reach = await page.evaluate(async () => {
+        window.scrollTo(0, document.documentElement.scrollHeight);
+        await new Promise(done => setTimeout(done, 200));
+        const last = [...document.querySelectorAll('#workerList .reorder-row')].pop();
+        const foot = document.querySelector('.reorder-foot');
+        return {
+            lastVisible: last.getBoundingClientRect().bottom <= window.innerHeight + 1,
+            footVisible: !foot || foot.getBoundingClientRect().bottom <= window.innerHeight + 1
+        };
+    });
+    check(`${width}px: the last man and the save button can both be reached`,
+        reach.lastVisible && reach.footVisible, JSON.stringify(reach));
+
     const small = await undersized(page);
     check(`${width}px: every move button is a finger's size`,
         small.length === 0, JSON.stringify(small).slice(0, 200));

@@ -413,10 +413,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
-    /* The browser must not start its own text selection or pan gesture on a row that is
-       about to be dragged: on a phone that is the difference between carrying a name and
-       scrolling the page with a name stuck to the finger. */
-    touch-action: none;
+    /* No text selection: a long press on a name in a list built for dragging should not
+       put a highlight on it.
+
+       And NOT touch-action: none, which is what used to be here. The intent was right -
+       the browser must not pan while a row is being carried - but the rule was on the
+       whole row, and in this mode the rows ARE the screen. A finger anywhere on the list
+       was a finger the browser had been told not to scroll with, so a crew of twenty-one
+       could not be scrolled past the fifth man. The handle below carries the rule, which
+       is the only place a drag can start from. */
     user-select: none;
 }
 .reorder-carrying {
