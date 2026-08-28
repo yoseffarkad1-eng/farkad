@@ -8723,4 +8723,115 @@ function withAdvances(device, rows) {
             .some(entry => entry.id === entryId));
 }
 
+// ---------------------------------------------------------------- the client's file
+//
+// The reports screen is a classic script like everything else, so its export logic runs
+// here the way the model does: loaded into a device's scope, no browser and no
+// spreadsheet library. The leak this guards against lived in which sheets got BUNDLED,
+// not in any one sheet's arithmetic - and the bundle is plain rows.
+{
+    suite('a site-scoped export is the billing sheet alone, with nobody named in it');
+
+    const vm = (await import('node:vm')).default;
+    const { readFileSync } = await import('node:fs');
+
+    const device = makeDevice();
+    seed(device);
+    const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
+    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+
+    run(`
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+        assignPlace(State.schedule, '2026-08-10', 'w_02', 'actual', 'p_02');
+        assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+        State.save({ silent: true });
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+    `);
+
+    // The manager's own export, from the payroll side: the whole workbook - names and
+    // pay are its whole job.
+    run(`REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+    const full = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('from the payroll side the workbook is whole',
+        Boolean(full.payroll && full.invoice && full.detail),
+        Object.keys(full).join(','));
+    check('and it names the crew, as it must',
+        JSON.stringify(full.payroll).includes('דוד'));
+
+    // The client's export: one site chosen on the billing side.
+    run(`REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
+    const scoped = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('with one client\'s site chosen, the bundle is the billing sheet alone',
+        Boolean(scoped.invoice) && !('payroll' in scoped) && !('detail' in scoped),
+        Object.keys(scoped).join(','));
+
+    const flat = JSON.stringify(scoped);
+    const named = ['דוד', 'שרה', 'עלי'].filter(name => flat.includes(name));
+    check('no worker is named anywhere in the client\'s rows', named.length === 0,
+        named.join(','));
+    check('and no pay is in them either',
+        !flat.includes('400') && !flat.includes('שכר') && !flat.includes('לתשלום'),
+        flat.slice(0, 140));
+    check('nor the other client\'s site', !flat.includes('תל אביב'), flat.slice(0, 140));
+
+    // A chosen site with nothing in range resolves to nothing, and the export is the
+    // ordinary workbook - matching what the screen falls back to showing.
+    run(`INVOICE_PLACE = 'p_gone';`);
+    const fallback = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('a chosen site with no rows in range is not a client scope',
+        Boolean(fallback.payroll && fallback.invoice && fallback.detail),
+        Object.keys(fallback).join(','));
+
+    // Back on the payroll side the same chosen site scopes nothing: the full workbook
+    // belongs to that context whatever the billing page was left pointing at.
+    run(`REPORT_SECTION = 'workers'; INVOICE_PLACE = 'p_01';`);
+    const payrollSide = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('the payroll side always gets the whole workbook',
+        Boolean(payrollSide.payroll && payrollSide.detail),
+        Object.keys(payrollSide).join(','));
+}
+
+// ---------------------------------------------------------------- how the money moved
+{
+    suite('an advance carries its method, and every door lets the field through');
+
+    const device = makeDevice();
+    seed(device);
+    device.setToday('2026-08-12');
+
+    // The way the form writes it: the legacy record every phone already reads, with the
+    // method set on the record itself before the commit - so the journal entry and the
+    // saved schedule carry it together.
+    const change = device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-12', 250, 'על חשבון סוף התקופה');
+    change.value.method = 'cash';
+    const committed = device.State.commit(change);
+    const id = change.value.id;
+
+    check('the commit is accepted', committed === true);
+    check('the record keeps the method and the note',
+        device.State.schedule.advances[id].method === 'cash'
+        && device.State.schedule.advances[id].note === 'על חשבון סוף התקופה',
+        JSON.stringify(device.State.schedule.advances[id]));
+
+    // The wire check: an extra field is not a problem. A device one build behind will
+    // receive this record, and refusing it would refuse the money.
+    const problems = device.call('advanceProblems',
+        { advances: device.State.schedule.advances });
+    same('the validator passes the record untouched', problems, []);
+
+    // Closed and reopened: the method is on the disk, not in the session.
+    const reopened = makeDevice({ storage: device.dump(), deviceId: device.id });
+    reopened.State.load();
+    check('the method survives a close and reopen',
+        reopened.State.schedule.advances[id]
+        && reopened.State.schedule.advances[id].method === 'cash',
+        JSON.stringify(reopened.State.schedule.advances[id]));
+
+    // And the existing correction mechanism still works on a record that carries it.
+    reopened.State.commit(reopened.call('removeAdvance', reopened.State.schedule, id));
+    check('the advance can still be removed', !(id in (reopened.State.schedule.advances || {})));
+}
+
 report();

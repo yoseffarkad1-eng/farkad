@@ -1934,9 +1934,12 @@ async function seedRoster(page) {
     };
   });
   check('the site totals say what they are counting',
-    invoice.footer.includes('ימי-עובד'), invoice.footer.slice(0, 60));
+    invoice.footer.includes('ימי עובד־אתר'), invoice.footer.slice(0, 60));
   check('and it is spelled out under the table',
     invoice.body.includes('עובד אחד ביום אחד באתר'), '');
+  check('with the counting rule that keeps the three counts apart',
+    invoice.body.includes('עובד בשני אתרים נספר פעם אחת בכל אתר') &&
+    invoice.body.includes('אין לצפות שהסכומים יתאימו'), '');
 
   // The client's page names sites and dates. It must not name the crew: who was there is
   // the employer's business, and this is the page that gets handed over.
@@ -5005,6 +5008,10 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.click('#tab-reports');
   await page.waitForTimeout(400);
 
+  // The billing side is behind its segment now; the chips are pressed on that side.
+  await page.locator('.report-section-toggle').getByRole('button', { name: 'לפי אתר' }).click();
+  await page.waitForTimeout(300);
+
   check('by default the invoice shows every site, for working from',
     (await page.locator('.report-invoice thead th').count()) === 4);
 
@@ -5031,10 +5038,29 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     sheets[0].length === 3 && !JSON.stringify(sheets).includes('תל אביב'),
     JSON.stringify(sheets[0]));
 
+  // The whole bundle, not just the billing sheet: with a client's site chosen, the
+  // pay sheet and the per-day detail - names and money - must not be in the file at
+  // all. This is the file that gets HANDED OVER.
+  const bundle = await page.evaluate(() => {
+    const out = reportSheets();
+    return { keys: Object.keys(out), flat: JSON.stringify(out) };
+  });
+  check('a client-scoped export is the billing sheet alone',
+    bundle.keys.length === 1 && bundle.keys[0] === 'invoice', bundle.keys.join(','));
+  check('and it names no worker',
+    !bundle.flat.includes('דוד') && !bundle.flat.includes('שרה') && !bundle.flat.includes('עלי'),
+    bundle.flat.slice(0, 120));
+
+  // The button says what it will hand over, since the usual one promises the workbook.
+  check('the export button names the client\'s file',
+    (await page.locator('.range-actions').textContent()).includes('יצוא חיוב'));
+
   await page.locator('.invoice-picker').getByRole('button', { name: 'כל האתרים' }).click();
   await page.waitForTimeout(300);
   check('and it goes back to every site',
     (await page.locator('.report-invoice thead th').count()) === 4);
+  check('with the full workbook back behind the button', await page.evaluate(() =>
+    Object.keys(reportSheets()).join(',') === 'payroll,invoice,detail'));
   await page.context().close();
 }
 

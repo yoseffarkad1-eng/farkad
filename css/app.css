@@ -1133,6 +1133,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .range-current { font-variant-numeric: tabular-nums; margin-inline-end: auto; font-size: 16px; }
 @media print { .range-chips, .range-actions { display: none !important; } }
 
+/* One report on screen at a time - לפי עובד or לפי אתר - while BOTH stay in the DOM.
+   The set-aside one is hidden for the screen only, so the print rules further down keep
+   printing the whole record without having to win anything back. */
+@media screen { .report-offscreen { display: none; } }
+.report-section-toggle { margin: 0 0 14px; margin-inline-start: 0; }
+.report-section-toggle button { flex: 1; min-height: 44px; }
+@media print { .report-section-toggle { display: none !important; } }
+
 /* Restore points: dated, and few enough to read as a sentence rather than a list. */
 .restore-points {
     display: flex;
@@ -1213,6 +1221,51 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-top: 1px solid var(--line-soft);
 }
 .wday-actions button { flex: 1; min-height: 46px; }
+
+/* The rate a historic day was actually paid at, small and under its amount - the day
+   keeps its rate, and this is where the card says which one that was. */
+.wday-rate { display: block; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+
+/* The working under the totals: how dates became paid days, and paid days money. Full
+   width of the middle column, so each equation is its own line. */
+.wday-derive { flex-basis: 100%; font-size: 12.5px; font-weight: 400; color: var(--ink-3); }
+
+/* Money that went the other way is its own block, and it says so before its rows. */
+.wday-advances-head {
+    margin-top: 16px;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--ink-2);
+}
+.wday-bridge { margin-top: 8px; }
+
+/* The advance form, in place of the one-question prompt: amount, date, note, and how
+   the money moved. Tokens only, so dark mode needs nothing of its own. */
+.advance-form {
+    margin-top: 14px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+}
+.advance-form-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+.advance-form input[type="text"],
+.advance-form input[type="date"] {
+    width: 100%;
+    font-family: inherit;
+    /* 16px exactly: anything smaller makes iOS zoom the page when a field focuses. */
+    font-size: 16px;
+    min-height: 44px;
+    padding: 9px 11px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+}
+.advance-form .layer-toggle { margin-inline-start: 0; margin-bottom: 6px; }
+.advance-form .layer-toggle button { flex: 1; min-height: 44px; }
+.advance-form .modal-actions button { flex: 1; min-height: 44px; }
 
 @media (max-width: 700px) {
     .wday { grid-template-columns: 1fr 70px; }

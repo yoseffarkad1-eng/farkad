@@ -214,7 +214,7 @@ for (const scenario of [
             content.text.slice(0, 60));
         check('its column headings', content.headers.length >= 4, JSON.stringify(content.headers));
         check('every worker row', content.rows === 6, String(content.rows));
-        check('and its totals', content.totals.includes('סה"כ'), content.totals.slice(0, 40));
+        check('and its totals', content.totals.includes('סה״כ'), content.totals.slice(0, 40));
     } else {
         check('the screen being printed is still printable', content.visible === true);
         check('and it still has the day on it', content.text.length > 0);
@@ -301,7 +301,7 @@ for (const scenario of [
 
     // The PAY SHEET's totals, on the pay sheet's own last page - not the invoice's, which
     // is a different table with a different total further on.
-    const totalsPage = payrollPages.filter(item => says(pageText(item), 'סה"כ')).pop();
+    const totalsPage = payrollPages.filter(item => says(pageText(item), 'סה״כ')).pop();
     check('the totals row is printed', Boolean(totalsPage),
         JSON.stringify(payrollPages.map(item => pageText(item).slice(-30))));
 
@@ -309,7 +309,7 @@ for (const scenario of [
         // Grouped into lines by their baseline, because a printed row arrives as a dozen
         // separate runs and the label is not one of them on its own.
         const lines = linesOf(totalsPage);
-        const totalsLine = lines.filter(line => says(line.text, 'סה"כ')).pop();
+        const totalsLine = lines.filter(line => says(line.text, 'סה״כ')).pop();
 
         check('the totals row is one line on the page', Boolean(totalsLine),
             JSON.stringify(lines.slice(-3).map(line => line.text.slice(0, 40))));
