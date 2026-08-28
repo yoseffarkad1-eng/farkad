@@ -340,7 +340,11 @@
              form fits above the phone keyboard with room to spare. -->
         <details class="form-more" id="workerFormMore">
             <summary>עוד פרטים (טלפון, תעודת זהות, שעות נוספות)</summary>
-            <input dir="ltr" id="workerFormPhone" inputmode="tel" placeholder="מספר טלפון" type="text"/>
+            <input dir="ltr" id="workerFormPhone" inputmode="tel" placeholder="מספר טלפון" type="text" oninput="workerPhoneTyped()"/>
+            <!-- Said while the number is still being typed, when fixing it costs one
+                 keystroke. Advisory only - the blocking question at save stays, and it is
+                 the one asked against the state that is actually written to. -->
+            <p class="phone-shared-hint" id="workerFormPhoneHint" style="display:none"></p>
             <input dir="ltr" id="workerFormId" inputmode="numeric" placeholder="מספר זהות" type="text"/>
             <input dir="ltr" id="workerFormHourly" inputmode="decimal" placeholder="שכר לשעה נוספת" type="number" min="0" step="1"/>
         </details>

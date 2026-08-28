@@ -950,6 +950,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .worker-history-label { color: var(--ink-2); }
 .worker-history-value { font-variant-numeric: tabular-nums; }
 
+/* The shared-number warning under the phone field, while it is being typed. Amber and
+   advisory - the blocking question at save time keeps its own dialog. Same shape as
+   .share-warning: a warning that is a sentence, not a badge. */
+.phone-shared-hint {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-inline-start: 3px solid var(--warn);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    margin: -2px 0 10px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
 /* Archived names, folded away under the working list. */
 .roster-archive { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .roster-archive summary {

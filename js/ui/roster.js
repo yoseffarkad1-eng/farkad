@@ -599,6 +599,7 @@ function showAddWorkerModal() {
     document.getElementById('workerFormDaily').value = '';
     document.getElementById('workerFormHourly').value = '';
     document.getElementById('workerFormError').textContent = '';
+    workerPhoneTyped();
     renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
 }
@@ -618,8 +619,40 @@ function editWorker(workerId) {
     // Folded details that hold data would look like data that was lost.
     document.getElementById('workerFormMore').open =
         Boolean(worker.phone || worker.idNumber || worker.hourlyRate);
+    // A number that already clashes is said the moment the screen opens, not only once
+    // somebody happens to retype it.
+    workerPhoneTyped();
     renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
+}
+
+// The typed number, checked as it is typed - against everybody, archived included,
+// because the archived man is exactly the one the daily list is not showing.
+//
+// Advisory, in amber, under the field. The BLOCKING question stays in saveWorkerForm and
+// is not touched by this: it asks against the schedule at the moment of the write, which
+// can differ from the schedule this hint was drawn against. The hint saves the retyping;
+// the confirm is the gate.
+function workerPhoneTyped() {
+    const field = document.getElementById('workerFormPhone');
+    const hint = document.getElementById('workerFormPhoneHint');
+    if (!field || !hint) return;
+
+    const sharing = typeof workersSharingPhone === 'function'
+        ? workersSharingPhone(State.schedule, field.value.trim(), editingWorkerId)
+        : [];
+    if (sharing.length === 0) {
+        hint.style.display = 'none';
+        hint.textContent = '';
+        return;
+    }
+    // Named the way the save-time question names them, so the two read as one voice.
+    const names = sharing
+        .map(worker => worker.active === false ? `${isolate(worker.name)} (בארכיון)` : worker.name)
+        .join(', ');
+    hint.textContent =
+        `המספר הזה כבר רשום אצל ${names} - אפשר לשמור, אבל בדוק שאין כפילות.`;
+    hint.style.display = '';
 }
 
 async function saveWorkerForm() {
