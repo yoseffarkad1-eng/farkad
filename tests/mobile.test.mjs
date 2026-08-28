@@ -582,6 +582,78 @@ for (const width of [320, 390]) {
 }
 
 for (const width of [320, 390]) {
+    suite(`${width}px: the worker's own screen`);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+
+    // The crew list with a man under the archive fold: the restore button is the one
+    // control this wave adds to a row, and it is measured where it is tapped. The text
+    // floor is not run against this view - the roster badges predate this suite and
+    // carry their own size.
+    await page.evaluate(() => {
+        State.schedule.workers[29].active = false;
+        State.commit(addAdvance(State.schedule, 'w_30', '2026-08-10', 200, ''));
+        State.save({ silent: true });
+        showView('roster');
+        render();
+        document.querySelector('#workerList .roster-archive').open = true;
+    });
+    await page.waitForTimeout(250);
+
+    const restore = await page.evaluate(() => {
+        const node = document.querySelector('.roster-archive .roster-restore');
+        if (!node) return { found: false };
+        const box = node.getBoundingClientRect();
+        return { found: true, w: Math.round(box.width), h: Math.round(box.height) };
+    });
+    check(`${width}px: the restore on an archived row is a finger's size`,
+        restore.found && restore.w >= 44 && restore.h >= 44, JSON.stringify(restore));
+
+    const listSmall = await undersized(page);
+    check(`${width}px: every control on the crew list is a finger's size`,
+        listSmall.length === 0, JSON.stringify(listSmall).slice(0, 200));
+
+    // The form itself, opened over the day view, with everything it can carry on
+    // screen at once: the history block, the folded details opened, and the
+    // shared-number hint raised by typing a number somebody already has.
+    await page.evaluate(() => {
+        showView('day');
+        State.schedule.workers[1].phone = '052-884-1930';
+        State.save({ silent: true });
+        editWorker('w_01');
+        document.getElementById('workerFormMore').open = true;
+    });
+    await page.fill('#workerFormPhone', '052-884-1930');
+    await page.waitForTimeout(200);
+
+    const form = await page.evaluate(() => {
+        const hint = document.getElementById('workerFormPhoneHint');
+        const history = document.getElementById('workerFormHistory');
+        return {
+            hint: hint.style.display !== 'none',
+            hintPx: parseFloat(getComputedStyle(hint).fontSize),
+            history: history.style.display !== 'none',
+            phonePx: parseFloat(getComputedStyle(
+                document.getElementById('workerFormPhone')).fontSize)
+        };
+    });
+    check(`${width}px: the history block and the typed-number hint are both on screen`,
+        form.hint && form.history, JSON.stringify(form));
+    check(`${width}px: the phone field holds the 16px zoom threshold`,
+        form.phonePx >= 16, JSON.stringify(form));
+
+    const formSmall = await undersized(page);
+    check(`${width}px: every control on the open form is a finger's size`,
+        formSmall.length === 0, JSON.stringify(formSmall).slice(0, 200));
+
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 4)));
+
+    await page.context().close();
+}
+
+for (const width of [320, 390]) {
     suite(`${width}px: reorder mode`);
 
     const page = await open({ width, height: HEIGHTS[width] });
