@@ -1,5 +1,13 @@
 # Data safety work — handover
 
+> **Read this first, if you are reading it after August 2026.** The statements below about
+> what is on `main` and what the live site serves were true on the day each was written and
+> are now history. v79 was released on 28 August 2026 and `main` is `94d5a84`. What has
+> actually been served, and what each build is known not to cover, is in
+> [`docs/releases.md`](releases.md) — that file is kept current; the sections here are
+> kept as they were, because a handover that is quietly edited afterwards cannot be
+> checked against what happened.
+
 Branch `claude/farkad-data-safety`. **Not merged, not published.** `main` is untouched and
 the live site still serves v58.
 
@@ -515,8 +523,9 @@ anything found under it on an old device is still a real copy worth keeping.
 
 ## v79 release blockers — what was found and closed
 
-This section is about the v79 branch only. `main` is `1dec586` and still serves v78;
-nothing here has been merged, published or deployed.
+This section is about the v79 branch only. It was written while that branch was unmerged;
+`main` was `1dec586` and served v78. It has since been released - see
+[`docs/releases.md`](releases.md).
 
 ### Was any earlier v79 ever served?
 

@@ -6085,6 +6085,69 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the file opens the way it reads
+{
+  // Every sheet in this export is Hebrew, and a workbook that says nothing about its
+  // direction opens left to right on any Excel that is not itself Hebrew: עובד lands on
+  // the far left and the bookkeeper reads the table backwards.
+  //
+  // SheetJS is stubbed rather than fetched. It comes from a CDN, which on a building site
+  // is a request that hangs, and what can regress here is OUR side of the boundary - the
+  // flag being set, on the workbook, before it is written. That RTL:true becomes
+  // rightToLeft="1" in the file is SheetJS's business and was checked once against a real
+  // generated workbook; asserting it here would only be testing somebody else's library
+  // over a network this app is built to survive without.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save();
+    showView('reports');
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const book = await page.evaluate(async () => {
+    const made = [];
+    window.XLSX = {
+      utils: {
+        book_new: () => ({ SheetNames: [], Sheets: {} }),
+        aoa_to_sheet: rows => ({ rows }),
+        book_append_sheet: (wb, sheet, name) => { wb.SheetNames.push(name); wb.Sheets[name] = sheet; }
+      },
+      writeFile: (wb, filename) => { made.push({ wb, filename }); }
+    };
+    await exportReports();
+    delete window.XLSX;
+    const only = made[0];
+    return only && {
+      filename: only.filename,
+      sheets: only.wb.SheetNames,
+      views: only.wb.Workbook && only.wb.Workbook.Views,
+      firstPayrollHeading: only.wb.Sheets['שכר'].rows[0][0],
+      lastPayrollHeading: only.wb.Sheets['שכר'].rows[0].slice(-1)[0]
+    };
+  });
+
+  check('a workbook is written at all', Boolean(book));
+  check('and it carries a view for the reader', Array.isArray(book.views) && book.views.length === 1,
+    JSON.stringify(book.views));
+  check('which says the file opens right to left',
+    Boolean(book.views && book.views[0] && book.views[0].RTL === true),
+    JSON.stringify(book.views && book.views[0]));
+  check('the sheets are the three reports, named in Hebrew',
+    book.sheets.join(',') === 'שכר,חיוב,פירוט', book.sheets.join(','));
+
+  // The direction is only worth setting if the columns are in the order it assumes.
+  check('the payroll still starts at the worker', book.firstPayrollHeading === 'עובד',
+    book.firstPayrollHeading);
+  check('and ends at the note column, where it ends on the screen',
+    book.lastPayrollHeading === 'הערה', book.lastPayrollHeading);
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- room on the device
 {
   // C1. Every message this app had about space arrived at the moment a write was refused

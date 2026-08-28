@@ -220,12 +220,33 @@ function closeShareModal() {
 
 // ---------------------------------------------------------------- csv
 
+// A cell a spreadsheet would run instead of read.
+//
+// Excel and Sheets treat a cell opening with = + - @ as a FORMULA, quoted or not, so a
+// site named "-חדש" reaches the bookkeeper as #NAME? where its name should be. This is
+// the CSV path, which is the one taken when the CDN holding SheetJS cannot be reached -
+// on a building site, the usual case. The xlsx path is not affected: SheetJS types a
+// string cell as a string.
+//
+// A leading apostrophe is how a spreadsheet is told "this is text". Excel does not
+// display it; some other viewers do, which is why it is put in front of the cells that
+// need it and nothing else: an ordinary payroll of Hebrew names and numbers comes out of
+// here byte for byte as it did before.
+//
+// Numbers are left alone, and that exclusion is the point rather than an optimisation.
+// Advances are exported negative - -1000 opens with a dangerous character and is not
+// dangerous at all - and quoting one as text would break the bookkeeper's own totals,
+// which is a worse thing to do to that file than the bug being fixed.
+function csvCell(value) {
+    const text = String(value === undefined || value === null ? '' : value);
+    const risky = /^[=+\-@\t\r]/.test(text) && !(text.trim() !== '' && Number.isFinite(Number(text)));
+    return `"${(risky ? "'" + text : text).replace(/"/g, '""')}"`;
+}
+
 // Excel needs a BOM to read a UTF-8 CSV as Hebrew rather than mojibake.
 function downloadCsv(rows, filename) {
     const csv = rows
-        .map(row => row
-            .map(value => `"${String(value === undefined || value === null ? '' : value).replace(/"/g, '""')}"`)
-            .join(','))
+        .map(row => row.map(csvCell).join(','))
         .join('\r\n');
 
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });

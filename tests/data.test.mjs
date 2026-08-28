@@ -8464,6 +8464,69 @@ for (const [label, run] of [
     Store.used = realUsed;
 }
 
+// ---------------------------------------------------------------- what reaches the bookkeeper
+//
+// C3. The exported file is the one thing here that leaves the crew and lands on somebody
+// else's desk, and a spreadsheet reads a cell opening with = + - @ as a formula rather
+// than as a name. A site called "-חדש" arrived as #NAME?.
+//
+// The whole of the fix is "only the cells that need it", so most of what is checked below
+// is what is NOT touched: an ordinary payroll has to come out of this byte for byte as it
+// did before, and the negative numbers in the advances column have to stay numbers.
+{
+    suite('C3: a name is a name in the bookkeeper\'s file, not a formula');
+
+    const device = makeDevice();
+    const cell = value => device.call('csvCell', value);
+
+    check('an ordinary name is quoted and otherwise left alone', cell('דוד') === '"דוד"');
+    check('so is a heading', cell('ימי נוכחות') === '"ימי נוכחות"');
+    check('and an empty cell', cell('') === '""' && cell(null) === '""');
+    check('a quote inside a name is still doubled, as CSV requires',
+        cell('דוד "הגדול"') === '"דוד ""הגדול"""');
+
+    check('a name opening with = is handed over as text', cell('=דוד') === `"'=דוד"`);
+    check('so is one opening with +', cell('+דוד') === `"'+דוד"`);
+    check('and with @', cell('@דוד') === `"'@דוד"`);
+    check('and a site opening with a dash', cell('-חדש') === `"'-חדש"`);
+    check('a tab in front counts too - it is how the other trick is spelled',
+        cell('\tדוד') === `"'\tדוד"`);
+
+    // The exclusion that matters more than the fix.
+    check('a positive number is a number', cell(450) === '"450"');
+    check('a NEGATIVE number is still a number, because the advances column is full of them',
+        cell(-1000) === '"-1000"');
+    check('and so is one that arrives as text', cell('-1000') === '"-1000"');
+    check('a decimal too', cell('-12.5') === '"-12.5"');
+    check('but a dash on its own is not a number and is handled', cell('-') === `"'-"`);
+}
+
+{
+    suite('C3: an ordinary payroll export is unchanged');
+
+    // The claim the previous suite is really making: nothing about the file the bookkeeper
+    // has been receiving all along is different. Built cell by cell rather than asserted
+    // in prose, because "I did not change anything else" is exactly the kind of claim that
+    // is true until it is not.
+    const device = makeDevice();
+    const rows = [
+        ['עובד', 'ימי נוכחות', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום'],
+        ['דוד', 22, 400, 8800, -1000, 7800],
+        ['שרה', 18, 350, 6300, 0, 6300],
+        ['עלי', 20, 0, '', 0, '']
+    ];
+    const out = rows.map(row => row.map(value => device.call('csvCell', value)).join(','));
+
+    check('the heading row is untouched',
+        out[0] === '"עובד","ימי נוכחות","שכר יומי","נצבר","מקדמות","לתשלום"', out[0]);
+    check('and a full row, advance and all',
+        out[1] === '"דוד","22","400","8800","-1000","7800"', out[1]);
+    check('a worker with no rate exports blanks, not apostrophes',
+        out[3] === '"עלי","20","0","","0",""', out[3]);
+    check('nothing in an ordinary export carries the text marker at all',
+        out.every(line => !line.includes("'")), out.find(line => line.includes("'")) || '');
+}
+
 
 // ================================================================ the advances ledger
 //

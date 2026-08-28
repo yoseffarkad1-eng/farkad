@@ -299,6 +299,65 @@ for (const scenario of [
     check('every one of the thirty men is on the paper', missing.length === 0,
         JSON.stringify(missing));
 
+    // Which side of the paper the table starts on.
+    //
+    // The whole report is Hebrew, so the first column is עובד and it belongs on the RIGHT.
+    // Nothing in the app says so out loud - the page is dir="rtl" and the PDF comes out of
+    // it - which is exactly why it is worth an assertion: the print stylesheet is a large
+    // block of overrides, and a direction inherited rather than declared is the kind of
+    // thing a later rule takes away without anybody noticing until a bookkeeper says the
+    // table reads backwards.
+    //
+    // Measured as positions rather than read as text: the heading row's rightmost run
+    // must be the worker column, and the leftmost must be the money.
+    const headingLine = linesOf(payrollPages[0])
+        .filter(line => says(line.text, 'ימי נוכחות')).shift();
+    check('the pay sheet has a heading row on the paper', Boolean(headingLine),
+        JSON.stringify(linesOf(payrollPages[0]).slice(0, 3).map(l => l.text.slice(0, 40))));
+
+    if (headingLine) {
+        const runs = payrollPages[0].texts
+            .filter(item => Math.abs(item.y - headingLine.y) < 3)
+            .sort((a, b) => a.x - b.x);
+        const width = payrollPages[0].width;
+
+        // WHICH heading is where, not merely that something reaches both edges - a table
+        // spans the page in either direction, so the weaker version of this passes just
+        // as well upside down.
+        const join = items => items.map(item => item.text).join('');
+        const rightThird = join(runs.filter(item => item.x > width * 0.62));
+        const leftThird = join(runs.filter(item => item.x < width * 0.28));
+
+        check('the column that names the worker is on the right, where Hebrew starts',
+            says(rightThird, 'עובד'), JSON.stringify(rightThird.slice(0, 30)));
+        check('and what he is owed is on the left, where the line ends',
+            says(leftThird, 'לתשלום'), JSON.stringify(leftThird.slice(0, 30)));
+
+        // The rows under the heading have to follow it, or the columns are right-to-left
+        // and what sits in them is not. Said as "name on the right, money on the left"
+        // rather than by looking for Hebrew letters: the crew in this fixture is called
+        // Worker 1 to Worker 30, and a Latin name in an RTL table belongs in exactly the
+        // same column as a Hebrew one.
+        const firstRow = linesOf(payrollPages[0])
+            .filter(line => line.y < headingLine.y - 5 && /\d/.test(line.text))[0];
+        check('the pay sheet has a row under the heading', Boolean(firstRow),
+            JSON.stringify(linesOf(payrollPages[0]).slice(0, 4).map(l => l.text.slice(0, 30))));
+
+        if (firstRow) {
+            const cells = payrollPages[0].texts
+                .filter(item => Math.abs(item.y - firstRow.y) < 3)
+                .sort((a, b) => a.x - b.x);
+            const name = cells[cells.length - 1];
+            const money = cells[0];
+            check('a worker\'s name is on the right, under the column that names it',
+                name.x > width * 0.6 && !/^[\d,.\s]+$/.test(name.text),
+                JSON.stringify({ text: name.text, x: Math.round(name.x) }));
+            check('and his money is on the left, under the column that totals it',
+                money.x < width * 0.4 && /\d/.test(money.text),
+                JSON.stringify({ text: money.text, x: Math.round(money.x) }));
+        }
+    }
+
     // The PAY SHEET's totals, on the pay sheet's own last page - not the invoice's, which
     // is a different table with a different total further on.
     const totalsPage = payrollPages.filter(item => says(pageText(item), 'סה״כ')).pop();

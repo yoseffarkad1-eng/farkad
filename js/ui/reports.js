@@ -1193,6 +1193,20 @@ async function exportReports() {
 
     try {
         const wb = XLSX.utils.book_new();
+
+        // The file has to open the way it reads. Every sheet here is Hebrew - עובד is
+        // the first column and לתשלום the last - and a workbook that says nothing about
+        // its direction opens left to right on any Excel that is not itself Hebrew: the
+        // first column lands on the far left and the bookkeeper reads the table
+        // backwards. This is the one flag that decides it; SheetJS writes it into the
+        // sheet as rightToLeft="1", which was checked against a real generated file
+        // rather than taken from the documentation.
+        //
+        // The screen and the printed page have never had this problem - the page is
+        // dir="rtl" and the PDF comes out of it - so this is the only place the
+        // direction had to be said out loud.
+        wb.Workbook = { Views: [{ RTL: true }] };
+
         if (sheets.payroll) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.payroll), 'שכר');
         }
