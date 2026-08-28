@@ -1559,6 +1559,25 @@ const FarkadSync = {
                 here.add(String(item.id));
                 const before = known[item.id];
                 if (before && JSON.stringify(before) === JSON.stringify(item)) return;
+
+                // A vehicle goes field by field once the cloud has heard of it.
+                //
+                // The whole object was one field on the wire, so two phones editing
+                // DIFFERENT things about the same van still fought: one renames it, the
+                // other corrects the price, and whichever landed second put its whole
+                // record down over the other's. The rename or the price was silently
+                // gone, and the price is money.
+                //
+                // Only once it is known. A van the cloud has never seen is sent whole, or
+                // it would arrive as a scatter of fields with no record to hang them on.
+                if (kind === 'vehicles' && before) {
+                    Object.keys(item).forEach(field => {
+                        if (field === 'id') return;
+                        if (JSON.stringify(before[field]) === JSON.stringify(item[field])) return;
+                        put(`roster.vehicles.${item.id}.${field}`, item[field]);
+                    });
+                    return;
+                }
                 put(`roster.${kind}.${item.id}`, item);
             });
 
@@ -2967,6 +2986,15 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
 
             // days.<date>.vehicles.<vehicleId> - one vehicle's state for one day, which
             // is the form that lets two phones mark two different vans at once.
+            // roster.vehicles.<id>.<field> - one thing about one van.
+            if (parts.length === 4 && parts[0] === 'roster' && parts[1] === 'vehicles') {
+                const list = schedule.vehicles || [];
+                const at = list.findIndex(item => item && String(item.id) === parts[2]);
+                if (at !== -1) list[at] = Object.assign({}, list[at], { [parts[3]]: value });
+                schedule.vehicles = list;
+                return;
+            }
+
             if (parts.length === 4 && parts[0] === 'days' && parts[2] === 'vehicles') {
                 const date = parts[1];
                 if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };

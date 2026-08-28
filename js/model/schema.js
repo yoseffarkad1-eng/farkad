@@ -665,6 +665,28 @@ function journalEntryProblems(path, value) {
             return [];
         }
 
+        // roster.vehicles.<id>.<field> - one thing about one van, so two phones changing
+        // its name and its price do not overwrite each other.
+        if (parts.length === 4 && parts[1] === 'vehicles') {
+            if (!isSafeSegment(parts[2])) return ['a roster path with an unusable id'];
+            const field = parts[3];
+            if (field === 'name' || field === 'ownerId') {
+                if (typeof value !== 'string') return ['a vehicle field that is not text'];
+                return [];
+            }
+            if (field === 'active') {
+                if (typeof value !== 'boolean') return ['a vehicle field that is not a flag'];
+                return [];
+            }
+            if (field === 'rates') {
+                if (!Array.isArray(value)) return ['a vehicle price history that is not a list'];
+                const bad = value.find(entry => !isPlainObject(entry)
+                    || typeof entry.from !== 'string' || !isFiniteNumber(entry.amount));
+                return bad === undefined ? [] : ['a vehicle price with no date or no amount'];
+            }
+            return ['a vehicle field nobody wrote'];
+        }
+
         // roster.workers.<id> / roster.places.<id> - one person or one site, or a
         // removal, which travels as null.
         if (parts.length !== 3) return ['a roster path with the wrong number of segments'];

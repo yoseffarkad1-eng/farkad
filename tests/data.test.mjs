@@ -9681,4 +9681,52 @@ function withAdvances(device, rows) {
         { days: 1, amount: 300 });
 }
 
+// ---------------------------------------------------------------- V7: two edits to one van
+//
+// A2.3. roster.vehicles.<id> was written as a whole object, so two phones editing DIFFERENT
+// things about the same van still fought: one renames it, the other corrects the price,
+// both started from the same version, and whichever landed second put its whole record
+// down over the other's. The rename or the price is silently gone - and the price is money.
+{
+    suite('V7: renaming a van does not undo the price somebody else just fixed');
+
+    const cloud = makeCloud();
+    const a = makeDevice();
+    seed(a);
+    const id = 'v_shared';
+    a.State.schedule.vehicles = [{ id, name: 'טנדר', ownerId: 'w_01', active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    a.State.commitRoster();
+    await connected(a, cloud);
+    await wait();
+
+    const b = makeDevice({ storage: a.dump() });
+    b.State.load();
+    await connected(b, cloud);
+    given('both phones have the same van', (b.State.schedule.vehicles || []).length === 1);
+
+    // Both start from the same version. Neither has finished when the other begins.
+    a.State.schedule.vehicles[0].name = 'טנדר לבן';
+    b.State.schedule.vehicles[0].rates.push({ from: '2026-09-01', amount: 350 });
+    a.State.commitRoster();
+    b.State.commitRoster();
+    await wait();
+    await wait();
+
+    const third = makeDevice();
+    await connected(third, cloud);
+    await wait();
+    const van = (third.State.schedule.vehicles || [])[0];
+    check('a phone arriving afterwards has the van', Boolean(van),
+        JSON.stringify(third.State.schedule.vehicles));
+    if (van) {
+        check('with the new name', van.name === 'טנדר לבן', van.name);
+        check('and the new price, which is money', van.rates.length === 2,
+            JSON.stringify(van.rates));
+        check('and the price it had before, which is last month\'s money',
+            third.call('vehicleRateOn', van, '2026-08-12') === 300,
+            String(third.call('vehicleRateOn', van, '2026-08-12')));
+    }
+}
+
 report();
