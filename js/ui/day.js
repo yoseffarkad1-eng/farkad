@@ -579,7 +579,21 @@ function renderSiteCard(place) {
     }
     card.appendChild(list);
 
-    card.appendChild(button('+ הוסף עובד', 'btn-add', () => openWorkerPicker(place.id)));
+    const actions = el('div', 'site-card-actions');
+    actions.appendChild(button('+ הוסף עובד', 'btn-add', () => openWorkerPicker(place.id)));
+
+    // The seder for THIS gate. It goes to the man driving there, who needs to know who is
+    // with him tomorrow and cannot act on the other four sites - and sending him all of
+    // them is how somebody reads the wrong line and turns up at the wrong place.
+    //
+    // Only once there is somebody to name: a message saying an empty site is empty is a
+    // message nobody sends.
+    if (workerIds.length > 0) {
+        actions.appendChild(button('💬 שלח את האתר הזה', 'btn-secondary',
+            () => showDayMessage(place.id),
+            `שלח את סידור ${isolate(place.name)} בלבד`));
+    }
+    card.appendChild(actions);
     return card;
 }
 

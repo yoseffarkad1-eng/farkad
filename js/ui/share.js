@@ -40,13 +40,22 @@ function currentMessageStyle() {
     return MESSAGE_STYLES.find(style => style.key === saved) || MESSAGE_STYLES[0];
 }
 
-function dayMessage(date, layer, styleKey) {
+// The whole evening, or one site of it.
+//
+// One site, because the seder does not go to one group. It goes to the man driving to
+// Herzliya, who needs to know who is with him tomorrow and does not need the other four
+// sites - and sending him all of them is how somebody turns up at the wrong gate having
+// read the wrong line.
+function dayMessage(date, layer, styleKey, placeId) {
     const style = MESSAGE_STYLES.find(item => item.key === styleKey) || currentMessageStyle();
     const parsed = parseLocalDate(date);
+    const only = placeId ? State.place(placeId) : null;
     const lines = [style.heading(parsed), ''];
 
     let any = false;
-    State.activePlaces().forEach(place => {
+    State.activePlaces()
+        .filter(place => !only || place.id === only.id)
+        .forEach(place => {
         const workerIds = workersAtPlace(State.schedule, date, place.id, layer);
         if (workerIds.length === 0) return;
 
@@ -73,23 +82,34 @@ function dayMessage(date, layer, styleKey) {
         lines.push('');
     });
 
-    const absent = State.workersForDay(date, layer)
+    // Who is away is a fact about the crew, not about a site, and the man driving to one
+    // gate cannot act on it. A one-site message leaves it out.
+    const absent = only ? [] : State.workersForDay(date, layer)
         .filter(worker => isAbsent(State.schedule, date, worker.id, layer));
-    // The line is always there, "אין" included: its absence would be ambiguous
-    // between nobody-absent and nobody-checked.
-    lines.push(style.absent(absent.length > 0 ? absent.map(w => w.name).join(', ') : 'אין'));
+    if (!only) {
+        // The line is always there, "אין" included: its absence would be ambiguous
+        // between nobody-absent and nobody-checked.
+        lines.push(style.absent(absent.length > 0 ? absent.map(w => w.name).join(', ') : 'אין'));
+    }
 
     if (!any && absent.length === 0) {
-        return lines[0] + '\n\nאין שיבוצים ליום הזה.';
+        return lines[0] + (only
+            ? `\n\n${only.name}: אין שיבוצים ליום הזה.`
+            : '\n\nאין שיבוצים ליום הזה.');
     }
 
     return lines.join('\n').trim().replace(/\n{3,}/g, '\n\n');
 }
 
-function showDayMessage() {
+// Which site the open message is about, or null for the whole day. Kept so that changing
+// the wording does not quietly widen a one-site message back out to all five.
+let sharePlaceId = null;
+
+function showDayMessage(placeId) {
+    sharePlaceId = placeId || null;
     renderMessageStyles();
     const box = document.getElementById('shareText');
-    box.value = dayMessage(State.date, State.layer);
+    box.value = dayMessage(State.date, State.layer, undefined, sharePlaceId);
     renderShareWarning();
     document.getElementById('shareStatus').textContent = '';
     document.getElementById('shareModal').style.display = 'flex';
@@ -135,7 +155,7 @@ function renderMessageStyles() {
             Store.set(MESSAGE_STYLE_KEY, style.key);
             renderMessageStyles();
             const box = document.getElementById('shareText');
-            box.value = dayMessage(State.date, State.layer);
+            box.value = dayMessage(State.date, State.layer, style.key, sharePlaceId);
         });
         chip.setAttribute('aria-pressed', style.key === active.key ? 'true' : 'false');
         bar.appendChild(chip);

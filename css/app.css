@@ -791,6 +791,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .site-empty { color: var(--ink-3); font-size: 14px; margin: 4px 0; }
 .site-list { display: flex; flex-direction: column; gap: 4px; }
+/* The two things done to a site card: put somebody on it, and send it to whoever is
+   driving there. Side by side on a wide phone, stacked when the labels stop fitting. */
+.site-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.site-card-actions > * { flex: 1 1 auto; min-height: 44px; }
 
 .assign-row {
     display: flex;

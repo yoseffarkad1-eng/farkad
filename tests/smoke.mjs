@@ -6185,6 +6185,57 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- one site's seder
+{
+  // The seder does not go to one group. It goes to the man driving to Herzliya, who needs
+  // to know who is with him tomorrow and cannot act on the other four sites - and sending
+  // him all of them is how somebody reads the wrong line and turns up at the wrong gate.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_02');
+    markAbsent(State.schedule, '2026-08-12', 'w_03', 'actual');
+    State.date = '2026-08-12';
+    State.save();
+    setDayMode('sites');
+    render();
+  });
+  await page.waitForTimeout(350);
+
+  const whole = await page.evaluate(() => dayMessage(State.date, State.layer));
+  check('the whole day names both sites',
+    whole.includes('הרצליה') && whole.includes('תל אביב'), whole.slice(0, 60));
+
+  // Scoped to the card rather than matched on the whole label: isolate() wraps a site
+  // name in invisible bidi marks, so the name inside an aria-label never matches as
+  // plain text.
+  await page.locator('.site-card').filter({ hasText: 'הרצליה' })
+    .getByRole('button', { name: /שלח את סידור/ }).click();
+  await page.waitForTimeout(350);
+
+  const one = await page.inputValue('#shareText');
+  check('one site names the man who is going there', one.includes('דוד'), one.slice(0, 70));
+  check('and does not name the other site', !one.includes('תל אביב'), one.slice(0, 70));
+  check('nor the man at it', !one.includes('שרה'), one.slice(0, 70));
+  check('and leaves out who is away, which is not about this gate',
+    !one.includes('עלי'), one.slice(0, 70));
+
+  // Changing the wording must not quietly widen it back out to the whole day.
+  const styles = await page.locator('#shareStyles button').count();
+  if (styles > 1) {
+    await page.locator('#shareStyles button').nth(1).click();
+    await page.waitForTimeout(250);
+    const after = await page.inputValue('#shareText');
+    check('changing the wording keeps it to the one site',
+      after.includes('הרצליה') && !after.includes('תל אביב'), after.slice(0, 70));
+  }
+
+  await page.click('#shareModal .btn-secondary, #shareModal button');
+  await page.waitForTimeout(200);
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- the crew's vehicles
 {
   // A vehicle is paid a flat amount for a day it went out, to the man who OWNS it -
