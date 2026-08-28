@@ -216,8 +216,12 @@ function closeReorder() {
 // The settings sheet's keyboard contract, on this panel: Escape is the way back and
 // asks the same question the back button does; Tab stays inside. Both stand down while
 // a dialog is open on top - the exit question is itself asked through askModal, and a
-// second Escape must answer IT, not stack another copy of it.
+// second Escape must answer IT, not stack another copy of it. Checked two ways because
+// the dialogs' own handler (js/ui/modal.js) runs FIRST on the same keypress: an Escape
+// it consumed arrives here already defaultPrevented and with the modal already closed,
+// and acting on it would reopen the question the person just dismissed.
 function reorderKeydown(event) {
+    if (event.defaultPrevented) return;
     if (typeof topModal === 'function' && topModal()) return;
     if (event.key === 'Escape') { confirmReorderExit(); return; }
     if (event.key !== 'Tab') return;
