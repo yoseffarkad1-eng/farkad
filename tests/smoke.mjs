@@ -4554,6 +4554,76 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- the reorder panel is a dialog
+{
+  // The settings sheet's contract, on the reorder mode's own screen: it covers the app,
+  // a reader is told where it has arrived, Tab stays inside, and Escape is the same
+  // guarded door as the back button and the tabs.
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(300);
+  const opened = await page.evaluate(() => {
+    const panel = document.getElementById('reorderPanel');
+    return {
+      shown: panel.classList.contains('open'),
+      modal: panel.getAttribute('aria-modal'),
+      hidden: panel.getAttribute('aria-hidden'),
+      focused: document.activeElement && document.activeElement.id
+    };
+  });
+  check('the mode opens as a dialog over the screen',
+    opened.shown === true && opened.modal === 'true' && opened.hidden === 'false',
+    JSON.stringify(opened));
+  check('focus lands on the heading, so a reader says where it is',
+    opened.focused === 'reorderTitle', String(opened.focused));
+
+  // Tab does not walk out of the panel into the roster behind it.
+  await page.evaluate(() => {
+    const panel = document.getElementById('reorderPanel');
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
+      .filter(node => node.offsetParent !== null && !node.disabled);
+    focusable[focusable.length - 1].focus();
+  });
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(150);
+  check('tab stays inside the panel', await page.evaluate(() =>
+    document.getElementById('reorderPanel').contains(document.activeElement)));
+
+  // With nothing moved, Escape is a plain way out - no question to answer.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  const closed = await page.evaluate(() => ({
+    shown: document.getElementById('reorderPanel').classList.contains('open'),
+    focused: document.activeElement && document.activeElement.id
+  }));
+  check('escape leaves an unchanged draft without asking', closed.shown === false,
+    JSON.stringify(closed));
+  check('and focus goes back to the button that opened it',
+    closed.focused === 'reorderOpenBtn', JSON.stringify(closed));
+
+  // With a change, Escape is the same three-answer door as the tabs - and a second
+  // Escape answers the QUESTION, it must not dismiss it and ask it again.
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(250);
+  await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  check('escape over a changed draft asks first', await page.isVisible('#askChoices'));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check('a second escape stays, once, with the draft still open', await page.evaluate(() => (
+    document.getElementById('askModal').style.display === 'none'
+    && document.getElementById('reorderPanel').classList.contains('open')
+  )));
+
+  await page.context().close();
+}
+
 // ------------------------------------------------- the day owns the top of the phone
 {
   const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
