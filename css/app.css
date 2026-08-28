@@ -390,8 +390,49 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
    A list you can carry a name up and down. The row is deliberately taller than a roster
    row: it is dragged with a thumb, on a list that is also scrolling, and the four jump
-   buttons beside the handle each need a target of their own. */
-.reorder-head { padding: 0 2px 6px; }
+   buttons beside the handle each need a target of their own.
+
+   The mode is a panel over the whole screen, cut like the settings sheet and on its
+   tier: z 60, over the tabs and the dock, because everything on it is one decision and
+   a half-visible sites panel beside an unsaved draft is an invitation to tap out of it.
+   #askModal shares the number and sits later in the document, so the exit question and
+   the exact-place prompt still land on top. Three parts, and only the middle one
+   scrolls: the head says where you are, the foot holds the way out, and neither may be
+   carried off screen by a crew of thirty. */
+.reorder-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: var(--paper);
+    display: none;
+    flex-direction: column;
+}
+.reorder-panel.open { display: flex; }
+
+.reorder-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px 8px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+.reorder-titles { flex: 1; min-width: 0; text-align: center; }
+.reorder-titles h2 { font-size: 18px; }
+/* The heading takes focus when the panel opens, so a screen reader says where it has
+   arrived before it starts naming controls. It is not a control itself. */
+.reorder-titles h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.reorder-sub { margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
+.reorder-head-end { width: 44px; flex: none; }
+
+.reorder-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 10px 12px 14px;
+}
+
 .reorder-live {
     /* Announced, not drawn. The list itself is the visible answer. */
     position: absolute;
@@ -447,14 +488,25 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .reorder-moves .btn-icon { font-size: 15px; }
 .reorder-exact { font-size: 14px; padding: 6px 10px; }
 
+/* The foot is fixed under the list, not appended after it: the save button must never
+   be thirty rows of scrolling away from the thumb. It rides above the home indicator
+   the same way the tab bar does. */
 .reorder-foot {
-    display: flex;
-    gap: 8px;
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line-soft);
+    flex: none;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    padding: 10px 16px;
+    padding-bottom: max(8px, var(--safe-bottom));
 }
-.reorder-foot button { flex: 1; min-height: 48px; }
+.reorder-foot-actions { display: flex; gap: 8px; }
+.reorder-foot-actions button { min-height: 54px; }
+/* Saving is the frequent answer, so it gets the wider target; the two verbs stay a full
+   gap apart. */
+.reorder-foot-actions .btn-add { flex: 1.4; }
+.reorder-foot-actions .btn-secondary { flex: 1; }
+.reorder-foot .hint { margin: 8px 0 0; text-align: center; }
+/* The unsaved count sits ABOVE the buttons - it is the thing the two verbs are about. */
+.reorder-foot .reorder-moved-count { margin: 0 0 8px; font-weight: 600; color: var(--warn); }
 
 @media (max-width: 700px) {
     /* Two lines on a phone: the handle and the name, then the controls under them.
@@ -475,6 +527,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
        their size here whatever else shrinks. */
     .reorder-moves .btn-icon { min-width: 44px; min-height: 44px; }
     .reorder-exact { min-height: 44px; }
+}
+
+@media (min-width: 701px) {
+    /* The settings sheet's laptop cut, for the same reasons and with the same spelling -
+       see the note there about inset + margin-inline versus translateX in RTL. */
+    .reorder-panel.open {
+        inset: 24px 0 auto 0;
+        margin-inline: auto;
+        width: min(560px, calc(100vw - 48px));
+        max-height: calc(100vh - 48px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: 0 24px 60px -30px rgba(0, 0, 0, .55);
+        overflow: hidden;
+    }
 }
 
 /* ---------------------------------------------------------------- settings sheet
@@ -2358,6 +2425,7 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     .topbar,
     .banner,
     .storage-notice,
+    .reorder-panel,
     .reorder-live,
     .reorder-foot,
     .reorder-head,

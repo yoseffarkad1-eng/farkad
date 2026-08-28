@@ -85,14 +85,11 @@
                         <!-- The order every other screen reads in. A mode of its own, and
                              not two arrows beside the pencil: each press used to be a
                              write, and the mis-tap that reorders the crew was one
-                             thumb-width from the one that opens a man's details. -->
-                        <button type="button" class="btn-secondary" onclick="openReorder()">↕ סדר מחדש</button>
+                             thumb-width from the one that opens a man's details. The mode
+                             itself is the panel below the settings sheet - it covers this
+                             screen, and focus comes back to this button when it closes. -->
+                        <button type="button" class="btn-secondary" id="reorderOpenBtn" onclick="openReorder()">↕ סדר מחדש</button>
                     </div>
-                    <!-- What a move in the reorder list is announced through. It lives
-                         out here rather than inside the list, because the list is redrawn
-                         on every move and a live region that is destroyed and rebuilt is
-                         a live region that announces nothing. -->
-                    <div class="reorder-live" id="reorderLive" role="status" aria-live="polite"></div>
                     <div id="workerList"></div>
                 </div>
 
@@ -228,6 +225,37 @@
             <p class="hint" id="ledgerParity" style="display:none"></p>
         </section>
     </div>
+</div>
+
+<!-- סידור העובדים. The draft used to be drawn inline where the worker list is, which
+     left the sites panel beside it and the tab bar under it - three ways to wander out
+     of an unsaved order without meaning to. Now it is a panel over the whole screen, on
+     the settings sheet's tier, and every way out - the chevron here, a tab, Escape -
+     routes through confirmReorderExit and its three-answer question. The list scrolls
+     between a fixed head and a fixed foot; js/ui/roster.js draws both. -->
+<div class="reorder-panel" id="reorderPanel" role="dialog" aria-modal="true"
+     aria-labelledby="reorderTitle" aria-hidden="true">
+    <div class="reorder-head">
+        <!-- Back points RIGHT: time flows right-to-left here, and so does leaving. -->
+        <button type="button" class="btn-icon reorder-back" onclick="confirmReorderExit()" aria-label="חזרה">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <div class="reorder-titles">
+            <h2 id="reorderTitle" tabindex="-1">סידור העובדים</h2>
+            <p class="reorder-sub">גרירה בידית, קפיצה לראש או לסוף, או מיקום מדויק</p>
+        </div>
+        <!-- Balances the chevron, so the title sits centred. -->
+        <span class="reorder-head-end" aria-hidden="true"></span>
+    </div>
+    <!-- What a move in the list is announced through. It lives out here rather than
+         inside the list, because the list is redrawn on every move and a live region
+         that is destroyed and rebuilt is a live region that announces nothing. Inside
+         the dialog, because aria-modal hides everything that is not. -->
+    <div class="reorder-live" id="reorderLive" role="status" aria-live="polite"></div>
+    <div class="reorder-scroll" id="reorderScroll">
+        <div id="reorderList"></div>
+    </div>
+    <div class="reorder-foot" id="reorderFoot"></div>
 </div>
 
 <div class="modal sheet" id="assignSheet">

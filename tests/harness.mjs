@@ -107,6 +107,7 @@ function makeDocument() {
         querySelector: () => null,
         querySelectorAll: () => [],
         addEventListener: () => {},
+        removeEventListener: () => {},
         createElement: () => ({ style: {}, setAttribute: () => {}, appendChild: () => {} })
     };
 }

@@ -662,7 +662,7 @@ for (const width of [320, 390]) {
     await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
     await page.waitForTimeout(300);
 
-    const rows = await page.locator('#workerList .reorder-row').count();
+    const rows = await page.locator('#reorderList .reorder-row').count();
     check(`${width}px: the whole crew is in the draft`, rows === CREW, String(rows));
 
     const across = await page.evaluate(() => ({
@@ -670,6 +670,24 @@ for (const width of [320, 390]) {
     }));
     check(`${width}px: it does not widen the page`, across.doc <= across.inner + 1,
         JSON.stringify(across));
+
+    // The mode is a panel over the WHOLE screen now, the settings sheet's cut: the
+    // sites panel and the tab bar are not half-visible invitations beside an unsaved
+    // draft, and nothing pokes out past either edge.
+    const cover = await page.evaluate(() => {
+        const box = document.getElementById('reorderPanel').getBoundingClientRect();
+        const tabs = document.querySelector('.tabs');
+        const low = document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 6);
+        return {
+            full: box.left <= 0 && box.top <= 0
+                && box.right >= window.innerWidth - 0.5
+                && box.bottom >= window.innerHeight - 0.5,
+            overTabs: !tabs || !tabs.contains(low),
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+    check(`${width}px: the panel covers the screen, tab bar included`,
+        cover.full && cover.overTabs && cover.across, JSON.stringify(cover));
 
     // A crew of thirty is taller than any phone, so this mode is only usable if the list
     // scrolls. It did not: touch-action: none was set on the whole ROW, and in this mode
@@ -681,7 +699,7 @@ for (const width of [320, 390]) {
             const value = getComputedStyle(node).touchAction;
             return value === 'none' || value === 'pan-x' || value === 'pinch-zoom';
         };
-        const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+        const rows = [...document.querySelectorAll('#reorderList .reorder-row')];
         return {
             rows: rows.filter(blocked).length,
             handles: [...document.querySelectorAll('.reorder-handle')].filter(blocked).length,
@@ -700,18 +718,35 @@ for (const width of [320, 390]) {
     check(`${width}px: and the handle still owns the drag`, panning.handles > 0,
         JSON.stringify(panning));
 
+    // The list scrolls inside the panel now, between the fixed head and the fixed
+    // foot - so the last man is reached by scrolling the panel's own box, and he must
+    // land ABOVE the foot rather than behind it.
     const reach = await page.evaluate(async () => {
-        window.scrollTo(0, document.documentElement.scrollHeight);
+        const box = document.getElementById('reorderScroll');
+        box.scrollTop = box.scrollHeight;
         await new Promise(done => setTimeout(done, 200));
-        const last = [...document.querySelectorAll('#workerList .reorder-row')].pop();
+        const last = [...document.querySelectorAll('#reorderList .reorder-row')].pop();
         const foot = document.querySelector('.reorder-foot');
         return {
-            lastVisible: last.getBoundingClientRect().bottom <= window.innerHeight + 1,
-            footVisible: !foot || foot.getBoundingClientRect().bottom <= window.innerHeight + 1
+            lastVisible: last.getBoundingClientRect().bottom <= foot.getBoundingClientRect().top + 1,
+            footVisible: foot.getBoundingClientRect().bottom <= window.innerHeight + 1
         };
     });
     check(`${width}px: the last man and the save button can both be reached`,
         reach.lastVisible && reach.footVisible, JSON.stringify(reach));
+
+    // The home indicator. The foot carries the same max(8px, safe-bottom) the tab bar
+    // does, and what has to clear the strip is what somebody presses - the buttons are
+    // measured, not the box they sit in.
+    await setInset(page, 34);
+    const indicator = await page.evaluate(() => ({
+        buttons: [...document.querySelectorAll('.reorder-foot button')].length,
+        clear: [...document.querySelectorAll('.reorder-foot button')]
+            .every(node => node.getBoundingClientRect().bottom <= window.innerHeight - 34 + 1)
+    }));
+    check(`${width}px: the save buttons clear the home indicator`,
+        indicator.buttons > 0 && indicator.clear, JSON.stringify(indicator));
+    await setInset(page, 0);
 
     const small = await undersized(page);
     check(`${width}px: every move button is a finger's size`,
@@ -722,7 +757,7 @@ for (const width of [320, 390]) {
         JSON.stringify(faint.slice(0, 4)));
 
     const name = await page.evaluate(() => {
-        const first = document.querySelector('#workerList .reorder-row .reorder-name');
+        const first = document.querySelector('#reorderList .reorder-row .reorder-name');
         return {
             wrapped: first.getBoundingClientRect().height,
             text: first.textContent.trim().slice(0, 20)

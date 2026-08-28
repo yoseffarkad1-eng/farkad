@@ -4475,7 +4475,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const order = () => page.evaluate(() =>
     State.schedule.workers.map(worker => worker.id).join());
   const drafted = () => page.evaluate(() =>
-    [...document.querySelectorAll('#workerList .reorder-row')].map(row => row.dataset.workerId).join());
+    [...document.querySelectorAll('#reorderList .reorder-row')].map(row => row.dataset.workerId).join());
 
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(300);
@@ -4483,7 +4483,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await drafted()) === 'w_01,w_02,w_03,w_04,w_05', await drafted());
 
   // The last man to the top, by the jump button.
-  await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(250);
   check('a jump to the top moves him in the draft',
     (await drafted()) === 'w_05,w_01,w_02,w_03,w_04', await drafted());
@@ -4491,7 +4491,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await order()) === 'w_01,w_02,w_03,w_04,w_05', await order());
 
   // An exact position, for a crew too long to walk one step at a time.
-  await page.locator('#workerList .reorder-row').first().locator('.reorder-exact').click();
+  await page.locator('#reorderList .reorder-row').first().locator('.reorder-exact').click();
   await page.waitForTimeout(250);
   await page.fill('#askInput', '3');
   await page.click('#askOk');
@@ -4501,7 +4501,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   // Dragging, by the handle, with a pointer.
   const dragged = await page.evaluate(async () => {
-    const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+    const rows = [...document.querySelectorAll('#reorderList .reorder-row')];
     const handle = rows[rows.length - 1].querySelector('.reorder-handle');
     const from = handle.getBoundingClientRect();
     const to = rows[0].getBoundingClientRect();
@@ -4516,7 +4516,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await new Promise(done => setTimeout(done, 50));
     fire('pointerup', to.top + 4);
     await new Promise(done => setTimeout(done, 100));
-    return [...document.querySelectorAll('#workerList .reorder-row')]
+    return [...document.querySelectorAll('#reorderList .reorder-row')]
       .map(row => row.dataset.workerId).join();
   });
   check('a row can be carried to the top with a finger',
@@ -4536,14 +4536,14 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('saving writes the drafted order', (await order()) === wanted,
     `${await order()} vs ${wanted}`);
   check('and leaves the mode',
-    (await page.locator('#workerList .reorder-row').count()) === 0);
+    (await page.locator('#reorderList .reorder-row').count()) === 0);
 
   // Cancelling is not a quiet save. The guard belongs to the IMPLICIT exits - a tab
   // tapped mid-sort asks its three-answer question - while the footer's explicit
   // discard button IS the answer and acts at once.
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(250);
-  await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(200);
   await page.click('#tab-day');
   await page.waitForTimeout(250);
@@ -4556,6 +4556,76 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.waitForTimeout(300);
   check('the explicit discard acts at once, and leaves the order alone',
     (await order()) === wanted, await order());
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the reorder panel is a dialog
+{
+  // The settings sheet's contract, on the reorder mode's own screen: it covers the app,
+  // a reader is told where it has arrived, Tab stays inside, and Escape is the same
+  // guarded door as the back button and the tabs.
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(300);
+  const opened = await page.evaluate(() => {
+    const panel = document.getElementById('reorderPanel');
+    return {
+      shown: panel.classList.contains('open'),
+      modal: panel.getAttribute('aria-modal'),
+      hidden: panel.getAttribute('aria-hidden'),
+      focused: document.activeElement && document.activeElement.id
+    };
+  });
+  check('the mode opens as a dialog over the screen',
+    opened.shown === true && opened.modal === 'true' && opened.hidden === 'false',
+    JSON.stringify(opened));
+  check('focus lands on the heading, so a reader says where it is',
+    opened.focused === 'reorderTitle', String(opened.focused));
+
+  // Tab does not walk out of the panel into the roster behind it.
+  await page.evaluate(() => {
+    const panel = document.getElementById('reorderPanel');
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
+      .filter(node => node.offsetParent !== null && !node.disabled);
+    focusable[focusable.length - 1].focus();
+  });
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(150);
+  check('tab stays inside the panel', await page.evaluate(() =>
+    document.getElementById('reorderPanel').contains(document.activeElement)));
+
+  // With nothing moved, Escape is a plain way out - no question to answer.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  const closed = await page.evaluate(() => ({
+    shown: document.getElementById('reorderPanel').classList.contains('open'),
+    focused: document.activeElement && document.activeElement.id
+  }));
+  check('escape leaves an unchanged draft without asking', closed.shown === false,
+    JSON.stringify(closed));
+  check('and focus goes back to the button that opened it',
+    closed.focused === 'reorderOpenBtn', JSON.stringify(closed));
+
+  // With a change, Escape is the same three-answer door as the tabs - and a second
+  // Escape answers the QUESTION, it must not dismiss it and ask it again.
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(250);
+  await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  check('escape over a changed draft asks first', await page.isVisible('#askChoices'));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check('a second escape stays, once, with the draft still open', await page.evaluate(() => (
+    document.getElementById('askModal').style.display === 'none'
+    && document.getElementById('reorderPanel').classList.contains('open')
+  )));
 
   await page.context().close();
 }
@@ -5888,18 +5958,18 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // button that opens a man's details.
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(300);
-  await page.locator('#workerList .reorder-row').nth(2)
+  await page.locator('#reorderList .reorder-row').nth(2)
     .getByRole('button', { name: /העלה/ }).click();
   await page.waitForTimeout(200);
-  await page.locator('#workerList .reorder-row').first()
+  await page.locator('#reorderList .reorder-row').first()
     .getByRole('button', { name: /הורד/ }).click();
   await page.waitForTimeout(200);
 
   check('the first row cannot be moved up past the top',
-    await page.locator('#workerList .reorder-row').first()
+    await page.locator('#reorderList .reorder-row').first()
       .getByRole('button', { name: /העלה/ }).isDisabled());
   check('nor the last down past the bottom',
-    await page.locator('#workerList .reorder-row').last()
+    await page.locator('#reorderList .reorder-row').last()
       .getByRole('button', { name: /הורד/ }).isDisabled());
 
   await page.getByRole('button', { name: 'שמירה ויציאה' }).click();
