@@ -520,6 +520,8 @@ function openWorkerDays(workerId) {
     if (days.length === 0 && advances.length === 0) {
         body.appendChild(emptyHint('אין רישומים בטווח הזה.'));
     } else {
+        const strip = renderAttendanceChips(days);
+        if (strip) body.appendChild(strip);
         days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
         body.appendChild(renderWorkerDaysTotal(days, worker));
         // Named before the rows begin: money that went the other way is its own block,
@@ -540,6 +542,26 @@ function openWorkerDays(workerId) {
 
     body.appendChild(renderAdvanceAdd(worker));
     document.getElementById('workerDaysModal').style.display = 'flex';
+}
+
+// The attendance dates in one line above the day rows: a chip per date the man was on a
+// site, the traditional one-letter weekday mark and the short date, ×2 on a doubled day.
+// The count on the pay sheet says FOUR; this is which four, at a glance, before the rows
+// spell out where and for how much. Nothing here is a button - the rows below carry the
+// detail - so the chips owe no thumb size, only legibility.
+function renderAttendanceChips(days) {
+    const worked = days.filter(day => !day.absent);
+    if (worked.length === 0) return null;
+
+    const strip = el('div', 'wday-chips');
+    worked.forEach(day => {
+        const parsed = parseLocalDate(day.date);
+        const chip = el('span', 'wday-chip',
+            `${HEBREW_DAY_LETTERS[parsed.getDay()]} ${formatShortDate(parsed)}`);
+        if (day.doubled) chip.appendChild(el('span', 'wday-chip-x2', '×2'));
+        strip.appendChild(chip);
+    });
+    return strip;
 }
 
 // How the money moved, when that was recorded. An advance from before the field existed

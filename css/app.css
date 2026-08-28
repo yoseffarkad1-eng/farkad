@@ -1335,6 +1335,29 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .wday-total .wday-what { color: var(--ink-2); font-weight: 400; font-size: 14px; }
 
+/* The attendance dates as chips above the rows: which dates the count on the sheet is
+   made of, ×2 where a day pays twice. Tokens only, nothing interactive, wraps freely. */
+.wday-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 2px 0 10px;
+}
+.wday-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    padding: 2px 9px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.wday-chip-x2 { font-size: 12px; font-weight: 700; color: var(--warn); }
+
 /* Money already handed over, marked as money going the other way so it is never read as
    another day worked. */
 .wday-advance .wday-date strong { color: var(--warn); }
