@@ -568,10 +568,22 @@ const FarkadSync = {
         // record that describes what it owes can be read again.
         if (this.replaceHeld) return false;
 
-        const items = {};
-        candidate.forEach((item, path) => { items[path] = item; });
-        const landed = Store.setVerified(this._activeKey,
-            JSON.stringify({ seq: this._seq, items }));
+        // What another TAB of this same app has put on the disk since this one last looked.
+        //
+        // loadOutbox reads once a session and adoptJournal writes the whole record back
+        // from what this tab believes is there, so the second tab to write replaced the
+        // first one's queue outright: tab A records Monday, tab B records Tuesday, and
+        // Monday is gone from the queue and from the schedule it would have rebuilt.
+        // Durably lost, not merely unsent, and invisible to every other test here because
+        // they all copy the bytes - a copy is a reopen, and a reopen cannot lose this way.
+        //
+        // The merge is precise rather than a blind union, because this same function is
+        // how entries are PRUNED: a path missing from `candidate` means one of two
+        // opposite things. If this tab had it, the omission is deliberate - it was sent,
+        // acknowledged, superseded - and it stays gone. If this tab never had it, it is
+        // another tab's work and it stays.
+        const record = this.mergedOutboxRecord(candidate, this._seq);
+        const landed = Store.setVerified(this._activeKey, JSON.stringify(record));
 
         this.journalFailed = !landed;
         if (!landed) {
@@ -579,7 +591,13 @@ const FarkadSync = {
             return false;
         }
 
-        this._outbox = candidate;
+        // Memory takes the merged queue, not just this tab's half of it: the next write
+        // from here starts from what is actually on the disk, and the entries the other
+        // tab added are ones this tab can now flush and prune like its own.
+        const merged = new Map();
+        Object.keys(record.items).forEach(path => merged.set(path, record.items[path]));
+        this._outbox = merged;
+        this._seq = record.seq;
         return true;
     },
 
@@ -1092,6 +1110,42 @@ const FarkadSync = {
         return this.queueBatch([{ path, value }]);
     },
 
+    // The record to write, with whatever ANOTHER TAB of this app has put on the disk
+    // since this one last looked.
+    //
+    // loadOutbox reads the queue once a session, and both writers below rebuild the whole
+    // {seq, items} record from what this tab believes is there - so the second tab to
+    // write replaced the first one's queue outright. Tab A records Monday, tab B records
+    // Tuesday, and Monday is gone from the queue and from the schedule the journal would
+    // have rebuilt. Durably lost, not merely unsent, and invisible to every other test
+    // here because they all copy the bytes: a copy is a reopen, and a reopen cannot lose
+    // an update this way.
+    //
+    // Precise rather than a blind union, because pruning goes through the same writers: a
+    // path missing from `candidate` means one of two opposite things. If this tab had it,
+    // the omission is deliberate - sent, acknowledged, superseded - and it stays gone. If
+    // this tab never had it, it is another tab's work and only that tab knows about it.
+    //
+    // What this does NOT close: both tabs reading before either writes. Then neither sees
+    // the other's entry at write time and the later write still wins. Closing that needs
+    // the queue to stop being one record - a durable key per entry, so two tabs writing
+    // different paths never touch the same bytes - which is a change to the most
+    // safety-critical file here and is not something to half-do. It is written down as an
+    // open blocker rather than papered over.
+    mergedOutboxRecord(candidate, seq) {
+        const items = {};
+        const disk = readOutboxRecord(Store.durableGet(this._activeKey));
+        if (disk) {
+            Object.keys(disk.items).forEach(path => {
+                if (this._outbox.has(path)) return;
+                if (candidate.has(path)) return;
+                items[path] = disk.items[path];
+            });
+        }
+        candidate.forEach((item, path) => { items[path] = item; });
+        return { seq: Math.max(seq, disk ? disk.seq : 0), items };
+    },
+
     // Several entries, or one, as a SINGLE write.
     //
     // Chaining queue() looked equivalent and was not. Each call rewrites the whole queue,
@@ -1122,9 +1176,8 @@ const FarkadSync = {
             candidate.set(entry.path, { value: entry.value, seq });
         });
 
-        const items = {};
-        candidate.forEach((item, path) => { items[path] = item; });
-        const landed = Store.setVerified(this._activeKey, JSON.stringify({ seq, items }));
+        const record = this.mergedOutboxRecord(candidate, seq);
+        const landed = Store.setVerified(this._activeKey, JSON.stringify(record));
 
         this.journalFailed = !landed;
         if (!landed) {
@@ -1132,9 +1185,13 @@ const FarkadSync = {
             return false;
         }
 
-        // Adopted only now.
-        this._outbox = candidate;
-        this._seq = seq;
+        // Adopted only now, and as the MERGED queue: the next write from this tab starts
+        // from what is actually on the disk, and the other tab's entries are ones this one
+        // can flush and prune like its own.
+        const adopted = new Map();
+        Object.keys(record.items).forEach(path => adopted.set(path, record.items[path]));
+        this._outbox = adopted;
+        this._seq = record.seq;
         return true;
     },
 

@@ -149,10 +149,19 @@ function hashOf(text) {
 
 // One phone. `storage` carries over a previous device's localStorage contents, which is
 // how "close the app and open it again" is spelled: makeDevice({ storage: old.dump() }).
+//
+// `sharedStorage` is a different thing entirely and the only way to spell TWO TABS. A
+// reopen copies the bytes; two tabs of the same site are two JavaScript worlds looking at
+// ONE localStorage, and a lost update between them is invisible to every test built on
+// copies. Pass the same object to two devices and they share it, the way two tabs do:
+//
+//   const shared = sharedStore();
+//   const tabA = makeDevice({ sharedStorage: shared });
+//   const tabB = makeDevice({ sharedStorage: shared });
 export function makeDevice(options = {}) {
     deviceCount += 1;
 
-    const localStorage = makeLocalStorage(options.storage);
+    const localStorage = options.sharedStorage || makeLocalStorage(options.storage);
     const renders = { count: 0 };
 
     // Installed BEFORE the app's scripts run. sync.js reads its outbox the moment it
@@ -254,6 +263,11 @@ export function makeDevice(options = {}) {
 // Modelled on Firestore's actual behaviour rather than on what the adapter happens to
 // call: update() merges by dotted field path and REJECTS if the document does not exist,
 // which is the difference the first-sync bug lives in.
+// One localStorage that several devices can be handed, for the two-tab case above.
+export function sharedStore(initial) {
+    return makeLocalStorage(initial);
+}
+
 export function makeCloud(options = {}) {
     const cloud = {
         doc: options.doc || null,          // null = the document does not exist yet

@@ -1103,9 +1103,17 @@ async function seedRoster(page) {
   await page.waitForTimeout(300);
   check('rapid edits collapse into one round trip',
     (await page.evaluate(() => window.__fake.patches.length)) === 1);
+  // Named, not counted. The count was every days.* path in the patch, and the queue now
+  // also carries anything ANOTHER TAB left on the disk that this one had not heard of -
+  // which is the whole point of the merge, and which the block above leaves behind by
+  // stubbing adoptJournal. Those entries were queued and never acknowledged, so sending
+  // them is right; what this check is about is that these three edits went in one round
+  // trip and none of them was dropped.
   check('but every one of them is in it',
-    (await page.evaluate(() => Object.keys(window.__fake.patches[0])
-      .filter(k => k.startsWith('days.')).length)) === 3);
+    (await page.evaluate(() => ['w_01', 'w_02', 'w_03']
+      .every(id => Object.prototype.hasOwnProperty.call(
+        window.__fake.patches[0], `days.2026-08-12.actual.${id}`)))),
+    JSON.stringify(await page.evaluate(() => Object.keys(window.__fake.patches[0]))));
 
   // The server document is the truth: every write is a field-level merge into it, so it
   // already holds everyone's work.

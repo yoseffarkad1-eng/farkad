@@ -6,7 +6,7 @@
 // Store, State and FarkadSync - so two devices editing at once, and a device closed and
 // reopened against a cloud that is behind, are both things a test can simply say.
 
-import { makeDevice, makeCloud, settle, deferred } from './harness.mjs';
+import { makeDevice, makeCloud, sharedStore, settle, deferred } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 // Real time, kept short. The sync layer debounces before it sends, and a test that does
@@ -9505,6 +9505,88 @@ function withAdvances(device, rows) {
     same('and the other phone works out the same money',
         b.call('vehiclePayFor', b.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
         { days: 0, amount: 0 });
+}
+
+// ---------------------------------------------------------------- V5: two tabs, one queue
+//
+// A2.4. loadOutbox reads the queue ONCE a session, and adoptJournal writes the whole
+// {seq, items} record back from what this tab believes is there. Two tabs of the same site
+// are two JavaScript worlds looking at one localStorage, so the second to write replaced
+// the first one's record outright: tab A records Monday, tab B records Tuesday, and after
+// both are closed Monday is gone from the schedule AND from the queue. Durably lost, not
+// merely unsent.
+//
+// makeDevice({ sharedStorage }) is what makes this sayable at all. Every other multi-device
+// test here copies the bytes, which is a reopen; a reopen cannot lose an update this way.
+{
+    suite('V5: one tab does not write over what the other queued');
+
+    const shared = sharedStore();
+    const a = makeDevice({ sharedStorage: shared });
+    seed(a);
+
+    const b = makeDevice({ sharedStorage: shared });
+    b.State.load();
+    given('both tabs are looking at the same storage', b.State.schedule.workers.length === 3);
+    given('and both start from the same queue',
+        a.Sync.pendingCount() === b.Sync.pendingCount());
+
+    record(a, '2026-08-10', 'w_01', 'p_01');
+    record(b, '2026-08-11', 'w_01', 'p_01');
+    await wait();
+
+    const queued = Object.keys(JSON.parse(shared.getItem('farkad:outbox')).items);
+    check('Monday is still queued', queued.includes('days.2026-08-10.actual.w_01'),
+        JSON.stringify(queued));
+    check('and so is Tuesday', queued.includes('days.2026-08-11.actual.w_01'),
+        JSON.stringify(queued));
+
+    // Both closed, one opened again from the bytes they left behind.
+    const copy = {};
+    Object.keys(shared).forEach(key => { copy[key] = shared[key]; });
+    const reopened = makeDevice({ storage: copy });
+    reopened.State.load();
+
+    check('and both days are there after reopening',
+        Boolean(reopened.State.schedule.days['2026-08-10'])
+        && Boolean(reopened.State.schedule.days['2026-08-11']),
+        Object.keys(reopened.State.schedule.days).join(', '));
+    check('with both still owed to the other phones',
+        reopened.Sync.pendingCount() >= 2, String(reopened.Sync.pendingCount()));
+}
+
+{
+    suite('V5: and both reach the other phone exactly once');
+
+    const cloud = makeCloud();
+    const shared = sharedStore();
+    const a = makeDevice({ sharedStorage: shared });
+    seed(a);
+    const b = makeDevice({ sharedStorage: shared });
+    b.State.load();
+
+    record(a, '2026-08-10', 'w_01', 'p_01');
+    record(b, '2026-08-11', 'w_01', 'p_01');
+    await wait();
+
+    const copy = {};
+    Object.keys(shared).forEach(key => { copy[key] = shared[key]; });
+    const reopened = makeDevice({ storage: copy });
+    reopened.State.load();
+    await connected(reopened, cloud);
+    await wait();
+    await wait();
+
+    const other = makeDevice();
+    await connected(other, cloud);
+    await wait();
+
+    check('the other phone has Monday',
+        other.call('entriesFor', other.State.schedule, '2026-08-10', 'w_01', 'actual').length === 1);
+    check('and Tuesday',
+        other.call('entriesFor', other.State.schedule, '2026-08-11', 'w_01', 'actual').length === 1);
+    check('and nothing is still owed', reopened.Sync.pendingCount() === 0,
+        String(reopened.Sync.pendingCount()));
 }
 
 report();
