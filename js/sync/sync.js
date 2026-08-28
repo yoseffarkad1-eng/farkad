@@ -2893,6 +2893,21 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
         {
             const parts = path.split('.');
 
+            // days.<date>.vehiclesOff - the vehicles that stayed in the yard. Three
+            // segments, so it fell through every branch here and was replayed as nothing:
+            // an exception that survived the failure the journal exists for came back as
+            // a vehicle that went out, and was paid for a day it spent in the yard.
+            if (parts.length === 3 && parts[0] === 'days' && parts[2] === 'vehiclesOff') {
+                const date = parts[1];
+                if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
+                if (value === null || (Array.isArray(value) && value.length === 0)) {
+                    delete schedule.days[date].vehiclesOff;
+                } else if (Array.isArray(value)) {
+                    schedule.days[date].vehiclesOff = value.slice();
+                }
+                return;
+            }
+
             if (parts.length === 4 && parts[0] === 'days') {
                 const [, date, layer, workerId] = parts;
                 if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
@@ -2926,7 +2941,8 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
             // One person, queued by id. A worker added seconds ago must not be dropped by
             // the snapshot that arrives before the send completes.
             if (parts.length === 3 && parts[0] === 'roster'
-                && (parts[1] === 'workers' || parts[1] === 'places')) {
+                && (parts[1] === 'workers' || parts[1] === 'places'
+                    || parts[1] === 'vehicles')) {
                 const list = schedule[parts[1]] || [];
                 const at = list.findIndex(item => item && String(item.id) === parts[2]);
                 // A null is a removal in flight and stays one, the same as it does for
@@ -2945,8 +2961,10 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
             }
 
             if (parts.length === 2 && parts[0] === 'roster'
-                && (parts[1] === 'workerOrder' || parts[1] === 'placeOrder')) {
-                const kind = parts[1] === 'workerOrder' ? 'workers' : 'places';
+                && (parts[1] === 'workerOrder' || parts[1] === 'placeOrder'
+                    || parts[1] === 'vehicleOrder')) {
+                const kind = parts[1] === 'workerOrder' ? 'workers'
+                    : (parts[1] === 'vehicleOrder' ? 'vehicles' : 'places');
                 const byId = new Map((schedule[kind] || [])
                     .filter(item => item && item.id)
                     .map(item => [String(item.id), item]));
@@ -2972,7 +2990,9 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
             // him up again on this device and then send him to everybody else. The
             // queued array is this device's own opinion of the roster from BEFORE it
             // heard; the tombstone is a statement about one man made after.
-            if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+            if (parts.length === 1
+                && (parts[0] === 'workers' || parts[0] === 'places'
+                    || parts[0] === 'vehicles')) {
                 if (perEntity && perEntity.has(parts[0])) return;
                 const gone = tombstoned && tombstoned[parts[0]];
                 schedule[parts[0]] = (!gone || gone.size === 0)

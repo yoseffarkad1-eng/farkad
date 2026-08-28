@@ -9404,4 +9404,107 @@ function withAdvances(device, rows) {
     same('and a phone arriving afterwards has both', ids, [idA, idB].sort());
 }
 
+// ---------------------------------------------------------------- V4: the journal forgets vehicles
+//
+// A2.1. The journal is the gate: every committed edit goes there first, and it is what
+// rebuilds an edit at the next boot when the schedule write did not land. applyJournalEntry
+// knows days, advances, ledger entries, one worker, one site and the two orders. It knows
+// none of the four vehicle paths - so an edit that survived the failure the journal exists
+// for was replayed as nothing, and the vehicle went back to what it was.
+//
+// The sequence below is the one that matters and the one an in-memory assertion cannot
+// reach: journal succeeds, schedule write refused, close, reopen from the durable bytes,
+// an older snapshot arrives, replay, reconnect, and a genuinely separate second device.
+{
+    suite('V4: a vehicle edit the schedule write lost comes back from the journal');
+
+    const cloud = makeCloud();
+    const a = makeDevice();
+    seed(a);
+    await connected(a, cloud);
+
+    const id = a.State.nextVehicleId();
+    a.State.schedule.vehicles = [{ id, name: 'טנדר לבן', ownerId: 'w_01', active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+
+    // The schedule write is refused; the journal write is not. This is the whole reason
+    // the journal is the gate rather than one of two alternatives.
+    a.setQuota(key => key === 'scheduleData:v2');
+    const stood = a.State.commitRoster();
+    check('the edit is still accepted, because the journal took it', stood === true);
+    check('and the schedule on the disk does NOT have it',
+        !String(a.raw('scheduleData:v2')).includes(id),
+        String(a.raw('scheduleData:v2')).slice(0, 80));
+    check('while the journal does',
+        String(a.raw('farkad:outbox')).includes(id));
+
+    // Closed and opened again, from the durable bytes alone.
+    const reopened = makeDevice({ storage: a.dump() });
+    reopened.State.load();
+    const back = (reopened.State.schedule.vehicles || []).find(item => item.id === id);
+    check('the reopened phone has the vehicle back', Boolean(back),
+        JSON.stringify(reopened.State.schedule.vehicles));
+    if (back) {
+        check('with its owner', back.ownerId === 'w_01', back.ownerId);
+        check('and its price', back.rates[0].amount === 300, JSON.stringify(back.rates));
+    }
+
+    // An older snapshot arrives - one written before the vehicle existed - and must not
+    // take it away again.
+    await connected(reopened, cloud);
+    await wait();
+    check('an older snapshot does not undo it',
+        (reopened.State.schedule.vehicles || []).some(item => item.id === id),
+        JSON.stringify(reopened.State.schedule.vehicles));
+
+    // And the other phone hears about it without anybody editing again.
+    const b = makeDevice();
+    await connected(b, cloud);
+    await wait();
+    check('and a second device has it, with no second edit anywhere',
+        (b.State.schedule.vehicles || []).some(item => item.id === id),
+        JSON.stringify(b.State.schedule.vehicles));
+}
+
+{
+    suite('V4: and so does the evening a vehicle stayed in the yard');
+
+    const cloud = makeCloud();
+    const a = makeDevice();
+    seed(a);
+    a.State.schedule.vehicles = [{ id: 'v_keep', name: 'טנדר', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    a.State.save({ silent: true });
+    record(a, '2026-08-12', 'w_01', 'p_01');
+    await connected(a, cloud);
+
+    a.setQuota(key => key === 'scheduleData:v2');
+    const off = a.call('setVehicleOut', a.State.schedule, '2026-08-12', 'v_keep', false);
+    check('the exception is accepted on the journal alone', a.State.commit(off) === true);
+    check('and the schedule on the disk does not carry it',
+        !String(a.raw('scheduleData:v2')).includes('vehiclesOff'));
+
+    const reopened = makeDevice({ storage: a.dump() });
+    reopened.State.load();
+    // Asserted as the vehicle AND the exception, not as the money: nought is also what a
+    // lost vehicle is worth, so the amount alone would pass for the wrong reason.
+    check('the reopened phone still has the vehicle',
+        (reopened.State.schedule.vehicles || []).some(item => item.id === 'v_keep'),
+        JSON.stringify(reopened.State.schedule.vehicles));
+    same('and still knows it stayed in the yard',
+        (reopened.State.schedule.days['2026-08-12'] || {}).vehiclesOff, ['v_keep']);
+    same('so it is not paid for',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 0, amount: 0 });
+
+    const b = makeDevice();
+    await connected(reopened, cloud);
+    await wait();
+    await connected(b, cloud);
+    await wait();
+    same('and the other phone works out the same money',
+        b.call('vehiclePayFor', b.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 0, amount: 0 });
+}
+
 report();
