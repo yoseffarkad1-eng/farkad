@@ -483,6 +483,18 @@ for (const width of [320, 390]) {
     check(`${width}px: every control on it is a finger's size`,
         small.length === 0, JSON.stringify(small).slice(0, 200));
 
+    // The ask dialog is where the permanent decisions are typed; its buttons must meet
+    // the same floor as everything else.
+    // Fire-and-forget: returning askConfirm's promise would make evaluate wait for a
+    // click that never comes.
+    await page.evaluate(() => { askConfirm({ title: 'בדיקה', message: 'בדיקה', ok: 'אישור' }); });
+    await page.waitForTimeout(150);
+    const askSmall = await undersized(page);
+    check(`${width}px: every control on the ask dialog is a finger's size`,
+      askSmall.length === 0, JSON.stringify(askSmall));
+    await page.evaluate(() => askCancel());
+    await page.waitForTimeout(100);
+
     await page.context().close();
 }
 
