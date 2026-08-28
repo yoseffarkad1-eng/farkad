@@ -1168,10 +1168,42 @@ function renderWorkerFormActions() {
 // queue rather than of the screen. Empty means deletable. Read in two places on purpose:
 // once to decide what to draw, and again at the moment of the write - a snapshot can
 // arrive while the confirmation is open.
+// Off in this build, and this is why.
+//
+// Permanent deletion rests on one claim: that this device made the id and that the id has
+// never left it. The claim is invalidated when something leaves - a backup, a raw recovery
+// export - by moving a generation, by marking the device uncertain, or by removing the
+// facts themselves. All three are writes or removals, and the device where a raw recovery
+// export happens is a device whose storage is refusing. If none of the three can be
+// recorded, the file still goes out - it is the only copy of the damage and refusing it
+// would trade the data for the bookkeeping - and a disk that recovers afterwards reads
+// back facts that were true before the handover and are not true now.
+//
+// There is nothing to write the truth into at that moment, so the claim cannot be made
+// safe by anything this file can do. What CAN be done is to stop making the claim. Nobody
+// loses a record: archiving keeps every day, every advance and every report, and it is
+// what the screen has always offered first. The only thing that goes is the ability to
+// purge a name typed by mistake, which the next build can restore with a deliberate,
+// verified reset behind it.
+const PERMANENT_DELETION = false;
+
+// Asked rather than read, so the suites can exercise the machinery behind the gate the
+// way they exercise the ledger's - see ledgerWritesEnabled. Nothing in the app calls it
+// with anything but the constant above.
+function permanentDeletionEnabled() {
+    return PERMANENT_DELETION === true;
+}
+
 function deletionBlockers(workerId) {
     const footprint = workerFootprint(State.schedule, workerId);
     const sync = typeof FarkadSync !== 'undefined' ? FarkadSync : null;
     const blocked = [];
+
+    // Fails closed: a build that has lost the gate has not been given permission by
+    // losing it.
+    if (typeof permanentDeletionEnabled !== 'function' || !permanentDeletionEnabled()) {
+        blocked.push('מחיקה סופית מושבתת בגרסה הזו');
+    }
 
     if (footprint.days.length > 0) blocked.push(`${footprint.days.length} ימים רשומים`);
     if (footprint.advances.length > 0) blocked.push(`${footprint.advances.length} מקדמות`);

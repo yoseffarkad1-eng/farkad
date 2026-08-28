@@ -46,38 +46,83 @@ function outboxSlotKey(index) {
     return index === 0 ? OUTBOX_KEY : `farkad:outbox:active${index}`;
 }
 
-// ---------------------------------------------------------------- one key per entry
+// ---------------------------------------------------------------- an operation, not a path
 //
-// The queue used to be ONE record: {seq, items}. Every write read it, changed it and
-// wrote the whole thing back - and a read-modify-write over a record two tabs share is a
-// lost update by construction. A merge at write time narrowed the window to a few
-// instructions; it could not close it, because the moment between a tab's read and its
-// write belongs to the other tab. Tab B reads the queue, tab A queues Monday, tab B
-// writes back a record computed from bytes that no longer describe the disk, and Monday
-// is gone - not unsent, deleted, by a tab doing exactly what it was told. T1 in the suite
-// is that, spelled out.
+// The queue used to be ONE record: {seq, items}. Every write read it, changed it and wrote
+// the whole thing back - and a read-modify-write over a record two tabs share is a lost
+// update by construction. v87 first gave every PATH its own key, which stopped two tabs
+// queueing two different days from erasing each other. It was not enough, and the way it
+// was not enough is worth writing down, because it is the shape of every bug in this file:
 //
-// So an entry is its own key. Two tabs queueing two different paths now touch two
-// different records and no interleaving can lose either. The slot record stays, holding
-// the sequence mark and nothing else, and any items still inside it are a queue written
-// by a build before this one - read, honoured, and migrated out one at a time.
+//   Tab A records Monday for a man and sends it; the cloud has not answered yet.
+//   Tab B, loaded earlier, records Monday for the same man again - a correction.
+//   Both tabs are numbering from the same stale mark, so both call it edit N+1.
+//   B's write lands on the same key, because the key was the PATH.
+//   A's send is acknowledged. A holds that path in its own memory, so it prunes the key.
+//   B's correction is gone from the disk, the cloud has A's older value, and the next
+//   open puts the old value back on the screen with nothing to say it happened.
 //
-// The separator cannot appear in a field path (paths are dot-joined ids), so the key
-// round-trips exactly. `farkad:outbox:active1:e:...` does not begin with
-// `farkad:outbox:e:`, so the slots stay apart.
-const ENTRY_MARK = ':e:';
+// So the unit of the queue is not a path and not a value. It is an OPERATION: one edit,
+// made once, with an identity nothing else can wear. An acknowledgement for operation X
+// can never mark, supersede or remove operation Y - not when they share a path, not when
+// they share a device, not when they share a number.
+//
+//   <slot>:b:<batchId>  one batch, and every operation in it, in one record
+//                       {batchId, seq, ops: [{opId, path, value, seq}]}
+//   <slot>:s:<opId>     that operation reached the cloud                     "1"
+//   <slot>              the sequence mark, and an older build's whole queue
+//
+// A batch is ATOMIC because it is ONE verified write. There is no rollback to trust and
+// no half-written batch to recover from: the record either landed whole or is not there,
+// and a process that dies at any point leaves nothing active either way. Two tabs mint
+// two batch ids and write two records, so a batch never touches bytes another tab owns.
+//
+// Marking an operation as sent is its own tiny key, so acknowledging one operation never
+// rewrites the record that carries the others.
+//
+// A key is matched by its exact shape rather than by a prefix. `<slot>:o:<opId>:damaged`
+// is a quarantine copy and it used to match the live scan, so every reopen quarantined
+// the quarantine: two keys, then four, then eight, with :damaged:damaged among them.
+const SENT_MARK = ':s:';
+const BATCH_MARK = ':b:';
 
-function outboxEntryKey(slotKey, path) {
-    return slotKey + ENTRY_MARK + path;
+// Ids carry no colons, so a key with one after the id is not one of ours.
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+function outboxSentKey(slotKey, opId) { return slotKey + SENT_MARK + opId; }
+
+// An id that is unique AND sorts by the moment it was made. Nine base-36 digits hold
+// milliseconds well past any date this app will see, so the width is stable and a plain
+// string comparison is a comparison of times.
+function opIdNow() {
+    const stamp = Date.now().toString(36);
+    const padded = stamp.length >= 9 ? stamp : '0'.repeat(9 - stamp.length) + stamp;
+    return padded + '_' + newEntityId('q').slice(2);
+}
+function outboxBatchKey(slotKey, batchId) { return slotKey + BATCH_MARK + batchId; }
+
+// The id in `key` if it is EXACTLY one of this slot's `mark` keys, else null.
+function outboxIdIn(slotKey, mark, key) {
+    const prefix = slotKey + mark;
+    if (key.indexOf(prefix) !== 0) return null;
+    const id = key.slice(prefix.length);
+    return SAFE_ID.test(id) ? id : null;
 }
 
-function outboxEntryPrefix(slotKey) {
-    return slotKey + ENTRY_MARK;
+// One batch as it sits on the disk, with every operation in it. Null when it cannot be
+// read, which is never the same as "not there": the caller quarantines it and keeps the
+// bytes. Strict, because a batch that reads as half itself is the thing this shape exists
+// to make impossible.
+// Which of two queued operations was written later. By id, which carries the moment;
+// by number only when one of them is an older build's item and has no id at all.
+function laterOperation(candidate, already) {
+    if (candidate.opId && already.opId) return candidate.opId > already.opId;
+    if (candidate.opId && !already.opId) return true;
+    if (!candidate.opId && already.opId) return false;
+    return (Number(candidate.seq) || 0) >= (Number(already.seq) || 0);
 }
 
-// One entry as it sits on the disk. Returns null when it cannot be read, which is never
-// the same as "not there": the caller quarantines it and keeps the bytes.
-function readOutboxEntry(raw, path) {
+function readOutboxBatch(raw, batchId) {
     let parsed;
     try {
         parsed = JSON.parse(raw);
@@ -85,16 +130,25 @@ function readOutboxEntry(raw, path) {
         return null;
     }
     if (!isPlainObject(parsed)) return null;
-    if (String(parsed.path) !== String(path)) return null;
+    if (String(parsed.batchId) !== String(batchId)) return null;
     if (!isSafeSeq(parsed.seq)) return null;
-    if (parsed.sent !== undefined && typeof parsed.sent !== 'boolean') return null;
-    if (!Object.prototype.hasOwnProperty.call(parsed, 'value')) return null;
-    // The path AND the value, against the families this app actually writes - the same
-    // check the single record made, for the same reason: a structurally sound entry
-    // naming a layer nobody wrote poisons the schedule in memory, and the next ordinary
-    // save puts that on the disk.
-    if (journalEntryProblems(path, parsed.value).length > 0) return null;
-    return { value: parsed.value, seq: parsed.seq, sent: parsed.sent === true };
+    if (!Array.isArray(parsed.ops) || parsed.ops.length === 0) return null;
+
+    const ops = [];
+    for (let i = 0; i < parsed.ops.length; i += 1) {
+        const op = parsed.ops[i];
+        if (!isPlainObject(op)) return null;
+        if (!SAFE_ID.test(String(op.opId || ''))) return null;
+        if (!isSafeSeq(op.seq)) return null;
+        if (!Object.prototype.hasOwnProperty.call(op, 'value')) return null;
+        // The path AND the value, against the families this app actually writes: a
+        // structurally sound entry naming a layer nobody wrote poisons the schedule in
+        // memory, and the next ordinary save puts that on the disk.
+        if (journalEntryProblems(String(op.path), op.value).length > 0) return null;
+        ops.push({ opId: String(op.opId), path: String(op.path), value: op.value,
+            seq: op.seq });
+    }
+    return { batchId: String(batchId), seq: parsed.seq, ops };
 }
 
 // A whole-document replacement - a backup restored, a file imported - that has not
@@ -191,15 +245,47 @@ const SCHEDULE_KEY = 'scheduleData:v2';     // must match V2_KEY in state.js
 // restore does. What it must NOT get is a trip to the cloud when somebody signs in
 // weeks later: local-only means local-only, and a record that could not say so would
 // turn every offline restore into a push the person never asked for.
-function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud) {
+// `supersedes` is the LIST of operations the restore replaces, named one by one.
+//
+// It was a number - the journal position at the moment the restore was asked for - and a
+// number is a statement about one tab's counter. Two tabs number from the same stale mark,
+// so an edit made in tab B AFTER the restore was asked for in tab A could be handed the
+// same number as the last edit before it, fall inside the boundary, and be deleted by the
+// restore. The work recorded after a restore request is exactly the work a restore must
+// not touch, and a scalar could not tell the two apart.
+//
+// Named operations can. An edit made after the prepare has an id nothing in this list
+// carries, whatever number it was given. The number stays alongside for an envelope
+// written by an older build, which has nothing else to go on.
+function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud, supersedes) {
     return {
         version: REPLACE_VERSION,
         phase,
         transactionId,
         supersedesSeq: Number(supersedesSeq) || 0,
+        supersedes: Array.isArray(supersedes) ? supersedes.map(String) : [],
         cloud: cloud !== false,
         document
     };
+}
+
+// The operations a restore replaces, or null when the envelope names none - which is what
+// an envelope written before v87 looks like, and the only case the old number is used for.
+function supersededOpIds(envelope) {
+    const named = envelope && envelope.supersedes;
+    if (!Array.isArray(named) || named.length === 0) return null;
+    return new Set(named.map(String));
+}
+
+// Is this queued operation one the restore replaces?
+//
+// By NAME where the envelope has names: an edit made after the prepare carries an id the
+// list cannot contain, whatever number it was handed. By number only for an envelope from
+// a build that recorded nothing else - and for an item an older build left inside the slot
+// record, which has no id to be named by.
+function supersededByRestore(item, named, upTo) {
+    if (named) return Boolean(item.opId) && named.has(String(item.opId));
+    return (Number(item.seq) || 0) <= (Number(upTo) || 0);
 }
 
 function replacementId() {
@@ -279,6 +365,9 @@ function envelopeProblems(parsed) {
     }
 
     if (!isSafeSeq(parsed.supersedesSeq)) return ['bad supersede point'];
+    if (parsed.supersedes !== undefined && !Array.isArray(parsed.supersedes)) {
+        return ['bad supersede list'];
+    }
     return readReplacementDocument(parsed.document).problems;
 }
 
@@ -539,18 +628,23 @@ const FarkadSync = {
         if (this._loaded) return;
         this._loaded = true;
 
-        // Walk the slots. The first that is empty or READS AS A QUEUE becomes the live
-        // one; every damaged one on the way is copied aside and left exactly where it is.
+        // A name for this session, minted once. Two tabs of the same app are two sessions
+        // and never share it, so an operation can always say which of them made it - and
+        // a tab can tell its own abandoned work from another tab's work in flight.
+        this._session = newEntityId('s').slice(2);
+
+        // Walk the slots. The first whose MARK is absent or readable becomes the one this
+        // session writes to; a damaged mark is copied aside and left exactly where it is.
         //
-        // "Reads as a queue" is not "parses". A record that parses into {} is not an
-        // empty queue - the app never writes one, every write is {seq, items} - so it is
-        // something else that arrived under this key, and treating it as empty means the
-        // next edit writes straight over whatever it actually was.
+        // "Reads as a queue" is not "parses". A record that parses into {} is not an empty
+        // queue - the app never writes one - so it is something else that arrived under
+        // this key, and treating it as empty means the next edit writes over whatever it
+        // actually was.
         //
         // _activeKey starts as null and is only ever set to a slot that PASSED. The first
         // version assigned it at the top of each turn, so with every slot damaged it came
-        // to rest on the last one and wrote the new journal straight over raw bytes it
-        // had just finished quarantining.
+        // to rest on the last one and wrote the new journal straight over raw bytes it had
+        // just finished quarantining.
         this._activeKey = null;
         let queue = null;
 
@@ -559,17 +653,13 @@ const FarkadSync = {
             const candidate = Store.durableGet(key);
 
             if (candidate === null) {
-                // A free slot as far as the RECORD goes. Its per-entry keys are read
-                // below all the same: the slot record holds only the sequence mark now,
-                // and a device that lost it - a refused write, a reclaim - still has
-                // every queued edit sitting in its own key beside it.
                 this._activeKey = key;
                 break;
             }
 
             const read = readOutboxRecord(candidate);
             if (read) {
-                this._activeKey = key;                      // a queue, this is the live one
+                this._activeKey = key;
                 queue = read;
                 break;
             }
@@ -590,80 +680,95 @@ const FarkadSync = {
         }
 
         if (this._activeKey === null) {
-            // Every slot damaged. There is nowhere a journal can go, so there is no way
-            // to record anything that could be re-applied - and no acknowledgement should
-            // be able to make it look otherwise.
+            // Every slot damaged. There is nowhere a journal can go, so there is no way to
+            // record anything that could be re-applied - and no acknowledgement should be
+            // able to make it look otherwise.
             Recovery.halt('outbox-slots',
                 'לא נמצא מקום תקין לתור השליחה. הרישום מושבת עד שהנתונים הגולמיים ייוצאו.');
             return;
         }
-        // The per-entry keys, whatever the slot record turned out to be. They are the
-        // queue since v87; a slot record with items in it is a queue written by an older
-        // build, still honoured and still the only copy of those edits.
-        const perEntry = this.readDurableEntries();
+
+        // EVERY slot's operations, not only the one being written to. A damaged mark used
+        // to move the loader on to the next slot and leave that slot's readable operations
+        // behind - present on the disk, absent from the queue, absent from the report of
+        // what is pending, and absent from the recovery export. The mark and the work are
+        // different records now, and losing the mark is not losing the work.
+        const durable = this.readDurableOps();
 
         if (queue) {
+            // An older build's whole queue, still the only copy of those edits.
             Object.keys(queue.items).forEach(path => {
                 const item = queue.items[path];
                 this._outbox.set(path, {
+                    opId: null,
+                    batchId: null,
+                    slot: this._activeKey,
+                    legacy: true,
+                    path,
                     value: item.value,
                     seq: item.seq,
-                    // Already in the cloud, still kept: it is only removed once the local
-                    // schedule holding it has also been written.
                     sent: item.sent === true
                 });
             });
         }
 
-        // Laid over the legacy record: an entry that exists in both was migrated and then
-        // edited again, and the per-entry key is the newer of the two by construction.
-        perEntry.forEach((item, path) => { this._outbox.set(path, item); });
-
-        if (!queue) {
-            this._outbox.forEach(item => { this._seq = Math.max(this._seq, item.seq); });
-            return;
-        }
+        // Laid over it: an operation and a legacy item for the same path means the item was
+        // migrated and then edited again, and the operation is the newer of the two by
+        // construction.
+        durable.forEach((item, path) => { this._outbox.set(path, item); });
 
         // The high-water mark, and it is READ rather than recomputed.
         //
-        // Deriving it from the items alone was G16.2: a restore prunes the entries it
-        // supersedes, which can leave {seq:N, items:{}} on the disk. The next open then
-        // computed a maximum over nothing, started again at zero, and handed the next
-        // edit a sequence number BELOW the boundary of the restore that was still
-        // pending - so the restore superseded an edit made after it, and deleted it.
-        //
-        // Taken as the larger of the two, because a record written by a build that did
-        // not persist the mark still has to load.
-        this._seq = queue.seq;
+        // Deriving it from the items alone was G16.2: a restore prunes what it supersedes,
+        // which can leave {seq:N} on the disk with nothing under it. The next open then
+        // computed a maximum over nothing, started again at zero, and handed the next edit
+        // a number BELOW the boundary of a restore that was still pending - so the restore
+        // superseded an edit made after it, and deleted it.
+        this._seq = queue ? queue.seq : 0;
         this._outbox.forEach(item => { this._seq = Math.max(this._seq, item.seq); });
+
     },
 
-    // Every queued entry the DISK holds for the live slot, read fresh. A Map, so it lays
-    // over the legacy record and over memory the same way.
+    // Every live operation across every slot, newest per path, read fresh off the disk.
     //
-    // An entry that will not read is quarantined and KEPT, one entry at a time. Under the
-    // single record one bad byte condemned the whole queue; here it costs exactly the
-    // edit it belongs to, and the rest of the queue goes on being sendable - which is the
-    // difference between a device that stops recording and one that does not.
-    readDurableEntries() {
-        const entries = new Map();
-        if (!this._activeKey) return entries;
+    // A batch record that will not read is quarantined and KEPT. Under the single record
+    // one bad byte condemned the whole queue; here it costs exactly the batch it belongs
+    // to, and the rest of the queue goes on being sendable.
+    readDurableOps() {
+        const byPath = new Map();
+        const keys = Store.keys();
 
-        const prefix = outboxEntryPrefix(this._activeKey);
-        Store.keys().filter(key => key.indexOf(prefix) === 0).sort().forEach(key => {
-            const path = key.slice(prefix.length);
-            const raw = Store.durableGet(key);
-            if (raw === null) return;
+        for (let i = 0; i < OUTBOX_SLOTS; i += 1) {
+            const slot = outboxSlotKey(i);
+            keys.forEach(key => {
+                const batchId = outboxIdIn(slot, BATCH_MARK, key);
+                if (batchId === null) return;
+                const raw = Store.durableGet(key);
+                if (raw === null) return;
 
-            const item = readOutboxEntry(raw, path);
-            if (item) { entries.set(path, item); return; }
+                const batch = readOutboxBatch(raw, batchId);
+                if (!batch) {
+                    console.error('Queued batch does not read as one, holding it:', key);
+                    this.outboxDamaged = true;
+                    Recovery.damaged(key, raw,
+                        `קבוצת עריכות בתור השליחה לא נקראה: ${key}.`);
+                    return;
+                }
 
-            console.error('Queued edit does not read as one, holding it:', key);
-            this.outboxDamaged = true;
-            Recovery.damaged(key, raw,
-                `רישום בתור השליחה (עריכה שטרם נשלחה) לא נקרא: ${path}.`);
-        });
-        return entries;
+                batch.ops.forEach(op => {
+                    const sent = Store.durableGet(outboxSentKey(slot, op.opId)) !== null;
+                    const held = { opId: op.opId, batchId, slot, legacy: false,
+                        path: op.path, value: op.value, seq: op.seq, sent };
+                    const already = byPath.get(op.path);
+                    // The one written LAST wins, and the id says when. Not the sequence
+                    // number: two tabs number from whatever mark each of them read, so
+                    // the higher number is not the later edit, and the tab that wrote
+                    // second is the one whose value the person is looking at.
+                    if (!already || laterOperation(held, already)) byPath.set(op.path, held);
+                });
+            });
+        }
+        return byPath;
     },
 
     // The queue as it stands in memory, written down. NOT optional: a restore point the
@@ -685,7 +790,7 @@ const FarkadSync = {
     // was removed, and the superseded days came back at the next open.
     //
     // Returns whether the disk now holds `candidate`.
-    adoptJournal(candidate) {
+    adoptJournal(candidate, authorised) {
         this.loadOutbox();
         if (!this._activeKey) return false;
         if (farkadWritesBlocked()) return false;
@@ -695,141 +800,140 @@ const FarkadSync = {
         // record that describes what it owes can be read again.
         if (this.replaceHeld) return false;
 
-        // What another TAB of this same app has put on the disk since this one last looked.
-        //
-        // loadOutbox reads once a session and adoptJournal writes the whole record back
-        // from what this tab believes is there, so the second tab to write replaced the
-        // first one's queue outright: tab A records Monday, tab B records Tuesday, and
-        // Monday is gone from the queue and from the schedule it would have rebuilt.
-        // Durably lost, not merely unsent, and invisible to every other test here because
-        // they all copy the bytes - a copy is a reopen, and a reopen cannot lose this way.
-        //
-        // The merge is precise rather than a blind union, because this same function is
-        // how entries are PRUNED: a path missing from `candidate` means one of two
-        // opposite things. If this tab had it, the omission is deliberate - it was sent,
-        // acknowledged, superseded - and it stays gone. If this tab never had it, it is
-        // another tab's work and it stays.
-        //
-        // Since v87 that is decided per ENTRY, against its own key, so the write this tab
-        // makes never touches a byte the other tab's entry lives in. What is left of the
-        // old shared record is the sequence mark, and a mark can only be raised.
         const mine = new Map(this._outbox);
-        const durable = this.readDurableEntries();
+        const durable = this.readDurableOps();
         const legacy = this.legacyQueuedItems();
 
-        // A batch is still ALL OR NOTHING. That was free while the queue was one record;
-        // over separate keys it has to be built. Thirteen roster paths half-written leave
-        // a worker present and missing from the order, and the next open replays exactly
-        // that - so every key this call touches remembers what it said before, and the
-        // first refusal puts them all back.
-        //
-        // The undo is a write of bytes that were already there, or a remove. Both are the
-        // cheap direction on a device that has just run out of room, which is the failure
-        // this is defending against.
+        // What is NEW: a path whose value or number this tab is putting down, and which
+        // the disk does not already hold under an identical operation. Everything new goes
+        // into ONE batch record, which is one verified write, which is what makes a batch
+        // atomic without a rollback anybody has to trust.
+        const fresh = [];
+        const written = new Map();
+        let seq = this._seq;
+
+        candidate.forEach((item, path) => {
+            const already = durable.get(path);
+            const unchanged = already && !legacy.has(path)
+                && (!item.opId || item.opId === already.opId)
+                && already.seq === item.seq
+                && canonicalJson(already.value) === canonicalJson(item.value);
+            if (unchanged) {
+                written.set(path, Object.assign({}, already, { sent: item.sent === true }));
+                return;
+            }
+            // A brand new operation id every time a value is put down, so two versions of
+            // one path are two operations and an acknowledgement for one can never touch
+            // the other.
+            //
+            // Ordered as well as unique. The id opens with the millisecond it was minted,
+            // base-36 and fixed width, so sorting the ids sorts the edits by when they
+            // were made - and two tabs of one app share a clock. That is what decides
+            // which of two versions of the same day is the current one; the sequence
+            // number cannot, because two tabs number from whatever mark each of them
+            // happened to read, and the tab with the higher number is not the tab that
+            // wrote last. The random tail is the tie-break inside one millisecond.
+            const opId = opIdNow();
+            seq = Math.max(seq, item.seq);
+            fresh.push({ opId, path, value: item.value, seq: item.seq });
+            written.set(path, { opId, batchId: null, slot: this._activeKey, legacy: false,
+                path, value: item.value, seq: item.seq, sent: false });
+        });
+
+        // What this tab is TAKING AWAY, and only what this tab actually had. An operation
+        // the other tab wrote while this one was thinking is not an omission, it is its
+        // work - and an operation that has been REPLACED on the disk since this tab last
+        // looked is not this tab's to remove either. That second rule is the one the
+        // path-keyed version did not have: it removed whatever occupied the path.
+        const removing = [];
+        durable.forEach((op, path) => {
+            if (candidate.has(path)) {
+                const held = mine.get(path);
+                // Superseding the same path: the older operation goes, but only if it is
+                // the one this tab was holding. If the disk has moved on, the operation
+                // there belongs to somebody else and it stays.
+                if (held && held.opId && held.opId === op.opId
+                    && written.get(path) && written.get(path).opId !== op.opId) {
+                    removing.push(op);
+                }
+                return;
+            }
+            // Named by a restore: the envelope listed this exact operation when it was
+            // prepared, which is a statement about the disk rather than about one tab's
+            // memory. Nothing else may remove another tab's work.
+            if (authorised && op.opId && authorised.has(op.opId)) { removing.push(op); return; }
+            const held = mine.get(path);
+            if (!held) { written.set(path, op); return; }         // another tab's work
+            if (held.opId !== op.opId) { written.set(path, op); return; }  // moved on
+            removing.push(op);
+        });
+
         const undo = [];
         const put = (key, text) => {
             const before = Store.durableGet(key);
-            if (!Store.setVerified(key, text)) return false;
-            undo.push({ key, before });
-            return true;
-        };
-        const drop = key => {
-            const before = Store.durableGet(key);
-            if (before === null) return true;
-            try { Store.remove(key); } catch (error) { /* answered next */ }
-            Store.forget(key);
-            if (!Store.available || Store.durableGet(key) !== null) return false;
+            if (!Store.setVerified(key, text)) {
+                // A write that came back changed has already touched the bytes. It is in
+                // the undo list either way, because "the write failed" and "the bytes are
+                // untouched" are not the same statement.
+                if (Store.durableGet(key) !== before) undo.push({ key, before });
+                return false;
+            }
             undo.push({ key, before });
             return true;
         };
         const rollBack = () => {
+            let clean = true;
             undo.reverse().forEach(step => {
                 if (step.before === null) {
-                    try { Store.remove(step.key); } catch (error) { /* best effort */ }
+                    try { Store.remove(step.key); } catch (error) { clean = false; }
                     Store.forget(step.key);
-                } else {
-                    Store.setVerified(step.key, step.before);
+                    if (!Store.available || Store.durableGet(step.key) !== null) clean = false;
+                } else if (!Store.setVerified(step.key, step.before)) {
+                    clean = false;
                 }
             });
+            return clean;
         };
         const refuse = () => {
-            rollBack();
+            // The answer is READ. A rollback that could not put the bytes back is a
+            // different device from one that could, and calling both "refused" is how a
+            // partial batch comes back at the next open wearing a success's clothes.
+            this.rollbackFailed = !rollBack();
             this.journalFailed = true;
             if (typeof updateSyncNotice === 'function') updateSyncNotice();
             return false;
         };
 
-        const written = new Map();
-        const slotRecord = () => {
-            const read = readOutboxRecord(Store.durableGet(this._activeKey));
-            return read || { seq: this._seq, items: {} };
-        };
-
-        // What this tab is putting down. An entry whose durable copy already says exactly
-        // this is left alone: a write that changes nothing is a chance to fail for nothing.
-        let failed = false;
-        candidate.forEach((item, path) => {
-            if (failed) return;
-            const record = { path, value: item.value, seq: item.seq, sent: item.sent === true };
-            const already = durable.get(path);
-            const unchanged = already && already.seq === record.seq
-                && already.sent === record.sent
-                && canonicalJson(already.value) === canonicalJson(record.value);
-            if (unchanged && !legacy.has(path)) { written.set(path, item); return; }
-
-            if (!put(outboxEntryKey(this._activeKey, path), JSON.stringify(record))) {
-                failed = true;
-                return;
+        // 1. The new work, as one record. Written FIRST, because until the removals below
+        //    it is purely additive: a process that dies here leaves a queue with one extra
+        //    batch in it, which is an edit waiting to be sent, not an edit lost.
+        let batchId = null;
+        if (fresh.length > 0) {
+            batchId = newEntityId('b').slice(2);
+            const record = { batchId, seq, ops: fresh };
+            if (!put(outboxBatchKey(this._activeKey, batchId), JSON.stringify(record))) {
+                return refuse();
             }
-            written.set(path, item);
-            // Migrating one entry out of an old build's record: the copy is verified
-            // before the original is let go.
-            if (legacy.has(path)) {
-                const read = slotRecord();
-                const items = {};
-                Object.keys(read.items).forEach(key => {
-                    if (key !== path) items[key] = read.items[key];
-                });
-                if (!put(this._activeKey, JSON.stringify({ seq: read.seq, items }))) {
-                    failed = true;
+            written.forEach((item, path) => {
+                if (item.batchId === null && fresh.some(op => op.opId === item.opId)) {
+                    written.set(path, Object.assign({}, item, { batchId }));
                 }
-            }
-        });
-        if (failed) return refuse();
-
-        // What this tab is taking away - and only what THIS tab had. An entry the other
-        // tab added while this one was thinking is not an omission, it is its work.
-        durable.forEach((item, path) => {
-            if (failed || candidate.has(path)) return;
-            if (!mine.has(path)) { written.set(path, item); return; }
-            if (!drop(outboxEntryKey(this._activeKey, path))) failed = true;
-        });
-        if (failed) return refuse();
-
-        legacy.forEach((item, path) => {
-            if (failed || candidate.has(path)) return;
-            if (!mine.has(path)) { written.set(path, item); return; }
-            const read = slotRecord();
-            if (!Object.prototype.hasOwnProperty.call(read.items, path)) return;
-            const items = {};
-            Object.keys(read.items).forEach(key => {
-                if (key !== path) items[key] = read.items[key];
             });
-            if (!put(this._activeKey, JSON.stringify({ seq: read.seq, items }))) failed = true;
-        });
-        if (failed) return refuse();
+        }
 
-        // The mark, last and raised only. A lost update here costs nothing an entry's own
-        // seq does not already carry, and lowering it is the one thing that could hand a
-        // later edit a number below a pending restore's boundary - which is G16.2.
-        let seq = this._seq;
-        written.forEach(item => { seq = Math.max(seq, item.seq); });
+        // 1b. The cloud has these. Its own tiny key per operation, so acknowledging one
+        //     edit never rewrites the record that carries the others - and so a refused
+        //     mark costs one re-send rather than a batch.
+        for (const [path, item] of written) {
+            if (!item.sent || !item.opId) continue;
+            const key = outboxSentKey(item.slot || this._activeKey, item.opId);
+            if (Store.durableGet(key) !== null) continue;
+            if (!put(key, '1')) return refuse();
+        }
+
+        // 2. The mark. Read rather than recomputed at the next open, and only ever raised.
         const onDisk = readOutboxRecord(Store.durableGet(this._activeKey));
         const highest = Math.max(seq, onDisk ? onDisk.seq : 0);
-        // Written when the mark would move, and written when there is no record at all:
-        // the mark is READ at the next open rather than recomputed, and a device with
-        // entries but no mark hands the edit after a restore a number below that
-        // restore's boundary - which is G16.2, and it deletes the edit.
         if (!onDisk || onDisk.seq !== highest) {
             if (!put(this._activeKey, JSON.stringify({
                 seq: highest, items: onDisk ? onDisk.items : {}
@@ -838,13 +942,78 @@ const FarkadSync = {
             }
         }
 
+        // 3. The removals, last, so that everything they make redundant is already down.
+        for (let i = 0; i < removing.length; i += 1) {
+            if (!this.removeOperation(removing[i], undo)) return refuse();
+        }
+
+        // 4. And the legacy items this tab is done with, taken out of the old record one
+        //    at a time. The copy is verified before the original is let go.
+        let failed = false;
+        legacy.forEach((item, path) => {
+            if (failed) return;
+            const superseded = written.has(path) && !written.get(path).legacy;
+            if (candidate.has(path) && !superseded) return;
+            if (!candidate.has(path) && !mine.has(path)) return;
+            const read = readOutboxRecord(Store.durableGet(this._activeKey));
+            if (!read || !Object.prototype.hasOwnProperty.call(read.items, path)) return;
+            const items = {};
+            Object.keys(read.items).forEach(key => {
+                if (key !== path) items[key] = read.items[key];
+            });
+            if (!put(this._activeKey, JSON.stringify({ seq: read.seq, items }))) failed = true;
+        });
+        if (failed) return refuse();
+
         this.journalFailed = false;
+        this.rollbackFailed = false;
         // Memory takes what the disk now holds, not just this tab's half of it: the next
         // write from here starts from what is actually there, and the entries the other
         // tab added are ones this tab can flush and prune like its own.
         this._outbox = written;
         this._seq = highest;
         return true;
+    },
+
+    // One operation off the disk, by its own id and nothing else.
+    //
+    // The record it lives in carries the rest of its batch, so it is rewritten without it
+    // rather than removed - and removed outright once it is the last one left. Two tabs
+    // pruning the same batch at once can lose one of the two removals; the operation is
+    // then pruned at the next pass, which is a delay and not a loss.
+    removeOperation(op, undo) {
+        const key = outboxBatchKey(op.slot, op.batchId);
+        const batch = readOutboxBatch(Store.durableGet(key), op.batchId);
+        const sentKey = outboxSentKey(op.slot, op.opId);
+
+        const forget = target => {
+            const before = Store.durableGet(target);
+            if (before === null) return true;
+            try { Store.remove(target); } catch (error) { /* answered next */ }
+            Store.forget(target);
+            if (!Store.available || Store.durableGet(target) !== null) return false;
+            if (undo) undo.push({ key: target, before });
+            return true;
+        };
+
+        if (!batch) return forget(sentKey);
+
+        const rest = batch.ops.filter(other => other.opId !== op.opId);
+        if (rest.length === batch.ops.length) return forget(sentKey);
+
+        if (rest.length === 0) {
+            if (!forget(key)) return false;
+            return forget(sentKey);
+        }
+
+        const before = Store.durableGet(key);
+        const text = JSON.stringify({ batchId: batch.batchId, seq: batch.seq, ops: rest });
+        if (!Store.setVerified(key, text)) {
+            if (Store.durableGet(key) !== before && undo) undo.push({ key, before });
+            return false;
+        }
+        if (undo) undo.push({ key, before });
+        return forget(sentKey);
     },
 
     // Items still inside the slot record, put there by a build before per-entry keys.
@@ -891,8 +1060,8 @@ const FarkadSync = {
             });
         }
 
-        // And the per-entry keys, which win where both have the path.
-        this.readDurableEntries().forEach((item, path) => { entries.set(path, item); });
+        // And the operations, which win where both have the path.
+        this.readDurableOps().forEach((item, path) => { entries.set(path, item); });
 
         return [...entries.entries()]
             .sort((a, b) => (Number(a[1].seq) || 0) - (Number(b[1].seq) || 0));
@@ -901,13 +1070,18 @@ const FarkadSync = {
     // The durable journal, replayed over `schedule`. False when the disk could not be
     // read - in which case the caller has no idea what this device holds and must not
     // pretend otherwise.
-    replayDurableJournal(schedule, after) {
+    replayDurableJournal(schedule, envelope) {
         const entries = this.durableJournalEntries();
         if (!entries) return false;
 
-        const floor = Number(after) || 0;
+        // Nothing superseded: replay everything.
+        const named = supersededOpIds(envelope);
+        const upTo = Number((envelope || {}).supersedesSeq) || 0;
+        const skipping = Boolean(envelope) && (named !== null || upTo > 0);
+
         entries.forEach(([path, item]) => {
-            if ((Number(item.seq) || 0) > floor) applyJournalEntry(schedule, path, item.value);
+            if (skipping && supersededByRestore(item, named, upTo)) return;
+            applyJournalEntry(schedule, path, item.value);
         });
         return true;
     },
@@ -934,11 +1108,14 @@ const FarkadSync = {
     // the whole record for its field, so applying it twice is applying it once.
     // `after` skips everything a replacement has superseded, which is what makes it
     // possible to say "the replacement, plus the work done since it was asked for".
-    replayJournal(schedule, after) {
+    replayJournal(schedule, envelope) {
         this.loadOutbox();
-        const floor = Number(after) || 0;
+        const named = supersededOpIds(envelope);
+        const upTo = Number((envelope || {}).supersedesSeq) || 0;
+        const skipping = Boolean(envelope) && (named !== null || upTo > 0);
+
         [...this._outbox.entries()]
-            .filter(([, item]) => item.seq > floor)
+            .filter(([, item]) => !(skipping && supersededByRestore(item, named, upTo)))
             .sort((a, b) => a[1].seq - b[1].seq)
             .forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
     },
@@ -1319,33 +1496,53 @@ const FarkadSync = {
     // get the effect they asked for; a context still holding the old number cannot undo
     // it, because a mine fact stamped with an older generation is already invalid.
     forgetLocalOrigin(payload) {
-        this.migrateProvenance();
+        // The ANSWER is read. A migration that could not finish leaves facts on the disk
+        // in a form the generation does not invalidate - the v1 blob is one value holding
+        // every claim, and moving the generation says nothing about it - so a handover
+        // that ignored this could report itself recorded while the blob sat there waiting
+        // to recreate every claim at the next healed open.
+        const migrated = this.migrateProvenance();
 
         const next = this.provGeneration() + 1;
         const moved = Store.setVerified(PROV_GEN_KEY, String(next));
 
         // Belt, braces, and string. If the generation will not move, the uncertainty flag
-        // says the same thing in one byte; if that will not store either, the mine facts
-        // themselves are removed one at a time. Any one of the three closes the hole, and
-        // the caller is told whether one of them did.
-        let closed = moved;
-        if (!closed) closed = this.noteProvenanceUncertain();
+        // says the same thing in one byte; if that will not store either, the facts
+        // themselves are removed. Any one of the three closes the hole, and the caller is
+        // told whether one of them did.
+        let closed = moved && migrated;
+        if (!closed) closed = this.noteProvenanceUncertain() && migrated;
         if (!closed) closed = this.dropLocalOriginFacts();
 
         if (payload) this.markSent(payload);
         return closed;
     },
 
-    // Every mine fact, removed. Only ever a fallback for a device that will not take a
-    // write - the generation is the ordinary mechanism.
+    // Every claim this device could make about having minted an id, removed. Only ever a
+    // fallback for a device that will not take a write - the generation is the ordinary
+    // mechanism - and it covers BOTH forms: the per-fact keys this build writes and the
+    // v1 blob an older one left, which holds every claim in a single value and which the
+    // generation cannot invalidate because a migration would restamp it.
     dropLocalOriginFacts() {
         const prefix = PROV_PREFIX + 'mine:';
+        const targets = Store.keys()
+            .filter(key => key.startsWith(prefix) || key === PROVENANCE_KEY);
+
+        // A device whose storage has gone away enumerates nothing and reads null from
+        // everything. Both look exactly like "there was nothing to remove", and answering
+        // yes on the strength of that is how a claim survives its own deletion: the keys
+        // are still on the disk, and the next healed open reads them straight back.
+        if (!Store.available) return false;
+
         let gone = true;
-        Store.keys().filter(key => key.startsWith(prefix)).forEach(key => {
-            Store.remove(key);
-            if (Store.durableGet(key) !== null) gone = false;
+        targets.forEach(key => {
+            try { Store.remove(key); } catch (error) { gone = false; }
+            Store.forget(key);
+            if (!Store.available || Store.durableGet(key) !== null) gone = false;
         });
-        return gone;
+        // Asked again afterwards, because a removal that threw may have taken the storage
+        // with it - and an empty list read through dead storage proves nothing.
+        return gone && Store.available;
     },
 
     // The whole question, asked in one place: can this id be destroyed for good?
@@ -1459,11 +1656,20 @@ const FarkadSync = {
         const candidate = new Map();
         let changed = false;
         this._outbox.forEach((item, path) => {
-            if (sent.get(path) === item.seq && !item.sent) {
+            const was = sent.get(path);
+            // The exact operation, by id. An operation that has been superseded since the
+            // send - by this tab or another one - is a DIFFERENT operation at the same
+            // path, and marking it sent would tell the queue the cloud holds a value it
+            // has never seen. Falling back to the number only for a legacy item, which
+            // has no id to be named by.
+            const same = was && (item.opId
+                ? was.opId === item.opId
+                : (was.opId === null && was.seq === item.seq));
+            if (same && !item.sent) {
                 // MARKED, not removed. The cloud has it; this device may still not, and
                 // until a schedule containing it is written here the journal is the only
                 // thing that can put it back. The prune below takes it when both are true.
-                candidate.set(path, { value: item.value, seq: item.seq, sent: true });
+                candidate.set(path, Object.assign({}, item, { sent: true }));
                 changed = true;
             } else {
                 candidate.set(path, item);
@@ -1590,9 +1796,10 @@ const FarkadSync = {
     // days it removed. That is the resurrection: the restore is on the disk, the queue
     // still holds the entries it superseded because the prune was refused, and the next
     // open lays them straight back on top of it.
+    // Named operations where the envelope has them, so an edit made after the restore was
+    // asked for is never swept up by a number another tab happened to reuse.
     supersededFloor() {
-        const envelope = this.pendingReplace();
-        return envelope ? (Number(envelope.supersedesSeq) || 0) : 0;
+        return this.pendingReplace();
     },
 
     connect(adapter) {
@@ -1949,7 +2156,12 @@ const FarkadSync = {
             .slice(0, MAX_PATHS_PER_WRITE)
             .forEach(([path, item]) => {
                 patch[path] = item.value;
-                sent.set(path, item.seq);
+                // The OPERATION that went out, not the path and a number. Two versions of
+                // one path are two operations, and an acknowledgement that named only the
+                // path acknowledged whichever one happened to be there when the answer
+                // came back - which, after another tab had corrected the same day, was not
+                // the one that was sent.
+                sent.set(path, { opId: item.opId || null, seq: item.seq });
             });
 
         if (holding) {
@@ -2152,8 +2364,15 @@ const FarkadSync = {
         // says so.
         if (!isFullScheduleDocument(document)) return false;
 
+        // Every operation on the disk RIGHT NOW, named. Read fresh rather than taken from
+        // memory: this tab's memory is this tab's opinion, and the other tab's work is
+        // exactly what must not be swept up by a boundary this one drew.
+        const superseded = [];
+        this.readDurableOps().forEach(op => { if (op.opId) superseded.push(op.opId); });
+
         return this.rememberReplace(replacementEnvelope(
-            document, 'prepared', replacementId(), this._seq, cloudOwed !== false));
+            document, 'prepared', replacementId(), this._seq, cloudOwed !== false,
+            superseded));
     },
 
     // Says the device now holds it. Best effort on purpose: the phase is a hint, and the
@@ -2163,7 +2382,7 @@ const FarkadSync = {
         if (!envelope || envelope.phase === 'local-stored') return true;
         return this.rememberReplace(replacementEnvelope(
             envelope.document, 'local-stored', envelope.transactionId,
-            envelope.supersedesSeq, envelope.cloud));
+            envelope.supersedesSeq, envelope.cloud, envelope.supersedes));
     },
 
     // Undoes a prepare when the caller could not store the new state. The restore is not
@@ -2195,7 +2414,7 @@ const FarkadSync = {
         // superseded entries and the disk with them, so the two sides agreed on a state
         // the next open would not produce.
         const expected = normaliseSchedule(envelope.document);
-        if (!this.replayDurableJournal(expected, envelope.supersedesSeq)) return false;
+        if (!this.replayDurableJournal(expected, envelope)) return false;
         return replacementContent(actual) === replacementContent(expected);
     },
 
@@ -2238,7 +2457,7 @@ const FarkadSync = {
         const next = normaliseSchedule(envelope.document);
         // The DURABLE journal, so that what is stored here is exactly what the invariant
         // will look for afterwards. Reading it out of memory let the two disagree.
-        if (!this.replayDurableJournal(next, envelope.supersedesSeq)) {
+        if (!this.replayDurableJournal(next, envelope)) {
             // The queue cannot be read, so there is no way to know what this device is
             // still owed. Storing the bare document would drop it silently.
             return { stored: false, pruned: false };
@@ -2270,7 +2489,7 @@ const FarkadSync = {
             return { stored: false, pruned: false };
         }
 
-        const pruned = this.dropSupersededEntries(envelope.supersedesSeq);
+        const pruned = this.dropSupersededEntries(envelope);
         if (typeof render === 'function') render();
         return { stored: true, pruned };
     },
@@ -2282,19 +2501,30 @@ const FarkadSync = {
     // write: the version that mutated the map and ignored saveOutbox's answer reported a
     // finished restore while the old journal sat on the disk, ready to put the superseded
     // days back at the next open.
-    dropSupersededEntries(supersedesSeq) {
-        const upTo = Number(supersedesSeq) || 0;
-        if (upTo <= 0) return true;
+    dropSupersededEntries(envelope) {
         this.loadOutbox();
+        const named = supersededOpIds(envelope);
+        const upTo = Number((envelope || {}).supersedesSeq) || 0;
+        if (!named && upTo <= 0) return true;
 
-        const candidate = new Map();
+        // Built from what the DISK holds, not from this tab's memory. The envelope named
+        // the operations it supersedes at the moment it was prepared, and some of them
+        // may have been queued by the other tab - which this tab has never seen and would
+        // otherwise leave standing, to be replayed straight back over the restore.
+        const durable = this.readDurableOps();
+        const candidate = new Map(this._outbox);
+        durable.forEach((op, path) => {
+            if (!candidate.has(path)) candidate.set(path, op);
+        });
+
+        const keep = new Map();
         let changed = false;
-        this._outbox.forEach((item, path) => {
-            if (item.seq > upTo) candidate.set(path, item);
-            else changed = true;
+        candidate.forEach((item, path) => {
+            if (supersededByRestore(item, named, upTo)) changed = true;
+            else keep.set(path, item);
         });
         if (!changed) return true;
-        return this.adoptJournal(candidate);
+        return this.adoptJournal(keep, named || undefined);
     },
 
     // Picking a restore back up - at connect, on the retry ladder, when the connection
@@ -2693,8 +2923,16 @@ const FarkadSync = {
             document.updatedBy = syncDeviceId();
         }
 
+        // The operations queued at the moment of the freeze, named. A v71 record cannot
+        // say what its own boundary was, so this is the most that can honestly be
+        // claimed - and it is strictly safer than the number, which would sweep up
+        // anything a second tab numbered the same way afterwards.
+        const superseded = [];
+        this.readDurableOps().forEach(op => { if (op.opId) superseded.push(op.opId); });
+
         const frozen = replacementEnvelope(
-            document, 'prepared', 'legacy_' + replacementId().slice(2), this._seq, true);
+            document, 'prepared', 'legacy_' + replacementId().slice(2), this._seq, true,
+            superseded);
 
         if (!Store.setVerified(LEGACY_UPGRADE_KEY, JSON.stringify(frozen))) {
             // No second copy, so the raw record is still the only one there is. It is

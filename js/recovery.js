@@ -101,21 +101,30 @@ const Recovery = {
         const schedule = Store.durableGet('scheduleData:v2');
         if (schedule !== null) out['scheduleData:v2'] = schedule;
 
-        // The queue that is actually being written to, which after a damaged one is not
-        // the key anybody would think to look under - and since v87 it is not ONE key.
-        // Every unsent edit is its own record beside the mark, and an export that carried
-        // only the mark would carry a number and none of the work it counts.
-        if (typeof FarkadSync !== 'undefined' && FarkadSync.activeOutboxKey) {
-            const key = FarkadSync.activeOutboxKey();
-            const live = Store.durableGet(key);
-            if (live !== null) out[key] = live;
-
-            const prefix = key + ':e:';
-            Store.keys().filter(name => name.indexOf(prefix) === 0).forEach(name => {
-                const entry = Store.durableGet(name);
-                if (entry !== null) out[name] = entry;
+        // Storage that has gone away reads null from everything, and a file that quietly
+        // came out short would be a rescue file somebody trusted. Two things instead: the
+        // schedule this session is HOLDING, which is the only copy of it left, and a note
+        // saying which durable records could not be read - so whoever opens the file can
+        // see what is missing rather than inferring that nothing was.
+        if (!Store.available) {
+            out['__unreadable'] = JSON.stringify({
+                note: 'Browser storage was unavailable while this file was made. Records '
+                    + 'that could not be read are absent below; nothing was deleted.',
+                liveSchedule: (typeof State !== 'undefined' && State.schedule)
+                    ? State.schedule : null
             });
         }
+
+        // EVERY queue key on the device, from every slot - not only the one being written
+        // to. Since v87 the queue is a set of records: a mark, a batch record per group of
+        // edits, and a small key per edit the cloud has taken. An export that carried only
+        // the mark would carry a number and none of the work it counts, and one that
+        // carried only the ACTIVE slot would leave behind exactly the edits a damaged mark
+        // stranded - which is the case a person is exporting for.
+        Store.keys().filter(name => name.indexOf('farkad:outbox') === 0).forEach(name => {
+            const held = Store.durableGet(name);
+            if (held !== null) out[name] = held;
+        });
 
         // A restore that was asked for and has not finished, and the frozen upgrade of an
         // old one beside it. Neither is derivable from anything else in the file: they
@@ -219,10 +228,15 @@ const Recovery = {
 function quarantineRecord(key, raw) {
     if (raw === null || raw === undefined) return null;
 
+    // Once. A record that will not read is found again at every open - the bytes have not
+    // changed, that is the whole problem - and taking a fresh copy each time filled the
+    // device with :damaged:2, :damaged:3, :damaged:4 of the same thing, on the device that
+    // was already short of room. An existing copy holding these exact bytes IS the copy.
     let target = key + ':damaged';
-    // Bounded. A device with twenty damaged copies of one record has a different problem,
-    // and an unbounded loop on a full disk would spin.
-    for (let n = 2; Store.get(target) !== null && n <= 20; n += 1) {
+    for (let n = 2; n <= 20; n += 1) {
+        const held = Store.get(target);
+        if (held === null) break;
+        if (held === raw) return target;
         target = key + ':damaged:' + n;
     }
     if (Store.get(target) !== null) return null;

@@ -729,8 +729,12 @@ async function seedRoster(page) {
     (await page.textContent('.roster-archive')).includes('דוד'),
     await page.textContent('.roster-archive'));
 
-  // A name typed by mistake, with nothing recorded against it, IS deletable - and the
-  // button for it is in his own screen, behind a dialog carrying his name.
+  // A name typed by mistake, with nothing recorded against it, used to be deletable from
+  // his own screen. It is not any more, and the reason is on the screen rather than in a
+  // silence: permanent deletion rests on this device being able to prove the id never
+  // left it, and the one moment that proof has to be invalidated - a raw recovery export
+  // from a phone whose storage is refusing - is a moment nothing can be written down in.
+  // See PERMANENT_DELETION in js/ui/roster.js.
   await page.evaluate(() => {
     State.schedule.workers.push({
       id: State.nextWorkerId(), name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0
@@ -744,41 +748,26 @@ async function seedRoster(page) {
   await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
-  check('a worker with nothing recorded is offered a delete',
-    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
+  check('a man with nothing recorded is still not offered a delete',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ })
+      .count()) === 0);
+  check('and the screen says why, rather than leaving a gap where a button was',
+    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת'),
+    await page.textContent('#workerFormDanger'));
+  check('while archiving is offered as it always was',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ })
+      .isVisible());
 
-  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
+  await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).click();
   await page.waitForTimeout(250);
-  // The title carries the ACT (מחיקת עובד) and the message carries the man - along
-  // with the three things that were just checked about him.
-  check('the dialog names the man before he goes',
-    (await page.textContent('#askMessage')).includes('טעות'),
-    await page.textContent('#askMessage'));
-
-  // One more tap in the same place as the last tap is not a decision. The name has to be
-  // typed, and a wrong one is refused rather than accepted quietly.
-  await page.fill('#askInput', 'טעו');
-  await page.click('#askOk');
-  await page.waitForTimeout(250);
-  check('a name that does not match is refused',
-    (await page.isVisible('#askModal')) === true
-    && (await page.textContent('#askError')).length > 0,
-    await page.textContent('#askError'));
-  check('and nobody has been deleted on the strength of it',
-    (await page.evaluate(() => State.schedule.workers.length)) === before,
-    String(await page.evaluate(() => State.schedule.workers.length)));
-
-  await page.fill('#askInput', 'טעות');
   await page.click('#askOk');
   await page.waitForTimeout(300);
-
-  check('and he is gone',
-    (await page.evaluate(() => State.schedule.workers.length)) === before - 1,
+  check('and archiving keeps him, every one of him',
+    (await page.evaluate(() => State.schedule.workers.length)) === before,
     String(await page.evaluate(() => State.schedule.workers.length)));
-  check('gone from the list too',
-    !(await page.textContent('#workerList')).includes('טעות'));
-  check('and gone from the disk, not only the screen',
-    !(await page.evaluate(() => localStorage.getItem('scheduleData:v2') || '')).includes('טעות'));
+  check('under the archive fold, off the working list',
+    (await page.textContent('.roster-archive')).includes('טעות'),
+    await page.textContent('.roster-archive'));
 
   // A new worker must never reuse an archived id - and must not be one past the highest
   // either. Two phones holding the same roster used to hand the same next id to two
@@ -1555,30 +1544,32 @@ async function seedRoster(page) {
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
 
-  check('an archived typo is still offered the permanent delete',
-    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
-  check('and the restore button is there beside it',
+  // Not offered here either. The fold is where a mistyped name ends up, and it is exactly
+  // the place somebody would expect the purge to still be - so the sentence has to be here
+  // as well, not only on the active screen.
+  check('an archived typo is not offered the permanent delete either',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ })
+      .count()) === 0);
+  check('and the screen says so in the fold too',
+    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת'),
+    await page.textContent('#workerFormDanger'));
+  check('while the restore button is there',
     await page.locator('#workerFormDanger').getByRole('button', { name: /החזר/ }).isVisible());
 
-  // By typed name, exactly as it is for an active one.
-  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
-  await page.waitForTimeout(250);
-  check('the dialog asks for the name to be typed',
-    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
-    await page.textContent('#askMessage'));
-  await page.fill('#askInput', 'טעות');
-  await page.click('#askOk');
-  await page.waitForTimeout(350);
-
-  check('and he is gone',
-    !(await page.textContent('#workerList')).includes('טעות'),
+  // And he stays put: nothing on this screen can destroy him.
+  check('he is still in the archive afterwards',
+    (await page.textContent('#workerList')).includes('טעות'),
     await page.textContent('#workerList'));
 
-  // The man with a day behind him is archived and stays that way.
+  // The man with a day behind him is archived and stays that way. His screen is closed
+  // first: nothing deletes anybody any more, so the form the last block opened is still
+  // up and would swallow the taps below.
   await page.evaluate(() => {
+    closeWorkerForm();
     State.commit(assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
     render();
   });
+  await page.waitForTimeout(200);
   await page.locator('#workerList .roster-row').filter({ hasText: 'דוד' })
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);

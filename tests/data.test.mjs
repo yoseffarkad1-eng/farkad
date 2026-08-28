@@ -2027,13 +2027,17 @@ function record(device, date, workerId, placeId, rate) {
     seed(device);
     const before = device.raw('scheduleData:v2');
 
-    fullAfter(device, 1);
+    const attempts = fullAfter(device, 0);
 
     const changes = ['w_01', 'w_02'].map(id =>
         device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
     const done = device.State.commitMany(changes);
 
     check('the bulk operation reports that it did not happen', done === false, String(done));
+    // Literally one write now: the batch is a single record, so "all or nothing" is not
+    // something the code has to arrange, it is the shape of the thing.
+    check('and it was one write, not a chain of them',
+        attempts.writes === 1, String(attempts.writes));
     check('neither worker is on screen',
         device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual').length === 0
         && device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_02', 'actual').length === 0,
@@ -2063,7 +2067,7 @@ function record(device, date, workerId, placeId, rate) {
     // Under the old chain that left a prefix on the disk. Now the one write is refused.
     const device = makeDevice();
     seed(device);
-    fullAfter(device, 2);
+    fullAfter(device, 0);
 
     const changes = ['w_01', 'w_02', 'w_03'].map(id =>
         device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
@@ -2088,7 +2092,7 @@ function record(device, date, workerId, placeId, rate) {
     const device = makeDevice();
     seed(device);
     const before = device.raw('scheduleData:v2');
-    fullAfter(device, 4);
+    fullAfter(device, 0);
 
     device.State.schedule.workers.push({ id: 'w_zz', name: 'חדש', active: true, dailyRate: 300 });
     device.State.schedule.workers.reverse();
@@ -2136,14 +2140,13 @@ function record(device, date, workerId, placeId, rate) {
             { path, value: { entries: [{ placeId: 'p_02' }] } }
         ]) === true);
 
-    // Read off the disk by path, not out of a record: since v87 the entry is its own key.
-    const stored = JSON.parse(device.raw(`farkad:outbox:e:${path}`));
+    // Read off the disk by path, out of whichever batch record holds it.
+    const stored = durableEntries(device)[path];
     check('and the value that survives is the later one',
         stored.value.entries[0].placeId === 'p_02', JSON.stringify(stored.value));
-    check('with one entry, not two',
-        Object.keys(device.dump()).filter(key => key.indexOf('farkad:outbox:e:') === 0)
-            .length === 1,
-        JSON.stringify(Object.keys(device.dump())));
+    check('with one operation for that path, not two',
+        Object.keys(durableEntries(device)).length === 1,
+        JSON.stringify(durableEntries(device)));
 }
 
 // ---------------------------------------------------------------- G11: slots
@@ -3892,8 +3895,7 @@ for (const ending of ['succeeds', 'fails']) {
 
     check('a day recorded now is accepted',
         record(again, '2026-08-20', 'w_02', 'p_02') === true);
-    const entry = JSON.parse(again.raw(
-        `${again.Sync.activeOutboxKey()}:e:days.2026-08-20.actual.w_02`));
+    const entry = durableEntries(again, again.Sync.activeOutboxKey())['days.2026-08-20.actual.w_02'];
     check('and it is numbered above the boundary, not below it',
         entry.seq > boundary, `${entry.seq} vs ${boundary}`);
 
@@ -5386,6 +5388,7 @@ function a_nameInDocument(document, id) {
     // him, so no other phone can be holding a day for him, so there is nothing that can
     // arrive later and be orphaned by his removal.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const added = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -5790,6 +5793,7 @@ for (const [label, arm] of [
 
     // Deleting.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const added = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -5976,6 +5980,7 @@ for (const [label, arm] of [
     // does, and a confirmation that is one more tap in the same place as the last tap is
     // not a decision.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const added = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -6005,6 +6010,7 @@ for (const [label, arm] of [
     suite('a snapshot that arrives while the delete question is open');
 
     const { device, said } = crew();
+    allowPermanentDeletion(device);
     const added = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -6116,6 +6122,7 @@ for (const [label, act] of [
     // those would mean a name typed by mistake could never be removed on the one kind of
     // device where that happens most.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const cloud = makeCloud({ online: false });
     await connected(device, cloud);
 
@@ -6167,6 +6174,7 @@ for (const [label, act] of [
     // and sends it later without asking. The honest moment is the handover: from then on
     // this device cannot say the name never left it, so from then on it archives.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const cloud = makeCloud({ online: false });
     await connected(device, cloud);
 
@@ -6271,6 +6279,7 @@ for (const [label, act] of [
     // has been laid over the top: what survived the swap arrived inside somebody else's
     // roster, and this device cannot tell the two apart.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const added = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -6314,6 +6323,7 @@ for (const [label, act] of [
 
     // The one case deleting exists for has to keep working, or the rule is just a ban.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const added = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -6321,6 +6331,7 @@ for (const [label, act] of [
     given('and nothing was ever handed to an adapter', device.Sync.adapter === null);
 
     const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    allowPermanentDeletion(again);
     again.State.load();
     again.ctx.askConfirm = () => Promise.resolve(true);
     again.ctx.askTell = () => Promise.resolve();
@@ -6990,6 +7001,7 @@ for (const [label, act] of [
     suite('an archived typo can still be deleted; an archived worker with a record cannot');
 
     const { device } = crew();
+    allowPermanentDeletion(device);
     device.ctx.askText = question => Promise.resolve(
         String(question.title).replace('למחוק את ', '').replace('?', ''));
 
@@ -7379,6 +7391,7 @@ function slowFirstSnapshot(cloud) {
     // only thing Store's reclaim ladder can delete is restore points, so a question asked
     // while the roster is on screen would quietly eat the history it exists to protect.
     const device = crew().device;
+    allowPermanentDeletion(device);
     device.State.save({ silent: true });
     device.call('takeDailySnapshot');
     const points = () => device.Store.keys()
@@ -7432,6 +7445,7 @@ function catchDownloads(device) {
     suite('the rescue file ends the proof that anybody was only ever here');
 
     const { device, said } = crew();
+    allowPermanentDeletion(device);
     const files = catchDownloads(device);
 
     const mine = device.State.nextWorkerId();
@@ -7494,6 +7508,7 @@ function catchDownloads(device) {
     // because it is the only copy of unreadable bytes there will ever be; what must not
     // happen is the device carrying on as though nothing left it.
     const { device, said } = crew();
+    allowPermanentDeletion(device);
     const files = catchDownloads(device);
 
     const mine = device.State.nextWorkerId();
@@ -8060,6 +8075,7 @@ for (const [label, run] of [
     // The file is opened on another phone and worked on. The device it left has no way of
     // hearing about that, so it cannot go on saying he never left.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const mine = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -8216,6 +8232,7 @@ for (const [label, run] of [
     // other one marks him sent - and this one has to see it on the next question, not at
     // the next reload.
     const { device } = crew();
+    allowPermanentDeletion(device);
     const mine = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id: mine, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
@@ -8580,20 +8597,38 @@ function durablyQueued(dumpOrDevice, needle) {
         .some(key => String(dump[key]).includes(needle));
 }
 
-// The queue as the DISK holds it, keyed by path - whatever key each entry lives in.
+// The queue as the DISK holds it, keyed by path - whatever key each operation lives in.
 // Takes a device or a raw dump, so a test can ask it of bytes it captured earlier.
+//
+// Since the operation-identity change a queued edit is an OPERATION inside a batch record,
+// so this walks the batch records and answers with the newest operation per path - which
+// is what the app itself does. Anything an older build left inside the slot record is
+// underneath it.
 function durableEntries(dumpOrDevice, slot) {
     const dump = typeof dumpOrDevice.dump === 'function' ? dumpOrDevice.dump() : dumpOrDevice;
     const key = slot || 'farkad:outbox';
     const out = {};
-    // Anything an older build left inside the record.
     try {
         const record = JSON.parse(dump[key]);
         if (record && record.items) Object.assign(out, record.items);
     } catch (error) { /* absent or unreadable is not the question here */ }
-    const prefix = `${key}:e:`;
+
+    const prefix = `${key}:b:`;
     Object.keys(dump).filter(name => name.indexOf(prefix) === 0).forEach(name => {
-        try { out[name.slice(prefix.length)] = JSON.parse(dump[name]); } catch (error) { /* */ }
+        const id = name.slice(prefix.length);
+        if (!/^[A-Za-z0-9_-]+$/.test(id)) return;
+        let batch;
+        try { batch = JSON.parse(dump[name]); } catch (error) { return; }
+        if (!batch || !Array.isArray(batch.ops)) return;
+        batch.ops.forEach(op => {
+            const already = out[op.path];
+            // The one written LAST, which the id says: it opens with the millisecond it
+            // was minted. An older build's item has no id and is underneath any of them.
+            if (!already || !already.opId || op.opId > already.opId) {
+                out[op.path] = Object.assign({}, op, { batchId: batch.batchId,
+                    sent: dump[`${key}:s:${op.opId}`] !== undefined });
+            }
+        });
     });
     return out;
 }
@@ -8624,12 +8659,22 @@ function cannotPrune(device) {
 }
 
 function fullAfter(device, writes) {
-    let seen = 0;
+    const counted = { writes: 0 };
     device.setQuota(key => {
         if (key.indexOf('farkad:outbox') !== 0) return false;
-        seen += 1;
-        return seen > writes;
+        counted.writes += 1;
+        return counted.writes > writes;
     });
+    return counted;
+}
+
+// Permanent deletion is off in the shipped build - see PERMANENT_DELETION in roster.js.
+// The machinery behind it is still tested, the way the ledger's writers are: the gate is
+// opened for the suite that is about what happens on the other side of it, and one suite
+// pins that the shipped default is shut.
+function allowPermanentDeletion(device) {
+    device.ctx.permanentDeletionEnabled = () => true;
+    return device;
 }
 
 function withAdvances(device, rows) {
@@ -9888,6 +9933,7 @@ function withAdvances(device, rows) {
     suite('V9: a man who owns a van cannot be deleted');
 
     const device = makeDevice();
+    allowPermanentDeletion(device);
     seed(device);
     // Proven local, no days, no advances - deletable on every other count.
     const id = device.State.nextWorkerId();
@@ -10925,6 +10971,7 @@ function vans(device) {
     suite('P1: an export the device could not record still ends its claims');
 
     const { device } = crew();
+    allowPermanentDeletion(device);
     const id = device.State.nextWorkerId();
     device.State.schedule.workers.push(
         { id, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
@@ -11009,6 +11056,645 @@ function vans(device) {
     other.State.commitRoster();
     check('a device that handed nothing over can still prove its own',
         other.Sync.provenLocalOnly('workers', mine) === true);
+}
+
+// ================================================================ T2: the same path, twice
+//
+// T1 proved two tabs recording two different days do not lose each other. Two tabs
+// recording the SAME day is the harder case, and the one the path-keyed queue got wrong.
+//
+//   Tab A records Monday for a man and sends it; the cloud has not answered yet.
+//   Tab B, loaded earlier, corrects Monday for the same man.
+//   Both tabs are numbering from the same stale mark, so both call it edit N+1.
+//   B's write lands on the same key, because the key was the PATH.
+//   A's send is acknowledged. A holds that path in its own memory, so it prunes the key.
+//   B's correction is gone from the disk, the cloud holds A's older value, and the next
+//   open puts the old value back on the screen with nothing to say it happened.
+//
+// The unit of the queue is an OPERATION now: one edit, made once, with an identity
+// nothing else can wear. An acknowledgement for operation X can never mark, supersede or
+// remove operation Y - not when they share a path, not when they share a number.
+{
+    const sameDay = async (order) => {
+        suite(`T2: a correction survives an acknowledgement of the edit it replaced (${order})`);
+
+        const cloud = makeCloud();
+        const shared = sharedStore();
+        const a = makeDevice({ sharedStorage: shared, deviceId: 'd_a' });
+        seed(a);
+        const b = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
+        b.State.load();
+        given('both tabs are looking at the same storage', b.State.schedule.workers.length === 3);
+
+        // A records Monday at one site and sends it. The cloud holds the answer open.
+        const gate = deferred();
+        cloud.hold = kind => (kind === 'update' ? gate.promise : null);
+        await connected(a, cloud);
+        await settle(TICK * 30);
+        record(a, '2026-08-10', 'w_01', 'p_01');
+        await settle(TICK * 30);
+        given('A has a send open', a.Sync.pendingCount() > 0, String(a.Sync.pendingCount()));
+
+        // B corrects the same day to the other site. Same path, and - because B has been
+        // numbering from the mark it read when it opened - quite possibly the same number.
+        record(b, '2026-08-10', 'w_01', 'p_02');
+        await settle(TICK * 20);
+
+        const opsAt = device => durableEntries(device)['days.2026-08-10.actual.w_01'];
+        given('the disk holds B\u2019s correction', Boolean(opsAt(b))
+            && opsAt(b).value.entries[0].placeId === 'p_02',
+            JSON.stringify(opsAt(b)));
+
+        if (order === 'A acknowledges first') {
+            gate.release();
+            await settle(TICK * 40);
+        }
+
+        check('the correction is still on the disk',
+            Boolean(opsAt(a)) && opsAt(a).value.entries[0].placeId === 'p_02',
+            JSON.stringify(opsAt(a)));
+        check('and it is still owed to the other phones',
+            durableEntries(a)['days.2026-08-10.actual.w_01'].sent !== true,
+            JSON.stringify(durableEntries(a)['days.2026-08-10.actual.w_01']));
+
+        if (order !== 'A acknowledges first') {
+            gate.release();
+            await settle(TICK * 40);
+        }
+
+        // Closed, reopened, and flushed with nothing held back.
+        const copy = {};
+        Object.keys(shared).forEach(key => { copy[key] = shared[key]; });
+        const reopened = makeDevice({ storage: copy, deviceId: 'd_a' });
+        reopened.State.load();
+        check('the reopened phone shows the correction, not the value that was sent first',
+            reopened.call('entriesFor', reopened.State.schedule, '2026-08-10', 'w_01',
+                'actual')[0].placeId === 'p_02',
+            JSON.stringify(reopened.call('entriesFor', reopened.State.schedule,
+                '2026-08-10', 'w_01', 'actual')));
+
+        cloud.hold = null;
+        await connected(reopened, cloud);
+        await settle(TICK * 60);
+        check('and the cloud ends up holding the correction too',
+            cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02',
+            JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01));
+        check('with nothing left owed',
+            reopened.Sync.pendingCount() === 0, String(reopened.Sync.pendingCount()));
+
+        const other = makeDevice({ deviceId: 'd_third' });
+        await connected(other, cloud);
+        await settle(TICK * 40);
+        check('and a third phone agrees',
+            other.call('entriesFor', other.State.schedule, '2026-08-10', 'w_01',
+                'actual')[0].placeId === 'p_02',
+            JSON.stringify(other.call('entriesFor', other.State.schedule, '2026-08-10',
+                'w_01', 'actual')));
+    };
+
+    await sameDay('A acknowledges first');
+    await sameDay('B writes, then A acknowledges last');
+}
+
+// ================================================================ T3: the restore fence
+//
+// The boundary a restore superseded was a NUMBER - the journal position at the moment it
+// was asked for - and a number is a statement about one tab's counter. Two tabs number
+// from the same stale mark, so an edit made in tab B AFTER the restore was asked for in
+// tab A could be handed the same number as the last edit before it, fall inside the
+// boundary, and be deleted by the restore.
+//
+// The work recorded after a restore request is exactly the work a restore must not touch.
+{
+    const fenced = async (order, samePath) => {
+        const where = `${order}, ${samePath ? 'same path' : 'different paths'}`;
+        suite(`T3: work recorded after a restore is not swept up by it (${where})`);
+
+        const shared = sharedStore();
+        const a = makeDevice({ sharedStorage: shared, deviceId: 'd_a' });
+        seed(a);
+        const b = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
+        b.State.load();
+
+        // Both tabs read the queue before either writes, which is the only way two tabs
+        // come to hand out the same number.
+        given('both tabs are at the same mark', a.Sync._seq === b.Sync._seq,
+            `${a.Sync._seq} vs ${b.Sync._seq}`);
+
+        const backup = a.call('normaliseSchedule', {
+            schemaVersion: 2,
+            workers: a.State.schedule.workers, places: a.State.schedule.places,
+            days: { '2026-07-01': { plan: {}, actual: {
+                w_01: { entries: [{ placeId: 'p_01', rate: 'normal' }] } } } },
+            advances: {}, updatedAt: '2026-07-01T06:00:00.000Z', updatedBy: 'd_backup'
+        });
+
+        const laterDay = samePath ? '2026-07-01' : '2026-08-20';
+        const laterPath = `days.${laterDay}.actual.${samePath ? 'w_01' : 'w_02'}`;
+
+        if (order === 'restore first') {
+            given('the restore is prepared', a.Sync.prepareReplace(backup) === true);
+            record(b, laterDay, samePath ? 'w_01' : 'w_02', 'p_02');
+        } else {
+            record(b, laterDay, samePath ? 'w_01' : 'w_02', 'p_02');
+            given('the restore is prepared', a.Sync.prepareReplace(backup) === true);
+        }
+        await wait();
+
+        const envelope = a.Sync.pendingReplace();
+        given('the restore names what it supersedes',
+            Array.isArray(envelope.supersedes), JSON.stringify(envelope.supersedes));
+
+        // The restore is applied and the queue pruned, exactly as replaceEverything does.
+        a.State.schedule = a.call('normaliseSchedule', backup);
+        a.State.save();
+        const pruned = a.Sync.dropSupersededEntries(envelope);
+        given('the prune went through', pruned === true);
+
+        const stillQueued = () => Object.keys(durableEntries(shared));
+        const copy = {};
+        Object.keys(shared).forEach(key => { copy[key] = shared[key]; });
+        const reopened = makeDevice({ storage: copy, deviceId: 'd_a' });
+        reopened.State.load();
+        const onScreen = () => reopened.call('entriesFor', reopened.State.schedule,
+            laterDay, samePath ? 'w_01' : 'w_02', 'actual').length;
+
+        if (order === 'restore first') {
+            // Made AFTER the restore was asked for, in the other tab, and numbered from
+            // the same stale mark. It is not the restore's to take.
+            check(`${where}: the edit made after the restore is still queued`,
+                stillQueued().includes(laterPath), JSON.stringify(stillQueued()));
+            check(`${where}: and it is on the screen after a reopen`, onScreen() === 1,
+                JSON.stringify(Object.keys(reopened.State.schedule.days)));
+            check(`${where}: without a second edit anywhere`,
+                reopened.Sync.pendingPaths().includes(laterPath),
+                JSON.stringify(reopened.Sync.pendingPaths()));
+        } else {
+            // Made BEFORE it, so the restore replaces it - and takes it cleanly, out of
+            // the other tab's queue as well as its own. Leaving it there is the
+            // resurrection: the restore on the disk and the superseded day replayed
+            // straight back on top of it at the next open.
+            check(`${where}: the edit the restore replaced is gone from the queue`,
+                !stillQueued().includes(laterPath), JSON.stringify(stillQueued()));
+            // Same path as the backup's own day, so what has to be true is not that the
+            // day is absent - the restore put one there - but that the value on it is the
+            // restored one and not the edit the restore replaced.
+            const shown = reopened.call('entriesFor', reopened.State.schedule, laterDay,
+                samePath ? 'w_01' : 'w_02', 'actual');
+            check(`${where}: and it does not come back on the reopen`,
+                samePath ? (shown.length === 1 && shown[0].placeId === 'p_01')
+                    : shown.length === 0,
+                JSON.stringify(shown));
+            check(`${where}: with nothing owed for it`,
+                !reopened.Sync.pendingPaths().includes(laterPath),
+                JSON.stringify(reopened.Sync.pendingPaths()));
+        }
+    };
+
+    await fenced('restore first', false);
+    await fenced('restore first', true);
+    await fenced('edit first', false);
+    await fenced('edit first', true);
+}
+
+// ================================================================ T4: damaged queue records
+//
+// The quarantine copy of a live key used to match the live scan, so every reopen
+// quarantined the quarantine: two keys, then four, then eight, with :damaged:damaged among
+// them - and after an acknowledgement, queueing the same path again could write over the
+// damaged original. A key is matched by its exact shape now, and an id carries no colon,
+// so nothing with :damaged on the end is ever read as a queue record.
+{
+    suite('T4: a damaged queue record is quarantined once, and never scanned again');
+
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    const batchKey = Object.keys(device.dump())
+        .find(key => key.indexOf('farkad:outbox:b:') === 0);
+    given('there is a batch record on the disk', Boolean(batchKey), batchKey);
+
+    // Damaged in place, the way a truncated write leaves one.
+    const broken = String(device.raw(batchKey)).slice(0, 20);
+    device.putRaw(batchKey, broken);
+
+    const outboxKeys = dev => Object.keys(dev.dump())
+        .filter(key => key.indexOf('farkad:outbox') === 0).sort();
+
+    let open = makeDevice({ storage: device.dump() });
+    open.State.load();
+    const afterFirst = outboxKeys(open);
+    check('the damaged bytes are kept exactly as they were',
+        open.raw(batchKey) === broken, String(open.raw(batchKey)));
+    check('and a copy is taken beside them',
+        typeof open.raw(`${batchKey}:damaged`) === 'string',
+        JSON.stringify(afterFirst));
+    check('and the device says so rather than carrying on quietly',
+        open.Sync.outboxDamaged === true);
+
+    // Reopened three more times. The count must not move.
+    for (let round = 0; round < 3; round += 1) {
+        const next = makeDevice({ storage: open.dump() });
+        next.State.load();
+        open = next;
+    }
+    check('reopening does not quarantine the quarantine',
+        JSON.stringify(outboxKeys(open)) === JSON.stringify(afterFirst),
+        JSON.stringify(outboxKeys(open)));
+    check('and there is no :damaged:damaged anywhere',
+        !outboxKeys(open).some(key => key.indexOf(':damaged:damaged') !== -1),
+        JSON.stringify(outboxKeys(open)));
+
+    // Acknowledged, then the same path recorded again. The damaged original stays.
+    open.global('Recovery').acknowledge();
+    record(open, '2026-08-12', 'w_01', 'p_02');
+    check('recording the same day again does not write over the damaged record',
+        open.raw(batchKey) === broken, String(open.raw(batchKey)));
+    check('and the new edit is queued somewhere else',
+        durableEntries(open)['days.2026-08-12.actual.w_01'].value.entries
+            .some(entry => entry.placeId === 'p_02'),
+        JSON.stringify(durableEntries(open)));
+
+    // And the export carries every one of them, byte for byte.
+    const exported = open.global('Recovery').rawRecords();
+    check('the raw export carries the damaged record',
+        exported[batchKey] === broken, String(exported[batchKey]));
+    check('and its quarantined copy',
+        exported[`${batchKey}:damaged`] === broken);
+    check('and every other queue key on the device',
+        outboxKeys(open).every(key => exported[key] === open.raw(key)),
+        JSON.stringify(outboxKeys(open).filter(key => exported[key] !== open.raw(key))));
+}
+
+// ================================================================ T5: a damaged mark strands nothing
+//
+// The mark and the work are different records. A mark that will not read used to move the
+// loader on to the next slot and leave that slot's readable operations behind: present on
+// the disk, absent from the queue, absent from what the app reported as pending, and
+// absent from the recovery export - which is the file somebody exports precisely because
+// something is wrong.
+{
+    suite('T5: a damaged mark does not strand the work beside it');
+
+    const device = makeDevice();
+    seed(device);
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    record(device, '2026-08-13', 'w_02', 'p_01');
+    const disk = device.dump();
+
+    // Two arms: the mark is gone, and the mark is damaged. The operations are untouched
+    // in both.
+    const arms = [
+        ['no mark at all', copy => { delete copy['farkad:outbox']; }],
+        ['a mark that will not read', copy => { copy['farkad:outbox'] = '{"seq":'; }]
+    ];
+
+    for (const [what, breakIt] of arms) {
+        const copy = {};
+        Object.keys(disk).forEach(key => { copy[key] = disk[key]; });
+        breakIt(copy);
+
+        const open = makeDevice({ storage: copy });
+        open.State.load();
+
+        check(`${what}: both days are still queued`,
+            open.Sync.pendingPaths().includes('days.2026-08-12.actual.w_01')
+            && open.Sync.pendingPaths().includes('days.2026-08-13.actual.w_02'),
+            JSON.stringify(open.Sync.pendingPaths()));
+        check(`${what}: and the journal rebuilds them onto the schedule`,
+            open.call('entriesFor', open.State.schedule, '2026-08-12', 'w_01',
+                'actual').length === 1,
+            JSON.stringify(Object.keys(open.State.schedule.days || {})));
+
+        const exported = open.global('Recovery').rawRecords();
+        check(`${what}: and the raw export carries the work, not only the mark`,
+            Object.keys(copy).filter(key => key.indexOf('farkad:outbox:b:') === 0)
+                .every(key => exported[key] === copy[key]),
+            JSON.stringify(Object.keys(exported).filter(k => k.indexOf('farkad:outbox') === 0)));
+    }
+}
+
+// ================================================================ T6: an older build's queue
+//
+// A queue written before operations existed is a whole record of items. It is read, it is
+// honoured, and it is migrated out one path at a time - the new record verified before the
+// old item is let go, so a failure anywhere leaves the edit in one place or the other and
+// never in neither.
+{
+    const legacyDisk = () => ({
+        'farkad:deviceId': 'd_old',
+        'scheduleData:v2': JSON.stringify({
+            schemaVersion: 2,
+            workers: [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 },
+                { id: 'w_02', name: 'שרה', active: true, dailyRate: 350 }],
+            places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+            days: {}, advances: {}, updatedAt: '2026-08-01T00:00:00.000Z', updatedBy: 'd_old'
+        }),
+        'farkad:outbox': JSON.stringify({ seq: 2, items: {
+            'days.2026-08-12.actual.w_01': {
+                value: { entries: [{ placeId: 'p_01' }] }, seq: 1 },
+            'days.2026-08-13.actual.w_02': {
+                value: { entries: [{ placeId: 'p_01' }] }, seq: 2 }
+        } })
+    });
+
+    {
+        suite('T6: an older build\u2019s queue is read and honoured');
+
+        const device = makeDevice({ storage: legacyDisk() });
+        device.State.load();
+        check('both of its edits are pending', device.Sync.pendingCount() === 2,
+            JSON.stringify(device.Sync.pendingPaths()));
+        check('and the mark it left is kept, not recomputed',
+            device.Sync._seq === 2, String(device.Sync._seq));
+        check('and the journal rebuilds them onto the schedule',
+            device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01',
+                'actual').length === 1,
+            JSON.stringify(Object.keys(device.State.schedule.days || {})));
+
+        // An ordinary edit migrates what it touches and leaves the rest alone.
+        record(device, '2026-08-12', 'w_01', 'p_01');
+        const stored = JSON.parse(device.raw('farkad:outbox'));
+        // The whole old record moves in ONE batch, not path by path: it is a single
+        // write either way, and half a migration is the thing the batch shape exists to
+        // make impossible.
+        check('the old record is empty afterwards',
+            Object.keys(stored.items).length === 0, JSON.stringify(stored.items));
+        check('and both paths are operations of their own',
+            Boolean(durableEntries(device)['days.2026-08-12.actual.w_01'].opId)
+            && Boolean(durableEntries(device)['days.2026-08-13.actual.w_02'].opId),
+            JSON.stringify(durableEntries(device)));
+        check('and both are still pending', device.Sync.pendingCount() === 2,
+            JSON.stringify(device.Sync.pendingPaths()));
+    }
+
+    {
+        suite('T6: a migration that cannot be written loses nothing');
+
+        for (const [what, arm] of [
+            ['no room', device => device.setQuota(key => key.indexOf('farkad:outbox') === 0)],
+            ['a write that lands changed', device => device.corruptWhen(
+                key => key.indexOf('farkad:outbox') === 0)]
+        ]) {
+            const device = makeDevice({ storage: legacyDisk() });
+            device.State.load();
+            const before = device.raw('farkad:outbox');
+            arm(device);
+
+            check(`${what}: the edit is refused rather than half-made`,
+                record(device, '2026-08-12', 'w_01', 'p_02') === false);
+            check(`${what}: the old record is byte-for-byte what it was`,
+                device.raw('farkad:outbox') === before, String(device.raw('farkad:outbox')));
+            check(`${what}: and no operation was left behind`,
+                Object.keys(device.dump())
+                    .filter(key => key.indexOf('farkad:outbox:b:') === 0).length === 0,
+                JSON.stringify(Object.keys(device.dump())));
+
+            const reopened = makeDevice({ storage: device.dump() });
+            reopened.State.load();
+            check(`${what}: both original edits are still pending after a reopen`,
+                reopened.Sync.pendingCount() === 2,
+                JSON.stringify(reopened.Sync.pendingPaths()));
+            check(`${what}: and the day the edit would have changed is unchanged`,
+                reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01',
+                    'actual')[0].placeId === 'p_01',
+                JSON.stringify(reopened.call('entriesFor', reopened.State.schedule,
+                    '2026-08-12', 'w_01', 'actual')));
+        }
+    }
+
+    {
+        suite('T6: an old build writing beside a new one');
+
+        // The old build rewrites the whole record - that is all it knows how to do - and
+        // its rewrite carries a path this build has already migrated into an operation.
+        // The operation is the newer of the two by construction, and it wins.
+        const device = makeDevice({ storage: legacyDisk() });
+        device.State.load();
+        record(device, '2026-08-12', 'w_01', 'p_02');
+        given('the path is an operation now',
+            Boolean(durableEntries(device)['days.2026-08-12.actual.w_01'].opId));
+
+        const stale = JSON.parse(device.raw('farkad:outbox'));
+        stale.items['days.2026-08-12.actual.w_01'] = {
+            value: { entries: [{ placeId: 'p_01' }] }, seq: 1 };
+        device.putRaw('farkad:outbox', JSON.stringify(stale));
+
+        const reopened = makeDevice({ storage: device.dump() });
+        reopened.State.load();
+        // The stale item names one site; the operation names two. Whichever the device
+        // ends up holding says which of the two it believed.
+        check('the operation is what the device holds, not the old build\u2019s item',
+            reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01',
+                'actual').length === 2,
+            JSON.stringify(reopened.call('entriesFor', reopened.State.schedule,
+                '2026-08-12', 'w_01', 'actual')));
+        check('and the old item is not sent as a second opinion',
+            durableEntries(reopened)['days.2026-08-12.actual.w_01'].value
+                .entries.length === 2,
+            JSON.stringify(durableEntries(reopened)['days.2026-08-12.actual.w_01']));
+    }
+}
+
+// ================================================================ P2: permanent deletion is off
+//
+// The claim behind permanent deletion is that this device made the id and the id has never
+// left it. What invalidates the claim when something DOES leave - a backup, a raw recovery
+// export - is a write or a removal: move the generation, mark the device uncertain, or
+// remove the facts. The device where a raw recovery export happens is a device whose
+// storage is refusing, and the file goes out anyway, because it is the only copy of the
+// damage. A disk that recovers afterwards then reads back facts that were true before the
+// handover and are not true now.
+//
+// Nothing this file can write makes that moment safe, so the claim is not made. Archiving
+// keeps every day, every advance and every report; only the purge of a mistyped name goes,
+// and it comes back with a deliberate verified reset behind it.
+{
+    suite('P2: the shipped build does not offer permanent deletion');
+
+    const { device } = crew();
+    const id = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    device.State.commitRoster();
+
+    given('nothing else stands against him',
+        device.Sync.provenLocalOnly('workers', id) === true);
+    check('the gate is shut', device.call('permanentDeletionEnabled') === false);
+    check('and the screen refuses the deletion',
+        device.call('deletionBlockers', id).some(reason => reason.includes('מושבתת')),
+        JSON.stringify(device.call('deletionBlockers', id)));
+
+    // Not only the drawing of it: the write itself.
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    device.ctx.askTell = () => Promise.resolve();
+    device.ctx.askText = question => Promise.resolve(
+        String(question.title).replace('למחוק את ', '').replace('?', ''));
+    await device.call('deleteWorker', id);
+    await wait();
+    check('and the man is still there afterwards',
+        Boolean(device.State.worker(id)), JSON.stringify(workerIds(device)));
+
+    // A build that has lost the gate has not been granted anything by losing it.
+    device.ctx.permanentDeletionEnabled = undefined;
+    check('a build with no gate at all still refuses',
+        device.call('deletionBlockers', id).some(reason => reason.includes('מושבתת')),
+        JSON.stringify(device.call('deletionBlockers', id)));
+
+    // Archiving is untouched, which is the whole point of doing it this way.
+    device.ctx.permanentDeletionEnabled = () => false;
+    await device.call('setWorkerArchived', id, true);
+    await wait();
+    check('archiving still works and keeps him',
+        device.State.worker(id) && device.State.worker(id).active === false,
+        JSON.stringify(device.State.worker(id)));
+}
+
+// ================================================================ P3: a handover behind a refusing disk
+//
+// The three ways a handover is recorded, each one broken in turn, and the two shapes the
+// facts come in: the per-fact keys this build writes, and the v1 blob an older build left
+// - which holds every claim in a single value and which moving the generation cannot
+// invalidate, because a migration would restamp it.
+{
+    const handover = async (what, arm, legacy, recordable) => {
+        suite(`P3: ${what}${legacy ? ' (v1 provenance)' : ''}`);
+
+        const { device } = crew();
+        allowPermanentDeletion(device);
+        const id = device.State.nextWorkerId();
+        device.State.schedule.workers.push(
+            { id, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+        device.State.commitRoster();
+
+        if (legacy) {
+            // As a v78 device left it: one blob, no per-fact keys, no migration marker.
+            const gen = device.raw('farkad:prov:gen') || '0';
+            Object.keys(device.dump())
+                .filter(key => key.indexOf('farkad:prov:') === 0)
+                .forEach(key => device.putRaw(key, undefined));
+            const blob = { gen: Number(gen), mine: { workers: [id], places: [] },
+                sent: { workers: [], places: [] } };
+            device.putRaw('farkad:provenance:v1', JSON.stringify(blob));
+            device.Sync._canRecord = null;
+        }
+        given('the device can prove he was made here and never sent',
+            device.Sync.provenLocalOnly('workers', id) === true);
+
+        device.putRaw('farkad:outbox:damagedish', '{"b":');
+        device.global('Recovery').damaged('farkad:outbox:damagedish', '{"b":', 'לא נקרא.');
+
+        const clicks = { count: 0, files: [], bodies: [] };
+        device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+        device.ctx.Blob = function Blob(parts) { this.parts = parts; };
+        device.ctx.document.createElement = () => ({
+            style: {}, setAttribute: () => {}, appendChild: () => {},
+            set download(name) { clicks.files.push(name); },
+            get download() { return clicks.files[clicks.files.length - 1]; },
+            set href(url) { clicks.bodies.push(url); },
+            get href() { return ''; },
+            click: () => { clicks.count += 1; }
+        });
+
+        arm(device);
+        device.call('exportRecoveryData');
+
+        check(`${what}: the file was actually handed to the browser`,
+            clicks.count === 1, String(clicks.count));
+        check(`${what}: under a name that says what it is`,
+            /^farkad-recovery-\d{4}-\d{2}-\d{2}\.json$/.test(String(clicks.files[0])),
+            String(clicks.files[0]));
+        check(`${what}: this session claims nothing any more`,
+            device.Sync.provenLocalOnly('workers', id) === false);
+
+        // The disk recovers, and the app opens again. THIS is the moment the claim used
+        // to come back.
+        device.setQuota(null);
+        device.blockRemoval(null);
+        device.throwOnRemove(null);
+        const healed = makeDevice({ storage: device.dump(), deviceId: device.id });
+        healed.State.load();
+        given(`${what}: the disk is working again`,
+            healed.Sync.canRecordProvenance() === true);
+
+        // What the provenance machinery could record, asked on a device of its own with
+        // the gate open, so the answer is about the facts rather than about the gate -
+        // and so opening it here cannot leak into the devices that answer for the
+        // shipped build.
+        const claim = dump => {
+            const asked = makeDevice({ storage: dump, deviceId: device.id });
+            allowPermanentDeletion(asked);
+            asked.State.load();
+            return asked.Sync.provenLocalOnly('workers', id);
+        };
+        if (recordable) {
+            check(`${what}: the claim is dead on a healed disk`, claim(device.dump()) === false,
+                JSON.stringify(Object.keys(healed.dump())
+                    .filter(key => key.indexOf('farkad:prov') === 0)));
+        } else {
+            // Nothing could be written and nothing could be removed, so nothing on this
+            // disk records the handover - and a disk that heals reads back a claim that
+            // was true before the file went out and is not true now. That is stated here
+            // rather than wished away: it is exactly why the build does not offer
+            // permanent deletion at all.
+            check(`${what}: nothing durable could record it, and this says so`,
+                claim(device.dump()) === true,
+                JSON.stringify(Object.keys(healed.dump())
+                    .filter(key => key.indexOf('farkad:prov') === 0)));
+        }
+
+        // And the answer that ships, in every arm: the gate is shut, so the man cannot be
+        // destroyed whatever the facts underneath say.
+        const shipped = makeDevice({ storage: device.dump(), deviceId: device.id });
+        shipped.State.load();
+        check(`${what}: the shipped build refuses the deletion either way`,
+            shipped.call('deletionBlockers', id).some(r => r.includes('מושבתת')),
+            JSON.stringify(shipped.call('deletionBlockers', id)));
+
+        // Two broken reopens and then a healed one, which is the slow version of the same
+        // thing.
+        const stillBroken = makeDevice({ storage: device.dump(), deviceId: device.id,
+            quota: () => true });
+        stillBroken.State.load();
+        const healedLater = makeDevice({ storage: stillBroken.dump(), deviceId: device.id });
+        healedLater.State.load();
+        check(`${what}: and a broken reopen does not change the answer`,
+            claim(stillBroken.dump()) === (recordable ? false : true),
+            JSON.stringify(Object.keys(healedLater.dump())
+                .filter(key => key.indexOf('farkad:prov') === 0)));
+        check(`${what}: while the shipped build goes on refusing`,
+            healedLater.call('deletionBlockers', id).some(r => r.includes('מושבתת')),
+            JSON.stringify(healedLater.call('deletionBlockers', id)));
+
+        // Acknowledging the damage changes neither.
+        healed.global('Recovery').acknowledge();
+        check(`${what}: acknowledging the damage does not restore the offer`,
+            healed.call('deletionBlockers', id).some(r => r.includes('מושבתת')),
+            JSON.stringify(healed.call('deletionBlockers', id)));
+    };
+
+    const armMap = [
+        ['the generation write is refused',
+            device => device.setQuota(key => key === 'farkad:prov:gen'), true],
+        ['every provenance write is refused',
+            device => device.setQuota(key => String(key).indexOf('farkad:prov') === 0), true],
+        ['every provenance write lands changed',
+            device => device.corruptWhen(key => String(key).indexOf('farkad:prov') === 0), true],
+        // The two the provenance architecture cannot record at all: nothing may be
+        // written and nothing may be removed.
+        ['writes are refused and removals do nothing', device => {
+            device.setQuota(() => true);
+            device.blockRemoval(() => true);
+        }, false],
+        ['writes are refused and removals throw', device => {
+            device.setQuota(() => true);
+            device.throwOnRemove(() => true);
+        }, false]
+    ];
+    for (const [what, arm, recordable] of armMap) {
+        await handover(what, arm, false, recordable);
+        await handover(what, arm, true, recordable);
+    }
 }
 
 report();
