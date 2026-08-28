@@ -1536,6 +1536,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wday-advance .wday-date strong { color: var(--warn); }
 .wday-advance .wday-money { color: var(--warn); }
 
+/* A van's earnings, in the same list as the days but not one of them. Coloured with the
+   site accent rather than the warning, because unlike an advance this money is coming TO
+   him - the two blocks sit next to each other and must not read the same. */
+.wday-vehicle .wday-date strong { color: var(--accent); }
+
 /* What is actually owed after the advances come off - the number the man is paid, so it
    is the loudest one on the card. */
 .wday-net { border-top-width: 3px; }

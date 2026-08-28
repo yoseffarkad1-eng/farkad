@@ -532,6 +532,109 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- V10: the vehicle money
+//
+// Four places say what a man is owed: the pay sheet, his detail screen, the message he
+// receives and the bookkeeper's file. A vehicle pays its owner 300 a day whether or not
+// he worked, and only the first of the four knew it - so the sheet said one number, the
+// screen he opens FROM that number said another, and the message in his hand agreed with
+// neither. On a settlement day that is not a display bug: it is an argument with a man
+// about his own pay, with the phone taking both sides.
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    // Two dates of work, so the van goes out twice: 600 for the owner on top of his days.
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+    State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+      rates: [{ from: '2026-08-01', amount: 300 }] }];
+    addAdvance(State.schedule, 'w_01', '2026-08-11', 100, '');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    showView('reports');
+  });
+  await page.waitForTimeout(400);
+
+  const model = await page.evaluate(() => {
+    const row = payrollRows().find(r => r.workerId === 'w_01');
+    return { days: row.vehicleDays, vehicle: row.vehicleAmount,
+      gross: row.amount, net: row.netAmount, advances: row.advances };
+  });
+  check('the van went out on both days', model.days === 2 && model.vehicle === 600,
+    JSON.stringify(model));
+  check('and its money is inside the gross', model.gross === 800 + 600,
+    JSON.stringify(model));
+
+  // 1. The sheet, read by heading rather than by position - the columns move with what
+  //    the period contains, and a footer that is right by accident is right until the
+  //    month somebody takes no advance.
+  const sheet = await page.evaluate(() => {
+    const table = document.querySelector('#reportsView .report-table');
+    const heads = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+    const body = [...table.querySelectorAll('tbody tr')]
+      .find(tr => tr.textContent.includes('דוד'));
+    const foot = table.querySelector('tfoot tr') ||
+      [...table.querySelectorAll('tr')].pop();
+    return {
+      heads,
+      cells: [...body.querySelectorAll('td, th')].map(c => c.textContent.trim()),
+      footer: [...foot.querySelectorAll('td, th')].map(c => c.textContent.trim())
+    };
+  });
+  const at = name => sheet.heads.indexOf(name);
+  check('the sheet has a column for the days the van went out',
+    at('ימי רכב') !== -1, JSON.stringify(sheet.heads));
+  check('and one for what it earned him', at('שכר רכב') !== -1, JSON.stringify(sheet.heads));
+  check('his row says both', sheet.cells[at('ימי רכב')] === '2'
+    && sheet.cells[at('שכר רכב')] === '600', JSON.stringify(sheet.cells));
+  check('and the footer totals them under their own headings',
+    sheet.footer[at('ימי רכב')] === '2' && sheet.footer[at('שכר רכב')] === '600',
+    JSON.stringify(sheet.footer));
+  check('the footer money still lands under the money headings',
+    sheet.footer[at('נצבר')] === '1400'
+    && sheet.footer[at('לתשלום')].includes('1300'), JSON.stringify(sheet.footer));
+
+  // 2. The screen he opens from that number.
+  const detail = await page.evaluate(() => {
+    openWorkerDays('w_01');
+    const body = document.getElementById('workerDaysBody');
+    const net = document.querySelector('#workerDaysModal .wday-net');
+    return { text: body.textContent, net: net ? net.textContent : '' };
+  });
+  check('the detail screen names the van', detail.text.includes('טנדר'), detail.text.slice(0, 300));
+  check('and prices it at what the sheet paid', detail.text.includes('600'),
+    detail.text.slice(0, 300));
+  check('and its net is the sheet\u2019s net', detail.net.includes('1300'), detail.net);
+  await page.evaluate(() => closeWorkerDays());
+
+  // 3. The message in his hand.
+  const statement = await page.evaluate(() => workerStatementText('w_01'));
+  check('the message names the van too', statement.includes('טנדר'), statement);
+  check('with the same 600', statement.includes('600'), statement);
+  check('and the same number at the bottom', statement.includes('נותר לתשלום: ')
+    && statement.includes('1300'), statement);
+
+  // 4. A man who owns a van and did not work himself is still owed for it.
+  const idle = await page.evaluate(() => {
+    State.schedule.vehicles.push({ id: 'v_02', name: 'טרנזיט', ownerId: 'w_03', active: true,
+      rates: [{ from: '2026-08-01', amount: 300 }] });
+    State.save();
+    render();
+    const row = payrollRows().find(r => r.workerId === 'w_03');
+    return { row: row ? { vehicle: row.vehicleAmount, net: row.netAmount } : null,
+      statement: workerStatementText('w_03') };
+  });
+  check('a van whose owner never went out still pays him',
+    idle.row && idle.row.vehicle === 600, JSON.stringify(idle.row));
+  check('and his message says the number rather than nothing',
+    idle.statement.includes('600'), idle.statement);
+
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- roster
 {
   const page = await open();

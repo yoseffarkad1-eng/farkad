@@ -362,6 +362,15 @@ function renderPayrollTable() {
         ? `סה״כ לתשלום · ${countedIn(paid, 'עובד אחד', 'עובדים')}`
         : 'סה״כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
+    // The vehicle cells, in the footer as well as the head and the body. They were in
+    // two of the three: the footer skipped straight to the money, so every cell after it
+    // sat two columns to the left of its own heading - the fortnight's gross printed
+    // under "ימי רכב", and the person reading the bottom line read the wrong number
+    // under the right word.
+    if (anyVehicle) {
+        footer.push(rows.reduce((sum, row) => sum + (row.vehicleDays || 0), 0),
+            Math.round(rows.reduce((sum, row) => sum + (row.vehicleAmount || 0), 0)));
+    }
     if (anyRate) footer.push('', Math.round(totals.amount));
     if (anyAdvance) footer.push(minusAmount(totals.advances));
     if (anyRate) footer.push(bidiAmount(Math.round(totals.amount - totals.advances)));
@@ -581,6 +590,12 @@ function openWorkerDays(workerId) {
 
     const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
     const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
+    // His vans, one line each. This screen is opened FROM the number on the pay sheet, so
+    // it has to be able to explain that number - and the sheet has counted vehicle money
+    // into it since v86. Without these lines the two screens differed by exactly the
+    // vehicles, and the one the man is shown was the smaller.
+    const vehicles = vehiclePayLines(State.schedule, worker.id,
+        REPORT_RANGE.from, REPORT_RANGE.to);
 
     document.getElementById('workerDaysTitle').textContent = worker.name;
     document.getElementById('workerDaysMeta').textContent =
@@ -589,26 +604,41 @@ function openWorkerDays(workerId) {
     const body = document.getElementById('workerDaysBody');
     clear(body);
 
-    if (days.length === 0 && advances.length === 0) {
+    if (days.length === 0 && advances.length === 0 && vehicles.length === 0) {
         body.appendChild(emptyHint('אין רישומים בטווח הזה.'));
     } else {
-        const strip = renderAttendanceChips(days);
-        if (strip) body.appendChild(strip);
-        days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
-        body.appendChild(renderWorkerDaysTotal(days, worker));
+        if (days.length > 0) {
+            const strip = renderAttendanceChips(days);
+            if (strip) body.appendChild(strip);
+            days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
+            body.appendChild(renderWorkerDaysTotal(days, worker));
+        }
+        // The vans, between his days and his advances, because that is the order the
+        // money is in: what he earned working, what the vehicle earned standing in his
+        // name, then what he has already been handed.
+        if (vehicles.length > 0) {
+            body.appendChild(el('div', 'wday-advances-head', 'רכב בתקופה'));
+            vehicles.forEach(line => body.appendChild(renderVehiclePayRow(line)));
+        }
         // Named before the rows begin: money that went the other way is its own block,
         // not three more days at the end of the list.
         if (advances.length > 0) {
             body.appendChild(el('div', 'wday-advances-head', 'מקדמות בתקופה'));
         }
         advances.forEach(item => body.appendChild(renderAdvanceRow(item)));
-        if (advances.length > 0) {
-            body.appendChild(renderNetRow(days, worker, advances));
+        // The bottom line appears for a van as readily as for an advance: a man who owns
+        // one and did not work a single day is still owed for it, and a screen that ends
+        // at his day total tells him he is owed nothing.
+        if (advances.length > 0 || vehicles.length > 0) {
+            body.appendChild(renderNetRow(days, worker, advances, vehicles));
             // Where this block is headed. The ledger model is written and gated off;
             // when it opens, nothing about these numbers changes - only their record.
-            body.appendChild(el('p', 'hint wday-bridge',
-                'במודל v80 השורה "מקדמות" בפירוט השכר הופכת לתנועת "נוכה מהשכר" ' +
-                'בסגירת תקופה — אותם סכומים, היסטוריה מלאה.'));
+            // Said only where there ARE advances - it is a sentence about that row.
+            if (advances.length > 0) {
+                body.appendChild(el('p', 'hint wday-bridge',
+                    'במודל v80 השורה "מקדמות" בפירוט השכר הופכת לתנועת "נוכה מהשכר" ' +
+                    'בסגירת תקופה — אותם סכומים, היסטוריה מלאה.'));
+            }
         }
     }
 
@@ -668,17 +698,42 @@ function renderAdvanceRow(item) {
     return row;
 }
 
-function renderNetRow(days, worker, advances) {
-    const earned = days.filter(day => !day.absent)
+// One van, one line: what it earned him over the period and across how many days. No
+// per-day breakdown - the flat rate does not vary by where it went or how far, and a
+// list of identical 300s says less than the one number and the count beside it.
+function renderVehiclePayRow(line) {
+    const row = el('div', 'wday wday-vehicle');
+
+    const what = el('div', 'wday-date');
+    what.appendChild(el('strong', null, `רכב · ${line.name}`));
+    what.appendChild(el('span', null, countedIn(line.days, 'יום אחד', 'ימים')));
+    row.appendChild(what);
+
+    row.appendChild(el('div', 'wday-what'));
+    row.appendChild(el('div', 'wday-money', String(Math.round(line.amount))));
+    return row;
+}
+
+function renderNetRow(days, worker, advances, vehicles) {
+    const worked = days.filter(day => !day.absent)
         .reduce((sum, day) => sum + (day.amount || 0), 0);
+    // The vans are part of נצבר, exactly as the pay sheet counts them. Leaving them out
+    // of this line while the block above lists them is the same contradiction one screen
+    // further in.
+    const fromVehicles = (vehicles || []).reduce((sum, line) => sum + line.amount, 0);
+    const earned = worked + fromVehicles;
     const taken = advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
     const row = el('div', 'wday wday-total wday-net');
     row.appendChild(el('div', 'wday-date', 'נותר לתשלום'));
     row.appendChild(el('div', 'wday-what',
         `${Math.round(earned)} נצבר · ${Math.round(taken)} מקדמות`));
+    // A man with no daily rate is owed an unknown amount for his DAYS - but a van's rate
+    // is its own, stamped on the vehicle, and it is known. So the dash is only right when
+    // there is nothing known to say; with vehicle money on the books there is.
+    const known = Number(worker.dailyRate) > 0 || fromVehicles > 0;
     row.appendChild(el('div', 'wday-money',
-        Number(worker.dailyRate) > 0 ? bidiAmount(Math.round(earned - taken)) : '—'));
+        known ? bidiAmount(Math.round(earned - taken)) : '—'));
     return row;
 }
 
@@ -916,9 +971,15 @@ function workerStatementText(workerId) {
     const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
     const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
     const worked = days.filter(day => !day.absent);
-    const earned = worked.reduce((sum, day) => sum + (day.amount || 0), 0);
+    const vehicles = vehiclePayLines(State.schedule, worker.id,
+        REPORT_RANGE.from, REPORT_RANGE.to);
+    const fromVehicles = vehicles.reduce((sum, line) => sum + line.amount, 0);
+    const earned = worked.reduce((sum, day) => sum + (day.amount || 0), 0) + fromVehicles;
     const taken = advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-    const priced = Number(worker.dailyRate) > 0;
+    // A van's rate is stamped on the van, so its money is known even for a man the roster
+    // has no daily rate for. He used to receive a message that listed his dates and then
+    // stopped, with no total at all, while the pay sheet had him down for six hundred.
+    const priced = Number(worker.dailyRate) > 0 || fromVehicles > 0;
 
     const lines = [
         `📄 ${isolate(worker.name)} - ${formatFullDate(parseLocalDate(REPORT_RANGE.from))} עד ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`,
@@ -944,6 +1005,15 @@ function workerStatementText(workerId) {
 
         lines.push(`• ${when} - ${where}${priced && day.amount !== null ? ` - ${Math.round(day.amount)}` : ''}`);
     });
+
+    // The vans, named and priced, before the totals they are part of. A line that is in
+    // נצבר and nowhere else is a number he cannot check, and this message is the one
+    // place he can check anything.
+    if (vehicles.length > 0) {
+        lines.push('');
+        vehicles.forEach(line => lines.push(
+            `רכב ${line.name} - ${countedIn(line.days, 'יום אחד', 'ימים')}: ${Math.round(line.amount)}`));
+    }
 
     lines.push('');
     // Both numbers, in the message the man actually receives. He is the one person who

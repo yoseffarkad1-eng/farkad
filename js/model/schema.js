@@ -1217,19 +1217,51 @@ function vehiclesOutOn(schedule, date) {
 }
 
 // What one person is owed for his vehicles across a period.
-function vehiclePayFor(schedule, workerId, fromDate, toDate) {
-    let days = 0;
-    let amount = 0;
+// The same period, broken down by van: one line per vehicle he was paid for, with the
+// days and the money it earned. The pay sheet needs one number; his own screen and the
+// message in his hand have to be able to say WHICH van earned it, because a man with
+// three of them cannot check a single total against anything.
+//
+// Named from the roster where the roster still has it, and by its id where it does not -
+// a van the roster has lost still worked those days, and printing a blank there would
+// quietly drop the line rather than the name.
+function vehiclePayLines(schedule, workerId, fromDate, toDate) {
+    const byVehicle = new Map();
 
     Object.keys(schedule.days || {})
         .filter(date => date >= fromDate && date <= toDate)
+        .sort()
         .forEach(date => {
             vehiclesOutOn(schedule, date)
-                .filter(item => item.vehicle.ownerId === workerId)
-                .forEach(item => { days += 1; amount += item.amount; });
+                .filter(item => String(item.vehicle.ownerId) === String(workerId))
+                .forEach(item => {
+                    const id = String(item.vehicle.id);
+                    if (!byVehicle.has(id)) {
+                        byVehicle.set(id, {
+                            vehicleId: id,
+                            name: item.vehicle.name || id,
+                            days: 0,
+                            amount: 0
+                        });
+                    }
+                    const line = byVehicle.get(id);
+                    line.days += 1;
+                    line.amount += item.amount;
+                });
         });
 
-    return { days, amount };
+    return [...byVehicle.values()];
+}
+
+// One computation, folded. The sheet, the detail screen, the message and the export all
+// reach the same arithmetic through here or through vehiclePayLines - counting it twice
+// is how the four of them came to disagree about the day rate, once already.
+function vehiclePayFor(schedule, workerId, fromDate, toDate) {
+    return vehiclePayLines(schedule, workerId, fromDate, toDate)
+        .reduce((sum, line) => ({
+            days: sum.days + line.days,
+            amount: sum.amount + line.amount
+        }), { days: 0, amount: 0 });
 }
 
 // Mark a vehicle as having stayed in the yard, or take that mark back. Returns the change
