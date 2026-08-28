@@ -149,10 +149,41 @@
         <button type="button" class="btn-icon" onclick="closeSettings()" aria-label="סגור">✕</button>
     </div>
     <div class="settings-body">
+        <!-- Six groups, in the order a person needs their answers: is anybody else
+             holding a copy, then the copy this device can make, then the doors that
+             REPLACE data - a group of their own, because a destructive door must never
+             sit beside a safe one - then the emergency exit, the running version, and
+             what this device itself is doing. -->
         <section class="settings-group">
+            <h3>ענן וסנכרון</h3>
+            <!-- The same words the line at the foot of every screen is showing right
+                 now. updateSyncNotice (js/sync/sync.js) owns them and writes them into
+                 #storageNotice; renderSettingsSyncLine copies them here on every render
+                 rather than composing a second version that could drift. -->
+            <p class="hint" id="settingsSyncStatus"></p>
+            <!-- Ships hidden and is shown by the adapter once a project actually answers:
+                 with no Firebase behind it, a "connect to the cloud" button is a door
+                 onto nothing. It lived in the header, where it was the widest thing on a
+                 phone and pressed about twice a year. -->
+            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
+        </section>
+
+        <section class="settings-group settings-group-backup">
             <h3>גיבוי</h3>
+            <!-- The one primary action on this sheet. Everything else here reads,
+                 restores or replaces; this is the only thing that gets a copy OFF the
+                 phone, which is why it does not share a row with anything. -->
+            <button type="button" class="backup-primary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
+            <p class="hint" id="backupAge"></p>
+            <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
+        </section>
+
+        <section class="settings-group">
+            <h3>ייבוא ושחזור</h3>
+            <!-- Every door in this group replaces the record. Said once, above all of
+                 them, before any of them is pressed. -->
+            <p class="hint">שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר תמיד כגיבוי מקומי לפני.</p>
             <div class="backup-actions">
-                <button type="button" class="btn-secondary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
                 <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
                 <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
                 <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
@@ -162,23 +193,20 @@
                  the rules there allow create and nothing else. Hidden entirely while
                  sync is off. -->
             <div class="restore-points" id="cloudRestorePoints"></div>
-            <p class="hint" id="backupAge"></p>
-            <p class="hint" id="storageRoom"></p>
-            <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
         </section>
 
         <section class="settings-group">
-            <h3>החשבון בענן</h3>
-            <!-- Ships hidden and is shown by the adapter once a project actually answers:
-                 with no Firebase behind it, a "connect to the cloud" button is a door
-                 onto nothing. It lived in the header, where it was the widest thing on a
-                 phone and pressed about twice a year. -->
-            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
-            <p class="hint">הסנכרון עובד ברקע. המצב שלו כתוב בתחתית כל מסך.</p>
+            <h3>שחזור חירום</h3>
+            <!-- The raw-records export, findable BEFORE it is needed. It used to be
+                 reachable only from the recovery banner - that is, only after damage was
+                 detected - and the day somebody is told over the phone to "export the
+                 raw data" is precisely the day nothing should have to go wrong first. -->
+            <button type="button" class="btn-secondary" onclick="exportRecoveryData()">💾 ייצא נתונים גולמיים</button>
+            <p class="hint">לשחזור חירום בלבד.</p>
         </section>
 
         <section class="settings-group">
-            <h3>הגרסה במכשיר</h3>
+            <h3>עדכון וגרסה</h3>
             <!-- Which version is actually running, and the way to move off it. An
                  installed app can sit on a cached build for a long time and there is
                  nothing on any other screen that would say so. -->
@@ -186,6 +214,16 @@
                 <span id="appVersion"></span>
                 <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button>
             </p>
+        </section>
+
+        <section class="settings-group">
+            <h3>מצב המכשיר</h3>
+            <p class="hint" id="storageRoom"></p>
+            <p class="hint" id="installState"></p>
+            <!-- The v80 advances ledger, when this build carries the parity check.
+                 renderLedgerParity feature-detects it and leaves this line hidden when
+                 the check is not there to ask. -->
+            <p class="hint" id="ledgerParity" style="display:none"></p>
         </section>
     </div>
 </div>
