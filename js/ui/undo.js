@@ -33,6 +33,11 @@ function snapshotWorkerDay(date, layer, workerId) {
 // Applies a change to one worker-day and keeps both sides of it on hand. The date and
 // layer are captured now, not read at undo time - by then the person may have moved to
 // another day, and restoring into that one would be a second mistake.
+//
+// Returns whether the edit STOOD - State.commit's verdict, passed through. The assign
+// sheet advances to the next worker on the strength of this call, and an advance over a
+// refused commit moves the sheet to a different name behind the very dialog explaining
+// that nothing was recorded for this one.
 function editWithUndo(workerId, label, mutate) {
     const date = State.date;
     const layer = State.layer;
@@ -40,7 +45,7 @@ function editWithUndo(workerId, label, mutate) {
 
     // No undo bar for an edit that did not happen. commit() has already put the screen
     // back and said why; offering "undo" over that would name a change nobody made.
-    if (!State.commit(mutate())) return;
+    if (!State.commit(mutate())) return false;
 
     // Taken AFTER the commit, so redo restores exactly what the edit produced rather
     // than being a guess at how to repeat it.
@@ -49,6 +54,7 @@ function editWithUndo(workerId, label, mutate) {
     offerUndo(label,
         () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, previous)),
         () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, after)));
+    return true;
 }
 
 // `redo` is optional: a bulk action (emptying a site) passes only the way back.

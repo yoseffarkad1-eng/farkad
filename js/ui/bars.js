@@ -41,6 +41,38 @@ function barHeight(node) {
     return Math.max(0, Math.round(box.height));
 }
 
+// How much of the viewport the on-screen keyboard is covering, or 0.
+//
+// window.innerHeight is the layout viewport, which the iOS keyboard does not shrink -
+// dvh and fixed elements are all sized against it and sit on happily under the keys.
+// visualViewport.height is what is actually left to see through. A small difference is
+// the browser's own chrome sliding around as the page scrolls, not a keyboard, and must
+// not start hiding bars; no keyboard is shorter than 150px.
+function keyboardHeight() {
+    if (typeof window === 'undefined' || !window.visualViewport) return 0;
+    const covered = window.innerHeight - window.visualViewport.height;
+    return covered > 150 ? Math.round(covered) : 0;
+}
+
+// Publishes the keyboard's height as --kb-h and marks the page while one is open.
+// Separate from the measuring above so a test can call it with a height of its own -
+// headless browsers do not open keyboards.
+//
+// kbd-open HIDES the two bottom bars (see the stylesheet) rather than this file doing
+// arithmetic around them: hidden bars measure 0 on the very next measureBottomBars call,
+// so the room the page reserves for them collapses on its own - which is the point of
+// measuring the bars instead of writing their sizes down.
+function applyKeyboardInset(pixels) {
+    const root = document.documentElement;
+    if (!root || !root.style) return;
+    const height = Math.max(0, Math.round(pixels) || 0);
+
+    root.style.setProperty('--kb-h', height + 'px');
+    if (document.body && document.body.classList) {
+        document.body.classList.toggle('kbd-open', height > 0);
+    }
+}
+
 // Measured after the layout that changed, not during it: a read in the middle of a render
 // returns the sizes from before the render, which is how the day screen came to reserve
 // room for a bar that had just been hidden.
@@ -48,7 +80,13 @@ let barsQueued = false;
 function scheduleBarMeasure() {
     if (barsQueued) return;
     barsQueued = true;
-    const run = () => { barsQueued = false; measureBottomBars(); };
+    // The keyboard first: whether the bars are hidden under it changes what measuring
+    // them is about to find.
+    const run = () => {
+        barsQueued = false;
+        applyKeyboardInset(keyboardHeight());
+        measureBottomBars();
+    };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
     else setTimeout(run, 0);
 }

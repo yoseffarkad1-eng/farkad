@@ -1325,6 +1325,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     }
 }
 
+/* While a keyboard is up - js/ui/bars.js measures it from visualViewport and marks the
+   page - the two bottom bars go away entirely. Nothing on them can be pressed under the
+   keys, and hiding them is what lets the assign sheet's foot take their place above the
+   keyboard. Hidden bars then MEASURE 0, so the room the page reserves for them
+   (--nav-h, --day-actions-h) collapses without another rule here. The sheet-foot also
+   drops its home-indicator padding: that strip is under the keyboard too. */
+body.kbd-open .tabs,
+body.kbd-open .day-actions { display: none; }
+body.kbd-open .sheet-foot { padding-bottom: 16px; }
+
 /* Above both bottom bars. A dialog the tab bar draws over is a dialog whose last button
    cannot be pressed - and the last button is usually the one that says no. */
 .modal {
@@ -1837,15 +1847,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* ---------------------------------------------------------------- assign sheet */
 
 /* Anchored to the bottom on a phone: that is where the thumb is, and the sheet is
-   tapped once per worker all the way down the roster. */
-.sheet { align-items: flex-end; padding: 0; }
+   tapped once per worker all the way down the roster. The bottom padding is the
+   keyboard: the layout viewport this fixed overlay is anchored to does not shrink when
+   the keys come up, so without the lift the sheet's foot - סגור, נעדר, the forward
+   button - sits under them, visible through nothing and pressable by nobody. --kb-h is
+   measured and published by js/ui/bars.js; 0 while no keyboard is open. */
+.sheet { align-items: flex-end; padding: 0 0 var(--kb-h, 0px); }
 .sheet-content {
     max-width: 560px;
     border-radius: 22px 22px 0 0;
     /* dvh for the same reason as the dialog above. Three parts, and only the middle one
        scrolls: a sheet listing thirty sites used to carry the name and the way out off
-       the top and bottom of the screen with it. */
-    max-height: calc(100dvh - 48px);
+       the top and bottom of the screen with it. Minus the keyboard, because dvh does
+       not shrink for it - see --kb-h on .sheet above. */
+    max-height: calc(100dvh - 48px - var(--kb-h, 0px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1974,6 +1989,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-top: 1px solid var(--line-soft);
 }
 .sheet-actions button { flex: 1; min-height: 48px; }
+/* The forward button: label first, chevron after it - which in RTL flow puts the arrow
+   on the LEFT, the direction the sheet actually moves. The SVG needs the flex row or it
+   sits on the text baseline and stretches the button. Wider than its neighbours because
+   it carries a whole name - המשך אל {שם} - and an even three-way split folded that name
+   into a word per line. */
+.sheet-actions .sheet-fwd {
+    flex: 1.6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+}
+.sheet-fwd svg { flex: 0 0 auto; }
 
 .mode-toggle { margin-inline-start: 0; }
 

@@ -90,8 +90,13 @@ function renderAssignSheet() {
     const position = workers.findIndex(w => w.id === worker.id) + 1;
 
     document.getElementById('assignSheetTitle').textContent = worker.name;
+    // The sheet covers the day header, so while it is open this line is the only thing
+    // on screen that says WHICH day is being written - and thirty taps into the wrong
+    // day is the mistake the fixed header exists to prevent.
+    const day = parseLocalDate(State.date);
     document.getElementById('assignSheetMeta').textContent =
-        `${position} מתוך ${workers.length} · ${State.unrecorded().length} נותרו`;
+        `${position} מתוך ${workers.length} · ${State.unrecorded().length} נותרו` +
+        ` · ${hebrewDayName(day)} ${formatShortDate(day)}`;
 
     const body = document.getElementById('assignSheetBody');
     clear(body);
@@ -113,11 +118,15 @@ function renderAssignSheet() {
                     renderAssignSheet();
                     return;
                 }
-                editWithUndo(worker.id, `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () =>
-                    assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
+                const stood = editWithUndo(worker.id,
+                    `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () =>
+                        assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
                 // A second site in a day is normal here, so picking one cannot assume the
-                // worker is finished - only move on when this is their first.
-                if (entries.length === 0) advanceSheet();
+                // worker is finished - only move on when this is their first. And only
+                // when the edit STOOD: a refused commit has already rolled back and put
+                // its dialog up, and advancing behind that dialog silently changes which
+                // worker the next tap lands on.
+                if (stood && entries.length === 0) advanceSheet();
                 else renderAssignSheet();
             }
         );
@@ -134,6 +143,10 @@ function renderAssignSheet() {
         grid.appendChild(tile);
     });
     body.appendChild(grid);
+    // The counting rule, where the second tap happens. It otherwise lives only in the
+    // reports, which are read on payday - two weeks after the tap it explains.
+    body.appendChild(el('p', 'sheet-note',
+        'שני אתרים - יום אחד · יום כפול נספר כשני ימי שכר'));
 
     if (entries.length > 0) {
         const rates = el('div', 'sheet-rates');
@@ -181,6 +194,15 @@ function renderAssignSheet() {
 
             rates.appendChild(row);
         });
+        // What the hours just typed are worth - said here, at the field, not two weeks
+        // later as an asterisk on the payroll. The no-rate case is the one that matters:
+        // hours recorded for a worker with no שכר שעה add nothing to the sum, and the
+        // person typing them should not find that out on payday.
+        if (entries.some(entry => entryRate(entry) === RATE_EXTRA)) {
+            rates.appendChild(el('p', 'sheet-note', worker.hourlyRate > 0
+                ? `שעות נוספות מחושבות לפי שכר שעה (${worker.hourlyRate} ₪ ל${isolate(worker.name)}).`
+                : 'לעובד אין שכר שעה - השעות יירשמו בלי סכום.'));
+        }
         body.appendChild(rates);
     }
 
@@ -195,18 +217,53 @@ function renderAssignSheet() {
             renderAssignSheet();
             return;
         }
-        editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`, () =>
-            markAbsent(State.schedule, State.date, worker.id, State.layer));
-        advanceSheet();
+        // Same gate as the site tiles: an absence is a complete answer for this worker,
+        // but only an absence that was actually recorded is.
+        if (editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`, () =>
+            markAbsent(State.schedule, State.date, worker.id, State.layer))) advanceSheet();
+        else renderAssignSheet();
     }));
-    actions.appendChild(button('דלג ›', 'btn-secondary', advanceSheet));
+    // The forward button says what forward MEANS right now. With nothing recorded for
+    // this worker it is a skip and says so; once something is, it names the worker the
+    // sheet will move to - which is also the quiet confirmation that this one is done.
+    // With nobody unfilled left, forward closes the sheet (see advanceSheet), so the
+    // label says the list is finished rather than promising a name it does not have.
+    const next = entries.length > 0 || absent
+        ? State.worker(nextUnfilledAfter(worker.id))
+        : null;
+    const forwardLabel = entries.length === 0 && !absent ? 'דלג'
+        : next ? `המשך אל ${isolate(next.name)}`
+            : 'סיום הרשימה';
+    const forward = button(forwardLabel, 'btn-secondary sheet-fwd', advanceSheet);
+    forward.appendChild(forwardChevron());
+    actions.appendChild(forward);
     // "סגור", not "סיום" and certainly not "שמור". Every tap on this sheet has already
     // been written and sent by the time the finger leaves the glass - there is nothing
     // here to save, and a button that says there is teaches somebody that closing without
     // pressing it loses the evening. It does not, and they should not have to wonder.
     actions.appendChild(button('סגור', 'btn-secondary', closeAssignSheet));
     foot.appendChild(actions);
-    foot.appendChild(el('p', 'sheet-note', 'כל בחירה נשמרת מיד. אין מה לשמור כאן.'));
+    foot.appendChild(el('p', 'sheet-note', 'כל בחירה נשמרת מיד במכשיר. אין מה לשמור כאן.'));
+}
+
+// Forward points LEFT on this calendar - time flows right-to-left - and it is drawn as
+// an SVG because a bare › inside a Hebrew label is reordered by the bidi algorithm to
+// whichever side it pleases, and has been seen pointing backwards.
+function forwardChevron() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '24');
+    svg.setAttribute('height', '24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M15 6l-6 6 6 6');
+    svg.appendChild(path);
+    return svg;
 }
 
 // ---------------------------------------------------------------- pickers

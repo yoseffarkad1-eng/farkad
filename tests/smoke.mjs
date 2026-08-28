@@ -2320,6 +2320,126 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- a refused save holds still
+// The advance is the sheet's whole rhythm, which is exactly why it must not happen over
+// a commit that was refused: the person reads 'הרישום לא נשמר' while the sheet quietly
+// moves to a different worker behind the dialog, and the retry tap records the failed
+// site against the wrong man.
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => openAssignSheet('w_01'));
+  await page.waitForTimeout(250);
+
+  // The disk refuses everything from here on, exactly as a full phone does.
+  await page.evaluate(() => {
+    window.__realSet = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = () => {
+      const error = new Error('quota');
+      error.name = 'QuotaExceededError';
+      throw error;
+    };
+  });
+
+  await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
+  await page.waitForTimeout(350);
+  check('a refused save leaves the sheet on the same worker',
+    (await page.textContent('#assignSheetTitle')) === 'דוד',
+    await page.textContent('#assignSheetTitle'));
+  check('and the refusal is said out loud, on top of that same worker',
+    (await page.isVisible('#askModal')) &&
+    (await page.textContent('#askModal')).includes('הרישום לא נשמר'));
+  check('nothing half-recorded is left behind it',
+    (await page.evaluate(() =>
+      entriesFor(State.schedule, State.date, 'w_01', 'actual').length)) === 0);
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
+  // נעדר is the other answer that advances, and it must hold still the same way.
+  await page.locator('.sheet-actions').getByText('נעדר', { exact: true }).click();
+  await page.waitForTimeout(350);
+  check('a refused absence holds still too',
+    (await page.textContent('#assignSheetTitle')) === 'דוד');
+  await page.click('#askOk');
+  await page.waitForTimeout(200);
+
+  // Storage comes back; the very same tap now records and moves on.
+  await page.evaluate(() => { localStorage.setItem = window.__realSet; });
+  await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
+  await page.waitForTimeout(350);
+  check('once the disk takes it, the same tap advances',
+    (await page.textContent('#assignSheetTitle')) === 'שרה');
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the sheet says where it goes
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => openAssignSheet('w_01'));
+  await page.waitForTimeout(250);
+
+  // The sheet covers the day header, so it has to name the day itself.
+  check('the sheet names the day being written',
+    (await page.textContent('#assignSheetMeta')).includes('יום רביעי 12/08'),
+    await page.textContent('#assignSheetMeta'));
+  check('the counting rule sits under the site tiles',
+    (await page.textContent('#assignSheetBody'))
+      .includes('שני אתרים - יום אחד · יום כפול נספר כשני ימי שכר'));
+
+  const forward = page.locator('.sheet-actions .sheet-fwd');
+  check('with nothing recorded the forward button is only a skip',
+    (await forward.textContent()).includes('דלג'), await forward.textContent());
+  check('drawn with an SVG chevron, never a bare › for bidi to reorder',
+    (await forward.locator('svg').count()) === 1 &&
+    !(await forward.textContent()).includes('›'));
+
+  // Record him, then come back: the button now says who the sheet moves to.
+  await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => openAssignSheet('w_01'));
+  await page.waitForTimeout(250);
+  check('once something is recorded it names the next unfilled worker',
+    (await forward.textContent()).includes('המשך אל') &&
+    (await forward.textContent()).includes('שרה'), await forward.textContent());
+
+  // The overtime hint says what the hours are worth - or that they are worth nothing.
+  await page.locator('.sheet-rate-row').getByText('שעות נוספות').click();
+  await page.waitForTimeout(250);
+  check('choosing extra hours states the hourly rate they are priced by',
+    (await page.textContent('#assignSheetBody'))
+      .includes('שעות נוספות מחושבות לפי שכר שעה (50 ₪ ל'),
+    await page.textContent('#assignSheetBody'));
+
+  // עלי has no hourly rate, and the hint must say so rather than implying a sum.
+  await page.evaluate(() => {
+    State.commit(assignPlace(State.schedule, State.date, 'w_03', State.layer,
+      'p_01', RATE_NORMAL));
+    openAssignSheet('w_03');
+  });
+  await page.waitForTimeout(250);
+  await page.locator('.sheet-rate-row').getByText('שעות נוספות').click();
+  await page.waitForTimeout(250);
+  check('and with no hourly rate it says the hours carry no amount',
+    (await page.textContent('#assignSheetBody'))
+      .includes('לעובד אין שכר שעה - השעות יירשמו בלי סכום.'));
+
+  // Fill the roster; with nobody left to move to, forward says the list is done - and
+  // pressing it does what it says, which is the same close the run always ended in.
+  await page.evaluate(() => {
+    State.commit(assignPlace(State.schedule, State.date, 'w_02', State.layer,
+      'p_01', RATE_NORMAL));
+    openAssignSheet('w_01');
+  });
+  await page.waitForTimeout(250);
+  check('with nobody unfilled left, forward says the list is finished',
+    (await forward.textContent()).includes('סיום הרשימה'), await forward.textContent());
+  await forward.click();
+  await page.waitForTimeout(300);
+  check('and pressing it closes the sheet', await page.isHidden('#assignSheet'));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- mode toggle
 {
   const page = await open();
