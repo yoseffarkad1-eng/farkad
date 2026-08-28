@@ -1090,6 +1090,25 @@ function ledgerEntryProblems(id, value) {
     if (value.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
         return ['a ledger entry with a date that is not a date'];
     }
+
+    // The gate, enforced where every write passes rather than where a writer remembers
+    // to ask. LEDGER_WRITES is false and nothing in the app calls the three record
+    // functions - today. It is one wired-up button away from a phone sending entries the
+    // other two phones cannot read, and the constant alone would not stop it: a gate that
+    // lives in a comment beside its writers is a gate held open by good manners.
+    //
+    // The one write the closed gate sanctions is the boot mirror, and it is recognised by
+    // all three of the things it actually is - the deterministic id every phone mints for
+    // the same advance, the origin the migration stamps, and the kind. Nothing that says
+    // 'corrected' or 'cancelled' passes on the strength of the stamp: a correction is
+    // precisely the entry the gate exists to hold, being the one that changes what a man
+    // is handed on a phone that cannot read it.
+    if (typeof ledgerWritesEnabled === 'function' && !ledgerWritesEnabled()) {
+        const mirrored = String(value.kind) === 'given'
+            && String(value.origin) === 'migration'
+            && String(id) === 'le_mig_' + String(value.advanceId);
+        if (!mirrored) return ['a ledger entry while the writer gate is closed'];
+    }
     return [];
 }
 

@@ -690,8 +690,18 @@ function normaliseSchedule(raw, hints) {
         ? ledger.advances : {};
     Object.keys(entries).forEach(id => {
         const entry = entries[id];
-        if (!entry || typeof entry !== 'object') return;
-        if (!entry.advanceId || !entry.kind) return;
+        // Unreadable is not "not there". This function rebuilds the schedule the session
+        // will hold, and that rebuilt schedule is what save() writes back over the disk -
+        // so an entry dropped here was not being left out of the fold, it was being
+        // DELETED, on an ordinary boot, by a device that never told anybody. It is the
+        // ledger's one promise, broken by the file that carries it.
+        //
+        // So the bytes come across exactly as they were found, and ledgerEntries goes on
+        // refusing to fold them: a repaired entry is a claim about money nobody made.
+        if (!entry || typeof entry !== 'object' || !entry.advanceId || !entry.kind) {
+            schedule.ledger.advances[id] = entry;
+            return;
+        }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
     });
 

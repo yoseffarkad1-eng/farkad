@@ -59,7 +59,14 @@ function ledgerEntries(schedule) {
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     return Object.keys(held)
         .map(id => held[id])
-        .filter(entry => entry && entry.id && entry.advanceId)
+        // Readable, not merely present. Since v87 the disk keeps an entry this build
+        // cannot parse rather than deleting it at boot, so the filter that decides what
+        // the FOLD is built from has to name what it can actually read: an id, an advance
+        // behind it, and one of the three kinds this file knows how to apply. An entry of
+        // an unknown kind used to reach foldAdvance, be silently ignored there, and count
+        // as a ledger entry everywhere else - including in the parity check.
+        .filter(entry => entry && entry.id && entry.advanceId
+            && ['given', 'corrected', 'cancelled'].includes(String(entry.kind)))
         .sort((a, b) => {
             const at = String(a.at || '');
             const bt = String(b.at || '');
@@ -310,8 +317,19 @@ function ledgerAgreesWithAdvances(schedule) {
         return !item || typeof item !== 'object';
     });
 
+    // The third pass, and the one the first two are blind to by construction: bytes in
+    // the ledger this build cannot read. Since v87 they are kept rather than deleted at
+    // boot, which is right - but keeping them silently while reporting agreement would be
+    // the same record treated as empty, one step further along. This verdict is the one
+    // thing anybody consults before opening the writer, and it must not say the ledger
+    // agrees with the record when part of the ledger has not been read at all.
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    const readable = new Set(ledgerEntries(schedule).map(entry => String(entry.id)));
+    const unreadable = Object.keys(held).filter(id => !readable.has(String(id)));
+
     return {
-        agrees: missing.length === 0 && different.length === 0 && orphaned.length === 0,
-        missing, different, orphaned
+        agrees: missing.length === 0 && different.length === 0
+            && orphaned.length === 0 && unreadable.length === 0,
+        missing, different, orphaned, unreadable
     };
 }

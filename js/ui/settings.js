@@ -158,6 +158,17 @@ function renderLedgerParity() {
     line.style.display = '';
     const behind = (verdict.missing || []).length;
     const wrong = (verdict.different || []).length + (verdict.orphaned || []).length;
+    // Bytes in the ledger this build cannot read - kept on the disk since v87 rather than
+    // deleted at boot. Said first and said plainly: it is not a mismatch to be reconciled
+    // and it is not a mirror running late, it is a record nobody here has read, and the
+    // person deciding whether to open the writer is the person who has to know.
+    const unreadable = (verdict.unreadable || []).length;
+    if (unreadable > 0) {
+        line.textContent = `פנקס המקדמות (v80) מכיל ${unreadable} רשומות שהגרסה הזו לא ` +
+            'קוראת. הן נשמרו כמו שהן ולא נמחקו - אין להפעיל את הכתיבה החדשה לפני בדיקה.';
+        line.className = 'hint hint-warn';
+        return;
+    }
     if (verdict.agrees) {
         line.textContent = 'פנקס המקדמות (v80) תואם את המקדמות הרשומות.';
         line.className = 'hint';
