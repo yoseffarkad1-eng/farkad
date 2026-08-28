@@ -883,8 +883,21 @@ function rosterDocument(schedule) {
     return {
         workers: byId(schedule.workers),
         places: byId(schedule.places),
+        // The vans, on the same terms as the people. They were missing from here while
+        // editRoster was already writing roster.vehicles.<id> per field - so a whole
+        // document write, which is what a restore is, replaced the roster wholesale and
+        // took the vehicle map and its order away with it.
+        //
+        // What that costs is not the map. It is what happens NEXT: the very next per-field
+        // edit from another phone - a rename, a price - writes roster.vehicles.v_01.name
+        // into a document that has no v_01 to write it into, and the map then holds a van
+        // consisting of one field. mergeRoster lets the map win per entity, by design, so
+        // that one field replaces the whole van on every device - the dated rates with it,
+        // which is a month of somebody's pay.
+        vehicles: byId(schedule.vehicles),
         workerOrder: ids(schedule.workers),
-        placeOrder: ids(schedule.places)
+        placeOrder: ids(schedule.places),
+        vehicleOrder: ids(schedule.vehicles)
     };
 }
 

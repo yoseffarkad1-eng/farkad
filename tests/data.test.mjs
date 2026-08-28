@@ -10236,4 +10236,117 @@ function withAdvances(device, rows) {
         JSON.stringify(again.call('ledgerEntries', again.State.schedule).map(e => e.id)));
 }
 
+// ---------------------------------------------------------------- R1: a restore keeps the vans and the ledger
+//
+// A whole-document write is the one place this app replaces a record instead of editing
+// it, and it is the place a field that nobody thought about goes missing without a word.
+// Vehicles and the ledger both arrived after the restore machinery was written.
+//
+// Two things have to hold. The document that goes UP must carry them - including the
+// per-entity roster map that every later per-field vehicle edit is merged onto, so a van
+// renamed on another phone after the restore has a record to be merged into rather than a
+// scatter of fields with nothing to hang them on. And the schedule that comes DOWN must
+// still hold the vans, their dated rates, their service history, the day a van stayed in
+// the yard, and every ledger entry - the unreadable one included.
+{
+    suite('R1: a whole-document restore carries the vans and the ledger');
+
+    const cloud = makeCloud();
+    const { device } = crew();
+    await connected(device, cloud);
+    await settle(TICK * 30);
+
+    // A van on the road, a van put away in September, a day one of them stayed in, an
+    // advance, its mirror, and an entry this build cannot read.
+    device.State.schedule.vehicles = [
+        { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+          rates: [{ from: '2026-08-01', amount: 300 }, { from: '2026-09-01', amount: 350 }] },
+        { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: false,
+          rates: [{ from: '2026-08-01', amount: 300 }],
+          service: [{ from: '2026-09-01', active: false }] }
+    ];
+    device.State.commitRoster();
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.State.commit(device.call('setVehicleOut', device.State.schedule,
+        '2026-08-12', 'v_01', false));
+    device.State.commit(
+        device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, ''));
+    commitMigration(device);
+    device.State.schedule.ledger.advances.le_future = {
+        id: 'le_future', advanceId: 'a_1', kind: 'reversed', amount: 500 };
+    device.State.save();
+    await settle(TICK * 30);
+
+    // The canonical form, which is what the app stores and what a round trip has to come
+    // back equal to. normaliseSchedule gives a van with no service history an empty one -
+    // that is the roster's canonical shape, the same way a worker gets his flags - and
+    // pinning the pre-normalised text here would pin an incidental rather than the
+    // guarantee, which is that nothing is lost and no number changes.
+    const before = JSON.stringify(
+        device.call('normaliseSchedule', device.State.schedule).vehicles);
+    const ledgerBefore = JSON.stringify(device.State.schedule.ledger.advances);
+    given('the vans and the ledger are on the device',
+        device.State.schedule.vehicles.length === 2
+        && Object.keys(device.State.schedule.ledger.advances).length === 2,
+        before);
+
+    // 1. The document as it goes up.
+    const wire = device.call('cloudDocument', device.State.schedule);
+    check('the wire form carries the vans as an array, for a phone on the old build',
+        JSON.stringify(device.call('normaliseSchedule', wire).vehicles) === before,
+        JSON.stringify(wire.vehicles));
+    check('and keyed by id, which is what a later per-field edit is merged onto',
+        Boolean(wire.roster && wire.roster.vehicles && wire.roster.vehicles.v_01
+            && wire.roster.vehicles.v_02),
+        JSON.stringify(wire.roster && Object.keys(wire.roster)));
+    check('with the order said once, the way the workers and the sites are',
+        JSON.stringify((wire.roster || {}).vehicleOrder) === JSON.stringify(['v_01', 'v_02']),
+        JSON.stringify((wire.roster || {}).vehicleOrder));
+    check('and every ledger entry, the one it cannot read included',
+        JSON.stringify(wire.ledger.advances) === ledgerBefore,
+        JSON.stringify(Object.keys(wire.ledger.advances)));
+
+    // 2. The restore itself, of that same document - the shape a backup file has.
+    const restored = device.call('normaliseSchedule', JSON.parse(JSON.stringify(wire)));
+    check('reading it back keeps the vans, dated rates and all',
+        JSON.stringify(restored.vehicles) === before, JSON.stringify(restored.vehicles));
+    check('and the evening one of them stayed in the yard',
+        restored.days['2026-08-12'].vehicles.v_01.out === false,
+        JSON.stringify(restored.days['2026-08-12'].vehicles));
+    check('and every ledger entry',
+        JSON.stringify(restored.ledger.advances) === ledgerBefore,
+        JSON.stringify(Object.keys(restored.ledger.advances)));
+
+    await device.Sync.replaceAll(restored).catch(() => {});
+    await settle(TICK * 40);
+
+    check('after the restore the device still has both vans',
+        JSON.stringify(device.call('normaliseSchedule', device.State.schedule).vehicles)
+            === before,
+        JSON.stringify(device.State.schedule.vehicles));
+    check('and the ledger is whole',
+        JSON.stringify(device.State.schedule.ledger.advances) === ledgerBefore,
+        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
+    check('the cloud document has the vans keyed by id',
+        Boolean(cloud.doc && cloud.doc.roster && cloud.doc.roster.vehicles
+            && cloud.doc.roster.vehicles.v_01),
+        JSON.stringify(cloud.doc && cloud.doc.roster && Object.keys(cloud.doc.roster)));
+    check('and the ledger it was given is the whole one',
+        JSON.stringify(((cloud.doc || {}).ledger || {}).advances) === ledgerBefore,
+        JSON.stringify(Object.keys((((cloud.doc || {}).ledger) || {}).advances || {})));
+
+    // 3. And after the app is closed and reopened on the restored record.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+    check('and all of it is still there after a reopen',
+        JSON.stringify(reopened.State.schedule.vehicles) === before
+        && JSON.stringify(reopened.State.schedule.ledger.advances) === ledgerBefore,
+        JSON.stringify(reopened.State.schedule.vehicles));
+    check('with the van pay for that month unchanged',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01',
+            '2026-08-01', '2026-08-31').amount === 0,
+        JSON.stringify(reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01',
+            '2026-08-01', '2026-08-31')));
+}
+
 report();
