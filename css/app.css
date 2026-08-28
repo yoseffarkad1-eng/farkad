@@ -255,7 +255,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
         gap: 2px;
         background: var(--surface);
         border-top: 1px solid var(--line);
-        padding: 6px 10px calc(6px + var(--safe-bottom));
+        padding: 6px 10px max(8px, var(--safe-bottom));
         box-shadow: 0 -6px 24px -18px rgba(0, 0, 0, .5);
     }
     .tab {
@@ -263,6 +263,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
         gap: 3px;
         padding: 5px 2px 4px;
         font-size: 11px;
+        font-weight: 600;
         border-radius: var(--radius-sm);
     }
     .tab-icon svg { width: 22px; height: 22px; }
@@ -368,7 +369,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    orientation where the screen is shortest and the thumb is furthest away. Asked by
    POINTER instead, the floor follows the finger onto any screen it is on. */
 @media (pointer: coarse) {
-    .tab { min-height: 44px; }
+    .tab { min-height: 50px; }
     .tabs .tab { padding-block: 8px; }
 }
 
@@ -1556,20 +1557,20 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     .btn-today { margin-inline-start: auto; }
     .day-actions {
         /* The tab bar below carries the home-indicator inset, so this one must not add a
-           second copy of it on top. */
+           second copy of it on top. ONE solid surface: this used to go transparent here,
+           floating two shadowed pills over the list - and the worker rows read through
+           the gap between them, which is exactly what a dock exists to prevent. */
         padding-bottom: 10px;
-        border-top: none;
-        box-shadow: none;
-        background: transparent;
-        pointer-events: none;
     }
     .day-actions button {
-        pointer-events: auto;
         flex: 1;
+        min-height: 48px;
         font-size: 14px;
         padding: 11px 8px;
-        box-shadow: var(--shadow);
     }
+    /* The WhatsApp button carries a whole phrase and is the one pressed every evening -
+       it gets the wider share of the row. */
+    .day-actions .btn-success { flex: 1.4; }
     .storage-notice { padding-bottom: 8px; }
 }
 
@@ -2192,7 +2193,7 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 
     /* the bottom bar */
     @media (max-width: 700px) {
-        .tab { font-size: 12px; padding: 7px 2px 6px; }
+        .tab { font-size: 11px; font-weight: 600; padding: 7px 2px 6px; }
         .tab-icon svg { width: 24px; height: 24px; }
         .wrow-main { min-height: 66px; }
         .report-table td { font-size: 16px; }

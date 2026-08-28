@@ -461,10 +461,36 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
         return;
     }
 
+    // Snapshotted per worker BEFORE the write, so the copy can be taken back the way
+    // any single tap can: the bulk chips on this same screen are undoable, and a bulk
+    // copy that was not taught somebody that undo is a lottery. Date and layer are
+    // captured now - by undo time the person may be looking at another day.
+    const dateAtCopy = State.date;
+    const layerAtCopy = State.layer;
+    const held = targets.map(worker => ({
+        id: worker.id,
+        before: snapshotWorkerDay(dateAtCopy, layerAtCopy, worker.id)
+    }));
+
     // One save and one render for the whole copy, but every path is still sent - see
     // State.commitMany. No "copied N workers" over a copy that was refused: commit has
     // already said what happened.
     if (!State.commitMany(changes)) return;
+
+    // Only the rows the copy actually filled: a worker it skipped must not be dragged
+    // back and forth by somebody else's undo.
+    const touched = held
+        .map(item => ({ ...item, after: snapshotWorkerDay(dateAtCopy, layerAtCopy, item.id) }))
+        .filter(item => JSON.stringify(item.before) !== JSON.stringify(item.after));
+    if (touched.length > 0) {
+        const count = touched.length;
+        offerUndo(count === 1 ? `הועתק עובד אחד ${source}` : `הועתקו ${count} עובדים ${source}`,
+            () => State.commitMany(touched.map(item =>
+                setWorkerDay(State.schedule, dateAtCopy, item.id, layerAtCopy, item.before))),
+            () => State.commitMany(touched.map(item =>
+                setWorkerDay(State.schedule, dateAtCopy, item.id, layerAtCopy, item.after))));
+    }
+
     askTell(`הועתקו ${countCopied(changes)} עובדים ${source}. רק מי שלא היה רשום עודכן.`);
 }
 

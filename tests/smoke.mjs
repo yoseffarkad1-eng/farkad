@@ -707,7 +707,7 @@ async function seedRoster(page) {
     markAbsent(State.schedule, '2026-08-12', 'w_03', 'actual');
     State.save(); render();
   });
-  await page.getByText('💬 וואטסאפ').click();
+  await page.getByText('שליחה לוואטסאפ').click();
   await page.waitForTimeout(300);
 
   const text = await page.inputValue('#shareText');
@@ -745,7 +745,7 @@ async function seedRoster(page) {
   // the choice survives closing and reopening
   await page.locator('#shareModal').getByRole('button', { name: 'סגור' }).click();
   await page.waitForTimeout(200);
-  await page.getByText('💬 וואטסאפ').click();
+  await page.getByText('שליחה לוואטסאפ').click();
   await page.waitForTimeout(250);
   check('and the chosen look is remembered for next time',
     (await page.inputValue('#shareText')).startsWith('בוקר טוב,'));
@@ -4378,10 +4378,13 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     };
   });
 
-  check(`${label}: the tab bar grows by the home-indicator strip`,
-    inset.after.tabsHeight - inset.before.tabsHeight === 34, JSON.stringify(inset));
+  // max(8px, inset): with no indicator the bar keeps an 8px breath, and the indicator
+  // replaces that breath rather than stacking on top of it - so the growth is the
+  // strip minus the breath it absorbs.
+  check(`${label}: the tab bar grows to carry the home-indicator strip`,
+    inset.after.tabsHeight - inset.before.tabsHeight === 34 - 8, JSON.stringify(inset));
   check(`${label}: and the measured --nav-h grows with it`,
-    inset.after.navVar - inset.before.navVar === 34, JSON.stringify(inset));
+    inset.after.navVar - inset.before.navVar === 34 - 8, JSON.stringify(inset));
   check(`${label}: the day actions move up rather than under it`,
     inset.after.dockTop < inset.before.dockTop, JSON.stringify(inset));
   check(`${label}: the page reserves more at its foot`,
@@ -4924,7 +4927,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('so the dock does not grow when the indicator appears',
     dock.inset.height === dock.flat.height, JSON.stringify(dock));
   check('it moves up with the tab bar instead',
-    dock.flat.bottom - dock.inset.bottom === 34, JSON.stringify(dock));
+    dock.flat.bottom - dock.inset.bottom === 34 - 8, JSON.stringify(dock));
   check('and still lands on the tab bar exactly',
     Math.abs(dock.inset.bottom - dock.inset.tabsTop) <= 1, JSON.stringify(dock.inset));
   check('both buttons in it are a thumb\'s worth, and the same size',

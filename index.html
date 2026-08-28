@@ -132,10 +132,12 @@
     <div class="undo-bar" id="undoBar" role="status" aria-live="polite" style="display:none"></div>
 
     <div class="day-actions">
-        <!-- The label is written by renderCopyButton, which names the day it will copy
-             from - the last one with anything on it, not whatever was yesterday. -->
+        <!-- WhatsApp first: in RTL that is the start corner, under the thumb, and it is
+             the button pressed every evening. The copy button's label is written by
+             renderCopyButton, which names the day it will copy from - the last one with
+             anything on it, not whatever was yesterday. -->
+        <button type="button" class="btn-success" onclick="showDayMessage()" title="הודעה לוואטסאפ עם הסידור של היום">💬 שליחה לוואטסאפ</button>
         <button type="button" class="btn-secondary" id="copyDayBtn" onclick="copyPreviousDay()">↧ מהיום הקודם</button>
-        <button type="button" class="btn-success" onclick="showDayMessage()" title="הודעה לוואטסאפ עם הסידור של היום">💬 וואטסאפ</button>
     </div>
 
 </div>
