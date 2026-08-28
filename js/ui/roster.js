@@ -18,6 +18,12 @@
 //
 // Neither action is offered in the list - both live inside the worker's own screen,
 // where his name is on the dialog and there is room to say what each one does.
+//
+// Restoring is the one exception, and the asymmetry is the point: archiving takes a man
+// off tonight's screen and deleting is for ever, but a restore puts a name back where
+// every mistake about it is seen immediately and undone from the same screen it was made
+// on. So an archived row carries its restore button, one tap - through the same guarded
+// flow as the button inside the form, clashes asked and all.
 
 function renderRoster() {
     renderWorkerList();
@@ -26,6 +32,11 @@ function renderRoster() {
     // The backup, the restore points and the version live on הגדרות וכלים now - see
     // js/ui/settings.js. This screen is about people and sites; it was also about files,
     // which on a phone meant scrolling past thirty men to reach the backup button.
+    //
+    // The reorder panel covers this screen while a draft is open, and it is redrawn
+    // with it: the crew can change under the draft - another phone's edit landing - and
+    // a panel showing yesterday's list is how the stale-save refusal gets earned twice.
+    renderReorderPanel();
 }
 
 function renderAppVersion() {
@@ -36,6 +47,9 @@ function renderAppVersion() {
 function renderWorkerList() {
     const container = document.getElementById('workerList');
     if (!container) return;
+    // Whether the archive fold was open before this redraw. A restore renders, and a
+    // person putting two men back should not have to reopen the fold between them.
+    const archiveWasOpen = Boolean(container.querySelector('.roster-archive[open]'));
     clear(container);
 
     if (State.schedule.workers.length === 0) {
@@ -45,11 +59,6 @@ function renderWorkerList() {
 
     const active = State.schedule.workers.filter(worker => worker.active !== false);
     const archived = State.schedule.workers.filter(worker => worker.active === false);
-
-    if (reorderDraft) {
-        renderReorderList(container, active);
-        return;
-    }
 
     if (active.length === 0) {
         container.appendChild(emptyHint('כל העובדים בארכיון.'));
@@ -71,21 +80,33 @@ function renderWorkerList() {
     // Folded, and at the bottom. They are not part of the working list any more, and a
     // crew of six that reads as a crew of eleven is a crew somebody counts wrong.
     const box = el('details', 'roster-archive');
-    // The count of archived men who still have advances on the books rides on the fold:
-    // money does not go to the archive with the man, and a fold that hid it would be
-    // where an open balance goes to be forgotten.
-    const owing = archived.filter(worker =>
-        (openAdvanceBalance(State.schedule, worker.id) || { count: 0 }).count > 0).length;
+    if (archiveWasOpen) box.open = true;
+    // The count of archived men who still have advances on the books rides on the fold,
+    // and each of their rows carries its own sum: money does not go to the archive with
+    // the man, and a fold that hid it would be where an open balance goes to be
+    // forgotten. The sum is what the record says and nothing more - a count of amounts
+    // on dates, with nothing anywhere marking one paid, open or settled.
+    // One pass over the advances, not a footprint walk per archived man: this render
+    // runs on every pointermove of a reorder drag.
+    const advanceTotals = new Map();
+    Object.values(State.schedule.advances || {}).forEach(item => {
+        if (!item) return;
+        advanceTotals.set(item.workerId,
+            (advanceTotals.get(item.workerId) || 0) + (Number(item.amount) || 0));
+    });
+    const owing = archived.filter(worker => advanceTotals.has(worker.id)).length;
     const summary = el('summary', null, owing === 0
         ? `ארכיון עובדים (${archived.length})`
         : `ארכיון עובדים (${archived.length}) · ` +
-            (owing === 1 ? 'לאחד מהם מקדמות רשומות' : `ל-${owing} מהם מקדמות רשומות`));
+            (owing === 1 ? 'לאחד מהם יש מקדמה רשומה' : `ל-${owing} מהם יש מקדמות רשומות`));
     box.appendChild(summary);
-    archived.forEach(worker => box.appendChild(workerRow(worker)));
+    archived.forEach(worker => box.appendChild(workerRow(worker, advanceTotals)));
     container.appendChild(box);
 }
 
-function workerRow(worker) {
+// `archiveAdvances` rides in only for the rows under the fold: a Map of workerId to the
+// summed advances, built in renderWorkerList's single pass over the record.
+function workerRow(worker, archiveAdvances) {
     const row = el('div', worker.active === false ? 'roster-row roster-off' : 'roster-row');
 
     const details = el('div', 'roster-details');
@@ -115,7 +136,16 @@ function workerRow(worker) {
         }
     }
     details.appendChild(line);
-    if (worker.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
+    if (worker.active === false) {
+        details.appendChild(el('span', 'badge', 'לא פעיל'));
+        // The money he left with, on the row itself. "רשומות", not "open" or "owed":
+        // an advance in this schema is an amount on a date, and whether it was ever
+        // settled is a fact this device does not hold - see the archive dialog below.
+        if (archiveAdvances && archiveAdvances.has(worker.id)) {
+            details.appendChild(el('div', 'roster-meta roster-advances',
+                `מקדמות רשומות: ${Math.round(archiveAdvances.get(worker.id))} ₪`));
+        }
+    }
     // Pairs that already exist - from an import, or from before this was checked.
     if (worker.active !== false && hasDuplicateName(worker)) {
         details.appendChild(el('span', 'badge badge-warn', 'שם כפול'));
@@ -143,6 +173,15 @@ function workerRow(worker) {
     // No archive icon here any more. Beside every name it was one mis-tap away from
     // taking a man off the daily screen mid-evening, and the pencil next to it opens
     // the screen where the same thing can be done deliberately, with his name on it.
+    //
+    // Restore is the one row action, and only on archived rows - see the note at the top
+    // of this file. Not a fork of the flow: the same setWorkerArchived the form button
+    // calls, four rounds of name and phone re-checks included.
+    if (worker.active === false) {
+        actions.appendChild(button('↩️ החזרה', 'btn-secondary roster-restore',
+            () => setWorkerArchived(worker.id, false),
+            `החזר את ${isolate(worker.name)} לעבודה`));
+    }
     actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
     row.appendChild(actions);
 
@@ -165,6 +204,14 @@ function workerRow(worker) {
 // So: a mode. A DRAFT order that lives in memory, moved by dragging or by four buttons
 // per row, saved once, and thrown away by cancelling. Nothing leaves this device until
 // the person says the order is right.
+//
+// The mode's stage is #reorderPanel in index.html - a panel over the whole screen, cut
+// like the settings sheet and on its tier. It was drawn inline where the worker list
+// is, which left the sites panel beside the draft and the tab bar under it: three ways
+// to wander out of unsaved work, on the one screen whose whole point is that nothing is
+// saved yet. The panel has a fixed head (the title and the way back), a fixed foot (the
+// two verbs and the unsaved count), and the list scrolling between them; the way back,
+// the tabs and Escape all route through confirmReorderExit below.
 
 // The draft, and what the crew looked like when it was taken. Both null when the mode is
 // closed, which is also what every render below tests.
@@ -183,9 +230,12 @@ function openReorder() {
     reorderDraft = activeWorkerIds();
     reorderBase = reorderDraft.join();
     render();
-    const list = document.getElementById('workerList');
-    const first = list && list.querySelector('.reorder-row button');
-    if (first && first.focus) first.focus();
+    renderReorderPanel();
+    document.addEventListener('keydown', reorderKeydown);
+    // The heading, not the first row's button: a screen reader should say where it has
+    // arrived before it starts naming controls - the settings sheet's own contract.
+    const title = document.getElementById('reorderTitle');
+    if (title && title.focus) title.focus();
 }
 
 function closeReorder() {
@@ -194,7 +244,43 @@ function closeReorder() {
     reorderHeld = null;
     const line = document.getElementById('reorderLive');
     if (line) line.textContent = '';
+    document.removeEventListener('keydown', reorderKeydown);
+    renderReorderPanel();
     render();
+    // Focus goes back to the button the mode was entered from, so the keyboard carries
+    // on from where the person was - not from the top of the document.
+    const opener = document.getElementById('reorderOpenBtn');
+    if (opener && opener.focus) opener.focus();
+}
+
+// The settings sheet's keyboard contract, on this panel: Escape is the way back and
+// asks the same question the back button does; Tab stays inside. Both stand down while
+// a dialog is open on top - the exit question is itself asked through askModal, and a
+// second Escape must answer IT, not stack another copy of it. Checked two ways because
+// the dialogs' own handler (js/ui/modal.js) runs FIRST on the same keypress: an Escape
+// it consumed arrives here already defaultPrevented and with the modal already closed,
+// and acting on it would reopen the question the person just dismissed.
+function reorderKeydown(event) {
+    if (event.defaultPrevented) return;
+    if (typeof topModal === 'function' && topModal()) return;
+    if (event.key === 'Escape') { confirmReorderExit(); return; }
+    if (event.key !== 'Tab') return;
+
+    const panel = document.getElementById('reorderPanel');
+    if (!panel) return;
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
+        .filter(node => node.offsetParent !== null && !node.disabled);
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
 }
 
 // How many rows sit somewhere other than where the crew's saved order has them. The
@@ -214,6 +300,9 @@ async function confirmReorderExit() {
     const moved = reorderMovedIds().length;
     if (moved === 0) { closeReorder(); return true; }
 
+    // The harness loads roster.js without ask.js; a guard beats a ReferenceError that
+    // would strand the draft open and pin the app to this tab.
+    if (typeof askChoice !== 'function') { closeReorder(); return true; }
     const answer = await askChoice({
         title: 'יציאה מסידור העובדים',
         message: moved === 1
@@ -262,7 +351,7 @@ function moveDraftTo(workerId, to) {
     if (target === at) return;
     reorderDraft.splice(at, 1);
     reorderDraft.splice(target, 0, workerId);
-    renderWorkerList();
+    renderReorderList();
     announceReorder(workerId);
 }
 
@@ -315,13 +404,36 @@ function saveReorder() {
     closeReorder();
 }
 
-function renderReorderList(container, active) {
-    const byId = new Map(active.map(worker => [worker.id, worker]));
+// The panel itself: open when a draft is, closed - and emptied, so no stale rows sit in
+// a hidden dialog - when there is none. The head is static markup in index.html; the
+// list and the foot are drawn here.
+function renderReorderPanel() {
+    const panel = document.getElementById('reorderPanel');
+    if (!panel) return;
 
-    const head = el('div', 'reorder-head');
-    head.appendChild(el('p', 'hint',
-        'גרור בידית, או השתמש בכפתורים. שום דבר לא נשמר עד שלוחצים "שמירה ויציאה".'));
-    container.appendChild(head);
+    const open = Boolean(reorderDraft);
+    panel.classList.toggle('open', open);
+    panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) {
+        renderReorderList();
+        return;
+    }
+    const host = document.getElementById('reorderList');
+    if (host) clear(host);
+    const foot = document.getElementById('reorderFoot');
+    if (foot) clear(foot);
+}
+
+function renderReorderList() {
+    const host = document.getElementById('reorderList');
+    if (!host || !reorderDraft) return;
+    clear(host);
+
+    // From the world as it is NOW, not as it was at openReorder: a worker another phone
+    // archived mid-draft simply stops being drawn, and the save below is what says why.
+    const byId = new Map(State.schedule.workers
+        .filter(worker => worker.active !== false)
+        .map(worker => [worker.id, worker]));
 
     const list = el('div', 'reorder-list');
     list.setAttribute('role', 'list');
@@ -331,24 +443,35 @@ function renderReorderList(container, active) {
         if (!worker) return;
         list.appendChild(reorderRow(worker, index));
     });
-    container.appendChild(list);
+    host.appendChild(list);
 
-    const foot = el('div', 'reorder-foot');
+    renderReorderFoot();
+}
+
+function renderReorderFoot() {
+    const foot = document.getElementById('reorderFoot');
+    if (!foot) return;
+    clear(foot);
+
     const moved = reorderMovedIds().length;
     if (moved > 0) {
         foot.appendChild(el('p', 'hint reorder-moved-count', moved === 1
             ? 'שינוי אחד לא נשמר'
-            : `${moved} שינויים לא שמורים`));
+            : `${moved} שינויים לא נשמרו`));
     }
+    const actions = el('div', 'reorder-foot-actions');
     const save = button('שמירה ויציאה', 'btn-add', saveReorder);
     // Mid-drag the finger owns the list; a save that fires under it would write
     // whatever order the row happened to be passing through.
     save.disabled = Boolean(reorderDragging);
-    foot.appendChild(save);
-    foot.appendChild(button('יציאה בלי לשמור', 'btn-secondary', () => { confirmReorderExit(); }));
+    actions.appendChild(save);
+    // The explicit button IS the answer - asking "leave without saving?" back at the
+    // person who just pressed exactly those words is a doubt loop, not a guard. The
+    // guard exists for the implicit exits (a tab tapped mid-sort, the panel's back).
+    actions.appendChild(button('יציאה בלי לשמור', 'btn-secondary', closeReorder));
+    foot.appendChild(actions);
     foot.appendChild(el('p', 'hint',
-        'הסדר נשמר כרשומה אחת לכל המכשירים — או שנשמר כולו, או שלא נשמר כלל.'));
-    container.appendChild(foot);
+        'השמירה היא הכל או כלום - או שכל הסדר נשמר בבת אחת, או ששום דבר לא משתנה.'));
 }
 
 function reorderRow(worker, index) {
@@ -433,11 +556,14 @@ function startReorderDrag(event, workerId) {
     // The edge bands appear only while a row is actually in the air - painted, they say
     // where holding the row will scroll, and gone the moment the finger lets go.
     if (document.body && document.body.classList) document.body.classList.add('reorder-dragging');
-    renderWorkerList();
 
+    // Listeners BEFORE the render: a throw inside renderWorkerList must not leave the
+    // drag armed with no way to end it - a stranded reorderDragging keeps the save
+    // button disabled for the rest of the session.
     document.addEventListener('pointermove', onReorderDrag);
     document.addEventListener('pointerup', endReorderDrag);
     document.addEventListener('pointercancel', endReorderDrag);
+    renderWorkerList();
 }
 
 function onReorderDrag(event) {
@@ -446,7 +572,7 @@ function onReorderDrag(event) {
 
     // The row the pointer is over, decided by midpoints rather than by hit testing: the
     // row being carried is under the finger, so hit testing always returns itself.
-    const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+    const rows = [...document.querySelectorAll('#reorderList .reorder-row')];
     let target = reorderDraft.length - 1;
     for (let i = 0; i < rows.length; i += 1) {
         const box = rows[i].getBoundingClientRect();
@@ -461,13 +587,18 @@ function onReorderDrag(event) {
 }
 
 // A list of thirty does not fit a phone, and a finger holding a row cannot also scroll.
-// So the page moves when the row is carried near either edge.
+// So the LIST moves when the row is carried near either edge - the panel's own scroll
+// box, not the page: the panel is fixed over the page, and scrolling the document under
+// it would move nothing anybody can see. The bands are measured from the box's edges,
+// which is also where the stylesheet paints them.
 function autoScrollWhileDragging(clientY) {
+    const box = document.getElementById('reorderScroll');
+    if (!box) return;
+    const frame = box.getBoundingClientRect();
     const edge = 90;
-    const height = window.innerHeight || 0;
     let step = 0;
-    if (clientY < edge) step = -14;
-    else if (clientY > height - edge) step = 14;
+    if (clientY < frame.top + edge) step = -14;
+    else if (clientY > frame.bottom - edge) step = 14;
 
     if (step === 0) {
         if (reorderDragging && reorderDragging.scrolling) {
@@ -477,7 +608,7 @@ function autoScrollWhileDragging(clientY) {
         return;
     }
     if (!reorderDragging || reorderDragging.scrolling) return;
-    reorderDragging.scrolling = setInterval(() => window.scrollBy(0, step), 16);
+    reorderDragging.scrolling = setInterval(() => { box.scrollTop += step; }, 16);
 }
 
 function endReorderDrag() {
@@ -488,7 +619,7 @@ function endReorderDrag() {
     document.removeEventListener('pointermove', onReorderDrag);
     document.removeEventListener('pointerup', endReorderDrag);
     document.removeEventListener('pointercancel', endReorderDrag);
-    renderWorkerList();
+    renderReorderList();
 }
 
 function hasDuplicateName(worker) {
@@ -715,6 +846,7 @@ function showAddWorkerModal() {
     document.getElementById('workerFormDaily').value = '';
     document.getElementById('workerFormHourly').value = '';
     document.getElementById('workerFormError').textContent = '';
+    workerPhoneTyped();
     renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
 }
@@ -734,8 +866,40 @@ function editWorker(workerId) {
     // Folded details that hold data would look like data that was lost.
     document.getElementById('workerFormMore').open =
         Boolean(worker.phone || worker.idNumber || worker.hourlyRate);
+    // A number that already clashes is said the moment the screen opens, not only once
+    // somebody happens to retype it.
+    workerPhoneTyped();
     renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
+}
+
+// The typed number, checked as it is typed - against everybody, archived included,
+// because the archived man is exactly the one the daily list is not showing.
+//
+// Advisory, in amber, under the field. The BLOCKING question stays in saveWorkerForm and
+// is not touched by this: it asks against the schedule at the moment of the write, which
+// can differ from the schedule this hint was drawn against. The hint saves the retyping;
+// the confirm is the gate.
+function workerPhoneTyped() {
+    const field = document.getElementById('workerFormPhone');
+    const hint = document.getElementById('workerFormPhoneHint');
+    if (!field || !hint) return;
+
+    const sharing = typeof workersSharingPhone === 'function'
+        ? workersSharingPhone(State.schedule, field.value.trim(), editingWorkerId)
+        : [];
+    if (sharing.length === 0) {
+        hint.style.display = 'none';
+        hint.textContent = '';
+        return;
+    }
+    // Named the way the save-time question names them, so the two read as one voice.
+    const names = sharing
+        .map(worker => worker.active === false ? `${isolate(worker.name)} (בארכיון)` : worker.name)
+        .join(', ');
+    hint.textContent =
+        `המספר הזה כבר רשום אצל ${names} - אפשר לשמור, אבל בדוק שאין כפילות.`;
+    hint.style.display = '';
 }
 
 async function saveWorkerForm() {
@@ -885,7 +1049,59 @@ function closeWorkerForm() {
 // Both ways out live here, and which one is offered is not a choice this file makes - it
 // asks the model what is recorded against the man and does what that allows.
 
+// What the record holds against his name, on his own screen. Counts and sums, read
+// straight off the model and never editable here - the same numbers deletionBlockers
+// weighs, shown before anybody has to wonder why the delete button is not there.
+//
+// The vocabulary is deliberate: "רשומות", never "open" or "unpaid". An advance in this
+// schema is an amount on a date, with nothing anywhere marking it paid, open or settled -
+// see the archive dialog below - so a sum is the whole of what can honestly be said.
+function renderWorkerFormHistory() {
+    const box = document.getElementById('workerFormHistory');
+    if (!box) return;
+    clear(box);
+
+    // A worker who has not been saved yet has no history to read.
+    const worker = editingWorkerId ? State.worker(editingWorkerId) : null;
+    if (!worker) { box.style.display = 'none'; return; }
+    box.style.display = '';
+
+    box.appendChild(el('h4', 'worker-history-title', 'היסטוריה'));
+
+    const days = workerFootprint(State.schedule, worker.id).days;
+
+    // The count and the sum in one pass over the advances - not a lookup per id.
+    let count = 0;
+    let total = 0;
+    Object.values(State.schedule.advances || {}).forEach(item => {
+        if (!item || String(item.workerId) !== String(worker.id)) return;
+        count += 1;
+        total += Number(item.amount) || 0;
+    });
+
+    const line = (label, value) => {
+        const item = el('div', 'worker-history-row');
+        item.appendChild(el('span', 'worker-history-label', label));
+        item.appendChild(el('strong', 'worker-history-value', value));
+        box.appendChild(item);
+    };
+
+    line('ימים רשומים', String(days.length));
+    line('מקדמות רשומות', count === 0 ? '0' : `${count} בסך ${Math.round(total)} ₪`);
+
+    // For an archived man: since WHEN is not in the record - v79 keeps active:false and
+    // nothing more - so no "בארכיון מאז" is invented here. What the record does hold is
+    // the last date anything was written for him, and the dates are already in hand.
+    if (worker.active === false && days.length > 0) {
+        const last = days.reduce(
+            (max, item) => (item.date > max ? item.date : max), days[0].date);
+        const parsed = parseLocalDate(last);
+        if (parsed) line('רישום אחרון', formatFullDate(parsed));
+    }
+}
+
 function renderWorkerFormActions() {
+    renderWorkerFormHistory();
     const box = document.getElementById('workerFormDanger');
     if (!box) return;
     clear(box);
@@ -962,21 +1178,15 @@ function deletionBlockers(workerId) {
     if (!(sync && sync.provenLocalOnly && sync.provenLocalOnly('workers', workerId))) {
         blocked.push('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום');
     }
-    // While writes are held - quarantine, a build mismatch - the tombstone this delete
-    // ends in cannot land, and the button would walk somebody through typing a name
-    // into a refusal.
-    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
-        blocked.push('הרישום מושבת כרגע - ראה את ההודעה שבראש המסך');
-    }
     return blocked;
 }
 
 function whyNotDeletable(blocked) {
-    // The enumeration names WHICH blocker; the sentence after it is the rule itself,
-    // said the way the design says it, so the refusal teaches the policy and not only
-    // this man's case.
-    return `${blocked.join(', ')} - לעובד עם היסטוריה אין מחיקה, רק העברה לארכיון, ` +
-        'כך שדוחות ותשלומי עבר נשמרים תמיד.';
+    // The enumeration names WHICH blocker; the rule after it stays causeless, because
+    // the blockers are not all history - a provenance gap is not היסטוריה, and a
+    // sentence that asserts the wrong cause teaches the wrong rule.
+    return `${blocked.join(', ')}. אי אפשר למחוק, רק להעביר לארכיון - ` +
+        'כך דוחות ותשלומי עבר נשמרים תמיד.';
 }
 
 // Said out loud, every time. Returning in silence here leaves somebody looking at a
@@ -1143,7 +1353,7 @@ async function deleteWorker(workerId) {
     const typed = await askText({
         title: 'מחיקת עובד',
         message: `ל${isolate(worker.name)} אין אף יום רשום, אף מקדמה ואף רישום שממתין ` +
-            'לשליחה. המחיקה סופית ולא ניתנת לשחזור. לאישור, הקלדת שם העובד:',
+            'לשליחה. המחיקה סופית ולא ניתנת לשחזור. לאישור, הקלד את שם העובד במדויק:',
         placeholder: worker.name,
         ok: 'מחיקה סופית',
         footer: 'נשמר במכשיר ויסתנכרן כשיש חיבור.',

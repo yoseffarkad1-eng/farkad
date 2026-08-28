@@ -5981,7 +5981,7 @@ for (const [label, arm] of [
     await wait();
 
     check('it is the typing dialog that is opened', Boolean(asked), String(asked));
-    check('and it asks for the name', String(asked.message).includes('הקלדת שם העובד'),
+    check('and it asks for the name', String(asked.message).includes('הקלד את שם העובד'),
         String(asked.message));
     check('the right name is accepted', asked.validate('טעות') === null,
         String(asked.validate('טעות')));
@@ -9157,6 +9157,54 @@ function withAdvances(device, rows) {
         { days: 0, amount: 0 });
     check('and the pay sheet still adds up', Array.isArray(
         upgraded.call('payrollReport', upgraded.State.schedule, '2026-01-01', '2026-12-31')));
+}
+
+
+{
+    suite('two phones mirror the same advance into the same entry');
+
+    const { device } = crew();
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500 }]);
+    const blob = device.dump();
+
+    // Both boot from the same record, apart, and mirror independently.
+    const phoneA = makeDevice({ storage: blob, deviceId: 'd_aaa' });
+    phoneA.State.load();
+    const phoneB = makeDevice({ storage: blob, deviceId: 'd_bbb' });
+    phoneB.State.load();
+
+    const idA = phoneA.call('ledgerEntries', phoneA.State.schedule)[0].id;
+    const idB = phoneB.call('ledgerEntries', phoneB.State.schedule)[0].id;
+    check('both mint the same entry id', idA === idB, `${idA} vs ${idB}`);
+
+    // The union then collapses the two copies into one entry, not a coin flip.
+    phoneA.call('mergeLedgerInto', phoneA.State.schedule.ledger, phoneB.State.schedule.ledger);
+    check('and the union holds one entry, not two',
+        phoneA.call('ledgerEntries', phoneA.State.schedule).length === 1);
+    check('folding to the one amount',
+        phoneA.call('foldLedger', phoneA.State.schedule)['a_' + idA.split('_a_')[1]]
+            ? true
+            : Object.values(phoneA.call('foldLedger', phoneA.State.schedule))[0].amount === 500);
+}
+
+{
+    suite('a deleted advance leaves an orphan the parity check refuses to bless');
+
+    const { device } = crew();
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 250 }]);
+    const booted = makeDevice({ storage: device.dump(), deviceId: device.id });
+    booted.State.load();
+    given('the mirror wrote its entry',
+        booted.call('ledgerEntries', booted.State.schedule).length === 1);
+
+    const id = Object.keys(booted.State.schedule.advances)[0];
+    booted.State.commit(booted.call('removeAdvance', booted.State.schedule, id));
+    check('the legacy record is gone',
+        !(id in booted.State.schedule.advances));
+    const verdict = booted.State.ledgerParity();
+    check('and the ledger ghost is named, not blessed',
+        verdict.agrees === false && verdict.orphaned.length === 1,
+        JSON.stringify(verdict));
 }
 
 report();

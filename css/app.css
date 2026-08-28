@@ -390,8 +390,49 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
    A list you can carry a name up and down. The row is deliberately taller than a roster
    row: it is dragged with a thumb, on a list that is also scrolling, and the four jump
-   buttons beside the handle each need a target of their own. */
-.reorder-head { padding: 0 2px 6px; }
+   buttons beside the handle each need a target of their own.
+
+   The mode is a panel over the whole screen, cut like the settings sheet and on its
+   tier: z 60, over the tabs and the dock, because everything on it is one decision and
+   a half-visible sites panel beside an unsaved draft is an invitation to tap out of it.
+   #askModal shares the number and sits later in the document, so the exit question and
+   the exact-place prompt still land on top. Three parts, and only the middle one
+   scrolls: the head says where you are, the foot holds the way out, and neither may be
+   carried off screen by a crew of thirty. */
+.reorder-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: var(--paper);
+    display: none;
+    flex-direction: column;
+}
+.reorder-panel.open { display: flex; }
+
+.reorder-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px 8px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+.reorder-titles { flex: 1; min-width: 0; text-align: center; }
+.reorder-titles h2 { font-size: 18px; }
+/* The heading takes focus when the panel opens, so a screen reader says where it has
+   arrived before it starts naming controls. It is not a control itself. */
+.reorder-titles h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.reorder-sub { margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
+.reorder-head-end { width: 44px; flex: none; }
+
+.reorder-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 10px 12px 14px;
+}
+
 .reorder-live {
     /* Announced, not drawn. The list itself is the visible answer. */
     position: absolute;
@@ -447,14 +488,25 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .reorder-moves .btn-icon { font-size: 15px; }
 .reorder-exact { font-size: 14px; padding: 6px 10px; }
 
+/* The foot is fixed under the list, not appended after it: the save button must never
+   be thirty rows of scrolling away from the thumb. It rides above the home indicator
+   the same way the tab bar does. */
 .reorder-foot {
-    display: flex;
-    gap: 8px;
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line-soft);
+    flex: none;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    padding: 10px 16px;
+    padding-bottom: max(8px, var(--safe-bottom));
 }
-.reorder-foot button { flex: 1; min-height: 48px; }
+.reorder-foot-actions { display: flex; gap: 8px; }
+.reorder-foot-actions button { min-height: 54px; }
+/* Saving is the frequent answer, so it gets the wider target; the two verbs stay a full
+   gap apart. */
+.reorder-foot-actions .btn-add { flex: 1.4; }
+.reorder-foot-actions .btn-secondary { flex: 1; }
+.reorder-foot .hint { margin: 8px 0 0; text-align: center; }
+/* The unsaved count sits ABOVE the buttons - it is the thing the two verbs are about. */
+.reorder-foot .reorder-moved-count { margin: 0 0 8px; font-weight: 600; color: var(--warn); }
 
 @media (max-width: 700px) {
     /* Two lines on a phone: the handle and the name, then the controls under them.
@@ -475,6 +527,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
        their size here whatever else shrinks. */
     .reorder-moves .btn-icon { min-width: 44px; min-height: 44px; }
     .reorder-exact { min-height: 44px; }
+}
+
+@media (min-width: 701px) {
+    /* The settings sheet's laptop cut, for the same reasons and with the same spelling -
+       see the note there about inset + margin-inline versus translateX in RTL. */
+    .reorder-panel.open {
+        inset: 24px 0 auto 0;
+        margin-inline: auto;
+        width: min(560px, calc(100vw - 48px));
+        max-height: calc(100vh - 48px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: 0 24px 60px -30px rgba(0, 0, 0, .55);
+        overflow: hidden;
+    }
 }
 
 /* ---------------------------------------------------------------- settings sheet
@@ -930,6 +997,44 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-danger:hover { background: var(--danger); color: var(--paper); }
 .worker-danger .hint { margin: 0; }
 
+/* What the record holds against the man - counts and sums, above the archive rule.
+   Read-only, so no floor to meet but the text one. */
+.worker-history {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+.worker-history-title {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+}
+.worker-history-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 15px;
+}
+.worker-history-label { color: var(--ink-2); }
+.worker-history-value { font-variant-numeric: tabular-nums; }
+
+/* The shared-number warning under the phone field, while it is being typed. Amber and
+   advisory - the blocking question at save time keeps its own dialog. Same shape as
+   .share-warning: a warning that is a sentence, not a badge. */
+.phone-shared-hint {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-inline-start: 3px solid var(--warn);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    margin: -2px 0 10px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
 /* Archived names, folded away under the working list. */
 .roster-archive { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .roster-archive summary {
@@ -942,6 +1047,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     align-items: center;
 }
 .roster-archive .roster-row:last-child { border-bottom: none; }
+/* The sum an archived man left with, on his own row. The colour of the warn badge, not
+   of an error: money on the books is a fact to be seen, not a fault. */
+.roster-advances { color: var(--warn); }
+/* The one-tap way back. Held to the same floor as every other target by the global
+   44px rule; the padding here only keeps the label off the button's edges. */
+.roster-restore { padding: 8px 12px; font-size: 14.5px; white-space: nowrap; }
 /* Folded means NOT DRAWN. A closed <details> hides its content through a user-agent
    display rule, and .roster-row sets display: flex - an author rule, which wins. So the
    archived men were laid out full height under a summary that said the section was shut:
@@ -1057,6 +1168,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     margin-bottom: 14px;
 }
 .panel-head {
+    /* Four children and a counted heading: without the wrap the row forced the layout
+       viewport past 320 and the whole app rendered offset. */
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1185,6 +1299,80 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     .report-table tfoot tr { background: var(--surface-2); }
     .report .table-scroll { border: none; background: none; overflow: visible; }
+
+    /* The pay card leads with its answer. In the table the net is the LAST column,
+       which on a card put the one number payday is about below six others. The cells
+       are reordered visually only - flex order over the same tds, so the DOM, the
+       data-labels and the printed column order are untouched. */
+    .report-payroll .report-table tbody tr { display: flex; flex-wrap: wrap; }
+    /* flex-basis 100%, not width: a width still lets a zero-basis neighbour onto the
+       same line, and the labelled row below must never share one with the name. */
+    .report-payroll .report-table tbody td { flex: 0 0 100%; order: 8; }
+    .report-payroll .report-table tbody td:first-child { order: 1; }
+
+    /* נותר לתשלום, first and at the hero size: the amount a screen is about is 36/800.
+       The column header stays לתשלום; the card says what REMAINS, because the row
+       above it on screen is a man asking what he is still owed. */
+    .report-payroll .report-table tbody td.cell-net {
+        order: 0;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+        padding: 4px 0 2px;
+        font-size: 36px;
+        font-weight: 800;
+        line-height: 1.15;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+    }
+    .report-payroll .report-table tbody td.cell-net::before {
+        content: 'נותר לתשלום';
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1.3;
+    }
+
+    /* The four counts the money is checked against, as one labelled row: the number,
+       and under it the word saying which count it is. A column nobody used this
+       fortnight is dropped from the table itself (renderPayrollTable), so this row
+       only ever shows what is true. */
+    .report-payroll .report-table tbody td[data-label="ימי נוכחות"],
+    .report-payroll .report-table tbody td[data-label="ימי שכר"],
+    .report-payroll .report-table tbody td[data-label="מתוכם כפולים"],
+    .report-payroll .report-table tbody td[data-label="מקדמות"] {
+        order: 2;
+        /* Just under a quarter each: four to the row - a rounding-proof 100% - and
+           never on anyone else's line. */
+        flex: 1 1 24%;
+        min-width: 0;
+        flex-direction: column-reverse;
+        justify-content: center;
+        align-items: center;
+        gap: 2px;
+        padding: 6px 0 4px;
+        font-size: 16px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+    }
+    .report-payroll .report-table tbody td[data-label="ימי נוכחות"]::before,
+    .report-payroll .report-table tbody td[data-label="ימי שכר"]::before,
+    .report-payroll .report-table tbody td[data-label="מתוכם כפולים"]::before,
+    .report-payroll .report-table tbody td[data-label="מקדמות"]::before {
+        font-size: 14px;
+        line-height: 1.25;
+        text-align: center;
+    }
+
+    /* What is left - the hours, the absences, the rate, the gross - stays on the card
+       and steps back: it is the working, not the answer. */
+    .report-payroll .report-table tbody td[data-label="שעות נוספות"],
+    .report-payroll .report-table tbody td[data-label="נעדר"],
+    .report-payroll .report-table tbody td[data-label="שכר יומי"],
+    .report-payroll .report-table tbody td[data-label="נצבר"] {
+        font-size: 14px;
+        color: var(--ink-2);
+    }
 }
 
 /* The reports' period controls: chips first, calendars only on request. */
@@ -1226,6 +1414,55 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .invoice-picker-label { color: var(--ink-2); font-size: 13px; margin-inline-end: 4px; }
 @media print { .invoice-picker { display: none !important; } }
 
+/* The site report's two shapes. On screen: a row per site - swatch, name, proportional
+   bar, count - because the on-screen question is how the period spread across the
+   sites. On paper: the date-by-site grid, because the client is billed day by day. The
+   grid stays in the DOM and only the screen looks away from it. */
+.invoice-bars { margin-bottom: 12px; }
+.invoice-bars-head { color: var(--ink-2); font-size: 14px; font-weight: 600; padding: 2px 0 4px; }
+.invoice-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.invoice-swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+.invoice-bar-name { font-size: 15.5px; font-weight: 600; }
+.invoice-bar-track {
+    flex: 1 1 60px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+    display: flex;
+}
+/* Anchored to the inline start, so the bar grows the way the page reads. */
+.invoice-bar-fill { height: 100%; border-radius: 3px; margin-inline-end: auto; }
+.invoice-bar-count {
+    min-width: 28px;
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+}
+.invoice-bars-total {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+}
+.invoice-bars-total strong { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+@media screen { .report-invoice .invoice-grid { display: none; } }
+@media print { .invoice-bars { display: none !important; } }
+
 /* A name in the pay sheet is a way in, so it looks like one - but it stays a table cell
    and does not turn the row into a wall of buttons. */
 .link-cell {
@@ -1265,6 +1502,29 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .wday-total .wday-what { color: var(--ink-2); font-weight: 400; font-size: 14px; }
 
+/* The attendance dates as chips above the rows: which dates the count on the sheet is
+   made of, ×2 where a day pays twice. Tokens only, nothing interactive, wraps freely. */
+.wday-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 2px 0 10px;
+}
+.wday-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    padding: 2px 9px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.wday-chip-x2 { font-size: 12px; font-weight: 700; color: var(--warn); }
+
 /* Money already handed over, marked as money going the other way so it is never read as
    another day worked. */
 .wday-advance .wday-date strong { color: var(--warn); }
@@ -1301,6 +1561,40 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .wday-bridge { margin-top: 8px; }
 
+/* The v80 record, collapsed under the advances. Rows only - the gate is closed, so the
+   fold holds no control of any kind, and the summary is the one thing to press. */
+.wday-ledger { margin-top: 12px; border-top: 1px solid var(--line-soft); }
+.wday-ledger summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+/* Flex removes the native marker on most engines; say open/shut ourselves, both ways. */
+.wday-ledger summary::before { content: '▸'; font-size: 12px; color: var(--ink-3); }
+.wday-ledger[open] summary::before { content: '▾'; }
+.wday-ledger summary::-webkit-details-marker { display: none; }
+.ledger-entry {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 10px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 14px;
+}
+.ledger-what { display: flex; align-items: baseline; gap: 8px; }
+.ledger-kind { font-weight: 600; }
+.ledger-date { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ledger-amount { font-weight: 700; font-variant-numeric: tabular-nums; text-align: end; }
+.ledger-note { grid-column: 1 / -1; color: var(--ink-3); font-size: 12.5px; }
+.ledger-origin { grid-column: 1 / -1; color: var(--ink-3); font-size: 12.5px; }
+
 /* The advance form, in place of the one-question prompt: amount, date, note, and how
    the money moved. Tokens only, so dark mode needs nothing of its own. */
 .advance-form {
@@ -1325,9 +1619,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     background: var(--surface);
     color: var(--ink);
 }
-.advance-form .layer-toggle { margin-inline-start: 0; margin-bottom: 6px; }
-.advance-form .layer-toggle button { flex: 1; min-height: 44px; }
+.advance-form .layer-toggle {
+    margin-inline-start: 0;
+    margin-bottom: 6px;
+    /* The card and the toggle track shared --surface-2 and the control dissolved into
+       its own background - bare text does not read as a button. */
+    background: var(--surface);
+    border: 1px solid var(--line);
+}
+.advance-form .layer-toggle button { flex: 1; min-height: 44px; font-size: 15px; }
+.advance-form .modal-actions { align-items: stretch; }
 .advance-form .modal-actions button { flex: 1; min-height: 44px; }
+/* The save carries a two-word label; an even split wrapped it to two lines and floated
+   it above its neighbour. */
+.advance-form .modal-actions button:not(.btn-secondary) { flex: 1.6; }
 
 @media (max-width: 700px) {
     .wday { grid-template-columns: 1fr 70px; }
@@ -2304,6 +2609,7 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     .topbar,
     .banner,
     .storage-notice,
+    .reorder-panel,
     .reorder-live,
     .reorder-foot,
     .reorder-head,
@@ -2360,13 +2666,15 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
    render), the recording surfaces say so with their bodies, not only with a banner: the
    lists dim and the dock's buttons go quiet. The banner at the top stays at full
    strength - it is the explanation. */
-body.writes-blocked #dayView .day-list,
-body.writes-blocked #dayView .site-cards,
-body.writes-blocked #dayView .day-tray { opacity: .55; }
-body.writes-blocked .day-actions button {
-    opacity: .5;
-    pointer-events: none;
-}
+body.writes-blocked #dayView .worker-list,
+body.writes-blocked #dayView .site-grid,
+body.writes-blocked #dayView .tray { opacity: .55; }
+body.writes-blocked .day-actions button { opacity: .5; }
+/* Only the WRITING button goes dead. The WhatsApp message is read-only and is exactly
+   the escape hatch a quarantined phone's owner needs - tonight's roster still has to
+   reach the crew from somewhere. */
+body.writes-blocked .day-actions #copyDayBtn { pointer-events: none; }
+body.writes-blocked .day-actions .btn-success { opacity: 1; }
 .progress-blocked {
     display: inline-flex;
     align-items: center;
@@ -2384,6 +2692,10 @@ body.writes-blocked .day-actions button {
    (הישארות) is last - furthest from where the thumb entered the dialog. */
 .ask-choices { flex-direction: column; }
 .ask-choices button { width: 100%; min-height: 48px; }
+/* The destructive middle answer gets air on both sides: 8px between "save and leave"
+   and "leave without saving" was one thumb-slip, and the modal is top-anchored on a
+   phone, so the bottom row is the NEAREST one to a thumb coming off the tab bar. */
+.ask-choices button + button { margin-top: 14px; }
 .ask-footer { margin-top: 10px; }
 
 /* The auto-scroll bands, visible only mid-drag: thin gradients at the list's edges
@@ -2422,8 +2734,10 @@ body.reorder-dragging .reorder-list::after {
 @media (min-width: 701px) {
     .day-header .progress { top: auto; }
     /* The progress used to pin alone on a wide screen; it lives in the header now, so
-       the header takes over the pinning - under the sticky desktop top bar. */
-    .day-header { position: sticky; top: 62px; z-index: 20; }
+       the header takes over the pinning - under the sticky desktop top bar, at its
+       MEASURED height: the bar is 67px at 1024 and 73px at 932, and a written-down 62
+       buried the header's first pixels under it. */
+    .day-header { position: sticky; top: var(--topbar-h, 62px); z-index: 20; }
 }
 
 /* The wall between undo and redo - see day.js. */
@@ -2436,19 +2750,18 @@ body.reorder-dragging .reorder-list::after {
 }
 
 @media (max-width: 700px) {
-    /* The brand row pays rent it does not earn on a phone: the person knows which app
-       they opened, and its 30-odd pixels come straight out of the list. The ⋯ keeps the
-       strip, thin, and the strip carries the notch inset for everything under it. */
+    /* The brand row goes: the person knows which app they opened, and what its absence
+       buys is quiet, not pixels - the strip's height is its 44px ⋯ either way. The
+       notch inset is paid ONCE, by the day header below, which is the element actually
+       pinned against the edge once the page scrolls; this static strip paying it too
+       cost 78 raw pixels on a notched phone. */
     .topbar .brand { display: none; }
-    .topbar {
-        padding-top: max(6px, env(safe-area-inset-top));
-        min-height: 40px;
-        z-index: 36;
-    }
-    /* Right under the measured strip above when it is pinned; the phone's top bar is
-       static and measures 0, so this is top: 0 there - and the header then carries the
-       notch inset itself, being the thing actually against the edge in an installed
-       app. env() is 0 in a browser tab, so the padding is just the padding. */
+    .topbar { padding: 6px 0; }
+    /* top: 0, spelled honestly: the phone top bar is STATIC (the phone block above
+       overrides the base sticky), it scrolls away, and stickyHeight() measures a
+       static bar as 0 - so the var resolves to 0 here and the header is the thing at
+       the edge. It carries the notch inset for that reason; env() is 0 in a browser
+       tab, so the padding is just the padding. */
     .day-header { top: var(--topbar-h, 0px); padding-top: max(10px, env(safe-area-inset-top)); }
 }
 
@@ -2466,4 +2779,11 @@ body.reorder-dragging .reorder-list::after {
 @media (max-width: 700px) {
     .day-header .progress { padding: 7px 12px 9px; }
     .day-header { padding-bottom: 8px; }
+}
+
+/* With one client's site chosen (body.client-scoped, set by renderReports), the printed
+   page follows the same rule as the export button: the client's grid, and nothing that
+   names the crew or the money. */
+@media print {
+    body.client-scoped .report-payroll { display: none !important; }
 }

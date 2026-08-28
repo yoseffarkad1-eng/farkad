@@ -50,6 +50,12 @@ function renderReports() {
     // Both sections are built and both are in the DOM, whichever is chosen: the print
     // stylesheet prints the record, not the screen's current answer to it. The one not
     // being looked at is set aside on screen only.
+    // With one client's site chosen, the printer follows the same rule as the export
+    // button beside it: the pay sheet stays out of the client's hands. The body class
+    // is what the print stylesheet keys on.
+    if (document.body && document.body.classList) {
+        document.body.classList.toggle('client-scoped', Boolean(scopedExportPlace()));
+    }
     const payroll = renderPayrollTable();
     const invoice = renderInvoiceTable();
     if (REPORT_SECTION === 'sites') payroll.classList.add('report-offscreen');
@@ -348,14 +354,27 @@ function renderPayrollTable() {
     // The band names what it totals and over how many people. Thirty rows of cards end
     // in one number, and "סה״כ" alone does not say whether that number is the gross,
     // the net, or the count of anything - nor that all thirty are inside it.
+    // Counting only the men whose money is actually inside the number: a worker with
+    // no daily rate contributes nothing to the total, and a denominator that includes
+    // him asserts a coverage the warning four lines down denies.
+    const paid = rows.filter(row => row.amount !== null).length;
     const footer = [anyRate
-        ? `סה״כ לתשלום · ${countedIn(rows.length, 'עובד אחד', 'עובדים')}`
+        ? `סה״כ לתשלום · ${countedIn(paid, 'עובד אחד', 'עובדים')}`
         : 'סה״כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
     if (anyRate) footer.push('', Math.round(totals.amount));
     if (anyAdvance) footer.push(minusAmount(totals.advances));
     if (anyRate) footer.push(bidiAmount(Math.round(totals.amount - totals.advances)));
     table.appendChild(totalRow(footer, headers));
+
+    // The net is the last cell of every row - the column order is the ledger's - and it
+    // is also the number the whole sheet exists to produce. The class lets the phone
+    // stylesheet lead each card with it; the table itself, the data-labels and the
+    // printed order stay exactly as they are.
+    if (anyRate) {
+        table.querySelectorAll('tbody tr').forEach(tr =>
+            tr.lastElementChild.classList.add('cell-net'));
+    }
 
     // The name opens that worker's days. On payday somebody asks why the number is what
     // it is, and the answer has to be reachable from the number itself.
@@ -439,13 +458,20 @@ function renderInvoiceTable() {
 
     section.appendChild(renderInvoicePicker(all.places));
 
+    // The screen's answer: one row per site. The question asked at a glance here is
+    // "how much of the period was each site", and a date-by-site grid answers it only
+    // after arithmetic. The grid is still built below, whole, because it is what the
+    // client is handed on paper - the bars are screen-only and the grid print-only,
+    // and both read the same workerDays.
+    section.appendChild(renderInvoiceBars(places));
+
     // Only the dates this site actually worked. A client's page with a run of empty rows
     // for days their site was closed reads as a mistake.
     const dates = chosen
         ? chosen.days.map(day => day.date)
         : all.dates;
 
-    const headers = ['תאריך'].concat(places.map(place => place.name)).concat(['סה"כ']);
+    const headers = ['תאריך'].concat(places.map(place => place.name)).concat(['סה״כ']);
     const body = dates.map(date => {
         const parsed = parseLocalDate(date);
         const counts = places.map(place => all.countAt(place.placeId, date));
@@ -465,16 +491,57 @@ function renderInvoiceTable() {
         headers
     ));
 
-    section.appendChild(scrollWrap(table));
+    // Kept in the DOM and kept whole, hidden from the screen only: the print stylesheet
+    // still gets the full date-by-site grid, and the tests that pin the paper pin THIS.
+    const grid = scrollWrap(table);
+    grid.classList.add('invoice-grid');
+    section.appendChild(grid);
     section.appendChild(el('p', 'hint',
-        'כל מספר הוא מספר העובדים שעבדו באתר באותו יום. השורה התחתונה היא ימי עובד־אתר: ' +
-        'עובד אחד ביום אחד באתר. היא אינה מספר הימים שהאתר עבד.'));
+        'המספר ליד כל אתר הוא ימי עובד־אתר: עובד אחד ביום אחד באתר. הוא אינו מספר ' +
+        'הימים שהאתר עבד. בהדפסה יוצא הפירוט המלא - שורה לכל תאריך, עמודה לכל אתר.'));
     // The counting rule, spelled out: this number lives beside two others that sound
     // like it, and the person about to bill from it must not expect them to reconcile.
     section.appendChild(el('p', 'hint',
         'עובד בשני אתרים נספר פעם אחת בכל אתר; ימי עובד־אתר אינם ימי נוכחות ואינם ' +
         'ימי שכר — אין לצפות שהסכומים יתאימו.'));
     return section;
+}
+
+// The on-screen shape of the site report: the site's own colour, its name, its
+// ימי עובד־אתר, and a bar proportional to the busiest site so the period's spread is
+// visible without reading a grid. Counts only - the screen version of this page names
+// no worker, exactly like the paper one. Nothing here is interactive; the picker above
+// narrows it and the total band closes it.
+function renderInvoiceBars(places) {
+    const wrap = el('div', 'invoice-bars');
+    wrap.appendChild(el('div', 'invoice-bars-head', 'ימי עובד־אתר לפי אתר'));
+
+    const most = places.reduce((max, place) => Math.max(max, place.workerDays), 0);
+    places.forEach(place => {
+        const row = el('div', 'invoice-bar-row');
+        row.appendChild(paintSite(el('span', 'invoice-swatch'), place.placeId));
+
+        const name = el('span', 'invoice-bar-name');
+        appendSiteName(name, place.placeId, place.name);
+        row.appendChild(name);
+
+        const track = el('span', 'invoice-bar-track');
+        const fill = el('span', 'invoice-bar-fill');
+        fill.style.width = `${most > 0 ? Math.round((place.workerDays / most) * 100) : 0}%`;
+        fill.style.background = siteColorVar(place.placeId);
+        track.appendChild(fill);
+        row.appendChild(track);
+
+        row.appendChild(el('span', 'invoice-bar-count', String(place.workerDays)));
+        wrap.appendChild(row);
+    });
+
+    const total = el('div', 'invoice-bars-total');
+    total.appendChild(el('span', null, 'סה״כ ימי עובד־אתר'));
+    total.appendChild(el('strong', null,
+        String(places.reduce((sum, place) => sum + place.workerDays, 0))));
+    wrap.appendChild(total);
+    return wrap;
 }
 
 // The chips are not printed - by then the choice has been made and the heading says it.
@@ -525,6 +592,8 @@ function openWorkerDays(workerId) {
     if (days.length === 0 && advances.length === 0) {
         body.appendChild(emptyHint('אין רישומים בטווח הזה.'));
     } else {
+        const strip = renderAttendanceChips(days);
+        if (strip) body.appendChild(strip);
         days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
         body.appendChild(renderWorkerDaysTotal(days, worker));
         // Named before the rows begin: money that went the other way is its own block,
@@ -543,8 +612,33 @@ function openWorkerDays(workerId) {
         }
     }
 
+    // After the period's advances: the whole record of them, folded shut. Read-only by
+    // construction - see renderWorkerLedger.
+    const ledger = renderWorkerLedger(worker.id);
+    if (ledger) body.appendChild(ledger);
+
     body.appendChild(renderAdvanceAdd(worker));
     document.getElementById('workerDaysModal').style.display = 'flex';
+}
+
+// The attendance dates in one line above the day rows: a chip per date the man was on a
+// site, the traditional one-letter weekday mark and the short date, ×2 on a doubled day.
+// The count on the pay sheet says FOUR; this is which four, at a glance, before the rows
+// spell out where and for how much. Nothing here is a button - the rows below carry the
+// detail - so the chips owe no thumb size, only legibility.
+function renderAttendanceChips(days) {
+    const worked = days.filter(day => !day.absent);
+    if (worked.length === 0) return null;
+
+    const strip = el('div', 'wday-chips');
+    worked.forEach(day => {
+        const parsed = parseLocalDate(day.date);
+        const chip = el('span', 'wday-chip',
+            `${HEBREW_DAY_LETTERS[parsed.getDay()]} ${formatShortDate(parsed)}`);
+        if (day.doubled) chip.appendChild(el('span', 'wday-chip-x2', '×2'));
+        strip.appendChild(chip);
+    });
+    return strip;
 }
 
 // How the money moved, when that was recorded. An advance from before the field existed
@@ -559,7 +653,9 @@ function renderAdvanceRow(item) {
     const parsed = parseLocalDate(item.date);
 
     const when = el('div', 'wday-date');
-    when.appendChild(el('strong', null, ADVANCE_METHOD_LABELS[item.method] || 'מקדמה'));
+    when.appendChild(el('strong', null,
+        Object.prototype.hasOwnProperty.call(ADVANCE_METHOD_LABELS, item.method)
+            ? ADVANCE_METHOD_LABELS[item.method] : 'מקדמה'));
     when.appendChild(el('span', null, formatFullDate(parsed)));
     row.appendChild(when);
 
@@ -622,22 +718,41 @@ function openAdvanceForm(worker, actions) {
     amountInput.placeholder = '500';
     field('סכום', amountInput);
 
-    // Dated today when today falls inside the period being viewed, and otherwise on
-    // the period's last day - an advance filed outside the account it belongs to
-    // would be deducted from the wrong fortnight. That stays the rule: the date can be
-    // corrected, but only inside the period on screen.
+    // Dated today, and correctable only inside the account that contains today. The
+    // clamp used to follow the VIEWED range - and from the "חודש שעבר" preset that
+    // filed live cash into a fortnight that was printed and paid weeks ago, where the
+    // date window would never deduct it. The account an advance belongs to is the one
+    // containing the day the money changed hands, not whatever window is on screen.
     const today = todayStr();
+    const accountFrom = accountStart(parseLocalDate(today));
+    const accountTo = new Date(accountFrom);
+    accountTo.setDate(accountFrom.getDate() + 13);
     const dateInput = document.createElement('input');
     dateInput.type = 'date';
-    dateInput.value = (today >= REPORT_RANGE.from && today <= REPORT_RANGE.to)
-        ? today : REPORT_RANGE.to;
-    dateInput.min = REPORT_RANGE.from;
-    dateInput.max = REPORT_RANGE.to;
+    dateInput.value = today;
+    dateInput.min = toLocalDateStr(accountFrom);
+    dateInput.max = toLocalDateStr(accountTo);
     field('תאריך', dateInput);
+    // The native control renders in the OS locale - 08/28 on a phone set to English -
+    // while every date this app shows is 28/08. The read-back line says the chosen day
+    // the way the rest of the screen says it.
+    const dateEcho = el('p', 'hint advance-date-echo');
+    const sayDate = () => {
+        const parsed = parseLocalDate(dateInput.value);
+        dateEcho.textContent = parsed
+            ? `${hebrewDayName(parsed)}, ${formatFullDate(parsed)}` : '';
+    };
+    dateInput.addEventListener('change', sayDate);
+    dateInput.addEventListener('input', sayDate);
+    sayDate();
+    form.appendChild(dateEcho);
 
     const noteInput = document.createElement('input');
     noteInput.type = 'text';
     noteInput.placeholder = 'למשל: על חשבון סוף התקופה';
+    // A pasted essay would be journalled and saved with the schedule; the cap keeps a
+    // note a note.
+    noteInput.maxLength = 120;
     field('הערה (לא חובה)', noteInput);
 
     // מזומן is the default because it is what an advance on a site almost always is -
@@ -671,17 +786,27 @@ function openAdvanceForm(worker, actions) {
     };
 
     const save = () => {
-        const amount = Number(amountInput.value.trim());
-        if (!amountInput.value.trim() || isNaN(amount) || amount <= 0) {
-            error.textContent = 'הכנס סכום גדול מאפס.';
+        // Validated to the same standard the wire check will later demand - a value
+        // the read path rejects (Infinity stringifies to null, a malformed date) would
+        // pass commit today and quarantine the whole record on the next launch.
+        // Arabic-Indic digits are typed on real phones here and are normalised, whole
+        // shekels only; 'Number' alone also reads '0x10' and '1e5', which nobody meant.
+        const typed = amountInput.value.trim()
+            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+        const amount = Number(typed);
+        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0 || amount > 10000000) {
+            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
             amountInput.focus();
             return;
         }
-        // Some phones let a date be typed straight into the field, past min and max.
+        // Some phones let a date be typed straight into the field, past min and max -
+        // and a lexical compare would pass '2026-13-45'. The same isRealDate the wire
+        // check runs, run here first.
         const date = dateInput.value;
-        if (!date || date < REPORT_RANGE.from || date > REPORT_RANGE.to) {
-            error.textContent = 'בחר תאריך בתוך התקופה המוצגת - מקדמה מחוץ לה ' +
-                'תנוכה מהחשבון הלא נכון.';
+        if (!isRealDate(date) || date < dateInput.min || date > dateInput.max) {
+            error.textContent = 'בחר תאריך בתוך תקופת החשבון הנוכחית - מקדמה מחוץ לה ' +
+                'תנוכה מהתקופה הלא נכונה.';
             return;
         }
 
@@ -695,7 +820,7 @@ function openAdvanceForm(worker, actions) {
     };
 
     const buttons = el('div', 'modal-actions');
-    buttons.appendChild(button('רישום המקדמה', null, save));
+    buttons.appendChild(button('שמור מקדמה', null, save));
     buttons.appendChild(button('ביטול', 'btn-secondary', close));
     form.appendChild(buttons);
 
@@ -713,6 +838,72 @@ async function removeAdvanceRow(item) {
     if (!ok) return;
     State.commit(removeAdvance(State.schedule, item.id));
     openWorkerDays(item.workerId);
+}
+
+// What a ledger entry IS, in the ledger's own three words. Not the method labels above:
+// a kind says what happened to the record, not how money moved.
+const LEDGER_KIND_LABELS = { given: 'מקדמה', corrected: 'תיקון', cancelled: 'בוטל' };
+
+// היסטוריה מלאה: every ledger entry that concerns this worker, oldest first, folded
+// shut under the advances. Strictly a reading of the v80 record - the writer is gated
+// off (ledger.js LEDGER_WRITES), so there is not a single button in here and nothing
+// this renders can change an entry. Feature-detected, because the modal must survive a
+// build where the ledger file is not loaded; empty ledgers render nothing at all.
+function renderWorkerLedger(workerId) {
+    if (typeof advanceHistory !== 'function' || typeof ledgerEntries !== 'function') {
+        return null;
+    }
+
+    // An advance concerns this man if any of its entries names him - a correction that
+    // moved it to somebody else is still part of the story of what he was handed.
+    const ids = [];
+    ledgerEntries(State.schedule).forEach(entry => {
+        if (String(entry.workerId || '') !== String(workerId)) return;
+        if (ids.indexOf(String(entry.advanceId)) === -1) ids.push(String(entry.advanceId));
+    });
+
+    let entries = [];
+    ids.forEach(id => { entries = entries.concat(advanceHistory(State.schedule, id)); });
+    if (entries.length === 0) return null;
+
+    // Read out in the order things happened. A migrated entry carries no `at` on
+    // purpose (ledger.js: a fabricated timestamp would be the ledger's first lie), so
+    // its advance date stands in for ordering; ties fall back to the entry id, the same
+    // tie-break the fold uses.
+    entries.sort((a, b) => {
+        const at = String(a.at || a.date || '');
+        const bt = String(b.at || b.date || '');
+        if (at !== bt) return at < bt ? -1 : 1;
+        return String(a.id) < String(b.id) ? -1 : 1;
+    });
+
+    const fold = el('details', 'wday-ledger');
+    fold.appendChild(el('summary', null, 'היסטוריה מלאה (פנקס v80)'));
+    entries.forEach(entry => fold.appendChild(renderLedgerEntry(entry)));
+    return fold;
+}
+
+function renderLedgerEntry(entry) {
+    const row = el('div', 'ledger-entry');
+
+    const what = el('div', 'ledger-what');
+    what.appendChild(el('strong', 'ledger-kind',
+        LEDGER_KIND_LABELS[entry.kind] || String(entry.kind || '')));
+    const parsed = parseLocalDate(entry.date);
+    if (parsed) what.appendChild(el('span', 'ledger-date', formatFullDate(parsed)));
+    row.appendChild(what);
+
+    // A cancellation carries no amount, and a correction may only move a date - the
+    // amount cell is filled only when the entry actually states one.
+    const amount = Number(entry.amount);
+    row.appendChild(el('div', 'ledger-amount',
+        entry.amount !== undefined && isFinite(amount) ? bidiAmount(Math.round(amount)) : ''));
+
+    if (entry.note) row.appendChild(el('div', 'ledger-note', entry.note));
+    if (entry.origin === 'migration') {
+        row.appendChild(el('div', 'ledger-origin', 'הועתק מהרישום הקיים'));
+    }
+    return row;
 }
 
 // The statement the worker gets on payday, in the same shape as the screen it came from:
@@ -758,7 +949,7 @@ function workerStatementText(workerId) {
     // Both numbers, in the message the man actually receives. He is the one person who
     // will check the total against the days, and one count could not explain it.
     const summary = workerDaysSummary(days);
-    lines.push('סה"כ ' + countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות'));
+    lines.push('סה״כ ' + countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות'));
     lines.push(workUnitsLine(summary));
     if (priced) lines.push(`נצבר: ${Math.round(earned)}`);
 
@@ -848,7 +1039,9 @@ function renderWorkerDayRow(day, worker) {
         // whole card reads as an arithmetic mistake on the one screen that exists to
         // settle that argument.
         if (day.historic && day.dailyRate > 0) {
-            money.appendChild(el('span', 'wday-rate', `לפי ${day.dailyRate} ליום`));
+            money.appendChild(el('span', 'wday-rate', day.doubled
+                ? `לפי ${day.dailyRate} ליום × 2`
+                : `לפי ${day.dailyRate} ליום`));
         }
     }
     row.appendChild(money);
@@ -881,8 +1074,12 @@ function renderWorkerDaysTotal(days, worker) {
     if (rateLine) what.appendChild(el('span', 'wday-derive', rateLine));
     row.appendChild(what);
 
+    // Gated on what the DAYS say, not on the roster's rate today: six stamped days at
+    // 450 are 2,700 whether or not the man still has a rate on the roster, and a card
+    // that prints the equation while refusing the sum reads as an argument with itself.
+    const knowsMoney = summary.amount !== null || total > 0;
     row.appendChild(el('div', 'wday-money',
-        Number(worker.dailyRate) > 0 ? String(Math.round(total)) : '—'));
+        knowsMoney ? String(Math.round(total)) : '—'));
     return row;
 }
 
@@ -891,10 +1088,12 @@ function renderWorkerDaysTotal(days, worker) {
 // four dates on his fingers.
 function deriveUnitsLine(summary) {
     const normal = summary.attendanceDays - summary.doubleDays;
+    // Digits as operands: the whole point of the line is arithmetic somebody can
+    // follow, and words make poor operands. The labels ride beside the numbers.
     const parts = [];
-    if (normal > 0) parts.push(countedIn(normal, 'יום רגיל אחד', 'ימים רגילים'));
-    parts.push(countedIn(summary.doubleDays, 'יום כפול אחד', 'ימים כפולים') + ' × 2');
-    return parts.join(' + ') + ' = ' + countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר');
+    if (normal > 0) parts.push(`${normal} רגילים`);
+    parts.push(`${summary.doubleDays} כפולים × 2`);
+    return parts.join(' + ') + ` = ${summary.payUnits} ימי שכר`;
 }
 
 // "6 ימי שכר × 450 = 2,700" - but only when that multiplication is the truth: one rate
@@ -904,6 +1103,10 @@ function deriveUnitsLine(summary) {
 function singleRateLine(days, summary, total) {
     const worked = days.filter(day => !day.absent);
     if (worked.length === 0) return null;
+    // Hours priced at zero pass the product check invisibly: the total excludes them,
+    // the product agrees with the total, and the equation asserts nothing is missing
+    // while the line above it lists the missing hours. No equation over any overtime.
+    if (summary.extraHours > 0) return null;
 
     const rates = new Set(worked.map(day => day.dailyRate));
     if (rates.size !== 1) return null;
@@ -913,7 +1116,7 @@ function singleRateLine(days, summary, total) {
     const product = summary.payUnits * rate;
     if (Math.round(total) !== product) return null;
     return countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר') +
-        ` × ${rate} = ${product.toLocaleString('en-US')}`;
+        ` × ${rate.toLocaleString('en-US')} = ${product.toLocaleString('en-US')}`;
 }
 
 // "6 ימי שכר · מתוכם 2 ימים כפולים · 3 שעות נוספות", with the parts that are zero left
@@ -1030,18 +1233,21 @@ function payrollSheetRows() {
 
 function invoiceSheetRows() {
     const invoice = invoiceByDate(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
-    // The export follows the same choice as the screen: exporting every site while the
-    // screen shows one would send the client a file about four sites.
-    const chosen = invoice.places.find(p => p.placeId === INVOICE_PLACE);
+    // Narrowed by the SAME predicate that decides whose file this is. The sticky
+    // INVOICE_PLACE alone once narrowed the bookkeeper's workbook too: chosen on the
+    // billing side, remembered after switching to לפי עובד, and three sites' days
+    // quietly missing from a file named דוחות.
+    const scoped = scopedExportPlace();
+    const chosen = scoped ? invoice.places.find(p => p.placeId === scoped.placeId) : null;
     const places = chosen ? [chosen] : invoice.places;
     const dates = chosen ? chosen.days.map(day => day.date) : invoice.dates;
 
-    const rows = [['תאריך'].concat(places.map(p => p.name)).concat(['סה"כ'])];
+    const rows = [['תאריך'].concat(places.map(p => p.name)).concat(['סה״כ'])];
     dates.forEach(date => {
         const counts = places.map(p => invoice.countAt(p.placeId, date));
         rows.push([date].concat(counts).concat([counts.reduce((a, b) => a + b, 0)]));
     });
-    rows.push(['סה"כ'].concat(places.map(p => p.workerDays))
+    rows.push(['סה״כ'].concat(places.map(p => p.workerDays))
         .concat([places.reduce((sum, p) => sum + p.workerDays, 0)]));
     return rows;
 }
@@ -1185,8 +1391,10 @@ async function exportReports() {
         // report anybody can act on.
         askTell({
             title: 'היצוא נכשל',
+            // The raw error is English inside a Hebrew paragraph; LRI/PDI keep its
+            // punctuation on its own side after the slice.
             message: 'קובץ ה-Excel לא נוצר. לא שינינו כלום. ' +
-                String((error && error.message) || error).slice(0, 160)
+                '\u2066' + String((error && error.message) || error).slice(0, 160) + '\u2069'
         });
     }
 }

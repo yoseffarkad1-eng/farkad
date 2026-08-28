@@ -385,7 +385,7 @@ function writeFieldPath(target, path, value) {
 
 const FarkadSync = {
     adapter: null,
-    status: 'off',       // off | connecting | synced | offline | error
+    status: 'off',       // off | connecting | synced | offline | error | blocked
     lastError: null,
     lastSyncedAt: null,
     pushDelayMs: 1200,
@@ -3051,15 +3051,26 @@ function updateSyncNotice() {
     // The browser knows the signal is gone before the write watchdog does, and a line
     // still reading "מסונכרן" under the offline banner is the two of them disagreeing
     // in one glance. Only the cloud states defer to it - a device that never had a
-    // cloud is off, not offline, and "יישלחו כשהחיבור יחזור" would be a promise to it.
-    const status = typeof navigator !== 'undefined' && navigator.onLine === false
-        && (FarkadSync.status === 'synced' || FarkadSync.status === 'connecting')
-        ? 'offline' : FarkadSync.status;
-    let text = messages[status] || messages.off;
+    // cloud is off, not offline. 'error' defers too: a flush that died because the
+    // signal died is not a sync error worth alarming anyone with, and that status is
+    // sticky. With an empty queue the line must not promise sends that do not exist -
+    // there is nothing to send, and saying so is the whole difference between "wait"
+    // and "worry".
+    const offlineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
+    const cloudState = FarkadSync.status === 'synced' || FarkadSync.status === 'connecting'
+        || FarkadSync.status === 'error';
+    const status = offlineNow && cloudState
+        ? (FarkadSync.pendingCount() > 0 ? 'offline' : 'offlineClean')
+        : FarkadSync.status;
+    let text = status === 'offlineClean'
+        ? 'אין חיבור - הכל כבר נשלח.'
+        : (messages[status] || messages.off);
 
-    if (status === 'synced' && FarkadSync.lastSyncedAt) {
+    if ((status === 'synced' || status === 'offline' || status === 'offlineClean')
+        && FarkadSync.lastSyncedAt) {
         // Hours and minutes: the default he-IL form appends seconds, and a status line
-        // is not a stopwatch.
+        // is not a stopwatch. Kept while offline - how stale the cloud copy is becomes
+        // the one number that matters the moment the signal drops.
         text += ` · עודכן: ${FarkadSync.lastSyncedAt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`;
     }
 

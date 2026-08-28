@@ -104,8 +104,8 @@ function renderInstallState() {
     if (!line) return;
     const standalone = typeof isStandalone === 'function' && isStandalone();
     line.textContent = standalone
-        ? 'מותקן כאפליקציה (PWA).'
-        : 'פועל בדפדפן - לא מותקן כאפליקציה.';
+        ? 'מותקן על מסך הבית.'
+        : 'פועל בדפדפן - לא מותקן על מסך הבית.';
 }
 
 // Does the v80 advances ledger agree with the record it was built from?
@@ -120,11 +120,14 @@ function renderLedgerParity() {
     const line = document.getElementById('ledgerParity');
     if (!line) return;
 
-    const fromGlobal = typeof window.FarkadLedger === 'object' && window.FarkadLedger !== null
-        && typeof window.FarkadLedger.ledgerAgreesWithAdvances === 'function'
-        ? window.FarkadLedger.ledgerAgreesWithAdvances : null;
-    const parity = fromGlobal
-        || (typeof ledgerAgreesWithAdvances === 'function' ? ledgerAgreesWithAdvances : null);
+    // State.ledgerParity is the shipped hook (it answers over the live schedule); the
+    // bare function is the fallback for a build that has the ledger but not the hook.
+    // `typeof window` FIRST - evaluating window.FarkadLedger where window is absent
+    // throws before typeof can save it.
+    const parity = (typeof State !== 'undefined' && typeof State.ledgerParity === 'function')
+        ? () => State.ledgerParity()
+        : (typeof ledgerAgreesWithAdvances === 'function'
+            ? () => ledgerAgreesWithAdvances(State.schedule) : null);
 
     const quiet = () => {
         line.style.display = 'none';
@@ -133,10 +136,17 @@ function renderLedgerParity() {
     };
 
     if (!parity || typeof State === 'undefined' || !State.schedule) { quiet(); return; }
+    // No advances at all: agreement would be vacuous, and a reassurance line about an
+    // empty record is noise.
+    if (Object.keys(State.schedule.advances || {}).length === 0
+        && Object.keys((State.schedule.ledger || {}).advances || {}).length === 0) {
+        quiet();
+        return;
+    }
 
     let verdict;
     try {
-        verdict = parity(State.schedule);
+        verdict = parity();
     } catch (error) {
         // A parity check that throws has no verdict to report, and a guess would be
         // worse than silence.
@@ -146,11 +156,20 @@ function renderLedgerParity() {
     if (!verdict || typeof verdict.agrees !== 'boolean') { quiet(); return; }
 
     line.style.display = '';
+    const behind = (verdict.missing || []).length;
+    const wrong = (verdict.different || []).length + (verdict.orphaned || []).length;
     if (verdict.agrees) {
-        line.textContent = 'פנקס המקדמות (v80) תואם את הרישום הקיים.';
+        line.textContent = 'פנקס המקדמות (v80) תואם את המקדמות הרשומות.';
+        line.className = 'hint';
+    } else if (wrong === 0 && behind > 0) {
+        // Behind is not broken: an advance recorded since the last boot simply has no
+        // mirror yet, and the next open writes it. A red warning here taught people to
+        // ignore the red warning that matters.
+        line.textContent = 'פנקס המקדמות (v80) טרם הועתק במלואו - יושלם בפתיחה הבאה.';
         line.className = 'hint';
     } else {
-        line.textContent = 'פנקס המקדמות (v80) אינו תואם את הרישום — אל תפעילו את הכתיבה החדשה.';
+        line.textContent = 'פנקס המקדמות (v80) אינו תואם את המקדמות הרשומות - ' +
+            'אין להפעיל את הכתיבה החדשה לפני בדיקה.';
         line.className = 'hint hint-warn';
     }
 }

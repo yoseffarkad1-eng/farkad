@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v84';
+const APP_VERSION = 'v85';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -50,7 +50,8 @@ function showView(view) {
     // unsaved order away without a word; now the mode asks its three-answer question
     // and the switch proceeds only once the draft is saved or knowingly discarded.
     if (typeof reorderDraft !== 'undefined' && reorderDraft && view !== 'roster') {
-        confirmReorderExit().then(allowed => { if (allowed) showView(view); });
+        confirmReorderExit().then(allowed => { if (allowed) showView(view); })
+            .catch(() => {});
         return;
     }
     // The offer to undo belongs to the screen the change was made on. Left floating over
@@ -131,8 +132,13 @@ function watchForCrashes() {
             && window.farkadBootSentinel.spoke()) return;
 
         const banner = document.getElementById('crashBanner');
-        if (!banner || banner.dataset.shown) return;
-        banner.dataset.shown = '1';
+        if (!banner) return;
+        // Memo on the MESSAGE, not a one-shot flag: a DIFFERENT crash later in the
+        // session must show, and the ✕ must forget - the storage banner had exactly
+        // this bug and went permanently silent after its first hide.
+        const memo = String((detail && detail.message) ? detail.message : detail).slice(0, 160);
+        if (banner.dataset.shown === memo) return;
+        banner.dataset.shown = memo;
 
         clear(banner);
         banner.appendChild(el('span', null,
@@ -143,7 +149,10 @@ function watchForCrashes() {
         banner.appendChild(el('span', 'crash-detail', String(
             (detail && detail.message) ? detail.message : detail).slice(0, 160)));
         banner.appendChild(button('רענן', 'btn-secondary', () => location.reload()));
-        banner.appendChild(button('✕', 'btn-icon', () => { banner.style.display = 'none'; }, 'סגור'));
+        banner.appendChild(button('✕', 'btn-icon', () => {
+            banner.style.display = 'none';
+            delete banner.dataset.shown;
+        }, 'סגור'));
         banner.style.display = '';
         console.error('Farkad crash:', detail);
     };

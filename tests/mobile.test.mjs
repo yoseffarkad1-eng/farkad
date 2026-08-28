@@ -198,12 +198,15 @@ for (const width of WIDTHS) {
             await setInset(page, inset);
 
             // Nothing scrolls sideways. A page that does hides the end of every row.
+            // Against clientWidth, not innerWidth: on an overflowing layout Chromium
+            // widens the layout viewport to fit (shrink-to-fit), and doc <= inner then
+            // passes on exactly the broken screens.
             const across = await page.evaluate(() => ({
                 doc: document.documentElement.scrollWidth,
-                inner: window.innerWidth
+                client: document.documentElement.clientWidth
             }));
             check(`${label}: the page does not scroll sideways`,
-                across.doc <= across.inner + 1, JSON.stringify(across));
+                across.doc <= across.client + 1, JSON.stringify(across));
 
             const small = await undersized(page);
             check(`${label}: everything a finger lands on is a finger's size`,
@@ -343,10 +346,11 @@ for (const width of WIDTHS) {
     await setInset(page, 34);
 
     const across = await page.evaluate(() => ({
-        doc: document.documentElement.scrollWidth, inner: window.innerWidth
+        doc: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth
     }));
     check(`${label}: the page does not scroll sideways`,
-        across.doc <= across.inner + 1, JSON.stringify(across));
+        across.doc <= across.client + 1, JSON.stringify(across));
 
     const small = await undersized(page);
     check(`${label}: everything a finger lands on is a finger's size`,
@@ -382,7 +386,7 @@ for (const width of WIDTHS) {
             await new Promise(done => setTimeout(done, 200));
             out[view] = {
                 doc: document.documentElement.scrollWidth,
-                inner: window.innerWidth
+                inner: document.documentElement.clientWidth
             };
         }
         showView('day');
@@ -578,6 +582,78 @@ for (const width of [320, 390]) {
 }
 
 for (const width of [320, 390]) {
+    suite(`${width}px: the worker's own screen`);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+
+    // The crew list with a man under the archive fold: the restore button is the one
+    // control this wave adds to a row, and it is measured where it is tapped. The text
+    // floor is not run against this view - the roster badges predate this suite and
+    // carry their own size.
+    await page.evaluate(() => {
+        State.schedule.workers[29].active = false;
+        State.commit(addAdvance(State.schedule, 'w_30', '2026-08-10', 200, ''));
+        State.save({ silent: true });
+        showView('roster');
+        render();
+        document.querySelector('#workerList .roster-archive').open = true;
+    });
+    await page.waitForTimeout(250);
+
+    const restore = await page.evaluate(() => {
+        const node = document.querySelector('.roster-archive .roster-restore');
+        if (!node) return { found: false };
+        const box = node.getBoundingClientRect();
+        return { found: true, w: Math.round(box.width), h: Math.round(box.height) };
+    });
+    check(`${width}px: the restore on an archived row is a finger's size`,
+        restore.found && restore.w >= 44 && restore.h >= 44, JSON.stringify(restore));
+
+    const listSmall = await undersized(page);
+    check(`${width}px: every control on the crew list is a finger's size`,
+        listSmall.length === 0, JSON.stringify(listSmall).slice(0, 200));
+
+    // The form itself, opened over the day view, with everything it can carry on
+    // screen at once: the history block, the folded details opened, and the
+    // shared-number hint raised by typing a number somebody already has.
+    await page.evaluate(() => {
+        showView('day');
+        State.schedule.workers[1].phone = '052-884-1930';
+        State.save({ silent: true });
+        editWorker('w_01');
+        document.getElementById('workerFormMore').open = true;
+    });
+    await page.fill('#workerFormPhone', '052-884-1930');
+    await page.waitForTimeout(200);
+
+    const form = await page.evaluate(() => {
+        const hint = document.getElementById('workerFormPhoneHint');
+        const history = document.getElementById('workerFormHistory');
+        return {
+            hint: hint.style.display !== 'none',
+            hintPx: parseFloat(getComputedStyle(hint).fontSize),
+            history: history.style.display !== 'none',
+            phonePx: parseFloat(getComputedStyle(
+                document.getElementById('workerFormPhone')).fontSize)
+        };
+    });
+    check(`${width}px: the history block and the typed-number hint are both on screen`,
+        form.hint && form.history, JSON.stringify(form));
+    check(`${width}px: the phone field holds the 16px zoom threshold`,
+        form.phonePx >= 16, JSON.stringify(form));
+
+    const formSmall = await undersized(page);
+    check(`${width}px: every control on the open form is a finger's size`,
+        formSmall.length === 0, JSON.stringify(formSmall).slice(0, 200));
+
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 4)));
+
+    await page.context().close();
+}
+
+for (const width of [320, 390]) {
     suite(`${width}px: reorder mode`);
 
     const page = await open({ width, height: HEIGHTS[width] });
@@ -586,7 +662,7 @@ for (const width of [320, 390]) {
     await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
     await page.waitForTimeout(300);
 
-    const rows = await page.locator('#workerList .reorder-row').count();
+    const rows = await page.locator('#reorderList .reorder-row').count();
     check(`${width}px: the whole crew is in the draft`, rows === CREW, String(rows));
 
     const across = await page.evaluate(() => ({
@@ -594,6 +670,24 @@ for (const width of [320, 390]) {
     }));
     check(`${width}px: it does not widen the page`, across.doc <= across.inner + 1,
         JSON.stringify(across));
+
+    // The mode is a panel over the WHOLE screen now, the settings sheet's cut: the
+    // sites panel and the tab bar are not half-visible invitations beside an unsaved
+    // draft, and nothing pokes out past either edge.
+    const cover = await page.evaluate(() => {
+        const box = document.getElementById('reorderPanel').getBoundingClientRect();
+        const tabs = document.querySelector('.tabs');
+        const low = document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 6);
+        return {
+            full: box.left <= 0 && box.top <= 0
+                && box.right >= window.innerWidth - 0.5
+                && box.bottom >= window.innerHeight - 0.5,
+            overTabs: !tabs || !tabs.contains(low),
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+    check(`${width}px: the panel covers the screen, tab bar included`,
+        cover.full && cover.overTabs && cover.across, JSON.stringify(cover));
 
     // A crew of thirty is taller than any phone, so this mode is only usable if the list
     // scrolls. It did not: touch-action: none was set on the whole ROW, and in this mode
@@ -605,7 +699,7 @@ for (const width of [320, 390]) {
             const value = getComputedStyle(node).touchAction;
             return value === 'none' || value === 'pan-x' || value === 'pinch-zoom';
         };
-        const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+        const rows = [...document.querySelectorAll('#reorderList .reorder-row')];
         return {
             rows: rows.filter(blocked).length,
             handles: [...document.querySelectorAll('.reorder-handle')].filter(blocked).length,
@@ -624,18 +718,35 @@ for (const width of [320, 390]) {
     check(`${width}px: and the handle still owns the drag`, panning.handles > 0,
         JSON.stringify(panning));
 
+    // The list scrolls inside the panel now, between the fixed head and the fixed
+    // foot - so the last man is reached by scrolling the panel's own box, and he must
+    // land ABOVE the foot rather than behind it.
     const reach = await page.evaluate(async () => {
-        window.scrollTo(0, document.documentElement.scrollHeight);
+        const box = document.getElementById('reorderScroll');
+        box.scrollTop = box.scrollHeight;
         await new Promise(done => setTimeout(done, 200));
-        const last = [...document.querySelectorAll('#workerList .reorder-row')].pop();
+        const last = [...document.querySelectorAll('#reorderList .reorder-row')].pop();
         const foot = document.querySelector('.reorder-foot');
         return {
-            lastVisible: last.getBoundingClientRect().bottom <= window.innerHeight + 1,
-            footVisible: !foot || foot.getBoundingClientRect().bottom <= window.innerHeight + 1
+            lastVisible: last.getBoundingClientRect().bottom <= foot.getBoundingClientRect().top + 1,
+            footVisible: foot.getBoundingClientRect().bottom <= window.innerHeight + 1
         };
     });
     check(`${width}px: the last man and the save button can both be reached`,
         reach.lastVisible && reach.footVisible, JSON.stringify(reach));
+
+    // The home indicator. The foot carries the same max(8px, safe-bottom) the tab bar
+    // does, and what has to clear the strip is what somebody presses - the buttons are
+    // measured, not the box they sit in.
+    await setInset(page, 34);
+    const indicator = await page.evaluate(() => ({
+        buttons: [...document.querySelectorAll('.reorder-foot button')].length,
+        clear: [...document.querySelectorAll('.reorder-foot button')]
+            .every(node => node.getBoundingClientRect().bottom <= window.innerHeight - 34 + 1)
+    }));
+    check(`${width}px: the save buttons clear the home indicator`,
+        indicator.buttons > 0 && indicator.clear, JSON.stringify(indicator));
+    await setInset(page, 0);
 
     const small = await undersized(page);
     check(`${width}px: every move button is a finger's size`,
@@ -646,7 +757,7 @@ for (const width of [320, 390]) {
         JSON.stringify(faint.slice(0, 4)));
 
     const name = await page.evaluate(() => {
-        const first = document.querySelector('#workerList .reorder-row .reorder-name');
+        const first = document.querySelector('#reorderList .reorder-row .reorder-name');
         return {
             wrapped: first.getBoundingClientRect().height,
             text: first.textContent.trim().slice(0, 20)
@@ -789,6 +900,98 @@ for (const width of WIDTHS) {
     }));
     check('and seven days plus the names fit across the phone',
         wide.scroll <= wide.client + 1, JSON.stringify(wide));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the pay card
+//
+// Below 700px each payroll row is a card, and the card leads with נותר לתשלום: the net
+// first at the hero size, the four counts it is checked against on one labelled row
+// under it. All of that is flex order over the same table cells, so what is asserted
+// here is geometry - which box is highest - plus the one class the stylesheet needs.
+for (const width of [320, 390]) {
+    suite(`${width}px: the pay card leads with the net`);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await page.evaluate(() => {
+        // A double day and an advance, so every one of the four labelled counts is a
+        // column the table actually grew.
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
+        assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_1', RATE_DOUBLE);
+        State.commit(addAdvance(State.schedule, 'w_01', '2026-08-11', 100, ''));
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(300);
+
+    const card = await page.evaluate(() => {
+        const tr = document.querySelector('.report-payroll tbody tr');
+        const net = tr ? tr.querySelector('td.cell-net') : null;
+        if (!net) return { present: false };
+        const style = getComputedStyle(net);
+        const metricTops = ['ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'מקדמות']
+            .map(label => tr.querySelector(`td[data-label="${label}"]`))
+            .filter(Boolean)
+            .map(node => Math.round(node.getBoundingClientRect().top));
+        return {
+            present: true,
+            netTop: Math.round(net.getBoundingClientRect().top),
+            otherTops: [...tr.querySelectorAll('td')].filter(td => td !== net)
+                .map(td => Math.round(td.getBoundingClientRect().top)),
+            size: style.fontSize,
+            weight: style.fontWeight,
+            label: getComputedStyle(net, '::before').content,
+            metricTops,
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+
+    check(`${width}px: the net cell carries the class the stylesheet leads with`,
+        card.present === true, JSON.stringify(card));
+    check(`${width}px: and it is the first thing on the card`,
+        card.present && card.otherTops.every(top => card.netTop < top),
+        JSON.stringify({ net: card.netTop, others: card.otherTops }));
+    check(`${width}px: at the hero size the ramp names`,
+        card.size === '36px' && Number(card.weight) >= 800,
+        JSON.stringify({ size: card.size, weight: card.weight }));
+    check(`${width}px: under the card's own name for the number`,
+        String(card.label).includes('נותר לתשלום'), JSON.stringify(card.label));
+    check(`${width}px: the four counts share one labelled row beneath it`,
+        card.metricTops.length === 4 && new Set(card.metricTops).size === 1,
+        JSON.stringify(card.metricTops));
+    check(`${width}px: and the card does not widen the page`,
+        card.across === true);
+
+    await page.context().close();
+}
+
+{
+    suite('above the card breakpoint the pay sheet is still a table');
+
+    // The print suite depends on the table staying a table, and an A4 page is about
+    // 794px wide - so at desktop width the same DOM must lay out as rows and columns.
+    const page = await open({ width: 900, height: 800, touch: false });
+    await page.evaluate(() => {
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
+        State.commit(addAdvance(State.schedule, 'w_01', '2026-08-11', 100, ''));
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(300);
+
+    const table = await page.evaluate(() => ({
+        row: getComputedStyle(document.querySelector('.report-payroll tbody tr')).display,
+        head: getComputedStyle(document.querySelector('.report-payroll thead')).display,
+        net: document.querySelectorAll('.report-payroll tbody td.cell-net').length
+    }));
+    check('a row is a table row again', table.row === 'table-row', table.row);
+    check('the headings are back over the columns', table.head !== 'none', table.head);
+    check('and the class rides along doing nothing', table.net > 0, String(table.net));
 
     await page.context().close();
 }

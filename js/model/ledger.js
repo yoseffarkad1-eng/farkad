@@ -164,8 +164,11 @@ function advanceHistory(schedule, advanceId) {
 // the caller, in the same commit, for as long as the gate below is closed.
 
 function appendLedgerEntry(schedule, entry) {
-    const id = ledgerEntryId();
-    const record = Object.assign({ id }, entry);
+    // An entry may bring its own id. The migration must: two phones mirroring the same
+    // advance have to mint the SAME key, or the union keeps both and the fold's winner
+    // is decided by whichever random id sorts later.
+    const id = entry.id ? String(entry.id) : ledgerEntryId();
+    const record = Object.assign({}, entry, { id });
     schedule.ledger = schedule.ledger || { advances: {} };
     schedule.ledger.advances = schedule.ledger.advances || {};
     schedule.ledger.advances[id] = record;
@@ -234,6 +237,9 @@ function migrateAdvancesToLedger(schedule, deviceId) {
         if (!item.workerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) return;
 
         const written = appendLedgerEntry(schedule, {
+            // Deterministic, derived from the advance: every phone that mirrors a_x
+            // writes le_mig_a_x, and mergeLedgerInto collapses the copies into one.
+            id: 'le_mig_' + String(id),
             advanceId: String(id),
             kind: 'given',
             workerId: String(item.workerId),
@@ -294,5 +300,18 @@ function ledgerAgreesWithAdvances(schedule) {
         }
     });
 
-    return { agrees: missing.length === 0 && different.length === 0, missing, different };
+    // The reverse pass. An entry whose advance no longer exists in the legacy field is
+    // the ledger remembering money the record has withdrawn - the one state in which
+    // flipping the write gate on would dock somebody for a cancelled advance - and a
+    // check that walks only the legacy keys is structurally blind to it. Cancelled
+    // advances fold to nothing and are rightly not orphans.
+    const orphaned = Object.keys(folded).filter(id => {
+        const item = legacy[id];
+        return !item || typeof item !== 'object';
+    });
+
+    return {
+        agrees: missing.length === 0 && different.length === 0 && orphaned.length === 0,
+        missing, different, orphaned
+    };
 }

@@ -1453,7 +1453,7 @@ async function seedRoster(page) {
   await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
   await page.waitForTimeout(250);
   check('the dialog asks for the name to be typed',
-    (await page.textContent('#askMessage')).includes('הקלדת שם העובד'),
+    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
     await page.textContent('#askMessage'));
   await page.fill('#askInput', 'טעות');
   await page.click('#askOk');
@@ -2464,7 +2464,8 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('choosing extra hours states the hourly rate they are priced by',
     (await page.textContent('#assignSheetBody'))
-      .includes('שעות נוספות מחושבות לפי שכר שעה (50 ₪ ל'),
+      .includes('שעות נוספות מחושבות לפי שכר השעה של') &&
+    (await page.textContent('#assignSheetBody')).includes('50 ₪ לשעה'),
     await page.textContent('#assignSheetBody'));
 
   // עלי has no hourly rate, and the hint must say so rather than implying a sum.
@@ -4474,7 +4475,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const order = () => page.evaluate(() =>
     State.schedule.workers.map(worker => worker.id).join());
   const drafted = () => page.evaluate(() =>
-    [...document.querySelectorAll('#workerList .reorder-row')].map(row => row.dataset.workerId).join());
+    [...document.querySelectorAll('#reorderList .reorder-row')].map(row => row.dataset.workerId).join());
 
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(300);
@@ -4482,7 +4483,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await drafted()) === 'w_01,w_02,w_03,w_04,w_05', await drafted());
 
   // The last man to the top, by the jump button.
-  await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(250);
   check('a jump to the top moves him in the draft',
     (await drafted()) === 'w_05,w_01,w_02,w_03,w_04', await drafted());
@@ -4490,7 +4491,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await order()) === 'w_01,w_02,w_03,w_04,w_05', await order());
 
   // An exact position, for a crew too long to walk one step at a time.
-  await page.locator('#workerList .reorder-row').first().locator('.reorder-exact').click();
+  await page.locator('#reorderList .reorder-row').first().locator('.reorder-exact').click();
   await page.waitForTimeout(250);
   await page.fill('#askInput', '3');
   await page.click('#askOk');
@@ -4500,7 +4501,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   // Dragging, by the handle, with a pointer.
   const dragged = await page.evaluate(async () => {
-    const rows = [...document.querySelectorAll('#workerList .reorder-row')];
+    const rows = [...document.querySelectorAll('#reorderList .reorder-row')];
     const handle = rows[rows.length - 1].querySelector('.reorder-handle');
     const from = handle.getBoundingClientRect();
     const to = rows[0].getBoundingClientRect();
@@ -4515,7 +4516,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await new Promise(done => setTimeout(done, 50));
     fire('pointerup', to.top + 4);
     await new Promise(done => setTimeout(done, 100));
-    return [...document.querySelectorAll('#workerList .reorder-row')]
+    return [...document.querySelectorAll('#reorderList .reorder-row')]
       .map(row => row.dataset.workerId).join();
   });
   check('a row can be carried to the top with a finger',
@@ -4535,21 +4536,96 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('saving writes the drafted order', (await order()) === wanted,
     `${await order()} vs ${wanted}`);
   check('and leaves the mode',
-    (await page.locator('#workerList .reorder-row').count()) === 0);
+    (await page.locator('#reorderList .reorder-row').count()) === 0);
 
-  // Cancelling is not a quiet save.
+  // Cancelling is not a quiet save. The panel is modal now, so the implicit exit is
+  // its back affordance - which asks the three-answer question - while the footer's
+  // explicit discard button IS the answer and acts at once.
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(250);
-  await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(200);
-  await page.locator('.reorder-foot').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
+  await page.locator('.reorder-back').click();
   await page.waitForTimeout(250);
-  // Discarding a changed order is a decision, and the door asks its three-answer
-  // question before anything is thrown away.
-  check('leaving with unsaved changes asks first', await page.isVisible('#askChoices'));
-  await page.locator('#askChoices').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
+  check('the back door over unsaved changes asks first', await page.isVisible('#askChoices'));
+  await page.locator('#askChoices').getByRole('button', { name: 'הישארות' }).click();
+  await page.waitForTimeout(250);
+  check('staying keeps the draft on screen',
+    (await page.locator('#reorderList .reorder-row').count()) > 0);
+  await page.locator('.reorder-foot').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
   await page.waitForTimeout(300);
-  check('cancelling leaves the order alone', (await order()) === wanted, await order());
+  check('the explicit discard acts at once, and leaves the order alone',
+    (await order()) === wanted, await order());
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the reorder panel is a dialog
+{
+  // The settings sheet's contract, on the reorder mode's own screen: it covers the app,
+  // a reader is told where it has arrived, Tab stays inside, and Escape is the same
+  // guarded door as the back button and the tabs.
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  await seedRoster(page);
+  await page.click('#tab-roster');
+  await page.waitForTimeout(300);
+
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(300);
+  const opened = await page.evaluate(() => {
+    const panel = document.getElementById('reorderPanel');
+    return {
+      shown: panel.classList.contains('open'),
+      modal: panel.getAttribute('aria-modal'),
+      hidden: panel.getAttribute('aria-hidden'),
+      focused: document.activeElement && document.activeElement.id
+    };
+  });
+  check('the mode opens as a dialog over the screen',
+    opened.shown === true && opened.modal === 'true' && opened.hidden === 'false',
+    JSON.stringify(opened));
+  check('focus lands on the heading, so a reader says where it is',
+    opened.focused === 'reorderTitle', String(opened.focused));
+
+  // Tab does not walk out of the panel into the roster behind it.
+  await page.evaluate(() => {
+    const panel = document.getElementById('reorderPanel');
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
+      .filter(node => node.offsetParent !== null && !node.disabled);
+    focusable[focusable.length - 1].focus();
+  });
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(150);
+  check('tab stays inside the panel', await page.evaluate(() =>
+    document.getElementById('reorderPanel').contains(document.activeElement)));
+
+  // With nothing moved, Escape is a plain way out - no question to answer.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  const closed = await page.evaluate(() => ({
+    shown: document.getElementById('reorderPanel').classList.contains('open'),
+    focused: document.activeElement && document.activeElement.id
+  }));
+  check('escape leaves an unchanged draft without asking', closed.shown === false,
+    JSON.stringify(closed));
+  check('and focus goes back to the button that opened it',
+    closed.focused === 'reorderOpenBtn', JSON.stringify(closed));
+
+  // With a change, Escape is the same three-answer door as the tabs - and a second
+  // Escape answers the QUESTION, it must not dismiss it and ask it again.
+  await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
+  await page.waitForTimeout(250);
+  await page.locator('#reorderList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  check('escape over a changed draft asks first', await page.isVisible('#askChoices'));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check('a second escape stays, once, with the draft still open', await page.evaluate(() => (
+    document.getElementById('askModal').style.display === 'none'
+    && document.getElementById('reorderPanel').classList.contains('open')
+  )));
 
   await page.context().close();
 }
@@ -4691,7 +4767,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   check('the restore group carries the guard sentence, above its doors',
     (await page.textContent('#settingsPanel'))
-      .includes('שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר תמיד כגיבוי מקומי לפני.'));
+      .includes('שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר כגיבוי מקומי לפני כן.'));
 
   // The raw export used to be reachable only AFTER damage was detected - from the
   // recovery banner - which is exactly backwards for an emergency door.
@@ -4713,28 +4789,50 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await page.textContent('#installState')).includes('בדפדפן'),
     await page.textContent('#installState'));
 
-  // The v80 parity line. This build carries ledgerAgreesWithAdvances, so the line is
-  // there - quiet on agreement, a warning on disagreement, and gone when no check is
-  // reachable at all.
+  // The v80 parity line answers in three registers: quiet agreement, a quiet "not yet
+  // copied" for a device that is merely behind, and a warning only when the mirror and
+  // the record genuinely disagree. With no advances at all it says nothing - there is
+  // nothing to agree about.
+  check('with no advances the parity line says nothing',
+    (await page.textContent('#ledgerParity')).trim() === '' &&
+    !(await page.locator('#ledgerParity').isVisible()));
+
+  await page.evaluate(() => {
+    State.schedule.advances['a_smoke'] = { id: 'a_smoke', workerId: 'w_x', date: '2026-08-01', amount: 100 };
+    State.ledgerParity = () => ({ agrees: true, missing: [], different: [], orphaned: [] });
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
   check('with the ledger agreeing, the parity line is quiet',
-    (await page.textContent('#ledgerParity')) === 'פנקס המקדמות (v80) תואם את הרישום הקיים.' &&
+    (await page.textContent('#ledgerParity')).includes('פנקס המקדמות (v80)') &&
+    !(await page.textContent('#ledgerParity')).includes('אינו תואם') &&
     !(await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
     await page.textContent('#ledgerParity'));
 
   await page.evaluate(() => {
-    window.FarkadLedger = { ledgerAgreesWithAdvances: () => ({ agrees: false, missing: ['a_1'], different: [] }) };
+    State.ledgerParity = () => ({ agrees: false, missing: ['a_smoke'], different: [], orphaned: [] });
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
+  check('merely behind reads as "not yet", quietly',
+    (await page.textContent('#ledgerParity')).includes('טרם הועתק') &&
+    !(await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#ledgerParity'));
+
+  await page.evaluate(() => {
+    State.ledgerParity = () => ({ agrees: false, missing: [], different: ['a_smoke'], orphaned: [] });
     renderSettings();
   });
   await page.waitForTimeout(200);
   check('a disagreement warns against flipping the write gate',
     (await page.textContent('#ledgerParity'))
-      .includes('אינו תואם את הרישום — אל תפעילו את הכתיבה החדשה') &&
+      .includes('אינו תואם את המקדמות הרשומות') &&
     (await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
     await page.textContent('#ledgerParity'));
 
   await page.evaluate(() => {
-    window.FarkadLedger = undefined;
-    window.ledgerAgreesWithAdvances = undefined;
+    delete State.schedule.advances['a_smoke'];
+    State.ledgerParity = () => { throw new Error('gone'); };
     renderSettings();
   });
   await page.waitForTimeout(200);
@@ -5860,18 +5958,18 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // button that opens a man's details.
   await page.getByRole('button', { name: '↕ סדר מחדש' }).click();
   await page.waitForTimeout(300);
-  await page.locator('#workerList .reorder-row').nth(2)
+  await page.locator('#reorderList .reorder-row').nth(2)
     .getByRole('button', { name: /העלה/ }).click();
   await page.waitForTimeout(200);
-  await page.locator('#workerList .reorder-row').first()
+  await page.locator('#reorderList .reorder-row').first()
     .getByRole('button', { name: /הורד/ }).click();
   await page.waitForTimeout(200);
 
   check('the first row cannot be moved up past the top',
-    await page.locator('#workerList .reorder-row').first()
+    await page.locator('#reorderList .reorder-row').first()
       .getByRole('button', { name: /העלה/ }).isDisabled());
   check('nor the last down past the bottom',
-    await page.locator('#workerList .reorder-row').last()
+    await page.locator('#reorderList .reorder-row').last()
       .getByRole('button', { name: /הורד/ }).isDisabled());
 
   await page.getByRole('button', { name: 'שמירה ויציאה' }).click();
@@ -6017,6 +6115,169 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.waitForTimeout(200);
   check('closing it goes back to the report',
     !(await page.locator('#workerDaysModal').isVisible()));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the chip strip
+{
+  // The pay sheet says four days; the strip above the detail rows says WHICH four,
+  // each date in the calendar's own shorthand, ×2 where a day pays twice.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-13', 'w_01', 'actual', 'p_01');
+    markAbsent(State.schedule, '2026-08-14', 'w_01', 'actual');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    showView('reports');
+    openWorkerDays('w_01');
+  });
+  await page.waitForTimeout(300);
+
+  const chips = await page.evaluate(() =>
+    [...document.querySelectorAll('#workerDaysBody .wday-chip')].map(chip => ({
+      text: chip.textContent.replace('×2', '').trim(),
+      doubled: Boolean(chip.querySelector('.wday-chip-x2'))
+    })));
+  check('one chip per attendance date, the absence not among them',
+    chips.length === 4, JSON.stringify(chips));
+  check('each chip is the one-letter weekday mark and the short date',
+    chips.map(c => c.text).join(',') === 'ב׳ 10/08,ג׳ 11/08,ד׳ 12/08,ה׳ 13/08',
+    JSON.stringify(chips));
+  check('the doubled days carry ×2, and only they do',
+    chips.map(c => c.doubled).join(',') === 'false,true,true,false',
+    JSON.stringify(chips));
+  check('the strip sits above the first day row',
+    await page.evaluate(() => {
+      const strip = document.querySelector('#workerDaysBody .wday-chips');
+      return Boolean(strip) && strip.nextElementSibling.classList.contains('wday');
+    }));
+  check('and nothing in it is a control',
+    (await page.locator('#workerDaysBody .wday-chips button').count()) === 0);
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the site bars
+{
+  // On screen the billing page is a bar per site; the date-by-site grid stays in the
+  // DOM because it is the thing that prints. Same counts, two shapes, one reader each.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-10', 'w_02', 'actual', 'p_02');
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-11', 'w_02', 'actual', 'p_01');
+    State.save();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    REPORT_SECTION = 'sites';
+    showView('reports');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const bars = await page.evaluate(() =>
+    [...document.querySelectorAll('.invoice-bars .invoice-bar-row')].map(row => ({
+      name: row.querySelector('.invoice-bar-name').textContent,
+      count: row.querySelector('.invoice-bar-count').textContent,
+      width: row.querySelector('.invoice-bar-fill').style.width,
+      painted: row.querySelector('.invoice-swatch').style.background !== ''
+    })));
+  check('every site with work gets a bar row', bars.length === 2, JSON.stringify(bars));
+  check('the counts are the worker-days the invoice bills',
+    bars[0].count === '3' && bars[1].count === '1', JSON.stringify(bars));
+  check('the busiest site fills its bar and the rest are proportional to it',
+    bars[0].width === '100%' && bars[1].width === '33%', JSON.stringify(bars));
+  check('each swatch is painted with the site\'s own colour',
+    bars.every(bar => bar.painted), JSON.stringify(bars));
+  check('the total band closes the list with the unit named',
+    (await page.textContent('.invoice-bars-total')).includes('סה״כ ימי עובד־אתר') &&
+    (await page.textContent('.invoice-bars-total')).includes('4'));
+  check('the bars name no worker, like the paper they stand in for',
+    !(await page.textContent('.invoice-bars')).includes('דוד') &&
+    !(await page.textContent('.invoice-bars')).includes('שרה'));
+
+  check('the bars are what the screen shows', await page.locator('.invoice-bars').isVisible());
+  check('while the grid waits whole in the DOM, unseen',
+    (await page.locator('.report-invoice tbody tr').count()) === 2 &&
+    !(await page.locator('.report-invoice .invoice-grid').isVisible()));
+
+  await page.emulateMedia({ media: 'print' });
+  await page.waitForTimeout(200);
+  check('paper swaps them: the grid prints',
+    (await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.report-invoice .invoice-grid')).display)) !== 'none');
+  check('and the bars do not',
+    (await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.invoice-bars')).display)) === 'none');
+  await page.emulateMedia({ media: 'screen' });
+  await page.waitForTimeout(200);
+
+  await page.locator('.invoice-picker').getByRole('button', { name: 'הרצליה' }).click();
+  await page.waitForTimeout(300);
+  check('the client picker narrows the bars the way it narrows the grid',
+    (await page.locator('.invoice-bars .invoice-bar-row').count()) === 1 &&
+    (await page.textContent('.invoice-bars')).includes('הרצליה'));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the ledger fold
+{
+  // The v80 record is readable the moment the boot migration mirrors an advance - and
+  // ONLY readable: the writer is gated off, so the fold holds not a single control.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-08-10', 150, ''));
+    State.migrateLedger();
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    showView('reports');
+    openWorkerDays('w_01');
+  });
+  await page.waitForTimeout(300);
+
+  const fold = await page.evaluate(() => {
+    const node = document.querySelector('#workerDaysBody .wday-ledger');
+    if (!node) return null;
+    return {
+      open: node.open,
+      title: node.querySelector('summary').textContent,
+      entries: [...node.querySelectorAll('.ledger-entry')].map(entry => entry.textContent),
+      controls: node.querySelectorAll('button, input, select, textarea').length
+    };
+  });
+  check('the fold is there, closed, named for the record it reads',
+    Boolean(fold) && fold.open === false && fold.title.includes('היסטוריה מלאה'),
+    JSON.stringify(fold));
+  check('the migrated advance is listed by its mandated kind, date and amount',
+    fold.entries.length === 1 && fold.entries[0].includes('מקדמה')
+    && fold.entries[0].includes('10/08/2026') && fold.entries[0].includes('150'),
+    JSON.stringify(fold.entries));
+  check('and says where the entry came from',
+    fold.entries[0].includes('הועתק מהרישום הקיים'), JSON.stringify(fold.entries));
+  check('read-only means read only: no control of any kind inside the fold',
+    fold.controls === 0, String(fold.controls));
+  check('because the gate itself is still closed',
+    (await page.evaluate(() => ledgerWritesEnabled())) === false);
+
+  await page.evaluate(() => openWorkerDays('w_02'));
+  await page.waitForTimeout(200);
+  check('a worker the ledger says nothing about gets no fold at all',
+    (await page.locator('#workerDaysBody .wday-ledger').count()) === 0);
+
+  // A build that never loaded the ledger file must show the modal, minus the fold.
+  await page.evaluate(() => { advanceHistory = undefined; openWorkerDays('w_01'); });
+  await page.waitForTimeout(200);
+  check('without the reader the modal still opens, the fold simply absent',
+    (await page.locator('#workerDaysModal').isVisible()) &&
+    (await page.locator('#workerDaysBody .wday-ledger').count()) === 0);
   await page.context().close();
 }
 
@@ -6734,6 +6995,164 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await blank.evaluate(() => currentView)) === 'roster');
 
   await fresh.context().close();
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the worker's own record
+{
+  // The היסטוריה block on the worker's screen, the advances line and one-tap restore on
+  // an archived row, and the shared-number hint under the phone field as it is typed.
+  const page = await open();
+  await seedRoster(page);
+
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-13', 'w_01', 'actual', 'p_01');
+    State.save();
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-08-12', 200, ''));
+    State.commit(addAdvance(State.schedule, 'w_01', '2026-08-13', 150, ''));
+    showView('roster');
+    render();
+  });
+  await page.waitForTimeout(250);
+
+  const readHistory = () => page.evaluate(() => {
+    const box = document.getElementById('workerFormHistory');
+    return {
+      shown: box.style.display !== 'none',
+      text: box.textContent,
+      rows: [...box.querySelectorAll('.worker-history-row')].map(row => row.textContent)
+    };
+  });
+
+  await page.locator('#workerList .roster-row').filter({ hasText: 'דוד' })
+    .getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+
+  const history = await readHistory();
+  check('the history block is on the worker\'s own screen',
+    history.shown && history.text.includes('היסטוריה'), JSON.stringify(history));
+  check('with his days counted',
+    history.rows[0] === 'ימים רשומים2', JSON.stringify(history.rows));
+  check('and his advances counted and summed',
+    history.rows[1] === 'מקדמות רשומות2 בסך 350 ₪', JSON.stringify(history.rows));
+  // The schema has no paid, open or settled state on an advance, so the block must not
+  // pretend to know one - the same honesty the archive dialog already keeps.
+  check('and it claims nothing about a debt being open',
+    !history.text.includes('חוב'), history.text);
+
+  // A worker who has not been saved yet has no record to read.
+  await page.evaluate(() => { closeWorkerForm(); showAddWorkerModal(); });
+  await page.waitForTimeout(200);
+  check('a brand new worker gets no history block',
+    (await readHistory()).shown === false);
+  await page.evaluate(() => closeWorkerForm());
+
+  // Into the archive, straight through the data - the archive dialog has its own tests.
+  await page.evaluate(() => {
+    State.worker('w_01').active = false;
+    State.commitRoster();
+    render();
+    document.querySelector('#workerList .roster-archive').open = true;
+  });
+  await page.waitForTimeout(250);
+
+  const row = page.locator('.roster-archive .roster-row').filter({ hasText: 'דוד' });
+  check('an archived row says what money is on the books',
+    (await row.textContent()).includes('מקדמות רשומות: 350 ₪'), await row.textContent());
+  check('and carries its own restore button',
+    await row.getByRole('button', { name: /החזר/ }).isVisible());
+
+  // Archived, his screen also says the last date anything was written for him - not
+  // "archived since", which the record does not hold.
+  await row.getByRole('button', { name: /ערוך/ }).click();
+  await page.waitForTimeout(250);
+  const archivedHistory = await readHistory();
+  check('an archived worker\'s history names his last recorded date',
+    archivedHistory.rows[2] === 'רישום אחרון13/08/2026', JSON.stringify(archivedHistory.rows));
+  await page.evaluate(() => closeWorkerForm());
+  await page.waitForTimeout(200);
+
+  // One tap, no dialog: his name and number clash with nobody, so nothing needs asking.
+  await row.getByRole('button', { name: /החזר/ }).click();
+  await page.waitForTimeout(300);
+  check('one tap puts him back in the crew',
+    (await page.evaluate(() => State.worker('w_01').active)) === true);
+  check('durably, not only on screen',
+    (await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('scheduleData:v2')).workers
+        .find(worker => worker.id === 'w_01').active)) === true);
+  await page.evaluate(() => showView('day'));
+  await page.waitForTimeout(250);
+  check('and he is back on the day screen',
+    (await page.textContent('#dayView')).includes('דוד'));
+
+  // The row's button is the SAME guarded flow as the form's - a clash is still asked
+  // about, and a no still leaves him where he was.
+  await page.evaluate(() => {
+    State.worker('w_01').active = false;
+    State.schedule.workers.push({
+      id: State.nextWorkerId(), name: 'דוד', active: true, dailyRate: 0, hourlyRate: 0
+    });
+    State.commitRoster();
+    showView('roster');
+    render();
+    document.querySelector('#workerList .roster-archive').open = true;
+  });
+  await page.waitForTimeout(250);
+  await page.locator('.roster-archive .roster-row').filter({ hasText: 'דוד' })
+    .getByRole('button', { name: /החזר/ }).click();
+  await page.waitForTimeout(250);
+  check('restoring into a namesake is asked about, from the row too',
+    (await page.isVisible('#askModal'))
+    && (await page.textContent('#askTitle')).includes('כבר יש עובד פעיל בשם'),
+    await page.textContent('#askTitle'));
+  await page.click('#askCancel');
+  await page.waitForTimeout(250);
+  check('and a no leaves him in the archive',
+    (await page.evaluate(() => State.worker('w_01').active)) === false);
+
+  // The shared-number hint, live under the field as the number is typed. The archived
+  // man is exactly the one the daily list is not showing, so he is found and named too.
+  await page.evaluate(() => {
+    State.worker('w_01').phone = '052-884-1930';
+    State.worker('w_02').phone = '054-788-8990';
+    State.commitRoster();
+    showAddWorkerModal();
+    document.getElementById('workerFormMore').open = true;
+  });
+  await page.waitForTimeout(200);
+  check('a fresh form shows no hint',
+    (await page.evaluate(() =>
+      document.getElementById('workerFormPhoneHint').style.display)) === 'none');
+
+  // Typed in the international spelling, found against the local one.
+  await page.fill('#workerFormPhone', '+972-52-884-1930');
+  await page.waitForTimeout(200);
+  const hint = await page.evaluate(() => {
+    const node = document.getElementById('workerFormPhoneHint');
+    return { shown: node.style.display !== 'none', text: node.textContent };
+  });
+  check('typing an archived man\'s number raises the hint',
+    hint.shown && hint.text.includes('המספר הזה כבר רשום אצל'), JSON.stringify(hint));
+  check('naming him, and saying where he is',
+    hint.text.includes('דוד') && hint.text.includes('(בארכיון)'), hint.text);
+  check('and saying it is allowed, with a caution rather than a block',
+    hint.text.includes('אפשר לשמור, אבל בדוק שאין כפילות'), hint.text);
+
+  await page.fill('#workerFormPhone', '0547888990');
+  await page.waitForTimeout(200);
+  check('an active holder is named the moment her number is typed',
+    (await page.evaluate(() =>
+      document.getElementById('workerFormPhoneHint').textContent)).includes('שרה'));
+
+  await page.fill('#workerFormPhone', '');
+  await page.waitForTimeout(200);
+  check('and clearing the field clears the hint',
+    (await page.evaluate(() =>
+      document.getElementById('workerFormPhoneHint').style.display)) === 'none');
+  await page.evaluate(() => closeWorkerForm());
+
   await page.context().close();
 }
 

@@ -90,7 +90,7 @@ const CHROME = [
     '#workerPickerModal', '#placePickerModal',
     '.settings-panel', '.drawer-wrap', '.day-drawer', '.drawer-backdrop',
     '.undo-bar', '.day-actions', '.tabs', '.topbar', '.banner', '.storage-notice',
-    '.reorder-live', '.reorder-foot'
+    '.reorder-panel', '.reorder-live', '.reorder-foot'
 ];
 
 // What is left with a box once the page is in print media.
