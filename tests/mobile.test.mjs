@@ -35,7 +35,7 @@ const HEIGHTS = { 320: 568, 375: 667, 390: 844, 430: 932 };
 // list is well past the fold.
 const CREW = 30;
 
-async function open({ width, height, scheme = 'light', touch = true }) {
+async function open({ width, height, scheme = 'light', touch = true, mode = 'workers' }) {
     const context = await browser.newContext({
         viewport: { width, height },
         deviceScaleFactor: 2,
@@ -48,7 +48,7 @@ async function open({ width, height, scheme = 'light', touch = true }) {
     await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
     await page.waitForTimeout(300);
 
-    await page.evaluate(count => {
+    await page.evaluate(([count, mode]) => {
         State.schedule.workers = Array.from({ length: count }, (unused, i) => ({
             id: `w_${String(i + 1).padStart(2, '0')}`,
             name: `עובד ${i + 1}`,
@@ -62,11 +62,21 @@ async function open({ width, height, scheme = 'light', touch = true }) {
         State.date = '2026-08-12';
         State.save();
         showView('day');
-        // By worker, which is the list this suite is about: the by-site view is a grid of
-        // sites and has no row per man to reach the bottom of.
-        if (typeof setDayMode === 'function') setDayMode('workers');
+        // Somebody's evening, so the by-site view has cards with people on them: an empty
+        // site card has no chips, and the chips are half of what this file measures.
+        ['w_01', 'w_02', 'w_03', 'w_07', 'w_11', 'w_19', 'w_28'].forEach((id, i) => {
+            assignPlace(State.schedule, '2026-08-12', id, 'actual', `p_${(i % 4) + 1}`);
+        });
+        markAbsent(State.schedule, '2026-08-12', 'w_05', 'actual');
+        State.save();
+
+        // By worker by default, which is the list most of this suite is about: the by-site
+        // view is a grid of sites and has no row per man to reach the bottom of. The
+        // suites that measure SIZES rather than reach switch it over - see below, and see
+        // what that exclusion was quietly hiding.
+        if (typeof setDayMode === 'function') setDayMode(mode);
         render();
-    }, CREW);
+    }, [CREW, mode]);
     await page.waitForTimeout(300);
     return page;
 }
@@ -103,6 +113,59 @@ async function undersized(page) {
             });
         return out;
     });
+}
+
+// Text nobody should have to lean in for.
+//
+// Two floors, because one would be a lie. The week grid is seven columns of dates on a
+// 320px screen and physically cannot carry the same size as a heading - so the grid has
+// its own floor and everything else has the real one. What is NOT allowed is a floor
+// nobody wrote down, which is how a 9px date and a 10.5px label ended up on the screen
+// somebody reads at the end of a working day.
+const TEXT_FLOOR = 14;
+const GRID_FLOOR = 12;
+const IN_GRID = '.week-table, .week-grid, .week-cell, .day-initial, .week-total, .corner';
+
+async function unreadable(page, floor = TEXT_FLOOR, gridFloor = GRID_FLOOR, inGrid = IN_GRID) {
+    return page.evaluate(([floorPx, gridPx, gridSel]) => {
+        const out = [];
+        document.querySelectorAll('body *').forEach(node => {
+            if (node.offsetParent === null) return;
+            if (node.getAttribute('aria-hidden') === 'true') return;
+            // Only elements with text of their own: a wrapper inherits its size from
+            // whatever is inside it and would be counted twice.
+            const owns = [...node.childNodes]
+                .some(child => child.nodeType === 3 && child.textContent.trim());
+            if (!owns) return;
+
+            const box = node.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0) return;
+
+            const size = parseFloat(getComputedStyle(node).fontSize);
+
+            // Deliberately hidden text keeps its place in the document for a screen
+            // reader while the eye is given something else - the week's corner label has
+            // no room on a narrow phone, and an absent cell is drawn as a dash by a
+            // ::before rule. Nothing to read is not text too small to read.
+            if (size === 0) return;
+
+            // A marker is not a sentence. The diamond that distinguishes two sites
+            // sharing a colour, the ✕ on a chip, the dash for an absence: they carry no
+            // letters and no digits, and the words they sit beside are always spelled out
+            // in full. Growing them would make the decoration compete with the name.
+            // Anything with a letter or a number in it is text and is held to the floor.
+            if (!/[\p{L}\p{N}]/u.test(node.textContent)) return;
+
+            const limit = node.closest(gridSel) ? gridPx : floorPx;
+            if (size + 0.01 >= limit) return;
+            out.push({
+                px: Math.round(size * 10) / 10,
+                cls: String(node.className || node.tagName).slice(0, 24),
+                text: node.textContent.trim().slice(0, 18)
+            });
+        });
+        return out;
+    }, [floor, gridFloor, inGrid]);
 }
 
 // Is this element the thing a tap at its own centre would hit?
@@ -145,6 +208,10 @@ for (const width of WIDTHS) {
             const small = await undersized(page);
             check(`${label}: everything a finger lands on is a finger's size`,
                 small.length === 0, JSON.stringify(small).slice(0, 200));
+
+            const faint = await unreadable(page);
+            check('and nothing on it is too small to read', faint.length === 0,
+                JSON.stringify(faint.slice(0, 4)));
 
             // The date. It decides where every tap lands, so it is on screen at the top of
             // the list and still on screen at the bottom of it.
@@ -285,6 +352,10 @@ for (const width of WIDTHS) {
     check(`${label}: everything a finger lands on is a finger's size`,
         small.length === 0, JSON.stringify(small).slice(0, 200));
 
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 4)));
+
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForTimeout(200);
     const last = await reachable(page, '#dayView .worker-list .wrow', -1);
@@ -380,6 +451,10 @@ for (const width of [320, 390]) {
     check(`${width}px: every control on the sheet is a finger's size`,
         small.length === 0, JSON.stringify(small).slice(0, 200));
 
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 4)));
+
     await page.context().close();
 }
 
@@ -409,6 +484,10 @@ for (const width of [320, 390]) {
     check(`${width}px: every control on it is a finger's size`,
         small.length === 0, JSON.stringify(small).slice(0, 200));
 
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 4)));
+
     await page.context().close();
 }
 
@@ -434,6 +513,10 @@ for (const width of [320, 390]) {
     check(`${width}px: every move button is a finger's size`,
         small.length === 0, JSON.stringify(small).slice(0, 200));
 
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 4)));
+
     const name = await page.evaluate(() => {
         const first = document.querySelector('#workerList .reorder-row .reorder-name');
         return {
@@ -443,6 +526,141 @@ for (const width of [320, 390]) {
     });
     check(`${width}px: a name and its position fit on two lines, not five`,
         name.wrapped < 70, JSON.stringify(name));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the other half of the day
+//
+// The fixture opened the by-WORKER list and nothing else, for a reason that was true as
+// far as it went: the by-site view is a grid of cards and has no row per man, so the
+// reachability questions this file was built around do not apply to it.
+//
+// The sizes do. Half the day screen - the view somebody uses to fix one site's evening -
+// had never been rendered by a layout assertion at all, and the smallest target in the
+// whole application was sitting in it: the ✕ that takes a man off a site, 31px wide,
+// because the stylesheet sets a minimum HEIGHT on it and no minimum width. A 44px-tall
+// button 31px wide passes a floor written in one dimension and fails a thumb.
+//
+// Undoable, all of it - every removal here goes through editWithUndo. The risk was never
+// that the tap could not be taken back. It is that it is easy to make by accident, and a
+// man of sixty-two holding a phone in one hand at the end of a day on a site should not
+// have to aim.
+for (const width of WIDTHS) {
+    suite(`${width}px: the day, by site`);
+
+    const page = await open({ width, height: HEIGHTS[width], mode: 'sites' });
+    await setInset(page, 34);
+
+    const cards = await page.evaluate(() =>
+        document.querySelectorAll('.site-card, .chip-main, .chip-side').length);
+    given('the by-site view actually drew its cards and chips', cards > 0);
+
+    const small = await undersized(page);
+    check('every control is at least a finger wide and tall', small.length === 0,
+        JSON.stringify(small.slice(0, 5)));
+
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 5)));
+
+    const wide = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth
+    }));
+    check('and the page does not run off the side',
+        wide.scroll <= wide.client + 1, JSON.stringify(wide));
+
+    // The one that removes something is the one to be surest about.
+    const remove = await page.evaluate(() => {
+        const node = [...document.querySelectorAll('.chip-side')]
+            .find(item => item.textContent.trim() === '✕');
+        if (!node) return null;
+        const box = node.getBoundingClientRect();
+        return { w: Math.round(box.width), h: Math.round(box.height) };
+    });
+    check('the button that takes a man off a site is there to be measured', Boolean(remove));
+    if (remove) {
+        // Deliberately MORE than the floor, and asserted at the number rather than at the
+        // floor - the first version of this check asked for 44, which the general rule
+        // already gives it, so removing the extra room changed nothing and nothing went
+        // red. An intention no test can tell apart from its absence is not protected.
+        //
+        // It is the only control on this screen that takes something away, it sits beside
+        // the one that opens the worker, and the two are told apart by aim.
+        check('and the one that removes gets more room than the rest',
+            remove.w >= 52 && remove.h >= 44, JSON.stringify(remove));
+    }
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the week as a grid
+//
+// The third screen this matrix had never measured. It is visited below to check that the
+// day dock stays behind on it, and that is all that has ever been asked of it - so the
+// smallest text in the whole application lived here undisturbed: 9px dates in the header,
+// a 10.5px label on the totals row, 11.5px totals under it.
+//
+// Seven columns of dates on a 320px phone genuinely cannot carry the same size as a
+// heading, which is why the floor here is its own and lower. What it cannot be is unwritten.
+for (const width of WIDTHS) {
+    suite(`${width}px: the week`);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+    await page.click('#tab-week');
+    await page.waitForTimeout(400);
+
+    const drawn = await page.evaluate(() => ({
+        cells: document.querySelectorAll('.week-cell').length,
+        filled: document.querySelectorAll('.cell-filled').length
+    }));
+    given('the week drew its grid, with somebody in it', drawn.cells > 0 && drawn.filled > 0);
+
+    const faint = await unreadable(page);
+    check('nothing in the grid is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 5)));
+
+    // What a cell can actually be, rather than a floor that cannot be met.
+    //
+    // Seven columns at 44px is 308px on its own, and a 320px screen offers 296 once the
+    // page's own padding is out - so on the smallest phone this app runs on, a week with a
+    // column of names beside it CANNOT have thumb-sized cells. The app's answer is to show
+    // the whole week anyway, because a screen that shows Thursday is not a week; the cell
+    // is a shortcut to that day and the day screen has its own arrows and picker. A cell
+    // hit by mistake opens a day and changes nothing.
+    //
+    // So the assertion is the truth at each width: from 375 up a cell is a target, at 320
+    // it is a thing to read, and either way nothing may be narrower than the grid it is in.
+    const cells = await page.evaluate(() => {
+        const boxes = [...document.querySelectorAll('.week-cell')]
+            .map(node => node.getBoundingClientRect());
+        return { min: Math.round(Math.min(...boxes.map(b => b.width))),
+            height: Math.round(Math.min(...boxes.map(b => b.height))) };
+    });
+    // The arithmetic, per width, measured rather than assumed: the name column is 70px and
+    // whatever the page's padding leaves is divided by seven. 320 gives 32, 375 and 390
+    // give about 42, and only 430 clears 44. Two pixels could be taken from the names to
+    // buy the middle sizes their 44th - and are not: on this screen the name is what a
+    // person is looking for, the cell is a shortcut to a day, and a cell hit by mistake
+    // opens a day and changes nothing.
+    const floor = width >= 430 ? 44 : (width >= 375 ? 40 : 30);
+    check(`a cell on a ${width}px screen is at least ${floor}px across`,
+        cells.min >= floor && cells.height >= 44, JSON.stringify({ ...cells, floor }));
+
+    const small = await undersized(page);
+    check('every OTHER control on the screen is big enough to tap',
+        small.filter(item => !item.cls.includes('week-cell')).length === 0,
+        JSON.stringify(small.filter(item => !item.cls.includes('week-cell')).slice(0, 4)));
+
+    const wide = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth,
+        table: Math.round(document.querySelector('.week-table').getBoundingClientRect().width)
+    }));
+    check('and seven days plus the names fit across the phone',
+        wide.scroll <= wide.client + 1, JSON.stringify(wide));
 
     await page.context().close();
 }

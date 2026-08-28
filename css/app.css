@@ -194,7 +194,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
     font-size: 17px;
 }
 .brand strong { font-size: 19px; letter-spacing: -.01em; }
-.brand-sub { color: var(--ink-3); font-size: 12.5px; }
+.brand-sub { color: var(--ink-3); font-size: 14px; }
 
 .tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 
@@ -358,6 +358,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* These carry their own padding and would otherwise stay short inside a flex row. */
     .chip-main, .chip-side, .tab, .step-btn, .btn-today, .btn-add { min-height: 44px; }
+
+    /* And a minimum WIDTH, which this block did not have.
+       A floor written in one dimension is not a floor. .chip-side was 44px tall and 31px
+       wide - it passed every check here for a year while being the smallest thing in the
+       app, and it is the button that takes a man off a site. Undoable, but a mis-tap is
+       still an evening interrupted, and the person holding the phone is sixty-two and
+       standing on a building site. */
+    .chip-main, .chip-side, .step-btn, .btn-today, .btn-add, .btn-icon { min-width: 44px; }
+
+    /* The ✕ gets more than the floor. It is the only control on this screen that takes
+       something away, it sits directly beside the one that opens the worker, and the two
+       are told apart by aim alone. */
+    .chip-side { min-width: 52px; }
 }
 
 /* A phone held sideways is 844 pixels wide and still a phone.
@@ -422,11 +435,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .reorder-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .reorder-name strong { font-size: 15px; }
-.reorder-place { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.reorder-place { font-size: 14px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
 .reorder-moves { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
 .reorder-moves .btn-icon { font-size: 15px; }
-.reorder-exact { font-size: 13px; padding: 6px 10px; }
+.reorder-exact { font-size: 14px; padding: 6px 10px; }
 
 .reorder-foot {
     display: flex;
@@ -662,7 +675,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Undo, redo and "היום" travel together, so they wrap as a group and keep their corner
    instead of one of them being carried onto a line of its own. */
 .day-steps { display: flex; gap: 6px; align-items: center; }
-.btn-today { padding: 6px 12px; font-size: 13.5px; }
+.btn-today { padding: 6px 12px; font-size: 14px; }
 .day-tools input[type="date"] {
     font-family: inherit;
     font-size: 15px;
@@ -803,7 +816,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border: none;
     border-radius: 0;
     padding: 6px 10px;
-    font-size: 13px;
+    font-size: 14px;
 }
 .chip-absent .chip-main { color: var(--ink-3); }
 
@@ -1012,7 +1025,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .roster-row:last-child { border-bottom: none; }
 .roster-details { flex: 1; min-width: 0; }
-.roster-meta { font-size: 13px; color: var(--ink-2); }
+.roster-meta { font-size: 14px; color: var(--ink-2); }
 .roster-off { opacity: .55; }
 .roster-actions { display: flex; gap: 2px; }
 .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1238,13 +1251,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .week-table th, .week-table td { padding: 3px 1px; }
 
     /* The corner label has no room; the column keeps its width for the names.
-       70px rather than 78: the seven day columns have to be 44px wide to be tapped at
-       all, and 70 + 7x44 is what fits across the narrowest phone this app runs on. The
-       names were already being ellipsized at 78. */
+       70px rather than 78, which buys the day columns 8px each and ellipsizes no name
+       that was not already being ellipsized.
+
+       An earlier version of this comment said 70 + 7x44 is what fits across the narrowest
+       phone. It is not: that is 378px, and a 320px screen offers 296. Seven columns wide
+       enough for a thumb do not fit beside a column of names on the smallest phone this
+       app runs on, and no arrangement of these numbers makes them - 7 x 44 is 308 on its
+       own. So the columns are 32px there and the week is a screen for READING on a phone
+       that size. Tapping a cell is a shortcut to that day, not the only way to it: the day
+       screen has its own date arrows and its own picker, and a cell hit by mistake opens a
+       day and changes nothing. From 375px up the columns clear 44 and the question does
+       not arise. tests/mobile.test.mjs measures this at every width rather than trusting
+       the arithmetic in a comment, which is how the wrong one survived here. */
     .week-table .corner { font-size: 0; width: 70px; }
     .week-table td.week-cell, .week-table th:not(.corner) { min-width: 44px; }
     .week-table .name-cell {
-        font-size: 12px;
+        font-size: 14px;
         padding: 4px 6px;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1256,7 +1279,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     /* One letter of the day name over the date, like the strip. */
     .week-table thead .day-full { display: none; }
     .week-table thead .day-initial { display: block; font-size: 12px; }
-    .week-table thead small { font-size: 9px; letter-spacing: -.02em; }
+    .week-table thead small { font-size: 12px; letter-spacing: -.02em; }
 
     .week-cell .cell-line {
         display: block;
@@ -1299,7 +1322,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .week-legend-note {
         display: block;
         color: var(--ink-3);
-        font-size: 12px;
+        font-size: 14px;
         margin: 6px 0 0;
     }
 
@@ -1307,8 +1330,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .cell-absent { font-size: 0; }
     .cell-absent::before { content: '\2014'; font-size: 12px; color: var(--ink-3); }
 
-    .week-table tfoot td { font-size: 11.5px; padding: 4px 1px; }
-    .week-table tfoot .name-cell { font-size: 10.5px; }
+    .week-table tfoot td { font-size: 12px; padding: 4px 1px; }
+    .week-table tfoot .name-cell { font-size: 12px; }
 }
 
 /* ---------------------------------------------------------------- modals */
@@ -1430,10 +1453,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .storage-notice {
     text-align: center;
     margin: 18px 0 0;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--ink-3);
 }
-.hint { font-size: 13px; color: var(--ink-3); margin: 10px 0 0; }
+.hint { font-size: 14px; color: var(--ink-3); margin: 10px 0 0; }
 /* A note about money that is missing from a total has to survive the print stylesheet,
    where every other hint is dropped. */
 .hint-warn { color: var(--warn); font-weight: 600; }
@@ -1450,7 +1473,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
        Told how wide it actually wants to be, it drops to the line below when there is no
        room and stretches into it, which is what it did when it had the row to itself. */
     .day-tools .layer-toggle { margin-inline-start: 0; flex: 1 1 auto; min-width: max-content; }
-    .layer-toggle button { flex: 1; padding: 6px 4px; font-size: 13px; }
+    .layer-toggle button { flex: 1; padding: 6px 4px; font-size: 14px; }
     .btn-today { margin-inline-start: auto; }
     .day-actions {
         /* The tab bar below carries the home-indicator inset, so this one must not add a
@@ -1700,12 +1723,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .now-flash { animation: nowFlash .7s ease-out 1; }
 /* the mode switch is a preference, not the decision of the screen - it whispers */
 .mode-quiet { background: transparent; padding: 0; gap: 6px; }
-.mode-quiet .layer-off { color: var(--ink-2); font-size: 13.5px; padding: 5px 10px; }
+.mode-quiet .layer-off { color: var(--ink-2); font-size: 14px; padding: 5px 10px; }
 .mode-quiet .layer-on {
     background: var(--surface-2);
     color: var(--ink);
     box-shadow: none;
-    font-size: 13.5px;
+    font-size: 14px;
     padding: 5px 10px;
 }
 @keyframes nowFlash {
@@ -1869,7 +1892,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .sheet-note {
     margin: 8px 0 0;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--ink-3);
     text-align: center;
 }
@@ -1894,7 +1917,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     background: var(--surface);
 }
 .sheet-head h3 { margin: 0; font-size: 27px; line-height: 1.15; }
-.sheet-meta { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sheet-meta { font-size: 14px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
 /* Advancing to the next worker slides the whole card in and flashes the name line -
    slowly enough to be SEEN. The layout is identical from worker to worker, so without
@@ -2013,7 +2036,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    missing sentence: a day recorded outside the range is not in the count, and nothing
    said what the range was. */
 .report-period {
-    font-size: 13.5px;
+    font-size: 14px;
     color: var(--ink-2);
     margin-bottom: 10px;
     font-variant-numeric: tabular-nums;
@@ -2071,7 +2094,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* the bottom bar */
     @media (max-width: 700px) {
-        .tab { font-size: 12px; padding: 7px 2px 6px; }
+        .tab { font-size: 14px; padding: 7px 2px 6px; }
         .tab-icon svg { width: 24px; height: 24px; }
         .wrow-main { min-height: 66px; }
         .report-table td { font-size: 16px; }
@@ -2099,7 +2122,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     gap: 10px;
     flex-wrap: wrap;
 }
-.app-version button { font-size: 13px; padding: 6px 12px; }
+.app-version button { font-size: 14px; padding: 6px 12px; }
 
 /* ================================================================ print, fail-safe
 
