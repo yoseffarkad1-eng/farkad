@@ -6444,8 +6444,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // day is being edited is pinned and never scrolls away
   check('the now-editing line names the day and date together',
     (await page.textContent('.now-editing')).includes('12/08'));
+  // The progress rides inside the sticky day header now - one box, so nothing can
+  // bury it. What is pinned is the box that carries the line.
   check('and it is pinned, not scrolled away',
-    (await page.locator('.progress').evaluate(n => getComputedStyle(n).position)) === 'sticky');
+    (await page.locator('.progress').evaluate(n =>
+      getComputedStyle(n.closest('.day-header') || n).position)) === 'sticky');
 
   await page.getByRole('button', { name: 'יום קודם', exact: true }).click();
   await page.getByRole('button', { name: 'יום קודם', exact: true }).click();
@@ -6615,6 +6618,19 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     String(paths.back));
   check('and the forward chevron pointing left', paths.fwd === 'M15 6l-6 6 6 6',
     String(paths.fwd));
+
+  // Every week cell is a button that opens somebody's day; a cell with no name used to
+  // announce as 'button', thirty times per screen.
+  await page.evaluate(() => {
+    State.schedule.workers.push({ id: 'w_wk', name: 'בודק', active: true });
+    State.save({ silent: true }); showView('week');
+  });
+  await page.waitForTimeout(300);
+  const cellLabel = await page.evaluate(() =>
+    document.querySelector('.week-cell[role="button"]')?.getAttribute('aria-label') || '');
+  check('a week cell tells a reader whose day it opens',
+    cellLabel.includes('בודק'), cellLabel);
+  await page.evaluate(() => showView('day'));
 
   // A leading plus is bidi-shuffled exactly like the leading minus the app already
   // guards: bare "+2" lays out as "2+" in Hebrew text. Every hours badge goes through

@@ -60,7 +60,14 @@ function renderDay() {
         return;
     }
 
-    root.appendChild(renderProgress());
+    // The progress row rides INSIDE the sticky header, as its last row. As a second
+    // sticky box it spent its scrolled life buried under the header - same top, lower
+    // z - taking המשך with it, and a tap where the button appeared to be landed on
+    // "יום הבא". One box cannot bury itself.
+    const stuck = root.querySelector('.day-header');
+    if (stuck) stuck.appendChild(renderProgress());
+    else root.appendChild(renderProgress());
+    root.appendChild(renderModeToggle());
     root.appendChild(renderBulkRow());
 
     if (dayMode === 'workers') {
@@ -179,6 +186,10 @@ function renderProgress() {
     const wrap = el('div', left === 0 ? 'progress progress-done' : 'progress');
 
     const line = el('div', 'progress-line');
+    // Inside the header the date is already on the row above; this copy is for the
+    // ANNOUNCEMENT (the live region reads the whole line) and for the empty-roster
+    // screens where the progress stands alone. The stylesheet hides it visually when
+    // the header carries it.
     const now = el('strong', 'now-editing');
     now.textContent = `${hebrewDayName(date)} · ${formatShortDate(date)}`;
     line.appendChild(now);
@@ -480,6 +491,13 @@ function renderDayHeader() {
     undoBtn.disabled = true;
     steps.appendChild(undoBtn);
 
+    // A thin wall between them: undo and redo are opposites, and a redo mis-tap right
+    // after an undo tap re-makes the exact mistake the undo was for. Six pixels of gap
+    // is not a decision; a drawn line is.
+    const wall = el('span', 'bar-div');
+    wall.setAttribute('aria-hidden', 'true');
+    steps.appendChild(wall);
+
     const redoBtn = button('↷ שוב', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
     redoBtn.id = 'redoBtn';
     redoBtn.disabled = true;
@@ -495,13 +513,18 @@ function renderDayHeader() {
     }
     tools.appendChild(steps);
 
-    const modes = el('div', 'layer-toggle mode-toggle mode-quiet');
-    modes.appendChild(modeButton('workers', 'לפי עובדים'));
-    modes.appendChild(modeButton('sites', 'לפי אתרים'));
-    tools.appendChild(modes);
-
     header.appendChild(tools);
     return header;
+}
+
+// The two ways of looking at one day, as the first thing in the SCROLLING content. On
+// the header it wrapped to a second line at 320px and the whole pinned block paid for
+// it on every scroll; a way of working is chosen once, not consulted every row.
+function renderModeToggle() {
+    const modes = el('div', 'layer-toggle mode-toggle mode-quiet day-mode-row');
+    modes.appendChild(modeButton('workers', 'לפי עובדים'));
+    modes.appendChild(modeButton('sites', 'לפי אתרים'));
+    return modes;
 }
 
 function openDayPicker() {
