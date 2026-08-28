@@ -806,6 +806,7 @@ function workerFootprint(schedule, workerId) {
     const id = String(workerId);
     const days = [];
     const advances = [];
+    const vehicles = [];
 
     const allDays = (schedule && schedule.days) || {};
     Object.keys(allDays).forEach(date => {
@@ -822,7 +823,16 @@ function workerFootprint(schedule, workerId) {
         if (item && String(item.workerId) === id) advances.push(advance);
     });
 
-    return { days, advances };
+    // A van is his in the same way a day is. It carries his id as its owner, the pay
+    // sheet pays HIM for every day it went out, and there is no second place that
+    // remembers whose it was: delete the man and the van is left pointing at nobody,
+    // while the money it earned leaves the report with him. Archived counts - a van put
+    // away last month still worked the month before it, and that fortnight is still owed.
+    ((schedule && schedule.vehicles) || []).forEach(vehicle => {
+        if (vehicle && String(vehicle.ownerId) === id) vehicles.push(String(vehicle.id));
+    });
+
+    return { days, advances, vehicles };
 }
 
 // What still has to be settled with a man before he is put away, said in a sentence, or

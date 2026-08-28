@@ -1175,6 +1175,15 @@ function deletionBlockers(workerId) {
 
     if (footprint.days.length > 0) blocked.push(`${footprint.days.length} ימים רשומים`);
     if (footprint.advances.length > 0) blocked.push(`${footprint.advances.length} מקדמות`);
+    // Named, not counted. "1 רכב" tells him nothing he can act on; the plate on the van
+    // is what he recognises, and if the answer surprises him he can go and look at it.
+    if (footprint.vehicles.length > 0) {
+        const names = footprint.vehicles
+            .map(id => (State.schedule.vehicles || []).find(v => v && String(v.id) === id))
+            .filter(Boolean)
+            .map(vehicle => vehicle.name);
+        blocked.push(`רכב על שמו: ${names.join(', ')}`);
+    }
     if (sync && sync.queueNamesWorker && sync.queueNamesWorker(workerId)) {
         blocked.push('רישומים שממתינים לשליחה');
     }

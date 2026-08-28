@@ -735,6 +735,22 @@ const FarkadSync = {
             if (parts[0] === 'advances') {
                 return Boolean(item && item.value && String(item.value.workerId) === id);
             }
+            // A van on its way out that says it is his. The roster on this device can
+            // lose a vehicle - a foreign snapshot, a migration, a hand-edited backup -
+            // and then nothing in the schedule remembers whose it was. This entry does,
+            // and while it is unsent it is the only copy of that fact anywhere.
+            if (parts[0] === 'roster' && parts[1] === 'vehicles') {
+                const value = item && item.value;
+                if (parts.length === 3) return Boolean(value && String(value.ownerId) === id);
+                // roster.vehicles.<id>.ownerId - the field written on its own.
+                if (parts.length === 4 && parts[3] === 'ownerId') return String(value) === id;
+                return false;
+            }
+            // The legacy whole array, still written for a phone that reads nothing else.
+            if (path === 'vehicles') {
+                return Array.isArray(item && item.value) && item.value.some(
+                    vehicle => vehicle && String(vehicle.ownerId) === id);
+            }
             return false;
         });
     },

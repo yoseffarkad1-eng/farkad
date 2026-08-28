@@ -9785,4 +9785,63 @@ function withAdvances(device, rows) {
         { days: 1, amount: 300 });
 }
 
+// ---------------------------------------------------------------- V9: a man with a van is not deletable
+//
+// Deleting a worker is refused when anything of his would be orphaned by it - days,
+// advances, an unsent queue, or a provenance record that cannot prove he was made here and
+// never sent. Vehicles were none of those. A man could own three vans, be owed for every
+// day they went out, and still be offered permanent deletion: the vans would be left
+// pointing at a worker who no longer exists, and the money owed for them would leave the
+// pay sheet with him.
+{
+    suite('V9: a man who owns a van cannot be deleted');
+
+    const device = makeDevice();
+    seed(device);
+    // Proven local, no days, no advances - deletable on every other count.
+    const id = device.State.nextWorkerId();
+    device.State.schedule.workers.push({ id, name: 'בעל הרכב', active: true, dailyRate: 0 });
+    device.State.commitRoster();
+    given('with nothing else against him he could be deleted',
+        device.call('deletionBlockers', id).length === 0,
+        JSON.stringify(device.call('deletionBlockers', id)));
+
+    device.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: id, active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.commitRoster();
+
+    const blocked = device.call('deletionBlockers', id);
+    check('owning one is enough to refuse it', blocked.length > 0, JSON.stringify(blocked));
+    check('and the reason names the vehicle rather than something else',
+        blocked.some(reason => reason.includes('רכב')), JSON.stringify(blocked));
+
+    // Archiving the van does not make him deletable: the days it earned on are still his.
+    device.State.schedule.vehicles[0].active = false;
+    device.State.schedule.vehicles[0].service = [{ from: '2026-09-01', active: false }];
+    device.State.commitRoster();
+    check('archiving the van does not change that',
+        device.call('deletionBlockers', id).length > 0,
+        JSON.stringify(device.call('deletionBlockers', id)));
+
+    // And a man whose van has left the roster - a foreign snapshot, a hand-edited backup,
+    // a migration that dropped it - is still refused while an unsent record names him as
+    // its owner. That record is then the only copy of the fact anywhere on the device.
+    const other = makeDevice();
+    seed(other);
+    const paid = other.State.nextWorkerId();
+    other.State.schedule.workers.push({ id: paid, name: 'שולם לו', active: true, dailyRate: 0 });
+    other.State.schedule.vehicles = [{ id: 'v_02', name: 'טרנזיט', ownerId: paid, active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    other.State.commitRoster();
+    record(other, '2026-08-12', 'w_01', 'p_01');
+    given('his van earned him something',
+        other.call('vehiclePayFor', other.State.schedule, paid, '2026-08-01', '2026-08-31').amount === 300);
+
+    other.State.schedule.vehicles = [];
+    other.State.commitRoster();
+    const after = other.call('deletionBlockers', paid);
+    check('an unsent record that names him as its owner still refuses the deletion',
+        after.length > 0, JSON.stringify(after));
+}
+
 report();
