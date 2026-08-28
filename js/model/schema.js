@@ -383,14 +383,35 @@ function dayProblems(raw, known) {
             problems.push('היום ' + date + ' ברישום אינו תקין.');
             return;
         }
-        // Only the two sides the model has. A third key is something this app did not
-        // write, and reading it as a day would be reading somebody else's document.
-        const extra = Object.keys(day).filter(key => key !== 'plan' && key !== 'actual');
+        // The two sides the model has, and the vehicles that stayed in the yard. Anything
+        // else is something this app did not write, and reading it as a day would be
+        // reading somebody else's document.
+        //
+        // vehiclesOff was added to the writer in v83 and to nothing else. A record
+        // carrying it failed here, was judged damaged and quarantined, and the day's work
+        // did not load - so one tap on "לא יצא" cost somebody the evening he had just
+        // recorded. The bytes were never overwritten, which is why teaching the reader
+        // about the field is enough to open those records again.
+        const extra = Object.keys(day)
+            .filter(key => key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff');
         if (extra.length > 0) {
             problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
             return;
         }
-        if (day.plan === undefined && day.actual === undefined) {
+        if (day.vehiclesOff !== undefined) {
+            const off = day.vehiclesOff;
+            if (!Array.isArray(off)) {
+                problems.push('רשימת הרכבים שלא יצאו ב-' + date + ' אינה תקינה.');
+                return;
+            }
+            const bad = off.find(id => !isSafeSegment(id));
+            if (bad !== undefined) {
+                problems.push('ליום ' + date + ' יש רכב עם מזהה שאינו תקין.');
+                return;
+            }
+        }
+        if (day.plan === undefined && day.actual === undefined
+            && day.vehiclesOff === undefined) {
             problems.push('ליום ' + date + ' אין רישום כלל.');
             return;
         }
@@ -557,6 +578,18 @@ function journalEntryProblems(path, value) {
 
     // days.<date>.<layer>.<workerId> - one person, one day, one side of it.
     if (parts[0] === 'days') {
+        // days.<date>.vehiclesOff - the vehicles that stayed in the yard that day, or a
+        // null taking the whole list back. Three segments rather than four, and it was
+        // refused here, so the edit was written to this phone's disk and never left it.
+        if (parts.length === 3 && parts[2] === 'vehiclesOff') {
+            if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
+            if (value === null) return [];
+            if (!Array.isArray(value)) return ['a vehicles-off list that is not a list'];
+            if (value.some(id => !isSafeSegment(id))) {
+                return ['a vehicles-off list naming an unusable id'];
+            }
+            return [];
+        }
         if (parts.length !== 4) return ['a day path with the wrong number of segments'];
         if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
         if (parts[2] !== 'plan' && parts[2] !== 'actual') return ['a layer nobody wrote'];

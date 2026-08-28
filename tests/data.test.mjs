@@ -9207,4 +9207,111 @@ function withAdvances(device, rows) {
         JSON.stringify(verdict));
 }
 
+// ---------------------------------------------------------------- V2: the exception that locked the record
+//
+// Shipped in v83 and live. One tap on "לא יצא" wrote days.<date>.vehiclesOff, commit()
+// said true, and the bytes reached the disk. At the NEXT OPEN the whole record was judged
+// damaged and quarantined: dayProblems accepts only plan and actual and calls a third key
+// somebody else's document, so the day's work did not load either. A man marks one van as
+// having stayed in the yard and loses the evening he just recorded.
+//
+// Two more places had never heard of the field: the journal path validator, which decides
+// what may be queued for the other phones, and normaliseSchedule, which rebuilds the
+// schedule from what it recognises and drops the rest.
+//
+// These tests walk the real lifecycle - write, close, reopen, and a second device - and
+// not an assertion taken in memory a line after the mutation, which is what let this ship.
+{
+    suite('V2: an evening survives a vehicle staying in the yard');
+
+    const device = makeDevice();
+    seed(device);
+    device.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    const change = device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', false);
+    check('marking one as having stayed in is accepted', device.State.commit(change) === true);
+    same('and it is on the disk', JSON.parse(device.raw('scheduleData:v2')).days['2026-08-12'].vehiclesOff,
+        ['v_01']);
+
+    // The whole of the point: close, and open again.
+    const reopened = makeDevice({ storage: device.dump() });
+    reopened.State.load();
+
+    check('the record opens rather than being quarantined',
+        reopened.call('farkadWritesBlocked') === false);
+    check('the day that was recorded is still there',
+        reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+    same('and so is the exception', (reopened.State.schedule.days['2026-08-12'] || {}).vehiclesOff,
+        ['v_01']);
+    same('so the vehicle is still not paid for',
+        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 0, amount: 0 });
+}
+
+{
+    suite('V2: and the other phone is told about it');
+
+    const device = makeDevice();
+    seed(device);
+    device.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+    device.State.commit(device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', false));
+
+    // What the queue is allowed to carry is decided by the path validator, and a path it
+    // refuses is an edit that never leaves this phone.
+    same('the queued path is one the wire accepts',
+        device.call('journalEntryProblems', 'days.2026-08-12.vehiclesOff', ['v_01']), []);
+    check('and the edit is actually in the queue',
+        String(device.raw('farkad:outbox')).includes('vehiclesOff'),
+        String(device.raw('farkad:outbox')).slice(0, 120));
+
+    // Taking it back empties the list, which travels as a deletion rather than as [].
+    const back = device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', true);
+    device.State.commit(back);
+    check('putting it back sends a deletion, not an empty list', back.value === null);
+    same('and that is a path the wire accepts too',
+        device.call('journalEntryProblems', 'days.2026-08-12.vehiclesOff', null), []);
+
+    const again = makeDevice({ storage: device.dump() });
+    again.State.load();
+    check('and the record still opens', again.call('farkadWritesBlocked') === false);
+    same('with the vehicle paid for again',
+        again.call('vehiclePayFor', again.State.schedule, 'w_01', '2026-08-12', '2026-08-12'),
+        { days: 1, amount: 300 });
+}
+
+{
+    suite('V2: a record quarantined by the old build opens once the reader knows the field');
+
+    // Anybody who pressed that button before this fix has a record their phone will not
+    // open. The bytes were never overwritten - recovery mode's whole job - so the repair
+    // is enough on its own, and this is the proof.
+    const written = makeDevice();
+    seed(written);
+    written.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    written.State.save({ silent: true });
+    record(written, '2026-08-12', 'w_01', 'p_01');
+    written.State.commit(
+        written.call('setVehicleOut', written.State.schedule, '2026-08-12', 'v_01', false));
+
+    const disk = written.dump();
+    given('the record on that disk carries the field', JSON.parse(disk['scheduleData:v2'])
+        .days['2026-08-12'].vehiclesOff.length === 1);
+
+    const healed = makeDevice({ storage: disk });
+    healed.State.load();
+    check('it opens', healed.call('farkadWritesBlocked') === false);
+    check('with the evening intact',
+        healed.call('entriesFor', healed.State.schedule, '2026-08-12', 'w_01', 'actual').length === 1);
+    check('and nothing was set aside as damaged on the way',
+        !Object.keys(healed.dump()).some(key => key.endsWith(':damaged')),
+        JSON.stringify(Object.keys(healed.dump())));
+}
+
 report();

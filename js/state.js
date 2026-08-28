@@ -617,6 +617,17 @@ function normaliseSchedule(raw, hints) {
             plan: normaliseLayer(day.plan),
             actual: normaliseLayer(day.actual)
         };
+
+        // The vehicles that stayed in the yard. Written since v83 and copied by nothing,
+        // so it disappeared at the next open even once the validator stopped calling the
+        // record damaged - this function builds a fresh schedule and keeps only what it
+        // recognises. Stored only when there is an exception to store: the ordinary
+        // evening writes nothing at all, and an empty list on every day of the record is
+        // a field on every device's document forever.
+        const off = Array.isArray(day.vehiclesOff)
+            ? day.vehiclesOff.filter(id => id && typeof id === 'string').map(String)
+            : [];
+        if (off.length > 0) schedule.days[date].vehiclesOff = off;
     });
 
     // Advances arrive keyed by id. A null value is a deletion another device sent and
