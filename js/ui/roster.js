@@ -55,12 +55,30 @@ function renderWorkerList() {
     }
     active.forEach(worker => container.appendChild(workerRow(worker)));
 
+    // The headings carry the counts: a crew is a NUMBER before it is a list, and the
+    // number is the first thing checked against payday's.
+    const workersHeading = document.getElementById('workersHeading');
+    if (workersHeading) workersHeading.textContent = `עובדים פעילים (${active.length})`;
+    const placesHeading = document.getElementById('placesHeading');
+    if (placesHeading) {
+        placesHeading.textContent =
+            `אתרי עבודה (${State.schedule.places.filter(place => place.active !== false).length})`;
+    }
+
     if (archived.length === 0) return;
 
     // Folded, and at the bottom. They are not part of the working list any more, and a
     // crew of six that reads as a crew of eleven is a crew somebody counts wrong.
     const box = el('details', 'roster-archive');
-    const summary = el('summary', null, `ארכיון עובדים (${archived.length})`);
+    // The count of archived men who still have advances on the books rides on the fold:
+    // money does not go to the archive with the man, and a fold that hid it would be
+    // where an open balance goes to be forgotten.
+    const owing = archived.filter(worker =>
+        (openAdvanceBalance(State.schedule, worker.id) || { count: 0 }).count > 0).length;
+    const summary = el('summary', null, owing === 0
+        ? `ארכיון עובדים (${archived.length})`
+        : `ארכיון עובדים (${archived.length}) · ` +
+            (owing === 1 ? 'לאחד מהם מקדמות רשומות' : `ל-${owing} מהם מקדמות רשומות`));
     box.appendChild(summary);
     archived.forEach(worker => box.appendChild(workerRow(worker)));
     container.appendChild(box);
@@ -77,26 +95,36 @@ function workerRow(worker) {
         line.appendChild(ltr(worker.idNumber));
         details.appendChild(line);
     }
+    // One line for the phone and the rates - it is a list of thirty, and every extra
+    // line per man is a screen of scrolling. A man with no phone says so, because a
+    // blank next to a list of numbers reads as "somebody forgot", which is the case.
+    const line = el('div', 'roster-meta');
     if (worker.phone) {
-        const line = el('div', 'roster-meta');
         line.appendChild(el('span', null, '📞 '));
         line.appendChild(ltr(worker.phone));
-        details.appendChild(line);
+    } else {
+        line.appendChild(el('span', null, 'בלי טלפון'));
     }
     if (worker.dailyRate) {
-        const line = el('div', 'roster-meta');
-        line.appendChild(el('span', null, 'יומי: '));
+        line.appendChild(el('span', null, ' · יומי: '));
         line.appendChild(ltr(String(worker.dailyRate)));
         if (worker.hourlyRate) {
             line.appendChild(el('span', null, ' · שעה: '));
             line.appendChild(ltr(String(worker.hourlyRate)));
         }
-        details.appendChild(line);
     }
+    details.appendChild(line);
     if (worker.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
     // Pairs that already exist - from an import, or from before this was checked.
     if (worker.active !== false && hasDuplicateName(worker)) {
         details.appendChild(el('span', 'badge badge-warn', 'שם כפול'));
+    }
+    // A number two men share is how half the days end up on the row nobody reads: the
+    // badge surfaces it on the LIST, where the duplicate is actually noticed - the
+    // dialogs at edit time already ask about it.
+    if (worker.phone && typeof workersSharingPhone === 'function'
+        && workersSharingPhone(State.schedule, worker.phone, worker.id).length > 0) {
+        details.appendChild(el('span', 'badge badge-warn', 'מספר משותף'));
     }
     row.appendChild(details);
 
@@ -166,6 +194,35 @@ function closeReorder() {
     const line = document.getElementById('reorderLive');
     if (line) line.textContent = '';
     render();
+}
+
+// How many rows sit somewhere other than where the crew's saved order has them. The
+// footer counts it out loud, each moved row wears a badge, and the exit guard below
+// asks about exactly this number.
+function reorderMovedIds() {
+    if (!reorderDraft || !reorderBase) return [];
+    const base = reorderBase.split(',');
+    return reorderDraft.filter((id, index) => base[index] !== id);
+}
+
+// The three-answer question at the door. Leaving a mode with unsaved work by switching
+// tabs used to discard it without a word - and the third answer, staying, is the one a
+// person who tapped the wrong tab actually wants.
+async function confirmReorderExit() {
+    if (!reorderDraft) return true;
+    const moved = reorderMovedIds().length;
+    if (moved === 0) { closeReorder(); return true; }
+
+    const answer = await askChoice({
+        title: 'יציאה מסידור העובדים',
+        message: moved === 1
+            ? 'שינית את הסדר של עובד אחד והשינוי עוד לא נשמר.'
+            : `שינית את הסדר של ${moved} עובדים והשינויים עוד לא נשמרו.`,
+        choices: ['שמירה ויציאה', 'יציאה בלי לשמור', 'הישארות']
+    });
+    if (answer === 'שמירה ויציאה') { saveReorder(); return reorderDraft === null; }
+    if (answer === 'יציאה בלי לשמור') { closeReorder(); return true; }
+    return false;
 }
 
 // The whole array, rebuilt from a draft order of the ACTIVE men.
@@ -250,7 +307,7 @@ function saveReorder() {
         askTell({
             title: 'הסדר לא נשמר',
             message: 'לא הצלחנו לכתוב את הסדר החדש במכשיר. הסדר שעל המסך נשמר כאן ' +
-                'בינתיים - פנה מקום ונסה לשמור שוב.'
+                'בינתיים - ייצא קובץ גיבוי, פנה מקום ונסה לשמור שוב.'
         });
         return;
     }
@@ -262,7 +319,7 @@ function renderReorderList(container, active) {
 
     const head = el('div', 'reorder-head');
     head.appendChild(el('p', 'hint',
-        'גרור בידית, או השתמש בכפתורים. שום דבר לא נשמר עד שלוחצים "שמור סדר".'));
+        'גרור בידית, או השתמש בכפתורים. שום דבר לא נשמר עד שלוחצים "שמירה ויציאה".'));
     container.appendChild(head);
 
     const list = el('div', 'reorder-list');
@@ -276,8 +333,20 @@ function renderReorderList(container, active) {
     container.appendChild(list);
 
     const foot = el('div', 'reorder-foot');
-    foot.appendChild(button('שמור סדר', 'btn-add', saveReorder));
-    foot.appendChild(button('ביטול', 'btn-secondary', closeReorder));
+    const moved = reorderMovedIds().length;
+    if (moved > 0) {
+        foot.appendChild(el('p', 'hint reorder-moved-count', moved === 1
+            ? 'שינוי אחד לא נשמר'
+            : `${moved} שינויים לא שמורים`));
+    }
+    const save = button('שמירה ויציאה', 'btn-add', saveReorder);
+    // Mid-drag the finger owns the list; a save that fires under it would write
+    // whatever order the row happened to be passing through.
+    save.disabled = Boolean(reorderDragging);
+    foot.appendChild(save);
+    foot.appendChild(button('יציאה בלי לשמור', 'btn-secondary', () => { confirmReorderExit(); }));
+    foot.appendChild(el('p', 'hint',
+        'הסדר נשמר כרשומה אחת לכל המכשירים — או שנשמר כולו, או שלא נשמר כלל.'));
     container.appendChild(foot);
 }
 
@@ -293,6 +362,11 @@ function reorderRow(worker, index) {
     const name = el('div', 'reorder-name');
     name.appendChild(el('strong', null, worker.name));
     name.appendChild(el('span', 'reorder-place', `${index + 1} מתוך ${reorderDraft.length}`));
+    // Which rows the unsaved count is counting - the answer to "what did I change?"
+    // before deciding at the door.
+    if (reorderBase && reorderBase.split(',')[index] !== worker.id) {
+        name.appendChild(el('span', 'badge badge-warn reorder-changed', 'שונה'));
+    }
     row.appendChild(name);
 
     const moves = el('div', 'reorder-moves');
@@ -355,6 +429,9 @@ function startReorderDrag(event, workerId) {
     event.preventDefault();
     reorderHeld = workerId;
     reorderDragging = { workerId, scrolling: null };
+    // The edge bands appear only while a row is actually in the air - painted, they say
+    // where holding the row will scroll, and gone the moment the finger lets go.
+    if (document.body && document.body.classList) document.body.classList.add('reorder-dragging');
     renderWorkerList();
 
     document.addEventListener('pointermove', onReorderDrag);
@@ -403,6 +480,7 @@ function autoScrollWhileDragging(clientY) {
 }
 
 function endReorderDrag() {
+    if (document.body && document.body.classList) document.body.classList.remove('reorder-dragging');
     if (reorderDragging && reorderDragging.scrolling) clearInterval(reorderDragging.scrolling);
     reorderDragging = null;
     reorderHeld = null;
@@ -720,12 +798,21 @@ function deletionBlockers(workerId) {
     if (!(sync && sync.provenLocalOnly && sync.provenLocalOnly('workers', workerId))) {
         blocked.push('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום');
     }
+    // While writes are held - quarantine, a build mismatch - the tombstone this delete
+    // ends in cannot land, and the button would walk somebody through typing a name
+    // into a refusal.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        blocked.push('הרישום מושבת כרגע - ראה את ההודעה שבראש המסך');
+    }
     return blocked;
 }
 
 function whyNotDeletable(blocked) {
-    return `${blocked.join(', ')} - אי אפשר למחוק, רק להעביר לארכיון. ` +
-        'הכל יישמר בדוחות ההיסטוריים.';
+    // The enumeration names WHICH blocker; the sentence after it is the rule itself,
+    // said the way the design says it, so the refusal teaches the policy and not only
+    // this man's case.
+    return `${blocked.join(', ')} - לעובד עם היסטוריה אין מחיקה, רק העברה לארכיון, ` +
+        'כך שדוחות ותשלומי עבר נשמרים תמיד.';
 }
 
 // Said out loud, every time. Returning in silence here leaves somebody looking at a
@@ -885,11 +972,17 @@ async function deleteWorker(workerId) {
     // By NAME, typed. The button was drawn once and this is permanent: a confirmation
     // that is one more tap in the same place as the last tap is not a decision, and the
     // difference between archiving and deleting is the whole of what this screen does.
+    // The message names the four things that were just checked - no day, no advance,
+    // nothing queued - because "it is final" alone does not say WHY this one man may be
+    // deleted when every other one may not. The footer makes the one promise the write
+    // path actually keeps.
     const typed = await askText({
-        title: `למחוק את ${isolate(worker.name)}?`,
-        message: 'המחיקה סופית. להמשיך - הקלד את שם העובד במדויק.',
+        title: 'מחיקת עובד',
+        message: `ל${isolate(worker.name)} אין אף יום רשום, אף מקדמה ואף רישום שממתין ` +
+            'לשליחה. המחיקה סופית ולא ניתנת לשחזור. לאישור, הקלדת שם העובד:',
         placeholder: worker.name,
-        ok: 'מחק לצמיתות',
+        ok: 'מחיקה סופית',
+        footer: 'נשמר במכשיר ויסתנכרן כשיש חיבור.',
         validate: value => (String(value).trim() === String(worker.name).trim()
             ? null : 'השם אינו זהה.')
     });

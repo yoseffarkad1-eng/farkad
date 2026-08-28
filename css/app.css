@@ -255,7 +255,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
         gap: 2px;
         background: var(--surface);
         border-top: 1px solid var(--line);
-        padding: 6px 10px calc(6px + var(--safe-bottom));
+        padding: 6px 10px max(8px, var(--safe-bottom));
         box-shadow: 0 -6px 24px -18px rgba(0, 0, 0, .5);
     }
     .tab {
@@ -263,6 +263,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
         gap: 3px;
         padding: 5px 2px 4px;
         font-size: 11px;
+        font-weight: 600;
         border-radius: var(--radius-sm);
     }
     .tab-icon svg { width: 22px; height: 22px; }
@@ -381,7 +382,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    orientation where the screen is shortest and the thumb is furthest away. Asked by
    POINTER instead, the floor follows the finger onto any screen it is on. */
 @media (pointer: coarse) {
-    .tab { min-height: 44px; }
+    .tab { min-height: 50px; }
     .tabs .tab { padding-block: 8px; }
 }
 
@@ -512,8 +513,37 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     gap: 22px;
 }
 
-.settings-group { display: flex; flex-direction: column; gap: 10px; }
-.settings-group h3 { margin: 0; font-size: 16px; }
+/* Each group is a card of its own, on the panel's paper. The card border is what keeps
+   FACTS' rule - a destructive door never sits beside a safe one - true here: ייבוא
+   ושחזור replaces data and גיבוי only copies it, so each holds its own walled card with
+   the body's gap between them. All by token, so dark mode needs nothing extra. */
+.settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+}
+/* Quiet group labels, like the board: the contents carry the weight, not the heading. */
+.settings-group h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+/* The card's own gap does the spacing; .hint's top margin would double it. */
+.settings-group .hint { margin: 0; }
+
+/* The backup card carries the accent, because its button is the one thing on this sheet
+   that gets a copy OFF the phone. */
+.settings-group-backup { border-color: var(--accent); }
+
+/* The one primary action on the sheet: full width, its own row, nothing beside it to
+   mis-tap. It keeps the default button colours - everything else here is quieted with
+   btn-secondary instead. */
+.backup-primary {
+    width: 100%;
+    min-height: 48px;
+    font-size: 16px;
+    font-weight: 600;
+}
 
 @media (min-width: 701px) {
     .settings-panel.open {
@@ -548,6 +578,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     background: var(--warn-bg);
     color: var(--warn);
     border-inline-start: 3px solid var(--warn);
+}
+/* A change the person just made was NOT written down, or the build itself is broken -
+   the failures wear the failure colour, so a full disk does not dress like an ordinary
+   notice. Amber stays for conditions the app is riding out (offline, an old account). */
+.banner-danger {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border-inline-start: 3px solid var(--danger);
 }
 /* An invitation, not a problem: the install prompt is in the app's own colour so it does
    not read as something having gone wrong. */
@@ -618,8 +656,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Narrow side padding: with the ☰ in the row there are four things sharing a phone's
    width, and the day name in the middle must never be the one that gives way. */
 .btn-nav { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding-inline: 10px; }
-.nav-back::before { content: '\203A'; font-weight: 700; }
-.nav-fwd::after { content: '\2039'; font-weight: 700; }
+/* The chevron is an inline SVG child of the button (see chevronIcon in dom.js) - the
+   old ‹ › pseudo-elements were bidi-mirrored and rendered pointing the wrong way. Small
+   and tight to the word, so the pills stay the width the 320px day title depends on. */
+.btn-nav svg { width: 12px; height: 12px; flex: 0 0 auto; margin: 0; }
 
 /* The title is a button that opens the date picker - but it must not look like a grey
    pill in the middle of the header. */
@@ -1146,6 +1186,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .range-current { font-variant-numeric: tabular-nums; margin-inline-end: auto; font-size: 16px; }
 @media print { .range-chips, .range-actions { display: none !important; } }
 
+/* One report on screen at a time - לפי עובד or לפי אתר - while BOTH stay in the DOM.
+   The set-aside one is hidden for the screen only, so the print rules further down keep
+   printing the whole record without having to win anything back. */
+@media screen { .report-offscreen { display: none; } }
+.report-section-toggle { margin: 0 0 14px; margin-inline-start: 0; }
+.report-section-toggle button { flex: 1; min-height: 44px; }
+@media print { .report-section-toggle { display: none !important; } }
+
 /* Restore points: dated, and few enough to read as a sentence rather than a list. */
 .restore-points {
     display: flex;
@@ -1226,6 +1274,51 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-top: 1px solid var(--line-soft);
 }
 .wday-actions button { flex: 1; min-height: 46px; }
+
+/* The rate a historic day was actually paid at, small and under its amount - the day
+   keeps its rate, and this is where the card says which one that was. */
+.wday-rate { display: block; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+
+/* The working under the totals: how dates became paid days, and paid days money. Full
+   width of the middle column, so each equation is its own line. */
+.wday-derive { flex-basis: 100%; font-size: 12.5px; font-weight: 400; color: var(--ink-3); }
+
+/* Money that went the other way is its own block, and it says so before its rows. */
+.wday-advances-head {
+    margin-top: 16px;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--ink-2);
+}
+.wday-bridge { margin-top: 8px; }
+
+/* The advance form, in place of the one-question prompt: amount, date, note, and how
+   the money moved. Tokens only, so dark mode needs nothing of its own. */
+.advance-form {
+    margin-top: 14px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+}
+.advance-form-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+.advance-form input[type="text"],
+.advance-form input[type="date"] {
+    width: 100%;
+    font-family: inherit;
+    /* 16px exactly: anything smaller makes iOS zoom the page when a field focuses. */
+    font-size: 16px;
+    min-height: 44px;
+    padding: 9px 11px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+}
+.advance-form .layer-toggle { margin-inline-start: 0; margin-bottom: 6px; }
+.advance-form .layer-toggle button { flex: 1; min-height: 44px; }
+.advance-form .modal-actions button { flex: 1; min-height: 44px; }
 
 @media (max-width: 700px) {
     .wday { grid-template-columns: 1fr 70px; }
@@ -1347,6 +1440,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         max-height: calc(100dvh - 24px - var(--safe-bottom));
     }
 }
+
+/* While a keyboard is up - js/ui/bars.js measures it from visualViewport and marks the
+   page - the two bottom bars go away entirely. Nothing on them can be pressed under the
+   keys, and hiding them is what lets the assign sheet's foot take their place above the
+   keyboard. Hidden bars then MEASURE 0, so the room the page reserves for them
+   (--nav-h, --day-actions-h) collapses without another rule here. The sheet-foot also
+   drops its home-indicator padding: that strip is under the keyboard too. */
+body.kbd-open .tabs,
+body.kbd-open .day-actions { display: none; }
+body.kbd-open .sheet-foot { padding-bottom: 16px; }
 
 /* Above both bottom bars. A dialog the tab bar draws over is a dialog whose last button
    cannot be pressed - and the last button is usually the one that says no. */
@@ -1477,20 +1580,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .btn-today { margin-inline-start: auto; }
     .day-actions {
         /* The tab bar below carries the home-indicator inset, so this one must not add a
-           second copy of it on top. */
+           second copy of it on top. ONE solid surface: this used to go transparent here,
+           floating two shadowed pills over the list - and the worker rows read through
+           the gap between them, which is exactly what a dock exists to prevent. */
         padding-bottom: 10px;
-        border-top: none;
-        box-shadow: none;
-        background: transparent;
-        pointer-events: none;
     }
     .day-actions button {
-        pointer-events: auto;
         flex: 1;
+        min-height: 48px;
         font-size: 14px;
         padding: 11px 8px;
-        box-shadow: var(--shadow);
     }
+    /* The WhatsApp button carries a whole phrase and is the one pressed every evening -
+       it gets the wider share of the row. */
+    .day-actions .btn-success { flex: 1.4; }
     .storage-notice { padding-bottom: 8px; }
 }
 
@@ -1860,15 +1963,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* ---------------------------------------------------------------- assign sheet */
 
 /* Anchored to the bottom on a phone: that is where the thumb is, and the sheet is
-   tapped once per worker all the way down the roster. */
-.sheet { align-items: flex-end; padding: 0; }
+   tapped once per worker all the way down the roster. The bottom padding is the
+   keyboard: the layout viewport this fixed overlay is anchored to does not shrink when
+   the keys come up, so without the lift the sheet's foot - סגור, נעדר, the forward
+   button - sits under them, visible through nothing and pressable by nobody. --kb-h is
+   measured and published by js/ui/bars.js; 0 while no keyboard is open. */
+.sheet { align-items: flex-end; padding: 0 0 var(--kb-h, 0px); }
 .sheet-content {
     max-width: 560px;
     border-radius: 22px 22px 0 0;
     /* dvh for the same reason as the dialog above. Three parts, and only the middle one
        scrolls: a sheet listing thirty sites used to carry the name and the way out off
-       the top and bottom of the screen with it. */
-    max-height: calc(100dvh - 48px);
+       the top and bottom of the screen with it. Minus the keyboard, because dvh does
+       not shrink for it - see --kb-h on .sheet above. */
+    max-height: calc(100dvh - 48px - var(--kb-h, 0px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1997,6 +2105,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-top: 1px solid var(--line-soft);
 }
 .sheet-actions button { flex: 1; min-height: 48px; }
+/* The forward button: label first, chevron after it - which in RTL flow puts the arrow
+   on the LEFT, the direction the sheet actually moves. The SVG needs the flex row or it
+   sits on the text baseline and stretches the button. Wider than its neighbours because
+   it carries a whole name - המשך אל {שם} - and an even three-way split folded that name
+   into a word per line. */
+.sheet-actions .sheet-fwd {
+    flex: 1.6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+}
+.sheet-fwd svg { flex: 0 0 auto; }
 
 .mode-toggle { margin-inline-start: 0; }
 
@@ -2080,7 +2201,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
        cannot afford - it is the only place on the screen that says which day is open. */
     @media (max-width: 359px) {
         .day-label strong { font-size: 18px; }
-        .btn-nav { padding-inline: 7px; }
+        .btn-nav { padding-inline: 6px; gap: 3px; }
+        .btn-nav svg { width: 10px; height: 10px; }
     }
     .progress-line strong { font-size: 17px; }
     .bulk-chip { height: 40px; font-size: 15.5px; }
@@ -2094,7 +2216,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* the bottom bar */
     @media (max-width: 700px) {
-        .tab { font-size: 14px; padding: 7px 2px 6px; }
+        /* 14px, not the 11px the design pass asked for. The bolder weight is its idea
+           and a good one; the size is not negotiable - four labels under four icons on
+           the bar somebody presses all evening, read by a man of sixty-two. Held by an
+           assertion in tests/mobile.test.mjs at every width. */
+        .tab { font-size: 14px; font-weight: 600; padding: 7px 2px 6px; }
         .tab-icon svg { width: 24px; height: 24px; }
         .wrow-main { min-height: 66px; }
         .report-table td { font-size: 16px; }
@@ -2220,3 +2346,56 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .report-invoice:first-child { page-break-before: auto !important; }
     main > section:last-child > *:last-child { margin-bottom: 0 !important; }
 }
+
+/* While writes are held (quarantine, a build mismatch - body.writes-blocked, set in
+   render), the recording surfaces say so with their bodies, not only with a banner: the
+   lists dim and the dock's buttons go quiet. The banner at the top stays at full
+   strength - it is the explanation. */
+body.writes-blocked #dayView .day-list,
+body.writes-blocked #dayView .site-cards,
+body.writes-blocked #dayView .day-tray { opacity: .55; }
+body.writes-blocked .day-actions button {
+    opacity: .5;
+    pointer-events: none;
+}
+.progress-blocked {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--danger-bg);
+    color: var(--danger);
+    white-space: nowrap;
+}
+
+/* Three named answers, stacked: each verb is its own full-width row, and the safe one
+   (הישארות) is last - furthest from where the thumb entered the dialog. */
+.ask-choices { flex-direction: column; }
+.ask-choices button { width: 100%; min-height: 48px; }
+.ask-footer { margin-top: 10px; }
+
+/* The auto-scroll bands, visible only mid-drag: thin gradients at the list's edges
+   naming the zone where a held row scrolls the rest into reach. */
+body.reorder-dragging .reorder-list { position: relative; }
+body.reorder-dragging .reorder-list::before,
+body.reorder-dragging .reorder-list::after {
+    content: '';
+    position: sticky;
+    display: block;
+    inset-inline: 0;
+    height: 14px;
+    z-index: 2;
+    pointer-events: none;
+}
+body.reorder-dragging .reorder-list::before {
+    top: 0;
+    background: linear-gradient(to bottom, var(--accent-soft), transparent);
+}
+body.reorder-dragging .reorder-list::after {
+    bottom: 0;
+    background: linear-gradient(to top, var(--accent-soft), transparent);
+}
+.reorder-changed { margin-inline-start: 6px; }

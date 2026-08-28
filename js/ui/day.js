@@ -182,8 +182,19 @@ function renderProgress() {
     const now = el('strong', 'now-editing');
     now.textContent = `${hebrewDayName(date)} · ${formatShortDate(date)}`;
     line.appendChild(now);
+    // The verb carries the count: "19 מתוך 30" alone reads as a position in a list,
+    // and this number is the day's one health figure. A finished day gets the word,
+    // not a bigger number - הכל נרשם is the state a manager is scrolling for.
     line.appendChild(el('span', 'now-count',
-        left === 0 ? `✓ ${done} מתוך ${workers.length}` : `${done} מתוך ${workers.length}`));
+        left === 0 ? '✓ הכל נרשם' : `נרשמו ${done} מתוך ${workers.length}`));
+    // Announced politely on change - the day switch and the climbing count are the two
+    // things a person not looking at the screen most needs to hear.
+    line.setAttribute('role', 'status');
+    line.setAttribute('aria-live', 'polite');
+
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        line.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
+    }
 
     if (left > 0) {
         line.appendChild(button(`המשך (${left})`, 'btn-add', () => {
@@ -373,7 +384,7 @@ function renderDayWorkerList() {
                 if (rate === RATE_DOUBLE) tag.appendChild(el('span', 'tag-rate', 'כפול'));
                 else if (rate === RATE_EXTRA) {
                     const hours = entryExtraHours(entry);
-                    tag.appendChild(el('span', 'tag-rate', hours ? `+${hours}` : 'נוספות'));
+                    tag.appendChild(el('span', 'tag-rate', hours ? plusAmount(hours) : 'נוספות'));
                 }
                 value.appendChild(tag);
             });
@@ -410,13 +421,15 @@ function renderDayHeader() {
     nav.appendChild(button('☰', 'btn-icon drawer-btn', openDayDrawer, 'בחר יום'));
 
     // Time flows right-to-left on an RTL calendar, so back points RIGHT and forward
-    // points LEFT. The chevrons are drawn by CSS pseudo-elements, because a bare ‹ in a
-    // Hebrew string gets reordered by the bidi algorithm to wherever it pleases.
+    // points LEFT - drawn as SVG (chevronIcon), because the characters ‹ › are
+    // Bidi_Mirrored and rendered backwards inside these RTL buttons.
     //
     // "קודם" and not "יום קודם": the word יום appeared three times on this one line, and
     // the two copies on the buttons were costing the day name sixty pixels it did not
     // have. The full wording stays as the label a screen reader announces.
-    nav.appendChild(button('קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם'));
+    const back = button('קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם');
+    back.insertBefore(chevronIcon('back'), back.firstChild);
+    nav.appendChild(back);
 
     // The title IS the date picker. A second full-width input row said the same date
     // twice - once as 12/08 and once as the browser's 08/12, which read as a bug.
@@ -429,7 +442,9 @@ function renderDayHeader() {
     label.addEventListener('click', () => openDayPicker());
     nav.appendChild(label);
 
-    nav.appendChild(button('הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא'));
+    const fwd = button('הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא');
+    fwd.appendChild(chevronIcon('fwd'));
+    nav.appendChild(fwd);
     header.appendChild(nav);
 
     const picker = document.createElement('input');

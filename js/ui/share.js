@@ -66,7 +66,7 @@ function dayMessage(date, layer, styleKey) {
             if (rate === RATE_DOUBLE) suffix = ' (כפול)';
             else if (rate === RATE_EXTRA) {
                 const hours = entryExtraHours(entry);
-                suffix = hours ? ` (+${hours} ש׳)` : ' (שעות נוספות)';
+                suffix = hours ? ` (${plusAmount(hours)} ש׳)` : ' (שעות נוספות)';
             }
             lines.push(style.worker(worker.name, suffix));
         });
@@ -731,15 +731,20 @@ function exportRecoveryData() {
     // the file was saved, or that it is in Files, or that the data is now safe. It says
     // what actually happened, which is that the app handed the file over, and asks the
     // one person who can check to go and check.
+    // The file name is Latin inside a Hebrew sentence, and the dialog writes textContent
+    // only - so the LTR isolation travels in the string itself, U+2066 before and U+2069
+    // after, or the bidi algorithm folds the date backwards.
     if (typeof askTell === 'function') {
         askTell({
             title: recorded ? 'הקובץ נמסר לדפדפן' : 'הקובץ נמסר, אבל לא נרשם במכשיר',
             message: recorded
-                ? `${name} - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר, והעתק אותו למקום נוסף. ` +
-                    'האפליקציה לא יכולה לדעת אם השמירה הצליחה.'
-                : `${name} - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר. ` +
+                ? '\u2066' + name + '\u2069 - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר, והעתק אותו למקום נוסף. ' +
+                    'האפליקציה לא יכולה לדעת אם השמירה הצליחה. ' +
+                    'הקובץ כולל את הרשומות הפגומות ואת המצב החי — שום דבר לא נמחק מהמכשיר.'
+                : '\u2066' + name + '\u2069 - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר. ' +
                     'לא הצלחנו לרשום במכשיר שהקובץ יצא ממנו, ולכן מחיקה לצמיתות תישאר חסומה ' +
-                    'עד שיהיה מקום פנוי - הארכיון עובד כרגיל.'
+                    'עד שיהיה מקום פנוי - הארכיון עובד כרגיל. ' +
+                    'הקובץ כולל את הרשומות הפגומות ואת המצב החי — שום דבר לא נמחק מהמכשיר.'
         });
     }
 }
@@ -781,6 +786,55 @@ function exportBackup() {
     // optimistic is still worth far more than no reminder.
     Store.set(LAST_BACKUP_KEY, todayStr());
     renderBackupAge();
+
+    tellBackupHandedOver(name);
+}
+
+// What is said after the backup leaves, and what is carefully NOT said - the same rule
+// the recovery export above already follows. A click on a link is not a file on a phone:
+// on iOS the share sheet can be dismissed, the save can be cancelled, and the app is told
+// nothing either way. So this never says the file was saved, or that it is in Files, or
+// that the data is now safe. It says what happened - the browser has it - and asks the
+// one person who can check to go and check.
+//
+// Until now this export said NOTHING, and the age line then read "גיבוי אחרון: היום."
+// over a file that may never have reached anywhere. The line stays - a backup was taken
+// today, that much is true - but the handover itself is no longer silent.
+function tellBackupHandedOver(name) {
+    if (typeof askConfirm !== 'function') return;
+
+    // The second button runs the whole export again, for the person who looked in
+    // "קבצים" and did not find the file. Only a real press counts: Escape and a tap on
+    // the backdrop also resolve the dialog through its cancel path, and neither of them
+    // is a request for another file. Watched in the CAPTURE phase on the document,
+    // because the button's own onclick resolves the promise and the microtask that
+    // follows it runs before a second listener on the same button ever would.
+    let again = false;
+    const wantAgain = event => {
+        const target = event.target;
+        if (target && target.closest && target.closest('#askCancel')) again = true;
+    };
+    // The test harness's document is a stub with no event methods; a dialog that cannot
+    // be watched simply never re-runs the export.
+    const watched = typeof document.addEventListener === 'function'
+        && typeof document.removeEventListener === 'function';
+    if (watched) document.addEventListener('click', wantAgain, true);
+
+    // The file name is Latin inside a Hebrew sentence; askTell and askConfirm write
+    // textContent only, so the isolation has to travel IN the string - U+2066 (LRI)
+    // before, U+2069 (PDI) after - or the bidi algorithm folds the date backwards.
+    askConfirm({
+        title: 'קובץ הגיבוי נמסר לשמירה',
+        message: 'שם הקובץ: \u2066' + name + '\u2069. ' +
+            'הדפדפן קיבל את הקובץ — זה עדיין לא אומר שהוא ביישום "קבצים". ' +
+            'פתח את "קבצים" וודא שהוא מופיע. ' +
+            'הייצוא עובד גם בלי חיבור — הקובץ נוצר מהמכשיר.',
+        ok: 'הבנתי',
+        cancel: 'שמירה חוזרת'
+    }).then(() => {
+        if (watched) document.removeEventListener('click', wantAgain, true);
+        if (again) exportBackup();
+    });
 }
 
 // How old the last backup is, in the one place a person can act on it.
@@ -906,15 +960,25 @@ function capacityState() {
     return state;
 }
 
-// The line in the backup card, beside the one about how old the last backup is - the same
-// place, because it prompts the same action.
+// The line in the מצב המכשיר group. It used to say nothing at all while there was room,
+// which made the group read as broken and left the warning with no quiet state to be
+// louder than - a line that only ever appears is a line nobody has learned to look at.
 function renderStorageRoom() {
     const line = document.getElementById('storageRoom');
     if (!line) return;
 
+    // A browser that will not let this app write at all is not a space problem, and
+    // claiming free room over it would be a lie: the sync line says what is actually
+    // wrong, and this one stays out of its way.
+    if (typeof Store !== 'undefined' && !Store.available) {
+        line.textContent = '';
+        line.className = 'hint';
+        return;
+    }
+
     const state = capacityState();
     if (state === 'ok') {
-        line.textContent = '';
+        line.textContent = 'יש מקום פנוי במכשיר.';
         line.className = 'hint';
         return;
     }

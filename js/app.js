@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v79';
+const APP_VERSION = 'v80';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -46,6 +46,13 @@ const VIEWS = ['day', 'week', 'roster', 'reports'];
 
 function showView(view) {
     if (!VIEWS.includes(view)) return;
+    // An open reorder draft owns the door. A tab tapped mid-sort used to throw the
+    // unsaved order away without a word; now the mode asks its three-answer question
+    // and the switch proceeds only once the draft is saved or knowingly discarded.
+    if (typeof reorderDraft !== 'undefined' && reorderDraft && view !== 'roster') {
+        confirmReorderExit().then(allowed => { if (allowed) showView(view); });
+        return;
+    }
     // The offer to undo belongs to the screen the change was made on. Left floating over
     // the reports it is just a bar in the way, on top of numbers it has nothing to do with.
     hideUndo();
@@ -58,6 +65,13 @@ function showView(view) {
 // so redrawing the visible view on every change is cheaper in bugs than tracking which
 // nodes need patching, and fast enough that nobody can see it happen.
 function render() {
+    // Held writes are a body state, not a banner alone: the stylesheet dims the
+    // recording surfaces and quiets the dock under it, and the progress row adds its
+    // badge - the block is SAID where the tap would land, not only explained at the top.
+    if (document.body && document.body.classList) {
+        document.body.classList.toggle('writes-blocked',
+            typeof farkadWritesBlocked === 'function' && farkadWritesBlocked());
+    }
     VIEWS.forEach(view => {
         const node = document.getElementById(view + 'View');
         if (node) node.style.display = view === currentView ? '' : 'none';

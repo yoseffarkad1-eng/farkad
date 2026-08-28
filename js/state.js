@@ -35,6 +35,13 @@ const State = {
         if (typeof FarkadSync !== 'undefined' && FarkadSync.finishLocalReplace) {
             FarkadSync.finishLocalReplace();
         }
+
+        // Only now is the schedule this session will actually hold standing: disk read,
+        // journal replayed, any unfinished restore completed. The advances on it are
+        // mirrored into the ledger here, before the first render - not that a render
+        // could tell: the screens read the fold, and the fold answers the same with the
+        // mirror written or refused.
+        this.migrateLedger();
         return result;
     },
 
@@ -132,6 +139,72 @@ const State = {
         FarkadSync.replayJournal(this.schedule, FarkadSync.supersededFloor());
     },
 
+    // ------------------------------------------------------------ the advances ledger
+    //
+    // The one write the closed ledger gate sanctions: every advance already on the
+    // record, mirrored into a 'given' entry, once. It creates no new facts - the entries
+    // say what schedule.advances already says, and that field is not touched - so the
+    // day the writer opens, it opens over a ledger that has been agreeing with the
+    // record for weeks. See the migration block in js/model/ledger.js.
+
+    // The schedule OBJECT the mirror was last asked about. Identity, not content: an
+    // ordinary edit mutates the schedule in place, so a landed write holding a DIFFERENT
+    // object means the whole record was swapped out from under the app - a restore, off
+    // one of share.js's four doors - and the question is open again. Asking it twice of
+    // the same record is free: an advance that already has an entry is never given
+    // another one.
+    mirrored: null,
+
+    // Committed the way every other edit is - journalled first, saved second, sent with
+    // everything else - but NOT through commit(), because it must not share commit's
+    // ending. A refused commit rolls back and says so out loud; nobody asked for this
+    // write, so a refusal is not announced and not mourned: the entries come quietly
+    // back out of memory, what is on the screen is exactly what it was, and the next
+    // boot asks again.
+    migrateLedger() {
+        this.mirrored = this.schedule;
+        // Quarantine and build mismatch. What is already saved stays saved and nothing
+        // new is written - the migration least of all, being the one edit nobody made.
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+
+        const result = migrateAdvancesToLedger(this.schedule, syncDeviceId());
+        // Nothing to mirror, nothing written: a second boot leaves the disk alone.
+        if (result.added.length === 0) return true;
+
+        const journalled = this.journalBatch(Object.keys(result.paths)
+            .map(path => ({ path, value: result.paths[path] })));
+        if (!journalled) {
+            // Nowhere durable. The entries were only ever in memory - the legacy field
+            // still holds every one of these advances, so nothing is lost by waiting.
+            Object.keys(result.paths).forEach(path => {
+                delete this.schedule.ledger.advances[path.split('.')[2]];
+            });
+            return false;
+        }
+
+        this.save();
+        return true;
+    },
+
+    // Asked a moment later, not now. The swap that prompts this is noticed in the middle
+    // of save(), inside a restore transaction that is still writing - and the mirror
+    // commits through the very machinery that transaction is standing in.
+    migrateTimer: null,
+    migrateSoon() {
+        if (this.migrateTimer) return;
+        this.migrateTimer = setTimeout(() => {
+            this.migrateTimer = null;
+            this.migrateLedger();
+        }, 0);
+    },
+
+    // For the settings screen: does the ledger say the same thing as the field every
+    // phone still writes? Returns { agrees, missing, different } - ledger.js's
+    // ledgerAgreesWithAdvances, over the live schedule.
+    ledgerParity() {
+        return ledgerAgreesWithAdvances(this.schedule);
+    },
+
     // True only when the schedule is on the disk. Every caller that tells somebody
     // something happened needs to be able to find that out.
     saveFailed: false,
@@ -161,6 +234,10 @@ const State = {
             // Everything journalled up to now is inside the blob just written, so the
             // journal no longer has to hold the ones the cloud already has.
             if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
+            // A different object than the mirror last saw means a restore just landed
+            // here - every one of its doors ends in this save - carrying advances whose
+            // entries its document may never have held. See migrateSoon.
+            if (this.mirrored && this.mirrored !== this.schedule) this.migrateSoon();
         }
 
         // Only on success. Telling the sync layer that something changed here when
@@ -286,7 +363,36 @@ const State = {
     refuseEdit() {
         this.rollback();
         render();
-        if (typeof askTell === 'function') {
+        // Two different refusals, and the dialog must name the right one. A held
+        // transaction - quarantine, a build mismatch - is not a space problem, and
+        // claiming "אין מקום" over it sends somebody to delete photos that will not
+        // help; the banner at the top of the screen carries the real story.
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+            if (typeof askTell === 'function') {
+                askTell({
+                    title: 'הרישום לא נשמר',
+                    message: 'הרישום מושבת כרגע - הסיבה כתובה בהודעה שבראש המסך. השינוי ' +
+                        'בוטל כדי שלא ייראה כאילו נרשם. מה שכבר שמור לא נפגע.'
+                });
+            }
+            return false;
+        }
+        // The board's dialog carries the way out as its primary action, not only as a
+        // sentence: the backup is the one thing that still works on a full device.
+        if (typeof askConfirm === 'function' && typeof exportBackup === 'function') {
+            askConfirm({
+                title: 'הרישום לא נשמר',
+                message: 'אין מקום פנוי במכשיר, ולכן לא הצלחנו לשמור את השינוי - הוא בוטל ' +
+                    'כדי שלא ייראה כאילו נרשם. מה שכבר שמור לא נפגע. פנה מקום במכשיר ' +
+                    'או ייצא קובץ גיבוי, ונסה שוב.',
+                ok: 'ייצוא קובץ גיבוי',
+                cancel: 'סגור'
+            }).then(wantsBackup => {
+                // The test harness answers every dialog yes and has no Blob to export
+                // with; a browser always has one. The guard is for the harness only.
+                if (wantsBackup && typeof Blob !== 'undefined') exportBackup();
+            });
+        } else if (typeof askTell === 'function') {
             askTell({
                 title: 'הרישום לא נשמר',
                 message: 'אין מקום פנוי במכשיר, ולכן לא הצלחנו לשמור את השינוי - הוא בוטל ' +
@@ -309,6 +415,11 @@ const State = {
         if (landed) {
             this.durableText = text;
             if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
+            // Adopted, not restored: another phone's snapshot swaps the object here,
+            // and that is not a moment to mirror. An advance arriving from a v79 phone
+            // waits for the next boot, exactly as one recorded on this device does -
+            // until the gate opens, the boots are where the ledger catches up.
+            this.mirrored = this.schedule;
         }
         return landed;
     },
@@ -469,6 +580,19 @@ function normaliseSchedule(raw, hints) {
             amount: Number(item.amount) || 0,
             note: String(item.note || '')
         };
+    });
+
+    // The ledger, carried through unchanged. Entries are append-only and this is a
+    // read: an entry that will not parse is DROPPED from the fold rather than repaired,
+    // because a repaired entry is a claim about money that nobody made.
+    const ledger = (raw.ledger && typeof raw.ledger === 'object') ? raw.ledger : {};
+    const entries = (ledger.advances && typeof ledger.advances === 'object')
+        ? ledger.advances : {};
+    Object.keys(entries).forEach(id => {
+        const entry = entries[id];
+        if (!entry || typeof entry !== 'object') return;
+        if (!entry.advanceId || !entry.kind) return;
+        schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
     });
 
     // The invariant, enforced here because here is where every route in meets: a

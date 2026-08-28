@@ -55,6 +55,11 @@ function emptySchedule() {
         // Money handed over before settlement day, keyed by its own id so two people
         // recording an advance at the same moment write to different fields.
         advances: {},
+        // The append-only history of those same advances - see js/model/ledger.js. Read
+        // by this build, written by nothing yet: three phones share this record and the
+        // other two cannot read entries, so the old field above is still the one every
+        // device writes until they have all updated.
+        ledger: { advances: {} },
         updatedAt: null,
         updatedBy: null
     };
@@ -556,6 +561,17 @@ function journalEntryProblems(path, value) {
         return recordProblems(null, parts[1], parts[3], value);
     }
 
+    // ledger.advances.<entry id>. Append-only on the wire as well as on the disk: an
+    // entry may be created and nothing else, so a null here - a deletion in flight - is
+    // refused rather than applied. The ledger's whole value is that nothing leaves it.
+    if (parts[0] === 'ledger') {
+        if (parts.length !== 3 || parts[1] !== 'advances') {
+            return ['a ledger path nobody wrote'];
+        }
+        if (!isSafeSegment(parts[2])) return ['a ledger path with an unusable id'];
+        return ledgerEntryProblems(parts[2], value);
+    }
+
     // advances.<id> - or a deletion of one, which travels as null.
     if (parts[0] === 'advances') {
         if (parts.length !== 2) return ['an advance path with the wrong number of segments'];
@@ -932,6 +948,37 @@ function reinstateReferenced(schedule, remembered) {
     });
 
     return recovered;
+}
+
+// What is wrong with a ledger entry, said in sentences. Strict on purpose: this is the
+// record that outlives every correction, and an entry nobody can read is an entry that
+// makes the fold below it wrong for ever.
+function ledgerEntryProblems(id, value) {
+    if (value === null) return ['a ledger entry cannot be deleted'];
+    if (!isPlainObject(value)) return ['a ledger entry that is not a record'];
+    if (String(value.id || '') !== String(id)) return ['a ledger entry whose id does not match its path'];
+    if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
+        return ['a ledger entry with no advance behind it'];
+    }
+    if (!['given', 'corrected', 'cancelled'].includes(String(value.kind))) {
+        return ['a ledger entry of a kind nobody wrote'];
+    }
+    if (value.kind === 'given') {
+        if (!value.workerId || !isSafeSegment(String(value.workerId))) {
+            return ['an advance given to nobody'];
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
+            return ['an advance given on no date'];
+        }
+        if (!Number.isFinite(Number(value.amount))) return ['an advance of no amount'];
+    }
+    if (value.amount !== undefined && !Number.isFinite(Number(value.amount))) {
+        return ['a ledger entry with an amount that is not a number'];
+    }
+    if (value.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
+        return ['a ledger entry with a date that is not a date'];
+    }
+    return [];
 }
 
 function advancePath(id) {

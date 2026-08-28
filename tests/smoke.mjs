@@ -646,9 +646,11 @@ async function seedRoster(page) {
 
   await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
   await page.waitForTimeout(250);
+  // The title carries the ACT (מחיקת עובד) and the message carries the man - along
+  // with the three things that were just checked about him.
   check('the dialog names the man before he goes',
-    (await page.textContent('#askTitle')).includes('טעות'),
-    await page.textContent('#askTitle'));
+    (await page.textContent('#askMessage')).includes('טעות'),
+    await page.textContent('#askMessage'));
 
   // One more tap in the same place as the last tap is not a decision. The name has to be
   // typed, and a wrong one is refused rather than accepted quietly.
@@ -707,7 +709,7 @@ async function seedRoster(page) {
     markAbsent(State.schedule, '2026-08-12', 'w_03', 'actual');
     State.save(); render();
   });
-  await page.getByText('💬 וואטסאפ').click();
+  await page.getByText('שליחה לוואטסאפ').click();
   await page.waitForTimeout(300);
 
   const text = await page.inputValue('#shareText');
@@ -745,7 +747,7 @@ async function seedRoster(page) {
   // the choice survives closing and reopening
   await page.locator('#shareModal').getByRole('button', { name: 'סגור' }).click();
   await page.waitForTimeout(200);
-  await page.getByText('💬 וואטסאפ').click();
+  await page.getByText('שליחה לוואטסאפ').click();
   await page.waitForTimeout(250);
   check('and the chosen look is remembered for next time',
     (await page.inputValue('#shareText')).startsWith('בוקר טוב,'));
@@ -953,6 +955,51 @@ async function seedRoster(page) {
   const saved = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
   check('the backup file carries the whole schedule',
     saved.workers.length === 3 && saved.days['2026-08-12'] !== undefined);
+
+  // The export used to say nothing at all, and the age line then claimed a backup for a
+  // file that may never have reached the Files app. Now the handover is said out loud -
+  // as a handover, never as a save.
+  await page.waitForTimeout(300);
+  check('handing the file over opens the dialog that says so',
+    (await page.locator('#askModal').isVisible()) &&
+    (await page.textContent('#askTitle')) === 'קובץ הגיבוי נמסר לשמירה',
+    await page.textContent('#askTitle'));
+  const handed = await page.textContent('#askMessage');
+  check('it names the file, isolated LTR inside the Hebrew',
+    handed.includes(`\u2066${download.suggestedFilename()}\u2069`), JSON.stringify(handed));
+  check('it says the browser has it, which is not the Files app',
+    handed.includes('הדפדפן קיבל את הקובץ') && handed.includes('פתח את "קבצים"'),
+    JSON.stringify(handed));
+  check('and that the export never needed a connection',
+    handed.includes('הייצוא עובד גם בלי חיבור'), JSON.stringify(handed));
+  check('nothing on it claims the file was saved',
+    !handed.includes('נשמר בהצלחה') && !(await page.textContent('#askTitle')).includes('נשמר'));
+  check('the way out is הבנתי and the second chance is שמירה חוזרת',
+    (await page.textContent('#askOk')) === 'הבנתי' &&
+    (await page.locator('#askCancel').isVisible()) &&
+    (await page.textContent('#askCancel')) === 'שמירה חוזרת');
+
+  // שמירה חוזרת runs the whole export again, for the person who looked and did not
+  // find the file.
+  const secondFile = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#askCancel')
+  ]).then(([d]) => d);
+  await page.waitForTimeout(300);
+  check('שמירה חוזרת hands the file over again',
+    secondFile.suggestedFilename() === download.suggestedFilename() &&
+    (await page.textContent('#askTitle')) === 'קובץ הגיבוי נמסר לשמירה');
+
+  // Escape is a way OUT, not a request for a third file.
+  let escaped = false;
+  page.once('download', () => { escaped = true; });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  check('escape closes the dialog without exporting again',
+    !(await page.locator('#askModal').isVisible()) && escaped === false);
+
+  check('and the age line reads today - what was done, not what was verified',
+    (await page.textContent('#backupAge')).includes('גיבוי אחרון: היום.'));
 
   // a file that is not a backup must not touch the data
   const before = await page.evaluate(() => State.schedule.workers.length);
@@ -1406,7 +1453,7 @@ async function seedRoster(page) {
   await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
   await page.waitForTimeout(250);
   check('the dialog asks for the name to be typed',
-    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
+    (await page.textContent('#askMessage')).includes('הקלדת שם העובד'),
     await page.textContent('#askMessage'));
   await page.fill('#askInput', 'טעות');
   await page.click('#askOk');
@@ -1495,11 +1542,14 @@ async function seedRoster(page) {
   check('the half-made worker is not left in the list either',
     !after.workers.includes('עובד חדש'), JSON.stringify(after.workers));
 
-  // The app also says out loud that the device would not take the write. Dismissed here
-  // so the form underneath can be used again - which is the point of leaving it open.
+  // The app also says out loud that the device would not take the write - and offers
+  // the backup as the dialog's primary action. Dismissed by the quiet button here so
+  // the form underneath can be used again - which is the point of leaving it open.
   check('and the storage failure is reported in its own right',
     await page.isVisible('#askModal'));
-  await page.click('#askOk');
+  check('with the backup as its way out',
+    (await page.textContent('#askOk')).includes('גיבוי'), await page.textContent('#askOk'));
+  await page.click('#askCancel');
   await page.waitForTimeout(250);
 
   // Storage comes back; the same form, still holding everything, saves.
@@ -1934,9 +1984,12 @@ async function seedRoster(page) {
     };
   });
   check('the site totals say what they are counting',
-    invoice.footer.includes('ימי-עובד'), invoice.footer.slice(0, 60));
+    invoice.footer.includes('ימי עובד־אתר'), invoice.footer.slice(0, 60));
   check('and it is spelled out under the table',
     invoice.body.includes('עובד אחד ביום אחד באתר'), '');
+  check('with the counting rule that keeps the three counts apart',
+    invoice.body.includes('עובד בשני אתרים נספר פעם אחת בכל אתר') &&
+    invoice.body.includes('אין לצפות שהסכומים יתאימו'), '');
 
   // The client's page names sites and dates. It must not name the crew: who was there is
   // the employer's business, and this is the page that gets handed over.
@@ -2243,7 +2296,8 @@ async function seedRoster(page) {
   check('the sheet closes when nobody is left', await page.isHidden('#assignSheet'));
   check('every worker ended up recorded',
     (await page.evaluate(() => State.unrecorded().length)) === 0);
-  check('progress reads complete', (await page.textContent('.progress-line')).includes('3 מתוך 3'));
+  check('progress reads complete', (await page.textContent('.progress-line')).includes('הכל נרשם'),
+    await page.textContent('.progress-line'));
   check('no row is left marked unfilled', (await page.locator('.wrow-empty').count()) === 0);
   await page.context().close();
 }
@@ -2317,6 +2371,128 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('the worker row shows both sites',
     (await page.locator('.wrow').first().locator('.tag-place').count()) === 2);
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- a refused save holds still
+// The advance is the sheet's whole rhythm, which is exactly why it must not happen over
+// a commit that was refused: the person reads 'הרישום לא נשמר' while the sheet quietly
+// moves to a different worker behind the dialog, and the retry tap records the failed
+// site against the wrong man.
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => openAssignSheet('w_01'));
+  await page.waitForTimeout(250);
+
+  // The disk refuses everything from here on, exactly as a full phone does.
+  await page.evaluate(() => {
+    window.__realSet = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = () => {
+      const error = new Error('quota');
+      error.name = 'QuotaExceededError';
+      throw error;
+    };
+  });
+
+  await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
+  await page.waitForTimeout(350);
+  check('a refused save leaves the sheet on the same worker',
+    (await page.textContent('#assignSheetTitle')) === 'דוד',
+    await page.textContent('#assignSheetTitle'));
+  check('and the refusal is said out loud, on top of that same worker',
+    (await page.isVisible('#askModal')) &&
+    (await page.textContent('#askModal')).includes('הרישום לא נשמר'));
+  check('nothing half-recorded is left behind it',
+    (await page.evaluate(() =>
+      entriesFor(State.schedule, State.date, 'w_01', 'actual').length)) === 0);
+  // The quiet button: #askOk is the backup offer now, and pressing it on a device
+  // whose storage is stubbed broken would stack a second dialog over this one.
+  await page.click('#askCancel');
+  await page.waitForTimeout(200);
+
+  // נעדר is the other answer that advances, and it must hold still the same way.
+  await page.locator('.sheet-actions').getByText('נעדר', { exact: true }).click();
+  await page.waitForTimeout(350);
+  check('a refused absence holds still too',
+    (await page.textContent('#assignSheetTitle')) === 'דוד');
+  await page.click('#askCancel');
+  await page.waitForTimeout(200);
+
+  // Storage comes back; the very same tap now records and moves on.
+  await page.evaluate(() => { localStorage.setItem = window.__realSet; });
+  await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
+  await page.waitForTimeout(350);
+  check('once the disk takes it, the same tap advances',
+    (await page.textContent('#assignSheetTitle')) === 'שרה');
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the sheet says where it goes
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => openAssignSheet('w_01'));
+  await page.waitForTimeout(250);
+
+  // The sheet covers the day header, so it has to name the day itself.
+  check('the sheet names the day being written',
+    (await page.textContent('#assignSheetMeta')).includes('יום רביעי 12/08'),
+    await page.textContent('#assignSheetMeta'));
+  check('the counting rule sits under the site tiles',
+    (await page.textContent('#assignSheetBody'))
+      .includes('שני אתרים - יום אחד · יום כפול נספר כשני ימי שכר'));
+
+  const forward = page.locator('.sheet-actions .sheet-fwd');
+  check('with nothing recorded the forward button is only a skip',
+    (await forward.textContent()).includes('דלג'), await forward.textContent());
+  check('drawn with an SVG chevron, never a bare › for bidi to reorder',
+    (await forward.locator('svg').count()) === 1 &&
+    !(await forward.textContent()).includes('›'));
+
+  // Record him, then come back: the button now says who the sheet moves to.
+  await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => openAssignSheet('w_01'));
+  await page.waitForTimeout(250);
+  check('once something is recorded it names the next unfilled worker',
+    (await forward.textContent()).includes('המשך אל') &&
+    (await forward.textContent()).includes('שרה'), await forward.textContent());
+
+  // The overtime hint says what the hours are worth - or that they are worth nothing.
+  await page.locator('.sheet-rate-row').getByText('שעות נוספות').click();
+  await page.waitForTimeout(250);
+  check('choosing extra hours states the hourly rate they are priced by',
+    (await page.textContent('#assignSheetBody'))
+      .includes('שעות נוספות מחושבות לפי שכר שעה (50 ₪ ל'),
+    await page.textContent('#assignSheetBody'));
+
+  // עלי has no hourly rate, and the hint must say so rather than implying a sum.
+  await page.evaluate(() => {
+    State.commit(assignPlace(State.schedule, State.date, 'w_03', State.layer,
+      'p_01', RATE_NORMAL));
+    openAssignSheet('w_03');
+  });
+  await page.waitForTimeout(250);
+  await page.locator('.sheet-rate-row').getByText('שעות נוספות').click();
+  await page.waitForTimeout(250);
+  check('and with no hourly rate it says the hours carry no amount',
+    (await page.textContent('#assignSheetBody'))
+      .includes('לעובד אין שכר שעה - השעות יירשמו בלי סכום.'));
+
+  // Fill the roster; with nobody left to move to, forward says the list is done - and
+  // pressing it does what it says, which is the same close the run always ended in.
+  await page.evaluate(() => {
+    State.commit(assignPlace(State.schedule, State.date, 'w_02', State.layer,
+      'p_01', RATE_NORMAL));
+    openAssignSheet('w_01');
+  });
+  await page.waitForTimeout(250);
+  check('with nobody unfilled left, forward says the list is finished',
+    (await forward.textContent()).includes('סיום הרשימה'), await forward.textContent());
+  await forward.click();
+  await page.waitForTimeout(300);
+  check('and pressing it closes the sheet', await page.isHidden('#assignSheet'));
   await page.context().close();
 }
 
@@ -2988,6 +3164,26 @@ async function seedRoster(page) {
   });
   check('and it clears itself once there is room again',
     (await page.evaluate(() => Store.full)) === false);
+
+  // The second failure must not be swallowed by the memory of the first: the banner
+  // used to keep its last text on hiding, and an identical message later was
+  // short-circuited into permanent silence.
+  const reshow = await page.evaluate(() => {
+    showStorageBanner('אין מקום פנוי במכשיר והשינוי האחרון לא נשמר - בדיקה');
+    showStorageBanner(null);
+    showStorageBanner('אין מקום פנוי במכשיר והשינוי האחרון לא נשמר - בדיקה');
+    const banner = document.getElementById('storageBanner');
+    return { shown: banner.style.display !== 'none', text: banner.textContent };
+  });
+  check('the same failure returning shows the banner again',
+    reshow.shown && reshow.text.includes('אין מקום פנוי'), JSON.stringify(reshow));
+  await page.evaluate(() => showStorageBanner(null));
+
+  // An update is an invitation, not a fault - it wears the app's own colour.
+  check('the update banner is dressed as an invitation',
+    await page.evaluate(() => document.getElementById('updateBanner').classList.contains('banner-info')));
+  check('and the storage banner as a failure',
+    await page.evaluate(() => document.getElementById('storageBanner').classList.contains('banner-danger')));
   await page.context().close();
 }
 
@@ -4184,10 +4380,13 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     };
   });
 
-  check(`${label}: the tab bar grows by the home-indicator strip`,
-    inset.after.tabsHeight - inset.before.tabsHeight === 34, JSON.stringify(inset));
+  // max(8px, inset): with no indicator the bar keeps an 8px breath, and the indicator
+  // replaces that breath rather than stacking on top of it - so the growth is the
+  // strip minus the breath it absorbs.
+  check(`${label}: the tab bar grows to carry the home-indicator strip`,
+    inset.after.tabsHeight - inset.before.tabsHeight === 34 - 8, JSON.stringify(inset));
   check(`${label}: and the measured --nav-h grows with it`,
-    inset.after.navVar - inset.before.navVar === 34, JSON.stringify(inset));
+    inset.after.navVar - inset.before.navVar === 34 - 8, JSON.stringify(inset));
   check(`${label}: the day actions move up rather than under it`,
     inset.after.dockTop < inset.before.dockTop, JSON.stringify(inset));
   check(`${label}: the page reserves more at its foot`,
@@ -4331,7 +4530,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await page.textContent('#reorderLive'));
 
   const wanted = await drafted();
-  await page.getByRole('button', { name: 'שמור סדר' }).click();
+  await page.getByRole('button', { name: 'שמירה ויציאה' }).click();
   await page.waitForTimeout(400);
   check('saving writes the drafted order', (await order()) === wanted,
     `${await order()} vs ${wanted}`);
@@ -4343,7 +4542,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.waitForTimeout(250);
   await page.locator('#workerList .reorder-row').last().getByRole('button', { name: /לראש/ }).click();
   await page.waitForTimeout(200);
-  await page.locator('.reorder-foot').getByRole('button', { name: 'ביטול' }).click();
+  await page.locator('.reorder-foot').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
+  await page.waitForTimeout(250);
+  // Discarding a changed order is a decision, and the door asks its three-answer
+  // question before anything is thrown away.
+  check('leaving with unsaved changes asks first', await page.isVisible('#askChoices'));
+  await page.locator('#askChoices').getByRole('button', { name: 'יציאה בלי לשמור' }).click();
   await page.waitForTimeout(300);
   check('cancelling leaves the order alone', (await order()) === wanted, await order());
 
@@ -4452,6 +4656,91 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('escape closes it', closed.shown === false, JSON.stringify(closed));
   check('and focus goes back to the button that opened it',
     closed.focused === 'settingsBtn', JSON.stringify(closed));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the six groups on the sheet
+{
+  // The sheet is organised by question: is anybody else holding a copy, the copy this
+  // device can make, the doors that replace data, the emergency exit, the version, and
+  // what this device is doing. Destructive never sits beside safe - ייבוא ושחזור is a
+  // card of its own, behind its own guard sentence.
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#settingsBtn');
+  await page.waitForTimeout(300);
+
+  const heads = await page.$$eval('#settingsPanel .settings-group h3',
+    nodes => nodes.map(node => node.textContent.trim()));
+  check('the sheet has the six groups, in the board order',
+    JSON.stringify(heads) === JSON.stringify(
+      ['ענן וסנכרון', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'עדכון וגרסה', 'מצב המכשיר']),
+    JSON.stringify(heads));
+
+  // One primary action: the export. Everything else is quieted with btn-secondary or
+  // btn-icon, so the eye lands on the one button that gets a copy off the phone.
+  const primaries = await page.evaluate(() =>
+    [...document.querySelectorAll('#settingsPanel button')]
+      .filter(node => !node.classList.contains('btn-secondary')
+        && !node.classList.contains('btn-icon'))
+      .map(node => node.textContent.trim()));
+  check('the export is the only primary action on the sheet',
+    primaries.length === 1 && primaries[0].includes('שמור קובץ גיבוי'),
+    JSON.stringify(primaries));
+
+  check('the restore group carries the guard sentence, above its doors',
+    (await page.textContent('#settingsPanel'))
+      .includes('שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר תמיד כגיבוי מקומי לפני.'));
+
+  // The raw export used to be reachable only AFTER damage was detected - from the
+  // recovery banner - which is exactly backwards for an emergency door.
+  check('the raw export has a permanent home, marked for emergencies only',
+    (await page.locator('#settingsPanel button').filter({ hasText: 'ייצא נתונים גולמיים' }).count()) === 1 &&
+    (await page.textContent('#settingsPanel')).includes('לשחזור חירום בלבד'));
+
+  // The sync line in the panel is a mirror of the one at the page foot, written by
+  // updateSyncNotice - the same words, never a second composition.
+  const mirrored = await page.evaluate(() => ({
+    panel: document.getElementById('settingsSyncStatus').textContent,
+    foot: document.getElementById('storageNotice').textContent
+  }));
+  check('the sync line in the panel says what the page foot says',
+    mirrored.panel.length > 0 && mirrored.panel === mirrored.foot,
+    JSON.stringify(mirrored));
+
+  check('the device group says whether the app is installed',
+    (await page.textContent('#installState')).includes('בדפדפן'),
+    await page.textContent('#installState'));
+
+  // The v80 parity line. This build carries ledgerAgreesWithAdvances, so the line is
+  // there - quiet on agreement, a warning on disagreement, and gone when no check is
+  // reachable at all.
+  check('with the ledger agreeing, the parity line is quiet',
+    (await page.textContent('#ledgerParity')) === 'פנקס המקדמות (v80) תואם את הרישום הקיים.' &&
+    !(await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#ledgerParity'));
+
+  await page.evaluate(() => {
+    window.FarkadLedger = { ledgerAgreesWithAdvances: () => ({ agrees: false, missing: ['a_1'], different: [] }) };
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
+  check('a disagreement warns against flipping the write gate',
+    (await page.textContent('#ledgerParity'))
+      .includes('אינו תואם את הרישום — אל תפעילו את הכתיבה החדשה') &&
+    (await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#ledgerParity'));
+
+  await page.evaluate(() => {
+    window.FarkadLedger = undefined;
+    window.ledgerAgreesWithAdvances = undefined;
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
+  check('with no check reachable the line says nothing at all',
+    (await page.textContent('#ledgerParity')).trim() === '' &&
+    !(await page.locator('#ledgerParity').isVisible()));
 
   await page.context().close();
 }
@@ -4645,7 +4934,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('so the dock does not grow when the indicator appears',
     dock.inset.height === dock.flat.height, JSON.stringify(dock));
   check('it moves up with the tab bar instead',
-    dock.flat.bottom - dock.inset.bottom === 34, JSON.stringify(dock));
+    dock.flat.bottom - dock.inset.bottom === 34 - 8, JSON.stringify(dock));
   check('and still lands on the tab bar exactly',
     Math.abs(dock.inset.bottom - dock.inset.tabsTop) <= 1, JSON.stringify(dock.inset));
   check('both buttons in it are a thumb\'s worth, and the same size',
@@ -5005,6 +5294,10 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.click('#tab-reports');
   await page.waitForTimeout(400);
 
+  // The billing side is behind its segment now; the chips are pressed on that side.
+  await page.locator('.report-section-toggle').getByRole('button', { name: 'לפי אתר' }).click();
+  await page.waitForTimeout(300);
+
   check('by default the invoice shows every site, for working from',
     (await page.locator('.report-invoice thead th').count()) === 4);
 
@@ -5031,10 +5324,29 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     sheets[0].length === 3 && !JSON.stringify(sheets).includes('תל אביב'),
     JSON.stringify(sheets[0]));
 
+  // The whole bundle, not just the billing sheet: with a client's site chosen, the
+  // pay sheet and the per-day detail - names and money - must not be in the file at
+  // all. This is the file that gets HANDED OVER.
+  const bundle = await page.evaluate(() => {
+    const out = reportSheets();
+    return { keys: Object.keys(out), flat: JSON.stringify(out) };
+  });
+  check('a client-scoped export is the billing sheet alone',
+    bundle.keys.length === 1 && bundle.keys[0] === 'invoice', bundle.keys.join(','));
+  check('and it names no worker',
+    !bundle.flat.includes('דוד') && !bundle.flat.includes('שרה') && !bundle.flat.includes('עלי'),
+    bundle.flat.slice(0, 120));
+
+  // The button says what it will hand over, since the usual one promises the workbook.
+  check('the export button names the client\'s file',
+    (await page.locator('.range-actions').textContent()).includes('יצוא חיוב'));
+
   await page.locator('.invoice-picker').getByRole('button', { name: 'כל האתרים' }).click();
   await page.waitForTimeout(300);
   check('and it goes back to every site',
     (await page.locator('.report-invoice thead th').count()) === 4);
+  check('with the full workbook back behind the button', await page.evaluate(() =>
+    Object.keys(reportSheets()).join(',') === 'payroll,invoice,detail'));
   await page.context().close();
 }
 
@@ -5562,7 +5874,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await page.locator('#workerList .reorder-row').last()
       .getByRole('button', { name: /הורד/ }).isDisabled());
 
-  await page.getByRole('button', { name: 'שמור סדר' }).click();
+  await page.getByRole('button', { name: 'שמירה ויציאה' }).click();
   await page.waitForTimeout(350);
   check('the drafted order is what the roster now reads',
     (await names()) === 'עלי,דוד,שרה', await names());
@@ -5823,8 +6135,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   });
   await page.click('#settingsBtn');
   await page.waitForTimeout(300);
-  check('on an ordinary device the space line says nothing at all',
-    (await page.textContent('#storageRoom')).trim() === '');
+  // A line that only ever appears is a line nobody has learned to look at, so the
+  // steady state is a quiet sentence rather than silence.
+  check('on an ordinary device the space line says quietly that there is room',
+    (await page.textContent('#storageRoom')).trim() === 'יש מקום פנוי במכשיר.' &&
+    !(await page.locator('#storageRoom').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#storageRoom'));
 
   const tighten = (factor) => page.evaluate((f) => {
     Store.budget = Store.used() + Math.round(State.durableText.length * 2 * f);
@@ -5862,8 +6178,9 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   await page.evaluate(() => { Store.budget = 5 * 1024 * 1024; render(); });
   await page.waitForTimeout(200);
-  check('room made, and the app stops mentioning it',
-    (await page.textContent('#storageRoom')).trim() === '' &&
+  check('room made, and the line goes back to its quiet state',
+    (await page.textContent('#storageRoom')).trim() === 'יש מקום פנוי במכשיר.' &&
+    !(await page.locator('#storageRoom').getAttribute('class')).includes('hint-warn') &&
     !(await page.textContent('#storageNotice')).includes('אין מקום'));
   await page.context().close();
 }
@@ -6140,7 +6457,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('and the line follows to the new day',
     (await page.textContent('.now-editing')).includes('10/08'));
   check('and the days recorded there are on screen',
-    (await page.textContent('.progress-line')).includes('3 מתוך 3'));
+    (await page.textContent('.progress-line')).includes('הכל נרשם'),
+    await page.textContent('.progress-line'));
 
   // a mistake found a week later still has to be fixable: nothing is closed off by age
   await page.evaluate(() => { State.date = '2026-08-04'; render(); });
@@ -6279,6 +6597,31 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await blank.evaluate(() => currentView)) === 'roster');
 
   await fresh.context().close();
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- the chevrons' pixels
+{
+  // The old ‹ › pseudo-elements read correctly in the SOURCE and rendered backwards on
+  // the SCREEN - U+2039/203A are Bidi_Mirrored, and the RTL run swapped the glyphs. No
+  // string assertion can see that, so this asserts the drawn path itself: back points
+  // RIGHT (M9 6l6 6-6 6), forward points LEFT (M15 6l-6 6 6 6).
+  const page = await open();
+  const paths = await page.evaluate(() => ({
+    back: document.querySelector('.day-nav .nav-back svg path')?.getAttribute('d'),
+    fwd: document.querySelector('.day-nav .nav-fwd svg path')?.getAttribute('d')
+  }));
+  check('the back chevron is drawn pointing right', paths.back === 'M9 6l6 6-6 6',
+    String(paths.back));
+  check('and the forward chevron pointing left', paths.fwd === 'M15 6l-6 6 6 6',
+    String(paths.fwd));
+
+  // A leading plus is bidi-shuffled exactly like the leading minus the app already
+  // guards: bare "+2" lays out as "2+" in Hebrew text. Every hours badge goes through
+  // plusAmount, and the mark is the first thing in the token.
+  const guarded = await page.evaluate(() => plusAmount(2));
+  check('a plus-hours token leads with the LTR mark', guarded === '\u200E+2',
+    JSON.stringify(guarded));
   await page.context().close();
 }
 

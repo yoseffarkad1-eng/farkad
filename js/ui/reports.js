@@ -15,6 +15,12 @@ let REPORT_PRESET = 'fortnight';
 // invoice to that client alone, for printing.
 let INVOICE_PLACE = null;
 
+// Which of the two reports is on screen: 'workers' is the pay sheet, 'sites' the
+// billing grid. On a phone the two stacked was one long scroll with the answer to the
+// wrong question at the top of it. BOTH stay in the DOM - print gets the whole record,
+// the screen shows the one being asked about.
+let REPORT_SECTION = 'workers';
+
 // The account period as the owner runs it: fourteen days, Friday through Thursday
 // twice, and WHICH fortnight is anchored to the business's own seam - see accountStart
 // in dates.js. This returns the account containing today, whole, even on its first
@@ -38,9 +44,37 @@ function renderReports() {
 
     clear(root);
     root.appendChild(renderRangePicker());
+    root.appendChild(renderSectionToggle());
     renderOverCapNotice(root);
-    root.appendChild(renderPayrollTable());
-    root.appendChild(renderInvoiceTable());
+
+    // Both sections are built and both are in the DOM, whichever is chosen: the print
+    // stylesheet prints the record, not the screen's current answer to it. The one not
+    // being looked at is set aside on screen only.
+    const payroll = renderPayrollTable();
+    const invoice = renderInvoiceTable();
+    if (REPORT_SECTION === 'sites') payroll.classList.add('report-offscreen');
+    else invoice.classList.add('report-offscreen');
+    root.appendChild(payroll);
+    root.appendChild(invoice);
+}
+
+// The same two-button switch the day screen uses for its two ways of looking at one
+// day - these are two ways of looking at one fortnight.
+function renderSectionToggle() {
+    const toggle = el('div', 'layer-toggle mode-toggle mode-quiet report-section-toggle');
+    toggle.appendChild(sectionButton('workers', 'לפי עובד'));
+    toggle.appendChild(sectionButton('sites', 'לפי אתר'));
+    return toggle;
+}
+
+function sectionButton(key, text) {
+    const on = REPORT_SECTION === key;
+    const btn = button(text, on ? 'layer-on' : 'layer-off', () => {
+        REPORT_SECTION = key;
+        render();
+    });
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    return btn;
 }
 
 // Days recorded with more sites than the cap allows. They are NOT trimmed - those
@@ -106,7 +140,13 @@ function renderRangePicker() {
     actions.appendChild(el('strong', 'range-current',
         `${formatFullDate(parseLocalDate(REPORT_RANGE.from))} - ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`));
     actions.appendChild(button('🖨️ הדפסה', 'btn-success', () => window.print()));
-    actions.appendChild(button('📊 יצוא', 'btn-info', exportReports));
+    // The button says what will come out of it. With one client's site chosen the file
+    // is that client's billing sheet and nothing else (see reportSheets), and a button
+    // still reading "יצוא" would promise the usual workbook and quietly hand over less.
+    const client = scopedExportPlace();
+    actions.appendChild(button(
+        client ? `📊 יצוא חיוב - ${isolate(client.name)}` : '📊 יצוא',
+        'btn-info', exportReports));
     wrap.appendChild(actions);
 
     return wrap;
@@ -184,8 +224,24 @@ function reportPeriod() {
     const from = parseLocalDate(REPORT_RANGE.from);
     const to = parseLocalDate(REPORT_RANGE.to);
     const days = Math.round((to - from) / 86400000) + 1;
+    // A whole account period is named as the thing the owner actually runs - שישי–חמישי
+    // - and any other window is measured in days instead, so a short one is obvious.
+    const length = wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)
+        ? 'שישי–חמישי'
+        : `${days} ימים`;
     return el('div', 'report-period',
-        `${formatFullDate(from)} - ${formatFullDate(to)} · ${days} ימים`);
+        `${formatFullDate(from)} - ${formatFullDate(to)} · ${length}`);
+}
+
+// Exactly one account, whole: it starts on an account's opening Friday and runs its
+// fourteen days. Anything else - a month, a hand-picked window, half an account - is a
+// way of looking at days, not a period the crew is paid on.
+function wholeAccountRange(fromStr, toStr) {
+    const from = parseLocalDate(fromStr);
+    if (!from || toLocalDateStr(accountStart(from)) !== fromStr) return false;
+    const to = new Date(from);
+    to.setDate(from.getDate() + 13);
+    return toLocalDateStr(to) === toStr;
 }
 
 function payrollRows() {
@@ -275,7 +331,12 @@ function renderPayrollTable() {
         advances: sum.advances + (row.advances || 0)
     }), { amount: 0, advances: 0 });
 
-    const footer = ['סה"כ'].concat(columns.map(column =>
+    // The band names what it totals and over how many people. Thirty rows of cards end
+    // in one number, and "סה״כ" alone does not say whether that number is the gross,
+    // the net, or the count of anything - nor that all thirty are inside it.
+    const footer = [anyRate
+        ? `סה״כ לתשלום · ${countedIn(rows.length, 'עובד אחד', 'עובדים')}`
+        : 'סה״כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
     if (anyRate) footer.push('', Math.round(totals.amount));
     if (anyAdvance) footer.push(minusAmount(totals.advances));
@@ -307,7 +368,7 @@ function renderPayrollTable() {
 
     if (rows.some(row => row.hoursUnpriced)) {
         section.appendChild(el('p', 'hint hint-warn',
-            '* לעובד יש שעות נוספות בלי שכר שעה, ולכן הן לא נכללות בסכום.'));
+            '* שעות נוספות בלי שכר שעה - לא נכללו בסכום.'));
     }
 
     // A day is paid at the rate it was RECORDED at, so after a raise mid-period the total
@@ -318,7 +379,7 @@ function renderPayrollTable() {
     if (mixed.length > 0) {
         section.appendChild(el('p', 'hint',
             `בתקופה הזו השתנה השכר היומי של ${mixed.map(row => isolate(row.name)).join(', ')}. ` +
-            'כל יום מחושב לפי השכר שהיה בזמן שנרשם, ולכן הסכום אינו מספר הימים כפול ' +
+            'כל יום מחושב לפי השכר שהיה בזמן הרישום, ולכן הסכום אינו מספר הימים כפול ' +
             'השכר שמופיע כאן.'));
     }
 
@@ -331,6 +392,12 @@ function renderPayrollTable() {
             `⚠️ ${unpriced.length} עובדים בלי שכר יומי, ולכן הסכום למטה חסר אותם: ` +
             `${unpriced.map(row => isolate(row.name)).join(', ')}. הוסף להם שכר במסך "עובדים ואתרים".`));
     }
+
+    // Under every pay sheet, not only in the fortnights where it happened to matter:
+    // the two rules every number above is computed by. The mixed-rates note further up
+    // stays as the extra explanation for the sheets where a rate actually changed.
+    section.appendChild(el('p', 'hint',
+        'יום כפול נספר כשני ימי שכר. כל יום מחושב לפי השכר שהיה בזמן הרישום.'));
     return section;
 }
 
@@ -374,20 +441,25 @@ function renderInvoiceTable() {
     });
 
     const table = buildTable(headers, body);
-    // "ימי-עובד", not "סה"כ". The column adds up how many men were on that site on how
-    // many days - four men for three days is twelve - and a bare total under a column of
-    // dates gets read as "the site worked twelve days", which is the number a client
-    // would be billed on. They are different numbers and only one of them is here.
+    // "ימי עובד־אתר", not "סה"כ". The column adds up how many men were on that site on
+    // how many days - four men for three days is twelve - and a bare total under a
+    // column of dates gets read as "the site worked twelve days", which is the number a
+    // client would be billed on. They are different numbers and only one of them is here.
     table.appendChild(totalRow(
-        ['סה"כ ימי-עובד'].concat(places.map(place => place.workerDays))
+        ['סה״כ ימי עובד־אתר'].concat(places.map(place => place.workerDays))
             .concat([places.reduce((sum, place) => sum + place.workerDays, 0)]),
         headers
     ));
 
     section.appendChild(scrollWrap(table));
     section.appendChild(el('p', 'hint',
-        'כל מספר הוא מספר העובדים שעבדו באתר באותו יום. השורה התחתונה היא ימי-עובד: ' +
+        'כל מספר הוא מספר העובדים שעבדו באתר באותו יום. השורה התחתונה היא ימי עובד־אתר: ' +
         'עובד אחד ביום אחד באתר. היא אינה מספר הימים שהאתר עבד.'));
+    // The counting rule, spelled out: this number lives beside two others that sound
+    // like it, and the person about to bill from it must not expect them to reconcile.
+    section.appendChild(el('p', 'hint',
+        'עובד בשני אתרים נספר פעם אחת בכל אתר; ימי עובד־אתר אינם ימי נוכחות ואינם ' +
+        'ימי שכר — אין לצפות שהסכומים יתאימו.'));
     return section;
 }
 
@@ -441,13 +513,29 @@ function openWorkerDays(workerId) {
     } else {
         days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
         body.appendChild(renderWorkerDaysTotal(days, worker));
+        // Named before the rows begin: money that went the other way is its own block,
+        // not three more days at the end of the list.
+        if (advances.length > 0) {
+            body.appendChild(el('div', 'wday-advances-head', 'מקדמות בתקופה'));
+        }
         advances.forEach(item => body.appendChild(renderAdvanceRow(item)));
-        if (advances.length > 0) body.appendChild(renderNetRow(days, worker, advances));
+        if (advances.length > 0) {
+            body.appendChild(renderNetRow(days, worker, advances));
+            // Where this block is headed. The ledger model is written and gated off;
+            // when it opens, nothing about these numbers changes - only their record.
+            body.appendChild(el('p', 'hint wday-bridge',
+                'במודל v80 השורה "מקדמות" בפירוט השכר הופכת לתנועת "נוכה מהשכר" ' +
+                'בסגירת תקופה — אותם סכומים, היסטוריה מלאה.'));
+        }
     }
 
     body.appendChild(renderAdvanceAdd(worker));
     document.getElementById('workerDaysModal').style.display = 'flex';
 }
+
+// How the money moved, when that was recorded. An advance from before the field existed
+// is still a plain מקדמה - the record does not guess.
+const ADVANCE_METHOD_LABELS = { cash: 'מקדמה במזומן', transfer: 'מקדמה בהעברה' };
 
 // Cash handed over before settlement day. Recorded here, next to the days it will be
 // deducted from, because the question it answers - "how much is left" - is asked on this
@@ -457,7 +545,7 @@ function renderAdvanceRow(item) {
     const parsed = parseLocalDate(item.date);
 
     const when = el('div', 'wday-date');
-    when.appendChild(el('strong', null, 'מקדמה'));
+    when.appendChild(el('strong', null, ADVANCE_METHOD_LABELS[item.method] || 'מקדמה'));
     when.appendChild(el('span', null, formatFullDate(parsed)));
     row.appendChild(when);
 
@@ -486,37 +574,120 @@ function renderNetRow(days, worker, advances) {
 
 function renderAdvanceAdd(worker) {
     const box = el('div', 'wday-actions');
-
-    box.appendChild(button('+ מקדמה', 'btn-secondary', async () => {
-        const amount = await askText({
-            title: `מקדמה ל${isolate(worker.name)}`,
-            message: 'כמה קיבל על החשבון? הסכום יירד מהתשלום בסוף התקופה.',
-            placeholder: '500',
-            // The digit keyboard, the way every other amount field in the app gets it.
-            inputmode: 'decimal',
-            dir: 'ltr',
-            ok: 'שמור',
-            validate: value => {
-                const number = Number(value);
-                if (!value || isNaN(number) || number <= 0) return 'הכנס סכום גדול מאפס.';
-                return null;
-            }
-        });
-        if (amount === null) return;
-
-        // Dated today when today falls inside the period being viewed, and otherwise on
-        // the period's last day - an advance filed outside the account it belongs to
-        // would be deducted from the wrong fortnight.
-        const today = todayStr();
-        const date = (today >= REPORT_RANGE.from && today <= REPORT_RANGE.to)
-            ? today : REPORT_RANGE.to;
-
-        State.commit(addAdvance(State.schedule, worker.id, date, Number(amount), ''));
-        openWorkerDays(worker.id);
-    }));
-
+    box.appendChild(button('+ מקדמה', 'btn-secondary', () => openAdvanceForm(worker, box)));
     box.appendChild(button('💬 שלח לעובד', 'btn-success', () => shareWorkerStatement(worker.id)));
     return box;
+}
+
+// The small form an advance is recorded through: amount, date, an optional note, and
+// how the money moved. One question through askText used to be enough, but the answers
+// the extra fields carry were being asked anyway - on payday, of somebody's memory.
+//
+// This still writes the ONE record every phone already reads (addAdvance, the legacy
+// path); the v80 ledger writer stays gated off. The method rides along as an extra
+// field the wire check passes through untouched.
+function openAdvanceForm(worker, actions) {
+    const host = actions.parentNode;
+    if (!host || host.querySelector('.advance-form')) return;
+
+    const form = el('div', 'advance-form');
+    form.appendChild(el('div', 'advance-form-title', `מקדמה חדשה · ${isolate(worker.name)}`));
+
+    const field = (labelText, input) => {
+        const label = el('label', 'field-label', labelText);
+        form.appendChild(label);
+        form.appendChild(input);
+        return input;
+    };
+
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    // The digit keyboard, the way every other amount field in the app gets it.
+    amountInput.setAttribute('inputmode', 'decimal');
+    amountInput.dir = 'ltr';
+    amountInput.placeholder = '500';
+    field('סכום', amountInput);
+
+    // Dated today when today falls inside the period being viewed, and otherwise on
+    // the period's last day - an advance filed outside the account it belongs to
+    // would be deducted from the wrong fortnight. That stays the rule: the date can be
+    // corrected, but only inside the period on screen.
+    const today = todayStr();
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = (today >= REPORT_RANGE.from && today <= REPORT_RANGE.to)
+        ? today : REPORT_RANGE.to;
+    dateInput.min = REPORT_RANGE.from;
+    dateInput.max = REPORT_RANGE.to;
+    field('תאריך', dateInput);
+
+    const noteInput = document.createElement('input');
+    noteInput.type = 'text';
+    noteInput.placeholder = 'למשל: על חשבון סוף התקופה';
+    field('הערה (לא חובה)', noteInput);
+
+    // מזומן is the default because it is what an advance on a site almost always is -
+    // and the segment is the day screen's toggle, not a third text field.
+    let method = 'cash';
+    const methods = el('div', 'layer-toggle advance-method');
+    const methodButton = (key, text) => {
+        const btn = button(text, method === key ? 'layer-on' : 'layer-off', () => {
+            method = key;
+            methods.querySelectorAll('button').forEach(node => {
+                const on = node === btn;
+                node.className = on ? 'layer-on' : 'layer-off';
+                node.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+        });
+        btn.setAttribute('aria-pressed', method === key ? 'true' : 'false');
+        return btn;
+    };
+    methods.appendChild(methodButton('cash', 'מזומן'));
+    methods.appendChild(methodButton('transfer', 'העברה'));
+    form.appendChild(methods);
+
+    form.appendChild(el('p', 'hint', 'הסכום יירד מהתשלום בסוף התקופה.'));
+
+    const error = el('p', 'field-error');
+    form.appendChild(error);
+
+    const close = () => {
+        form.remove();
+        actions.style.display = '';
+    };
+
+    const save = () => {
+        const amount = Number(amountInput.value.trim());
+        if (!amountInput.value.trim() || isNaN(amount) || amount <= 0) {
+            error.textContent = 'הכנס סכום גדול מאפס.';
+            amountInput.focus();
+            return;
+        }
+        // Some phones let a date be typed straight into the field, past min and max.
+        const date = dateInput.value;
+        if (!date || date < REPORT_RANGE.from || date > REPORT_RANGE.to) {
+            error.textContent = 'בחר תאריך בתוך התקופה המוצגת - מקדמה מחוץ לה ' +
+                'תנוכה מהחשבון הלא נכון.';
+            return;
+        }
+
+        const change = addAdvance(State.schedule, worker.id, date, amount,
+            noteInput.value.trim());
+        // On the record object itself, before the commit, so the journal entry and the
+        // saved schedule carry it together.
+        change.value.method = method;
+        if (!State.commit(change)) return;
+        openWorkerDays(worker.id);
+    };
+
+    const buttons = el('div', 'modal-actions');
+    buttons.appendChild(button('רישום המקדמה', null, save));
+    buttons.appendChild(button('ביטול', 'btn-secondary', close));
+    form.appendChild(buttons);
+
+    host.insertBefore(form, actions);
+    actions.style.display = 'none';
+    amountInput.focus();
 }
 
 async function removeAdvanceRow(item) {
@@ -561,7 +732,7 @@ function workerStatementText(workerId) {
             if (rate === RATE_DOUBLE) return `${name} (כפול)`;
             if (rate === RATE_EXTRA) {
                 const hours = entryExtraHours(entry);
-                return hours ? `${name} (+${hours} ש׳)` : `${name} (נוספות)`;
+                return hours ? `${name} (${plusAmount(hours)} ש׳)` : `${name} (נוספות)`;
             }
             return name;
         }).join(' + ');
@@ -640,7 +811,7 @@ function renderWorkerDayRow(day, worker) {
             if (rate === RATE_DOUBLE) tag.appendChild(el('span', 'tag-rate', 'כפול'));
             else if (rate === RATE_EXTRA) {
                 const hours = entryExtraHours(entry);
-                tag.appendChild(el('span', 'tag-rate', hours ? `+${hours}` : 'נוספות'));
+                tag.appendChild(el('span', 'tag-rate', hours ? plusAmount(hours) : 'נוספות'));
             }
             what.appendChild(tag);
         });
@@ -657,6 +828,13 @@ function renderWorkerDayRow(day, worker) {
         money.textContent = day.amount === null ? '—' : String(Math.round(day.amount));
         if (day.amount !== null && day.extraHours > 0 && !(Number(worker.hourlyRate) > 0)) {
             money.textContent += ' *';
+        }
+        // A day keeps the rate it was worked at, so after a raise this line and the
+        // roster disagree - and the line has to say which rate IT was paid at, or the
+        // whole card reads as an arithmetic mistake on the one screen that exists to
+        // settle that argument.
+        if (day.historic && day.dailyRate > 0) {
+            money.appendChild(el('span', 'wday-rate', `לפי ${day.dailyRate} ליום`));
         }
     }
     row.appendChild(money);
@@ -675,10 +853,53 @@ function renderWorkerDaysTotal(days, worker) {
     const row = el('div', 'wday wday-total');
     row.appendChild(el('div', 'wday-date',
         countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות')));
-    row.appendChild(el('div', 'wday-what', workUnitsLine(summary)));
+
+    // The counts, then the working under them: how 4 dates became 6 paid days, and how
+    // 6 paid days became 2,700. Each line appears only when it is actually true - the
+    // second one is dropped the moment more than one rate was paid in the period,
+    // because then no single multiplication IS the total.
+    const what = el('div', 'wday-what');
+    what.appendChild(el('span', null, workUnitsLine(summary)));
+    if (summary.doubleDays > 0) {
+        what.appendChild(el('span', 'wday-derive', deriveUnitsLine(summary)));
+    }
+    const rateLine = singleRateLine(days, summary, total);
+    if (rateLine) what.appendChild(el('span', 'wday-derive', rateLine));
+    row.appendChild(what);
+
     row.appendChild(el('div', 'wday-money',
         Number(worker.dailyRate) > 0 ? String(Math.round(total)) : '—'));
     return row;
+}
+
+// "2 ימים רגילים + 2 ימים כפולים × 2 = 6 ימי שכר" - the arithmetic between the two day
+// counts, written out once for the person holding the phone up to somebody who counted
+// four dates on his fingers.
+function deriveUnitsLine(summary) {
+    const normal = summary.attendanceDays - summary.doubleDays;
+    const parts = [];
+    if (normal > 0) parts.push(countedIn(normal, 'יום רגיל אחד', 'ימים רגילים'));
+    parts.push(countedIn(summary.doubleDays, 'יום כפול אחד', 'ימים כפולים') + ' × 2');
+    return parts.join(' + ') + ' = ' + countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר');
+}
+
+// "6 ימי שכר × 450 = 2,700" - but only when that multiplication is the truth: one rate
+// across every day worked, nothing priced by the hour on top, and the product actually
+// equal to the total. A period with a raise in it has no such line, and the sheet's
+// mixed-rates note explains why.
+function singleRateLine(days, summary, total) {
+    const worked = days.filter(day => !day.absent);
+    if (worked.length === 0) return null;
+
+    const rates = new Set(worked.map(day => day.dailyRate));
+    if (rates.size !== 1) return null;
+    const rate = rates.values().next().value;
+    if (!(rate > 0)) return null;
+
+    const product = summary.payUnits * rate;
+    if (Math.round(total) !== product) return null;
+    return countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר') +
+        ` × ${rate} = ${product.toLocaleString('en-US')}`;
 }
 
 // "6 ימי שכר · מתוכם 2 ימים כפולים · 3 שעות נוספות", with the parts that are zero left
@@ -759,12 +980,24 @@ function scrollWrap(node) {
 
 // ---------------------------------------------------------------- export
 
-function reportSheets() {
+// The one client site the billing page is narrowed to, resolved against the rows that
+// are actually in range - or null, when the person is working from the payroll side or
+// looking at every site at once.
+function scopedExportPlace() {
+    if (REPORT_SECTION !== 'sites' || !INVOICE_PLACE) return null;
+    return invoiceByDate(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
+        .places.find(place => place.placeId === INVOICE_PLACE) || null;
+}
+
+// Each sheet built on its own, so a test can hold the rows up to the light without a
+// browser or the spreadsheet library - the leak this file had lived exactly in what got
+// bundled, not in any one sheet's arithmetic.
+function payrollSheetRows() {
     // The exported columns say the SAME thing as the screen, under the same headings.
     // This file is the one that reaches the bookkeeper, and it used to write the gross
     // amount under 'לתשלום' - the heading the screen uses for the net - so the two
     // disagreed by exactly the advances, and the paper won.
-    const payroll = [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
+    return [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
         'נעדר', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
         .concat(payrollRows().map(row => [
             row.name, row.attendanceDays, row.payUnits, row.doubleDays,
@@ -774,7 +1007,9 @@ function reportSheets() {
             row.netAmount === null ? '' : Math.round(row.netAmount),
             row.hoursUnpriced ? 'שעות נוספות בלי שכר שעה - לא נכללו' : ''
         ]));
+}
 
+function invoiceSheetRows() {
     const invoice = invoiceByDate(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
     // The export follows the same choice as the screen: exporting every site while the
     // screen shows one would send the client a file about four sites.
@@ -782,15 +1017,25 @@ function reportSheets() {
     const places = chosen ? [chosen] : invoice.places;
     const dates = chosen ? chosen.days.map(day => day.date) : invoice.dates;
 
-    const invoiceRowsOut = [['תאריך'].concat(places.map(p => p.name)).concat(['סה"כ'])];
+    const rows = [['תאריך'].concat(places.map(p => p.name)).concat(['סה"כ'])];
     dates.forEach(date => {
         const counts = places.map(p => invoice.countAt(p.placeId, date));
-        invoiceRowsOut.push([date].concat(counts).concat([counts.reduce((a, b) => a + b, 0)]));
+        rows.push([date].concat(counts).concat([counts.reduce((a, b) => a + b, 0)]));
     });
-    invoiceRowsOut.push(['סה"כ'].concat(places.map(p => p.workerDays))
+    rows.push(['סה"כ'].concat(places.map(p => p.workerDays))
         .concat([places.reduce((sum, p) => sum + p.workerDays, 0)]));
+    return rows;
+}
 
-    return { payroll, invoice: invoiceRowsOut, detail: detailRows() };
+// Which sheets go in the file follows whose file it is. From the payroll side it is the
+// bookkeeper's - all three. With one client's site chosen on the billing side it is the
+// CLIENT's, and the client gets the billing grid alone: the other two sheets carry
+// every worker's name and pay, which is exactly what the screen version of that page
+// keeps off anything handed over. It used to write all three regardless, so the file
+// said what the printed page was built never to say.
+function reportSheets() {
+    if (scopedExportPlace()) return { invoice: invoiceSheetRows() };
+    return { payroll: payrollSheetRows(), invoice: invoiceSheetRows(), detail: detailRows() };
 }
 
 // Every worker-day in the range, one row each. The two summary sheets answer "how much";
@@ -872,17 +1117,21 @@ function loadXlsx(timeoutMs = 8000) {
 
 async function exportReports() {
     const stamp = `${REPORT_RANGE.from}_${REPORT_RANGE.to}`;
+    const client = scopedExportPlace();
     const sheets = reportSheets();
 
     await loadXlsx();
 
     // Falls back to CSV rather than failing when the SheetJS CDN is unreachable - which
-    // on a building site is a normal Tuesday, not an exception.
+    // on a building site is a normal Tuesday, not an exception. The client-scoped
+    // export stays scoped here too: only the billing sheet exists to fall back to.
     if (typeof XLSX === 'undefined') {
-        downloadCsv(sheets.payroll, `שכר_${stamp}.csv`);
+        if (sheets.payroll) downloadCsv(sheets.payroll, `שכר_${stamp}.csv`);
         downloadCsv(sheets.invoice, `חיוב_${stamp}.csv`);
-        downloadCsv(sheets.detail, `פירוט_${stamp}.csv`);
-        askTell('ספריית Excel לא נטענה, ולכן הקבצים יוצאו כ-CSV.');
+        if (sheets.detail) downloadCsv(sheets.detail, `פירוט_${stamp}.csv`);
+        askTell(client
+            ? 'ספריית Excel לא נטענה, ולכן קובץ החיוב יוצא כ-CSV.'
+            : 'ספריית Excel לא נטענה, ולכן הקבצים יוצאו כ-CSV.');
         return;
     }
 
@@ -902,12 +1151,23 @@ async function exportReports() {
         // direction had to be said out loud.
         wb.Workbook = { Views: [{ RTL: true }] };
 
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.payroll), 'שכר');
+        if (sheets.payroll) {
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.payroll), 'שכר');
+        }
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.invoice), 'חיוב');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');
-        XLSX.writeFile(wb, `דוחות_${stamp}.xlsx`);
+        if (sheets.detail) {
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');
+        }
+        XLSX.writeFile(wb, client ? `חיוב_${stamp}.xlsx` : `דוחות_${stamp}.xlsx`);
     } catch (error) {
         console.error('Report export failed:', error);
-        askTell('אירעה שגיאה בזמן היצוא.');
+        // Named, the way the crash banner does it: which file failed, that the record
+        // was not touched, and the error itself - "something went wrong" is not a
+        // report anybody can act on.
+        askTell({
+            title: 'היצוא נכשל',
+            message: 'קובץ ה-Excel לא נוצר. לא שינינו כלום. ' +
+                String((error && error.message) || error).slice(0, 160)
+        });
     }
 }

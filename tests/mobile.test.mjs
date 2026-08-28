@@ -458,6 +458,80 @@ for (const width of [320, 390]) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- the keyboard
+
+// Typing hours into שעות נוספות opens the keyboard over the bottom third of the screen,
+// and neither dvh nor a fixed overlay shrinks for it - without the measured --kb-h the
+// sheet's foot sits under the keys, visible and unpressable. Headless Chromium never
+// opens a keyboard, so the height is handed to the same function the visualViewport
+// listener feeds (js/ui/bars.js); everything downstream of that number is the code a
+// phone runs.
+for (const width of [320, 390]) {
+    suite(`${width}px: the sheet with the keyboard up`);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+    await page.evaluate(() => {
+        State.commit(assignPlace(State.schedule, State.date, 'w_01', State.layer,
+            'p_1', RATE_NORMAL));
+        openAssignSheet('w_01');
+    });
+    await page.waitForTimeout(350);
+    // The rate whose hours field is the one thing on this sheet a keyboard opens for.
+    await page.locator('.sheet-rate-row').getByText('שעות נוספות').click();
+    await page.waitForTimeout(250);
+
+    const KB = 291;    // an iOS Hebrew keyboard with its accessory row, measured once
+    const state = await page.evaluate(kb => {
+        const hours = document.querySelector('.rate-hours');
+        if (hours) hours.focus();
+        applyKeyboardInset(kb);
+        measureBottomBars();
+
+        const visualBottom = window.innerHeight - kb;
+        const buttons = [...document.querySelectorAll('#assignSheet .sheet-foot button')];
+        const bars = ['.tabs', '.day-actions'].map(selector => {
+            const node = document.querySelector(selector);
+            return node ? getComputedStyle(node).display : 'gone';
+        });
+        const root = getComputedStyle(document.documentElement);
+        return {
+            buttons: buttons.length,
+            lowest: Math.max(...buttons.map(node =>
+                Math.round(node.getBoundingClientRect().bottom))),
+            visualBottom,
+            bars,
+            navVar: root.getPropertyValue('--nav-h').trim(),
+            kbVar: root.getPropertyValue('--kb-h').trim()
+        };
+    }, KB);
+
+    check(`${width}px: the sheet's foot sits above the keyboard`,
+        state.buttons > 0 && state.lowest <= state.visualBottom + 1, JSON.stringify(state));
+    check(`${width}px: both bottom bars are gone from under it`,
+        state.bars.every(display => display === 'none' || display === 'gone'),
+        JSON.stringify(state.bars));
+    check(`${width}px: hidden bars measure 0, so nothing reserves room for them`,
+        state.navVar === '0px', state.navVar);
+    check(`${width}px: the measured keyboard is published for the stylesheet`,
+        state.kbVar === `${KB}px`, state.kbVar);
+
+    // The keyboard closes; the same path puts everything back.
+    const after = await page.evaluate(() => {
+        applyKeyboardInset(0);
+        measureBottomBars();
+        return {
+            tabs: getComputedStyle(document.querySelector('.tabs')).display,
+            kbVar: getComputedStyle(document.documentElement)
+                .getPropertyValue('--kb-h').trim()
+        };
+    });
+    check(`${width}px: and everything comes back when it closes`,
+        after.tabs !== 'none' && after.kbVar === '0px', JSON.stringify(after));
+
+    await page.context().close();
+}
+
 for (const width of [320, 390]) {
     suite(`${width}px: הגדרות וכלים`);
 

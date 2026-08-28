@@ -63,6 +63,32 @@ function bidiAmount(value) {
     return value < 0 ? minusAmount(Math.abs(value)) : String(value);
 }
 
+// A leading plus has the same problem as the minus above - "+2" lays out as "2+" in
+// Hebrew text - and the same cure. Not rounded: this one carries hours, not money.
+function plusAmount(value) {
+    return '\u200E+' + value;
+}
+
+// The navigation chevrons, as SVG. They used to be the characters ‹ and › in CSS
+// pseudo-elements, and both are Bidi_Mirrored: inside an RTL button the renderer swaps
+// the glyphs, so back pointed left and forward pointed right - the source read
+// correctly and the pixels were backwards. A drawn path has no bidi class to mirror.
+// Back points RIGHT and forward points LEFT, because time flows right-to-left here.
+function chevronIcon(direction) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2.4');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', direction === 'back' ? 'M9 6l6 6-6 6' : 'M15 6l-6 6 6 6');
+    svg.appendChild(path);
+    return svg;
+}
+
 // The traditional one-letter weekday marks, for where a whole name cannot fit. NOT the
 // first letter of the name - ראשון, שני, שלישי and רביעי would collapse into two
 // indistinguishable letters. יום א׳ through שבת is how a Hebrew calendar abbreviates.

@@ -2,9 +2,9 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8"/>
-<!-- No zoom. Every screen here is already sized for the person using it, and the only
-     zoom that ever actually happened was accidental: a pinch while reaching for a name,
-     or iOS magnifying the page because a field was a pixel under its threshold. -->
+<!-- Zoom stays enabled - it is not ours to take away. What the old lock was defending
+     against is handled at the source instead: every field is 16px or larger, so iOS
+     has no reason to magnify the page on focus. -->
 <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
 <title>פרקד - רישום עבודה</title>
 <link rel="stylesheet" href="css/app.css">
@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v79">
+<meta name="farkad-build" content="v80">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -48,25 +48,25 @@
         </div>
     </header>
 
-    <div class="banner banner-warn" id="storageBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-danger" id="storageBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- What the account still needs before it can be settled. Written on the screen
          rather than pushed as a notification: an installed web app on iOS cannot
          schedule a local one, and a reminder that needs a server behind it is a
          reminder that stops arriving the day the server does. -->
     <div class="banner banner-warn" id="accountBanner" role="status" aria-live="polite" style="display:none"></div>
-    <div class="banner banner-warn" id="recoveryBanner" role="status" aria-live="polite" style="display:none"></div>
-    <div class="banner banner-warn" id="crashBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-danger" id="recoveryBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-danger" id="crashBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- The boot sentinel's banner, written out in full here and never built in code.
          Every other banner on this page is assembled by el() from js/ui/dom.js - and the
          one failure this banner exists for is the one where those scripts are the thing
          that did not arrive. So the words are in the document, the sentinel only reveals
          them, and the only DOM call in the whole path is getElementById. -->
-    <div class="banner banner-warn" id="bootBanner" role="status" aria-live="polite" style="display:none">
+    <div class="banner banner-danger" id="bootBanner" role="status" aria-live="polite" style="display:none">
         <span>⚠️ האפליקציה לא נטענה במלואה. מה שכבר נשמר במכשיר לא נפגע ולא נמחק - רענן את הדף. אם זה חוזר, נסה שוב כשיש חיבור טוב יותר.</span>
         <span class="crash-detail" id="bootBannerDetail"></span>
         <button type="button" class="btn-secondary" onclick="location.reload()">רענן</button>
     </div>
-    <div class="banner banner-warn" id="updateBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-info" id="updateBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-warn" id="offlineBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-warn" id="migrationBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-info" id="installBanner" role="status" aria-live="polite" style="display:none"></div>
@@ -79,7 +79,7 @@
             <div class="roster-columns">
                 <div class="roster-panel">
                     <div class="panel-head">
-                        <h2>עובדים</h2>
+                        <h2 id="workersHeading">עובדים</h2>
                         <button type="button" class="btn-add" onclick="showAddWorkerModal()">+ הוסף עובד</button>
                         <button type="button" class="btn-secondary" onclick="openQuickStart()">📋 הדבק רשימה</button>
                         <!-- The order every other screen reads in. A mode of its own, and
@@ -98,7 +98,7 @@
 
                 <div class="roster-panel">
                     <div class="panel-head">
-                        <h2>אתרי עבודה</h2>
+                        <h2 id="placesHeading">אתרי עבודה</h2>
                         <button type="button" class="btn-add" onclick="showAddPlaceModal()">+ הוסף אתר</button>
                     </div>
                     <div id="placeList"></div>
@@ -132,10 +132,12 @@
     <div class="undo-bar" id="undoBar" role="status" aria-live="polite" style="display:none"></div>
 
     <div class="day-actions">
-        <!-- The label is written by renderCopyButton, which names the day it will copy
-             from - the last one with anything on it, not whatever was yesterday. -->
+        <!-- WhatsApp first: in RTL that is the start corner, under the thumb, and it is
+             the button pressed every evening. The copy button's label is written by
+             renderCopyButton, which names the day it will copy from - the last one with
+             anything on it, not whatever was yesterday. -->
+        <button type="button" class="btn-success" onclick="showDayMessage()" title="הודעה לוואטסאפ עם הסידור של היום">💬 שליחה לוואטסאפ</button>
         <button type="button" class="btn-secondary" id="copyDayBtn" onclick="copyPreviousDay()">↧ מהיום הקודם</button>
-        <button type="button" class="btn-success" onclick="showDayMessage()" title="הודעה לוואטסאפ עם הסידור של היום">💬 וואטסאפ</button>
     </div>
 
 </div>
@@ -149,10 +151,41 @@
         <button type="button" class="btn-icon" onclick="closeSettings()" aria-label="סגור">✕</button>
     </div>
     <div class="settings-body">
+        <!-- Six groups, in the order a person needs their answers: is anybody else
+             holding a copy, then the copy this device can make, then the doors that
+             REPLACE data - a group of their own, because a destructive door must never
+             sit beside a safe one - then the emergency exit, the running version, and
+             what this device itself is doing. -->
         <section class="settings-group">
+            <h3>ענן וסנכרון</h3>
+            <!-- The same words the line at the foot of every screen is showing right
+                 now. updateSyncNotice (js/sync/sync.js) owns them and writes them into
+                 #storageNotice; renderSettingsSyncLine copies them here on every render
+                 rather than composing a second version that could drift. -->
+            <p class="hint" id="settingsSyncStatus"></p>
+            <!-- Ships hidden and is shown by the adapter once a project actually answers:
+                 with no Firebase behind it, a "connect to the cloud" button is a door
+                 onto nothing. It lived in the header, where it was the widest thing on a
+                 phone and pressed about twice a year. -->
+            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
+        </section>
+
+        <section class="settings-group settings-group-backup">
             <h3>גיבוי</h3>
+            <!-- The one primary action on this sheet. Everything else here reads,
+                 restores or replaces; this is the only thing that gets a copy OFF the
+                 phone, which is why it does not share a row with anything. -->
+            <button type="button" class="backup-primary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
+            <p class="hint" id="backupAge"></p>
+            <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
+        </section>
+
+        <section class="settings-group">
+            <h3>ייבוא ושחזור</h3>
+            <!-- Every door in this group replaces the record. Said once, above all of
+                 them, before any of them is pressed. -->
+            <p class="hint">שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר תמיד כגיבוי מקומי לפני.</p>
             <div class="backup-actions">
-                <button type="button" class="btn-secondary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
                 <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
                 <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
                 <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
@@ -162,23 +195,20 @@
                  the rules there allow create and nothing else. Hidden entirely while
                  sync is off. -->
             <div class="restore-points" id="cloudRestorePoints"></div>
-            <p class="hint" id="backupAge"></p>
-            <p class="hint" id="storageRoom"></p>
-            <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
         </section>
 
         <section class="settings-group">
-            <h3>החשבון בענן</h3>
-            <!-- Ships hidden and is shown by the adapter once a project actually answers:
-                 with no Firebase behind it, a "connect to the cloud" button is a door
-                 onto nothing. It lived in the header, where it was the widest thing on a
-                 phone and pressed about twice a year. -->
-            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
-            <p class="hint">הסנכרון עובד ברקע. המצב שלו כתוב בתחתית כל מסך.</p>
+            <h3>שחזור חירום</h3>
+            <!-- The raw-records export, findable BEFORE it is needed. It used to be
+                 reachable only from the recovery banner - that is, only after damage was
+                 detected - and the day somebody is told over the phone to "export the
+                 raw data" is precisely the day nothing should have to go wrong first. -->
+            <button type="button" class="btn-secondary" onclick="exportRecoveryData()">💾 ייצא נתונים גולמיים</button>
+            <p class="hint">לשחזור חירום בלבד.</p>
         </section>
 
         <section class="settings-group">
-            <h3>הגרסה במכשיר</h3>
+            <h3>עדכון וגרסה</h3>
             <!-- Which version is actually running, and the way to move off it. An
                  installed app can sit on a cached build for a long time and there is
                  nothing on any other screen that would say so. -->
@@ -186,6 +216,16 @@
                 <span id="appVersion"></span>
                 <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button>
             </p>
+        </section>
+
+        <section class="settings-group">
+            <h3>מצב המכשיר</h3>
+            <p class="hint" id="storageRoom"></p>
+            <p class="hint" id="installState"></p>
+            <!-- The v80 advances ledger, when this build carries the parity check.
+                 renderLedgerParity feature-detects it and leaves this line hidden when
+                 the check is not there to ask. -->
+            <p class="hint" id="ledgerParity" style="display:none"></p>
         </section>
     </div>
 </div>
@@ -262,10 +302,14 @@
         <p class="hint" id="askMessage"></p>
         <input id="askInput" type="text" onkeydown="askKeydown(event)"/>
         <p class="ask-error" id="askError"></p>
+        <!-- askChoice's named answers; hidden whenever an ordinary two-button question
+             is being asked. Stacked, so three verbs are three full-width targets. -->
+        <div class="modal-actions ask-choices" id="askChoices" style="display:none"></div>
         <div class="modal-actions">
             <button type="button" id="askOk" onclick="askAccept()">אישור</button>
             <button type="button" class="btn-secondary" id="askCancel" onclick="askCancel()">ביטול</button>
         </div>
+        <p class="hint ask-footer" id="askFooter" style="display:none"></p>
     </div>
 </div>
 
@@ -300,7 +344,7 @@
             <input dir="ltr" id="workerFormId" inputmode="numeric" placeholder="מספר זהות" type="text"/>
             <input dir="ltr" id="workerFormHourly" inputmode="decimal" placeholder="שכר לשעה נוספת" type="number" min="0" step="1"/>
         </details>
-        <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום.</p>
+        <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום. שינוי שכר חל מהיום והלאה - ימים שכבר נרשמו שומרים את השכר שהיה בזמן הרישום.</p>
         <div class="modal-actions">
             <button type="button" onclick="saveWorkerForm()">שמור</button>
             <button type="button" class="btn-secondary" onclick="closeWorkerForm()">ביטול</button>
@@ -425,6 +469,7 @@
 <script src="js/dates.js"></script>
 <script src="js/model/schema.js"></script>
 <script src="js/model/migrate.js"></script>
+<script src="js/model/ledger.js"></script>
 <script src="js/sync/sync.js"></script>
 <script src="js/state.js"></script>
 <script src="js/ui/dom.js"></script>

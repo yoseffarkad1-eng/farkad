@@ -168,7 +168,7 @@ function renderWeekCell(worker, date) {
                 } else if (rate === RATE_EXTRA) {
                     const hours = entryExtraHours(entry);
                     line.classList.add('cell-extra');
-                    line.appendChild(el('span', 'tag-rate', hours ? `+${hours}` : 'נוספות'));
+                    line.appendChild(el('span', 'tag-rate', hours ? plusAmount(hours) : 'נוספות'));
                 }
                 cell.appendChild(line);
             });
@@ -177,6 +177,10 @@ function renderWeekCell(worker, date) {
 
     cell.tabIndex = 0;
     cell.setAttribute('role', 'button');
+    // Without a name an empty cell announces as "button" and nothing else - the reader
+    // hears thirty of those per week. The name says whose day it opens.
+    cell.setAttribute('aria-label',
+        `${worker.name} · יום ${hebrewDayName(parseLocalDate(date))} ${formatFullDate(parseLocalDate(date))}`);
     const open = () => { State.date = date; showView('day'); };
     cell.addEventListener('click', open);
     cell.addEventListener('keydown', event => {
@@ -189,15 +193,22 @@ function renderWeekCell(worker, date) {
 function renderWeekHeader() {
     const header = el('div', 'week-header');
 
-    header.appendChild(button('שבוע קודם', 'btn-secondary btn-nav nav-back', () => stepWeek(-7)));
+    const back = button('שבוע קודם', 'btn-secondary btn-nav nav-back', () => stepWeek(-7));
+    back.insertBefore(chevronIcon('back'), back.firstChild);
+    header.appendChild(back);
 
     const dates = weekDates();
     const first = parseLocalDate(dates[0]);
     const last = parseLocalDate(dates[6]);
+    // Each date is one LTR run and the pair sits in an RTL element: without isolation
+    // the bidi algorithm keeps the dates readable but swaps their ORDER, so the range
+    // showed its end first. FSI/PDI around each keeps start before end.
     header.appendChild(el('strong', 'week-range',
-        `${formatFullDate(first)} - ${formatFullDate(last)}`));
+        `\u2068${formatFullDate(first)}\u2069 - \u2068${formatFullDate(last)}\u2069`));
 
-    header.appendChild(button('שבוע הבא', 'btn-secondary btn-nav nav-fwd', () => stepWeek(7)));
+    const fwd = button('שבוע הבא', 'btn-secondary btn-nav nav-fwd', () => stepWeek(7));
+    fwd.appendChild(chevronIcon('fwd'));
+    header.appendChild(fwd);
     header.appendChild(button('השבוע', 'btn-secondary', () => { setWeekFromDate(todayStr()); render(); }));
 
     header.appendChild(button('🖨️ הדפסה', 'btn-success', () => window.print()));

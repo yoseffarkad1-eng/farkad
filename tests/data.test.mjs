@@ -4994,9 +4994,12 @@ for (const [label, arm] of [
     check('with nothing quarantined',
         !again.global('Recovery').problems.some(p => p.key.startsWith('farkad:outbox')),
         JSON.stringify(again.global('Recovery').problems.map(p => p.key)));
+    // Still in it, not "and nothing else": the reopen is a boot, and a boot with an
+    // unmirrored advance on the disk writes that advance's ledger entry - one more
+    // queued path, and a legitimate one. What this check pins is that no entry is LOST.
     check('and every entry still in it',
-        again.Sync.pendingPaths().length === device.Sync.pendingPaths().length,
-        `${again.Sync.pendingPaths().length} vs ${device.Sync.pendingPaths().length}`);
+        device.Sync.pendingPaths().every(path => again.Sync.pendingPaths().includes(path)),
+        `${again.Sync.pendingPaths().length} holds ${device.Sync.pendingPaths().length}`);
 }
 
 {
@@ -5978,7 +5981,7 @@ for (const [label, arm] of [
     await wait();
 
     check('it is the typing dialog that is opened', Boolean(asked), String(asked));
-    check('and it asks for the name', String(asked.message).includes('הקלד את שם העובד'),
+    check('and it asks for the name', String(asked.message).includes('הקלדת שם העובד'),
         String(asked.message));
     check('the right name is accepted', asked.validate('טעות') === null,
         String(asked.validate('טעות')));
@@ -8522,6 +8525,456 @@ for (const [label, run] of [
         out[3] === '"עלי","20","0","","0",""', out[3]);
     check('nothing in an ordinary export carries the text marker at all',
         out.every(line => !line.includes("'")), out.find(line => line.includes("'")) || '');
+}
+
+
+// ================================================================ the advances ledger
+//
+// v80 groundwork. The reader and the migration ship first and write nothing new: three
+// phones share this record and the other two cannot read a ledger entry, so the field
+// they DO read is still the one every device writes. What is proven here is that the
+// ledger says the same thing as that field, on real data, before anything depends on it.
+
+// The migration, committed the way every other edit is: journalled, saved and queued.
+function commitMigration(device) {
+    const result = device.call('migrateAdvancesToLedger', device.State.schedule, device.id);
+    device.State.commitMany(Object.keys(result.paths)
+        .map(path => ({ path, value: result.paths[path] })));
+    return result;
+}
+
+function withAdvances(device, rows) {
+    rows.forEach(row => device.State.commit(
+        device.call('addAdvance', device.State.schedule, row.workerId, row.date, row.amount, row.note || '')));
+    return device;
+}
+
+{
+    suite('the migration builds the ledger without touching what it was built from');
+
+    const { device } = crew();
+    withAdvances(device, [
+        { workerId: 'w_01', date: '2026-08-03', amount: 500, note: 'מזומן' },
+        { workerId: 'w_02', date: '2026-08-05', amount: 300 },
+        { workerId: 'w_01', date: '2026-08-11', amount: 200 }
+    ]);
+    const before = JSON.stringify(device.State.schedule.advances);
+    given('three advances are on the device',
+        Object.keys(device.State.schedule.advances).length === 3);
+
+    const result = device.call('migrateAdvancesToLedger', device.State.schedule, device.id);
+    device.State.commitMany(Object.keys(result.paths)
+        .map(path => ({ path, value: result.paths[path] })));
+
+    check('every advance became an entry', result.added.length === 3,
+        JSON.stringify(result.added));
+    check('and the field it was built from is untouched',
+        JSON.stringify(device.State.schedule.advances) === before);
+
+    const folded = device.call('foldLedger', device.State.schedule);
+    check('the fold names the same three advances',
+        Object.keys(folded).sort().join() ===
+        Object.keys(device.State.schedule.advances).sort().join(),
+        JSON.stringify(Object.keys(folded)));
+
+    const agreement = device.call('ledgerAgreesWithAdvances', device.State.schedule);
+    check('and says the same thing about every one of them',
+        agreement.agrees === true, JSON.stringify(agreement));
+
+    // An old advance has no timestamp anywhere. Inventing one would be the ledger's
+    // first lie, so the entry says it does not know.
+    const entries = device.call('ledgerEntries', device.State.schedule);
+    check('a migrated entry does not pretend to know when it happened',
+        entries.every(entry => entry.at === '' && entry.origin === 'migration'),
+        JSON.stringify(entries.map(entry => ({ at: entry.at, origin: entry.origin }))));
+
+    // Run again - a second boot, another device, a re-import.
+    const second = device.call('migrateAdvancesToLedger', device.State.schedule, device.id);
+    check('running it again adds nothing', second.added.length === 0,
+        JSON.stringify(second.added));
+    check('and the ledger still holds exactly three entries',
+        device.call('ledgerEntries', device.State.schedule).length === 3);
+}
+
+{
+    suite('a correction is an entry, not an overwrite');
+
+    // The failure this is for: 500 handed over in cash, corrected to 300 a week later,
+    // and nothing anywhere afterwards says 500 was ever written down.
+    const { device } = crew();
+    const written = device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, 'מזומן');
+    device.State.commit(written);
+    const advanceId = written.value.id;
+    commitMigration(device);
+
+    device.State.commit(device.call('recordAdvanceCorrected', device.State.schedule, advanceId,
+        { amount: 300, note: 'תוקן' }, '2026-08-12T09:00:00.000Z', device.id));
+
+    const folded = device.call('foldLedger', device.State.schedule);
+    check('the fold reads the corrected amount', folded[advanceId].amount === 300,
+        JSON.stringify(folded[advanceId]));
+    check('and keeps everything the correction did not mention',
+        folded[advanceId].workerId === 'w_01' && folded[advanceId].date === '2026-08-03',
+        JSON.stringify(folded[advanceId]));
+
+    const history = device.call('advanceHistory', device.State.schedule, advanceId);
+    check('the history has both, in order', history.length === 2
+        && history[0].kind === 'given' && history[1].kind === 'corrected',
+        JSON.stringify(history.map(entry => entry.kind)));
+    check('and the 500 that was handed over is still written down',
+        history[0].amount === 500, JSON.stringify(history[0]));
+    check('with the correction saying when it was made and by whom',
+        history[1].at === '2026-08-12T09:00:00.000Z' && history[1].by === device.id,
+        JSON.stringify(history[1]));
+
+    // A correction can move an advance to the right man, which is the correction a
+    // mutation loses most completely.
+    device.State.commit(device.call('recordAdvanceCorrected', device.State.schedule, advanceId,
+        { workerId: 'w_02' }, '2026-08-13T09:00:00.000Z', device.id));
+    const moved = device.call('foldLedger', device.State.schedule)[advanceId];
+    check('it can be moved to the man it actually belonged to',
+        moved.workerId === 'w_02' && moved.amount === 300, JSON.stringify(moved));
+    check('and the man it was first written against is still on the record',
+        device.call('advanceHistory', device.State.schedule, advanceId)[0].workerId === 'w_01');
+}
+
+{
+    suite('a cancellation leaves the record of what was cancelled');
+
+    const { device } = crew();
+    const written = device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, '');
+    device.State.commit(written);
+    const advanceId = written.value.id;
+    commitMigration(device);
+
+    device.State.commit(device.call('recordAdvanceCancelled', device.State.schedule, advanceId,
+        'נרשם פעמיים', '2026-08-12T09:00:00.000Z', device.id));
+
+    check('it is out of the fold',
+        device.call('foldLedger', device.State.schedule)[advanceId] === undefined);
+    check('and out of what the screens read',
+        device.call('currentAdvances', device.State.schedule)[advanceId] === undefined);
+    const history = device.call('advanceHistory', device.State.schedule, advanceId);
+    check('but the 500 and the reason are both still there',
+        history.length === 2 && history[0].amount === 500 && history[1].note === 'נרשם פעמיים',
+        JSON.stringify(history));
+
+    // And it stays cancelled across a close and reopen, which is where a deletion that
+    // was only local used to come back.
+    const reopened = makeDevice({ storage: device.dump(), deviceId: device.id });
+    reopened.State.load();
+    check('the next session agrees it is cancelled',
+        reopened.call('currentAdvances', reopened.State.schedule)[advanceId] === undefined);
+    check('and can still read what was cancelled',
+        reopened.call('advanceHistory', reopened.State.schedule, advanceId).length === 2);
+}
+
+{
+    suite('an advance from a phone that has never heard of the ledger still counts');
+
+    // The whole reason the writer is still off. A v79 phone writes advances.<id> and no
+    // entry; a build that read only its own ledger would leave money out of the pay
+    // sheet, which is the one failure this file exists to prevent.
+    const { device } = crew();
+    const mine = device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, '');
+    device.State.commit(mine);
+    commitMigration(device);
+
+    // What the other phone sends: a field, and nothing else.
+    device.State.schedule.advances.a_fromv79 = {
+        id: 'a_fromv79', workerId: 'w_02', date: '2026-08-07', amount: 250, note: ''
+    };
+
+    const current = device.call('currentAdvances', device.State.schedule);
+    check('both advances are on the sheet',
+        Object.keys(current).sort().join() === [mine.value.id, 'a_fromv79'].sort().join(),
+        JSON.stringify(Object.keys(current)));
+    check('the one from the older phone reads correctly',
+        current.a_fromv79.amount === 250 && current.a_fromv79.workerId === 'w_02',
+        JSON.stringify(current.a_fromv79));
+
+    // And a cancellation on THIS phone is not undone by the old field still being there,
+    // because the cancellation is the newer information.
+    commitMigration(device);
+    device.State.commit(device.call('recordAdvanceCancelled', device.State.schedule,
+        'a_fromv79', 'לא ניתן', '2026-08-12T09:00:00.000Z', device.id));
+    check('a cancelled advance is not resurrected by the field it came from',
+        device.call('currentAdvances', device.State.schedule).a_fromv79 === undefined,
+        JSON.stringify(device.call('currentAdvances', device.State.schedule)));
+}
+
+{
+    suite('the writer is off, and the app writes what the other phones read');
+
+    const { device } = crew();
+    device.State.commit(
+        device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, ''));
+
+    check('the gate is closed', device.call('ledgerWritesEnabled') === false);
+    check('so recording an advance the ordinary way writes no entry',
+        device.call('ledgerEntries', device.State.schedule).length === 0,
+        JSON.stringify(device.call('ledgerEntries', device.State.schedule)));
+    check('and the field every phone reads is what was written',
+        Object.keys(device.State.schedule.advances).length === 1);
+}
+
+{
+    suite('an entry is not something the wire can take away');
+
+    const { device } = crew();
+    const problems = path => device.call('journalEntryProblems', path,
+        { id: 'le_x', advanceId: 'a_1', kind: 'given', workerId: 'w_01',
+          date: '2026-08-03', amount: 500 });
+
+    check('a well-formed entry is accepted',
+        problems('ledger.advances.le_x').length === 0,
+        JSON.stringify(problems('ledger.advances.le_x')));
+    check('a deletion of one is refused',
+        device.call('journalEntryProblems', 'ledger.advances.le_x', null).length > 0);
+    check('an entry whose id does not match its path is refused',
+        device.call('journalEntryProblems', 'ledger.advances.le_other',
+            { id: 'le_x', advanceId: 'a_1', kind: 'given', workerId: 'w_01',
+              date: '2026-08-03', amount: 500 }).length > 0);
+    check('an entry of a kind nobody wrote is refused',
+        device.call('journalEntryProblems', 'ledger.advances.le_x',
+            { id: 'le_x', advanceId: 'a_1', kind: 'invented' }).length > 0);
+    check('an advance given to nobody is refused',
+        device.call('journalEntryProblems', 'ledger.advances.le_x',
+            { id: 'le_x', advanceId: 'a_1', kind: 'given', date: '2026-08-03', amount: 5 }).length > 0);
+    check('and a ledger path nobody wrote is refused',
+        device.call('journalEntryProblems', 'ledger.days.le_x', { id: 'le_x' }).length > 0);
+}
+
+{
+    suite('an entry survives a snapshot from a phone that has none');
+
+    const cloud = makeCloud();
+    const { device } = crew();
+    const written = device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, '');
+    device.State.commit(written);
+    commitMigration(device);
+    const entryId = device.call('ledgerEntries', device.State.schedule)[0].id;
+    device.State.commit(device.call('recordAdvanceCorrected', device.State.schedule,
+        written.value.id, { amount: 300 }, '2026-08-12T09:00:00.000Z', device.id));
+
+    await connected(device, cloud);
+    await settle(TICK * 30);
+
+    // The other phone's document: everything it knows, and no ledger at all.
+    device.Sync.receive({
+        workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: {},
+        advances: device.State.schedule.advances,
+        updatedAt: '2026-08-12T10:00:00.000Z',
+        updatedBy: 'd_other'
+    });
+    await settle(TICK * 20);
+
+    check('the entries are still here after adopting it',
+        device.call('ledgerEntries', device.State.schedule).length >= 2,
+        String(device.call('ledgerEntries', device.State.schedule).length));
+    check('and the correction still stands',
+        device.call('foldLedger', device.State.schedule)[written.value.id].amount === 300,
+        JSON.stringify(device.call('foldLedger', device.State.schedule)));
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: device.id });
+    reopened.State.load();
+    check('across a close and reopen too',
+        reopened.call('ledgerEntries', reopened.State.schedule).length >= 2
+        && reopened.call('foldLedger', reopened.State.schedule)[written.value.id].amount === 300,
+        JSON.stringify(reopened.call('ledgerEntries', reopened.State.schedule).map(e => e.kind)));
+    check('and the entry that was migrated is the same entry, not a new one',
+        reopened.call('ledgerEntries', reopened.State.schedule)
+            .some(entry => entry.id === entryId));
+}
+
+
+{
+    suite('the boot mirrors the advances into the ledger, unasked');
+
+    const { device } = crew();
+    withAdvances(device, [
+        { workerId: 'w_01', date: '2026-08-03', amount: 500 },
+        { workerId: 'w_02', date: '2026-08-05', amount: 300 }
+    ]);
+    given('two advances and no entries - this build recorded them the old way, then',
+        device.call('ledgerEntries', device.State.schedule).length >= 0);
+
+    // The reopen IS the migration: nobody calls anything.
+    const booted = makeDevice({ storage: device.dump(), deviceId: device.id });
+    booted.State.load();
+    const entries = booted.call('ledgerEntries', booted.State.schedule);
+    check('the reopen wrote one given entry per advance',
+        entries.length === 2 && entries.every(e => e.kind === 'given'),
+        JSON.stringify(entries.map(e => e.kind)));
+    check('and the field it mirrored is byte-identical',
+        JSON.stringify(booted.State.schedule.advances) === JSON.stringify(device.State.schedule.advances));
+    check('and the entries are on the disk, not only in memory',
+        JSON.parse(booted.Store.get('scheduleData:v2')).ledger !== undefined
+        && Object.keys(JSON.parse(booted.Store.get('scheduleData:v2')).ledger.advances).length === 2,
+        booted.Store.get('scheduleData:v2') ? 'blob present' : 'no blob');
+
+    // A second boot has nothing to add - and nothing queued to send twice.
+    const queued = booted.Sync.pendingPaths().filter(path => path.startsWith('ledger.')).length;
+    const again = makeDevice({ storage: booted.dump(), deviceId: booted.id });
+    again.State.load();
+    check('a second boot adds nothing',
+        again.call('ledgerEntries', again.State.schedule).length === 2);
+    check('and queues nothing new for it',
+        again.Sync.pendingPaths().filter(path => path.startsWith('ledger.')).length <= queued,
+        `${queued} then ${again.Sync.pendingPaths().filter(path => path.startsWith('ledger.')).length}`);
+
+    // The parity question the gate decision will be made on, asked the way the
+    // settings screen asks it.
+    const parity = again.State.ledgerParity();
+    check('the ledger agrees with the field it mirrors',
+        parity.agrees === true, JSON.stringify(parity));
+    // Content, not blessing: bend the old field underneath and the report says so.
+    const bent = Object.keys(again.State.schedule.advances)[0];
+    again.State.schedule.advances[bent].amount = 999;
+    const disagree = again.State.ledgerParity();
+    check('and reports a disagreement instead of assuming one away',
+        disagree.agrees === false && disagree.different.length === 1,
+        JSON.stringify(disagree));
+}
+
+{
+    suite('a boot that cannot write still opens, and the next one catches up');
+
+    const { device } = crew();
+    withAdvances(device, [{ workerId: 'w_01', date: '2026-08-03', amount: 500 }]);
+
+    // A device whose storage refuses everything: the boot must not be the thing that
+    // breaks, and the un-mirrored advance must not be the thing that is lost.
+    const cramped = makeDevice({ storage: device.dump(), deviceId: device.id });
+    const realSet = cramped.Store.set;
+    cramped.Store.set = () => false;
+    cramped.State.load();
+    check('the app came up with the advance readable',
+        Object.keys(cramped.State.schedule.advances).length === 1);
+    check('and the refused mirror left no half-written entry behind',
+        cramped.call('ledgerEntries', cramped.State.schedule).length === 0,
+        JSON.stringify(cramped.call('ledgerEntries', cramped.State.schedule)));
+    cramped.Store.set = realSet;
+
+    // Room again: the next boot finishes what the cramped one could not.
+    const healthy = makeDevice({ storage: device.dump(), deviceId: device.id });
+    healthy.State.load();
+    check('the next healthy boot mirrors it',
+        healthy.call('ledgerEntries', healthy.State.schedule).length === 1
+        && healthy.call('ledgerEntries', healthy.State.schedule)[0].kind === 'given');
+}
+
+// ---------------------------------------------------------------- the client's file
+//
+// The reports screen is a classic script like everything else, so its export logic runs
+// here the way the model does: loaded into a device's scope, no browser and no
+// spreadsheet library. The leak this guards against lived in which sheets got BUNDLED,
+// not in any one sheet's arithmetic - and the bundle is plain rows.
+{
+    suite('a site-scoped export is the billing sheet alone, with nobody named in it');
+
+    const vm = (await import('node:vm')).default;
+    const { readFileSync } = await import('node:fs');
+
+    const device = makeDevice();
+    seed(device);
+    const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
+    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+
+    run(`
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+        assignPlace(State.schedule, '2026-08-10', 'w_02', 'actual', 'p_02');
+        assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+        State.save({ silent: true });
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+    `);
+
+    // The manager's own export, from the payroll side: the whole workbook - names and
+    // pay are its whole job.
+    run(`REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+    const full = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('from the payroll side the workbook is whole',
+        Boolean(full.payroll && full.invoice && full.detail),
+        Object.keys(full).join(','));
+    check('and it names the crew, as it must',
+        JSON.stringify(full.payroll).includes('דוד'));
+
+    // The client's export: one site chosen on the billing side.
+    run(`REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
+    const scoped = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('with one client\'s site chosen, the bundle is the billing sheet alone',
+        Boolean(scoped.invoice) && !('payroll' in scoped) && !('detail' in scoped),
+        Object.keys(scoped).join(','));
+
+    const flat = JSON.stringify(scoped);
+    const named = ['דוד', 'שרה', 'עלי'].filter(name => flat.includes(name));
+    check('no worker is named anywhere in the client\'s rows', named.length === 0,
+        named.join(','));
+    check('and no pay is in them either',
+        !flat.includes('400') && !flat.includes('שכר') && !flat.includes('לתשלום'),
+        flat.slice(0, 140));
+    check('nor the other client\'s site', !flat.includes('תל אביב'), flat.slice(0, 140));
+
+    // A chosen site with nothing in range resolves to nothing, and the export is the
+    // ordinary workbook - matching what the screen falls back to showing.
+    run(`INVOICE_PLACE = 'p_gone';`);
+    const fallback = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('a chosen site with no rows in range is not a client scope',
+        Boolean(fallback.payroll && fallback.invoice && fallback.detail),
+        Object.keys(fallback).join(','));
+
+    // Back on the payroll side the same chosen site scopes nothing: the full workbook
+    // belongs to that context whatever the billing page was left pointing at.
+    run(`REPORT_SECTION = 'workers'; INVOICE_PLACE = 'p_01';`);
+    const payrollSide = JSON.parse(JSON.stringify(run('reportSheets()')));
+    check('the payroll side always gets the whole workbook',
+        Boolean(payrollSide.payroll && payrollSide.detail),
+        Object.keys(payrollSide).join(','));
+}
+
+// ---------------------------------------------------------------- how the money moved
+{
+    suite('an advance carries its method, and every door lets the field through');
+
+    const device = makeDevice();
+    seed(device);
+    device.setToday('2026-08-12');
+
+    // The way the form writes it: the legacy record every phone already reads, with the
+    // method set on the record itself before the commit - so the journal entry and the
+    // saved schedule carry it together.
+    const change = device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-12', 250, 'על חשבון סוף התקופה');
+    change.value.method = 'cash';
+    const committed = device.State.commit(change);
+    const id = change.value.id;
+
+    check('the commit is accepted', committed === true);
+    check('the record keeps the method and the note',
+        device.State.schedule.advances[id].method === 'cash'
+        && device.State.schedule.advances[id].note === 'על חשבון סוף התקופה',
+        JSON.stringify(device.State.schedule.advances[id]));
+
+    // The wire check: an extra field is not a problem. A device one build behind will
+    // receive this record, and refusing it would refuse the money.
+    const problems = device.call('advanceProblems',
+        { advances: device.State.schedule.advances });
+    same('the validator passes the record untouched', problems, []);
+
+    // Closed and reopened: the method is on the disk, not in the session.
+    const reopened = makeDevice({ storage: device.dump(), deviceId: device.id });
+    reopened.State.load();
+    check('the method survives a close and reopen',
+        reopened.State.schedule.advances[id]
+        && reopened.State.schedule.advances[id].method === 'cash',
+        JSON.stringify(reopened.State.schedule.advances[id]));
+
+    // And the existing correction mechanism still works on a record that carries it.
+    reopened.State.commit(reopened.call('removeAdvance', reopened.State.schedule, id));
+    check('the advance can still be removed', !(id in (reopened.State.schedule.advances || {})));
 }
 
 report();

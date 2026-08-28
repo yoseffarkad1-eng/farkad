@@ -2546,7 +2546,10 @@ const FarkadSync = {
         Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
 
         const previous = State.schedule;
-        State.schedule = remote;
+        // Ledger entries are append-only against the other phones too: a device that has
+        // never heard of one has not disagreed with it. See mergeLedgerInto.
+        State.schedule = (typeof mergeLedgerInto === 'function')
+            ? mergeLedgerInto(remote, previous) : remote;
         this.reapplyPending(State.schedule, gone);
 
         // AGAIN, after the pending edits are back on top.
@@ -2895,6 +2898,17 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 return;
             }
 
+            // ledger.advances.<entry id>. Re-applied like anything else, and never
+            // removed: an entry is the record that an amount was once written down, and
+            // an arriving snapshot that does not have it yet has not disagreed with it.
+            if (parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'advances') {
+                if (value === null) return;
+                schedule.ledger = schedule.ledger || { advances: {} };
+                schedule.ledger.advances = schedule.ledger.advances || {};
+                schedule.ledger.advances[parts[2]] = value;
+                return;
+            }
+
             // One person, queued by id. A worker added seconds ago must not be dropped by
             // the snapshot that arrives before the send completes.
             if (parts.length === 3 && parts[0] === 'roster'
@@ -2976,7 +2990,13 @@ function showStorageBanner(text) {
     const banner = document.getElementById('storageBanner');
     if (!banner) return;
 
-    if (!text) { banner.style.display = 'none'; return; }
+    if (!text) {
+        banner.style.display = 'none';
+        // Forgotten as well as hidden: the next occurrence of the SAME failure must
+        // show again, and the memo below would short-circuit it into permanent silence.
+        delete banner.dataset.text;
+        return;
+    }
     if (banner.dataset.text === text) return;   // already saying exactly this
 
     banner.dataset.text = text;
@@ -3028,10 +3048,19 @@ function updateSyncNotice() {
         error: 'שגיאת סנכרון - הנתונים שמורים במכשיר הזה.'
     };
 
-    let text = messages[FarkadSync.status] || messages.off;
+    // The browser knows the signal is gone before the write watchdog does, and a line
+    // still reading "מסונכרן" under the offline banner is the two of them disagreeing
+    // in one glance. Only the cloud states defer to it - a device that never had a
+    // cloud is off, not offline, and "יישלחו כשהחיבור יחזור" would be a promise to it.
+    const status = typeof navigator !== 'undefined' && navigator.onLine === false
+        && (FarkadSync.status === 'synced' || FarkadSync.status === 'connecting')
+        ? 'offline' : FarkadSync.status;
+    let text = messages[status] || messages.off;
 
-    if (FarkadSync.status === 'synced' && FarkadSync.lastSyncedAt) {
-        text += ` עודכן: ${FarkadSync.lastSyncedAt.toLocaleTimeString('he-IL')}`;
+    if (status === 'synced' && FarkadSync.lastSyncedAt) {
+        // Hours and minutes: the default he-IL form appends seconds, and a status line
+        // is not a stopwatch.
+        text += ` · עודכן: ${FarkadSync.lastSyncedAt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`;
     }
 
     // How many edits are written down here and not yet in the cloud. Said plainly,
