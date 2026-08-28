@@ -1443,6 +1443,40 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .wday-bridge { margin-top: 8px; }
 
+/* The v80 record, collapsed under the advances. Rows only - the gate is closed, so the
+   fold holds no control of any kind, and the summary is the one thing to press. */
+.wday-ledger { margin-top: 12px; border-top: 1px solid var(--line-soft); }
+.wday-ledger summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+/* Flex removes the native marker on most engines; say open/shut ourselves, both ways. */
+.wday-ledger summary::before { content: '▸'; font-size: 12px; color: var(--ink-3); }
+.wday-ledger[open] summary::before { content: '▾'; }
+.wday-ledger summary::-webkit-details-marker { display: none; }
+.ledger-entry {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 10px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 14px;
+}
+.ledger-what { display: flex; align-items: baseline; gap: 8px; }
+.ledger-kind { font-weight: 600; }
+.ledger-date { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ledger-amount { font-weight: 700; font-variant-numeric: tabular-nums; text-align: end; }
+.ledger-note { grid-column: 1 / -1; color: var(--ink-3); font-size: 12.5px; }
+.ledger-origin { grid-column: 1 / -1; color: var(--ink-3); font-size: 12.5px; }
+
 /* The advance form, in place of the one-question prompt: amount, date, note, and how
    the money moved. Tokens only, so dark mode needs nothing of its own. */
 .advance-form {

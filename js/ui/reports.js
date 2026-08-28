@@ -588,6 +588,11 @@ function openWorkerDays(workerId) {
         }
     }
 
+    // After the period's advances: the whole record of them, folded shut. Read-only by
+    // construction - see renderWorkerLedger.
+    const ledger = renderWorkerLedger(worker.id);
+    if (ledger) body.appendChild(ledger);
+
     body.appendChild(renderAdvanceAdd(worker));
     document.getElementById('workerDaysModal').style.display = 'flex';
 }
@@ -778,6 +783,72 @@ async function removeAdvanceRow(item) {
     if (!ok) return;
     State.commit(removeAdvance(State.schedule, item.id));
     openWorkerDays(item.workerId);
+}
+
+// What a ledger entry IS, in the ledger's own three words. Not the method labels above:
+// a kind says what happened to the record, not how money moved.
+const LEDGER_KIND_LABELS = { given: 'מקדמה', corrected: 'תיקון', cancelled: 'בוטל' };
+
+// היסטוריה מלאה: every ledger entry that concerns this worker, oldest first, folded
+// shut under the advances. Strictly a reading of the v80 record - the writer is gated
+// off (ledger.js LEDGER_WRITES), so there is not a single button in here and nothing
+// this renders can change an entry. Feature-detected, because the modal must survive a
+// build where the ledger file is not loaded; empty ledgers render nothing at all.
+function renderWorkerLedger(workerId) {
+    if (typeof advanceHistory !== 'function' || typeof ledgerEntries !== 'function') {
+        return null;
+    }
+
+    // An advance concerns this man if any of its entries names him - a correction that
+    // moved it to somebody else is still part of the story of what he was handed.
+    const ids = [];
+    ledgerEntries(State.schedule).forEach(entry => {
+        if (String(entry.workerId || '') !== String(workerId)) return;
+        if (ids.indexOf(String(entry.advanceId)) === -1) ids.push(String(entry.advanceId));
+    });
+
+    let entries = [];
+    ids.forEach(id => { entries = entries.concat(advanceHistory(State.schedule, id)); });
+    if (entries.length === 0) return null;
+
+    // Read out in the order things happened. A migrated entry carries no `at` on
+    // purpose (ledger.js: a fabricated timestamp would be the ledger's first lie), so
+    // its advance date stands in for ordering; ties fall back to the entry id, the same
+    // tie-break the fold uses.
+    entries.sort((a, b) => {
+        const at = String(a.at || a.date || '');
+        const bt = String(b.at || b.date || '');
+        if (at !== bt) return at < bt ? -1 : 1;
+        return String(a.id) < String(b.id) ? -1 : 1;
+    });
+
+    const fold = el('details', 'wday-ledger');
+    fold.appendChild(el('summary', null, 'היסטוריה מלאה (פנקס v80)'));
+    entries.forEach(entry => fold.appendChild(renderLedgerEntry(entry)));
+    return fold;
+}
+
+function renderLedgerEntry(entry) {
+    const row = el('div', 'ledger-entry');
+
+    const what = el('div', 'ledger-what');
+    what.appendChild(el('strong', 'ledger-kind',
+        LEDGER_KIND_LABELS[entry.kind] || String(entry.kind || '')));
+    const parsed = parseLocalDate(entry.date);
+    if (parsed) what.appendChild(el('span', 'ledger-date', formatFullDate(parsed)));
+    row.appendChild(what);
+
+    // A cancellation carries no amount, and a correction may only move a date - the
+    // amount cell is filled only when the entry actually states one.
+    const amount = Number(entry.amount);
+    row.appendChild(el('div', 'ledger-amount',
+        entry.amount !== undefined && isFinite(amount) ? bidiAmount(Math.round(amount)) : ''));
+
+    if (entry.note) row.appendChild(el('div', 'ledger-note', entry.note));
+    if (entry.origin === 'migration') {
+        row.appendChild(el('div', 'ledger-origin', 'הועתק מהרישום הקיים'));
+    }
+    return row;
 }
 
 // The statement the worker gets on payday, in the same shape as the screen it came from:
