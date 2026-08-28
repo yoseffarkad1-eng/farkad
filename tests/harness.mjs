@@ -129,7 +129,11 @@ function makeDocument() {
         querySelectorAll: () => [],
         addEventListener: () => {},
         removeEventListener: () => {},
-        createElement: () => ({ style: {}, setAttribute: () => {}, appendChild: () => {} })
+        // click() is here because the export paths build an anchor and press it. What is
+        // being tested through them is what the device wrote down, not the download.
+        createElement: () => ({
+            style: {}, setAttribute: () => {}, appendChild: () => {}, click: () => {}
+        })
     };
 }
 

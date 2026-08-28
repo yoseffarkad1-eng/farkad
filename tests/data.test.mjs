@@ -10907,4 +10907,108 @@ function vans(device) {
         JSON.stringify(after.Sync.pendingPaths()));
 }
 
+// ================================================================ P1: the handover that could not be written down
+//
+// The recovery export is the only way unreadable bytes leave a phone, so it is never
+// refused for bookkeeping - the ordinary backup is, and rightly, but not this one. The
+// file still carries the WHOLE schedule, though, so once it has gone, "he was made here
+// and has never left" is not something this device can say about anybody, and that claim
+// is the only thing standing between a man and permanent deletion.
+//
+// forgetLocalOrigin moves the generation, which kills every claim at once, and when it
+// cannot be written noteHandoverUnrecorded marks the device uncertain. Both are WRITES,
+// and the device this happens on is a device whose disk is refusing. The comment beside
+// it said the refusal survives a reopen because the probe would refuse too - and that
+// holds for a disk that stays full. It does not hold for the ordinary case: the person
+// frees space, opens the app, and every claim the export killed is standing again.
+{
+    suite('P1: an export the device could not record still ends its claims');
+
+    const { device } = crew();
+    const id = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.commitRoster();
+    given('the device can prove he was made here and never sent',
+        device.Sync.provenLocalOnly('workers', id) === true);
+
+    // Something unreadable, which is the only reason this export exists.
+    device.putRaw('farkad:outbox:damagedish', '{"b":');
+    device.global('Recovery').damaged('farkad:outbox:damagedish', '{"b":', 'לא נקרא.');
+
+    // The disk refuses every provenance write from here - the generation move and the
+    // uncertainty mark alike. It is the same disk that produced the damage.
+    device.setQuota(key => String(key).indexOf('farkad:prov:') === 0);
+    device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    device.ctx.Blob = function Blob() { return {}; };
+    device.call('exportRecoveryData');
+
+    check('the file went out anyway - it is the only copy of the damage',
+        device.global('Recovery').problems.length > 0);
+    check('and this session knows it cannot prove anything any more',
+        device.Sync.provenLocalOnly('workers', id) === false);
+
+    // The person frees space and opens the app again. THIS is the case the comment did
+    // not cover: the probe now succeeds, the uncertainty mark was never written, and the
+    // claim the export killed is standing again - over a file that is already out there
+    // with every worker on this device inside it.
+    device.setQuota(null);
+    const reopened = makeDevice({ storage: device.dump(), deviceId: device.id });
+    reopened.State.load();
+    given('the disk is working again',
+        reopened.Sync.canRecordProvenance() === true);
+    check('the claim is still dead after the app is closed and reopened',
+        reopened.Sync.provenLocalOnly('workers', id) === false,
+        JSON.stringify(Object.keys(reopened.dump()).filter(k => k.indexOf('farkad:prov') === 0)));
+    check('and permanent deletion is refused with it',
+        reopened.call('deletionBlockers', id).length > 0,
+        JSON.stringify(reopened.call('deletionBlockers', id)));
+
+    // The last arm, and the one that cannot be closed by anything this file can do: a
+    // disk that refuses the write AND the removal. There are three ways to record a
+    // handover - move the generation, mark the device uncertain, or drop the mine facts
+    // one at a time - and this device can do none of them, because two of them are writes
+    // and the third is a removal.
+    //
+    // While the disk stays broken the device is still safe: canRecordProvenance probes
+    // with a write of its own every session, and a phone that cannot write cannot claim.
+    // What is NOT closed is a disk that recovers afterwards, and that is written down in
+    // the release notes rather than papered over here.
+    {
+        const stuck = crew({ deviceId: 'd_stuck' }).device;
+        const held = stuck.State.nextWorkerId();
+        stuck.State.schedule.workers.push(
+            { id: held, name: 'תקוע', active: true, dailyRate: 300, hourlyRate: 0 });
+        stuck.State.commitRoster();
+        given('it can prove him to begin with',
+            stuck.Sync.provenLocalOnly('workers', held) === true);
+
+        stuck.putRaw('farkad:outbox:damagedish', '{"b":');
+        stuck.global('Recovery').damaged('farkad:outbox:damagedish', '{"b":', 'לא נקרא.');
+        stuck.setQuota(() => true);
+        stuck.blockRemoval(() => true);
+        stuck.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+        stuck.ctx.Blob = function Blob() { return {}; };
+        stuck.call('exportRecoveryData');
+
+        check('this session refuses to claim anything',
+            stuck.Sync.provenLocalOnly('workers', held) === false);
+        const later = makeDevice({ storage: stuck.dump(), deviceId: 'd_stuck',
+            quota: () => true });
+        later.State.load();
+        check('and so does the next one, while the disk is still refusing',
+            later.Sync.provenLocalOnly('workers', held) === false,
+            String(later.Sync.canRecordProvenance()));
+    }
+
+    // A device that never handed anything over is untouched by all this.
+    const other = crew({ deviceId: 'd_untouched' }).device;
+    const mine = other.State.nextWorkerId();
+    other.State.schedule.workers.push(
+        { id: mine, name: 'שלי', active: true, dailyRate: 300, hourlyRate: 0 });
+    other.State.commitRoster();
+    check('a device that handed nothing over can still prove its own',
+        other.Sync.provenLocalOnly('workers', mine) === true);
+}
+
 report();
