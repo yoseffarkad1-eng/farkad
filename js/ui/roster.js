@@ -720,6 +720,12 @@ function deletionBlockers(workerId) {
     if (!(sync && sync.provenLocalOnly && sync.provenLocalOnly('workers', workerId))) {
         blocked.push('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום');
     }
+    // While writes are held - quarantine, a build mismatch - the tombstone this delete
+    // ends in cannot land, and the button would walk somebody through typing a name
+    // into a refusal.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        blocked.push('הרישום מושבת כרגע - ראה את ההודעה שבראש המסך');
+    }
     return blocked;
 }
 

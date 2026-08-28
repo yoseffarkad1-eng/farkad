@@ -2,9 +2,9 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8"/>
-<!-- No zoom. Every screen here is already sized for the person using it, and the only
-     zoom that ever actually happened was accidental: a pinch while reaching for a name,
-     or iOS magnifying the page because a field was a pixel under its threshold. -->
+<!-- Zoom stays enabled - it is not ours to take away. What the old lock was defending
+     against is handled at the source instead: every field is 16px or larger, so iOS
+     has no reason to magnify the page on focus. -->
 <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
 <title>פרקד - רישום עבודה</title>
 <link rel="stylesheet" href="css/app.css">
@@ -48,25 +48,25 @@
         </div>
     </header>
 
-    <div class="banner banner-warn" id="storageBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-danger" id="storageBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- What the account still needs before it can be settled. Written on the screen
          rather than pushed as a notification: an installed web app on iOS cannot
          schedule a local one, and a reminder that needs a server behind it is a
          reminder that stops arriving the day the server does. -->
     <div class="banner banner-warn" id="accountBanner" role="status" aria-live="polite" style="display:none"></div>
-    <div class="banner banner-warn" id="recoveryBanner" role="status" aria-live="polite" style="display:none"></div>
-    <div class="banner banner-warn" id="crashBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-danger" id="recoveryBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-danger" id="crashBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- The boot sentinel's banner, written out in full here and never built in code.
          Every other banner on this page is assembled by el() from js/ui/dom.js - and the
          one failure this banner exists for is the one where those scripts are the thing
          that did not arrive. So the words are in the document, the sentinel only reveals
          them, and the only DOM call in the whole path is getElementById. -->
-    <div class="banner banner-warn" id="bootBanner" role="status" aria-live="polite" style="display:none">
+    <div class="banner banner-danger" id="bootBanner" role="status" aria-live="polite" style="display:none">
         <span>⚠️ האפליקציה לא נטענה במלואה. מה שכבר נשמר במכשיר לא נפגע ולא נמחק - רענן את הדף. אם זה חוזר, נסה שוב כשיש חיבור טוב יותר.</span>
         <span class="crash-detail" id="bootBannerDetail"></span>
         <button type="button" class="btn-secondary" onclick="location.reload()">רענן</button>
     </div>
-    <div class="banner banner-warn" id="updateBanner" role="status" aria-live="polite" style="display:none"></div>
+    <div class="banner banner-info" id="updateBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-warn" id="offlineBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-warn" id="migrationBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-info" id="installBanner" role="status" aria-live="polite" style="display:none"></div>

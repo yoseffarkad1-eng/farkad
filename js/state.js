@@ -363,7 +363,36 @@ const State = {
     refuseEdit() {
         this.rollback();
         render();
-        if (typeof askTell === 'function') {
+        // Two different refusals, and the dialog must name the right one. A held
+        // transaction - quarantine, a build mismatch - is not a space problem, and
+        // claiming "אין מקום" over it sends somebody to delete photos that will not
+        // help; the banner at the top of the screen carries the real story.
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+            if (typeof askTell === 'function') {
+                askTell({
+                    title: 'הרישום לא נשמר',
+                    message: 'הרישום מושבת כרגע - הסיבה כתובה בהודעה שבראש המסך. השינוי ' +
+                        'בוטל כדי שלא ייראה כאילו נרשם. מה שכבר שמור לא נפגע.'
+                });
+            }
+            return false;
+        }
+        // The board's dialog carries the way out as its primary action, not only as a
+        // sentence: the backup is the one thing that still works on a full device.
+        if (typeof askConfirm === 'function' && typeof exportBackup === 'function') {
+            askConfirm({
+                title: 'הרישום לא נשמר',
+                message: 'אין מקום פנוי במכשיר, ולכן לא הצלחנו לשמור את השינוי - הוא בוטל ' +
+                    'כדי שלא ייראה כאילו נרשם. מה שכבר שמור לא נפגע. פנה מקום במכשיר ' +
+                    'או ייצא קובץ גיבוי, ונסה שוב.',
+                ok: 'ייצוא קובץ גיבוי',
+                cancel: 'סגור'
+            }).then(wantsBackup => {
+                // The test harness answers every dialog yes and has no Blob to export
+                // with; a browser always has one. The guard is for the harness only.
+                if (wantsBackup && typeof Blob !== 'undefined') exportBackup();
+            });
+        } else if (typeof askTell === 'function') {
             askTell({
                 title: 'הרישום לא נשמר',
                 message: 'אין מקום פנוי במכשיר, ולכן לא הצלחנו לשמור את השינוי - הוא בוטל ' +

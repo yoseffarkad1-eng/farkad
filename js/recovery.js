@@ -51,7 +51,7 @@ const Recovery = {
             key,
             raw,
             copy,
-            message: message || `הרישום "${key}" לא נקרא.`,
+            message: message || `הרישום "\u2068${key}\u2069" לא נקרא.`,
             // A copy that could not be confirmed means the original is the only one there
             // is. Writing anywhere near it is not something to let somebody wave away.
             mustHold: !copy || alwaysHold === true

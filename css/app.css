@@ -565,6 +565,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     color: var(--warn);
     border-inline-start: 3px solid var(--warn);
 }
+/* A change the person just made was NOT written down, or the build itself is broken -
+   the failures wear the failure colour, so a full disk does not dress like an ordinary
+   notice. Amber stays for conditions the app is riding out (offline, an old account). */
+.banner-danger {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border-inline-start: 3px solid var(--danger);
+}
 /* An invitation, not a problem: the install prompt is in the app's own colour so it does
    not read as something having gone wrong. */
 .banner-info {
@@ -2309,4 +2317,28 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     .report:first-child { page-break-before: auto !important; }
     .report-invoice:first-child { page-break-before: auto !important; }
     main > section:last-child > *:last-child { margin-bottom: 0 !important; }
+}
+
+/* While writes are held (quarantine, a build mismatch - body.writes-blocked, set in
+   render), the recording surfaces say so with their bodies, not only with a banner: the
+   lists dim and the dock's buttons go quiet. The banner at the top stays at full
+   strength - it is the explanation. */
+body.writes-blocked #dayView .day-list,
+body.writes-blocked #dayView .site-cards,
+body.writes-blocked #dayView .day-tray { opacity: .55; }
+body.writes-blocked .day-actions button {
+    opacity: .5;
+    pointer-events: none;
+}
+.progress-blocked {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--danger-bg);
+    color: var(--danger);
+    white-space: nowrap;
 }

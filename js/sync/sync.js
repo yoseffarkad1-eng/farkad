@@ -2990,7 +2990,13 @@ function showStorageBanner(text) {
     const banner = document.getElementById('storageBanner');
     if (!banner) return;
 
-    if (!text) { banner.style.display = 'none'; return; }
+    if (!text) {
+        banner.style.display = 'none';
+        // Forgotten as well as hidden: the next occurrence of the SAME failure must
+        // show again, and the memo below would short-circuit it into permanent silence.
+        delete banner.dataset.text;
+        return;
+    }
     if (banner.dataset.text === text) return;   // already saying exactly this
 
     banner.dataset.text = text;
@@ -3042,10 +3048,19 @@ function updateSyncNotice() {
         error: 'שגיאת סנכרון - הנתונים שמורים במכשיר הזה.'
     };
 
-    let text = messages[FarkadSync.status] || messages.off;
+    // The browser knows the signal is gone before the write watchdog does, and a line
+    // still reading "מסונכרן" under the offline banner is the two of them disagreeing
+    // in one glance. Only the cloud states defer to it - a device that never had a
+    // cloud is off, not offline, and "יישלחו כשהחיבור יחזור" would be a promise to it.
+    const status = typeof navigator !== 'undefined' && navigator.onLine === false
+        && (FarkadSync.status === 'synced' || FarkadSync.status === 'connecting')
+        ? 'offline' : FarkadSync.status;
+    let text = messages[status] || messages.off;
 
-    if (FarkadSync.status === 'synced' && FarkadSync.lastSyncedAt) {
-        text += ` עודכן: ${FarkadSync.lastSyncedAt.toLocaleTimeString('he-IL')}`;
+    if (status === 'synced' && FarkadSync.lastSyncedAt) {
+        // Hours and minutes: the default he-IL form appends seconds, and a status line
+        // is not a stopwatch.
+        text += ` · עודכן: ${FarkadSync.lastSyncedAt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`;
     }
 
     // How many edits are written down here and not yet in the cloud. Said plainly,

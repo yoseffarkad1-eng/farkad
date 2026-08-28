@@ -58,6 +58,13 @@ function showView(view) {
 // so redrawing the visible view on every change is cheaper in bugs than tracking which
 // nodes need patching, and fast enough that nobody can see it happen.
 function render() {
+    // Held writes are a body state, not a banner alone: the stylesheet dims the
+    // recording surfaces and quiets the dock under it, and the progress row adds its
+    // badge - the block is SAID where the tap would land, not only explained at the top.
+    if (document.body && document.body.classList) {
+        document.body.classList.toggle('writes-blocked',
+            typeof farkadWritesBlocked === 'function' && farkadWritesBlocked());
+    }
     VIEWS.forEach(view => {
         const node = document.getElementById(view + 'View');
         if (node) node.style.display = view === currentView ? '' : 'none';

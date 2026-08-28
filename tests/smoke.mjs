@@ -1540,11 +1540,14 @@ async function seedRoster(page) {
   check('the half-made worker is not left in the list either',
     !after.workers.includes('עובד חדש'), JSON.stringify(after.workers));
 
-  // The app also says out loud that the device would not take the write. Dismissed here
-  // so the form underneath can be used again - which is the point of leaving it open.
+  // The app also says out loud that the device would not take the write - and offers
+  // the backup as the dialog's primary action. Dismissed by the quiet button here so
+  // the form underneath can be used again - which is the point of leaving it open.
   check('and the storage failure is reported in its own right',
     await page.isVisible('#askModal'));
-  await page.click('#askOk');
+  check('with the backup as its way out',
+    (await page.textContent('#askOk')).includes('גיבוי'), await page.textContent('#askOk'));
+  await page.click('#askCancel');
   await page.waitForTimeout(250);
 
   // Storage comes back; the same form, still holding everything, saves.
@@ -2291,7 +2294,8 @@ async function seedRoster(page) {
   check('the sheet closes when nobody is left', await page.isHidden('#assignSheet'));
   check('every worker ended up recorded',
     (await page.evaluate(() => State.unrecorded().length)) === 0);
-  check('progress reads complete', (await page.textContent('.progress-line')).includes('3 מתוך 3'));
+  check('progress reads complete', (await page.textContent('.progress-line')).includes('הכל נרשם'),
+    await page.textContent('.progress-line'));
   check('no row is left marked unfilled', (await page.locator('.wrow-empty').count()) === 0);
   await page.context().close();
 }
@@ -2400,7 +2404,9 @@ async function seedRoster(page) {
   check('nothing half-recorded is left behind it',
     (await page.evaluate(() =>
       entriesFor(State.schedule, State.date, 'w_01', 'actual').length)) === 0);
-  await page.click('#askOk');
+  // The quiet button: #askOk is the backup offer now, and pressing it on a device
+  // whose storage is stubbed broken would stack a second dialog over this one.
+  await page.click('#askCancel');
   await page.waitForTimeout(200);
 
   // נעדר is the other answer that advances, and it must hold still the same way.
@@ -2408,7 +2414,7 @@ async function seedRoster(page) {
   await page.waitForTimeout(350);
   check('a refused absence holds still too',
     (await page.textContent('#assignSheetTitle')) === 'דוד');
-  await page.click('#askOk');
+  await page.click('#askCancel');
   await page.waitForTimeout(200);
 
   // Storage comes back; the very same tap now records and moves on.
@@ -3156,6 +3162,26 @@ async function seedRoster(page) {
   });
   check('and it clears itself once there is room again',
     (await page.evaluate(() => Store.full)) === false);
+
+  // The second failure must not be swallowed by the memory of the first: the banner
+  // used to keep its last text on hiding, and an identical message later was
+  // short-circuited into permanent silence.
+  const reshow = await page.evaluate(() => {
+    showStorageBanner('אין מקום פנוי במכשיר והשינוי האחרון לא נשמר - בדיקה');
+    showStorageBanner(null);
+    showStorageBanner('אין מקום פנוי במכשיר והשינוי האחרון לא נשמר - בדיקה');
+    const banner = document.getElementById('storageBanner');
+    return { shown: banner.style.display !== 'none', text: banner.textContent };
+  });
+  check('the same failure returning shows the banner again',
+    reshow.shown && reshow.text.includes('אין מקום פנוי'), JSON.stringify(reshow));
+  await page.evaluate(() => showStorageBanner(null));
+
+  // An update is an invitation, not a fault - it wears the app's own colour.
+  check('the update banner is dressed as an invitation',
+    await page.evaluate(() => document.getElementById('updateBanner').classList.contains('banner-info')));
+  check('and the storage banner as a failure',
+    await page.evaluate(() => document.getElementById('storageBanner').classList.contains('banner-danger')));
   await page.context().close();
 }
 
@@ -6358,7 +6384,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('and the line follows to the new day',
     (await page.textContent('.now-editing')).includes('10/08'));
   check('and the days recorded there are on screen',
-    (await page.textContent('.progress-line')).includes('3 מתוך 3'));
+    (await page.textContent('.progress-line')).includes('הכל נרשם'),
+    await page.textContent('.progress-line'));
 
   // a mistake found a week later still has to be fixable: nothing is closed off by age
   await page.evaluate(() => { State.date = '2026-08-04'; render(); });

@@ -182,8 +182,19 @@ function renderProgress() {
     const now = el('strong', 'now-editing');
     now.textContent = `${hebrewDayName(date)} · ${formatShortDate(date)}`;
     line.appendChild(now);
+    // The verb carries the count: "19 מתוך 30" alone reads as a position in a list,
+    // and this number is the day's one health figure. A finished day gets the word,
+    // not a bigger number - הכל נרשם is the state a manager is scrolling for.
     line.appendChild(el('span', 'now-count',
-        left === 0 ? `✓ ${done} מתוך ${workers.length}` : `${done} מתוך ${workers.length}`));
+        left === 0 ? '✓ הכל נרשם' : `נרשמו ${done} מתוך ${workers.length}`));
+    // Announced politely on change - the day switch and the climbing count are the two
+    // things a person not looking at the screen most needs to hear.
+    line.setAttribute('role', 'status');
+    line.setAttribute('aria-live', 'polite');
+
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        line.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
+    }
 
     if (left > 0) {
         line.appendChild(button(`המשך (${left})`, 'btn-add', () => {

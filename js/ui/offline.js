@@ -134,6 +134,10 @@ function watchConnection() {
         if (!banner) return;
         banner.style.display = navigator.onLine ? 'none' : '';
         banner.textContent = '📴 אין חיבור. הרישום נשמר במכשיר ויסונכרן כשהחיבור יחזור.';
+        // The grey line under the board answers the same question and used to keep
+        // saying מסונכרן until the write watchdog noticed - the banner and the line
+        // change together or they read as two apps.
+        if (typeof updateSyncNotice === 'function') updateSyncNotice();
     };
 
     window.addEventListener('online', paint);
