@@ -733,7 +733,59 @@ function closeWorkerForm() {
 // Both ways out live here, and which one is offered is not a choice this file makes - it
 // asks the model what is recorded against the man and does what that allows.
 
+// What the record holds against his name, on his own screen. Counts and sums, read
+// straight off the model and never editable here - the same numbers deletionBlockers
+// weighs, shown before anybody has to wonder why the delete button is not there.
+//
+// The vocabulary is deliberate: "רשומות", never "open" or "unpaid". An advance in this
+// schema is an amount on a date, with nothing anywhere marking it paid, open or settled -
+// see the archive dialog below - so a sum is the whole of what can honestly be said.
+function renderWorkerFormHistory() {
+    const box = document.getElementById('workerFormHistory');
+    if (!box) return;
+    clear(box);
+
+    // A worker who has not been saved yet has no history to read.
+    const worker = editingWorkerId ? State.worker(editingWorkerId) : null;
+    if (!worker) { box.style.display = 'none'; return; }
+    box.style.display = '';
+
+    box.appendChild(el('h4', 'worker-history-title', 'היסטוריה'));
+
+    const days = workerFootprint(State.schedule, worker.id).days;
+
+    // The count and the sum in one pass over the advances - not a lookup per id.
+    let count = 0;
+    let total = 0;
+    Object.values(State.schedule.advances || {}).forEach(item => {
+        if (!item || String(item.workerId) !== String(worker.id)) return;
+        count += 1;
+        total += Number(item.amount) || 0;
+    });
+
+    const line = (label, value) => {
+        const item = el('div', 'worker-history-row');
+        item.appendChild(el('span', 'worker-history-label', label));
+        item.appendChild(el('strong', 'worker-history-value', value));
+        box.appendChild(item);
+    };
+
+    line('ימים רשומים', String(days.length));
+    line('מקדמות רשומות', count === 0 ? '0' : `${count} בסך ${Math.round(total)} ₪`);
+
+    // For an archived man: since WHEN is not in the record - v79 keeps active:false and
+    // nothing more - so no "בארכיון מאז" is invented here. What the record does hold is
+    // the last date anything was written for him, and the dates are already in hand.
+    if (worker.active === false && days.length > 0) {
+        const last = days.reduce(
+            (max, item) => (item.date > max ? item.date : max), days[0].date);
+        const parsed = parseLocalDate(last);
+        if (parsed) line('רישום אחרון', formatFullDate(parsed));
+    }
+}
+
 function renderWorkerFormActions() {
+    renderWorkerFormHistory();
     const box = document.getElementById('workerFormDanger');
     if (!box) return;
     clear(box);

@@ -349,6 +349,11 @@
             <button type="button" onclick="saveWorkerForm()">שמור</button>
             <button type="button" class="btn-secondary" onclick="closeWorkerForm()">ביטול</button>
         </div>
+        <!-- What the record already holds against his name - counts, read straight off
+             the model and never editable here. Below the save row so the typing part of
+             the form stays short enough to fit above the phone keyboard. Built by
+             renderWorkerFormHistory, on the same render path as the actions under it. -->
+        <div class="worker-history" id="workerFormHistory" style="display:none"></div>
         <!-- Archiving and, when nothing is recorded against him, deleting. Below the save
              row and behind a rule, because they are not what this screen is for - and
              built by renderWorkerFormActions, which asks the model which of them applies

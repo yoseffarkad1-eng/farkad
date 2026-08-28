@@ -926,6 +926,30 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-danger:hover { background: var(--danger); color: var(--paper); }
 .worker-danger .hint { margin: 0; }
 
+/* What the record holds against the man - counts and sums, above the archive rule.
+   Read-only, so no floor to meet but the text one. */
+.worker-history {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+.worker-history-title {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+}
+.worker-history-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 15px;
+}
+.worker-history-label { color: var(--ink-2); }
+.worker-history-value { font-variant-numeric: tabular-nums; }
+
 /* Archived names, folded away under the working list. */
 .roster-archive { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .roster-archive summary {
