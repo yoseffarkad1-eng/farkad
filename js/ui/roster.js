@@ -775,7 +775,7 @@ async function showAddVehicleModal() {
 
     if (!Array.isArray(State.schedule.vehicles)) State.schedule.vehicles = [];
     State.schedule.vehicles.push({
-        id: nextVehicleId(State.schedule),
+        id: State.nextVehicleId(),
         name,
         ownerId: owner.id,
         active: true,

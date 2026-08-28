@@ -343,10 +343,13 @@ function record(device, date, workerId, placeId, rate) {
     // A roster change queues with no cloud too - a worker added offline who never
     // reaches the cloud takes his days with him. It is one path per person, plus the
     // order, plus the whole array kept for devices still on the older build: for three
-    // workers and two places that is 5 + 4 on top of the two days.
+    // workers, two places and no vehicles that is 5 + 4 + 2 on top of the two days. The
+    // two are the vehicles' own order and array, sent even while the list is empty for
+    // the same reason the others are - a phone that never hears the field never learns
+    // the list is now empty.
     device.State.commitRoster();
     check('a roster change queues one path per person, not one whole array',
-        device.Sync.pendingCount() === 11, String(device.Sync.pendingCount()));
+        device.Sync.pendingCount() === 13, String(device.Sync.pendingCount()));
     check('and the paths are per-entity',
         device.Sync.pendingPaths().includes('roster.workers.w_01')
         && device.Sync.pendingPaths().includes('roster.workerOrder'),
@@ -355,7 +358,7 @@ function record(device, date, workerId, placeId, rate) {
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
     check('and the queue survives the app being closed',
-        reopened.Sync.pendingCount() === 11, String(reopened.Sync.pendingCount()));
+        reopened.Sync.pendingCount() === 13, String(reopened.Sync.pendingCount()));
 }
 
 {
@@ -9312,6 +9315,93 @@ function withAdvances(device, rows) {
     check('and nothing was set aside as damaged on the way',
         !Object.keys(healed.dump()).some(key => key.endsWith(':damaged')),
         JSON.stringify(Object.keys(healed.dump())));
+}
+
+// ---------------------------------------------------------------- V3: a vehicle nobody else knows about
+//
+// Shipped in v83. commitRoster sends roster.workers.<id>, roster.places.<id>, the two
+// orders and the two legacy arrays. Vehicles are in none of those lists, so a vehicle
+// added on the manager's phone never left it - and the other two phones worked out a
+// different total for the same fortnight, with nothing on any screen to say why.
+//
+// Two devices and a cloud, not one device reopened from its own disk. A same-storage
+// reopen is a reopen; it is not another phone.
+{
+    suite('V3: a vehicle added here reaches the other phone');
+
+    const cloud = makeCloud();
+    const a = makeDevice();
+    seed(a);
+    await connected(a, cloud);
+
+    const b = makeDevice();
+    await connected(b, cloud);
+    given('the two are linked', (b.State.schedule.workers || []).length === 3);
+
+    a.State.schedule.vehicles = [{ id: 'v_aaa1', name: 'טנדר לבן', ownerId: 'w_01',
+        active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
+    a.State.commitRoster();
+    await wait();
+    await wait();
+
+    check('the cloud document carries it',
+        Boolean(cloud.doc && (cloud.doc.vehicles || []).length === 1),
+        JSON.stringify(cloud.doc && cloud.doc.vehicles));
+    check('as a per-vehicle field, so two phones adding one do not overwrite each other',
+        Boolean(cloud.doc && cloud.doc.roster && cloud.doc.roster.vehicles
+            && cloud.doc.roster.vehicles.v_aaa1),
+        JSON.stringify(cloud.doc && cloud.doc.roster && Object.keys(cloud.doc.roster)));
+
+    const there = (b.State.schedule.vehicles || [])[0];
+    check('and the other phone has it', Boolean(there), JSON.stringify(b.State.schedule.vehicles));
+    if (there) {
+        check('with the same owner', there.ownerId === 'w_01', there.ownerId);
+        check('and the same price from the same date',
+            there.rates.length === 1 && there.rates[0].amount === 300
+            && there.rates[0].from === '2026-08-01', JSON.stringify(there.rates));
+        same('so both phones work out the same money',
+            b.call('vehicleRateOn', there, '2026-08-12'), 300);
+    }
+}
+
+{
+    suite('V3: and two phones adding one at the same moment keep both');
+
+    const cloud = makeCloud();
+    const a = makeDevice();
+    seed(a);
+    await connected(a, cloud);
+    const b = makeDevice({ storage: a.dump() });
+    b.State.load();
+    await connected(b, cloud);
+
+    // Both mint an id before either write lands - which is the only interesting case.
+    const idA = a.State.nextVehicleId();
+    const idB = b.State.nextVehicleId();
+    check('two phones minting at once do not choose the same id', idA !== idB,
+        `${idA} / ${idB}`);
+
+    a.State.schedule.vehicles = [{ id: idA, name: 'טנדר', ownerId: 'w_01', active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    b.State.schedule.vehicles = [{ id: idB, name: 'טרנזיט', ownerId: 'w_02', active: true,
+        rates: [{ from: '2026-08-01', amount: 300 }] }];
+    a.State.commitRoster();
+    b.State.commitRoster();
+    await wait();
+    await wait();
+    await wait();
+
+    // The legacy ARRAY holds whichever phone wrote last - it is one field, and that is
+    // exactly why the per-vehicle map exists beside it. What matters is what a phone ends
+    // up with, and a phone merges the two.
+    check('each is filed under its own id, so neither write erased the other',
+        Boolean(cloud.doc.roster.vehicles[idA] && cloud.doc.roster.vehicles[idB]),
+        JSON.stringify(Object.keys(cloud.doc.roster.vehicles || {})));
+
+    const third = makeDevice();
+    await connected(third, cloud);
+    const ids = (third.State.schedule.vehicles || []).map(item => item.id).sort();
+    same('and a phone arriving afterwards has both', ids, [idA, idB].sort());
 }
 
 report();

@@ -545,6 +545,18 @@ const State = {
             FarkadSync.markLocallyMinted('places', id);
         }
         return id;
+    },
+
+    // Vehicles are minted the same way, and for the same reason: two phones adding one on
+    // the same evening must not choose the same id. The first version counted the vehicles
+    // already here and returned v_01, so both phones would have chosen v_01 and one would
+    // have quietly overwritten the other's van.
+    nextVehicleId() {
+        const id = newEntityId('v');
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.markLocallyMinted) {
+            FarkadSync.markLocallyMinted('vehicles', id);
+        }
+        return id;
     }
 };
 
@@ -597,7 +609,11 @@ function normaliseSchedule(raw, hints) {
     // The rate history is the part worth being careful with: it is what stops a raise
     // repaying last month, so an entry without a date it applies from is dropped rather
     // than guessed at.
-    schedule.vehicles = (Array.isArray(raw.vehicles) ? raw.vehicles : [])
+    // Both shapes, merged rather than chosen between - the same as the roster above. The
+    // array is what a phone still on an older build reads and writes; the map carries the
+    // ones that changed, so reading either alone loses a vehicle.
+    const rawVehicles = mergeRoster(raw.vehicles, roster.vehicles, roster.vehicleOrder);
+    schedule.vehicles = (Array.isArray(rawVehicles) ? rawVehicles : [])
         .filter(v => v && v.id)
         .map(v => ({
             id: String(v.id),

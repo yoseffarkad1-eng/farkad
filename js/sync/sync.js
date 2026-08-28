@@ -432,7 +432,7 @@ const FarkadSync = {
     _stamp: null,
     // The roster as the cloud last showed it, keyed by id. What a roster edit is compared
     // against to work out which people actually changed.
-    _remoteRoster: { workers: {}, places: {} },
+    _remoteRoster: { workers: {}, places: {}, vehicles: {} },
     // A whole-document replacement that has not been acknowledged yet. Mirrored to disk.
     _replace: null,
     _replacing: false,
@@ -1489,7 +1489,11 @@ const FarkadSync = {
         const batch = [];
         const put = (path, value) => batch.push({ path, value });
 
-        [['workers', 'workerOrder'], ['places', 'placeOrder']].forEach(([kind, orderKey]) => {
+        [['workers', 'workerOrder'], ['places', 'placeOrder'],
+            // Vehicles ride the same machinery, per entity rather than as one array. They
+            // were in none of these lists, so a vehicle added here never left the phone
+            // and the other two worked out a different total for the same fortnight.
+            ['vehicles', 'vehicleOrder']].forEach(([kind, orderKey]) => {
             const known = this._remoteRoster[kind] || {};
             const here = new Set();
 
@@ -2630,7 +2634,8 @@ const FarkadSync = {
         };
         this._remoteRoster = {
             workers: byId(schedule.workers),
-            places: byId(schedule.places)
+            places: byId(schedule.places),
+            vehicles: byId(schedule.vehicles)
         };
         // Everything in a snapshot has, by definition, been somewhere other than here.
         // Nothing is handed over on this path, so a refused write cannot hold anything
@@ -2733,9 +2738,18 @@ const FarkadSync = {
     },
 
     // Whether this path may go out before the first snapshot has arrived.
+    //
+    // The vehicles' legacy array belongs here for exactly the reason the other two do: it
+    // is a whole-list opinion about what the crew has, and sending one before hearing what
+    // the cloud already holds is how a list gets replaced by a shorter one. Adding it to
+    // editRoster without adding it here breached the barrier - a device whose subscription
+    // FAILED went on to create the document, which the suite above caught within minutes.
     rosterShaped(path) {
         const parts = String(path).split('.');
-        if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) return true;
+        if (parts.length === 1
+            && (parts[0] === 'workers' || parts[0] === 'places' || parts[0] === 'vehicles')) {
+            return true;
+        }
         return parts[0] === 'roster';
     },
 

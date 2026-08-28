@@ -621,7 +621,8 @@ function journalEntryProblems(path, value) {
     if (parts[0] === 'roster') {
         // roster.workerOrder / roster.placeOrder - the order the lists are read in.
         if (parts.length === 2) {
-            if (parts[1] !== 'workerOrder' && parts[1] !== 'placeOrder') {
+            if (parts[1] !== 'workerOrder' && parts[1] !== 'placeOrder'
+                && parts[1] !== 'vehicleOrder') {
                 return ['a roster path nobody wrote'];
             }
             if (!Array.isArray(value)) return ['an order that is not a list'];
@@ -638,17 +639,21 @@ function journalEntryProblems(path, value) {
         // removal, which travels as null.
         if (parts.length !== 3) return ['a roster path with the wrong number of segments'];
         const kind = parts[1];
-        if (kind !== 'workers' && kind !== 'places') return ['a roster path nobody wrote'];
+        if (kind !== 'workers' && kind !== 'places' && kind !== 'vehicles') {
+            return ['a roster path nobody wrote'];
+        }
         if (!isSafeSegment(parts[2])) return ['a roster path with an unusable id'];
         if (value === null) return [];
         if (!isPlainObject(value)) return ['a roster entry that is not a record'];
         if (String(value.id) !== parts[2]) return ['a roster entry filed under another id'];
-        return entityProblems(value, kind, kind === 'workers' ? 'עובד' : 'אתר');
+        const label = kind === 'workers' ? 'עובד' : (kind === 'vehicles' ? 'רכב' : 'אתר');
+        return entityProblems(value, kind, label);
     }
 
     // The legacy whole-array form. Still written on purpose, for a phone that has not
     // updated and reads nothing else - see editRoster.
-    if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+    if (parts.length === 1
+        && (parts[0] === 'workers' || parts[0] === 'places' || parts[0] === 'vehicles')) {
         if (!Array.isArray(value)) return ['a roster array that is not an array'];
         const seen = new Set();
         for (let i = 0; i < value.length; i += 1) {
