@@ -259,14 +259,44 @@ function isLegacyReplacement(parsed) {
     return isFullScheduleDocument(parsed);
 }
 
+// What legitimately differs between the replacement that was asked for and the record
+// this device ends up holding. It is a short list and it is the WHOLE list:
+//
+//   updatedAt, updatedBy - saving the replacement re-stamps it with this device and this
+//     clock, which is correct and is not a difference in the record.
+//   schemaVersion       - constant.
+//   roster              - derived from workers, places and vehicles; comparing it as well
+//                         would be comparing the same facts twice.
+//
+// Everything else a schedule has is compared, and it is compared by ASKING the schedule
+// rather than by listing what to look at. The list was the bug: it named workers, places,
+// days and advances, so the vans and the entire ledger were invisible to the one question
+// a restore hangs on - and a device could send a replacement to the cloud, and clear the
+// record of what it still owed, while holding neither. Nothing downstream would ever
+// notice, because everything downstream trusts this answer.
+//
+// A projection built from the keys cannot go stale when the model grows. R2 pins that:
+// every field of an empty schedule is either compared or named here.
+const REPLACEMENT_VOLATILE = ['schemaVersion', 'updatedAt', 'updatedBy', 'roster'];
+
+function replacementVolatileKeys() {
+    return REPLACEMENT_VOLATILE.slice();
+}
+
+// The fields actually compared, for the test that makes sure none went missing.
+function replacementComparedKeys() {
+    return Object.keys(normaliseSchedule(emptySchedule()))
+        .filter(key => !REPLACEMENT_VOLATILE.includes(key));
+}
+
 function replacementContent(source) {
     const schedule = normaliseSchedule(source);
-    return canonicalJson({
-        workers: schedule.workers,
-        places: schedule.places,
-        days: schedule.days,
-        advances: schedule.advances
+    const projected = {};
+    Object.keys(schedule).sort().forEach(key => {
+        if (REPLACEMENT_VOLATILE.includes(key)) return;
+        projected[key] = schedule[key];
     });
+    return canonicalJson(projected);
 }
 
 // Retry, backing off. A device on a building site loses signal for minutes at a time and

@@ -10236,64 +10236,104 @@ function withAdvances(device, rows) {
         JSON.stringify(again.call('ledgerEntries', again.State.schedule).map(e => e.id)));
 }
 
-// ---------------------------------------------------------------- R1: a restore keeps the vans and the ledger
+// ================================================================ the vans through a restore
 //
 // A whole-document write is the one place this app replaces a record instead of editing
-// it, and it is the place a field that nobody thought about goes missing without a word.
-// Vehicles and the ledger both arrived after the restore machinery was written.
+// it, and it is where a field nobody thought about goes missing without a word. Vehicles
+// and the ledger both arrived after the restore machinery was written.
+
+// The backup every suite below is restored FROM: two vans with dated rates either side of
+// a raise, one of them archived in September with its service history, a fortnight of work,
+// an evening one van stayed in the yard in each of the two ways a day can say so, an
+// advance, its mirror, and a ledger entry this build cannot read.
 //
-// Two things have to hold. The document that goes UP must carry them - including the
-// per-entity roster map that every later per-field vehicle edit is merged onto, so a van
-// renamed on another phone after the restore has a record to be merged into rather than a
-// scatter of fields with nothing to hang them on. And the schedule that comes DOWN must
-// still hold the vans, their dated rates, their service history, the day a van stayed in
-// the yard, and every ledger entry - the unreadable one included.
-{
-    suite('R1: a whole-document restore carries the vans and the ledger');
+// Built once, as plain data, so what is restored is a document rather than something a
+// device already happens to be holding.
+// The one path all four restore doors in share.js go through. Called rather than
+// approximated: a suite that drives the low-level replaceAll is not testing what a person
+// pressing "שחזר" actually runs.
+function restoreThrough(device, schedule) {
+    return device.Sync.replaceEverything(schedule);
+}
 
-    const cloud = makeCloud();
-    const { device } = crew();
-    await connected(device, cloud);
-    await settle(TICK * 30);
+function vanBackup(device) {
+    const days = {};
+    // Six working days in August at the old price, three in September at the new one.
+    ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14', '2026-08-17']
+        .concat(['2026-09-01', '2026-09-02', '2026-09-03'])
+        .forEach(date => {
+            days[date] = { plan: {}, actual: {
+                w_01: { entries: [{ placeId: 'p_01', rate: 'normal' }] },
+                w_02: { entries: [{ placeId: 'p_01', rate: 'normal' }] }
+            } };
+        });
+    // The canonical way a day says a van stayed in.
+    days['2026-08-12'].vehicles = { v_01: { out: false } };
+    // And the legacy array, which older records still carry and which the model must go
+    // on reading - a van paid for a day it spent in the yard is money out the door.
+    days['2026-08-13'].vehiclesOff = ['v_01'];
 
-    // A van on the road, a van put away in September, a day one of them stayed in, an
-    // advance, its mirror, and an entry this build cannot read.
-    device.State.schedule.vehicles = [
-        { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
-          rates: [{ from: '2026-08-01', amount: 300 }, { from: '2026-09-01', amount: 350 }] },
-        { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: false,
-          rates: [{ from: '2026-08-01', amount: 300 }],
-          service: [{ from: '2026-09-01', active: false }] }
-    ];
-    device.State.commitRoster();
-    record(device, '2026-08-12', 'w_01', 'p_01');
-    device.State.commit(device.call('setVehicleOut', device.State.schedule,
-        '2026-08-12', 'v_01', false));
-    device.State.commit(
-        device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, ''));
-    commitMigration(device);
-    device.State.schedule.ledger.advances.le_future = {
-        id: 'le_future', advanceId: 'a_1', kind: 'reversed', amount: 500 };
-    device.State.save();
-    await settle(TICK * 30);
+    return device.call('normaliseSchedule', {
+        schemaVersion: 2,
+        workers: [
+            { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
+            { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
+        ],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }],
+        days,
+        vehicles: [
+            { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+              rates: [{ from: '2026-08-01', amount: 300 }, { from: '2026-09-01', amount: 350 }] },
+            // Archived from 1 September: it earns through August and stops.
+            { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: false,
+              rates: [{ from: '2026-08-01', amount: 300 }],
+              service: [{ from: '2026-09-01', active: false }] }
+        ],
+        advances: { a_1: { id: 'a_1', workerId: 'w_01', date: '2026-08-03', amount: 500, note: '' } },
+        ledger: { advances: {
+            le_mig_a_1: { id: 'le_mig_a_1', advanceId: 'a_1', kind: 'given', workerId: 'w_01',
+                date: '2026-08-03', amount: 500, note: '', at: '', by: 'd_backup',
+                origin: 'migration' },
+            le_future: { id: 'le_future', advanceId: 'a_1', kind: 'reversed', amount: 500 }
+        } },
+        updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+}
 
-    // The canonical form, which is what the app stores and what a round trip has to come
-    // back equal to. normaliseSchedule gives a van with no service history an empty one -
-    // that is the roster's canonical shape, the same way a worker gets his flags - and
-    // pinning the pre-normalised text here would pin an incidental rather than the
-    // guarantee, which is that nothing is lost and no number changes.
-    const before = JSON.stringify(
+// What the vans are owed, asked of a device rather than asserted about one. Four numbers,
+// every one of them non-zero somewhere, so a pay arithmetic that quietly returned nothing
+// could not pass this by agreeing with itself.
+function vanMoney(device) {
+    const pay = (workerId, from, to) =>
+        device.call('vehiclePayFor', device.State.schedule, workerId, from, to);
+    return JSON.stringify({
+        augustV1: pay('w_01', '2026-08-01', '2026-08-31'),
+        septemberV1: pay('w_01', '2026-09-01', '2026-09-30'),
+        augustV2: pay('w_02', '2026-08-01', '2026-08-31'),
+        septemberV2: pay('w_02', '2026-09-01', '2026-09-30')
+    });
+}
+
+// The canonical form of the vans, which is what the app stores and what a round trip has
+// to come back equal to. normaliseSchedule gives a van with no service history an empty
+// one - the roster's canonical shape, the same way a worker gets his flags - so pinning
+// the pre-normalised text would pin an incidental rather than the guarantee.
+function vans(device) {
+    return JSON.stringify(
         device.call('normaliseSchedule', device.State.schedule).vehicles);
-    const ledgerBefore = JSON.stringify(device.State.schedule.ledger.advances);
-    given('the vans and the ledger are on the device',
-        device.State.schedule.vehicles.length === 2
-        && Object.keys(device.State.schedule.ledger.advances).length === 2,
-        before);
+}
 
-    // 1. The document as it goes up.
+// ---------------------------------------------------------------- R1: what goes up the wire
+{
+    suite('R1: the wire form carries the vans and the whole ledger');
+
+    const { device } = crew();
+    device.State.schedule = vanBackup(device);
+    device.State.save();
+
     const wire = device.call('cloudDocument', device.State.schedule);
-    check('the wire form carries the vans as an array, for a phone on the old build',
-        JSON.stringify(device.call('normaliseSchedule', wire).vehicles) === before,
+    check('the vans ride as an array, for a phone still on the old build',
+        JSON.stringify(device.call('normaliseSchedule', wire).vehicles) === vans(device),
         JSON.stringify(wire.vehicles));
     check('and keyed by id, which is what a later per-field edit is merged onto',
         Boolean(wire.roster && wire.roster.vehicles && wire.roster.vehicles.v_01
@@ -10303,50 +10343,420 @@ function withAdvances(device, rows) {
         JSON.stringify((wire.roster || {}).vehicleOrder) === JSON.stringify(['v_01', 'v_02']),
         JSON.stringify((wire.roster || {}).vehicleOrder));
     check('and every ledger entry, the one it cannot read included',
-        JSON.stringify(wire.ledger.advances) === ledgerBefore,
+        Object.keys(wire.ledger.advances).sort().join() === 'le_future,le_mig_a_1',
         JSON.stringify(Object.keys(wire.ledger.advances)));
+}
 
-    // 2. The restore itself, of that same document - the shape a backup file has.
-    const restored = device.call('normaliseSchedule', JSON.parse(JSON.stringify(wire)));
-    check('reading it back keeps the vans, dated rates and all',
-        JSON.stringify(restored.vehicles) === before, JSON.stringify(restored.vehicles));
-    check('and the evening one of them stayed in the yard',
-        restored.days['2026-08-12'].vehicles.v_01.out === false,
-        JSON.stringify(restored.days['2026-08-12'].vehicles));
-    check('and every ledger entry',
-        JSON.stringify(restored.ledger.advances) === ledgerBefore,
-        JSON.stringify(Object.keys(restored.ledger.advances)));
+// ---------------------------------------------------------------- R1b: the money is real
+//
+// The first version of this suite recorded one man, marked the only van as NOT going out,
+// gave the second van no work at all, and then asserted the vehicle pay was zero. That
+// passes with the whole of vehiclePayFor deleted. These are the numbers the pay sheet
+// actually produces, on both sides of a raise and both sides of an archiving.
+{
+    suite('R1b: what the vans earn, in numbers that are not zero');
 
-    await device.Sync.replaceAll(restored).catch(() => {});
+    const { device } = crew();
+    device.State.schedule = vanBackup(device);
+    device.State.save();
+
+    const money = JSON.parse(vanMoney(device));
+    // Nine working days: six in August, three in September. v_01 stayed in on the 12th
+    // (canonical) and the 13th (legacy array), so August is four days at 300.
+    check('the van is paid for every day it went out in August, at the old price',
+        money.augustV1.days === 4 && money.augustV1.amount === 1200,
+        JSON.stringify(money.augustV1));
+    check('and at the new price on the far side of the raise',
+        money.septemberV1.days === 3 && money.septemberV1.amount === 1050,
+        JSON.stringify(money.septemberV1));
+    check('the archived van still earns the month it worked',
+        money.augustV2.days === 6 && money.augustV2.amount === 1800,
+        JSON.stringify(money.augustV2));
+    check('and nothing after the day it was put away',
+        money.septemberV2.days === 0 && money.septemberV2.amount === 0,
+        JSON.stringify(money.septemberV2));
+
+    // The two ways a day says a van stayed in, each proved on its own day.
+    check('the canonical day record keeps it off the books',
+        device.call('isVehicleHeldIn', device.State.schedule, '2026-08-12', 'v_01') === true);
+    check('and so does the legacy array an older record carries',
+        device.call('isVehicleHeldIn', device.State.schedule, '2026-08-13', 'v_01') === true);
+    check('while an ordinary evening writes nothing and pays',
+        device.call('isVehicleHeldIn', device.State.schedule, '2026-08-10', 'v_01') === false);
+
+    // And it is inside the pay sheet, not only in the vehicle function.
+    const row = device.call('payrollReport', device.State.schedule,
+        '2026-08-01', '2026-08-31').find(item => item.workerId === 'w_01');
+    check('the pay sheet counts the van days and the van money',
+        row.vehicleDays === 4 && Math.round(row.vehicleAmount) === 1200,
+        JSON.stringify({ days: row.vehicleDays, amount: row.vehicleAmount }));
+}
+
+// ---------------------------------------------------------------- R1c: the real restore
+//
+// Through replaceEverything - the one path all four doors in share.js go through - onto a
+// phone whose own record is materially different, with the result read rather than
+// swallowed. The earlier version of this seeded the same state into the device first and
+// then called the low-level replaceAll with .catch(() => {}), which cannot fail and
+// therefore cannot prove anything.
+{
+    suite('R1c: a phone adopts a backup it does not already hold');
+
+    const cloud = makeCloud();
+    const { device } = crew();
+    await connected(device, cloud);
+    await settle(TICK * 30);
+
+    // Device A's own record: a different site, a different day, no vans, no ledger.
+    device.State.schedule.places.push({ id: 'p_09', name: 'רמת גן', active: true });
+    device.State.commitRoster();
+    record(device, '2026-07-04', 'w_01', 'p_09');
+    device.State.commit(
+        device.call('addAdvance', device.State.schedule, 'w_02', '2026-07-05', 90, 'ישן'));
+    await settle(TICK * 30);
+    given('it holds none of the backup to begin with',
+        device.State.schedule.vehicles.length === 0
+        && Object.keys(device.State.schedule.ledger.advances).length === 0
+        && Boolean(device.State.schedule.days['2026-07-04']));
+
+    const backup = vanBackup(device);
+    const expectedVans = JSON.stringify(backup.vehicles);
+    const result = await restoreThrough(device, backup);
+    check('the restore reports success rather than being ignored',
+        result && result.ok === true && result.stage === 'done', JSON.stringify(result));
+
+    // The disk, not memory: these are the bytes the next session opens.
+    const stored = JSON.parse(device.raw('scheduleData:v2'));
+    check('the record on the disk is the backup, vans and all',
+        JSON.stringify(device.call('normaliseSchedule', stored).vehicles) === expectedVans,
+        JSON.stringify(stored.vehicles));
+    check('and the whole ledger with it',
+        Object.keys(stored.ledger.advances).sort().join() === 'le_future,le_mig_a_1',
+        JSON.stringify(Object.keys(stored.ledger.advances)));
+    check('the device’s own earlier day is gone, which is what a restore means',
+        !stored.days['2026-07-04'], JSON.stringify(Object.keys(stored.days)));
+    check('and nothing is left owed',
+        device.Sync.pendingReplace() === null,
+        JSON.stringify(device.Sync.pendingReplace()));
+
+    // The cloud.
     await settle(TICK * 40);
-
-    check('after the restore the device still has both vans',
-        JSON.stringify(device.call('normaliseSchedule', device.State.schedule).vehicles)
-            === before,
-        JSON.stringify(device.State.schedule.vehicles));
-    check('and the ledger is whole',
-        JSON.stringify(device.State.schedule.ledger.advances) === ledgerBefore,
-        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
     check('the cloud document has the vans keyed by id',
         Boolean(cloud.doc && cloud.doc.roster && cloud.doc.roster.vehicles
-            && cloud.doc.roster.vehicles.v_01),
+            && cloud.doc.roster.vehicles.v_01 && cloud.doc.roster.vehicles.v_02),
         JSON.stringify(cloud.doc && cloud.doc.roster && Object.keys(cloud.doc.roster)));
     check('and the ledger it was given is the whole one',
-        JSON.stringify(((cloud.doc || {}).ledger || {}).advances) === ledgerBefore,
+        Object.keys(((cloud.doc || {}).ledger || {}).advances || {}).sort().join()
+            === 'le_future,le_mig_a_1',
         JSON.stringify(Object.keys((((cloud.doc || {}).ledger) || {}).advances || {})));
 
-    // 3. And after the app is closed and reopened on the restored record.
+    // Closed, reopened, and the money unchanged.
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
-    check('and all of it is still there after a reopen',
-        JSON.stringify(reopened.State.schedule.vehicles) === before
-        && JSON.stringify(reopened.State.schedule.ledger.advances) === ledgerBefore,
-        JSON.stringify(reopened.State.schedule.vehicles));
-    check('with the van pay for that month unchanged',
-        reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01',
-            '2026-08-01', '2026-08-31').amount === 0,
-        JSON.stringify(reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01',
-            '2026-08-01', '2026-08-31')));
+    check('the vans are there after a close and reopen', vans(reopened) === expectedVans,
+        vans(reopened));
+    check('and the money they earned is the same to the shekel',
+        vanMoney(reopened) === vanMoney(device), vanMoney(reopened));
+
+    // A genuinely separate second phone, told only by the cloud.
+    const b = makeDevice();
+    await connected(b, cloud);
+    await settle(TICK * 40);
+    check('the other phone converges on the same vans',
+        vans(b) === expectedVans, vans(b));
+    check('with the same money',
+        vanMoney(b) === vanMoney(device), vanMoney(b));
+    check('and the same ledger, the unreadable entry included',
+        Object.keys(b.State.schedule.ledger.advances).sort().join() === 'le_future,le_mig_a_1',
+        JSON.stringify(Object.keys(b.State.schedule.ledger.advances)));
+}
+
+// ---------------------------------------------------------------- R1d: a restore that cannot land
+{
+    suite('R1d: a local write that fails takes nothing to the cloud');
+
+    // Each fault gets its own device: what is being measured is what the CLOUD was told,
+    // and a device that has already sent one restore has nothing left to prove.
+    const run = async (what, install, endsIn) => {
+        const cloud = makeCloud();
+        const { device } = crew();
+        await connected(device, cloud);
+        await settle(TICK * 30);
+        record(device, '2026-07-04', 'w_01', 'p_01');
+        await settle(TICK * 30);
+
+        const before = cloud.attempts.filter(item => item.kind === 'save').length;
+        const docBefore = JSON.stringify(cloud.doc);
+        install(device);
+
+        const result = await restoreThrough(device, vanBackup(device));
+        await settle(TICK * 30);
+
+        check(`${what}: the restore does not report success`,
+            result && result.ok === false, JSON.stringify(result));
+        check(`${what}: the cloud document is untouched`,
+            JSON.stringify(cloud.doc) === docBefore,
+            `${(cloud.doc || {}).updatedAt} vs before`);
+        check(`${what}: no whole-document write was even attempted`,
+            cloud.attempts.filter(item => item.kind === 'save').length === before,
+            `${before} -> ${cloud.attempts.filter(item => item.kind === 'save').length}`);
+        check(`${what}: the day this phone recorded is still here`,
+            device.call('entriesFor', device.State.schedule, '2026-07-04', 'w_01',
+                'actual').length === 1);
+        check(`${what}: and no van was half-adopted`,
+            device.State.schedule.vehicles.length === 0,
+            JSON.stringify(device.State.schedule.vehicles));
+
+        // Whatever is on the disk about the restore, the next session must not read it as
+        // a finished one. What "not a finished one" looks like differs by fault, and
+        // saying so per fault is the point: a single loose assertion here would pass on
+        // an empty screen as readily as on a preserved record.
+        const reopened = makeDevice({ storage: device.dump() });
+        reopened.State.load();
+        check(`${what}: and the reopen shows no half-restored record`,
+            reopened.State.schedule.vehicles.length === 0,
+            JSON.stringify(reopened.State.schedule.vehicles));
+        endsIn(what, reopened, device);
+    };
+
+    // The record on the disk is still readable, so the next open must show exactly what
+    // this phone had before the restore was attempted.
+    const recordIntact = (what, reopened) => {
+        check(`${what}: the next open still has the day this phone recorded`,
+            reopened.call('entriesFor', reopened.State.schedule, '2026-07-04', 'w_01',
+                'actual').length === 1,
+            JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+        check(`${what}: and is not stuck in recovery over a record that is fine`,
+            reopened.call('farkadWritesBlocked') === false);
+    };
+
+    // The schedule write is refused outright - a full disk.
+    await run('a full disk', device => {
+        device.setQuota(key => key === 'scheduleData:v2');
+    }, recordIntact);
+    // The note that says a restore is owed cannot be written.
+    await run('no room for the intent', device => {
+        device.setQuota(key => key === 'farkad:pendingReplace');
+    }, recordIntact);
+    // The write reports success and the bytes land as something else. Here the record
+    // itself is damaged, so an intact screen is the WRONG ending: the right one is the
+    // app refusing to carry on over bytes it cannot read, keeping them, and saying so.
+    await run('a write that lands corrupted', device => {
+        device.corruptOnWrite('scheduleData:v2');
+    }, (what, reopened, device) => {
+        check(`${what}: the next open blocks writing rather than carrying on`,
+            reopened.call('farkadWritesBlocked') === true);
+        check(`${what}: the damaged bytes are kept, not deleted`,
+            typeof reopened.raw('scheduleData:v2') === 'string'
+            && reopened.raw('scheduleData:v2').length > 0);
+        check(`${what}: with a quarantined copy beside them`,
+            typeof reopened.raw('scheduleData:v2:damaged') === 'string',
+            JSON.stringify(Object.keys(reopened.dump())));
+    });
+}
+
+// ---------------------------------------------------------------- R1e: the edit after the restore
+//
+// The reason the vans belong in the wire form at all. rosterDocument used to leave them
+// out, so a restore replaced the roster block and took roster.vehicles with it - and the
+// very next per-field edit from another phone wrote roster.vehicles.v_01.name into a
+// document with no v_01 to write it into. mergeRoster lets the map win per entity, by
+// design, so that one field would replace the whole van on all three phones.
+//
+// Performed rather than described: the second phone really renames the van, the first
+// really changes a price, and both are read back off the wire.
+{
+    suite('R1e: a one-field edit does not reduce a van to one field');
+
+    const cloud = makeCloud();
+    const { device: a } = crew();
+    await connected(a, cloud);
+    await settle(TICK * 30);
+
+    const restored = await restoreThrough(a, vanBackup(a));
+    given('the restore landed', restored.ok === true, JSON.stringify(restored));
+    await settle(TICK * 40);
+
+    const b = makeDevice({ deviceId: 'd_other' });
+    await connected(b, cloud);
+    await settle(TICK * 40);
+    given('the other phone has the van', (b.State.schedule.vehicles || []).length === 2,
+        JSON.stringify(b.State.schedule.vehicles));
+
+    // B renames one van, and nothing else about it.
+    const theirs = b.State.schedule.vehicles.find(item => item.id === 'v_01');
+    theirs.name = 'טנדר לבן';
+    b.State.commitRoster();
+    await settle(TICK * 40);
+
+    // A, interleaved, changes that same van's price - a different field of the same
+    // record, which is the case the per-field form exists for.
+    const mine = a.State.schedule.vehicles.find(item => item.id === 'v_01');
+    mine.rates = mine.rates.concat([{ from: '2026-10-01', amount: 400 }]);
+    a.State.commitRoster();
+    await settle(TICK * 60);
+
+    const van = device => (device.State.schedule.vehicles || [])
+        .find(item => item.id === 'v_01');
+    const whole = (device, where) => {
+        const item = van(device);
+        check(`${where}: the van still has its id and owner`,
+            Boolean(item) && item.ownerId === 'w_01', JSON.stringify(item));
+        check(`${where}: the rename landed`, Boolean(item) && item.name === 'טנדר לבן',
+            JSON.stringify(item && item.name));
+        check(`${where}: and so did the new price, without losing the old two`,
+            Boolean(item) && item.rates.length === 3
+            && item.rates[0].amount === 300 && item.rates[1].amount === 350
+            && item.rates[2].amount === 400,
+            JSON.stringify(item && item.rates));
+        check(`${where}: it is still on the road`, Boolean(item) && item.active !== false,
+            JSON.stringify(item && item.active));
+        check(`${where}: the archived van kept its service history`,
+            JSON.stringify(((device.State.schedule.vehicles || [])
+                .find(other => other.id === 'v_02') || {}).service)
+                === JSON.stringify([{ from: '2026-09-01', active: false }]),
+            JSON.stringify((device.State.schedule.vehicles || [])
+                .find(other => other.id === 'v_02')));
+        check(`${where}: and the order is unchanged`,
+            (device.State.schedule.vehicles || []).map(item2 => item2.id).join() === 'v_01,v_02',
+            JSON.stringify((device.State.schedule.vehicles || []).map(item2 => item2.id)));
+    };
+
+    whole(a, 'the phone that restored');
+    whole(b, 'the phone that renamed');
+
+    const reopenedA = makeDevice({ storage: a.dump() });
+    reopenedA.State.load();
+    whole(reopenedA, 'after a reopen');
+
+    // A third phone, which has only ever been told by the cloud.
+    const c = makeDevice({ deviceId: 'd_third' });
+    await connected(c, cloud);
+    await settle(TICK * 40);
+    whole(c, 'a phone told only by the cloud');
+    check('and its August money is still the same to the shekel',
+        JSON.parse(vanMoney(c)).augustV1.amount === 1200, vanMoney(c));
+}
+
+// ================================================================ R2: the restore gate
+//
+// localDurableHolds is THE invariant of a whole-document restore: does the record on the
+// disk - the bytes the next session will open - actually contain the replacement? It is
+// asked before the cloud is written and again before the pending record is forgotten, and
+// everything downstream trusts its answer.
+//
+// It answered by comparing a PROJECTION of the two schedules, and the projection listed
+// four fields: workers, places, days, advances. The comment above it said the exclusions
+// were updatedAt and updatedBy and nothing else; the code excluded the vans and the whole
+// ledger as well. So a device could send a replacement to the cloud, and clear the record
+// of what it owed, while holding none of the restored vehicles and none of the entries -
+// and the next open would find neither, with nothing anywhere saying a restore had failed.
+{
+    suite('R2: the restore gate reads every part of the record');
+
+    const { device } = crew();
+    // The backup: two vans with dated rates and a service history, an advance, its
+    // mirror, and an entry this build cannot read.
+    const backup = device.call('normaliseSchedule', {
+        schemaVersion: 2,
+        workers: device.State.schedule.workers,
+        places: device.State.schedule.places,
+        days: { '2026-08-12': { plan: {}, actual: {
+            w_01: { entries: [{ placeId: 'p_01', rate: 'normal' }] } }, vehicles: { v_01: { out: false } } } },
+        vehicles: [
+            { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+              rates: [{ from: '2026-08-01', amount: 300 }] },
+            { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: false,
+              rates: [{ from: '2026-08-01', amount: 300 }],
+              service: [{ from: '2026-09-01', active: false }] }
+        ],
+        advances: { a_1: { id: 'a_1', workerId: 'w_01', date: '2026-08-03', amount: 500, note: '' } },
+        ledger: { advances: {
+            le_mig_a_1: { id: 'le_mig_a_1', advanceId: 'a_1', kind: 'given', workerId: 'w_01',
+                date: '2026-08-03', amount: 500, note: '', at: '', by: 'd_backup',
+                origin: 'migration' },
+            le_future: { id: 'le_future', advanceId: 'a_1', kind: 'reversed', amount: 500 }
+        } },
+        updatedAt: '2026-08-01T06:00:00.000Z', updatedBy: 'd_backup'
+    });
+
+    given('the restore is prepared and written down',
+        device.Sync.prepareReplace(backup) === true);
+    const envelope = device.Sync.pendingReplace();
+
+    // The exact reported reproduction: the local save lands EXCEPT for the vans and the
+    // ledger. Every other field agrees, so a gate that compares only workers, places,
+    // days and advances says yes - and a restore that lost two vehicles and every entry
+    // is sent to the cloud and then forgotten.
+    const partial = device.call('normaliseSchedule', backup);
+    partial.vehicles = [];
+    partial.ledger = { advances: {} };
+    device.State.schedule = partial;
+    device.State.save();
+    given('the disk holds everything except the vans and the ledger',
+        JSON.parse(device.raw('scheduleData:v2')).vehicles.length === 0
+        && Object.keys(JSON.parse(device.raw('scheduleData:v2')).ledger.advances).length === 0
+        && Object.keys(JSON.parse(device.raw('scheduleData:v2')).days).length === 1);
+
+    check('the gate refuses a record that lost the vans and the ledger',
+        device.Sync.localDurableHolds(envelope) === false,
+        JSON.stringify({
+            vehicles: device.State.schedule.vehicles.length,
+            ledger: Object.keys(device.State.schedule.ledger.advances).length
+        }));
+
+    // Now the local save lands, and the gate opens.
+    device.State.schedule = device.call('normaliseSchedule', backup);
+    device.State.save();
+    given('with the record actually on the disk, the gate opens',
+        device.Sync.localDurableHolds(device.Sync.pendingReplace()) === true);
+
+    // And each component removed in turn: every one of them is part of the answer.
+    const withoutPart = drop => {
+        const stored = JSON.parse(device.raw('scheduleData:v2'));
+        drop(stored);
+        device.putRaw('scheduleData:v2', JSON.stringify(stored));
+        device.Store.forget('scheduleData:v2');
+        const held = device.Sync.localDurableHolds(device.Sync.pendingReplace());
+        device.State.save();
+        return held;
+    };
+
+    check('a disk with no vans is not the restored record',
+        withoutPart(stored => { stored.vehicles = []; }) === false);
+    check('nor one whose van lost its dated rates',
+        withoutPart(stored => { stored.vehicles[0].rates = []; }) === false);
+    check('nor one whose archived van lost its service history',
+        withoutPart(stored => { delete stored.vehicles[1].service; }) === false);
+    check('nor one that forgot which van stayed in the yard',
+        withoutPart(stored => { delete stored.days['2026-08-12'].vehicles; }) === false);
+    check('nor one with an empty ledger',
+        withoutPart(stored => { stored.ledger = { advances: {} }; }) === false);
+    check('nor one missing only the entry it cannot read',
+        withoutPart(stored => { delete stored.ledger.advances.le_future; }) === false);
+    check('nor one missing a worker',
+        withoutPart(stored => { stored.workers.pop(); }) === false);
+    check('nor one missing a site',
+        withoutPart(stored => { stored.places.pop(); }) === false);
+    check('nor one missing the day',
+        withoutPart(stored => { stored.days = {}; }) === false);
+    check('nor one missing the advance',
+        withoutPart(stored => { stored.advances = {}; }) === false);
+    check('and the whole record still passes',
+        device.Sync.localDurableHolds(device.Sync.pendingReplace()) === true);
+
+    // The projection is a list, and a list is a thing a future field falls off. This is
+    // the check that notices: everything an empty schedule has is either compared or
+    // named as legitimately volatile, and nothing is neither.
+    const compared = device.call('replacementComparedKeys');
+    const volatileKeys = device.call('replacementVolatileKeys');
+    const all = Object.keys(device.call('emptySchedule'));
+    check('every field of a schedule is either compared or declared volatile',
+        all.every(key => compared.includes(key) || volatileKeys.includes(key)),
+        JSON.stringify({ all, compared, volatile: volatileKeys }));
+    check('and the vans and the ledger are on the compared side',
+        compared.includes('vehicles') && compared.includes('ledger'),
+        JSON.stringify(compared));
 }
 
 report();
