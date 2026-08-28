@@ -3716,7 +3716,14 @@ async function seedRoster(page) {
 
       if (fault === 'prepare') refuse(key => key === 'farkad:pendingReplace');
       if (fault === 'local-save') refuse(key => key === 'scheduleData:v2');
-      if (fault === 'queue-prune') refuse(key => key.indexOf('farkad:outbox') === 0);
+      if (fault === 'queue-prune') {
+        // A prune is a REMOVAL since v87 - each queued entry is its own key - so refusing
+        // the write alone stopped describing this failure. Both halves are blocked here:
+        // the disk will not take a new queue byte and will not let one go either.
+        refuse(key => key.indexOf('farkad:outbox') === 0);
+        Store.remove = key =>
+          (String(key).indexOf('farkad:outbox') === 0 ? undefined : realRemove(key));
+      }
       if (fault === 'finalize') {
         refuse((key, value) =>
           key === 'farkad:pendingReplace' && value.indexOf('"cancelled"') !== -1);

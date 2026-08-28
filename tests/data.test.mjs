@@ -451,7 +451,7 @@ function record(device, date, workerId, placeId, rate) {
     check('a write that failed is still waiting',
         device.Sync.pendingCount() > 0, String(device.Sync.pendingCount()));
     check('and it is still on disk',
-        device.dump()['farkad:outbox'].includes('2026-08-12'));
+        durablyQueued(device, '2026-08-12'));
 
     // Closing the app here is the case the whole outbox exists for.
     const reopened = makeDevice({ storage: device.dump() });
@@ -1602,7 +1602,7 @@ function record(device, date, workerId, placeId, rate) {
     const done = record(device, '2026-08-12', 'w_01', 'p_01');
     check('the commit reports success, because something durable holds it', done === true);
     check('and the journal is what holds it',
-        (device.raw('farkad:outbox') || '').includes('2026-08-12'));
+        durablyQueued(device, '2026-08-12'));
 
     // No cloud anywhere. The journal has to rebuild the edit by itself.
     const reopened = makeDevice({ storage: device.dump() });
@@ -1621,7 +1621,7 @@ function record(device, date, workerId, placeId, rate) {
     const device = makeDevice();
     seed(device);
     const before = device.raw('scheduleData:v2');
-    device.setQuota(key => key.startsWith('farkad:outbox'));
+    cannotPrune(device);
 
     const done = record(device, '2026-08-12', 'w_01', 'p_01');
     check('the commit is refused when only the journal fails', done === false, String(done));
@@ -1934,7 +1934,7 @@ function record(device, date, workerId, placeId, rate) {
     check('the new day is accepted', committed === true, String(committed));
     check('and it went into a NEW queue, not over the damaged one',
         device.raw('farkad:outbox') === broken
-        && (device.raw('farkad:outbox:active1') || '').includes('2026-08-12'),
+        && durablyQueued(device, '2026-08-12'),
         JSON.stringify({
             original: (device.raw('farkad:outbox') || '').slice(0, 20),
             active: (device.raw('farkad:outbox:active1') || '').slice(0, 40)
@@ -2010,9 +2010,9 @@ function record(device, date, workerId, placeId, rate) {
         typeof held['scheduleData:v2'] === 'string'
         && held['scheduleData:v2'].includes('2026-08-12'),
         JSON.stringify(Object.keys(held)));
-    check('and so is the queue that is actually live',
+    check('and so is the queue that is actually live - the mark and the work it counts',
         typeof held['farkad:outbox:active1'] === 'string'
-        && held['farkad:outbox:active1'].includes('2026-08-12'),
+        && durablyQueued(held, '2026-08-12'),
         JSON.stringify(Object.keys(held)));
 }
 
@@ -2027,9 +2027,7 @@ function record(device, date, workerId, placeId, rate) {
     seed(device);
     const before = device.raw('scheduleData:v2');
 
-    const baseline = (device.raw('farkad:outbox') || '').length;
-    device.setQuota((key, value) =>
-        key.startsWith('farkad:outbox') && value.length > baseline + 220);
+    fullAfter(device, 1);
 
     const changes = ['w_01', 'w_02'].map(id =>
         device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
@@ -2045,8 +2043,8 @@ function record(device, date, workerId, placeId, rate) {
         ]));
     check('the schedule on disk is untouched', device.raw('scheduleData:v2') === before);
     check('and NEITHER worker is in the journal on disk',
-        !(device.raw('farkad:outbox') || '').includes('2026-08-12'),
-        (device.raw('farkad:outbox') || '').slice(0, 120));
+        !durablyQueued(device, '2026-08-12'),
+        JSON.stringify(Object.keys(device.dump())));
 
     // The measure that counts, and the one that caught this.
     const reopened = makeDevice({ storage: device.dump() });
@@ -2065,16 +2063,14 @@ function record(device, date, workerId, placeId, rate) {
     // Under the old chain that left a prefix on the disk. Now the one write is refused.
     const device = makeDevice();
     seed(device);
-    const baseline = (device.raw('farkad:outbox') || '').length;
-    device.setQuota((key, value) =>
-        key.startsWith('farkad:outbox') && value.length > baseline + 250);
+    fullAfter(device, 2);
 
     const changes = ['w_01', 'w_02', 'w_03'].map(id =>
         device.call('assignPlace', device.State.schedule, '2026-08-12', id, 'actual', 'p_01'));
     check('the batch is refused', device.State.commitMany(changes) === false);
     check('and none of the three reached the disk',
-        !(device.raw('farkad:outbox') || '').includes('2026-08-12'),
-        (device.raw('farkad:outbox') || '').slice(0, 140));
+        !durablyQueued(device, '2026-08-12'),
+        JSON.stringify(Object.keys(device.dump())));
 
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
@@ -2092,9 +2088,7 @@ function record(device, date, workerId, placeId, rate) {
     const device = makeDevice();
     seed(device);
     const before = device.raw('scheduleData:v2');
-    const baseline = (device.raw('farkad:outbox') || '').length;
-    device.setQuota((key, value) =>
-        key.startsWith('farkad:outbox') && value.length > baseline + 400);
+    fullAfter(device, 4);
 
     device.State.schedule.workers.push({ id: 'w_zz', name: 'חדש', active: true, dailyRate: 300 });
     device.State.schedule.workers.reverse();
@@ -2105,8 +2099,8 @@ function record(device, date, workerId, placeId, rate) {
         JSON.stringify(device.State.schedule.workers.map(w => w.id)));
     check('the schedule on disk is untouched', device.raw('scheduleData:v2') === before);
     check('and no half-roster reached the journal',
-        !(device.raw('farkad:outbox') || '').includes('w_zz'),
-        (device.raw('farkad:outbox') || '').slice(0, 140));
+        !durablyQueued(device, 'w_zz'),
+        JSON.stringify(Object.keys(device.dump())));
 
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
@@ -2142,11 +2136,14 @@ function record(device, date, workerId, placeId, rate) {
             { path, value: { entries: [{ placeId: 'p_02' }] } }
         ]) === true);
 
-    const stored = JSON.parse(device.raw('farkad:outbox')).items[path];
+    // Read off the disk by path, not out of a record: since v87 the entry is its own key.
+    const stored = JSON.parse(device.raw(`farkad:outbox:e:${path}`));
     check('and the value that survives is the later one',
         stored.value.entries[0].placeId === 'p_02', JSON.stringify(stored.value));
     check('with one entry, not two',
-        Object.keys(JSON.parse(device.raw('farkad:outbox')).items).length === 1);
+        Object.keys(device.dump()).filter(key => key.indexOf('farkad:outbox:e:') === 0)
+            .length === 1,
+        JSON.stringify(Object.keys(device.dump())));
 }
 
 // ---------------------------------------------------------------- G11: slots
@@ -2864,7 +2861,7 @@ const diskDays = device => {
 
     cloud.online = true;
     // The schedule can be written; the queue cannot.
-    device.setQuota(key => key.startsWith('farkad:outbox'));
+    cannotPrune(device);
     const result = await device.Sync.replaceEverything(restored);
 
     check('the restore is not reported as done',
@@ -2877,9 +2874,8 @@ const diskDays = device => {
         dayKeys(device.State.schedule) === '2026-07-01', dayKeys(device.State.schedule));
     check('and so does the disk', diskDays(device) === '2026-07-01', String(diskDays(device)));
     check('the durable queue still holds the superseded entries - they were not lost',
-        JSON.parse(device.raw(device.Sync.activeOutboxKey())).items['days.2026-08-12.actual.w_01']
-            !== undefined,
-        String(device.raw(device.Sync.activeOutboxKey())));
+        durablyQueued(device, '2026-08-12'),
+        JSON.stringify(Object.keys(device.dump())));
     check('and nothing reached the cloud',
         cloud.attempts.filter(a => a.kind === 'save').length === 0);
 
@@ -2934,7 +2930,11 @@ const diskDays = device => {
     given('there is something to supersede', device.Sync.pendingCount() > 0);
 
     cloud.online = true;
-    device.corruptOnWrite(device.Sync.activeOutboxKey());
+    // The queue is a set of keys since v87, and what a restore has to do to it is take
+    // the superseded entries OFF. So this is a removal that comes back having done
+    // nothing - the disk saying yes and meaning no.
+    device.blockRemoval(key => String(key).indexOf('farkad:outbox') === 0);
+    device.corruptWhen(key => String(key).indexOf('farkad:outbox') === 0);
     const result = await device.Sync.replaceEverything(restored);
     check('it is not reported as done', result.ok === false, JSON.stringify(result));
     check('and the transaction is still pending', device.Sync.pendingReplace() !== null);
@@ -3173,7 +3173,7 @@ const diskDays = device => {
         device.Sync.pendingPaths().includes(path),
         JSON.stringify(device.Sync.pendingPaths()));
     check('and still on the disk in the queue',
-        String(device.raw(device.Sync.activeOutboxKey())).includes(path));
+        durablyQueued(device, path), JSON.stringify(Object.keys(device.dump())));
     check('the retry ladder is armed rather than silent',
         device.Sync.pendingReplace() !== null);
 
@@ -3509,8 +3509,11 @@ const diskDays = device => {
     suite('G15.3: a prune that is refused leaves memory and the disk agreeing');
 
     for (const [label, arm] of [
-        ['refused', device => device.setQuota(key => key.startsWith('farkad:outbox'))],
-        ['written back changed', device => device.corruptOnWrite(device.Sync.activeOutboxKey())]
+        ['refused', device => cannotPrune(device)],
+        // Two different ways a removal fails, because that is what a prune is since v87:
+        // one that quietly does nothing, and one that throws.
+        ['the removal throws', device => device.throwOnRemove(
+            key => String(key).indexOf('farkad:outbox') === 0)]
     ]) {
         const device = makeDevice({ deviceId: 'd_here' });
         seed(device);
@@ -3568,7 +3571,7 @@ const diskDays = device => {
     given('there is no cloud', device.Sync.adapter === null);
     given('and something to supersede', device.Sync.pendingCount() > 0);
 
-    device.setQuota(key => key.startsWith('farkad:outbox'));
+    cannotPrune(device);
     const result = await device.Sync.replaceEverything(restored);
 
     check('it is not reported as done',
@@ -3584,13 +3587,17 @@ const diskDays = device => {
     // FIRST REOPEN, still with no room.
     const stuck = makeDevice({ storage: device.dump(), deviceId: 'd_here',
         quota: key => key.startsWith('farkad:outbox') });
+    // Still no room, and still unable to take an entry off the queue - which is what a
+    // prune is since v87. Installed before load(), because the resume happens there.
+    stuck.blockRemoval(key => String(key).indexOf('farkad:outbox') === 0);
     stuck.State.load();
     check('reopening does not resurrect the superseded day',
         dayKeys(stuck.State.schedule) === '2026-07-01', dayKeys(stuck.State.schedule));
     check('and the transaction is still there to be finished',
         stuck.Sync.pendingReplace() !== null);
 
-    // SECOND REOPEN, with room. It finishes itself, with no cloud anywhere.
+    // SECOND REOPEN, with room and with removals working again. It finishes itself,
+    // with no cloud anywhere.
     const free = makeDevice({ storage: stuck.dump(), deviceId: 'd_here' });
     free.State.load();
     check('the transaction closes on its own',
@@ -3808,8 +3815,8 @@ for (const ending of ['succeeds', 'fails']) {
     check(`${ending}: nothing claims to be synced`,
         device.Sync.status !== 'synced', device.Sync.status);
     check(`${ending}: and B is durable in the journal`,
-        String(device.raw(device.Sync.activeOutboxKey()))
-            .includes('days.2026-08-12.actual.w_01'));
+        durablyQueued(device, 'days.2026-08-12.actual.w_01'),
+        JSON.stringify(Object.keys(device.dump())));
 
     if (ending === 'succeeds') gate.release();
     else gate.refuse(new Error('the socket gave up'));
@@ -3885,8 +3892,8 @@ for (const ending of ['succeeds', 'fails']) {
 
     check('a day recorded now is accepted',
         record(again, '2026-08-20', 'w_02', 'p_02') === true);
-    const entry = JSON.parse(again.raw(again.Sync.activeOutboxKey()))
-        .items['days.2026-08-20.actual.w_02'];
+    const entry = JSON.parse(again.raw(
+        `${again.Sync.activeOutboxKey()}:e:days.2026-08-20.actual.w_02`));
     check('and it is numbered above the boundary, not below it',
         entry.seq > boundary, `${entry.seq} vs ${boundary}`);
 
@@ -4734,8 +4741,7 @@ for (const [label, arm] of [
 
     check('a day recorded now is accepted',
         record(half, '2026-08-20', 'w_02', 'p_02') === true);
-    const entry = JSON.parse(half.raw(half.Sync.activeOutboxKey()))
-        .items['days.2026-08-20.actual.w_02'];
+    const entry = durableEntries(half, half.Sync.activeOutboxKey())['days.2026-08-20.actual.w_02'];
     given('and it is numbered above the boundary', entry.seq > boundary,
         `${entry.seq} vs ${boundary}`);
 
@@ -5030,9 +5036,10 @@ for (const [label, arm] of [
 
     check('a day recorded after the restore is accepted',
         record(half, '2026-08-20', 'w_02', 'p_02') === true);
-    const queueBefore = half.raw(half.Sync.activeOutboxKey());
+    const dumpBefore = half.dump();
+    const queueBefore = outboxBytes(dumpBefore);
     given('and it is queued above the boundary',
-        JSON.parse(queueBefore).items['days.2026-08-20.actual.w_02'].seq === 2,
+        durableEntries(dumpBefore)['days.2026-08-20.actual.w_02'].seq === 2,
         queueBefore);
 
     // The companion is damaged; everything else is left exactly as it is.
@@ -5061,8 +5068,7 @@ for (const [label, arm] of [
     check('writing is still blocked after acknowledging',
         held.call('farkadWritesBlocked') === true);
     check('the queue is byte-for-byte what it was',
-        held.raw(held.Sync.activeOutboxKey()) === queueBefore,
-        String(held.raw(held.Sync.activeOutboxKey())));
+        outboxBytes(held) === queueBefore, outboxBytes(held));
 
     // 3. Nothing anybody presses can get past it.
     await held.Sync.flush();
@@ -5076,10 +5082,9 @@ for (const [label, arm] of [
     check('repeated flushes, a reconnect and a retry still send nothing',
         documentWrites(cloud).length === 0, JSON.stringify(documentWrites(cloud)));
     check('and the queue is still byte-for-byte what it was',
-        held.raw(held.Sync.activeOutboxKey()) === queueBefore,
-        String(held.raw(held.Sync.activeOutboxKey())));
-    const waitingBefore = Object.keys(JSON.parse(queueBefore).items)
-        .filter(path => JSON.parse(queueBefore).items[path].sent !== true).length;
+        outboxBytes(held) === queueBefore, outboxBytes(held));
+    const waitingBefore = Object.keys(durableEntries(dumpBefore))
+        .filter(path => durableEntries(dumpBefore)[path].sent !== true).length;
     check('and every entry is still waiting - none was marked as sent',
         held.Sync.pendingCount() === waitingBefore,
         `${held.Sync.pendingCount()} vs ${waitingBefore}`);
@@ -5090,7 +5095,7 @@ for (const [label, arm] of [
     check('the disk did not change either',
         JSON.parse(held.raw('scheduleData:v2')).days['2026-08-21'] === undefined);
     check('and the queue STILL has not moved',
-        held.raw(held.Sync.activeOutboxKey()) === queueBefore);
+        outboxBytes(held) === queueBefore);
 
     // Both raw records, and the copy, are all there to be exported.
     check('the raw v71 record is intact',
@@ -5101,7 +5106,7 @@ for (const [label, arm] of [
     check('the export carries both, and the queue',
         exported['farkad:pendingReplace'] === V71_RECORD
         && exported['farkad:pendingReplace:v71'] === brokenCompanion
-        && exported[held.Sync.activeOutboxKey()] === queueBefore,
+        && outboxBytes(exported) === queueBefore,
         JSON.stringify(Object.keys(exported)));
 
     // 5. The companion is repaired, and the transaction finishes properly.
@@ -6119,7 +6124,7 @@ for (const [label, act] of [
         { id: added, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
     given('he was added with no connection', device.State.commitRoster() === true);
     given('and the queue does hold roster entries naming him',
-        String(device.raw(device.Sync.activeOutboxKey())).includes(added));
+        durablyQueued(device, added), JSON.stringify(Object.keys(device.dump())));
 
     check('a roster entry alone does not hold the deletion',
         device.Sync.queueNamesWorker(added) === false);
@@ -6699,9 +6704,9 @@ for (const [label, act] of [
     given('he was queued in the whole array', device.State.commitRoster() === true);
 
     const queuedArray = source => {
-        const raw = JSON.parse(String((source || device).raw(
-            (source || device).Sync.activeOutboxKey())));
-        return JSON.stringify(raw.items.workers.value);
+        const from = source || device;
+        return JSON.stringify(durableEntries(from, from.Sync.activeOutboxKey())
+            .workers.value);
     };
     given('and the stored queue really does hold him in it',
         queuedArray().includes(doomed), queuedArray());
@@ -6809,12 +6814,11 @@ for (const [label, act] of [
     await wait();
     // Empty once it has been acknowledged and pruned, which is the shape success takes.
     const queuedNames = () => {
-        const raw = JSON.parse(String(b.raw(b.Sync.activeOutboxKey())) || '{}');
-        const entry = (raw.items || {}).workers;
+        const entry = durableEntries(b, b.Sync.activeOutboxKey()).workers;
         return entry ? JSON.stringify(entry.value) : '';
     };
     given('B has him queued in a whole array', queuedNames().includes(doomed));
-    const queuedBefore = String(b.raw(b.Sync.activeOutboxKey()));
+    const queuedBefore = outboxBytes(b);
 
     // A removes him. B comes back with no room to rewrite its queue.
     a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
@@ -6844,7 +6848,7 @@ for (const [label, act] of [
     check('and no write ever carried him in a whole array', !everSentHim(),
         JSON.stringify(cloud.writes.map(write => write.kind)));
     check('and the queue is byte for byte what it was',
-        String(b.raw(b.Sync.activeOutboxKey())) === queuedBefore);
+        outboxBytes(b) === queuedBefore);
     check('the removed man was NOT put back into the cloud',
         !(cloud.doc.workers || []).some(item => item && item.id === doomed),
         JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
@@ -7085,7 +7089,7 @@ function slowFirstSnapshot(cloud) {
     b.State.commitRoster();
     await wait();
     given('B has a whole array queued with him in it',
-        String(b.raw(b.Sync.activeOutboxKey())).includes(doomed));
+        durablyQueued(b, doomed), JSON.stringify(Object.keys(b.dump())));
 
     // A removes him while B is away.
     a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
@@ -7097,8 +7101,8 @@ function slowFirstSnapshot(cloud) {
     const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
     reopened.State.load();
     given('the queue survived the reopen',
-        String(reopened.raw(reopened.Sync.activeOutboxKey())).includes(doomed));
-    const queuedBefore = String(reopened.raw(reopened.Sync.activeOutboxKey()));
+        durablyQueued(reopened, doomed), JSON.stringify(Object.keys(reopened.dump())));
+    const queuedBefore = outboxBytes(reopened);
     const fromWrite = cloud.writes.length;
 
     // Connected to a cloud whose first snapshot is late - much later than the debounce.
@@ -7119,7 +7123,7 @@ function slowFirstSnapshot(cloud) {
     check('nothing carrying a roster went out before the first snapshot',
         !carriedHim(), JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
     check('the queue is byte for byte what it was',
-        String(reopened.raw(reopened.Sync.activeOutboxKey())) === queuedBefore);
+        outboxBytes(reopened) === queuedBefore);
     check('and the device does not call itself synced while it holds data back',
         reopened.Sync.status !== 'synced', reopened.Sync.status);
 
@@ -7249,8 +7253,9 @@ function slowFirstSnapshot(cloud) {
 
     const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
     reopened.State.load();
-    const queuedBefore = String(reopened.raw(reopened.Sync.activeOutboxKey()));
-    given('the queue survived the reopen', queuedBefore.includes(doomed));
+    const queuedBefore = outboxBytes(reopened);
+    given('the queue survived the reopen', durablyQueued(reopened, doomed),
+        JSON.stringify(Object.keys(reopened.dump())));
 
     const fromWrite = cloud.writes.length;
     const carriedHim = () => cloud.writes.slice(fromWrite).some(write => {
@@ -7273,7 +7278,7 @@ function slowFirstSnapshot(cloud) {
     check('nothing carrying him went out', !carriedHim(),
         JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
     check('the queue is byte for byte what it was',
-        String(reopened.raw(reopened.Sync.activeOutboxKey())) === queuedBefore);
+        outboxBytes(reopened) === queuedBefore);
     check('the device does not call itself synced',
         reopened.Sync.status !== 'synced', reopened.Sync.status);
     check('a v78 reader of the document does not see him',
@@ -8562,6 +8567,71 @@ function seedLedgerEntry(device, build) {
     return written;
 }
 
+// Is this path durably queued, whatever key the queue keeps it in?
+//
+// Since v87 an entry is its own key - two tabs queueing two different paths must never
+// touch the same bytes - so a test that reads `farkad:outbox` and looks for a date in it
+// is reading the sequence mark. This asks the guarantee instead of the layout: the bytes
+// on the disk, somewhere, still name that edit.
+function durablyQueued(dumpOrDevice, needle) {
+    const dump = typeof dumpOrDevice.dump === 'function' ? dumpOrDevice.dump() : dumpOrDevice;
+    return Object.keys(dump)
+        .filter(key => key.indexOf('farkad:outbox') === 0)
+        .some(key => String(dump[key]).includes(needle));
+}
+
+// The queue as the DISK holds it, keyed by path - whatever key each entry lives in.
+// Takes a device or a raw dump, so a test can ask it of bytes it captured earlier.
+function durableEntries(dumpOrDevice, slot) {
+    const dump = typeof dumpOrDevice.dump === 'function' ? dumpOrDevice.dump() : dumpOrDevice;
+    const key = slot || 'farkad:outbox';
+    const out = {};
+    // Anything an older build left inside the record.
+    try {
+        const record = JSON.parse(dump[key]);
+        if (record && record.items) Object.assign(out, record.items);
+    } catch (error) { /* absent or unreadable is not the question here */ }
+    const prefix = `${key}:e:`;
+    Object.keys(dump).filter(name => name.indexOf(prefix) === 0).forEach(name => {
+        try { out[name.slice(prefix.length)] = JSON.parse(dump[name]); } catch (error) { /* */ }
+    });
+    return out;
+}
+
+// Every outbox byte on the device, canonically ordered. "The queue did not move" used to
+// be one key compared to itself; the queue is a set of keys now, so the sentence needs a
+// set. Any change anywhere in it - an entry written, removed, marked sent, or the mark
+// raised - changes this string.
+function outboxBytes(dumpOrDevice) {
+    const dump = typeof dumpOrDevice.dump === 'function' ? dumpOrDevice.dump() : dumpOrDevice;
+    return JSON.stringify(Object.keys(dump).filter(key => key.indexOf('farkad:outbox') === 0)
+        .sort().map(key => [key, dump[key]]));
+}
+
+// A device that runs out of room PARTWAY THROUGH a batch. Since v87 each queued entry is
+// its own key, so "the second write is the one that fails" is spelled by counting the
+// writes rather than by watching one record grow. Everything already written by the batch
+// must be put back: a roster half-queued is a worker present and missing from the order,
+// and the next open replays exactly that.
+// A device that cannot take an entry OFF the queue. Under the single record a prune was a
+// write, so a full disk produced it; per-entry keys prune by removing a key, and a disk
+// with no room removes happily. The failure being described has not gone anywhere - a
+// browser can refuse a removeItem, and the code has always had to notice - so the fault
+// moves to where it actually lives.
+function cannotPrune(device) {
+    device.blockRemoval(key => String(key).indexOf('farkad:outbox') === 0);
+    device.setQuota(key => String(key).indexOf('farkad:outbox') === 0);
+}
+
+function fullAfter(device, writes) {
+    let seen = 0;
+    device.setQuota(key => {
+        if (key.indexOf('farkad:outbox') !== 0) return false;
+        seen += 1;
+        return seen > writes;
+    });
+}
+
 function withAdvances(device, rows) {
     rows.forEach(row => device.State.commit(
         device.call('addAdvance', device.State.schedule, row.workerId, row.date, row.amount, row.note || '')));
@@ -9290,8 +9360,8 @@ function withAdvances(device, rows) {
     same('the queued path is one the wire accepts',
         device.call('journalEntryProblems', 'days.2026-08-12.vehicles.v_01', { out: false }), []);
     check('and the edit is actually in the queue',
-        String(device.raw('farkad:outbox')).includes('days.2026-08-12.vehicles.v_01'),
-        String(device.raw('farkad:outbox')).slice(0, 140));
+        durablyQueued(device, 'days.2026-08-12.vehicles.v_01'),
+        JSON.stringify(Object.keys(device.dump())));
 
     // Taking it back empties the list, which travels as a deletion rather than as [].
     const back = device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', true);
@@ -9460,8 +9530,8 @@ function withAdvances(device, rows) {
     check('and the schedule on the disk does NOT have it',
         !String(a.raw('scheduleData:v2')).includes(id),
         String(a.raw('scheduleData:v2')).slice(0, 80));
-    check('while the journal does',
-        String(a.raw('farkad:outbox')).includes(id));
+    check('while the journal does', durablyQueued(a, id),
+        JSON.stringify(Object.keys(a.dump())));
 
     // Closed and opened again, from the durable bytes alone.
     const reopened = makeDevice({ storage: a.dump() });
@@ -9560,7 +9630,9 @@ function withAdvances(device, rows) {
     record(b, '2026-08-11', 'w_01', 'p_01');
     await wait();
 
-    const queued = Object.keys(JSON.parse(shared.getItem('farkad:outbox')).items);
+    const copyNow = {};
+    Object.keys(shared).forEach(key => { copyNow[key] = shared[key]; });
+    const queued = Object.keys(durableEntries(copyNow));
     check('Monday is still queued', queued.includes('days.2026-08-10.actual.w_01'),
         JSON.stringify(queued));
     check('and so is Tuesday', queued.includes('days.2026-08-11.actual.w_01'),
@@ -10757,6 +10829,82 @@ function vans(device) {
     check('and the vans and the ledger are on the compared side',
         compared.includes('vehicles') && compared.includes('ledger'),
         JSON.stringify(compared));
+}
+
+// ================================================================ T1: the two-tab race, for real
+//
+// V5 above proves the SEQUENTIAL case: tab A writes, then tab B writes and merges what it
+// finds on the disk. What it cannot say anything about is the moment between tab B's read
+// and tab B's write. Two tabs are two threads, and one can be preempted right there - so B
+// reads the queue, A queues Monday, and B then writes back a record computed from bytes
+// that no longer describe the disk. Monday is gone: not unsent, deleted, by a tab that was
+// doing exactly what it was told.
+//
+// A merge at write time narrowed that window to a few instructions, and the comment beside
+// it said the rest could not be closed while the queue was ONE record. It could not. A read-modify-
+// write over a shared record is a lost update by construction, and the only fix is for two
+// tabs writing two different paths never to touch the same bytes.
+//
+// shared.interleave() is how the moment is spelled: it fires once, after a read, before
+// the caller can act on it.
+{
+    suite('T1: a tab preempted between its read and its write loses nothing');
+
+    const shared = sharedStore();
+    const a = makeDevice({ sharedStorage: shared });
+    seed(a);
+    const b = makeDevice({ sharedStorage: shared });
+    b.State.load();
+    given('both tabs are looking at the same storage', b.State.schedule.workers.length === 3);
+
+    // Tab B is about to record Tuesday. In the middle of it - after it has read whatever
+    // the queue looks like, before it writes - tab A records Monday.
+    let interleaved = false;
+    shared.interleave(() => {
+        interleaved = true;
+        record(a, '2026-08-10', 'w_01', 'p_01');
+    });
+    record(b, '2026-08-11', 'w_01', 'p_01');
+    await wait();
+    given('the other tab really did write in the middle', interleaved === true);
+
+    const reopen = () => {
+        const copy = {};
+        Object.keys(shared).forEach(key => { copy[key] = shared[key]; });
+        const device = makeDevice({ storage: copy });
+        device.State.load();
+        return device;
+    };
+    const reopened = reopen();
+    check('Monday survived the tab that was writing over it',
+        Boolean(reopened.State.schedule.days['2026-08-10']),
+        Object.keys(reopened.State.schedule.days).join(', '));
+    check('and Tuesday is there too',
+        Boolean(reopened.State.schedule.days['2026-08-11']),
+        Object.keys(reopened.State.schedule.days).join(', '));
+    check('with both still owed to the other phones',
+        reopened.Sync.pendingCount() >= 2, String(reopened.Sync.pendingCount()));
+
+    // And the other way round: A preempted mid-write by B.
+    let second = false;
+    shared.interleave(() => {
+        second = true;
+        record(b, '2026-08-13', 'w_01', 'p_01');
+    });
+    record(a, '2026-08-12', 'w_01', 'p_01');
+    await wait();
+    given('the second interleaving happened too', second === true);
+
+    const after = reopen();
+    check('neither day is lost the other way round either',
+        Boolean(after.State.schedule.days['2026-08-12'])
+        && Boolean(after.State.schedule.days['2026-08-13']),
+        Object.keys(after.State.schedule.days).join(', '));
+    check('and all four are still queued',
+        ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13']
+            .every(date => after.Sync.pendingPaths()
+                .includes(`days.${date}.actual.w_01`)),
+        JSON.stringify(after.Sync.pendingPaths()));
 }
 
 report();

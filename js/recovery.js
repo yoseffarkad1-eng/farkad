@@ -102,11 +102,19 @@ const Recovery = {
         if (schedule !== null) out['scheduleData:v2'] = schedule;
 
         // The queue that is actually being written to, which after a damaged one is not
-        // the key anybody would think to look under.
+        // the key anybody would think to look under - and since v87 it is not ONE key.
+        // Every unsent edit is its own record beside the mark, and an export that carried
+        // only the mark would carry a number and none of the work it counts.
         if (typeof FarkadSync !== 'undefined' && FarkadSync.activeOutboxKey) {
             const key = FarkadSync.activeOutboxKey();
             const live = Store.durableGet(key);
             if (live !== null) out[key] = live;
+
+            const prefix = key + ':e:';
+            Store.keys().filter(name => name.indexOf(prefix) === 0).forEach(name => {
+                const entry = Store.durableGet(name);
+                if (entry !== null) out[name] = entry;
+            });
         }
 
         // A restore that was asked for and has not finished, and the frozen upgrade of an

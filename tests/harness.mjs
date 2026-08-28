@@ -52,8 +52,25 @@ function makeLocalStorage(initial) {
     const ls = {};
     const define = (name, value) => Object.defineProperty(ls, name, { value, enumerable: false });
 
-    define('getItem', key =>
-        (Object.prototype.hasOwnProperty.call(ls, key) ? ls[key] : null));
+    define('getItem', key => {
+        const value = Object.prototype.hasOwnProperty.call(ls, key) ? ls[key] : null;
+        // The only way to spell the moment BETWEEN a read and the write that depends on
+        // it. Two tabs are two threads: one can be preempted after it has read a record
+        // and before it writes the record back, and everything the other tab did in that
+        // gap is then overwritten by a value computed from stale bytes. Inside one Node
+        // thread that moment cannot happen by itself, so a test that needs it asks for it:
+        //
+        //   shared.interleave(key => { ...the other tab writes here... });
+        //
+        // Fired after the value is taken and before the caller can act on it, once - it
+        // clears itself, because a hook that fired on every read would recurse.
+        if (ls.__hook) {
+            const hook = ls.__hook;
+            ls.__hook = null;
+            hook(key, value);
+        }
+        return value;
+    });
     define('setItem', (key, value) => {
         // A device with no room throws here, which is a real state this app handles and
         // therefore one the harness has to be able to produce.
@@ -69,6 +86,10 @@ function makeLocalStorage(initial) {
             value: stored, enumerable: true, writable: true, configurable: true
         });
     });
+    // See getItem. Non-enumerable, like every other method here, because Store.keys()
+    // reads Object.keys(localStorage) and a hook is not a record.
+    Object.defineProperty(ls, '__hook', { value: null, enumerable: false, writable: true });
+    define('interleave', hook => { ls.__hook = hook; });
     define('removeItem', key => {
         // A remove the browser refuses. Rare, and the reason cancellation cannot be
         // assumed to have worked just because it was asked for.
@@ -237,6 +258,12 @@ export function makeDevice(options = {}) {
         // Make writes to `key` land as something other than what was written.
         corruptOnWrite(key) {
             localStorage.__corrupt = (written) => written === key;
+        },
+        // The same, for a family of keys. The queue is a set of keys since v87, so "the
+        // disk takes the write and gives back something else" is a statement about all of
+        // them rather than about one.
+        corruptWhen(matches) {
+            localStorage.__corrupt = (written) => matches(written);
         },
         // Make removeItem silently do nothing for the matching keys.
         blockRemoval(fn) {
