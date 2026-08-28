@@ -18,6 +18,12 @@
 //
 // Neither action is offered in the list - both live inside the worker's own screen,
 // where his name is on the dialog and there is room to say what each one does.
+//
+// Restoring is the one exception, and the asymmetry is the point: archiving takes a man
+// off tonight's screen and deleting is for ever, but a restore puts a name back where
+// every mistake about it is seen immediately and undone from the same screen it was made
+// on. So an archived row carries its restore button, one tap - through the same guarded
+// flow as the button inside the form, clashes asked and all.
 
 function renderRoster() {
     renderWorkerList();
@@ -35,6 +41,9 @@ function renderAppVersion() {
 function renderWorkerList() {
     const container = document.getElementById('workerList');
     if (!container) return;
+    // Whether the archive fold was open before this redraw. A restore renders, and a
+    // person putting two men back should not have to reopen the fold between them.
+    const archiveWasOpen = Boolean(container.querySelector('.roster-archive[open]'));
     clear(container);
 
     if (State.schedule.workers.length === 0) {
@@ -70,24 +79,33 @@ function renderWorkerList() {
     // Folded, and at the bottom. They are not part of the working list any more, and a
     // crew of six that reads as a crew of eleven is a crew somebody counts wrong.
     const box = el('details', 'roster-archive');
-    // The count of archived men who still have advances on the books rides on the fold:
-    // money does not go to the archive with the man, and a fold that hid it would be
-    // where an open balance goes to be forgotten.
+    if (archiveWasOpen) box.open = true;
+    // The count of archived men who still have advances on the books rides on the fold,
+    // and each of their rows carries its own sum: money does not go to the archive with
+    // the man, and a fold that hid it would be where an open balance goes to be
+    // forgotten. The sum is what the record says and nothing more - a count of amounts
+    // on dates, with nothing anywhere marking one paid, open or settled.
     // One pass over the advances, not a footprint walk per archived man: this render
     // runs on every pointermove of a reorder drag.
-    const advanceHolders = new Set(
-        Object.values(State.schedule.advances || {}).map(item => item && item.workerId));
-    const owing = archived.filter(worker => advanceHolders.has(worker.id)).length;
+    const advanceTotals = new Map();
+    Object.values(State.schedule.advances || {}).forEach(item => {
+        if (!item) return;
+        advanceTotals.set(item.workerId,
+            (advanceTotals.get(item.workerId) || 0) + (Number(item.amount) || 0));
+    });
+    const owing = archived.filter(worker => advanceTotals.has(worker.id)).length;
     const summary = el('summary', null, owing === 0
         ? `ארכיון עובדים (${archived.length})`
         : `ארכיון עובדים (${archived.length}) · ` +
             (owing === 1 ? 'לאחד מהם יש מקדמה רשומה' : `ל-${owing} מהם יש מקדמות רשומות`));
     box.appendChild(summary);
-    archived.forEach(worker => box.appendChild(workerRow(worker)));
+    archived.forEach(worker => box.appendChild(workerRow(worker, advanceTotals)));
     container.appendChild(box);
 }
 
-function workerRow(worker) {
+// `archiveAdvances` rides in only for the rows under the fold: a Map of workerId to the
+// summed advances, built in renderWorkerList's single pass over the record.
+function workerRow(worker, archiveAdvances) {
     const row = el('div', worker.active === false ? 'roster-row roster-off' : 'roster-row');
 
     const details = el('div', 'roster-details');
@@ -117,7 +135,16 @@ function workerRow(worker) {
         }
     }
     details.appendChild(line);
-    if (worker.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
+    if (worker.active === false) {
+        details.appendChild(el('span', 'badge', 'לא פעיל'));
+        // The money he left with, on the row itself. "רשומות", not "open" or "owed":
+        // an advance in this schema is an amount on a date, and whether it was ever
+        // settled is a fact this device does not hold - see the archive dialog below.
+        if (archiveAdvances && archiveAdvances.has(worker.id)) {
+            details.appendChild(el('div', 'roster-meta roster-advances',
+                `מקדמות רשומות: ${Math.round(archiveAdvances.get(worker.id))} ₪`));
+        }
+    }
     // Pairs that already exist - from an import, or from before this was checked.
     if (worker.active !== false && hasDuplicateName(worker)) {
         details.appendChild(el('span', 'badge badge-warn', 'שם כפול'));
@@ -145,6 +172,15 @@ function workerRow(worker) {
     // No archive icon here any more. Beside every name it was one mis-tap away from
     // taking a man off the daily screen mid-evening, and the pencil next to it opens
     // the screen where the same thing can be done deliberately, with his name on it.
+    //
+    // Restore is the one row action, and only on archived rows - see the note at the top
+    // of this file. Not a fork of the flow: the same setWorkerArchived the form button
+    // calls, four rounds of name and phone re-checks included.
+    if (worker.active === false) {
+        actions.appendChild(button('↩️ החזרה', 'btn-secondary roster-restore',
+            () => setWorkerArchived(worker.id, false),
+            `החזר את ${isolate(worker.name)} לעבודה`));
+    }
     actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
     row.appendChild(actions);
 

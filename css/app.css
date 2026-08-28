@@ -962,6 +962,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     align-items: center;
 }
 .roster-archive .roster-row:last-child { border-bottom: none; }
+/* The sum an archived man left with, on his own row. The colour of the warn badge, not
+   of an error: money on the books is a fact to be seen, not a fault. */
+.roster-advances { color: var(--warn); }
+/* The one-tap way back. Held to the same floor as every other target by the global
+   44px rule; the padding here only keeps the label off the button's edges. */
+.roster-restore { padding: 8px 12px; font-size: 14.5px; white-space: nowrap; }
 /* Folded means NOT DRAWN. A closed <details> hides its content through a user-agent
    display rule, and .roster-row sets display: flex - an author rule, which wins. So the
    archived men were laid out full height under a summary that said the section was shut:
