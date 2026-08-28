@@ -180,7 +180,7 @@ function renderWeekCell(worker, date) {
     // Without a name an empty cell announces as "button" and nothing else - the reader
     // hears thirty of those per week. The name says whose day it opens.
     cell.setAttribute('aria-label',
-        `${worker.name} · יום ${hebrewDayName(parseLocalDate(date))} ${formatFullDate(parseLocalDate(date))}`);
+        `${worker.name} · ${hebrewDayName(parseLocalDate(date))} ${formatFullDate(parseLocalDate(date))}`);
     const open = () => { State.date = date; showView('day'); };
     cell.addEventListener('click', open);
     cell.addEventListener('keydown', event => {
