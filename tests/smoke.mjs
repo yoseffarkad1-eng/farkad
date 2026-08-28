@@ -6500,6 +6500,31 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- the chevrons' pixels
+{
+  // The old ‹ › pseudo-elements read correctly in the SOURCE and rendered backwards on
+  // the SCREEN - U+2039/203A are Bidi_Mirrored, and the RTL run swapped the glyphs. No
+  // string assertion can see that, so this asserts the drawn path itself: back points
+  // RIGHT (M9 6l6 6-6 6), forward points LEFT (M15 6l-6 6 6 6).
+  const page = await open();
+  const paths = await page.evaluate(() => ({
+    back: document.querySelector('.day-nav .nav-back svg path')?.getAttribute('d'),
+    fwd: document.querySelector('.day-nav .nav-fwd svg path')?.getAttribute('d')
+  }));
+  check('the back chevron is drawn pointing right', paths.back === 'M9 6l6 6-6 6',
+    String(paths.back));
+  check('and the forward chevron pointing left', paths.fwd === 'M15 6l-6 6 6 6',
+    String(paths.fwd));
+
+  // A leading plus is bidi-shuffled exactly like the leading minus the app already
+  // guards: bare "+2" lays out as "2+" in Hebrew text. Every hours badge goes through
+  // plusAmount, and the mark is the first thing in the token.
+  const guarded = await page.evaluate(() => plusAmount(2));
+  check('a plus-hours token leads with the LTR mark', guarded === '\u200E+2',
+    JSON.stringify(guarded));
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);

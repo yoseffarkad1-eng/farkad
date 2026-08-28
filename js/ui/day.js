@@ -373,7 +373,7 @@ function renderDayWorkerList() {
                 if (rate === RATE_DOUBLE) tag.appendChild(el('span', 'tag-rate', 'כפול'));
                 else if (rate === RATE_EXTRA) {
                     const hours = entryExtraHours(entry);
-                    tag.appendChild(el('span', 'tag-rate', hours ? `+${hours}` : 'נוספות'));
+                    tag.appendChild(el('span', 'tag-rate', hours ? plusAmount(hours) : 'נוספות'));
                 }
                 value.appendChild(tag);
             });
@@ -410,13 +410,15 @@ function renderDayHeader() {
     nav.appendChild(button('☰', 'btn-icon drawer-btn', openDayDrawer, 'בחר יום'));
 
     // Time flows right-to-left on an RTL calendar, so back points RIGHT and forward
-    // points LEFT. The chevrons are drawn by CSS pseudo-elements, because a bare ‹ in a
-    // Hebrew string gets reordered by the bidi algorithm to wherever it pleases.
+    // points LEFT - drawn as SVG (chevronIcon), because the characters ‹ › are
+    // Bidi_Mirrored and rendered backwards inside these RTL buttons.
     //
     // "קודם" and not "יום קודם": the word יום appeared three times on this one line, and
     // the two copies on the buttons were costing the day name sixty pixels it did not
     // have. The full wording stays as the label a screen reader announces.
-    nav.appendChild(button('קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם'));
+    const back = button('קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם');
+    back.insertBefore(chevronIcon('back'), back.firstChild);
+    nav.appendChild(back);
 
     // The title IS the date picker. A second full-width input row said the same date
     // twice - once as 12/08 and once as the browser's 08/12, which read as a bug.
@@ -429,7 +431,9 @@ function renderDayHeader() {
     label.addEventListener('click', () => openDayPicker());
     nav.appendChild(label);
 
-    nav.appendChild(button('הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא'));
+    const fwd = button('הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא');
+    fwd.appendChild(chevronIcon('fwd'));
+    nav.appendChild(fwd);
     header.appendChild(nav);
 
     const picker = document.createElement('input');

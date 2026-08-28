@@ -634,8 +634,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Narrow side padding: with the ☰ in the row there are four things sharing a phone's
    width, and the day name in the middle must never be the one that gives way. */
 .btn-nav { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding-inline: 10px; }
-.nav-back::before { content: '\203A'; font-weight: 700; }
-.nav-fwd::after { content: '\2039'; font-weight: 700; }
+/* The chevron is an inline SVG child of the button (see chevronIcon in dom.js) - the
+   old ‹ › pseudo-elements were bidi-mirrored and rendered pointing the wrong way. Small
+   and tight to the word, so the pills stay the width the 320px day title depends on. */
+.btn-nav svg { width: 12px; height: 12px; flex: 0 0 auto; margin: 0; }
 
 /* The title is a button that opens the date picker - but it must not look like a grey
    pill in the middle of the header. */
@@ -2167,7 +2169,8 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
        cannot afford - it is the only place on the screen that says which day is open. */
     @media (max-width: 359px) {
         .day-label strong { font-size: 18px; }
-        .btn-nav { padding-inline: 7px; }
+        .btn-nav { padding-inline: 6px; gap: 3px; }
+        .btn-nav svg { width: 10px; height: 10px; }
     }
     .progress-line strong { font-size: 17px; }
     .bulk-chip { height: 40px; font-size: 15.5px; }

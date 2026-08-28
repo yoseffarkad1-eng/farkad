@@ -66,7 +66,7 @@ function dayMessage(date, layer, styleKey) {
             if (rate === RATE_DOUBLE) suffix = ' (כפול)';
             else if (rate === RATE_EXTRA) {
                 const hours = entryExtraHours(entry);
-                suffix = hours ? ` (+${hours} ש׳)` : ' (שעות נוספות)';
+                suffix = hours ? ` (${plusAmount(hours)} ש׳)` : ' (שעות נוספות)';
             }
             lines.push(style.worker(worker.name, suffix));
         });

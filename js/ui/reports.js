@@ -732,7 +732,7 @@ function workerStatementText(workerId) {
             if (rate === RATE_DOUBLE) return `${name} (כפול)`;
             if (rate === RATE_EXTRA) {
                 const hours = entryExtraHours(entry);
-                return hours ? `${name} (+${hours} ש׳)` : `${name} (נוספות)`;
+                return hours ? `${name} (${plusAmount(hours)} ש׳)` : `${name} (נוספות)`;
             }
             return name;
         }).join(' + ');
@@ -811,7 +811,7 @@ function renderWorkerDayRow(day, worker) {
             if (rate === RATE_DOUBLE) tag.appendChild(el('span', 'tag-rate', 'כפול'));
             else if (rate === RATE_EXTRA) {
                 const hours = entryExtraHours(entry);
-                tag.appendChild(el('span', 'tag-rate', hours ? `+${hours}` : 'נוספות'));
+                tag.appendChild(el('span', 'tag-rate', hours ? plusAmount(hours) : 'נוספות'));
             }
             what.appendChild(tag);
         });
