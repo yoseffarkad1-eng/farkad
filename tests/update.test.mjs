@@ -56,10 +56,13 @@ for (const item of ['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 
 // The three strings that name a build. They are checked against each other at boot -
 // checkBuildConsistency() stops the app writing when the page and the scripts disagree -
 // so a deploy that moved only one of them would be testing the crash banner instead.
-// The real pair. `old` is whatever the tree is stamped with right now - read from the
-// copy rather than written into it, so this suite cannot pass by deploying a build that
-// does not exist - and `new` is the candidate that will replace it. Synthetic names would
-// have proved the machinery and not the release.
+// The real pair. `new` is READ from the copy - whatever this candidate is actually
+// stamped with, so the suite cannot pass by handing over between two builds that do not
+// exist - and `old` is the build that is live on main today, which is what the phones
+// this candidate reaches are running. Synthetic names would have proved the machinery and
+// not the release.
+const RELEASED = { app: 'v86', cache: 'farkad-v86' };
+
 const stampedBuild = await (async () => {
     const html = await readFile(join(dir, 'index.html'), 'utf8');
     const sw = await readFile(join(dir, 'sw.js'), 'utf8');
@@ -69,11 +72,10 @@ const stampedBuild = await (async () => {
 })();
 given('the copy is stamped with a build at all',
     Boolean(stampedBuild.app) && Boolean(stampedBuild.cache));
+given('and it is not the build that is already live - a candidate has to be a new one',
+    stampedBuild.app !== RELEASED.app && stampedBuild.cache !== RELEASED.cache);
 
-const BUILDS = {
-    old: stampedBuild,
-    new: { app: 'v87', cache: 'farkad-v87' }
-};
+const BUILDS = { old: RELEASED, new: stampedBuild };
 
 async function deploy(build) {
     const edits = [
@@ -450,14 +452,19 @@ const cacheNames = page => page.evaluate(() => caches.keys());
         JSON.stringify(await cacheNames(page)));
 
     // The handover, and only then does the old cache go.
+    //
+    // Waited on the browser's OWN signal - the moment the new worker takes control -
+    // rather than on a pause or on a poll that can catch the old worker still active a
+    // millisecond before it is replaced. A fixed sleep is how a suite comes to pass on a
+    // fast machine and fail on the one that matters.
+    await page.evaluate(() => {
+        window.__tookOver = new Promise(resolve =>
+            navigator.serviceWorker.addEventListener('controllerchange', resolve,
+                { once: true }));
+    });
     await page.evaluate(() => navigator.serviceWorker.getRegistration()
         .then(reg => reg && reg.waiting && reg.waiting.postMessage('skip-waiting')));
-    // Waited for rather than slept through: how long an activation takes is not this
-    // test's business, and a fixed pause is how a suite comes to pass on a fast machine
-    // and fail on the one that matters.
-    await page.waitForFunction(() => navigator.serviceWorker.getRegistration()
-        .then(reg => Boolean(reg && reg.active && !reg.waiting)), null,
-        { timeout: 20000, polling: 100 });
+    await page.evaluate(() => window.__tookOver);
     await page.reload({ waitUntil: 'load' });
     await page.waitForTimeout(600);
     check('after the handover the phone is on the new build',
