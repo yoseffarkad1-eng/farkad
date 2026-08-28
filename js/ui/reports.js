@@ -434,6 +434,13 @@ function renderInvoiceTable() {
 
     section.appendChild(renderInvoicePicker(all.places));
 
+    // The screen's answer: one row per site. The question asked at a glance here is
+    // "how much of the period was each site", and a date-by-site grid answers it only
+    // after arithmetic. The grid is still built below, whole, because it is what the
+    // client is handed on paper - the bars are screen-only and the grid print-only,
+    // and both read the same workerDays.
+    section.appendChild(renderInvoiceBars(places));
+
     // Only the dates this site actually worked. A client's page with a run of empty rows
     // for days their site was closed reads as a mistake.
     const dates = chosen
@@ -460,16 +467,57 @@ function renderInvoiceTable() {
         headers
     ));
 
-    section.appendChild(scrollWrap(table));
+    // Kept in the DOM and kept whole, hidden from the screen only: the print stylesheet
+    // still gets the full date-by-site grid, and the tests that pin the paper pin THIS.
+    const grid = scrollWrap(table);
+    grid.classList.add('invoice-grid');
+    section.appendChild(grid);
     section.appendChild(el('p', 'hint',
-        'כל מספר הוא מספר העובדים שעבדו באתר באותו יום. השורה התחתונה היא ימי עובד־אתר: ' +
-        'עובד אחד ביום אחד באתר. היא אינה מספר הימים שהאתר עבד.'));
+        'המספר ליד כל אתר הוא ימי עובד־אתר: עובד אחד ביום אחד באתר. הוא אינו מספר ' +
+        'הימים שהאתר עבד. בהדפסה יוצא הפירוט המלא - שורה לכל תאריך, עמודה לכל אתר.'));
     // The counting rule, spelled out: this number lives beside two others that sound
     // like it, and the person about to bill from it must not expect them to reconcile.
     section.appendChild(el('p', 'hint',
         'עובד בשני אתרים נספר פעם אחת בכל אתר; ימי עובד־אתר אינם ימי נוכחות ואינם ' +
         'ימי שכר — אין לצפות שהסכומים יתאימו.'));
     return section;
+}
+
+// The on-screen shape of the site report: the site's own colour, its name, its
+// ימי עובד־אתר, and a bar proportional to the busiest site so the period's spread is
+// visible without reading a grid. Counts only - the screen version of this page names
+// no worker, exactly like the paper one. Nothing here is interactive; the picker above
+// narrows it and the total band closes it.
+function renderInvoiceBars(places) {
+    const wrap = el('div', 'invoice-bars');
+    wrap.appendChild(el('div', 'invoice-bars-head', 'ימי עובד־אתר לפי אתר'));
+
+    const most = places.reduce((max, place) => Math.max(max, place.workerDays), 0);
+    places.forEach(place => {
+        const row = el('div', 'invoice-bar-row');
+        row.appendChild(paintSite(el('span', 'invoice-swatch'), place.placeId));
+
+        const name = el('span', 'invoice-bar-name');
+        appendSiteName(name, place.placeId, place.name);
+        row.appendChild(name);
+
+        const track = el('span', 'invoice-bar-track');
+        const fill = el('span', 'invoice-bar-fill');
+        fill.style.width = `${most > 0 ? Math.round((place.workerDays / most) * 100) : 0}%`;
+        fill.style.background = siteColorVar(place.placeId);
+        track.appendChild(fill);
+        row.appendChild(track);
+
+        row.appendChild(el('span', 'invoice-bar-count', String(place.workerDays)));
+        wrap.appendChild(row);
+    });
+
+    const total = el('div', 'invoice-bars-total');
+    total.appendChild(el('span', null, 'סה״כ ימי עובד־אתר'));
+    total.appendChild(el('strong', null,
+        String(places.reduce((sum, place) => sum + place.workerDays, 0))));
+    wrap.appendChild(total);
+    return wrap;
 }
 
 // The chips are not printed - by then the choice has been made and the heading says it.

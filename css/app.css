@@ -1296,6 +1296,55 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .invoice-picker-label { color: var(--ink-2); font-size: 13px; margin-inline-end: 4px; }
 @media print { .invoice-picker { display: none !important; } }
 
+/* The site report's two shapes. On screen: a row per site - swatch, name, proportional
+   bar, count - because the on-screen question is how the period spread across the
+   sites. On paper: the date-by-site grid, because the client is billed day by day. The
+   grid stays in the DOM and only the screen looks away from it. */
+.invoice-bars { margin-bottom: 12px; }
+.invoice-bars-head { color: var(--ink-2); font-size: 14px; font-weight: 600; padding: 2px 0 4px; }
+.invoice-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.invoice-swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+.invoice-bar-name { font-size: 15.5px; font-weight: 600; }
+.invoice-bar-track {
+    flex: 1 1 60px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+    display: flex;
+}
+/* Anchored to the inline start, so the bar grows the way the page reads. */
+.invoice-bar-fill { height: 100%; border-radius: 3px; margin-inline-end: auto; }
+.invoice-bar-count {
+    min-width: 28px;
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+}
+.invoice-bars-total {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+}
+.invoice-bars-total strong { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+@media screen { .report-invoice .invoice-grid { display: none; } }
+@media print { .invoice-bars { display: none !important; } }
+
 /* A name in the pay sheet is a way in, so it looks like one - but it stays a table cell
    and does not turn the row into a wall of buttons. */
 .link-cell {
