@@ -954,6 +954,51 @@ async function seedRoster(page) {
   check('the backup file carries the whole schedule',
     saved.workers.length === 3 && saved.days['2026-08-12'] !== undefined);
 
+  // The export used to say nothing at all, and the age line then claimed a backup for a
+  // file that may never have reached the Files app. Now the handover is said out loud -
+  // as a handover, never as a save.
+  await page.waitForTimeout(300);
+  check('handing the file over opens the dialog that says so',
+    (await page.locator('#askModal').isVisible()) &&
+    (await page.textContent('#askTitle')) === 'קובץ הגיבוי נמסר לשמירה',
+    await page.textContent('#askTitle'));
+  const handed = await page.textContent('#askMessage');
+  check('it names the file, isolated LTR inside the Hebrew',
+    handed.includes(`\u2066${download.suggestedFilename()}\u2069`), JSON.stringify(handed));
+  check('it says the browser has it, which is not the Files app',
+    handed.includes('הדפדפן קיבל את הקובץ') && handed.includes('פתח את "קבצים"'),
+    JSON.stringify(handed));
+  check('and that the export never needed a connection',
+    handed.includes('הייצוא עובד גם בלי חיבור'), JSON.stringify(handed));
+  check('nothing on it claims the file was saved',
+    !handed.includes('נשמר בהצלחה') && !(await page.textContent('#askTitle')).includes('נשמר'));
+  check('the way out is הבנתי and the second chance is שמירה חוזרת',
+    (await page.textContent('#askOk')) === 'הבנתי' &&
+    (await page.locator('#askCancel').isVisible()) &&
+    (await page.textContent('#askCancel')) === 'שמירה חוזרת');
+
+  // שמירה חוזרת runs the whole export again, for the person who looked and did not
+  // find the file.
+  const secondFile = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#askCancel')
+  ]).then(([d]) => d);
+  await page.waitForTimeout(300);
+  check('שמירה חוזרת hands the file over again',
+    secondFile.suggestedFilename() === download.suggestedFilename() &&
+    (await page.textContent('#askTitle')) === 'קובץ הגיבוי נמסר לשמירה');
+
+  // Escape is a way OUT, not a request for a third file.
+  let escaped = false;
+  page.once('download', () => { escaped = true; });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  check('escape closes the dialog without exporting again',
+    !(await page.locator('#askModal').isVisible()) && escaped === false);
+
+  check('and the age line reads today - what was done, not what was verified',
+    (await page.textContent('#backupAge')).includes('גיבוי אחרון: היום.'));
+
   // a file that is not a backup must not touch the data
   const before = await page.evaluate(() => State.schedule.workers.length);
   await page.evaluate(() => {
@@ -4576,6 +4621,91 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- the six groups on the sheet
+{
+  // The sheet is organised by question: is anybody else holding a copy, the copy this
+  // device can make, the doors that replace data, the emergency exit, the version, and
+  // what this device is doing. Destructive never sits beside safe - ייבוא ושחזור is a
+  // card of its own, behind its own guard sentence.
+  const page = await open();
+  await seedRoster(page);
+  await page.click('#settingsBtn');
+  await page.waitForTimeout(300);
+
+  const heads = await page.$$eval('#settingsPanel .settings-group h3',
+    nodes => nodes.map(node => node.textContent.trim()));
+  check('the sheet has the six groups, in the board order',
+    JSON.stringify(heads) === JSON.stringify(
+      ['ענן וסנכרון', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'עדכון וגרסה', 'מצב המכשיר']),
+    JSON.stringify(heads));
+
+  // One primary action: the export. Everything else is quieted with btn-secondary or
+  // btn-icon, so the eye lands on the one button that gets a copy off the phone.
+  const primaries = await page.evaluate(() =>
+    [...document.querySelectorAll('#settingsPanel button')]
+      .filter(node => !node.classList.contains('btn-secondary')
+        && !node.classList.contains('btn-icon'))
+      .map(node => node.textContent.trim()));
+  check('the export is the only primary action on the sheet',
+    primaries.length === 1 && primaries[0].includes('שמור קובץ גיבוי'),
+    JSON.stringify(primaries));
+
+  check('the restore group carries the guard sentence, above its doors',
+    (await page.textContent('#settingsPanel'))
+      .includes('שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר תמיד כגיבוי מקומי לפני.'));
+
+  // The raw export used to be reachable only AFTER damage was detected - from the
+  // recovery banner - which is exactly backwards for an emergency door.
+  check('the raw export has a permanent home, marked for emergencies only',
+    (await page.locator('#settingsPanel button').filter({ hasText: 'ייצא נתונים גולמיים' }).count()) === 1 &&
+    (await page.textContent('#settingsPanel')).includes('לשחזור חירום בלבד'));
+
+  // The sync line in the panel is a mirror of the one at the page foot, written by
+  // updateSyncNotice - the same words, never a second composition.
+  const mirrored = await page.evaluate(() => ({
+    panel: document.getElementById('settingsSyncStatus').textContent,
+    foot: document.getElementById('storageNotice').textContent
+  }));
+  check('the sync line in the panel says what the page foot says',
+    mirrored.panel.length > 0 && mirrored.panel === mirrored.foot,
+    JSON.stringify(mirrored));
+
+  check('the device group says whether the app is installed',
+    (await page.textContent('#installState')).includes('בדפדפן'),
+    await page.textContent('#installState'));
+
+  // The v80 parity line. This build carries ledgerAgreesWithAdvances, so the line is
+  // there - quiet on agreement, a warning on disagreement, and gone when no check is
+  // reachable at all.
+  check('with the ledger agreeing, the parity line is quiet',
+    (await page.textContent('#ledgerParity')) === 'פנקס המקדמות (v80) תואם את הרישום הקיים.' &&
+    !(await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#ledgerParity'));
+
+  await page.evaluate(() => {
+    window.FarkadLedger = { ledgerAgreesWithAdvances: () => ({ agrees: false, missing: ['a_1'], different: [] }) };
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
+  check('a disagreement warns against flipping the write gate',
+    (await page.textContent('#ledgerParity'))
+      .includes('אינו תואם את הרישום — אל תפעילו את הכתיבה החדשה') &&
+    (await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#ledgerParity'));
+
+  await page.evaluate(() => {
+    window.FarkadLedger = undefined;
+    window.ledgerAgreesWithAdvances = undefined;
+    renderSettings();
+  });
+  await page.waitForTimeout(200);
+  check('with no check reachable the line says nothing at all',
+    (await page.textContent('#ledgerParity')).trim() === '' &&
+    !(await page.locator('#ledgerParity').isVisible()));
+
+  await page.context().close();
+}
+
 // ------------------------------------------------- what a thumb can actually hit
 //
 // Measured on the real screens, not read off the stylesheet. The mode toggle was 26px
@@ -5880,8 +6010,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   });
   await page.click('#settingsBtn');
   await page.waitForTimeout(300);
-  check('on an ordinary device the space line says nothing at all',
-    (await page.textContent('#storageRoom')).trim() === '');
+  // A line that only ever appears is a line nobody has learned to look at, so the
+  // steady state is a quiet sentence rather than silence.
+  check('on an ordinary device the space line says quietly that there is room',
+    (await page.textContent('#storageRoom')).trim() === 'יש מקום פנוי במכשיר.' &&
+    !(await page.locator('#storageRoom').getAttribute('class')).includes('hint-warn'),
+    await page.textContent('#storageRoom'));
 
   const tighten = (factor) => page.evaluate((f) => {
     Store.budget = Store.used() + Math.round(State.durableText.length * 2 * f);
@@ -5919,8 +6053,9 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   await page.evaluate(() => { Store.budget = 5 * 1024 * 1024; render(); });
   await page.waitForTimeout(200);
-  check('room made, and the app stops mentioning it',
-    (await page.textContent('#storageRoom')).trim() === '' &&
+  check('room made, and the line goes back to its quiet state',
+    (await page.textContent('#storageRoom')).trim() === 'יש מקום פנוי במכשיר.' &&
+    !(await page.locator('#storageRoom').getAttribute('class')).includes('hint-warn') &&
     !(await page.textContent('#storageNotice')).includes('אין מקום'));
   await page.context().close();
 }

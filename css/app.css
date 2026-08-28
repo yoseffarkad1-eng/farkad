@@ -499,8 +499,37 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     gap: 22px;
 }
 
-.settings-group { display: flex; flex-direction: column; gap: 10px; }
-.settings-group h3 { margin: 0; font-size: 16px; }
+/* Each group is a card of its own, on the panel's paper. The card border is what keeps
+   FACTS' rule - a destructive door never sits beside a safe one - true here: ייבוא
+   ושחזור replaces data and גיבוי only copies it, so each holds its own walled card with
+   the body's gap between them. All by token, so dark mode needs nothing extra. */
+.settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+}
+/* Quiet group labels, like the board: the contents carry the weight, not the heading. */
+.settings-group h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+/* The card's own gap does the spacing; .hint's top margin would double it. */
+.settings-group .hint { margin: 0; }
+
+/* The backup card carries the accent, because its button is the one thing on this sheet
+   that gets a copy OFF the phone. */
+.settings-group-backup { border-color: var(--accent); }
+
+/* The one primary action on the sheet: full width, its own row, nothing beside it to
+   mis-tap. It keeps the default button colours - everything else here is quieted with
+   btn-secondary instead. */
+.backup-primary {
+    width: 100%;
+    min-height: 48px;
+    font-size: 16px;
+    font-weight: 600;
+}
 
 @media (min-width: 701px) {
     .settings-panel.open {
