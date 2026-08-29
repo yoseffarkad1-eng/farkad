@@ -86,47 +86,92 @@ async function importThrough(page, name, text) {
   const source = await open();
   await seed(source);
 
-  // A day that is on the disk, and an edit that is only in the queue - the difference a
-  // rescue file exists to carry.
-  const file = await source.evaluate(() => {
+  // THE REAL EXPORT. exportRecoveryData builds the Blob and presses an anchor at it;
+  // createObjectURL is where those exact bytes pass, so that is where they are taken.
+  // A test that assembles the payload itself proves the reader works and nothing about
+  // what the writer writes.
+  await source.evaluate(() => {
+    window.__blobs = [];
+    const real = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => { window.__blobs.push(blob); return real(blob); };
+    window.askTell = () => Promise.resolve();
+  });
+
+  await source.evaluate(() => {
     State.commit(assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01'));
     FarkadSync.queueBatch([{
       path: 'days.2026-08-11.actual.w_02',
       value: { entries: [{ placeId: 'p_01' }] }
     }]);
-    const payload = {
-      kind: 'farkad-recovery',
-      takenAt: new Date().toISOString(),
-      liveSchedule: cloudDocument(State.schedule),
-      pendingDecisions: [],
-      records: Recovery.rawRecords()
-    };
-    return JSON.stringify(payload);
+    exportRecoveryData();
   });
-  check('the source produced a rescue file with both records in it',
-    file.includes('2026-08-10') && file.includes('2026-08-11'),
-    file.slice(0, 60));
+  await source.waitForTimeout(400);
+
+  const file = await source.evaluate(() => window.__blobs.length
+    ? window.__blobs[window.__blobs.length - 1].text()
+    : null);
+  check('the real export produced a file', typeof file === 'string' && file.length > 0,
+    String(file).slice(0, 40));
+  const parsed = JSON.parse(file);
+  check('and it says what it is and how it was taken',
+    parsed.kind === 'farkad-recovery' && typeof parsed.stable === 'boolean'
+    && typeof parsed.handoverRecorded === 'boolean'
+    && typeof parsed.storageReadable === 'boolean',
+    JSON.stringify({ kind: parsed.kind, stable: parsed.stable,
+      handover: parsed.handoverRecorded, readable: parsed.storageReadable }));
+  check('with the day that was on the disk and the edit that was only in the queue',
+    file.includes('2026-08-10') && file.includes('2026-08-11'));
   await source.context().close();
 
   const page = await open();
   await seed(page);
-  await answerDialogs(page, true);
+
+  // The confirmation is HELD, so what the disk holds while the question is on screen can
+  // be read. Nothing may have moved before the person has answered.
+  await page.evaluate(() => {
+    window.__asked = [];
+    window.__told = [];
+    window.__release = null;
+    window.askConfirm = question => {
+      window.__asked.push(String((question && question.title) || question));
+      window.__diskWhileAsking = localStorage.getItem('scheduleData:v2');
+      return new Promise(done => { window.__release = () => done(true); });
+    };
+    window.askTell = message => {
+      window.__told.push(typeof message === 'string' ? message : JSON.stringify(message));
+      return Promise.resolve();
+    };
+    window.askText = question => Promise.resolve(String((question || {}).title || ''));
+  });
   const before = await page.evaluate(() => localStorage.getItem('scheduleData:v2'));
 
-  await importThrough(page, 'farkad-recovery-2026-08-29.json', file);
+  // THAT EXACT FILE, through the input a person taps.
+  await page.setInputFiles('#importInput', {
+    name: 'farkad-recovery-2026-08-29.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(file, 'utf8')
+  });
+  await page.waitForTimeout(600);
+
+  const held = await page.evaluate(() => ({
+    asked: window.__asked, disk: window.__diskWhileAsking
+  }));
+  check('the app asked before replacing anything, and said it was a rescue file',
+    held.asked.length === 1 && held.asked[0].includes('חילוץ'),
+    JSON.stringify(held.asked));
+  check('and nothing on the disk had moved while the question was on screen',
+    held.disk === before);
+
+  await page.evaluate(() => window.__release());
+  await page.waitForTimeout(600);
 
   const state = await page.evaluate(() => ({
-    asked: window.__asked,
     told: window.__told,
     days: Object.keys(State.schedule.days || {}).sort(),
     stored: localStorage.getItem('scheduleData:v2')
   }));
-
-  check('the app asked before replacing anything, and said it was a rescue file',
-    state.asked.length === 1 && state.asked[0].includes('חילוץ'),
-    JSON.stringify(state.asked));
-  check('the day that was on the disk arrived',
-    state.days.includes('2026-08-10'), JSON.stringify(state.days));
+  check('the day that was on the disk arrived', state.days.includes('2026-08-10'),
+    JSON.stringify(state.days));
   check('and so did the edit that was only in the queue',
     state.days.includes('2026-08-11'), JSON.stringify(state.days));
   check('the record on disk is the rescued one, not what was there before',
@@ -140,6 +185,72 @@ async function importThrough(page, name, text) {
   check('and it is still there after a real reload',
     after.includes('2026-08-10') && after.includes('2026-08-11'), JSON.stringify(after));
   await page.context().close();
+}
+
+// ------------------------------------------------- a file the source could not vouch for
+{
+  // The two things a rescue file can say about itself that change what the person should
+  // do, produced by the REAL export on a phone in each state - not written by hand.
+  const source = await open();
+  await seed(source);
+  await source.evaluate(() => {
+    window.__blobs = [];
+    const real = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => { window.__blobs.push(blob); return real(blob); };
+    window.askTell = () => Promise.resolve();
+
+    // Somebody made HERE, so there is a claim for the handover to retire. Without one,
+    // there is nothing to fail at and reporting the handover as recorded is the truth.
+    State.schedule.workers.push({
+      id: State.nextWorkerId(), name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0
+    });
+    State.commitRoster();
+
+    // A disk that refuses every provenance write and every removal: the handover cannot
+    // be written down, and the export must still happen.
+    const set = Storage.prototype.setItem;
+    const remove = Storage.prototype.removeItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (String(key).indexOf('farkad:prov:') === 0) {
+        const error = new Error('quota'); error.name = 'QuotaExceededError'; throw error;
+      }
+      return set.call(this, key, value);
+    };
+    Storage.prototype.removeItem = function (key) {
+      if (String(key).indexOf('farkad:prov:') === 0) return undefined;
+      return remove.call(this, key);
+    };
+    State.commit(assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01'));
+    exportRecoveryData();
+  });
+  await source.waitForTimeout(400);
+  const file = await source.evaluate(() => window.__blobs[window.__blobs.length - 1].text());
+  const parsed = JSON.parse(file);
+  check('the export happened even though the handover could not be recorded',
+    typeof file === 'string' && file.length > 0);
+  check('and the file says so', parsed.handoverRecorded === false,
+    String(parsed.handoverRecorded));
+  await source.context().close();
+
+  const page = await open();
+  await seed(page);
+  await answerDialogs(page, true);
+  await importThrough(page, 'farkad-recovery.json', file);
+  const told = await page.evaluate(() => window.__told);
+  check('the receiving phone is warned about it',
+    told.some(message => message.includes('לא נרשם')), JSON.stringify(told));
+  await page.context().close();
+
+  // And a file that could not be taken from one moment.
+  const shaky = await open();
+  await seed(shaky);
+  await answerDialogs(shaky, true);
+  await importThrough(shaky, 'unstable.json', JSON.stringify(Object.assign({}, parsed,
+    { handoverRecorded: true, stable: false })));
+  const shakyTold = await shaky.evaluate(() => window.__told);
+  check('an unstable rescue says it may be missing the last of it',
+    shakyTold.some(message => message.includes('נלקח בזמן')), JSON.stringify(shakyTold));
+  await shaky.context().close();
 }
 
 // ---------------------------------------------------------------- the ways it goes wrong

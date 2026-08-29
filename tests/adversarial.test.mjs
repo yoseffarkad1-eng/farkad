@@ -1109,4 +1109,211 @@ function twoTabsRace(shared, tabA, tabB, path) {
         JSON.stringify(again.global('Recovery').problems.map(problem => problem.key)));
 }
 
+// ================================================================ the rest of the matrix
+{
+    suite('E11: five readings that never settle are five readings that are kept');
+
+    const shared = sharedStore();
+    const exporter = makeDevice({ sharedStorage: shared, deviceId: 'd_five' });
+    seed(exporter);
+    answering(exporter);
+    const busy = makeDevice({ sharedStorage: shared, deviceId: 'd_five_busy' });
+    busy.State.load();
+
+    let round = 0;
+    const arm = () => exporter.ctx.localStorage.interleave(read => {
+        if (String(read) !== 'scheduleData:v2') { arm(); return; }
+        round += 1;
+        put(busy, `days.2026-10-${String(round + 9)}.actual.w_02`, 'p_02');
+        arm();
+    });
+    arm();
+    exporter.call('exportRecoveryData');
+    exporter.ctx.localStorage.interleave(() => {});
+
+    const file = JSON.parse(exporter.downloads[0].text);
+    check('the export gave up rather than looping for ever',
+        file.stable === false, String(file.stable));
+    check('and every distinct reading is in the file',
+        Array.isArray(file.captures) && file.captures.length >= 3,
+        JSON.stringify({ captures: (file.captures || []).length, rounds: round }));
+    check('each of them different from the last',
+        (file.captures || []).every((records, at, all) =>
+            all.findIndex(other =>
+                JSON.stringify(other) === JSON.stringify(records)) === at));
+}
+
+{
+    suite('E12: damaged evidence and the record that replaced it are both kept');
+
+    const broken = '{"seq":7,"items":{"days.2026-08-12.actual.w_01":{"value":{"entr';
+    const device = makeDevice({
+        deviceId: 'd_both',
+        storage: { 'farkad:deviceId': 'd_both', 'farkad:outbox': broken }
+    });
+    seed(device);
+    answering(device);
+    given('the damaged bytes were quarantined',
+        device.raw('farkad:outbox:damaged') === broken);
+    given('and writing resumed somewhere else',
+        device.global('Recovery').acknowledge() === true);
+    put(device, PATH, 'p_01');
+
+    device.call('exportRecoveryData');
+    const file = JSON.parse(device.downloads[0].text);
+
+    check('the damaged original is in the file',
+        file.records['farkad:outbox'] === broken,
+        String(file.records['farkad:outbox']).slice(0, 40));
+    check('so is the quarantine copy of it',
+        file.records['farkad:outbox:damaged'] === broken);
+    check('and so is the queue that took over from it',
+        Object.keys(file.records).some(key =>
+            key.indexOf('farkad:outbox:active1') === 0
+            && String(file.records[key]).includes('2026-08-10')),
+        JSON.stringify(Object.keys(file.records)));
+    check('with nothing having overwritten anything under one name',
+        new Set(Object.keys(file.records)).size === Object.keys(file.records).length);
+}
+
+{
+    suite('E13: a file that cannot vouch for itself says so before anything is replaced');
+
+    const rescuer = makeDevice({ deviceId: 'd_warned_first' });
+    seed(rescuer);
+    put(rescuer, PATH, 'p_01');
+    const before = rescuer.raw('scheduleData:v2');
+
+    const said = [];
+    const asked = [];
+    rescuer.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    // The question is where the disk is read: what it holds at that moment is what the
+    // person is being asked ABOUT, and nothing may have moved yet.
+    rescuer.ctx.askConfirm = question => {
+        asked.push({
+            title: String((question || {}).title || ''),
+            message: String((question || {}).message || ''),
+            disk: rescuer.raw('scheduleData:v2')
+        });
+        return Promise.resolve(true);
+    };
+    rescuer.ctx.askText = () => Promise.resolve('');
+    rescuer.ctx.openMigrationModal = () => {};
+
+    rescuer.call('importBackup', rescuer.fileEvent('rescue.json', JSON.stringify({
+        kind: 'farkad-recovery',
+        stable: false,
+        handoverRecorded: false,
+        records: { 'scheduleData:v2': JSON.stringify(document({
+            days: { '2026-01-01': dayFor('w_01', 'p_02') } })) }
+    })));
+    await settle(80);
+
+    given('the question was asked', asked.length === 1, JSON.stringify(asked));
+    check('and nothing had been replaced when it was',
+        asked[0].disk === before);
+    check('the question itself says this is a rescue, not a backup',
+        asked[0].title.includes('חילוץ'), asked[0].title);
+    check('and afterwards the person is told what the file could not vouch for',
+        said.some(message => message.includes('נלקח בזמן'))
+        && said.some(message => message.includes('לא נרשם')),
+        JSON.stringify(said));
+}
+
+{
+    suite('E20: a close and reopen at every boundary shows one honest state');
+
+    // Write, acknowledge, collect, fence, import - and after each of them the app is
+    // closed and opened again, twice, and has to say the same thing every time.
+    const cloud = makeCloud({ online: false });
+    const device = makeDevice({ deviceId: 'd_boundaries' });
+    seed(device);
+    answering(device);
+    await connected(device, cloud);
+
+    const truth = () => ({
+        screen: screenPlace(device, '2026-08-10', 'w_01'),
+        pending: device.Sync.pendingCount()
+    });
+    const agrees = (label, device) => {
+        const once = reopen(device);
+        const twice = reopen(once);
+        check(`${label}: two reopens agree with the screen`,
+            screenPlace(once, '2026-08-10', 'w_01') === screenPlace(device, '2026-08-10', 'w_01')
+            && screenPlace(twice, '2026-08-10', 'w_01') === screenPlace(device, '2026-08-10', 'w_01'),
+            JSON.stringify({
+                now: screenPlace(device, '2026-08-10', 'w_01'),
+                once: screenPlace(once, '2026-08-10', 'w_01'),
+                twice: screenPlace(twice, '2026-08-10', 'w_01')
+            }));
+    };
+
+    put(device, PATH, 'p_01');
+    agrees('after the write', device);
+
+    cloud.online = true;
+    device.Sync.flush();
+    await settle(TICK * 40);
+    agrees('after the send and the acknowledgement', device);
+
+    device.Sync.collectQueueGarbage();
+    agrees('after the collection', device);
+
+    const restored = document({ days: { '2026-07-01': dayFor('w_01', 'p_02') } });
+    const result = await device.Sync.replaceEverything(restored);
+    given('the restore happened', result.ok === true, JSON.stringify(result));
+    check('after the restore: two reopens hold the restored week',
+        Object.keys(reopen(device).State.schedule.days || {}).join() === '2026-07-01'
+        && Object.keys(reopen(reopen(device)).State.schedule.days || {}).join() === '2026-07-01',
+        JSON.stringify(Object.keys(reopen(device).State.schedule.days || {})));
+
+    device.call('importBackup', device.fileEvent('backup.json',
+        JSON.stringify(document({ days: { '2026-06-01': dayFor('w_02', 'p_01') } }))));
+    await settle(120);
+    check('after the import: two reopens hold the imported week',
+        Object.keys(reopen(device).State.schedule.days || {}).join() === '2026-06-01'
+        && Object.keys(reopen(reopen(device)).State.schedule.days || {}).join() === '2026-06-01',
+        JSON.stringify(Object.keys(reopen(device).State.schedule.days || {})));
+    check('and the queue and the bytes still agree',
+        reopen(device).Sync.pendingCount() === device.Sync.pendingCount(),
+        JSON.stringify({ now: device.Sync.pendingCount(),
+            reopened: reopen(device).Sync.pendingCount() }));
+}
+
+// ================================================================ what vehicles WOULD be
+//
+// Written down here and nowhere else. The feature is cancelled and nothing below is
+// implemented; this is the contract the owner described, kept beside the tests so that
+// whoever reconsiders it starts from what was decided rather than from what the code
+// used to do.
+//
+//   - a vehicle with nothing recorded about it on a day earns NOTHING, and the day is
+//     worth a reminder rather than a charge. The shape this replaced assumed the
+//     opposite - every active vehicle went out every worked day - so an evening nobody
+//     said anything about added the daily charge by itself;
+//   - explicitly OUT is the fixed amount, once, for that vehicle on that date;
+//   - explicitly NOT OUT is nothing, and no reminder;
+//   - the amount never doubles, and does not move with the number of sites, trips,
+//     passengers or overtime hours, nor with whether the owner was on a site himself;
+//   - one owner with several vehicles explicitly out is paid the sum of their amounts;
+//   - the state is tri-state - unrecorded / out / not out - not a list of exceptions;
+//   - the reminder reads: הרכב X לא נרשם היום. להוסיף אותו?
+//   - and it is ONE reminder for the evening, not six modals in a row.
+//
+// The vehiclesOff shape - "everything went out unless named" - must not come back as it
+// stands, whatever else is decided.
+{
+    suite('the vehicle contract is recorded, and none of it is implemented');
+
+    const device = makeDevice({ deviceId: 'd_contract' });
+    seed(device);
+    check('the feature is off in the build a person installs',
+        device.global('FARKAD_FLAGS').vehicles === false);
+    check('and the flags cannot be opened by anything running in it',
+        Object.isFrozen(device.global('FARKAD_FLAGS')));
+}
+
 report();
