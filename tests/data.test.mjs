@@ -11697,4 +11697,390 @@ function vans(device) {
     }
 }
 
+// ================================================================ P4: the rescue file itself
+//
+// P3 proves what the DEVICE does. This proves what comes out of it: the file is captured
+// as the browser would receive it - the actual Blob body, not the object URL - read back,
+// and carried onto a second device, which is what a rescue file is for. A file nobody has
+// opened is a claim, and this suite is the opening of it.
+{
+    const exportOn = (device, arm) => {
+        const taken = { clicks: 0, names: [], bodies: [], types: [] };
+        device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+        device.ctx.Blob = function Blob(parts, options) {
+            taken.bodies.push(String((parts || []).join('')));
+            taken.types.push((options || {}).type || '');
+        };
+        device.ctx.document.createElement = () => ({
+            style: {}, setAttribute: () => {}, appendChild: () => {},
+            set download(name) { taken.names.push(name); },
+            get download() { return taken.names[taken.names.length - 1]; },
+            href: '',
+            click: () => { taken.clicks += 1; }
+        });
+        if (arm) arm(device);
+        device.call('exportRecoveryData');
+        return taken;
+    };
+
+    {
+        suite('P4: the file that comes out is the file that was needed');
+
+        const { device } = crew();
+        const id = device.State.nextWorkerId();
+        device.State.schedule.workers.push(
+            { id, name: 'רפאת', active: true, dailyRate: 300, hourlyRate: 0 });
+        device.State.commitRoster();
+        record(device, '2026-08-12', id, 'p_01');
+        device.State.commit(
+            device.call('addAdvance', device.State.schedule, id, '2026-08-03', 250, 'מזומן'));
+
+        // Something unreadable, which is the only reason this export exists.
+        device.putRaw('farkad:outbox:damagedish', '{"b":');
+        device.global('Recovery').damaged('farkad:outbox:damagedish', '{"b":',
+            'תור השליחה לא נקרא.');
+
+        const taken = exportOn(device, dev =>
+            dev.setQuota(key => String(key).indexOf('farkad:prov') === 0));
+
+        check('the browser was handed exactly one file', taken.clicks === 1,
+            String(taken.clicks));
+        check('under a name that says what it is and when',
+            /^farkad-recovery-\d{4}-\d{2}-\d{2}\.json$/.test(String(taken.names[0])),
+            String(taken.names[0]));
+        check('and it is offered as JSON', taken.types[0] === 'application/json',
+            taken.types[0]);
+
+        let file = null;
+        try { file = JSON.parse(taken.bodies[0]); } catch (error) { file = null; }
+        given('the body parses', file !== null && file.kind === 'farkad-recovery',
+            String(taken.bodies[0]).slice(0, 60));
+
+        check('it carries the damaged bytes, exactly as they are on the disk',
+            file.records['farkad:outbox:damagedish'] === '{"b":',
+            JSON.stringify(file.records['farkad:outbox:damagedish']));
+        check('and the quarantined copy beside them',
+            file.records['farkad:outbox:damagedish:damaged'] === '{"b":',
+            JSON.stringify(Object.keys(file.records)));
+        check('and the live schedule, which is what somebody carries on from',
+            String(file.records['scheduleData:v2']).includes('רפאת'),
+            String(file.records['scheduleData:v2']).slice(0, 80));
+        check('and the queue, every key of it',
+            Object.keys(device.dump()).filter(key => key.indexOf('farkad:outbox') === 0)
+                .every(key => file.records[key] === device.raw(key)),
+            JSON.stringify(Object.keys(file.records).filter(k => k.indexOf('farkad:outbox') === 0)));
+        check('the damage is named in words, not only in bytes',
+            file.problems.some(problem => String(problem.message).includes('תור השליחה')),
+            JSON.stringify(file.problems));
+
+        // The metadata the brief asks for: what this device believes about its own
+        // bookkeeping, so whoever opens the file does not have to infer it.
+        // The handover WAS recorded here - the writes were refused, so the facts were
+        // dropped instead, which is the third layer doing its job. What the file has to
+        // say is that this device could not write anything down, so a reader knows not to
+        // trust a claim from it either way.
+        check('the file says this device could not record anything',
+            file.provenance && file.provenance.canRecord === false,
+            JSON.stringify(file.provenance));
+        check('and that permanent deletion is off in the build that wrote it',
+            file.provenance.permanentDeletion === false,
+            JSON.stringify(file.provenance));
+
+        // Carried onto a second device, which is the whole point of the file.
+        const rescued = makeDevice({ storage: Object.assign({}, file.records) });
+        rescued.State.load();
+        check('a second device opens the rescue file and has the man',
+            Boolean(rescued.State.worker(id)),
+            JSON.stringify((rescued.State.schedule.workers || []).map(w => w.name)));
+        check('with his day',
+            rescued.call('entriesFor', rescued.State.schedule, '2026-08-12', id,
+                'actual').length === 1,
+            JSON.stringify(Object.keys(rescued.State.schedule.days || {})));
+        check('and his advance, to the shekel',
+            Object.values(rescued.State.schedule.advances || {})
+                .some(item => item.workerId === id && item.amount === 250),
+            JSON.stringify(rescued.State.schedule.advances));
+
+        // And the device it came from still holds everything, and still refuses.
+        check('the source device kept every byte it had',
+            Boolean(device.State.worker(id))
+            && device.raw('farkad:outbox:damagedish') === '{"b":',
+            JSON.stringify(device.raw('farkad:outbox:damagedish')));
+        check('and goes on refusing the deletion',
+            device.call('deletionBlockers', id).some(reason => reason.includes('מושבתת')),
+            JSON.stringify(device.call('deletionBlockers', id)));
+    }
+
+    {
+        suite('P4: a device that could record nothing says so in the file');
+
+        const { device } = crew();
+        const id = device.State.nextWorkerId();
+        device.State.schedule.workers.push(
+            { id, name: 'נאדר', active: true, dailyRate: 300, hourlyRate: 0 });
+        device.State.commitRoster();
+        device.putRaw('farkad:outbox:damagedish', '{"b":');
+        device.global('Recovery').damaged('farkad:outbox:damagedish', '{"b":', 'לא נקרא.');
+
+        // Nothing may be written and nothing may be removed, so none of the three ways of
+        // recording a handover is open. This is the case the build stopped offering
+        // permanent deletion for, and the file has to carry the fact rather than leave
+        // whoever opens it to work it out.
+        const taken = exportOn(device, dev => {
+            dev.setQuota(() => true);
+            dev.blockRemoval(() => true);
+        });
+        const file = JSON.parse(taken.bodies[0]);
+
+        check('the file went out all the same', taken.clicks === 1, String(taken.clicks));
+        check('and it reports the device as uncertain about its own bookkeeping',
+            file.provenance.uncertain === true || file.provenance.canRecord === false,
+            JSON.stringify(file.provenance));
+        check('with permanent deletion named as off',
+            file.provenance.permanentDeletion === false,
+            JSON.stringify(file.provenance));
+        check('and the man is in the file, whatever the device could not write',
+            String(file.records['scheduleData:v2']).includes('נאדר'),
+            String(file.records['scheduleData:v2']).slice(0, 60));
+    }
+
+    {
+        suite('P4: storage that has gone away does not make a short file look whole');
+
+        const { device } = crew();
+        const id = device.State.nextWorkerId();
+        device.State.schedule.workers.push(
+            { id, name: 'סאמי', active: true, dailyRate: 300, hourlyRate: 0 });
+        device.State.commitRoster();
+        record(device, '2026-08-12', id, 'p_01');
+        device.putRaw('farkad:outbox:damagedish', '{"b":');
+        device.global('Recovery').damaged('farkad:outbox:damagedish', '{"b":', 'לא נקרא.');
+
+        // The storage API itself is gone - not full, not corrupting: unavailable. Every
+        // durableGet answers null and Store.keys enumerates only what this session wrote.
+        const taken = exportOn(device, dev => { dev.Store.available = false; });
+
+        const file = JSON.parse(taken.bodies[0]);
+        check('the file still goes out', taken.clicks === 1, String(taken.clicks));
+        check('and says out loud that records could not be read',
+            typeof file.records.__unreadable === 'string',
+            JSON.stringify(Object.keys(file.records)));
+        const note = JSON.parse(file.records.__unreadable);
+        check('carrying the schedule this session is holding, which is the only copy left',
+            note.liveSchedule && (note.liveSchedule.workers || [])
+                .some(worker => worker.id === id),
+            JSON.stringify((note.liveSchedule || {}).workers || []));
+        check('and it does not claim the device could record anything',
+            file.provenance && file.provenance.storageAvailable === false,
+            JSON.stringify(file.provenance));
+
+        // A second device can still be got going from what came out.
+        const rescued = makeDevice({ storage: {
+            'scheduleData:v2': JSON.stringify(note.liveSchedule) } });
+        rescued.State.load();
+        check('and a second device rebuilds the crew from it',
+            Boolean(rescued.State.worker(id)),
+            JSON.stringify((rescued.State.schedule.workers || []).map(w => w.name)));
+        check('with the day on it',
+            rescued.call('entriesFor', rescued.State.schedule, '2026-08-12', id,
+                'actual').length === 1,
+            JSON.stringify(Object.keys(rescued.State.schedule.days || {})));
+    }
+}
+
+// ================================================================ T7: the batch, fault by fault
+//
+// A batch is ONE record - {batchId, seq, ops} - and one verified write. That is what makes
+// it atomic on a disk with no transactions: the record landed whole or it is not there,
+// and there is no rollback anybody has to trust. This is that claim taken apart.
+//
+// "Process death" is spelled the only honest way it can be: the bytes on the disk at that
+// instant are carried to a new device and opened. A crash cannot leave a state a reopen
+// from those bytes does not see.
+{
+    // The faults that stop a batch being WRITTEN. A batch is one record, so each of these
+    // meets it at its single verified write - and a removal fault is not among them,
+    // because a batch that only adds work has nothing to remove. That case is its own
+    // suite below, where a removal is actually needed.
+    const faults = [
+        ['no room at all', dev => dev.setQuota(key => key.indexOf('farkad:outbox') === 0)],
+        ['a write that lands changed', dev => dev.corruptWhen(
+            key => key.indexOf('farkad:outbox') === 0)]
+    ];
+
+    for (const [what, arm] of faults) {
+        suite(`T7: a roster batch against ${what}`);
+
+        const device = makeDevice();
+        seed(device);
+        // Something already queued, so the fault meets an existing key as well as a new
+        // one: a batch that only ever writes fresh keys is the easy half.
+        record(device, '2026-08-12', 'w_01', 'p_01');
+        const before = {
+            disk: device.raw('scheduleData:v2'),
+            outbox: outboxBytes(device),
+            pending: device.Sync.pendingPaths().sort().join()
+        };
+        given(`${what}: there is something in the queue to begin with`,
+            before.pending.length > 0);
+
+        arm(device);
+        device.State.schedule.workers.push(
+            { id: 'w_zz', name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+        const done = device.State.commitRoster();
+
+        check(`${what}: the roster change reports that it did not happen`, done === false,
+            String(done));
+        check(`${what}: nothing of it is on the screen`, !device.State.worker('w_zz'),
+            JSON.stringify(device.State.schedule.workers.map(worker => worker.id)));
+        check(`${what}: the schedule on the disk is untouched`,
+            device.raw('scheduleData:v2') === before.disk);
+        check(`${what}: and no half of it reached the queue`,
+            !durablyQueued(device, 'w_zz'),
+            JSON.stringify(Object.keys(device.dump())));
+        check(`${what}: while the edit that was already queued is still there`,
+            durablyQueued(device, '2026-08-12'),
+            JSON.stringify(Object.keys(device.dump())));
+
+        // Process death, at the only boundary a one-record batch has: whatever is on the
+        // disk now is what a crash would have left.
+        const crashed = makeDevice({ storage: device.dump() });
+        crashed.State.load();
+        check(`${what}: a reopen from those bytes shows no partial roster`,
+            !crashed.State.worker('w_zz'),
+            JSON.stringify(crashed.State.schedule.workers.map(worker => worker.id)));
+        check(`${what}: and the earlier edit is still pending on it`,
+            crashed.Sync.pendingPaths().includes('days.2026-08-12.actual.w_01'),
+            JSON.stringify(crashed.Sync.pendingPaths()));
+
+        // The fault lifts, and the same edit goes through - a device that cannot recover
+        // once the disk is working again is a device somebody has to be told to reinstall.
+        device.setQuota(null);
+        device.corruptWhen(() => false);
+        device.blockRemoval(null);
+        device.throwOnRemove(null);
+        device.State.schedule.workers.push(
+            { id: 'w_zz', name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+        check(`${what}: and it goes through once the disk is working`,
+            device.State.commitRoster() === true);
+        check(`${what}: with the man on the screen`, Boolean(device.State.worker('w_zz')));
+        const healed = makeDevice({ storage: device.dump() });
+        healed.State.load();
+        check(`${what}: and after a reopen`, Boolean(healed.State.worker('w_zz')),
+            JSON.stringify(healed.State.schedule.workers.map(worker => worker.id)));
+    }
+}
+
+// ---------------------------------------------------------------- T7: when a removal is needed
+//
+// A batch that only ADDS work has nothing to remove, so a disk that refuses removals does
+// not stop it - correctly. The case where a removal is the point is the prune: the cloud
+// has an edit, the schedule holding it has been written, and the queue entry is finished
+// with. A prune that cannot happen must be reported, not assumed.
+{
+    for (const [what, arm] of [
+        ['removals that quietly do nothing', dev => dev.blockRemoval(
+            key => String(key).indexOf('farkad:outbox') === 0)],
+        ['removals that throw', dev => dev.throwOnRemove(
+            key => String(key).indexOf('farkad:outbox') === 0)]
+    ]) {
+        suite(`T7: a prune against ${what}`);
+
+        const cloud = makeCloud();
+        const device = makeDevice({ deviceId: 'd_here' });
+        seed(device);
+        await connected(device, cloud);
+        await wait();
+        given(`${what}: the roster has drained`, device.Sync.pendingCount() === 0,
+            String(device.Sync.pendingCount()));
+
+        cloud.online = false;
+        record(device, '2026-08-12', 'w_01', 'p_01');
+        await wait();
+        given(`${what}: the day is queued and unsent`, device.Sync.pendingCount() === 1,
+            String(device.Sync.pendingCount()));
+
+        arm(device);
+        cloud.online = true;
+        await device.Sync.flush();
+        await wait();
+
+        given(`${what}: the cloud has it`,
+            Boolean(cloud.doc && cloud.doc.days && cloud.doc.days['2026-08-12']));
+        check(`${what}: the queue still holds what could not be pruned`,
+            device.Sync.pendingPaths().includes('days.2026-08-12.actual.w_01'),
+            JSON.stringify(device.Sync.pendingPaths()));
+        check(`${what}: memory holds what the disk holds`,
+            durablyQueued(device, '2026-08-12'),
+            JSON.stringify(Object.keys(device.dump())));
+        check(`${what}: the failure is reported rather than assumed`,
+            device.Sync.journalFailed === true);
+        check(`${what}: and nothing claims to be synced`,
+            device.Sync.status !== 'synced', device.Sync.status);
+
+        // The day itself survives both reopens, which is the only thing that matters.
+        const once = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+        once.State.load();
+        check(`${what}: the day is there after the first reopen`,
+            once.call('entriesFor', once.State.schedule, '2026-08-12', 'w_01',
+                'actual').length === 1,
+            JSON.stringify(Object.keys(once.State.schedule.days || {})));
+        const twice = makeDevice({ storage: once.dump(), deviceId: 'd_here' });
+        twice.State.load();
+        check(`${what}: and after the second`,
+            twice.call('entriesFor', twice.State.schedule, '2026-08-12', 'w_01',
+                'actual').length === 1,
+            JSON.stringify(Object.keys(twice.State.schedule.days || {})));
+    }
+}
+
+// ================================================================ T8: a second tab during the failure
+//
+// The dangerous half of a failed write is not the failure, it is what the failing tab does
+// on its way out. A rollback that put bytes back over another tab's work would be the lost
+// update this whole design exists to prevent, arriving through the recovery path.
+{
+    suite('T8: a batch that fails does not take the other tab\u2019s work with it');
+
+    const shared = sharedStore();
+    const a = makeDevice({ sharedStorage: shared, deviceId: 'd_a' });
+    seed(a);
+    const b = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
+    b.State.load();
+
+    // Tab B writes in the middle of tab A's failing batch - after A has read the disk and
+    // before it gives up on it.
+    let interleaved = false;
+    shared.interleave(() => {
+        interleaved = true;
+        record(b, '2026-08-11', 'w_02', 'p_01');
+    });
+    // By VALUE, not by key: the two tabs share one localStorage, so a fault keyed on the
+    // outbox would refuse the other tab's write as well and prove nothing.
+    a.setQuota((key, value) => key.indexOf('farkad:outbox') === 0
+        && String(value).indexOf('w_zz') !== -1);
+    a.State.schedule.workers.push(
+        { id: 'w_zz', name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    const done = a.State.commitRoster();
+
+    given('the other tab really did write in the middle', interleaved === true);
+    check('the failing tab reports failure', done === false, String(done));
+    check('and left nothing of its own behind', !durablyQueued(a, 'w_zz'),
+        JSON.stringify(Object.keys(a.dump())));
+    check('while the other tab\u2019s day is on the disk, untouched',
+        durablyQueued(a, '2026-08-11'), JSON.stringify(Object.keys(a.dump())));
+
+    const reopened = makeDevice({ storage: a.dump() });
+    reopened.State.load();
+    check('a reopen has the other tab\u2019s day', Boolean(
+        reopened.State.schedule.days['2026-08-11']),
+        JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+    check('and still owes it to the other phones',
+        reopened.Sync.pendingPaths().includes('days.2026-08-11.actual.w_02'),
+        JSON.stringify(reopened.Sync.pendingPaths()));
+    check('and no trace of the roster change that failed',
+        !reopened.State.worker('w_zz'),
+        JSON.stringify(reopened.State.schedule.workers.map(worker => worker.id)));
+}
+
 report();

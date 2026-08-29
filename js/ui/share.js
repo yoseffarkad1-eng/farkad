@@ -718,6 +718,28 @@ function exportRecoveryData() {
         records
     };
 
+    // What this device believes about its own bookkeeping, written INTO the file.
+    //
+    // Whoever opens a rescue file is trying to work out what happened, and the one thing
+    // they cannot see from the raw records is whether this phone was able to record that
+    // the file left it. Said here rather than inferred: `uncertain` and a storage that
+    // cannot answer both mean the same thing to the reader - do not trust this device's
+    // claim that a worker never left it.
+    //
+    // Read defensively. This runs on a device whose storage is misbehaving by definition,
+    // and a throw here would cost the export itself.
+    try {
+        payload.provenance = {
+            uncertain: Boolean(FarkadSync.provenanceUncertain && FarkadSync.provenanceUncertain()),
+            canRecord: Boolean(FarkadSync.canRecordProvenance && FarkadSync.canRecordProvenance()),
+            storageAvailable: Boolean(typeof Store !== 'undefined' && Store.available),
+            permanentDeletion: typeof permanentDeletionEnabled === 'function'
+                ? permanentDeletionEnabled() : null
+        };
+    } catch (error) {
+        payload.provenance = { unreadable: String(error && error.message || error) };
+    }
+
     // The same handover the ordinary backup makes, attempted - but never a reason to
     // stop. This file is the only way the unreadable bytes leave a phone, and refusing it
     // because a bookkeeping write failed would be trading the data for the bookkeeping.
