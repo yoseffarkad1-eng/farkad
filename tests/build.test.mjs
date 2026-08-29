@@ -139,4 +139,43 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
         /keys\.filter\(key => key !== VERSION\)/.test(activate));
 }
 
+{
+    suite('the shipped feature flags are frozen, and nothing shipped can open one');
+
+    // FARKAD_FLAGS decides whether this build does permanent deletion and whether it does
+    // vehicles. Both are off, and both are off because turning one on is a decision about
+    // somebody's record or somebody's money that has not been made.
+    //
+    // `const` binds the NAME, not the object - so a gate that is only a const is a gate a
+    // stray line can open. It is frozen, and the one seam that can change it is a test
+    // seam: FARKAD_FLAG_OVERRIDES, read once at definition time. No file this app ships
+    // may define it, and that is what the second check below is for. Nothing in a browser
+    // can create it either: index.html loads only the scripts in the offline shell.
+    const schema = readFileSync(join(ROOT, 'js/model/schema.js'), 'utf8');
+
+    check('the flags object is frozen', /const FARKAD_FLAGS = Object\.freeze\(/.test(schema));
+    check('and both gates are shut in the shipped defaults',
+        /permanentDeletion: false/.test(schema) && /vehicles: false/.test(schema),
+        schema.slice(schema.indexOf('const FARKAD_SHIPPED_FLAGS'),
+            schema.indexOf('const FARKAD_FLAGS')).match(/\w+: (true|false)/g).join(', '));
+
+    // Every file the service worker caches - which is every file that reaches a phone.
+    const shell = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+    const cached = [...shell.matchAll(/'\.\/(js\/[^']+\.js)'/g)].map(match => match[1]);
+    check('the shell names the scripts it caches', cached.length > 10, String(cached.length));
+
+    const setsOverride = cached.filter(file => {
+        const code = readFileSync(join(ROOT, file), 'utf8');
+        // Reading it is what schema.js does. WRITING it is what nothing may do.
+        return /FARKAD_FLAG_OVERRIDES\s*=[^=]/.test(code)
+            || /(var|let|const)\s+FARKAD_FLAG_OVERRIDES/.test(code);
+    });
+    check('no file that reaches a phone defines the test seam',
+        setsOverride.length === 0, setsOverride.join(', '));
+
+    const page = readFileSync(join(ROOT, 'index.html'), 'utf8');
+    check('nor does the page itself',
+        !/FARKAD_FLAG_OVERRIDES/.test(page));
+}
+
 report();

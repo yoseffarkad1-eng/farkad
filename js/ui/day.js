@@ -696,6 +696,11 @@ function renderUnassignedTray(unrecorded) {
 // Returns null when there are no vehicles at all: an empty tray on the busiest screen in
 // the app is a row of nothing to read every evening.
 function renderVehicleTray() {
+    // The feature is retired; see vehiclesEnabled in js/model/schema.js. The tray is the
+    // busiest screen in the app and every chip on it writes a day record, so it is not
+    // drawn at all rather than drawn and made inert.
+    if (!vehiclesEnabled()) return null;
+
     const vehicles = (State.schedule.vehicles || []).filter(item => item.active !== false);
     if (vehicles.length === 0) return null;
 

@@ -30,7 +30,7 @@
 // the suites that prove they work turn the flag on deliberately. Nothing in the app ever
 // writes to this object; there is no setting, no URL parameter and no dialog that reaches
 // it. It is changed by editing this line, in a commit, with the reason in the message.
-const FARKAD_FLAGS = {
+const FARKAD_SHIPPED_FLAGS = {
     // The one action with nothing behind it. Off because the proof it depends on - "made
     // here and never sent anywhere" - is a statement about what two OTHER phones hold,
     // and the evidence for it lives on this one. Getting it wrong deletes a man the other
@@ -43,6 +43,23 @@ const FARKAD_FLAGS = {
     // The stored vehicle records are NOT removed by this; see the retirement below.
     vehicles: false
 };
+
+// FROZEN. `const` binds the name, not the object: anything holding a reference could set
+// a field on it, and a feature gate that a stray line can open is not a gate. The suites
+// were doing exactly that, which meant the shipped default was never actually read by the
+// tests that claimed to be reading it.
+//
+// The one seam is FARKAD_FLAG_OVERRIDES, and it is a TEST seam. No file this app ships
+// defines it - tests/build.test.mjs fails if one ever does - and nothing in a browser can
+// create it, because index.html loads only the scripts in that shell. A suite that needs
+// the machinery behind a shut gate sets it in the sandbox before the app loads, which is
+// the same thing a build with the flag on would do, and then it is testing that build.
+const FARKAD_FLAGS = Object.freeze(Object.assign(
+    {},
+    FARKAD_SHIPPED_FLAGS,
+    (typeof FARKAD_FLAG_OVERRIDES !== 'undefined' && FARKAD_FLAG_OVERRIDES
+        && typeof FARKAD_FLAG_OVERRIDES === 'object') ? FARKAD_FLAG_OVERRIDES : {}
+));
 
 const SCHEMA_VERSION = 2;
 
@@ -408,11 +425,25 @@ function dayProblems(raw, known) {
             problems.push('היום ' + date + ' ברישום אינו תקין.');
             return;
         }
-        // Only the two sides the model has. A third key is something this app did not
-        // write, and reading it as a day would be reading somebody else's document.
-        const extra = Object.keys(day).filter(key => key !== 'plan' && key !== 'actual');
+        // Only the two sides the model has, plus the one field a day can carry beside
+        // them. A key that is neither is something this app did not write, and reading it
+        // as a day would be reading somebody else's document.
+        //
+        // vehiclesOff is accepted whether or not this build DOES vehicles. It is on real
+        // devices - written by a build that did - and refusing it here would quarantine
+        // the whole record: the app would open on a phone whose schedule it will not
+        // read, hold every write, and tell somebody their data is unreadable, over a
+        // field naming a van that stayed in the yard one evening in June.
+        const extra = Object.keys(day).filter(key =>
+            key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff');
         if (extra.length > 0) {
             problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
+            return;
+        }
+        if (day.vehiclesOff !== undefined
+            && !(Array.isArray(day.vehiclesOff)
+                && day.vehiclesOff.every(id => typeof id === 'string'))) {
+            problems.push('ליום ' + date + ' יש רישום רכבים שאינו תקין.');
             return;
         }
         if (day.plan === undefined && day.actual === undefined) {
@@ -1052,6 +1083,13 @@ function advancesTotal(schedule, workerId, fromDate, toDate) {
 }
 
 // ---------------------------------------------------------------- vehicles
+
+// Whether this build does vehicles at all. Read at every entry point rather than at one -
+// a gate on the screen while the arithmetic went on running is what let a cancelled
+// feature go on charging people.
+function vehiclesEnabled() {
+    return FARKAD_FLAGS.vehicles === true;
+}
 //
 // A vehicle is paid a flat amount for a day it went out. Not per trip, not per site, and
 // not scaled by whether the man driving it worked a full day - three hundred is three
@@ -1106,6 +1144,19 @@ function anyWorkOn(schedule, date) {
 // day in the record, including months already paid. The rate history is what stops it:
 // no rate before the day it was added means no money before the day it was added.
 function vehiclesOutOn(schedule, date) {
+    // THE RETIREMENT, at the one place every vehicle number in this app comes from.
+    //
+    // The owner cancelled the feature. Gating the screens alone would have left this
+    // function answering, and the answer is the whole hazard: the default here is that
+    // every active vehicle went out on every worked day, so one evening recorded with
+    // nothing said about vehicles added the daily charge to somebody's pay by itself.
+    // A retired feature that still moves money is not retired.
+    //
+    // The stored records are NOT touched by this. Whoever turns it back on gets the same
+    // vehicles, the same owners and the same rate history - see normaliseSchedule, which
+    // goes on carrying every one of those fields through load, sync, backup and restore.
+    if (!vehiclesEnabled()) return [];
+
     if (!Array.isArray(schedule.vehicles) || schedule.vehicles.length === 0) return [];
     if (!anyWorkOn(schedule, date)) return [];
 
@@ -1138,6 +1189,11 @@ function vehiclePayFor(schedule, workerId, fromDate, toDate) {
 // Mark a vehicle as having stayed in the yard, or take that mark back. Returns the change
 // for State.commit, the same shape every other edit here returns.
 function setVehicleOut(schedule, date, vehicleId, out) {
+    // No mutation path while the feature is off. Nothing draws the control that calls
+    // this, but a stale screen, an undo held from before a reload, or a queued edit from
+    // another build could still reach it - and every one of those writes a day record.
+    if (!vehiclesEnabled()) return { path: null, value: null };
+
     if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
     const day = schedule.days[date];
 

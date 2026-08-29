@@ -116,8 +116,13 @@ const Recovery = {
         // A copy made months ago, whose original has since been written over by an
         // ordinary save, is the only trace of those bytes left anywhere - and it was
         // being left behind by an export that walked this session's problem list.
+        //
+        // By ALLOWLIST, not by suffix. ":damaged" is a convention this app follows; it is
+        // not a licence to copy anything on the origin whose name happens to contain it
+        // into a file somebody is about to send over WhatsApp. A copy counts only when
+        // the record it is a copy OF is one this app writes.
         Store.keys()
-            .filter(key => key.indexOf(':damaged') !== -1)
+            .filter(isFarkadQuarantineKey)
             .sort()
             .forEach(key => {
                 const held = Store.durableGet(key);
@@ -161,6 +166,28 @@ const Recovery = {
             });
 
         return out;
+    },
+
+    // The same records, taken TWICE, and believed only when the two readings agree.
+    //
+    // Two tabs of this app are two JavaScript worlds on one disk. The export reads the
+    // schedule, then the queue - and in between, the other tab can save a newer edit and
+    // collect the operation that carried it. The file then holds a schedule from before
+    // the edit and no operation that could put it back, while the phone it came from has
+    // the edit. Nothing about that file looks wrong; it is simply missing an evening.
+    //
+    // Bounded, because this must never become a reason the raw bytes do not leave the
+    // phone. If the readings will not settle the file is still made, still carries
+    // everything that was captured, and SAYS it was taken while something was moving -
+    // and nothing downstream may then present the reconstruction as complete.
+    rawSnapshot() {
+        let previous = this.rawRecords();
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+            const again = this.rawRecords();
+            if (sameRecordMap(previous, again)) return { records: again, stable: true };
+            previous = again;
+        }
+        return { records: previous, stable: false };
     },
 
     // Pressed only after the export. Resumes writing if every damaged record was copied.
@@ -227,6 +254,44 @@ const Recovery = {
         banner.style.display = '';
     }
 };
+
+// Byte-for-byte, key for key. Not a JSON comparison of two objects built in different
+// orders - the question is whether the disk moved between two readings.
+function sameRecordMap(one, two) {
+    const keys = Object.keys(one);
+    if (keys.length !== Object.keys(two).length) return false;
+    return keys.every(key => two[key] === one[key]);
+}
+
+// The records this app writes, by name. Everything the recovery export carries is one of
+// these or a quarantine copy of one; nothing else on the origin is its business.
+const FARKAD_RECORD_KEYS = [
+    'scheduleData',
+    'scheduleData:v2',
+    'scheduleData:migrationIssues',
+    'farkad:deviceId',
+    'farkad:pendingReplace',
+    'farkad:pendingReplace:v71',
+    'farkad:provenance:v1'
+];
+
+function isFarkadRecordKey(key) {
+    if (FARKAD_RECORD_KEYS.indexOf(key) !== -1) return true;
+    if (key.indexOf('farkad:prov:') === 0) return true;
+    return typeof FarkadSync !== 'undefined' && FarkadSync.isQueueKey
+        ? FarkadSync.isQueueKey(key)
+        : false;
+}
+
+// <base>:damaged, or <base>:damaged:<n> - and only when <base> is a record this app
+// writes. See quarantineRecord for where the suffix comes from.
+function isFarkadQuarantineKey(key) {
+    const at = key.lastIndexOf(':damaged');
+    if (at <= 0) return false;
+    const tail = key.slice(at + ':damaged'.length);
+    if (tail !== '' && !/^:[0-9]+$/.test(tail)) return false;
+    return isFarkadRecordKey(key.slice(0, at));
+}
 
 // Puts raw bytes somewhere they are safe, and does not believe it until it can read them
 // back. Returns the key it used, or null.

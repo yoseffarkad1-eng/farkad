@@ -617,6 +617,14 @@ function normaliseSchedule(raw, hints) {
             plan: normaliseLayer(day.plan),
             actual: normaliseLayer(day.actual)
         };
+        // Which vehicles stayed in the yard that evening. Carried through even though
+        // this build does not do vehicles: it is a fact somebody recorded about a day,
+        // this function keeps only what it names, and a field it does not name is a field
+        // that disappears at the next reopen.
+        if (Array.isArray(day.vehiclesOff)) {
+            schedule.days[date].vehiclesOff = day.vehiclesOff
+                .filter(id => typeof id === 'string').map(String);
+        }
     });
 
     // Advances arrive keyed by id. A null value is a deletion another device sent and
@@ -627,13 +635,24 @@ function normaliseSchedule(raw, hints) {
         const item = advances[id];
         if (!item || typeof item !== 'object') return;
         if (!item.workerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) return;
-        schedule.advances[id] = {
+        const advance = {
             id: String(id),
             workerId: String(item.workerId),
             date: String(item.date),
             amount: Number(item.amount) || 0,
             note: String(item.note || '')
         };
+        // HOW it was paid. This function starts from an empty record and copies across
+        // what it recognises, so a field it does not name is a field that disappears at
+        // the next reopen - and this one had no name here. An advance handed over in cash
+        // and one sent by transfer are different facts about somebody's money, and the
+        // second reopen was quietly turning both of them into neither.
+        //
+        // Carried verbatim rather than checked against a list: a value written by a build
+        // that does not exist yet is still what somebody chose, and replacing it with a
+        // guess is worse than keeping a word this build does not draw.
+        if (typeof item.method === 'string' && item.method) advance.method = item.method;
+        schedule.advances[id] = advance;
     });
 
     // The ledger, carried through unchanged. Entries are append-only and this is a
@@ -724,18 +743,53 @@ function normaliseLayer(side) {
     return out;
 }
 
+// A decision the migration refused to guess is a question about one cell in ONE schedule.
+// It was stored as a bare list under a fixed key, so a list left by whatever was on the
+// phone before survived an import and attached itself to the week that had just arrived -
+// pointing at a worker and a date that record has never heard of.
+//
+// So the list carries the fingerprint of the schedule it describes, and a list that does
+// not match the record on the disk is not adopted. An older build's bare array is still
+// read: it is all there is, and refusing it would throw away questions somebody has not
+// answered yet.
+function fingerprintOf(text) {
+    let value = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        value = (Math.imul(value, 31) + text.charCodeAt(i)) | 0;
+    }
+    return (value >>> 0).toString(36) + ':' + text.length;
+}
+
+// Of the record the NEXT session would open, not of what is in memory: the questions have
+// to belong to the schedule that survives the app being closed.
+function scheduleFingerprint() {
+    const raw = Store.durableGet(V2_KEY);
+    return raw === null ? '' : fingerprintOf(raw);
+}
+
 function readIssues() {
     try {
         const raw = Store.get(ISSUES_KEY);
-        const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed : [];
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.issues)) return [];
+        if (typeof parsed.forSchedule === 'string'
+            && parsed.forSchedule !== scheduleFingerprint()) return [];
+        return parsed.issues;
     } catch (error) {
         return [];
     }
 }
 
+// Written and READ BACK, and the answer is returned. The caller used to ignore it, so an
+// import could report success over a device holding the new schedule and none of the
+// questions that came with it - and the questions were the half nobody could reconstruct.
 function writeIssues(issues) {
-    Store.set(ISSUES_KEY, JSON.stringify(issues || []));
+    return Store.setVerified(ISSUES_KEY, JSON.stringify({
+        forSchedule: scheduleFingerprint(),
+        issues: issues || []
+    }));
 }
 
 // By identity, not by position: the list is rebuilt on every render, and an index

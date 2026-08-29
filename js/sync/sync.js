@@ -172,6 +172,144 @@ function readOpBatch(raw, batchId) {
     return { batchId: String(batchId), ops };
 }
 
+// ---------------------------------------------------------------- the one projector
+//
+// Every reader of this queue goes through the three functions below: the live device, the
+// boot replay, and the rebuild of a rescue file exported off a phone that could not read
+// itself. They take a plain map of key -> raw bytes and nothing else, so the SAME rules
+// answer "whose day is on the sheet" wherever the bytes come from.
+//
+// The version this replaced had a second implementation inside the recovery import. It
+// sorted storage keys lexically, sorted only inside each batch, threw away opId and
+// `after`, and applied every operation it could parse. Batch ids are random, so which
+// value a rescue file rebuilt depended on how two of them happened to sort: a coin toss,
+// per file, over whose day is on the sheet - and the phone and its own rescue file could
+// disagree about it.
+//
+// A key belongs to this queue only in an EXACT shape. Anything else on the origin is
+// somebody else's record and is not read, not projected, and not exported.
+function queueKeyKind(key) {
+    if (slotIndexOf(key) !== -1) return 'slot';
+
+    const opAt = key.lastIndexOf(OP_MARK);
+    if (opAt > 0 && slotIndexOf(key.slice(0, opAt)) !== -1
+        && SAFE_ID.test(key.slice(opAt + OP_MARK.length))) return 'batch';
+
+    const ackAt = key.lastIndexOf(ACK_MARK);
+    if (ackAt > 0 && slotIndexOf(key.slice(0, ackAt)) !== -1
+        && SAFE_ID.test(key.slice(ackAt + ACK_MARK.length))) return 'ack';
+
+    return null;
+}
+
+// Parsed batches, kept against their own bytes. Collection, the projection and every
+// acknowledgement ask for the same records over and over; a season's queue is not
+// something to re-parse per question. Bounded, because a rescue file brings in keys that
+// belong to another device and must not accumulate.
+const BATCH_CACHE = new Map();
+const BATCH_CACHE_MAX = 512;
+
+function readBatchCached(key, raw, batchId) {
+    const cached = BATCH_CACHE.get(key);
+    if (cached && cached.raw === raw) return cached.batch;
+    const batch = readOpBatch(raw, batchId);
+    if (BATCH_CACHE.size >= BATCH_CACHE_MAX) BATCH_CACHE.clear();
+    BATCH_CACHE.set(key, { raw, batch });
+    return batch;
+}
+
+// EVERY physical operation in `records`, in an order that does not depend on how the
+// browser enumerates keys - slot first, then batch id - so two contexts reading identical
+// bytes build identical lists.
+//
+// A batch is atomic. One operation inside it that will not read makes the RECORD
+// unreadable: the batch was written once and cannot be rewritten, so there is no such
+// thing as most of it, and applying the readable half would put a roster on the screen
+// with a person in it and no order naming him.
+//
+// Items an older build left inside a slot record are operations too. They carry no id and
+// no `after`, so they get a stable synthetic id and compete on the sequence they were
+// written with - assuming one is older merely because an operation exists beside it is
+// how a newer edit from an old client gets overruled.
+function decodeQueue(records) {
+    const operations = [];
+    const unreadable = [];
+    const acknowledged = new Set();
+    const batches = [];
+
+    Object.keys(records).forEach(key => {
+        const kind = queueKeyKind(key);
+        if (kind === 'batch') {
+            const opAt = key.lastIndexOf(OP_MARK);
+            batches.push({
+                key,
+                slot: key.slice(0, opAt),
+                batchId: key.slice(opAt + OP_MARK.length)
+            });
+            return;
+        }
+        if (kind === 'ack' && records[key] === ACK_VALUE) acknowledged.add(key);
+    });
+
+    batches.sort((one, two) => (slotIndexOf(one.slot) - slotIndexOf(two.slot))
+        || (one.batchId < two.batchId ? -1 : one.batchId > two.batchId ? 1 : 0));
+
+    batches.forEach(({ key, slot, batchId }) => {
+        const raw = records[key];
+        if (typeof raw !== 'string') return;
+        const batch = readBatchCached(key, raw, batchId);
+        if (!batch) { unreadable.push(key); return; }
+        batch.ops.forEach(op => operations.push(Object.assign({}, op, {
+            slot, batchKey: key, batchId,
+            sent: acknowledged.has(outboxAckKey(slot, op.opId))
+        })));
+    });
+
+    for (let i = 0; i < OUTBOX_SLOTS; i += 1) {
+        const slot = outboxSlotKey(i);
+        const raw = records[slot];
+        if (typeof raw !== 'string') continue;
+        const record = readOutboxRecord(raw);
+        if (!record) { unreadable.push(slot); continue; }
+        Object.keys(record.items).sort().forEach(path => {
+            const item = record.items[path];
+            operations.push({
+                opId: 'legacy_' + hashedId(slot + '|' + path),
+                path, value: item.value, seq: item.seq, after: [],
+                slot, batchKey: slot, batchId: null, legacy: true,
+                sent: item.sent === true
+            });
+        });
+    }
+
+    return { operations, unreadable, acknowledged };
+}
+
+// The current value per path, from the whole physical set.
+//
+// An operation another LIVE operation names in `after` is superseded and can never be
+// current - not now, and not later when the one that superseded it is collected. That is
+// what makes this a record rather than a comparison: B carries the fact that it saw A, so
+// removing B does not make A the winner again.
+function projectQueue(operations) {
+    const superseded = new Set();
+    operations.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
+
+    const byPath = new Map();
+    operations.forEach(op => {
+        if (superseded.has(op.opId)) return;
+        const already = byPath.get(op.path);
+        if (!already || laterOperation(op, already)) byPath.set(op.path, op);
+    });
+    return byPath;
+}
+
+// The projection as a journal: oldest first, ready to be laid over a schedule.
+function queueJournalEntries(operations) {
+    return [...projectQueue(operations).entries()]
+        .sort((a, b) => (Number(a[1].seq) || 0) - (Number(b[1].seq) || 0));
+}
+
 // Which of two operations for one path is the current one.
 //
 // Superseded is decided first and by NAME: if one names the other in `after`, the one
@@ -760,98 +898,50 @@ const FarkadSync = {
     // sequence they were written with - assuming one is older merely because an operation
     // exists beside it is how a newer edit from an old client gets overruled.
     physicalOperations() {
-        const out = [];
-        if (!this._activeKey && !this._loaded) return out;
+        if (!this._activeKey && !this._loaded) return [];
 
-        // ONE pass over the keys, not one per slot. The per-slot loop this replaced was
-        // twenty-five walks of the whole store and a JSON.parse of every batch, on every
-        // call - and pendingCount(), the projection and each acknowledgement all call
-        // this. Draining a season's queue spent its whole budget re-parsing records that
-        // had not changed, and the flush that should have followed the first batch never
-        // got a turn: 300 days went and the other 150 sat there looking sent.
-        //
-        // The cache is keyed on the RAW BYTES. Another tab writing to the same storage
-        // changes them, so its work is picked up on the next call; a record that has not
-        // moved is not parsed again. Nothing is remembered about a key that is gone.
-        const parsed = this._batchCache || (this._batchCache = new Map());
-        const seen = new Set();
-        const acks = new Set();
-        const batchKeys = [];
+        const decoded = decodeQueue(this.durableQueueRecords());
 
-        Store.keys().forEach(key => {
-            const opAt = key.lastIndexOf(OP_MARK);
-            if (opAt > 0) {
-                const slot = key.slice(0, opAt);
-                if (slotIndexOf(slot) !== -1 && SAFE_ID.test(key.slice(opAt + OP_MARK.length))) {
-                    batchKeys.push({ key, slot, batchId: key.slice(opAt + OP_MARK.length) });
-                }
-                return;
-            }
-            const ackAt = key.lastIndexOf(ACK_MARK);
-            if (ackAt > 0 && slotIndexOf(key.slice(0, ackAt)) !== -1
-                && SAFE_ID.test(key.slice(ackAt + ACK_MARK.length))
-                // DURABLY, and saying what it is supposed to say. Store.keys() lists what
-                // this session has written as well as what the disk holds, so a refused
-                // acknowledgement stays in memory; and a disk that writes something else
-                // leaves one that is present and wrong. Either read alone said the cloud
-                // had an operation whose proof was never stored, and collection threw the
-                // operation away on the strength of it.
-                && Store.durableGet(key) === ACK_VALUE) {
-                acks.add(key);
-            }
+        // A record that will not read is held, not skipped. The mark of a slot is
+        // handled by loadOutbox, which has to decide where recording continues; a BATCH
+        // is quarantined here, because nothing else reads one.
+        decoded.unreadable.forEach(key => {
+            if (slotIndexOf(key) !== -1) return;
+            console.error('Queued batch does not read as one, holding it:', key);
+            this.outboxDamaged = true;
+            Recovery.damaged(key, Store.durableGet(key),
+                `קבוצת עריכות בתור השליחה לא נקראה: ${key}.`);
         });
 
-        // Slot order, then id, so the list is the same on every device that reads the
-        // same disk - a projection whose tie-break depended on enumeration order would
-        // answer differently in two tabs holding identical bytes.
-        batchKeys.sort((a, b) => (slotIndexOf(a.slot) - slotIndexOf(b.slot))
-            || (a.batchId < b.batchId ? -1 : a.batchId > b.batchId ? 1 : 0));
+        return decoded.operations;
+    },
 
-        batchKeys.forEach(({ key, slot, batchId }) => {
+    // Every key this queue is written across, on THIS device, across every slot.
+    //
+    // Not the active slot's family. A damaged mark moves recording to the next slot
+    // along, and the operations under the slot it left are their own records - still part
+    // of what this device owes, and still the only copy of the edits inside them. An
+    // export that walked one family left them behind, and a projection that read all
+    // twenty-five slots while the export read one meant the rescue file could not rebuild
+    // the week the phone it came from was showing.
+    queueKeys() {
+        return Store.keys().filter(key => queueKeyKind(key) !== null).sort();
+    },
+
+    // Whether `key` is one of this queue's, in the exact shape. Used by the recovery
+    // export, which must not sweep up records that are not this app's.
+    isQueueKey(key) {
+        return queueKeyKind(String(key)) !== null;
+    },
+
+    // Those keys and their bytes, read the way the next session would read them.
+    durableQueueRecords() {
+        const records = {};
+        this.queueKeys().forEach(key => {
             const raw = Store.durableGet(key);
-            if (raw === null) return;
-            seen.add(key);
-
-            let batch;
-            const cached = parsed.get(key);
-            if (cached && cached.raw === raw) {
-                batch = cached.batch;
-            } else {
-                batch = readOpBatch(raw, batchId);
-                parsed.set(key, { raw, batch });
-            }
-
-            if (!batch) {
-                console.error('Queued batch does not read as one, holding it:', key);
-                this.outboxDamaged = true;
-                Recovery.damaged(key, raw,
-                    `קבוצת עריכות בתור השליחה לא נקראה: ${key}.`);
-                return;
-            }
-            batch.ops.forEach(op => out.push(Object.assign({}, op, {
-                slot, batchKey: key, batchId,
-                sent: acks.has(outboxAckKey(slot, op.opId))
-            })));
+            if (raw !== null) records[key] = raw;
         });
-
-        parsed.forEach((value, key) => { if (!seen.has(key)) parsed.delete(key); });
-
-        // Whatever a build before operations left inside a slot record.
-        for (let i = 0; i < OUTBOX_SLOTS; i += 1) {
-            const slot = outboxSlotKey(i);
-            const record = readOutboxRecord(Store.durableGet(slot));
-            if (!record) continue;
-            Object.keys(record.items).forEach(path => {
-                const item = record.items[path];
-                out.push({
-                    opId: 'legacy_' + hashedId(slot + '|' + path),
-                    path, value: item.value, seq: item.seq, after: [],
-                    slot, batchKey: slot, batchId: null, legacy: true,
-                    sent: item.sent === true
-                });
-            });
-        }
-        return out;
+        return records;
     },
 
     // The current value per path, derived from the whole physical set.
@@ -862,17 +952,7 @@ const FarkadSync = {
     // B came after A is written down in B, so removing B does not make A the winner
     // again. Garbage collection removes A first or neither; see collectQueueGarbage.
     projectedQueue() {
-        const all = this.physicalOperations();
-        const superseded = new Set();
-        all.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
-
-        const byPath = new Map();
-        all.forEach(op => {
-            if (superseded.has(op.opId)) return;
-            const already = byPath.get(op.path);
-            if (!already || laterOperation(op, already)) byPath.set(op.path, op);
-        });
-        return byPath;
+        return projectQueue(this.physicalOperations());
     },
 
     // What the rest of the app calls the queue: path -> the current operation for it.
@@ -1155,8 +1235,7 @@ const FarkadSync = {
         this.loadOutbox();
         if (!this._activeKey) return null;
         if (this.outboxDamaged) return null;
-        return [...this.projectedQueue().entries()]
-            .sort((a, b) => (Number(a[1].seq) || 0) - (Number(b[1].seq) || 0));
+        return queueJournalEntries(this.physicalOperations());
     },
 
     // The durable journal, replayed over `schedule`. False when the disk could not be
@@ -1592,12 +1671,21 @@ const FarkadSync = {
     // write - the generation is the ordinary mechanism.
     dropLocalOriginFacts() {
         const prefix = PROV_PREFIX + 'mine:';
+
+        // A disk that cannot be read cannot report an absence. The version this replaced
+        // called remove() and then asked durableGet - and remove() had just declared
+        // storage unavailable, so durableGet answered null for everything and every fact
+        // read as gone. The device then said the handover was recorded, went on claiming
+        // that everybody on it was only ever its own, and offered to destroy them.
+        if (!Store.available) return false;
+
         let gone = true;
         Store.keys().filter(key => key.startsWith(prefix)).forEach(key => {
-            Store.remove(key);
-            if (Store.durableGet(key) !== null) gone = false;
+            if (!Store.removeVerified(key)) gone = false;
         });
-        return gone;
+        // And it has to still be readable at the end of it, or "none left" is a statement
+        // about a disk that stopped answering halfway through.
+        return gone && Store.available;
     },
 
     // The whole question, asked in one place: can this id be destroyed for good?
@@ -1630,25 +1718,16 @@ const FarkadSync = {
         return this._activeKey;
     },
 
-    // EVERY key the live queue is written across - the mark, each batch, each
-    // acknowledgement - so that whoever is copying this device off it copies all of it.
+    // EVERY key the queue is written across on this device - every slot's mark, every
+    // batch, every acknowledgement - so that whoever is copying this device off it copies
+    // all of it.
     //
-    // The queue used to be one record, and the recovery export named it. Now it is a
-    // family, and an export carrying only the mark would hand somebody a file with the
-    // number of the last edit in it and none of the edits: the days that were recorded
-    // and never sent would be missing from the one file that exists because the device
-    // could not be trusted with them.
+    // It used to be the ACTIVE slot's family alone, which is a different set the moment a
+    // damaged mark moves recording along: the operations under the slot that was left are
+    // still in the journal, still owed, and existed nowhere but on that disk.
     activeQueueKeys() {
         this.loadOutbox();
-        if (!this._activeKey) return [];
-        const slot = this._activeKey;
-        const out = [slot];
-        Store.keys().forEach(key => {
-            if (key === slot) return;
-            if (outboxIdIn(slot, OP_MARK, key) !== null
-                || outboxIdIn(slot, ACK_MARK, key) !== null) out.push(key);
-        });
-        return out.sort();
+        return this.queueKeys();
     },
 
     pendingPaths() {

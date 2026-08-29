@@ -626,8 +626,14 @@ async function seedRoster(page) {
     (await page.textContent('.roster-archive')).includes('דוד'),
     await page.textContent('.roster-archive'));
 
-  // A name typed by mistake, with nothing recorded against it, IS deletable - and the
-  // button for it is in his own screen, behind a dialog carrying his name.
+  // A name typed by mistake, with nothing recorded against it, is the ONE case permanent
+  // deletion was ever for - and in this build it is not offered either. The gate is
+  // FARKAD_FLAGS in js/model/schema.js and it is shut; what this reads is the screen a
+  // person actually gets, which is the archive and a sentence saying why.
+  //
+  // The machinery behind the gate is exercised in tests/data.test.mjs against a device
+  // built with the flag on. This is the shipped reading, and the two are deliberately
+  // different tests.
   await page.evaluate(() => {
     State.schedule.workers.push({
       id: State.nextWorkerId(), name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0
@@ -641,41 +647,44 @@ async function seedRoster(page) {
   await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
-  check('a worker with nothing recorded is offered a delete',
-    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
 
-  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
-  await page.waitForTimeout(250);
-  // The title carries the ACT (מחיקת עובד) and the message carries the man - along
-  // with the three things that were just checked about him.
-  check('the dialog names the man before he goes',
-    (await page.textContent('#askMessage')).includes('טעות'),
+  check('the shipped build offers no delete, even for a name typed by mistake',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0,
+    await page.textContent('#workerFormDanger'));
+  check('and says why, rather than leaving a gap where a button was',
+    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת בגרסה הזו'),
+    await page.textContent('#workerFormDanger'));
+  check('the archive is what it does offer instead',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /ארכיון/ }).count()) > 0);
+
+  // And the write path, called the way a screen drawn by an older build would call it.
+  // NOT awaited inside the page: the refusal opens a dialog and waits for somebody to
+  // read it, so returning that promise would hang until the test timed out. What is being
+  // read here is what the call DID, which is nothing.
+  await page.evaluate(() => {
+    const typo = State.schedule.workers.find(worker => worker.name === 'טעות');
+    deleteWorker(typo.id);
+  });
+  await page.waitForTimeout(400);
+  check('and it says why rather than failing silently',
+    (await page.textContent('#askMessage')).includes('מחיקה סופית מושבתת'),
     await page.textContent('#askMessage'));
-
-  // One more tap in the same place as the last tap is not a decision. The name has to be
-  // typed, and a wrong one is refused rather than accepted quietly.
-  await page.fill('#askInput', 'טעו');
   await page.click('#askOk');
-  await page.waitForTimeout(250);
-  check('a name that does not match is refused',
-    (await page.isVisible('#askModal')) === true
-    && (await page.textContent('#askError')).length > 0,
-    await page.textContent('#askError'));
-  check('and nobody has been deleted on the strength of it',
+  await page.waitForTimeout(200);
+  check('and calling the deletion directly does not remove him either',
     (await page.evaluate(() => State.schedule.workers.length)) === before,
     String(await page.evaluate(() => State.schedule.workers.length)));
+  check('he is still on the disk, not only on the screen',
+    (await page.evaluate(() => localStorage.getItem('scheduleData:v2') || '')).includes('טעות'));
 
-  await page.fill('#askInput', 'טעות');
-  await page.click('#askOk');
-  await page.waitForTimeout(300);
-
-  check('and he is gone',
-    (await page.evaluate(() => State.schedule.workers.length)) === before - 1,
-    String(await page.evaluate(() => State.schedule.workers.length)));
-  check('gone from the list too',
-    !(await page.textContent('#workerList')).includes('טעות'));
-  check('and gone from the disk, not only the screen',
-    !(await page.evaluate(() => localStorage.getItem('scheduleData:v2') || '')).includes('טעות'));
+  // Vehicles are retired in this build too, and the roster is where they were managed.
+  check('no vehicle panel is drawn',
+    (await page.evaluate(() => {
+      const list = document.getElementById('vehicleList');
+      if (!list) return true;
+      const panel = list.closest('.roster-panel');
+      return !panel || panel.style.display === 'none';
+    })), 'vehicle panel');
 
   // A new worker must never reuse an archived id - and must not be one past the highest
   // either. Two phones holding the same roster used to hand the same next id to two
@@ -1192,6 +1201,13 @@ async function seedRoster(page) {
     // of the next check is the failure it reports, not how long the wait was.
     FarkadSync._cloudChain = null;
     FarkadSync._cloudOpen = 0;
+    // And the right to send, which since v87 is a record on the DISK rather than a
+    // property of this tab - see SEND_CLAIM_KEY. A send that never answered still holds
+    // it, and the next flush correctly refuses to start while another sender might be
+    // open. Given back here for the same reason as the two above: what the next check is
+    // about is the failure that gets reported, not the wait before it.
+    FarkadSync.releaseSendClaim();
+    FarkadSync._claiming = false;
     FarkadSync.adapter.update = () => Promise.reject(new Error('offline'));
     FarkadSync.edit('days.2026-08-12.actual.w_09', { entries: [] });
   });
@@ -1444,24 +1460,26 @@ async function seedRoster(page) {
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
 
-  check('an archived typo is still offered the permanent delete',
-    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
-  check('and the restore button is there beside it',
+  // An archived typo is offered no permanent delete either - the gate is shut for the
+  // archive as much as for the working list, which is the point of putting it first in
+  // deletionBlockers rather than at the end.
+  check('an archived typo is offered no permanent delete',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0,
+    await page.textContent('#workerFormDanger'));
+  check('and the restore button is what is there instead',
     await page.locator('#workerFormDanger').getByRole('button', { name: /החזר/ }).isVisible());
+  check('with the reason named',
+    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת בגרסה הזו'),
+    await page.textContent('#workerFormDanger'));
 
-  // By typed name, exactly as it is for an active one.
-  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
-  await page.waitForTimeout(250);
-  check('the dialog asks for the name to be typed',
-    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
-    await page.textContent('#askMessage'));
-  await page.fill('#askInput', 'טעות');
-  await page.click('#askOk');
-  await page.waitForTimeout(350);
-
-  check('and he is gone',
-    !(await page.textContent('#workerList')).includes('טעות'),
+  check('and he is still in the archive rather than gone',
+    (await page.textContent('#workerList')).includes('טעות'),
     await page.textContent('#workerList'));
+
+  // The form has to be closed by hand now. It used to close because the deletion below
+  // it went through, and a modal left open swallows every click after it.
+  await page.evaluate(() => closeWorkerForm());
+  await page.waitForTimeout(200);
 
   // The man with a day behind him is archived and stays that way.
   await page.evaluate(() => {
@@ -3605,7 +3623,14 @@ async function seedRoster(page) {
 
       if (fault === 'prepare') refuse(key => key === 'farkad:pendingReplace');
       if (fault === 'local-save') refuse(key => key === 'scheduleData:v2');
-      if (fault === 'queue-prune') refuse(key => key.indexOf('farkad:outbox') === 0);
+      // A restore FENCES the queue by taking the operations it supersedes off the disk,
+      // so the fault that stops one is a browser that will not remove. A full disk is
+      // not: taking bytes away has never needed room, and refusing writes here left the
+      // fence landing happily and the door reporting the success it had.
+      if (fault === 'queue-prune') {
+        Store.remove = key => (String(key).indexOf('farkad:outbox') === 0
+          ? undefined : realRemove(key));
+      }
       if (fault === 'finalize') {
         refuse((key, value) =>
           key === 'farkad:pendingReplace' && value.indexOf('"cancelled"') !== -1);
@@ -6498,84 +6523,98 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 }
 
 // ---------------------------------------------------------------- the crew's vehicles
+//
+// RETIRED. The owner cancelled the feature; FARKAD_FLAGS in js/model/schema.js is where
+// that is said, and this is what a person actually gets. The arithmetic and the screens
+// that drew it are exercised with the gate open in tests/data.test.mjs - what is read
+// here is that none of it is reachable, and that the records are still there.
 {
-  // A vehicle is paid a flat amount for a day it went out, to the man who OWNS it -
-  // whether or not he was on a site himself. Added through the screen rather than by
-  // writing the array, because what is being checked is that a person can do this.
   const page = await open();
   await seedRoster(page);
+
+  // A vehicle, and an evening that remembered it stayed in the yard: bytes a build that
+  // still did vehicles would have written, on a phone that now runs this one.
+  await page.evaluate(() => {
+    State.schedule.vehicles = [{
+      id: 'v_01', name: 'טנדר לבן', ownerId: 'w_01', active: true,
+      rates: [{ from: '2026-01-01', amount: 300 }]
+    }];
+    State.commit(assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    State.schedule.days['2026-08-12'].vehiclesOff = ['v_01'];
+    State.save({ silent: true });
+  });
   await page.click('#tab-roster');
   await page.waitForTimeout(300);
 
-  check('the crew screen offers somewhere to put them',
-    await page.locator('#vehicleList').isVisible());
-  check('and says so while there are none',
-    (await page.textContent('#vehicleList')).includes('אין רכבים'));
+  check('the crew screen offers no vehicle panel at all',
+    await page.evaluate(() => {
+      const list = document.getElementById('vehicleList');
+      if (!list) return true;
+      const panel = list.closest('.roster-panel');
+      return !panel || panel.style.display === 'none';
+    }));
+  check('and no button that would add one',
+    (await page.getByRole('button', { name: '+ הוסף רכב' }).count()) === 0
+    || !(await page.getByRole('button', { name: '+ הוסף רכב' }).isVisible()));
 
-  await page.getByRole('button', { name: '+ הוסף רכב' }).click();
-  await page.waitForTimeout(250);
-  await page.fill('#askInput', 'טנדר לבן');
-  await page.getByRole('button', { name: 'המשך' }).click();
-  await page.waitForTimeout(250);
-  await page.getByRole('button', { name: 'דוד', exact: true }).click();
-  await page.waitForTimeout(250);
-  await page.fill('#askInput', '300');
-  await page.click('#askOk');
-  await page.waitForTimeout(400);
+  await page.click('#tab-day');
+  await page.waitForTimeout(300);
+  check('the day screen draws no vehicle tray',
+    (await page.locator('.chip-vehicle').count()) === 0);
 
-  const listed = await page.textContent('#vehicleList');
-  check('the vehicle is on the list', listed.includes('טנדר לבן'), listed.slice(0, 60));
-  check('with the man who owns it', listed.includes('דוד'), listed.slice(0, 60));
-  check('and what it is worth a day', listed.includes('300'), listed.slice(0, 60));
-
-  const stored = await page.evaluate(() => State.schedule.vehicles[0]);
-  check('it is owned by an id, not by a name that could change',
-    stored.ownerId === 'w_01', JSON.stringify(stored));
-  check('and it starts earning today, not in a month already paid',
-    stored.rates.length === 1 && stored.rates[0].from === new Date().toISOString().slice(0, 10),
-    JSON.stringify(stored.rates));
-
-  // The money, on the sheet that gets printed.
-  await page.evaluate(() => {
-    const today = todayStr();
-    assignPlace(State.schedule, today, 'w_02', 'actual', 'p_01');
-    State.save();
-    showView('reports');
-    REPORT_RANGE.from = today;
-    REPORT_RANGE.to = today;
-    render();
+  // The money, which is the half a screen gate would not have covered.
+  const pay = await page.evaluate(() => {
+    State.date = '2026-08-12';
+    return {
+      out: vehiclesOutOn(State.schedule, '2026-08-12'),
+      owed: vehiclePayFor(State.schedule, 'w_01', '2026-08-01', '2026-08-31'),
+      row: payrollReport(State.schedule, '2026-08-01', '2026-08-31')
+        .find(item => item.workerId === 'w_01')
+    };
   });
-  await page.waitForTimeout(400);
+  check('nothing went out, so nobody is charged for one',
+    pay.out.length === 0 && pay.owed.days === 0 && pay.owed.amount === 0,
+    JSON.stringify(pay.owed));
+  check('and the pay sheet is his day and nothing else',
+    pay.row.amount === 400 && pay.row.netAmount === 400 && pay.row.vehicleAmount === 0,
+    JSON.stringify(pay.row));
 
-  const sheet = await page.textContent('.report-payroll');
-  check('the pay sheet grows a vehicle column', sheet.includes('ימי רכב'), sheet.slice(0, 80));
-  const owed = await page.evaluate(() => {
-    const rows = payrollRows();
-    const owner = rows.find(row => row.workerId === 'w_01');
-    return { days: owner.vehicleDays, amount: owner.vehicleAmount, total: owner.amount };
+  // The export a bookkeeper opens: no vehicle headings at all, rather than two columns
+  // of zeroes under headings that say this app still accounts for them.
+  const headers = await page.evaluate(() => {
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    return payrollSheetRows()[0];
   });
-  check('the owner is paid for the day his vehicle went out, though he did not work',
-    owed.days === 1 && owed.amount === 300 && owed.total === 300, JSON.stringify(owed));
+  check('the exported sheet has no vehicle columns',
+    !headers.includes('ימי רכב') && !headers.includes('שכר רכב'),
+    JSON.stringify(headers));
 
-  // The exception, on the evening it happens.
-  await page.evaluate(() => { showView('day'); State.date = todayStr(); render(); });
-  await page.waitForTimeout(350);
-  const tray = await page.textContent('.tray:last-of-type');
-  check('the day screen lists the vehicles', tray.includes('טנדר לבן'), tray.slice(0, 50));
-  check('and says it went out', tray.includes('יצא'), tray.slice(0, 50));
+  // And the records are exactly where they were.
+  const kept = await page.evaluate(() => ({
+    vehicles: State.schedule.vehicles,
+    off: (State.schedule.days['2026-08-12'] || {}).vehiclesOff,
+    stored: localStorage.getItem('scheduleData:v2')
+  }));
+  check('the vehicle is still in the record, rates and all',
+    kept.vehicles.length === 1 && kept.vehicles[0].rates.length === 1
+    && kept.vehicles[0].rates[0].amount === 300, JSON.stringify(kept.vehicles));
+  check('the evening that remembered it stayed in still says so',
+    JSON.stringify(kept.off) === '["v_01"]', JSON.stringify(kept.off));
+  check('and all of it is on the disk, not only on the screen',
+    kept.stored.includes('v_01') && kept.stored.includes('vehiclesOff'));
 
-  await page.getByRole('button', { name: /טנדר לבן/ }).first().click();
-  await page.waitForTimeout(350);
-  check('one tap says it did not',
-    (await page.textContent('.tray:last-of-type')).includes('לא יצא'));
-  check('and that day is no longer paid for',
-    (await page.evaluate(() => vehiclePayFor(State.schedule, 'w_01', todayStr(), todayStr()))).amount === 0);
-  check('the undo bar offers it back', await page.locator('#undoBar').isVisible());
-
-  await page.getByRole('button', { name: 'בטל', exact: true }).first().click();
-  await page.waitForTimeout(350);
-  check('and taking it back pays for it again',
-    (await page.evaluate(() => vehiclePayFor(State.schedule, 'w_01', todayStr(), todayStr()))).amount === 300);
+  // A reload, through the real service worker, on the real record.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  const after = await page.evaluate(() => ({
+    vehicles: (State.schedule.vehicles || []).map(item => item.id),
+    off: (State.schedule.days['2026-08-12'] || {}).vehiclesOff,
+    problems: Recovery.problems.map(problem => problem.key)
+  }));
+  check('a reload keeps them and quarantines nothing',
+    after.vehicles.join() === 'v_01' && JSON.stringify(after.off) === '["v_01"]'
+    && after.problems.length === 0, JSON.stringify(after));
 
   await page.context().close();
 }

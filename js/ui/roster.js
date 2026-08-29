@@ -678,6 +678,22 @@ function renderPlaceList() {
 // the price they were worth. See vehicleRateOn() in js/model/schema.js.
 
 function renderVehicleList() {
+    // Retired. Nothing is drawn - no list, no add button, no rate history - so there is
+    // no path from the screen to a vehicle record. The records themselves are untouched;
+    // see vehiclesEnabled in js/model/schema.js.
+    if (!vehiclesEnabled()) {
+        const host = document.getElementById('vehicleList');
+        if (!host) return;
+        if (typeof clear === 'function') clear(host);
+        // The whole panel, heading and "+ add" button included. Hiding the list alone
+        // would leave a heading and a button that opens a form for a feature that does
+        // not exist. Found from the list rather than by an id in the markup, so nothing
+        // in the offline shell has to change to retire a feature.
+        const panel = host.closest ? host.closest('.roster-panel') : null;
+        if (panel) panel.style.display = 'none';
+        return;
+    }
+
     const container = document.getElementById('vehicleList');
     if (!container) return;
     clear(container);
@@ -744,6 +760,10 @@ async function askAmount(title, value, ok, message) {
 }
 
 async function showAddVehicleModal() {
+    // Retired. Reachable only from a screen drawn before this build, or from a hand
+    // typing it into a console - and either way it would create a record for a feature
+    // nothing else reads.
+    if (!vehiclesEnabled()) return;
     if (State.activeWorkers().length === 0) {
         askTell('הוסף קודם עובד - לרכב צריך להיות בעלים שמקבל עליו את התשלום.');
         return;

@@ -490,8 +490,15 @@ const UNDO_KEEP = 3;
 // The caller must not replace anything until it does. A restore that goes ahead without a
 // confirmed way back leaves somebody with the state they restored, no route to the one
 // they had, and no way to know that until they look for it.
+// The way back, and it is not the schedule alone.
+//
+// A restore point that carried only the week put somebody back where they started with
+// the questions the migration had raised about it gone - answered by nobody, and gone
+// from the only place they existed. The decisions travel in the entry beside it.
 function pushUndoState(schedule) {
     const entry = JSON.stringify(schedule);
+    const decisions = JSON.stringify(
+        Array.isArray(State.migrationIssues) ? State.migrationIssues : []);
 
     let stack;
     try {
@@ -505,7 +512,7 @@ function pushUndoState(schedule) {
         stack = [];
     }
 
-    stack.unshift({ at: new Date().toISOString(), schedule: entry });
+    stack.unshift({ at: new Date().toISOString(), schedule: entry, decisions });
     const stacked = Store.setVerified(UNDO_STACK_KEY, JSON.stringify(stack.slice(0, UNDO_KEEP)));
 
     // The single slot stays, because it is what restoreLocalBackup has always read and
@@ -535,6 +542,20 @@ function peekUndoState() {
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
     return Store.get(UNDO_KEY);
+}
+
+// The unanswered decisions stored beside a way back, or null when the entry predates
+// them. Null is not "there were none" - an older entry simply cannot say - so the caller
+// leaves whatever is on the device alone rather than clearing it on that entry's behalf.
+function undoDecisionsFor(raw) {
+    const entry = readUndoStack().find(item => item && item.schedule === raw);
+    if (!entry || typeof entry.decisions !== 'string') return null;
+    try {
+        const parsed = JSON.parse(entry.decisions);
+        return Array.isArray(parsed) ? parsed : null;
+    } catch (error) {
+        return null;
+    }
 }
 
 // Taken off, once the state it holds has been accepted. Matched on content so that a
@@ -731,6 +752,8 @@ function exportRecoveryData() {
         : true;
     if (!recorded && FarkadSync.noteHandoverUnrecorded) FarkadSync.noteHandoverUnrecorded();
 
+    const snapshot = Recovery.rawSnapshot();
+
     const payload = {
         kind: 'farkad-recovery',
         takenAt: new Date().toISOString(),
@@ -756,10 +779,14 @@ function exportRecoveryData() {
         // Marked as what it is. It is derived, not a record, and whoever opens this file
         // is told which of the two they are reading.
         liveSchedule: cloudDocument(State.schedule),
+        // Whether the two readings of the device agreed - see Recovery.rawSnapshot. False
+        // means another tab was writing while this ran, so the reconstruction on the far
+        // side may be missing the last of it and must not be presented as complete.
+        stable: snapshot.stable,
         // Same reason: the decisions the migration refused to guess are only on the disk
         // when the migration was allowed to write, and on a held device it never is.
         pendingDecisions: Array.isArray(State.migrationIssues) ? State.migrationIssues : [],
-        records: Recovery.rawRecords()
+        records: snapshot.records
     };
 
     const name = `farkad-recovery-${todayStr()}.json`;
@@ -783,7 +810,9 @@ function exportRecoveryData() {
     // after, or the bidi algorithm folds the date backwards.
     if (typeof askTell === 'function') {
         askTell({
-            title: recorded ? 'הקובץ נמסר לדפדפן' : 'הקובץ נמסר, אבל לא נרשם במכשיר',
+            title: !snapshot.stable
+                ? 'הקובץ נמסר, אבל נלקח בזמן שמשהו השתנה'
+                : (recorded ? 'הקובץ נמסר לדפדפן' : 'הקובץ נמסר, אבל לא נרשם במכשיר'),
             message: recorded
                 ? '\u2066' + name + '\u2069 - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר, והעתק אותו למקום נוסף. ' +
                     'האפליקציה לא יכולה לדעת אם השמירה הצליחה. ' +
@@ -1073,6 +1102,73 @@ function looksLikeRecoveryFile(parsed) {
 // Every candidate is tried in order and the first one that passes the WHOLE document
 // check wins. Nothing here repairs anything: a record that will not parse is skipped and
 // named, never patched into something that looks plausible.
+// The restore the person asked for, if the file carries one that can be acted on.
+//
+// A held device is exactly the device whose transaction has not finished. Its envelope is
+// the state somebody was TOLD they now had, and the schedule record beside it is the one
+// they asked to replace - so falling back to that record silently undoes the thing they
+// pressed a button for. It used to be exported and then never looked at.
+//
+// Every phase gets an answer and none of them gets a guess:
+//
+//   prepared / local-stored   the replacement, carried out, fencing the queue by the
+//                             operations it names
+//   cancelled                 the transaction was called off; the disk record stands
+//   legacy (v71)              the bare document an old build wrote. Applied only when
+//                             its frozen v2 companion is there to say WHERE the boundary
+//                             was - without that the queue cannot be fenced, and a
+//                             restore that supersedes the wrong half of a journal is
+//                             somebody's day either deleted or resurrected
+//   unreadable                named, never repaired
+function pendingReplacementIn(records, tried) {
+    const read = key => {
+        const raw = records[key];
+        if (typeof raw !== 'string') return undefined;
+        try {
+            return JSON.parse(raw);
+        } catch (error) {
+            tried.push(`${key}: לא נקרא`);
+            return null;
+        }
+    };
+
+    const parsed = read('farkad:pendingReplace');
+    if (parsed === undefined) return null;
+    if (parsed === null) return null;
+
+    const envelope = readReplacementRecord(parsed);
+    if (envelope) {
+        if (envelope.phase === 'cancelled') return null;
+        const check = readReplacementDocument(envelope.document);
+        if (!check.document) {
+            tried.push(`farkad:pendingReplace: ${(check.problems || []).join(', ')}`);
+            return null;
+        }
+        return { envelope, document: check.document, phase: envelope.phase };
+    }
+
+    if (isLegacyReplacement(parsed)) {
+        const companion = read('farkad:pendingReplace:v71');
+        const frozen = companion ? readReplacementRecord(companion) : null;
+        if (!frozen || frozen.phase === 'cancelled') {
+            // The document is real and the boundary is not known. Carrying it out would
+            // mean choosing which half of the queue it supersedes, and choosing wrong in
+            // either direction loses a day.
+            tried.push('farkad:pendingReplace: שחזור ישן בלי גבול תור - לא בוצע');
+            return null;
+        }
+        const check = readReplacementDocument(frozen.document);
+        if (!check.document) {
+            tried.push(`farkad:pendingReplace:v71: ${(check.problems || []).join(', ')}`);
+            return null;
+        }
+        return { envelope: frozen, document: check.document, phase: frozen.phase };
+    }
+
+    tried.push('farkad:pendingReplace: לא נקרא כרשומת שחזור');
+    return null;
+}
+
 function scheduleFromRecoveryRecords(records, fallback) {
     const tried = [];
     const parse = key => {
@@ -1086,15 +1182,22 @@ function scheduleFromRecoveryRecords(records, fallback) {
         }
     };
 
+    // Asked FIRST. Everything below is about the record the restore was replacing.
+    const replacement = pendingReplacementIn(records, tried);
+
     // The live record first, then its quarantined copies oldest-first, then whatever an
     // older build left behind. A copy is bytes that were already refused once, so it is
     // only reached when the live record cannot be used at all.
-    const candidates = ['scheduleData:v2']
+    //
+    // Skipped entirely when a restore is outstanding: the person asked for that document
+    // to BE the record, and the one on the disk is what they asked to replace.
+    const candidates = replacement ? [] : ['scheduleData:v2']
         .concat(Object.keys(records)
             .filter(key => key.indexOf('scheduleData:v2:damaged') === 0).sort());
 
-    let document = null;
-    let from = null;
+    let document = replacement ? replacement.document : null;
+    let from = replacement ? 'שחזור שממתין להסתיים' : null;
+    let issues = [];
     for (let i = 0; i < candidates.length && !document; i += 1) {
         const parsed = parse(candidates[i]);
         if (!parsed) continue;
@@ -1108,7 +1211,6 @@ function scheduleFromRecoveryRecords(records, fallback) {
     }
 
     // An old build's record, migrated the same way a first load migrates it.
-    let issues = [];
     if (!document) {
         const legacy = parse('scheduleData');
         if (legacy) {
@@ -1147,45 +1249,38 @@ function scheduleFromRecoveryRecords(records, fallback) {
 
     const schedule = normaliseSchedule(document);
 
-    // The queue the broken phone was carrying, replayed. These are edits that were made
-    // and confirmed to their owner and had not yet reached the schedule record - the
-    // difference between "what was written last time" and "what the phone was showing".
+    // The queue the broken phone was carrying, replayed through the SAME projector the
+    // live queue uses - decodeQueue and projectQueue in js/sync/sync.js. Not a second
+    // implementation: the version this replaced sorted storage keys lexically and threw
+    // away opId and `after`, so which value a rescue file rebuilt depended on how two
+    // random batch ids happened to sort, and the phone and its own file could disagree.
+    //
+    // These are edits that were made and confirmed to their owner and had not yet reached
+    // the schedule record - the difference between "what was written last time" and "what
+    // the phone was showing".
+    const queueRecords = {};
+    Object.keys(records).forEach(key => {
+        if (typeof records[key] !== 'string') return;
+        if (!FarkadSync.isQueueKey(key)) return;
+        queueRecords[key] = records[key];
+    });
+
+    const decoded = decodeQueue(queueRecords);
+    decoded.unreadable.forEach(key => tried.push(`${key}: לא נקרא`));
+
+    // Everything the replacement below supersedes, named. A restore fences by opId, so
+    // the operations it replaced are skipped by NAME rather than by a number that belongs
+    // to one tab's counter.
+    const fenced = supersededOpIds(replacement && replacement.envelope);
+    const upTo = Number(((replacement || {}).envelope || {}).supersedesSeq) || 0;
+    const fencing = Boolean(replacement && replacement.envelope)
+        && (fenced !== null || upTo > 0);
+
     let replayed = 0;
-    Object.keys(records).sort().forEach(key => {
-        if (key.indexOf('farkad:outbox') !== 0) return;
-        if (key.indexOf(':damaged') !== -1) return;
-        let parsed;
-        try {
-            parsed = JSON.parse(records[key]);
-        } catch (error) {
-            tried.push(`${key}: לא נקרא`);
-            return;
-        }
-        if (!parsed || typeof parsed !== 'object') return;
-
-        // Both shapes: a batch of operations, and the whole queue an older build kept
-        // inside the slot record.
-        const entries = [];
-        if (Array.isArray(parsed.ops)) {
-            parsed.ops.forEach(op => entries.push({
-                path: String((op || {}).path || ''), value: (op || {}).value,
-                seq: Number((op || {}).seq) || 0
-            }));
-        } else if (parsed.items && typeof parsed.items === 'object') {
-            Object.keys(parsed.items).forEach(path => entries.push({
-                path, value: parsed.items[path].value,
-                seq: Number(parsed.items[path].seq) || 0
-            }));
-        }
-
-        entries.sort((one, two) => one.seq - two.seq).forEach(entry => {
-            if (journalEntryProblems(entry.path, entry.value).length > 0) {
-                tried.push(`${key}: ${entry.path} לא נקרא`);
-                return;
-            }
-            applyJournalEntry(schedule, entry.path, entry.value);
-            replayed += 1;
-        });
+    queueJournalEntries(decoded.operations).forEach(([path, item]) => {
+        if (fencing && supersededByRestore(item, fenced, upTo)) return;
+        applyJournalEntry(schedule, path, item.value);
+        replayed += 1;
     });
 
     // Read again AFTER the replay. An entry that is sound on its own can still leave a
@@ -1198,7 +1293,57 @@ function scheduleFromRecoveryRecords(records, fallback) {
         throw error;
     }
 
-    return { schedule: normaliseSchedule(after.document), from, issues, replayed, tried };
+    const rebuilt = normaliseSchedule(after.document);
+
+    // Money that did not survive the read, named.
+    //
+    // Normalisation is deliberately forgiving - it has to be - and what it cannot place
+    // it drops. That is right for a live boot and wrong for a rescue: an advance or a
+    // ledger entry that fell out here is a number somebody wrote down about somebody's
+    // pay, and a file that silently held one fewer of them than the phone did would be a
+    // rescue that lost money without saying so. It stays in the file as raw bytes either
+    // way; this is what makes the person told about it.
+    const lostMoney = (label, before, went) => {
+        Object.keys(before || {}).forEach(id => {
+            if (!went || went[id] === undefined) tried.push(`${label} ${id}: לא נקרא`);
+        });
+    };
+    // Against the SOURCE, not against a document re-derived from the rebuilt schedule -
+    // anything already lost is gone from that one too, so comparing the two would compare
+    // the answer with itself and always agree.
+    lostMoney('מקדמה', (document || {}).advances, rebuilt.advances);
+    lostMoney('רישום מקדמה', ((document || {}).ledger || {}).advances,
+        (rebuilt.ledger || {}).advances);
+
+    return {
+        schedule: rebuilt,
+        from, issues, replayed, tried,
+        restorePhase: replacement ? replacement.phase : null
+    };
+}
+
+// What the person on the RECEIVING phone is told once a rescue file has landed.
+//
+// Three things they cannot find out any other way. That permanent deletion is off here
+// from now on, which is the price of a roster that arrived in a file. That part of the
+// file could not be read, when part of it could not - a summary that stayed silent about
+// it would let somebody believe they had recovered everything. And that the phone this
+// came from could not write down that the file left it: on that device the same people
+// still look deletable, and nothing in this file can fix that from here.
+function rescueLoadedNotice(loaded) {
+    let message = 'קובץ החילוץ נטען. מחיקה לצמיתות חסומה כאן מעכשיו - הארכיון עובד כרגיל.';
+    if (loaded.handoverRecorded === false) {
+        message += ' שים לב: במכשיר שממנו הגיע הקובץ לא נרשם שהקובץ יצא ממנו, '
+            + 'ולכן שם עדיין ייתכן שעובדים ייראו כאילו לא נשלחו לשום מקום. '
+            + 'אל תמחק שם אף אחד לצמיתות.';
+    }
+    if ((loaded.unread || []).length > 0) {
+        message += ` ${loaded.unread.length} רשומות בקובץ לא נקראו ונשארות בקובץ בלבד.`;
+    }
+    if (loaded.stable === false) {
+        message += ' הקובץ נלקח בזמן שמכשיר אחר כתב, ולכן ייתכן שחסרות בו עריכות אחרונות.';
+    }
+    return message;
 }
 
 function readRecoveryFile(parsed) {
@@ -1242,6 +1387,9 @@ function readRecoveryFile(parsed) {
         // left. Either way this device treats it as a handover; the flag is carried so
         // the person is told which of the two happened.
         handoverRecorded: parsed.handoverRecorded !== false,
+        // Whether the export could take one consistent reading of the device. False means
+        // another tab was writing while it ran and the file may be missing the last of it.
+        stable: parsed.stable !== false,
         summary: `קובץ חילוץ ממכשיר אחר. נמצא לוח עבודה ב-\u2068${found.from}\u2069 עם `
             + `${found.schedule.workers.length} עובדים ו-${counts.workDays} ימי עבודה`
             + (found.replayed > 0 ? `, ועוד ${found.replayed} עריכות שלא הספיקו להישמר.` : '.')
@@ -1400,15 +1548,38 @@ function importBackup(event) {
             if (FarkadSync.noteProvenanceUncertain) FarkadSync.noteProvenanceUncertain();
         }
 
-        if (!result.ok && result.stage !== 'cloud') {
-            // The schedule was put back by the transaction; the issues are this file's
-            // business and go back with it.
+        // WHICH failures actually put the schedule back, and which only left the
+        // transaction unfinished. Only two of them roll anything back: 'prepare', where
+        // nothing happened at all, and 'local', where the write was refused and the
+        // previous state was restored. Every other stage means the incoming schedule is
+        // ON THE DISK - the fence did not finish, or the cloud did not answer, or the
+        // note could not be taken off - and treating those as a rollback put the OLD
+        // file's questions back beside the NEW file's schedule. The schedule then
+        // survived the app being closed and the unanswered decisions did not.
+        const rolledBack = result.stage === 'prepare' || result.stage === 'local';
+        if (!result.ok && rolledBack) {
             State.migrationIssues = previousIssues;
             render();
             tellRestoreResult(result, '');
             return;
         }
-        writeIssues(loaded.issues);
+
+        // The schedule is durable, so the questions that belong to it have to be too -
+        // and the answer is read, because a device that keeps the week and loses the
+        // questions has lost the half nobody can reconstruct.
+        const decisionsKept = writeIssues(loaded.issues);
+        if (!decisionsKept && loaded.issues.length > 0) {
+            State.migrationIssues = loaded.issues;
+            render();
+            await askTell({
+                title: 'נטען, אבל ההחלטות לא נשמרו',
+                message: `הנתונים נטענו, אבל ${loaded.issues.length} רישומים שממתינים ` +
+                    'להחלטה לא הצליחו להישמר במכשיר, ולכן הם יימחקו כשתסגור את האפליקציה. ' +
+                    'פנה מקום במכשיר וטען את הקובץ שוב, או ענה עליהם עכשיו.'
+            });
+            openMigrationModal();
+            return;
+        }
 
         if (loaded.issues.length > 0) {
             await askTell(`הגיבוי נטען. ${loaded.issues.length} רישומים ממתינים להחלטה שלך.`);
@@ -1416,9 +1587,23 @@ function importBackup(event) {
             if (!result.ok) askTell(replacementNotice(result.error));
             return;
         }
-        tellRestoreResult(result, loaded.rescue
-            ? 'קובץ החילוץ נטען. מחיקה לצמיתות חסומה כאן מעכשיו - הארכיון עובד כרגיל.'
-            : 'הגיבוי נטען.');
+        tellRestoreResult(result, loaded.rescue ? rescueLoadedNotice(loaded) : 'הגיבוי נטען.');
+    };
+    // A read that FAILS, which is not the same as a file that will not parse.
+    //
+    // The browser does this when the file has gone from under the picker - a photo
+    // deleted while the sheet was open, a file on a share that dropped, a permission
+    // withdrawn on iOS. Without this, onload simply never fires: nothing is replaced,
+    // which is right, and nothing is SAID, which leaves somebody tapping the button
+    // again on a screen where the last tap did nothing at all.
+    reader.onerror = () => {
+        console.error('Import failed: the file could not be read', reader.error);
+        event.target.value = '';
+        askTell({
+            title: 'הקובץ לא נקרא',
+            message: 'לא הצלחנו לקרוא את הקובץ מהמכשיר. הנתונים הקיימים לא השתנו. ' +
+                'נסה לבחור אותו שוב, או להעתיק אותו למכשיר ולנסות מחדש.'
+        });
     };
     reader.readAsText(file);
 }
@@ -1453,7 +1638,18 @@ async function restoreLocalBackup() {
         return;
     }
 
+    // Read BEFORE the replacement, because the entry is dropped once it succeeds.
+    const decisions = undoDecisionsFor(raw);
+
     const result = await FarkadSync.replaceEverything(normaliseSchedule(document));
+
+    // The questions that belonged to the state being restored, restored with it. A way
+    // back that returned the week and left the previous week's unanswered questions
+    // beside it would put a card on screen pointing at a day this record does not have.
+    if (result.stage !== 'prepare' && result.stage !== 'local' && decisions !== null) {
+        State.migrationIssues = decisions;
+        writeIssues(decisions);
+    }
 
     if (result.ok) {
         // Now, and only now. Dropping it before the transaction had proved itself meant

@@ -250,6 +250,10 @@ export function makeDevice(options = {}) {
     const downloads = [];
     const sandbox = {
         localStorage,
+        // The test seam for the shipped feature gates. Defined BEFORE the app's scripts
+        // run, which is the only moment it can be read - schema.js freezes the flags at
+        // definition time. A device given no flags gets exactly what a person installs.
+        FARKAD_FLAG_OVERRIDES: options.flags || null,
         document: makeDocument(downloads),
         Blob: makeBlob(),
         URL: makeUrl(),

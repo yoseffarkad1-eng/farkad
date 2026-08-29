@@ -171,7 +171,39 @@ const Store = {
         try {
             localStorage.removeItem(key);
         } catch (error) {
+            // NOT a reason to declare storage gone. This used to call fallback, which
+            // sets available = false - and from that moment durableGet answered null for
+            // every key on the device. Anything asking "is this record still there?" was
+            // told no, by a disk that had simply stopped answering, and one caller read
+            // that as "confirmed absent". See removeVerified.
+            console.warn('Browser storage refused a removal:', key, error);
+        }
+    },
+
+    // A removal that is not believed until the key is READ BACK as gone.
+    //
+    // For the records where "it is no longer there" is a claim somebody acts on - the
+    // provenance facts that decide whether a man can be destroyed for good. A removal
+    // that threw, and a removal onto a disk that will not answer, are both FALSE here:
+    // being unable to read a key has never been proof that it is absent, and treating it
+    // as proof is how a device came back from a failed handover still claiming that
+    // everybody on it was only ever its own.
+    removeVerified(key) {
+        delete this.memory[key];
+        if (!this.available) return false;
+
+        try {
+            localStorage.removeItem(key);
+        } catch (error) {
+            console.warn('Browser storage refused a removal:', key, error);
+            return false;
+        }
+
+        try {
+            return localStorage.getItem(key) === null;
+        } catch (error) {
             this.fallback(error);
+            return false;
         }
     },
 

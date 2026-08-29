@@ -260,7 +260,7 @@ function payrollRows() {
     // off is owed real money and had no row to be owed it on.
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
         .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
-            || row.vehicleDays > 0);
+            || (vehiclesEnabled() && row.vehicleDays > 0));
 }
 
 function invoiceRows() {
@@ -316,7 +316,7 @@ function renderPayrollTable() {
     // the money answer different questions - and separate from the day rate, because a
     // vehicle is paid for going out and the man's day is paid for his working. Adding
     // them together is how five days at 450 comes to 3750 and explains nothing.
-    const anyVehicle = rows.some(row => row.vehicleDays > 0);
+    const anyVehicle = vehiclesEnabled() && rows.some(row => row.vehicleDays > 0);
 
     const headers = ['עובד'].concat(columns.map(column => column.header));
     if (anyVehicle) headers.push('ימי רכב', 'שכר רכב');
@@ -1214,21 +1214,32 @@ function payrollSheetRows() {
     // This file is the one that reaches the bookkeeper, and it used to write the gross
     // amount under 'לתשלום' - the heading the screen uses for the net - so the two
     // disagreed by exactly the advances, and the paper won.
-    // The vehicle columns are always here, unlike on the screen where they appear only
-    // when somebody owns one. A spreadsheet is compared against last month's, and a file
-    // whose columns move depending on whether a van went out is a file that cannot be.
-    return [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
-        'נעדר', 'ימי רכב', 'שכר רכב', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
-        .concat(payrollRows().map(row => [
-            row.name, row.attendanceDays, row.payUnits, row.doubleDays,
-            row.extraHours, row.absent,
-            row.vehicleDays || 0, Math.round(row.vehicleAmount || 0),
-            row.dailyRate,
-            row.amount === null ? '' : Math.round(row.amount),
-            row.advances > 0 ? -Math.round(row.advances) : 0,
-            row.netAmount === null ? '' : Math.round(row.netAmount),
-            row.hoursUnpriced ? 'שעות נוספות בלי שכר שעה - לא נכללו' : ''
-        ]));
+    // The vehicle columns are here whenever this build does vehicles at all, unlike on
+    // the screen where they appear only when somebody owns one. A spreadsheet is compared
+    // against last month's, and a file whose columns move depending on whether a van went
+    // out is a file that cannot be.
+    //
+    // While the feature is retired they are not written. Two columns of zeroes in a file
+    // that reaches a bookkeeper are not neutral: they are a heading that says this app
+    // still accounts for vehicles, beside a number saying it accounted for none.
+    const withVehicles = vehiclesEnabled();
+    const headers = ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר']
+        .concat(withVehicles ? ['ימי רכב', 'שכר רכב'] : [])
+        .concat(['שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']);
+
+    return [headers].concat(payrollRows().map(row => [
+        row.name, row.attendanceDays, row.payUnits, row.doubleDays,
+        row.extraHours, row.absent
+    ].concat(withVehicles
+        ? [row.vehicleDays || 0, Math.round(row.vehicleAmount || 0)]
+        : []
+    ).concat([
+        row.dailyRate,
+        row.amount === null ? '' : Math.round(row.amount),
+        row.advances > 0 ? -Math.round(row.advances) : 0,
+        row.netAmount === null ? '' : Math.round(row.netAmount),
+        row.hoursUnpriced ? 'שעות נוספות בלי שכר שעה - לא נכללו' : ''
+    ])));
 }
 
 function invoiceSheetRows() {

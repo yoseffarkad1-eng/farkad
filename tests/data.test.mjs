@@ -3112,9 +3112,17 @@ const diskDays = device => {
     let answer = null;
     try { answer = device.Sync.forgetReplace(); } catch (error) { threw = true; }
     check('it does not throw out of forgetReplace', threw === false);
+    // Three honest outcomes, and no fourth: the bytes went, a tombstone says the
+    // transaction is over, or the answer is false. A removal that throws is no longer
+    // allowed to declare the whole of storage unavailable - being unable to read a key
+    // was never proof that it is absent - so the tombstone is the route this takes now.
     check('and the answer is honest about whether it is gone',
-        answer === false || device.raw('farkad:pendingReplace') === null,
-        JSON.stringify({ answer, still: device.raw('farkad:pendingReplace') !== null }));
+        answer === false
+        || device.raw('farkad:pendingReplace') === null
+        || (device.Sync.pendingReplace() === null
+            && String(device.raw('farkad:pendingReplace')).includes('"cancelled"')),
+        JSON.stringify({ answer, still: device.raw('farkad:pendingReplace'),
+            pending: device.Sync.pendingReplace() }));
 }
 
 {
@@ -5423,19 +5431,20 @@ for (const [label, arm] of [
 // against him. Which one is offered is decided by the model, not by the screen.
 
 // A crew, a site, and the dialogs answered for us. `answer` is what the person taps.
-// Permanent deletion is OFF in this build (FARKAD_FLAGS in js/model/schema.js), so the
-// path behind it can only be exercised by a test that opens the gate on purpose. It is
-// opened here, per device, and never in production: nothing in the app writes to that
-// object. A gate that rots while it is shut is not a gate, so everything it guards goes
-// on being tested exactly as it was - and the suite below proves it is shut by default.
-function allowDeletion(device) {
-    device.global('FARKAD_FLAGS').permanentDeletion = true;
-    return device;
-}
+// Permanent deletion is OFF in this build (FARKAD_FLAGS in js/model/schema.js), and the
+// flags are frozen - so a test cannot reach in and set one. It asks for a device built
+// with the gate open instead, which is the same thing a build with the flag on would be,
+// and is therefore testing that build rather than mutating this one.
+//
+// A gate that rots while it is shut is not a gate, so everything it guards goes on being
+// tested exactly as it was - and one suite below reads what a person actually installs.
+const DELETION_ON = { permanentDeletion: true };
 
 function crew(options = {}) {
-    const device = makeDevice({ deviceId: options.deviceId || 'd_here' });
-    if (options.canDelete !== false) allowDeletion(device);
+    const device = makeDevice({
+        deviceId: options.deviceId || 'd_here',
+        flags: options.canDelete === false ? null : DELETION_ON
+    });
     device.State.schedule.workers = [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
         { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
@@ -6493,7 +6502,9 @@ for (const [label, act] of [
     given('he was added', device.State.commitRoster() === true);
     given('and nothing was ever handed to an adapter', device.Sync.adapter === null);
 
-    const again = allowDeletion(makeDevice({ storage: device.dump(), deviceId: 'd_here' }));
+    const again = makeDevice({
+        storage: device.dump(), deviceId: 'd_here', flags: DELETION_ON
+    });
     again.State.load();
     again.ctx.askConfirm = () => Promise.resolve(true);
     again.ctx.askTell = () => Promise.resolve();
@@ -9453,6 +9464,17 @@ function withAdvances(device, rows) {
 
 // ---------------------------------------------------------------- the vehicles
 //
+// THE FEATURE IS OFF IN THIS BUILD. The owner cancelled it, and FARKAD_FLAGS in
+// js/model/schema.js is where that is said. What follows tests the implementation with
+// the gate OPEN - the same thing a build with the flag on would be - because a gate that
+// rots while it is shut is not a gate, and the day anybody reconsiders this the
+// arithmetic underneath has to still be the arithmetic that was argued over.
+//
+// What a person actually installs is read by the suite after them, and by R8 in
+// tests/recovery.test.mjs: no charge, no control, and every stored vehicle byte intact.
+const VEHICLES_ON = { vehicles: true };
+
+//
 // V1. Five vehicles: one each for two of the men, three for a third. Three hundred a day
 // for a vehicle that went out - not per trip, not per site, and not scaled by whether the
 // man driving it worked a full day. Paid to whoever OWNS it, and paid whether or not he
@@ -9465,7 +9487,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: a vehicle earns for the man who owns it');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = [
@@ -9500,7 +9522,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: three vehicles are three payments');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = ['v_01', 'v_02', 'v_03'].map(id => ({
@@ -9521,7 +9543,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: the ordinary evening writes nothing, the exception writes one field');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
@@ -9554,7 +9576,7 @@ function withAdvances(device, rows) {
     // The one that would have cost real money. The default is "they all went out", so a
     // vehicle with no start date would earn for every day in the record - including the
     // month that was counted, paid and closed.
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     ['2026-07-06', '2026-07-07', '2026-08-12'].forEach(date => record(device, date, 'w_01', 'p_01'));
@@ -9581,7 +9603,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: a day nobody worked is not a day five vehicles earned');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
@@ -9604,13 +9626,13 @@ function withAdvances(device, rows) {
 {
     suite('V1: the vehicles survive the app being closed, and reach the other phone');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     device.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר לבן', ownerId: 'w_01',
         active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
     device.State.save();
 
-    const reopened = makeDevice({ storage: device.dump() });
+    const reopened = makeDevice({ storage: device.dump(), flags: VEHICLES_ON });
     reopened.State.load();
     const kept = reopened.State.schedule.vehicles;
     check('a reopened phone still has them', Array.isArray(kept) && kept.length === 1,
@@ -9620,11 +9642,11 @@ function withAdvances(device, rows) {
 
     // A build that has never heard of vehicles must not be handed something it will choke
     // on, and a record written before this feature must not arrive here as a crash.
-    const older = makeDevice();
+    const older = makeDevice({ flags: VEHICLES_ON });
     seed(older);
     delete older.State.schedule.vehicles;
     older.State.save();
-    const upgraded = makeDevice({ storage: older.dump() });
+    const upgraded = makeDevice({ storage: older.dump(), flags: VEHICLES_ON });
     upgraded.State.load();
     same('a record from before vehicles existed reads as none of them',
         upgraded.call('vehiclePayFor', upgraded.State.schedule, 'w_01', '2026-01-01', '2026-12-31'),
@@ -9633,6 +9655,127 @@ function withAdvances(device, rows) {
         upgraded.call('payrollReport', upgraded.State.schedule, '2026-01-01', '2026-12-31')));
 }
 
+
+// ---------------------------------------------------------------- vehicles, as shipped
+//
+// The build a person installs. Everything above this line ran with the gate open; nothing
+// below it does, and nothing below it may pass by accident - each check is a thing the
+// retirement promised.
+{
+    suite('V-off: a cancelled feature does not go on charging anybody');
+
+    const device = makeDevice({ deviceId: 'd_voff' });
+    seed(device);
+    device.State.schedule.vehicles = [
+        { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+            rates: [{ from: '2026-01-01', amount: 300 }] },
+        { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: true,
+            rates: [{ from: '2026-01-01', amount: 300 }] }
+    ];
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    given('the feature is off in this build',
+        device.global('FARKAD_FLAGS').vehicles === false);
+
+    same('nothing went out, because nothing is asked any more',
+        device.call('vehiclesOutOn', device.State.schedule, '2026-08-12'), []);
+    same('so nobody is paid for one',
+        device.call('vehiclePayFor', device.State.schedule, 'w_01', '2026-08-01', '2026-08-31'),
+        { days: 0, amount: 0 });
+    same('not even the owner who was nowhere near a site',
+        device.call('vehiclePayFor', device.State.schedule, 'w_02', '2026-08-01', '2026-08-31'),
+        { days: 0, amount: 0 });
+
+    const rows = device.call('payrollReport', device.State.schedule, '2026-08-01', '2026-08-31');
+    const his = rows.find(row => row.workerId === 'w_01');
+    check('the pay sheet counts no vehicle days',
+        his.vehicleDays === 0 && his.vehicleAmount === 0, JSON.stringify(his));
+    check('and his day is his day, with nothing added to it',
+        his.amount === 400 && his.netAmount === 400, JSON.stringify(his));
+
+    // The write path, called the way a stale screen or a queued edit from another build
+    // would call it.
+    const change = device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', false);
+    check('marking a vehicle off the road writes nothing',
+        !change || change.path === null, JSON.stringify(change));
+    check('and no day record grew a vehicle field',
+        (device.State.schedule.days['2026-08-12'] || {}).vehiclesOff === undefined,
+        JSON.stringify(device.State.schedule.days['2026-08-12']));
+}
+
+{
+    suite('V-off: every vehicle byte survives load, sync, backup and restore');
+
+    // The bytes are somebody's history. Retiring a feature is not a licence to lose them,
+    // and the day anybody turns it back on the rates have to still be the rates.
+    const cloud = makeCloud();
+    const device = makeDevice({ deviceId: 'd_vbytes' });
+    seed(device);
+    device.State.schedule.vehicles = [
+        { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+            rates: [{ from: '2026-01-01', amount: 300 }, { from: '2026-06-01', amount: 350 }] },
+        { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: false,
+            rates: [{ from: '2026-03-01', amount: 280 }] }
+    ];
+    // A day that remembers one of them stayed in the yard - written by a build that still
+    // did vehicles, and still true about that evening.
+    device.State.schedule.days['2026-08-12'] = {
+        plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } },
+        vehiclesOff: ['v_01']
+    };
+    device.State.save({ silent: true });
+    const before = JSON.stringify(device.State.schedule.vehicles);
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_vbytes' });
+    reopened.State.load();
+    check('a close and reopen keeps them, rates and all',
+        JSON.stringify(reopened.State.schedule.vehicles) === before,
+        JSON.stringify(reopened.State.schedule.vehicles));
+    check('and the evening that remembered one stayed in still says so',
+        JSON.stringify((reopened.State.schedule.days['2026-08-12'] || {}).vehiclesOff)
+            === '["v_01"]',
+        JSON.stringify(reopened.State.schedule.days['2026-08-12']));
+
+    await connected(reopened, cloud);
+    await settle(TICK * 40);
+    check('the cloud has them too',
+        JSON.stringify(cloud.doc.vehicles) === before, JSON.stringify(cloud.doc.vehicles));
+
+    const other = makeDevice({ deviceId: 'd_vother' });
+    await connected(other, cloud);
+    await settle(TICK * 40);
+    check('and the second phone reads them back unchanged',
+        JSON.stringify(other.State.schedule.vehicles) === before,
+        JSON.stringify(other.State.schedule.vehicles));
+
+    // Through a backup file and back.
+    const target = makeDevice({ deviceId: 'd_vtarget' });
+    seed(target);
+    target.ctx.askTell = () => Promise.resolve();
+    target.ctx.askConfirm = () => Promise.resolve(true);
+    target.call('importBackup',
+        target.fileEvent('farkad.json', JSON.stringify(reopened.State.schedule)));
+    await settle(80);
+    check('a backup round trip keeps them',
+        JSON.stringify(target.State.schedule.vehicles) === before,
+        JSON.stringify(target.State.schedule.vehicles));
+
+    // And a whole-document restore.
+    const restored = makeDevice({ deviceId: 'd_vrestore' });
+    seed(restored);
+    const result = await restored.Sync.replaceEverything(
+        restored.call('normaliseSchedule', reopened.State.schedule));
+    given('the restore happened', result.ok === true, JSON.stringify(result));
+    check('a restore keeps them',
+        JSON.stringify(restored.State.schedule.vehicles) === before,
+        JSON.stringify(restored.State.schedule.vehicles));
+
+    // A schedule carrying vehicle fields is still a schedule this build will open.
+    check('and none of it makes the record unreadable',
+        restored.global('Recovery').problems.length === 0,
+        JSON.stringify(restored.global('Recovery').problems.map(problem => problem.key)));
+}
 
 {
     suite('two phones mirror the same advance into the same entry');
