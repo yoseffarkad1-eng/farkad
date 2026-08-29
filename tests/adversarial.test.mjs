@@ -702,33 +702,50 @@ function twoTabsRace(shared, tabA, tabB, path) {
 {
     suite('B1: two equal readings are not proof of one moment');
 
-    const device = makeDevice({ deviceId: 'd_aba' });
-    seed(device);
-    put(device, PATH, 'p_01');
+    // The hazard is a record that RETURNS to a value it already had, between the two
+    // readings, so comparing the readings cannot see that anything happened.
+    //
+    // Not every record can do that, and it matters which. A queued batch cannot: it has
+    // one write site, always under a fresh random id, so a batch that has been removed
+    // can never come back under its own key - absent, present, absent, and never again.
+    // The schedule can revert, but it is the FIRST record read, so a reading that agrees
+    // with the next one is certified at the moment the second pass read it.
+    //
+    // The records that are rewritten IN PLACE and read after the schedule are the ones
+    // this is about, and the questions the migration raised are one of them: production
+    // rewrites that key every time somebody answers one. A second tab that answers a
+    // question and has the answer undone leaves the record exactly as it found it, and
+    // the pair the export certifies was never on the disk at one moment.
+    const shared = sharedStore();
+    const exporter = makeDevice({ sharedStorage: shared, deviceId: 'd_aba' });
+    seed(exporter);
+    const other = makeDevice({ sharedStorage: shared, deviceId: 'd_aba_other' });
+    other.State.load();
 
-    // A write that leaves the map byte-identical: the record goes and comes back. Nothing
-    // about the two readings can see it, which is the whole point - a snapshot has to be
-    // fenced by something a writer moves, not by comparing two values.
-    const key = Object.keys(outboxBytes(device))
-        .filter(name => name.indexOf('farkad:outbox:op:') === 0)[0];
-    given('there is a batch on the disk', typeof key === 'string');
-    const bytes = device.raw(key);
+    const question = { kind: 'unknown-place', value: 'שאלה', date: '2026-08-10',
+        workerId: 'w_01', message: 'שאלה' };
+    given('the questions are on the disk',
+        exporter.call('writeIssues', [question]) === true);
+    const settled = exporter.raw('scheduleData:migrationIssues');
 
     let passes = 0;
-    const arm = () => device.ctx.localStorage.interleave(read => {
+    const arm = () => exporter.ctx.localStorage.interleave(read => {
         if (String(read) !== 'scheduleData:v2') { arm(); return; }
         passes += 1;
-        // Between the two readings the record leaves the disk and comes back.
-        device.Store.remove(key);
-        device.putRaw(key, bytes);
+        // The other tab answers it, and the answer is undone - both through the writer
+        // production uses. The record ends exactly where it started.
+        other.call('writeIssues', []);
+        other.call('writeIssues', [question]);
         arm();
     });
     arm();
 
-    const snapshot = device.global('Recovery').rawSnapshot();
-    device.ctx.localStorage.interleave(() => {});
+    const snapshot = exporter.global('Recovery').rawSnapshot();
+    exporter.ctx.localStorage.interleave(() => {});
 
     given('the disk really did move between the readings', passes >= 2, String(passes));
+    given('and it came back to exactly what it was',
+        exporter.raw('scheduleData:migrationIssues') === settled);
     check('the snapshot does not call itself stable',
         snapshot.stable === false, JSON.stringify({ stable: snapshot.stable, passes }));
 }
