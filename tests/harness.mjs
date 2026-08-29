@@ -72,6 +72,16 @@ function makeLocalStorage(initial) {
         return value;
     });
     define('setItem', (key, value) => {
+        // A write the browser refuses for a reason that is NOT lack of room - Safari in
+        // private mode, a blocked frame, storage the browser has revoked. Store treats
+        // this differently from a full disk: it takes the whole of localStorage away for
+        // the rest of the session, which is a state the app has to survive and therefore
+        // one the harness has to be able to produce.
+        if (ls.__failWrite && ls.__failWrite(key, String(value))) {
+            const error = new Error('storage is not available');
+            error.name = 'SecurityError';
+            throw error;
+        }
         // A device with no room throws here, which is a real state this app handles and
         // therefore one the harness has to be able to produce.
         if (ls.__quota && ls.__quota(key, String(value))) {
@@ -101,6 +111,9 @@ function makeLocalStorage(initial) {
     });
     // Writable, because a test switches the fault on partway through a run.
     Object.defineProperty(ls, '__quota', {
+        value: null, enumerable: false, writable: true, configurable: true
+    });
+    Object.defineProperty(ls, '__failWrite', {
         value: null, enumerable: false, writable: true, configurable: true
     });
     // A disk that ACCEPTS a write and then hands back something else. Rarer than a full
@@ -335,6 +348,12 @@ export function makeDevice(options = {}) {
         // (key, value) => true to refuse that write, the way a full disk does.
         setQuota(fn) {
             localStorage.__quota = fn;
+        },
+        // The same, for a refusal that is not about room. Store answers a full disk by
+        // keeping the value in memory and reporting the failure; it answers this by
+        // deciding there is no storage at all, for the rest of the session.
+        failWrite(fn) {
+            localStorage.__failWrite = fn;
         },
         // Make writes to `key` land as something other than what was written.
         corruptOnWrite(key) {
