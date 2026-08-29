@@ -120,8 +120,14 @@ const State = {
         // Shown, so the week is on screen and can be read - but not written down. Saving
         // it would put pre-migration data over the newest record there is.
         if (!damaged) {
-            writeIssues(result.issues);
+            // The schedule FIRST, then the questions about it.
+            //
+            // Written the other way round, the fingerprint was taken before the record it
+            // fingerprints existed - so it was the empty string, and the very next open
+            // compared it against a real one and dropped every question the migration had
+            // raised. The week came back and the things nobody had answered did not.
             this.save({ silent: true });
+            writeIssues(result.issues);
         }
 
         return { migrated: true, issues: result.issues, damaged };
@@ -597,16 +603,28 @@ function normaliseSchedule(raw, hints) {
     // The rate history is the part worth being careful with: it is what stops a raise
     // repaying last month, so an entry without a date it applies from is dropped rather
     // than guessed at.
+    // DORMANT. This build does not do vehicles - FARKAD_FLAGS in js/model/schema.js - and
+    // that is a reason to draw nothing and charge nobody, not a reason to lose records.
+    //
+    // So the fields this app knows are read the way it knows them, and everything else on
+    // the record is carried through untouched. This function starts from an empty
+    // schedule and copies across what it recognises, so a field it does not name is a
+    // field that disappears at the next save: a plate, a note, whatever the build that
+    // wrote them called them. A rate entry with no date it applies from is kept beside
+    // them rather than dropped - it earns nothing while this is off, and it is somebody's
+    // record of a price.
     schedule.vehicles = (Array.isArray(raw.vehicles) ? raw.vehicles : [])
         .filter(v => v && v.id)
-        .map(v => ({
+        .map(v => Object.assign({}, v, {
             id: String(v.id),
             name: String(v.name || ''),
             ownerId: String(v.ownerId || ''),
             active: v.active !== false,
-            rates: (Array.isArray(v.rates) ? v.rates : [])
-                .filter(entry => entry && typeof entry.from === 'string' && entry.from)
-                .map(entry => ({ from: String(entry.from), amount: Number(entry.amount) || 0 }))
+            rates: (Array.isArray(v.rates) ? v.rates : []).map(entry =>
+                (entry && typeof entry.from === 'string' && entry.from)
+                    ? Object.assign({}, entry,
+                        { from: String(entry.from), amount: Number(entry.amount) || 0 })
+                    : entry)
         }));
 
     const days = (raw.days && typeof raw.days === 'object') ? raw.days : {};
@@ -767,29 +785,55 @@ function scheduleFingerprint() {
     return raw === null ? '' : fingerprintOf(raw);
 }
 
-function readIssues() {
+// One reader for the record, and it says which of the three things it found.
+//
+//   bound      the list names the schedule it describes, and that schedule is here
+//   unbound    a bare array, the way a build before the binding wrote one. It is all
+//              there is, so it is carried - and it is NOT evidence about this week
+//   stale      the list names a different schedule: not adopted
+//
+// The version this replaced returned a bare array for all three, and its caller could not
+// tell them apart.
+function parseIssuesRecord(raw, fingerprint) {
+    if (!raw) return { issues: [], bound: true, found: false };
+    let parsed;
     try {
-        const raw = Store.get(ISSUES_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.issues)) return [];
-        if (typeof parsed.forSchedule === 'string'
-            && parsed.forSchedule !== scheduleFingerprint()) return [];
-        return parsed.issues;
+        parsed = JSON.parse(raw);
     } catch (error) {
-        return [];
+        return { issues: [], bound: true, found: false };
     }
+    if (Array.isArray(parsed)) return { issues: parsed, bound: false, found: true };
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.issues)) {
+        return { issues: [], bound: true, found: false };
+    }
+    if (typeof parsed.forSchedule !== 'string') {
+        return { issues: parsed.issues, bound: false, found: true };
+    }
+    if (fingerprint !== undefined && parsed.forSchedule !== fingerprint) {
+        return { issues: [], bound: false, found: true, stale: true };
+    }
+    return { issues: parsed.issues, bound: true, found: true };
+}
+
+function readIssues() {
+    const read = parseIssuesRecord(Store.get(ISSUES_KEY), scheduleFingerprint());
+    return read.issues;
 }
 
 // Written and READ BACK, and the answer is returned. The caller used to ignore it, so an
 // import could report success over a device holding the new schedule and none of the
 // questions that came with it - and the questions were the half nobody could reconstruct.
-function writeIssues(issues) {
-    return Store.setVerified(ISSUES_KEY, JSON.stringify({
-        forSchedule: scheduleFingerprint(),
-        issues: issues || []
-    }));
+//
+// `bound` says whether the list can be shown to belong to the schedule on the disk. It is
+// false for a list that arrived in a file written before the binding existed: those
+// questions are still somebody's questions and are kept, but nothing here pretends to
+// know which week they are about.
+function writeIssues(issues, options) {
+    const bound = !options || options.bound !== false;
+    const record = { issues: issues || [] };
+    if (bound) record.forSchedule = scheduleFingerprint();
+    else record.bound = false;
+    return Store.setVerified(ISSUES_KEY, JSON.stringify(record));
 }
 
 // By identity, not by position: the list is rebuilt on every render, and an index

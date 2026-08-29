@@ -512,13 +512,22 @@ function pushUndoState(schedule) {
         stack = [];
     }
 
-    stack.unshift({ at: new Date().toISOString(), schedule: entry, decisions });
+    stack.unshift({ at: new Date().toISOString(), schedule: entry, decisions,
+        // Which schedule those questions were about, so restoring the pair can be shown
+        // to be restoring a pair and not two things that happened to be stored together.
+        forSchedule: fingerprintOf(entry) });
     const stacked = Store.setVerified(UNDO_STACK_KEY, JSON.stringify(stack.slice(0, UNDO_KEEP)));
 
     // The single slot stays, because it is what restoreLocalBackup has always read and
-    // what an older build left behind. Either route home is enough.
+    // what an older build left behind. It carries the SCHEDULE ONLY.
     const slotted = Store.setVerified(UNDO_KEY, entry);
 
+    // Either route home is enough - unless there are questions to carry, and then only
+    // the stack entry can carry them. Returning true because the schedule-only slot
+    // landed reported a way back that would come home with the week and without the
+    // things nobody had answered about it, and the import that read that answer went
+    // ahead on the strength of it.
+    if (JSON.parse(decisions).length > 0) return stacked;
     return stacked || slotted;
 }
 
@@ -747,12 +756,45 @@ function exportRecoveryData() {
     // quietly left standing - the device is marked uncertain for as long as it is open,
     // and a disk that refuses this write refuses the probe in canRecordProvenance too, so
     // the refusal survives the app being closed and opened again.
+    // EVIDENCE FIRST, and the handover after it.
+    //
+    // The order below is about provenance, and it is right about provenance. What it did
+    // not consider is that the handover write can take storage AWAY: forgetLocalOrigin
+    // writes the generation, and a browser that answers a write with a SecurityError -
+    // Safari private mode, a blocked frame, storage the browser has revoked - makes Store
+    // decide there is no storage at all for the rest of the session. Every read after
+    // that answers null, so the file came out with records:{} and called itself stable,
+    // on a phone that still held every byte.
+    //
+    // So the bytes are captured before the attempt. They are EVIDENCE - what this device
+    // was holding a moment ago - and nothing downstream may treat the provenance inside
+    // them as a claim about what it is holding now.
+    const evidence = Recovery.rawSnapshot();
+
     const recorded = typeof FarkadSync !== 'undefined' && FarkadSync.forgetLocalOrigin
         ? FarkadSync.forgetLocalOrigin()
         : true;
     if (!recorded && FarkadSync.noteHandoverUnrecorded) FarkadSync.noteHandoverUnrecorded();
 
+    // And again afterwards, because the provenance records are the one part of the file
+    // that must describe the phone AFTER the handover: a file carrying "made here and
+    // never left" claims the export is in the act of retiring hands them straight back.
     const snapshot = Recovery.rawSnapshot();
+
+    // Whichever reading is the fuller one is the reconstruction, with the provenance
+    // taken from after the handover in either case. A disk that stopped answering during
+    // the handover produces an empty second reading, and the first is then the only
+    // record of what this phone held.
+    const readable = Store.available;
+    const records = Object.keys(snapshot.records).length >= Object.keys(evidence.records).length
+        ? snapshot.records
+        : Object.assign({}, evidence.records, snapshot.records);
+
+    // Which keys the second reading could no longer see. Named, because "we could not
+    // read these" is a different sentence from "these were not there".
+    const unreadable = Object.keys(evidence.records)
+        .filter(key => snapshot.records[key] === undefined)
+        .sort();
 
     const payload = {
         kind: 'farkad-recovery',
@@ -765,6 +807,10 @@ function exportRecoveryData() {
         // "we could not record the handover" is exactly the thing that must not be lost
         // between the two.
         handoverRecorded: recorded,
+        // Whether the disk was still answering when the file was built. False means the
+        // records below are what this phone held a moment earlier, not what it holds.
+        storageReadable: readable && snapshot.storageReadable !== false,
+        unreadableKeys: unreadable,
         problems: Recovery.problems.map(problem => ({
             key: problem.key, copiedTo: problem.copy, message: problem.message
         })),
@@ -782,11 +828,20 @@ function exportRecoveryData() {
         // Whether the two readings of the device agreed - see Recovery.rawSnapshot. False
         // means another tab was writing while this ran, so the reconstruction on the far
         // side may be missing the last of it and must not be presented as complete.
-        stable: snapshot.stable,
+        stable: snapshot.stable && evidence.stable && readable
+            && unreadable.length === 0,
+        // Every distinct reading taken, when they would not settle. On a device this file
+        // exists for, the difference between two of them may be the evening somebody is
+        // looking for, and keeping only the last one throws it away.
+        captures: (snapshot.stable && evidence.stable && unreadable.length === 0)
+            ? undefined
+            : evidence.captures.concat(snapshot.captures)
+                .filter((records, at, all) =>
+                    all.findIndex(other => canonicalJson(other) === canonicalJson(records)) === at),
         // Same reason: the decisions the migration refused to guess are only on the disk
         // when the migration was allowed to write, and on a held device it never is.
         pendingDecisions: Array.isArray(State.migrationIssues) ? State.migrationIssues : [],
-        records: snapshot.records
+        records
     };
 
     const name = `farkad-recovery-${todayStr()}.json`;
@@ -1150,6 +1205,20 @@ function pendingReplacementIn(records, tried) {
     if (isLegacyReplacement(parsed)) {
         const companion = read('farkad:pendingReplace:v71');
         const frozen = companion ? readReplacementRecord(companion) : null;
+
+        // BOUND to the primary, by the same test the phone applies at boot - see
+        // readFrozenLegacy in js/sync/sync.js. A companion is the frozen upgrade OF a
+        // particular v71 record; one that describes a different restore is a record of
+        // somebody else's transaction, and carrying it out here means restoring a week
+        // nobody asked for. The rescue rebuild was reading it without asking, so a
+        // primary holding one week and a companion holding another imported the
+        // companion's, in silence, on a phone whose owner had just lost their data.
+        if (frozen && frozen.phase !== 'cancelled'
+            && replacementContent(frozen.document) !== replacementContent(parsed)) {
+            tried.push('farkad:pendingReplace:v71: מלווה שחזור אחר - לא בוצע');
+            return null;
+        }
+
         if (!frozen || frozen.phase === 'cancelled') {
             // The document is real and the boundary is not known. Carrying it out would
             // mean choosing which half of the queue it supersedes, and choosing wrong in
@@ -1268,20 +1337,16 @@ function scheduleFromRecoveryRecords(records, fallback) {
     const decoded = decodeQueue(queueRecords);
     decoded.unreadable.forEach(key => tried.push(`${key}: לא נקרא`));
 
-    // Everything the replacement below supersedes, named. A restore fences by opId, so
-    // the operations it replaced are skipped by NAME rather than by a number that belongs
-    // to one tab's counter.
-    const fenced = supersededOpIds(replacement && replacement.envelope);
-    const upTo = Number(((replacement || {}).envelope || {}).supersedesSeq) || 0;
-    const fencing = Boolean(replacement && replacement.envelope)
-        && (fenced !== null || upTo > 0);
-
+    // The restore fence goes to the PROJECTOR, exactly as it does on the phone - see
+    // projectQueue. Filtering the answer afterwards could only remove the winner the
+    // projection had already chosen, and could not promote the operation that winner was
+    // hiding: a rescue file rebuilt one week and the phone it came from showed another.
     let replayed = 0;
-    queueJournalEntries(decoded.operations).forEach(([path, item]) => {
-        if (fencing && supersededByRestore(item, fenced, upTo)) return;
-        applyJournalEntry(schedule, path, item.value);
-        replayed += 1;
-    });
+    queueJournalEntries(decoded.operations, replacement && replacement.envelope)
+        .forEach(([path, item]) => {
+            applyJournalEntry(schedule, path, item.value);
+            replayed += 1;
+        });
 
     // Read again AFTER the replay. An entry that is sound on its own can still leave a
     // document this app would refuse - a day against a worker the schedule does not have
@@ -1356,20 +1421,37 @@ function readRecoveryFile(parsed) {
 
     // Decisions the migration refused to guess come from the file itself where the broken
     // phone had any, and from the migration this import just ran where it did not.
+    // Read through the SAME parser that wrote it. The record is {forSchedule, issues};
+    // this used to accept only a bare array, so every question a phone was holding was
+    // dropped on the way through the one file that exists to carry them.
+    //
+    // The fingerprint is checked against the record the questions describe - the raw
+    // scheduleData:v2 bytes in this file - so a list belonging to another week is not
+    // attached to this one. A bare array from an older build cannot say which week it is
+    // about; it is carried, and it is carried as UNBOUND rather than as evidence.
     let issues = found.issues;
+    let issuesBound = true;
     if (typeof records['scheduleData:migrationIssues'] === 'string') {
-        try {
-            const held = JSON.parse(records['scheduleData:migrationIssues']);
-            if (Array.isArray(held) && held.length > 0) issues = held;
-        } catch (error) {
-            found.tried.push('scheduleData:migrationIssues: לא נקרא');
+        const read = parseIssuesRecord(records['scheduleData:migrationIssues'],
+            typeof records['scheduleData:v2'] === 'string'
+                ? fingerprintOf(records['scheduleData:v2']) : undefined);
+        if (read.stale) {
+            found.tried.push('scheduleData:migrationIssues: שייך ללוח אחר - לא נטען');
+        } else if (read.issues.length > 0) {
+            issues = read.issues;
+            issuesBound = read.bound;
         }
     }
     // And the ones the broken phone never got to write down. A held device does not save
     // its migration, so the questions it raised exist only in the session that raised
     // them - which is the session that exported this file.
-    if (issues.length === 0 && Array.isArray(parsed.pendingDecisions)) {
+    if (issues.length === 0 && Array.isArray(parsed.pendingDecisions)
+        && parsed.pendingDecisions.length > 0) {
         issues = parsed.pendingDecisions;
+        // They came out of a session's memory, not off a disk, so nothing ties them to
+        // the record they were about - which is exactly what a held device looks like.
+        // An EMPTY list says nothing at all and is not a reason to mark anything unbound.
+        issuesBound = false;
     }
 
     const counts = migrationTally(found.schedule);
@@ -1379,6 +1461,7 @@ function readRecoveryFile(parsed) {
         rescue: true,
         schedule: found.schedule,
         issues,
+        issuesBound,
         // Everything that could NOT be used, so the summary never implies the file was
         // read whole when part of it was unreadable.
         unread: found.tried,
@@ -1386,7 +1469,12 @@ function readRecoveryFile(parsed) {
         // The file says whether the phone it came from managed to write down that it
         // left. Either way this device treats it as a handover; the flag is carried so
         // the person is told which of the two happened.
-        handoverRecorded: parsed.handoverRecorded !== false,
+        // ONLY a file that says, in a boolean, that the handover was written down counts
+        // as recorded. Missing, "false", 0, null, a word - every value that means "this
+        // file cannot tell you" used to collapse to yes, and the receiving phone was
+        // never warned. A file from a build before the field existed is exactly that
+        // case, and it is the case the warning exists for.
+        handoverRecorded: parsed.handoverRecorded === true,
         // Whether the export could take one consistent reading of the device. False means
         // another tab was writing while it ran and the file may be missing the last of it.
         stable: parsed.stable !== false,
@@ -1567,13 +1655,23 @@ function importBackup(event) {
         // The schedule is durable, so the questions that belong to it have to be too -
         // and the answer is read, because a device that keeps the week and loses the
         // questions has lost the half nobody can reconstruct.
-        const decisionsKept = writeIssues(loaded.issues);
+        // Built ONCE, and said on every branch out of here.
+        //
+        // The warnings used to live only in the last line, and two branches returned
+        // before reaching it - both of them branches a rescue file takes. So a file that
+        // brought questions with it never told anybody that the phone it came from could
+        // not record the handover, or that it had been taken while something was moving.
+        // The branch a person lands on is not a reason to tell them less.
+        const opening = loaded.rescue ? rescueLoadedNotice(loaded) : 'הגיבוי נטען.';
+
+        const decisionsKept = writeIssues(loaded.issues,
+            { bound: loaded.issuesBound !== false });
         if (!decisionsKept && loaded.issues.length > 0) {
             State.migrationIssues = loaded.issues;
             render();
             await askTell({
                 title: 'נטען, אבל ההחלטות לא נשמרו',
-                message: `הנתונים נטענו, אבל ${loaded.issues.length} רישומים שממתינים ` +
+                message: `${opening}\n\n${loaded.issues.length} רישומים שממתינים ` +
                     'להחלטה לא הצליחו להישמר במכשיר, ולכן הם יימחקו כשתסגור את האפליקציה. ' +
                     'פנה מקום במכשיר וטען את הקובץ שוב, או ענה עליהם עכשיו.'
             });
@@ -1582,12 +1680,12 @@ function importBackup(event) {
         }
 
         if (loaded.issues.length > 0) {
-            await askTell(`הגיבוי נטען. ${loaded.issues.length} רישומים ממתינים להחלטה שלך.`);
+            await askTell(`${opening} ${loaded.issues.length} רישומים ממתינים להחלטה שלך.`);
             openMigrationModal();
             if (!result.ok) askTell(replacementNotice(result.error));
             return;
         }
-        tellRestoreResult(result, loaded.rescue ? rescueLoadedNotice(loaded) : 'הגיבוי נטען.');
+        tellRestoreResult(result, opening);
     };
     // A read that FAILS, which is not the same as a file that will not parse.
     //

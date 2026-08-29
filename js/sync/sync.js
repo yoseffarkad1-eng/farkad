@@ -94,6 +94,23 @@ function slotIndexOf(key) {
 const OP_MARK = ':op:';
 const ACK_MARK = ':ack:';
 
+// An operation that LOST, written down.
+//
+// Two tabs that both write one path inside the window where neither can see the other
+// name nothing in `after`: they are genuinely concurrent, so the projection decides
+// between them by a rule - the sequence, then the id - and hides the loser. Hiding is not
+// deciding. The loser was still on the disk, and the moment the winner was acknowledged
+// and collected it was the only operation left for that path: it became current, went to
+// the cloud over the top of the value the app had committed, and left the queue reporting
+// empty and the status reporting synced.
+//
+// So the decision is a record. Before a winner may be collected, everything it beat is
+// retired here - one small key per defeated operation, its own write, never rewritten -
+// and a retired operation can never be current again. If the retirement cannot be
+// written, the winner stays: it is the only thing keeping the loser defeated, and letting
+// go of it while the loser is still readable is the whole of the fault.
+const BEAT_MARK = ':beat:';
+
 // What an acknowledgement record says, exactly. Compared rather than merely found: a
 // disk that takes the write and hands back something else leaves a key that EXISTS and
 // says nothing, and reading its presence alone was enough to make collection throw the
@@ -159,7 +176,17 @@ function readOpBatch(raw, batchId) {
         if (!SAFE_ID.test(String(op.opId || ''))) return null;
         if (!isSafeSeq(op.seq)) return null;
         if (!Object.prototype.hasOwnProperty.call(op, 'value')) return null;
+        // `after` is the only record that one operation beat another, so it is validated
+        // like everything else here rather than copied. An id that is not an id, an
+        // operation naming ITSELF, or the same id twice are all records this app cannot
+        // have written - and each of them suppresses work that was never superseded.
         if (op.after !== undefined && !Array.isArray(op.after)) return null;
+        if (Array.isArray(op.after)) {
+            const named = op.after.map(String);
+            if (named.some(id => !SAFE_ID.test(id))) return null;
+            if (named.indexOf(String(op.opId)) !== -1) return null;
+            if (new Set(named).size !== named.length) return null;
+        }
         // The path AND the value, against the families this app actually writes: a
         // structurally sound entry naming a layer nobody wrote poisons the schedule in
         // memory, and the next ordinary save puts that on the disk.
@@ -199,7 +226,56 @@ function queueKeyKind(key) {
     if (ackAt > 0 && slotIndexOf(key.slice(0, ackAt)) !== -1
         && SAFE_ID.test(key.slice(ackAt + ACK_MARK.length))) return 'ack';
 
+    const beatAt = key.lastIndexOf(BEAT_MARK);
+    if (beatAt > 0 && slotIndexOf(key.slice(0, beatAt)) !== -1
+        && SAFE_ID.test(key.slice(beatAt + BEAT_MARK.length))) return 'beat';
+
     return null;
+}
+
+function outboxBeatKey(slotKey, opId) { return slotKey + BEAT_MARK + opId; }
+
+// The identity of an item an older build left inside a slot record.
+//
+// It used to be a 32-bit rolling hash of slot + path, and that was wrong in two ways at
+// once. It was not INJECTIVE - days.2026-08-12.actual.w_1n and days.2026-08-12.actual.w_30
+// are both ordinary valid paths and both hashed to legacy_8pu8nh, so two days became one
+// operation and one of them was never sent. And it said nothing about the VALUE, so when
+// an old tab rewrote the same path its correction wore the name of the value it replaced:
+// an operation that had superseded the old one suppressed the new one too, and a
+// correction somebody made never left the phone.
+//
+// The path is carried whole, in hex, which is injective by construction rather than by
+// hope; the sequence and a digest of the value make a rewrite a LATER revision rather than
+// the same operation wearing the same name. Nothing here is a proof of identity resting on
+// a hash: the hash only distinguishes two different values under one path and sequence,
+// and a collision there costs a re-send, not a day.
+function hexOf(text) {
+    let out = '';
+    for (let i = 0; i < text.length; i += 1) {
+        const code = text.charCodeAt(i);
+        out += (code < 16 ? '000' : code < 256 ? '00' : code < 4096 ? '0' : '')
+            + code.toString(16);
+    }
+    return out;
+}
+
+function digestOf(text) {
+    let a = 0x811c9dc5;
+    let b = 0x01000193;
+    for (let i = 0; i < text.length; i += 1) {
+        a = Math.imul(a ^ text.charCodeAt(i), 16777619) | 0;
+        b = (Math.imul(b, 31) + text.charCodeAt(i) + (a & 0xff)) | 0;
+    }
+    return ((a >>> 0).toString(16) + '0000000').slice(0, 8)
+        + ((b >>> 0).toString(16) + '0000000').slice(0, 8);
+}
+
+function legacyOpId(slotIndex, path, item) {
+    return 'legacy_' + slotIndex
+        + '_' + hexOf(String(path))
+        + '_' + (Number(item.seq) || 0)
+        + '_' + digestOf(canonicalJson(item.value));
 }
 
 // Parsed batches, kept against their own bytes. Collection, the projection and every
@@ -232,9 +308,9 @@ function readBatchCached(key, raw, batchId) {
 // written with - assuming one is older merely because an operation exists beside it is
 // how a newer edit from an old client gets overruled.
 function decodeQueue(records) {
-    const operations = [];
     const unreadable = [];
     const acknowledged = new Set();
+    const retired = new Set();
     const batches = [];
 
     Object.keys(records).forEach(key => {
@@ -249,20 +325,84 @@ function decodeQueue(records) {
             return;
         }
         if (kind === 'ack' && records[key] === ACK_VALUE) acknowledged.add(key);
+        if (kind === 'beat' && records[key] === ACK_VALUE) retired.add(key);
     });
 
     batches.sort((one, two) => (slotIndexOf(one.slot) - slotIndexOf(two.slot))
         || (one.batchId < two.batchId ? -1 : one.batchId > two.batchId ? 1 : 0));
 
+    const fromBatch = new Map();          // batch key -> its operations, or null
     batches.forEach(({ key, slot, batchId }) => {
         const raw = records[key];
         if (typeof raw !== 'string') return;
         const batch = readBatchCached(key, raw, batchId);
-        if (!batch) { unreadable.push(key); return; }
-        batch.ops.forEach(op => operations.push(Object.assign({}, op, {
+        if (!batch) { fromBatch.set(key, null); return; }
+        fromBatch.set(key, batch.ops.map(op => Object.assign({}, op, {
+            // CLONED. The cache hands out the same parsed object every time, and a value
+            // that reaches State is a value ordinary app code edits in place before it
+            // commits anything - so the "journal as the disk holds it" was reporting
+            // whatever the screen had done to it, and a rollback put back what it had
+            // been editing rather than what the disk said.
+            value: cloneValue(op.value),
+            after: (op.after || []).slice(),
             slot, batchKey: key, batchId,
-            sent: acknowledged.has(outboxAckKey(slot, op.opId))
+            sent: acknowledged.has(outboxAckKey(slot, op.opId)),
+            retired: retired.has(outboxBeatKey(slot, op.opId))
         })));
+    });
+
+    // Now the two rules `after` has to obey that no single batch can check on its own.
+    //
+    // An operation may only supersede one on the SAME PATH: naming one on another path
+    // suppresses work it never replaced. And a set of operations may not name each other
+    // in a circle: every one of them is then superseded, so the path has no value at all
+    // and nothing says so.
+    //
+    // A reference to an operation that is not here is ordinary and correct - it was
+    // collected. So invalidating a batch can only relax the constraints on the others,
+    // and this settles: bounded anyway, because a device with twenty-five slots of
+    // circular records has a different problem.
+    for (let pass = 0; pass < OUTBOX_SLOTS; pass += 1) {
+        const present = new Map();
+        fromBatch.forEach(ops => {
+            if (!ops) return;
+            ops.forEach(op => present.set(op.opId, op));
+        });
+
+        const guilty = new Set();
+        present.forEach(op => {
+            (op.after || []).forEach(id => {
+                const named = present.get(String(id));
+                if (named && named.path !== op.path) guilty.add(op.batchKey);
+            });
+        });
+
+        // Cycles, over what is left after the cross-path check.
+        const colour = new Map();
+        const walk = op => {
+            const state = colour.get(op.opId);
+            if (state === 2) return false;
+            if (state === 1) return true;
+            colour.set(op.opId, 1);
+            let looped = false;
+            (op.after || []).forEach(id => {
+                const named = present.get(String(id));
+                if (named && walk(named)) { looped = true; guilty.add(named.batchKey); }
+            });
+            colour.set(op.opId, 2);
+            if (looped) guilty.add(op.batchKey);
+            return looped;
+        };
+        present.forEach(op => walk(op));
+
+        if (guilty.size === 0) break;
+        guilty.forEach(key => fromBatch.set(key, null));
+    }
+
+    const operations = [];
+    fromBatch.forEach((ops, key) => {
+        if (ops === null) { unreadable.push(key); return; }
+        ops.forEach(op => operations.push(op));
     });
 
     for (let i = 0; i < OUTBOX_SLOTS; i += 1) {
@@ -273,16 +413,33 @@ function decodeQueue(records) {
         if (!record) { unreadable.push(slot); continue; }
         Object.keys(record.items).sort().forEach(path => {
             const item = record.items[path];
+            const opId = legacyOpId(i, path, item);
             operations.push({
-                opId: 'legacy_' + hashedId(slot + '|' + path),
-                path, value: item.value, seq: item.seq, after: [],
+                opId, path, value: cloneValue(item.value), seq: item.seq, after: [],
                 slot, batchKey: slot, batchId: null, legacy: true,
-                sent: item.sent === true
+                // A legacy item has an acknowledgement key of its own now. The flag inside
+                // the record is still read, because an older build wrote it there - but
+                // it is not the only answer, and it is not one this build has to rewrite
+                // a shared record to change.
+                sent: item.sent === true || acknowledged.has(outboxAckKey(slot, opId)),
+                retired: retired.has(outboxBeatKey(slot, opId))
             });
         });
     }
 
-    return { operations, unreadable, acknowledged };
+    return { operations, unreadable, acknowledged, retired };
+}
+
+// A value on its way out of the parse cache. Plain JSON, so this is all it takes - and
+// doing it here means no caller anywhere can be holding the cached parse.
+function cloneValue(value) {
+    if (Array.isArray(value)) return value.map(cloneValue);
+    if (value && typeof value === 'object') {
+        const out = {};
+        Object.keys(value).forEach(key => { out[key] = cloneValue(value[key]); });
+        return out;
+    }
+    return value;
 }
 
 // The current value per path, from the whole physical set.
@@ -291,12 +448,22 @@ function decodeQueue(records) {
 // current - not now, and not later when the one that superseded it is collected. That is
 // what makes this a record rather than a comparison: B carries the fact that it saw A, so
 // removing B does not make A the winner again.
-function projectQueue(operations) {
+// `envelope` is a restore that has not finished, or nothing. What it supersedes is taken
+// out of the CANDIDATES, before a winner is chosen - not out of the answer afterwards.
+//
+// Filtering the answer could only ever remove the one winner the projection had already
+// picked, and it could not promote what that winner was hiding. A named pre-restore
+// operation with a higher sequence hid a post-restore one; the fence removed the named
+// one; nothing was left, and the day somebody recorded after pressing the button was
+// gone from the screen, the disk and the cloud.
+function projectQueue(operations, envelope) {
+    const candidates = fenceOperations(operations, envelope);
+
     const superseded = new Set();
-    operations.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
+    candidates.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
 
     const byPath = new Map();
-    operations.forEach(op => {
+    candidates.forEach(op => {
         if (superseded.has(op.opId)) return;
         const already = byPath.get(op.path);
         if (!already || laterOperation(op, already)) byPath.set(op.path, op);
@@ -304,9 +471,20 @@ function projectQueue(operations) {
     return byPath;
 }
 
+// The candidates: everything the restore did not supersede, and nothing that has been
+// durably retired. A retired operation lost to another one for its path and the decision
+// was written down; it can never be current again, whatever is collected around it.
+function fenceOperations(operations, envelope) {
+    const live = operations.filter(op => op.retired !== true);
+    const named = supersededOpIds(envelope);
+    const upTo = Number((envelope || {}).supersedesSeq) || 0;
+    if (!envelope || (named === null && upTo <= 0)) return live;
+    return live.filter(op => !supersededByRestore(op, named, upTo));
+}
+
 // The projection as a journal: oldest first, ready to be laid over a schedule.
-function queueJournalEntries(operations) {
-    return [...projectQueue(operations).entries()]
+function queueJournalEntries(operations, envelope) {
+    return [...projectQueue(operations, envelope).entries()]
         .sort((a, b) => (Number(a[1].seq) || 0) - (Number(b[1].seq) || 0));
 }
 
@@ -575,13 +753,31 @@ function isLegacyReplacement(parsed) {
     return isFullScheduleDocument(parsed);
 }
 
+// EVERY subtree of the document, not the four that were easy to serialise.
+//
+// This is the whole of what localDurableHolds asks, and localDurableHolds is the gate a
+// restore passes before it is sent to the cloud, before the record of it is removed, and
+// before the app says it is done. With the ledger and the vehicles left out of the
+// comparison, a device holding the days and none of the money answered "yes, I have the
+// replacement" - and the transaction closed over a phone that held part of it.
+//
+// It is also what binds a frozen v71 companion to the primary it belongs to, and a
+// comparison that cannot see the ledger cannot see two restores that differ only there.
+//
+// updatedAt and updatedBy stay out, and they are the whole list: saving the replacement
+// re-stamps it with this device and this clock, which is correct and is not a difference
+// in the record. schemaVersion is in, because a document from another version is not the
+// same document.
 function replacementContent(source) {
     const schedule = normaliseSchedule(source);
     return canonicalJson({
+        schemaVersion: schedule.schemaVersion,
         workers: schedule.workers,
         places: schedule.places,
         days: schedule.days,
-        advances: schedule.advances
+        advances: schedule.advances,
+        ledger: schedule.ledger,
+        vehicles: schedule.vehicles
     });
 }
 
@@ -1060,10 +1256,14 @@ const FarkadSync = {
         // Read the disk ONCE for the whole acknowledgement. Asking per operation was a
         // full scan per operation, and a batch of three hundred turned one answer from
         // the cloud into a stall long enough that the rest of the queue never went.
+        // Legacy items included. They used to be skipped here and skipped again by the
+        // collector, so an edit an older build left in the queue went to the cloud on
+        // every flush for the rest of the phone's life - a hundred and eleven writes in
+        // six rounds, with the count beside it never moving. An acknowledgement is its
+        // own small key now, so saying the cloud has one costs no rewrite of the shared
+        // record it lives in.
         const bySlot = new Map();
-        this.physicalOperations().forEach(op => {
-            if (!op.legacy) bySlot.set(op.opId, op.slot);
-        });
+        this.physicalOperations().forEach(op => bySlot.set(op.opId, op.slot));
 
         let whole = true;
         opIds.forEach(opId => {
@@ -1176,6 +1376,11 @@ const FarkadSync = {
         const superseded = new Set();
         all.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
 
+        // Who is CURRENT for each path right now, by the same rule everything else uses.
+        // Everything else for that path lost - and losing has to be written down before
+        // the winner can go, or the loser becomes current the moment it does.
+        const current = projectQueue(all);
+
         // The schedule as the NEXT session would read it, parsed once. Cached on its own
         // bytes: collection runs on every save and every acknowledgement, and a season's
         // record is not something to re-parse per operation.
@@ -1191,38 +1396,98 @@ const FarkadSync = {
         }
 
         const finished = op => {
-            if (op.legacy) return false;                 // an old record is rewritten, not removed
+            if (op.retired) return true;
             if (superseded.has(op.opId)) return true;
             // The cloud has it AND the disk here holds it. Asked of the stored schedule
             // rather than of a counter - see scheduleHoldsEntry.
             return op.sent && scheduleHoldsEntry(stored, op.path, op.value);
         };
 
-        const byBatch = new Map();
+        // RETIREMENT, and it goes first.
+        //
+        // Every operation that is neither current for its path nor already superseded by
+        // name is one the projection beat. While it is readable it can come back, so the
+        // fact that it lost is written down - its own key, one small verified write - and
+        // only then may the operation that beat it be collected. A retirement that could
+        // not be written leaves the winner where it is, which is the only thing keeping
+        // the loser defeated.
+        let whole = true;
+        const retired = new Set();
         all.forEach(op => {
-            if (op.legacy || !op.batchId) return;
+            if (op.retired) { retired.add(op.opId); return; }
+            if (superseded.has(op.opId)) return;
+            const winner = current.get(op.path);
+            if (!winner || winner.opId === op.opId) return;
+            const key = outboxBeatKey(op.slot, op.opId);
+            if (Store.durableGet(key) === ACK_VALUE) { retired.add(op.opId); return; }
+            if (Store.setVerified(key, ACK_VALUE)) { retired.add(op.opId); return; }
+            Store.forget(key);
+            whole = false;
+        });
+
+        // A winner may only go once everything it beat has been retired, and once
+        // everything it superseded by name has gone. Both are the same rule seen twice:
+        // never remove the record that is keeping an older value out of the way.
+        const beatenBy = new Map();
+        all.forEach(op => {
+            if (op.retired || retired.has(op.opId)) {
+                const winner = current.get(op.path);
+                if (winner) beatenBy.set(op.opId, winner.opId);
+            }
+        });
+        const owedRetirements = new Set();
+        beatenBy.forEach((winnerId, loserId) => {
+            if (present.has(loserId)) owedRetirements.add(winnerId);
+        });
+
+        const byBatch = new Map();
+        const legacyGone = [];
+        all.forEach(op => {
+            if (op.legacy) { legacyGone.push(op); return; }
+            if (!op.batchId) return;
             if (!byBatch.has(op.batchKey)) byBatch.set(op.batchKey, []);
             byBatch.get(op.batchKey).push(op);
         });
 
-        let whole = true;
         byBatch.forEach((ops, key) => {
             if (!ops.every(finished)) return;
-            // Nothing this batch supersedes may still be on the disk.
-            const owes = ops.some(op => (op.after || []).some(id => present.has(String(id))));
+            // Nothing this batch supersedes, and nothing it beat, may still be readable.
+            const owes = ops.some(op => (op.after || []).some(id => present.has(String(id)))
+                || owedRetirements.has(op.opId));
             if (owes) return;
 
             try { Store.remove(key); } catch (error) { whole = false; }
             Store.forget(key);
             if (Store.available && Store.durableGet(key) !== null) whole = false;
-            ops.forEach(op => {
-                const ack = outboxAckKey(op.slot, op.opId);
-                if (Store.durableGet(ack) === null) return;
-                try { Store.remove(ack); } catch (error) { /* bytes, not truth */ }
-                Store.forget(ack);
-            });
+            ops.forEach(op => this.forgetQueueMarks(op));
         });
+
+        // An item an older build left inside a slot record is finished the same way, and
+        // it is RETIRED rather than rewritten out: the slot record is shared with every
+        // other tab, and reading it, changing it and writing it back is the lost update
+        // this whole file is built to refuse. The bytes stay; the item stops being
+        // current, for good, in one small write of its own.
+        legacyGone.forEach(op => {
+            if (op.retired) return;
+            if (!finished(op)) return;
+            const key = outboxBeatKey(op.slot, op.opId);
+            if (Store.setVerified(key, ACK_VALUE)) return;
+            Store.forget(key);
+            whole = false;
+        });
+
         return whole;
+    },
+
+    // The small records that hang off one operation - the acknowledgement and the
+    // retirement. Removed only once the operation itself is gone, and never a reason to
+    // report a failure: they are bookkeeping about bytes that no longer exist.
+    forgetQueueMarks(op) {
+        [outboxAckKey(op.slot, op.opId), outboxBeatKey(op.slot, op.opId)].forEach(key => {
+            if (Store.durableGet(key) === null) return;
+            try { Store.remove(key); } catch (error) { /* bytes, not truth */ }
+            Store.forget(key);
+        });
     },
 
     // The journal as the DISK holds it, oldest first. Returns null when it cannot be
@@ -1231,11 +1496,11 @@ const FarkadSync = {
     // Everything a replacement decides is decided against these bytes rather than
     // against _outbox: memory is what this session believes, and after a refused write
     // the two disagree in exactly the way that matters.
-    durableJournalEntries() {
+    durableJournalEntries(envelope) {
         this.loadOutbox();
         if (!this._activeKey) return null;
         if (this.outboxDamaged) return null;
-        return queueJournalEntries(this.physicalOperations());
+        return queueJournalEntries(this.physicalOperations(), envelope);
     },
 
     // The durable journal, replayed over `schedule`. False when the disk could not be
@@ -1247,17 +1512,10 @@ const FarkadSync = {
     // counter and another tab numbering from the same stale mark could hand an edit made
     // after the restore the same number as one made before it.
     replayDurableJournal(schedule, envelope) {
-        const entries = this.durableJournalEntries();
+        // The fence goes to the PROJECTOR, not over its answer - see projectQueue.
+        const entries = this.durableJournalEntries(envelope);
         if (!entries) return false;
-
-        const named = supersededOpIds(envelope);
-        const upTo = Number((envelope || {}).supersedesSeq) || 0;
-        const skipping = Boolean(envelope) && (named !== null || upTo > 0);
-
-        entries.forEach(([path, item]) => {
-            if (skipping && supersededByRestore(item, named, upTo)) return;
-            applyJournalEntry(schedule, path, item.value);
-        });
+        entries.forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
         return true;
     },
 
@@ -1285,13 +1543,7 @@ const FarkadSync = {
     // possible to say "the replacement, plus the work done since it was asked for".
     replayJournal(schedule, envelope) {
         this.loadOutbox();
-        const named = supersededOpIds(envelope);
-        const upTo = Number((envelope || {}).supersedesSeq) || 0;
-        const skipping = Boolean(envelope) && (named !== null || upTo > 0);
-
-        [...this.projectedQueue().entries()]
-            .filter(([, item]) => !(skipping && supersededByRestore(item, named, upTo)))
-            .sort((a, b) => a[1].seq - b[1].seq)
+        queueJournalEntries(this.physicalOperations(), envelope)
             .forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
     },
 
@@ -3269,6 +3521,13 @@ const FarkadSync = {
         // never heard of one has not disagreed with it. See mergeLedgerInto.
         State.schedule = (typeof mergeLedgerInto === 'function')
             ? mergeLedgerInto(remote, previous) : remote;
+        // And the vehicles, on the same rule and for the same reason - see
+        // mergeVehiclesInto. They are dormant in this build, which means nothing writes
+        // them and therefore nothing can be said to have deleted them.
+        if (typeof mergeVehiclesInto === 'function') {
+            mergeVehiclesInto(State.schedule, previous);
+            mergeVehicleDaysInto(State.schedule, previous);
+        }
         this.reapplyPending(State.schedule, gone);
 
         // AGAIN, after the pending edits are back on top.

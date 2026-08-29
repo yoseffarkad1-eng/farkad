@@ -21,6 +21,10 @@ function isQuotaError(error) {
     );
 }
 
+// The counter every durable write moves. Its own key, outside every record family this
+// app reads, so nothing that enumerates the app's records has to know about it.
+const WRITE_TICK_KEY = 'farkad:writeTick';
+
 const Store = {
     available: true,
     // Set when a write was refused for space. Distinct from `available`, which means the
@@ -104,6 +108,50 @@ const Store = {
     // delete is other restore points: letting one buy space by eating the rest turns a
     // full device into a device with a single copy of today and no history at all. It
     // also never raises `full`, which is reserved for a write that actually mattered.
+    // A counter every durable write moves, so that a reader can tell "nothing happened"
+    // from "something happened and came back".
+    //
+    // Two readings of the same records being equal is not proof that they were taken at
+    // one moment: a record can leave the disk and return between them, and the recovery
+    // export was calling exactly that stable. Comparing values cannot see a value that
+    // came back, so the snapshot is bracketed by something that only ever goes forward.
+    //
+    // Best effort, and deliberately so. A tick that cannot be written is not a reason to
+    // refuse somebody's edit - it is a reason for the next snapshot to say it cannot
+    // prove it was one moment, which is what unfenced() below is for.
+    tick: 0,
+    _ticking: false,
+    unfenced: false,
+
+    bumpWriteTick(key) {
+        if (this._ticking) return;
+        if (key === WRITE_TICK_KEY) return;
+        if (!this.available) return;
+        this._ticking = true;
+        try {
+            const next = (Number(this.readWriteTick()) || 0) + 1;
+            localStorage.setItem(WRITE_TICK_KEY, String(next));
+        } catch (error) {
+            // No room for the counter, or no storage at all. The write itself is not the
+            // counter's business; what is lost is the ability to PROVE a quiet moment.
+            this.unfenced = true;
+        } finally {
+            this._ticking = false;
+        }
+    },
+
+    // What the disk says the counter is. Read durably, because the question is about
+    // what every context on this origin can see, not about what this one wrote.
+    readWriteTick() {
+        if (!this.available) return null;
+        try {
+            const raw = localStorage.getItem(WRITE_TICK_KEY);
+            return raw === null ? 0 : (Number(raw) || 0);
+        } catch (error) {
+            return null;
+        }
+    },
+
     set(key, value, options) {
         const optional = !!(options && options.optional);
 
@@ -120,6 +168,7 @@ const Store = {
 
         try {
             localStorage.setItem(key, value);
+            this.bumpWriteTick(key);
             if (!optional) this.full = false;
             return true;
         } catch (error) {
@@ -139,6 +188,7 @@ const Store = {
             while (this.reclaim && this.reclaim()) {
                 try {
                     localStorage.setItem(key, value);
+                    this.bumpWriteTick(key);
                     this.full = false;
                     return true;
                 } catch (retryError) {
@@ -170,6 +220,7 @@ const Store = {
         if (!this.available) return;
         try {
             localStorage.removeItem(key);
+            this.bumpWriteTick(key);
         } catch (error) {
             // NOT a reason to declare storage gone. This used to call fallback, which
             // sets available = false - and from that moment durableGet answered null for
@@ -194,6 +245,7 @@ const Store = {
 
         try {
             localStorage.removeItem(key);
+            this.bumpWriteTick(key);
         } catch (error) {
             console.warn('Browser storage refused a removal:', key, error);
             return false;

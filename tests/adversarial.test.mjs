@@ -736,30 +736,38 @@ function twoTabsRace(shared, tabA, tabB, path) {
 {
     suite('B1: an unstable export keeps every reading it took');
 
-    const device = makeDevice({ deviceId: 'd_unstable' });
-    seed(device);
-    answering(device);
-    put(device, PATH, 'p_01');
+    // A second tab that writes on every one of the exporter's readings, so no two of them
+    // can agree. The file still has to be made - it is the only way the bytes leave the
+    // phone - and it has to say what it is, and keep what it saw.
+    const shared = sharedStore();
+    const exporter = makeDevice({ sharedStorage: shared, deviceId: 'd_unstable' });
+    seed(exporter);
+    answering(exporter);
+    const busy = makeDevice({ sharedStorage: shared, deviceId: 'd_busy' });
+    busy.State.load();
 
-    // Something changes on every single reading, so no two agree.
     let round = 0;
-    const arm = () => device.ctx.localStorage.interleave(read => {
+    const arm = () => exporter.ctx.localStorage.interleave(read => {
         if (String(read) !== 'scheduleData:v2') { arm(); return; }
         round += 1;
-        device.putRaw('farkad:outbox:noise' + round, String(round));
+        put(busy, `days.2026-09-${String(round + 9)}.actual.w_02`, 'p_02');
         arm();
     });
     arm();
-    device.call('exportRecoveryData');
-    device.ctx.localStorage.interleave(() => {});
+    exporter.call('exportRecoveryData');
+    exporter.ctx.localStorage.interleave(() => {});
 
-    given('a file was produced', device.downloads.length === 1);
-    const file = JSON.parse(device.downloads[0].text);
+    given('a file was produced', exporter.downloads.length === 1);
+    given('the other tab really did keep writing', round >= 2, String(round));
+    const file = JSON.parse(exporter.downloads[0].text);
     check('it says it is not one moment of the device', file.stable === false,
         String(file.stable));
-    check('and it keeps every distinct reading rather than throwing four away',
+    check('and it keeps every distinct reading rather than throwing them away',
         Array.isArray(file.captures) && file.captures.length > 1,
         JSON.stringify({ captures: (file.captures || []).length, rounds: round }));
+    check('with the last of them as the one it rebuilds from',
+        Object.keys(file.records || {}).length > 0,
+        JSON.stringify(Object.keys(file.records || {})));
 }
 
 // ================================================================ B2
@@ -1026,10 +1034,13 @@ function twoTabsRace(shared, tabA, tabB, path) {
         ['a different cloud vehicle', [{ id: 'v_cloud', name: 'טרנזיט', ownerId: 'w_02',
             active: true, rates: [{ from: '2026-02-01', amount: 250 }] }]]
     ]) {
+        // The snapshot carries the day - so nothing here is about the days rule - and it
+        // carries no vehicles and no marker, because the build that wrote it does not.
         const cloud = makeCloud({
-            doc: Object.assign(document({ vehicles: remote }), {
-                updatedAt: '2026-08-20T00:00:00.000Z', updatedBy: 'd_other'
-            })
+            doc: Object.assign(document({
+                vehicles: remote,
+                days: { '2026-08-12': dayFor('w_01', 'p_01') }
+            }), { updatedAt: '2026-08-20T00:00:00.000Z', updatedBy: 'd_other' })
         });
         const device = makeDevice({ deviceId: 'd_veh' });
         seed(device);

@@ -1090,6 +1090,52 @@ function advancesTotal(schedule, workerId, fromDate, toDate) {
 function vehiclesEnabled() {
     return FARKAD_FLAGS.vehicles === true;
 }
+
+// A snapshot's vehicles, laid on top of the ones this device is holding.
+//
+// The same rule the ledger already follows: a phone that has never heard of a record has
+// not DISAGREED with it. While the feature is retired nothing on any phone writes a
+// vehicle, so a document with an empty array is not a document saying they were deleted -
+// it is a document written by a build that does not carry them. Adopting it wholesale
+// took a crew's vehicles, their rate history and the evenings that named them off the one
+// device that still had them, and the snapshot that did it could not be undone.
+//
+// The remote copy wins where both have the same id: that is an ordinary field merge, and
+// it is what would happen if anybody were editing them. What it may not do is remove.
+function mergeVehiclesInto(target, source) {
+    if (!target || !source) return target;
+    const held = Array.isArray(source.vehicles) ? source.vehicles : [];
+    if (held.length === 0) return target;
+
+    const merged = Array.isArray(target.vehicles) ? target.vehicles.slice() : [];
+    const known = new Set(merged.filter(item => item && item.id).map(item => String(item.id)));
+    held.forEach(item => {
+        if (!item || !item.id || known.has(String(item.id))) return;
+        merged.push(item);
+        known.add(String(item.id));
+    });
+    target.vehicles = merged;
+    return target;
+}
+
+// The other half of the same fact: which vehicles stayed in the yard on a given evening.
+//
+// It lives on the day record, and a build that does not do vehicles does not write it -
+// so a snapshot arriving without one is not a snapshot saying the evening has changed its
+// mind. Carried forward for every day the snapshot DOES carry and says nothing about; a
+// day the snapshot has removed is the days rule, not this one.
+function mergeVehicleDaysInto(target, source) {
+    if (!target || !source) return target;
+    const held = (source && source.days) || {};
+    Object.keys(held).forEach(date => {
+        const was = held[date];
+        const now = (target.days || {})[date];
+        if (!was || !Array.isArray(was.vehiclesOff)) return;
+        if (!now || Array.isArray(now.vehiclesOff)) return;
+        now.vehiclesOff = was.vehiclesOff.slice();
+    });
+    return target;
+}
 //
 // A vehicle is paid a flat amount for a day it went out. Not per trip, not per site, and
 // not scaled by whether the man driving it worked a full day - three hundred is three

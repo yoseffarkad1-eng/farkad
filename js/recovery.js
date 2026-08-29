@@ -168,26 +168,57 @@ const Recovery = {
         return out;
     },
 
-    // The same records, taken TWICE, and believed only when the two readings agree.
+    // ONE MOMENT OF THE DEVICE, or an honest admission that it could not be had.
     //
-    // Two tabs of this app are two JavaScript worlds on one disk. The export reads the
-    // schedule, then the queue - and in between, the other tab can save a newer edit and
-    // collect the operation that carried it. The file then holds a schedule from before
-    // the edit and no operation that could put it back, while the phone it came from has
-    // the edit. Nothing about that file looks wrong; it is simply missing an evening.
+    // Taking the records twice and comparing them is an ABA check: it compares two
+    // VALUES, so it cannot tell "nothing moved" from "moved and came back". A second tab
+    // mid-fence removes a batch, the exporter reads, the fence fails and the batch
+    // returns, the exporter reads again - two equal readings of a disk that was never in
+    // that state, and a file that says it is stable while the phone still holds the days
+    // it is missing.
     //
-    // Bounded, because this must never become a reason the raw bytes do not leave the
-    // phone. If the readings will not settle the file is still made, still carries
-    // everything that was captured, and SAYS it was taken while something was moving -
-    // and nothing downstream may then present the reconstruction as complete.
+    // So the captures are bracketed by something only ever goes forward: Store's write
+    // tick, which every durable write in every tab moves. Equal readings AND an unmoved
+    // tick is one moment; anything else is not, and says so.
+    //
+    // Bounded, because this must never be a reason the raw bytes do not leave the phone.
+    // When the readings will not settle the file is still made, it carries EVERY distinct
+    // reading rather than the last one, and nothing downstream may present the
+    // reconstruction as complete.
     rawSnapshot() {
-        let previous = this.rawRecords();
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-            const again = this.rawRecords();
-            if (sameRecordMap(previous, again)) return { records: again, stable: true };
-            previous = again;
+        const captures = [];
+        const keep = records => {
+            const already = captures.some(seen => sameRecordMap(seen, records));
+            if (!already) captures.push(records);
+            return records;
+        };
+
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const before = Store.readWriteTick();
+            const first = keep(this.rawRecords());
+            const second = keep(this.rawRecords());
+            const after = Store.readWriteTick();
+
+            const quiet = before !== null && after !== null && before === after
+                && !Store.unfenced;
+            if (quiet && sameRecordMap(first, second)) {
+                return {
+                    records: second,
+                    stable: true,
+                    storageReadable: Store.available,
+                    captures: [second]
+                };
+            }
         }
-        return { records: previous, stable: false };
+
+        return {
+            records: captures[captures.length - 1] || {},
+            stable: false,
+            storageReadable: Store.available,
+            // Every reading, because on a device this file exists for the difference
+            // between two of them may be the evening somebody is looking for.
+            captures
+        };
     },
 
     // Pressed only after the export. Resumes writing if every damaged record was copied.
