@@ -5423,8 +5423,19 @@ for (const [label, arm] of [
 // against him. Which one is offered is decided by the model, not by the screen.
 
 // A crew, a site, and the dialogs answered for us. `answer` is what the person taps.
+// Permanent deletion is OFF in this build (FARKAD_FLAGS in js/model/schema.js), so the
+// path behind it can only be exercised by a test that opens the gate on purpose. It is
+// opened here, per device, and never in production: nothing in the app writes to that
+// object. A gate that rots while it is shut is not a gate, so everything it guards goes
+// on being tested exactly as it was - and the suite below proves it is shut by default.
+function allowDeletion(device) {
+    device.global('FARKAD_FLAGS').permanentDeletion = true;
+    return device;
+}
+
 function crew(options = {}) {
     const device = makeDevice({ deviceId: options.deviceId || 'd_here' });
+    if (options.canDelete !== false) allowDeletion(device);
     device.State.schedule.workers = [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
         { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
@@ -5475,6 +5486,66 @@ function a_nameInDocument(document, id) {
     if ((doc.workers || []).some(item => item && String(item.id) === id)) return true;
     const map = (doc.roster && doc.roster.workers) || {};
     return Boolean(map[id]);
+}
+
+{
+    suite('permanent deletion is off in this build, and nothing reaches past it');
+
+    // The gate is shut and this is the test that says so. Every suite around it opens it
+    // on purpose to keep the machinery behind it honest; this one is the only reading of
+    // what the build a person actually installs will do.
+    const device = makeDevice({ deviceId: 'd_shut' });
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 }
+    ];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+
+    const said = [];
+    let typingAsked = 0;
+    device.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    device.ctx.askText = () => { typingAsked += 1; return Promise.resolve('דוד'); };
+
+    check('the flag is off', device.global('FARKAD_FLAGS').permanentDeletion === false,
+        String(device.global('FARKAD_FLAGS').permanentDeletion));
+    check('and the app agrees when asked',
+        device.global('permanentDeletionEnabled')() === false);
+
+    // The man the gate would otherwise let through: nothing recorded, nothing queued,
+    // and provably this device's own.
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    given('he was added', device.State.commitRoster() === true);
+    given('nothing is recorded against him',
+        device.call('workerFootprint', device.State.schedule, added).days.length === 0);
+    given('and he is provably this phone\'s own',
+        device.Sync.provenLocalOnly('workers', added) === true);
+
+    check('the screen still refuses, and names the reason',
+        device.call('deletionBlockers', added).includes('מחיקה סופית מושבתת בגרסה הזו'),
+        JSON.stringify(device.call('deletionBlockers', added)));
+
+    // And the write path, called directly - the way a stale screen would call it.
+    await device.call('deleteWorker', added);
+    await wait();
+
+    check('the typing dialog is never opened', typingAsked === 0, String(typingAsked));
+    check('he is still on the screen', workerIds(device).includes(added),
+        workerIds(device));
+    check('and still on the disk',
+        String(device.raw('scheduleData:v2')).includes(added));
+    check('the person is told why rather than watching nothing happen',
+        said.some(message => message.includes('מושבתת')), JSON.stringify(said));
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_shut' });
+    reopened.State.load();
+    check('and the next open has him too', workerIds(reopened).includes(added),
+        workerIds(reopened));
 }
 
 {
@@ -6422,7 +6493,7 @@ for (const [label, act] of [
     given('he was added', device.State.commitRoster() === true);
     given('and nothing was ever handed to an adapter', device.Sync.adapter === null);
 
-    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    const again = allowDeletion(makeDevice({ storage: device.dump(), deviceId: 'd_here' }));
     again.State.load();
     again.ctx.askConfirm = () => Promise.resolve(true);
     again.ctx.askTell = () => Promise.resolve();
@@ -8282,6 +8353,301 @@ for (const [label, run] of [
     reopened.State.load();
     check('which is what the next session reads too',
         reopened.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+// ================================================================ P4: the rescue file
+//
+// The one file that exists for the worst day: the app has just told somebody it cannot
+// read its own records, and this is how the bytes leave the phone. Everything below goes
+// through the REAL export and the REAL <input type="file"> - a test that hands the app a
+// storage object proves the parser works and nothing about whether a person holding this
+// file can open it.
+
+// A phone whose schedule record is truncated, with an older build's record behind it,
+// unsent edits in the queue, and dialogs that answer.
+function brokenPhone(options = {}) {
+    const damagedV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"ד';
+    // A v1 record the way the old build wrote one: a week start, two names, and a flat
+    // array of cells indexed worker*7 + day. The second cell names a site that is not in
+    // the list, which the migration refuses to guess at - so this phone also has a
+    // decision waiting that has never been written to its disk.
+    const v1 = JSON.stringify({
+        weekStartDate: '2026-08-09',
+        workers: ['דוד', 'שרה'],
+        places: ['הרצליה'],
+        assignments: [
+            { index: 1, value: 'הרצליה' },
+            { index: 9, value: 'מקום שלא ברשימה' }
+        ]
+    });
+
+    const device = makeDevice({
+        deviceId: options.deviceId || 'd_broken',
+        storage: { 'scheduleData:v2': damagedV2, scheduleData: v1 }
+    });
+    const said = [];
+    device.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    device.ctx.askConfirm = () => Promise.resolve(options.answer !== false);
+    device.State.load();
+    return { device, said, damagedV2, v1 };
+}
+
+{
+    suite('P4: the rescue file carries everything, including what was never written down');
+
+    const { device, damagedV2, v1 } = brokenPhone();
+
+    given('the record on disk is the damaged one, untouched',
+        device.raw('scheduleData:v2') === damagedV2);
+    given('and it was quarantined', device.raw('scheduleData:v2:damaged') === damagedV2);
+    given('while the screen shows the migrated week',
+        Object.keys(device.State.schedule.days || {}).length > 0,
+        JSON.stringify(Object.keys(device.State.schedule.days || {})));
+    given('with a decision still waiting', device.State.migrationIssues.length > 0,
+        String(device.State.migrationIssues.length));
+
+    // An edit made on the broken phone. Writing is blocked until the person acknowledges,
+    // which is exactly what they do after exporting - so this is queued afterwards.
+    device.global('Recovery').acknowledge();
+    check('recording resumes once the person has been told',
+        device.call('farkadWritesBlocked') === false);
+    const queued = device.Sync.queueBatch([{
+        path: 'days.2026-08-12.actual.w_01',
+        value: { entries: [{ placeId: 'p_01' }] }
+    }]);
+    given('and an edit is queued', queued === true);
+
+    const before = device.dump();
+    device.call('exportRecoveryData');
+
+    check('a file was handed to the browser', device.downloads.length === 1,
+        JSON.stringify(device.downloads.map(file => file.name)));
+    const file = JSON.parse(device.downloads[0].text);
+    check('it says what it is', file.kind === 'farkad-recovery', String(file.kind));
+
+    check('the damaged bytes are in it',
+        file.records['scheduleData:v2'] === damagedV2,
+        String(file.records['scheduleData:v2']).slice(0, 40));
+    check('so is the quarantine copy',
+        file.records['scheduleData:v2:damaged'] === damagedV2);
+    check('so is the record the old build wrote',
+        file.records.scheduleData === v1, String(file.records.scheduleData).slice(0, 40));
+    check('and the schedule the app was actually holding',
+        Boolean(file.liveSchedule) && Array.isArray(file.liveSchedule.workers)
+        && file.liveSchedule.workers.length === 2,
+        JSON.stringify((file.liveSchedule || {}).workers || []).slice(0, 80));
+    check('the decision nobody has answered yet travels with it',
+        Array.isArray(file.pendingDecisions) && file.pendingDecisions.length > 0,
+        JSON.stringify(file.pendingDecisions));
+
+    const queueKeys = Object.keys(file.records).filter(key => key.indexOf('farkad:outbox') === 0);
+    check('every queue record is in it',
+        device.Sync.activeQueueKeys().every(key => file.records[key] === device.raw(key))
+        && queueKeys.some(key => String(file.records[key]).includes('2026-08-12')),
+        JSON.stringify(queueKeys));
+    check('and every provenance record',
+        device.Store.keys()
+            .filter(key => key === 'farkad:provenance:v1' || key.indexOf('farkad:prov:') === 0)
+            .every(key => file.records[key] === device.raw(key)),
+        JSON.stringify(device.Store.keys().filter(key => key.indexOf('farkad:prov:') === 0)));
+
+    // THE SOURCE KEEPS EVERY BYTE. A complete before/after map, not a spot check on the
+    // two keys the test happened to think of.
+    const after = device.dump();
+    const lost = Object.keys(before).filter(key => after[key] !== before[key]);
+    check('and the phone it came from kept every byte it had',
+        lost.length === 0, JSON.stringify(lost.map(key => ({
+            key, before: String(before[key]).slice(0, 40), after: String(after[key]).slice(0, 40)
+        }))));
+}
+
+{
+    suite('P4: the rescue file opens through the real file input');
+
+    const { device, damagedV2 } = brokenPhone();
+    device.global('Recovery').acknowledge();
+    device.Sync.queueBatch([{
+        path: 'days.2026-08-12.actual.w_01',
+        value: { entries: [{ placeId: 'p_01' }] }
+    }]);
+    device.call('exportRecoveryData');
+    const text = device.downloads[0].text;
+    const name = device.downloads[0].name;
+
+    // A SECOND phone, with troubles of its own that must survive the import.
+    const rescuer = makeDevice({ deviceId: 'd_rescuer' });
+    seed(rescuer);
+    rescuer.putRaw('farkad:outbox:damaged', '{"seq":3,"items":{"days.2026-07-07');
+    const theirWreckage = rescuer.raw('farkad:outbox:damaged');
+    const said = [];
+    const asked = [];
+    rescuer.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    rescuer.ctx.askConfirm = question => { asked.push(question); return Promise.resolve(true); };
+    // Lives in js/ui/migration.js, which the data suite does not load. The import opens
+    // it when the file brought decisions with it, and that it is opened at all is part of
+    // what this checks.
+    let migrationOpened = 0;
+    rescuer.ctx.openMigrationModal = () => { migrationOpened += 1; };
+
+    const mine = rescuer.State.nextWorkerId();
+    rescuer.State.schedule.workers.push(
+        { id: mine, name: 'שלי', active: true, dailyRate: 100, hourlyRate: 0 });
+    rescuer.State.save({ silent: true });
+    given('the rescuer can prove somebody is only ever his',
+        rescuer.Sync.provenLocalOnly('workers', mine) === true);
+
+    // Through the handler the browser calls, with the file on the event.
+    rescuer.call('importBackup', rescuer.fileEvent(name, text));
+    await settle(60);
+
+    check('the app asked before replacing anything', asked.length === 1,
+        JSON.stringify(asked.map(question => question && question.title)));
+    check('and said out loud that this is a rescue file, not a backup',
+        String((asked[0] || {}).title || '').includes('חילוץ'),
+        JSON.stringify((asked[0] || {}).title));
+    check('the week the broken phone was showing arrived',
+        Boolean((rescuer.State.schedule.days || {})['2026-08-10']),
+        JSON.stringify(Object.keys(rescuer.State.schedule.days || {})));
+    check('and so did the edit that never reached its schedule record',
+        rescuer.call('entriesFor', rescuer.State.schedule, '2026-08-12', 'w_01', 'actual')
+            .length === 1,
+        JSON.stringify(Object.keys(rescuer.State.schedule.days || {})));
+    check('the decision nobody answered is still waiting, on this phone now',
+        rescuer.State.migrationIssues.length > 0,
+        String(rescuer.State.migrationIssues.length));
+    check('and it was put in front of the person rather than filed away',
+        migrationOpened === 1, String(migrationOpened));
+
+    // The raw records are EVIDENCE. Importing them would put unreadable bytes under the
+    // keys this app reads, and the next open would quarantine them and stop recording.
+    // Not "does the record look different" - the rescued schedule naturally begins with
+    // the same characters the truncated one did. The question is whether any key on this
+    // device now holds those bytes, and whether what it does hold can be read.
+    const readsBack = (() => {
+        try { return Boolean(JSON.parse(rescuer.raw('scheduleData:v2'))); }
+        catch (error) { return false; }
+    })();
+    const carrying = Object.entries(rescuer.dump())
+        .filter(([, value]) => value === damagedV2)
+        .map(([key]) => key);
+    check('the damaged bytes were not written onto the rescuing phone',
+        readsBack && carrying.length === 0,
+        JSON.stringify({ readsBack, carrying }));
+    check('and its own wreckage is exactly where it was',
+        rescuer.raw('farkad:outbox:damaged') === theirWreckage,
+        String(rescuer.raw('farkad:outbox:damaged')));
+
+    // A roster that arrived in a file has been on two phones. Nobody in it is provably
+    // this device's own any more, and permanent deletion has nothing behind it.
+    check('nobody can be proved local-only after a rescue import',
+        rescuer.Sync.provenLocalOnly('workers', 'w_01') === false
+        && rescuer.Sync.provenLocalOnly('workers', mine) === false);
+    check('so the screen offers the archive instead of the delete',
+        rescuer.call('deletionBlockers', 'w_01').length > 0,
+        JSON.stringify(rescuer.call('deletionBlockers', 'w_01')));
+
+    // And across a close and reopen, which is the only reading that counts.
+    const reopened = makeDevice({ storage: rescuer.dump(), deviceId: 'd_rescuer' });
+    reopened.State.load();
+    check('the reopen holds the rescued week',
+        Boolean((reopened.State.schedule.days || {})['2026-08-10'])
+        && reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01',
+            'actual').length === 1,
+        JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+    check('and still refuses to call anybody its own',
+        reopened.Sync.provenLocalOnly('workers', 'w_01') === false);
+}
+
+{
+    suite('P4: a rescue file cannot hand back the claims its export retired');
+
+    // The ordering bug, stated as the thing it costs. forgetLocalOrigin is what says
+    // "nothing here is provably ours any more", and the records were being snapshotted
+    // BEFORE it ran - so the file carried the very claims it was invalidating, and
+    // opening it on a second phone stood them back up with a delete button beside them.
+    const { device } = crew({ deviceId: 'd_source' });
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.save({ silent: true });
+    given('he is provably local before the file leaves',
+        device.Sync.provenLocalOnly('workers', mine) === true);
+
+    device.call('exportRecoveryData');
+    const file = JSON.parse(device.downloads[0].text);
+
+    check('the file says the handover was written down',
+        file.handoverRecorded === true, String(file.handoverRecorded));
+    check('and the provenance records in it are the ones from AFTER the handover',
+        file.records['farkad:prov:gen'] === device.raw('farkad:prov:gen'),
+        `${file.records['farkad:prov:gen']} vs ${device.raw('farkad:prov:gen')}`);
+
+    // The proof: a phone built from the file's own records cannot claim him.
+    const opened = makeDevice({ storage: file.records, deviceId: 'd_source' });
+    opened.State.load();
+    check('so a device holding only those records cannot prove he never left',
+        opened.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
+    suite('P4: a rescue file with nothing readable in it is refused, not half-imported');
+
+    const rescuer = makeDevice({ deviceId: 'd_rescuer2' });
+    seed(rescuer);
+    const before = rescuer.raw('scheduleData:v2');
+    const said = [];
+    let asked = 0;
+    rescuer.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    rescuer.ctx.askConfirm = () => { asked += 1; return Promise.resolve(true); };
+
+    rescuer.call('importBackup', rescuer.fileEvent('farkad-recovery-bad.json',
+        JSON.stringify({
+            kind: 'farkad-recovery',
+            records: { 'scheduleData:v2': '{"workers":[{"id":"w_0' }
+        })));
+    await settle(60);
+
+    check('nothing was replaced', rescuer.raw('scheduleData:v2') === before);
+    check('and nothing was even asked', asked === 0, String(asked));
+    check('the person is told the file could not be read',
+        said.some(message => message.includes('לא נטען')), JSON.stringify(said));
+}
+
+{
+    suite('P4: an ordinary backup still opens through the same door');
+
+    // The rescue path is a branch, not a replacement. A file that is a plain schedule has
+    // to go on behaving exactly as it did.
+    const source = makeDevice({ deviceId: 'd_plain' });
+    seed(source);
+    record(source, '2026-08-15', 'w_01', 'p_01');
+    const text = JSON.stringify(source.State.schedule);
+
+    const target = makeDevice({ deviceId: 'd_target' });
+    seed(target);
+    const asked = [];
+    target.ctx.askTell = () => Promise.resolve();
+    target.ctx.askConfirm = question => { asked.push(question); return Promise.resolve(true); };
+
+    target.call('importBackup', target.fileEvent('farkad-2026-08-15.json', text));
+    await settle(60);
+
+    check('it is offered as a backup, not as a rescue',
+        String((asked[0] || {}).title || '').includes('גיבוי'),
+        JSON.stringify((asked[0] || {}).title));
+    check('and the day arrived',
+        target.call('entriesFor', target.State.schedule, '2026-08-15', 'w_01', 'actual')
+            .length === 1,
+        JSON.stringify(Object.keys(target.State.schedule.days || {})));
 }
 
 {

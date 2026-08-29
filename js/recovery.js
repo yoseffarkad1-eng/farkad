@@ -101,6 +101,29 @@ const Recovery = {
         const schedule = Store.durableGet('scheduleData:v2');
         if (schedule !== null) out['scheduleData:v2'] = schedule;
 
+        // The record an old build wrote, and the decisions the migration off it refused
+        // to guess. Neither is derivable from the schedule beside them: the v1 bytes are
+        // the only copy of anything the migration could not carry across, and an issue is
+        // a question about somebody's day that is still waiting for a person. A rescue
+        // file that dropped them would hand over a schedule and quietly lose the part
+        // nobody had answered yet.
+        ['scheduleData', 'scheduleData:migrationIssues'].forEach(key => {
+            const held = Store.durableGet(key);
+            if (held !== null) out[key] = held;
+        });
+
+        // EVERY quarantine copy on the device, not only the ones this session put aside.
+        // A copy made months ago, whose original has since been written over by an
+        // ordinary save, is the only trace of those bytes left anywhere - and it was
+        // being left behind by an export that walked this session's problem list.
+        Store.keys()
+            .filter(key => key.indexOf(':damaged') !== -1)
+            .sort()
+            .forEach(key => {
+                const held = Store.durableGet(key);
+                if (held !== null) out[key] = held;
+            });
+
         // The queue that is actually being written to, which after a damaged one is not
         // the key anybody would think to look under - and which is a FAMILY of keys, not
         // one record. Naming only the slot would put the sequence number in the file and

@@ -705,19 +705,15 @@ const LAST_BACKUP_KEY = 'scheduleData:lastBackup';
 // and so somebody can look at it later. JSON a parser refuses is usually a truncated
 // write, and the days in it are plain text.
 function exportRecoveryData() {
-    const records = Recovery.rawRecords();
-    const payload = {
-        kind: 'farkad-recovery',
-        takenAt: new Date().toISOString(),
-        appVersion: typeof APP_VERSION === 'string' ? APP_VERSION : null,
-        // Said in the file too, because whoever opens it will not have the banner.
-        note: 'Raw records that could not be parsed. Nothing here was deleted from the device.',
-        problems: Recovery.problems.map(problem => ({
-            key: problem.key, copiedTo: problem.copy, message: problem.message
-        })),
-        records
-    };
-
+    // The handover FIRST, and the records read after it.
+    //
+    // The order is the whole of it. forgetLocalOrigin is what says "nothing on this
+    // device is provably its own any more", and it writes that down - so a snapshot of
+    // the provenance records taken BEFORE it still carried every "made here and never
+    // left" claim the file was in the act of invalidating. Open that file on a second
+    // phone and it hands back the very claims the export existed to retire, with a
+    // permanent-delete button beside each of them.
+    //
     // The same handover the ordinary backup makes, attempted - but never a reason to
     // stop. This file is the only way the unreadable bytes leave a phone, and refusing it
     // because a bookkeeping write failed would be trading the data for the bookkeeping.
@@ -734,6 +730,37 @@ function exportRecoveryData() {
         ? FarkadSync.forgetLocalOrigin()
         : true;
     if (!recorded && FarkadSync.noteHandoverUnrecorded) FarkadSync.noteHandoverUnrecorded();
+
+    const payload = {
+        kind: 'farkad-recovery',
+        takenAt: new Date().toISOString(),
+        appVersion: typeof APP_VERSION === 'string' ? APP_VERSION : null,
+        // Said in the file too, because whoever opens it will not have the banner.
+        note: 'Raw records that could not be parsed. Nothing here was deleted from the device.',
+        // Whether the device managed to write down that this file left it. Carried in the
+        // file because the phone it is opened on cannot ask the phone it came from, and
+        // "we could not record the handover" is exactly the thing that must not be lost
+        // between the two.
+        handoverRecorded: recorded,
+        problems: Recovery.problems.map(problem => ({
+            key: problem.key, copiedTo: problem.copy, message: problem.message
+        })),
+        // The schedule AS THE APP IS HOLDING IT, which on the device this file exists for
+        // is not any record on the disk. When scheduleData:v2 will not parse the app
+        // falls back to the old v1 record, migrates it, shows it - and deliberately does
+        // not write it down, because writing would put pre-migration data over the newest
+        // record there is. So the only complete, readable schedule on that phone lives in
+        // memory, and a file carrying only the raw records carried the wreckage and left
+        // the week the person was looking at behind.
+        //
+        // Marked as what it is. It is derived, not a record, and whoever opens this file
+        // is told which of the two they are reading.
+        liveSchedule: cloudDocument(State.schedule),
+        // Same reason: the decisions the migration refused to guess are only on the disk
+        // when the migration was allowed to write, and on a held device it never is.
+        pendingDecisions: Array.isArray(State.migrationIssues) ? State.migrationIssues : [],
+        records: Recovery.rawRecords()
+    };
 
     const name = `farkad-recovery-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
@@ -1016,8 +1043,223 @@ function renderStorageRoom() {
 // report success and leave an empty app. So an old file is recognised and put through the
 // same migration the app runs on first load, and a file that loses everything in
 // normalisation is refused rather than imported as an empty schedule.
+// ---------------------------------------------------------------- the rescue file
+//
+// A recovery export is not a backup and must never be treated as one. A backup is a
+// schedule somebody chose to keep; this is everything a broken phone was holding, raw
+// bytes included, produced at the moment the app told its owner it could not read its
+// own records. Three things follow, and all three are why this has its own door:
+//
+//   the file is a HANDOVER from a device that could not be trusted with its own data,
+//   so nothing in it can still be "made here and never left" - the deletion provenance
+//   it carries is invalidated on the way in, explicitly, rather than adopted;
+//
+//   the usable schedule inside it has to be FOUND, because the record the app normally
+//   reads is the one that would not parse. The queue beside it holds edits that never
+//   reached that record, and a rescue that dropped them would lose the last evening
+//   somebody worked - which is the evening this file exists for;
+//
+//   and the raw records are evidence. They are reported, never imported: writing another
+//   device's wreckage onto this one would put unreadable bytes under the keys this app
+//   reads, and the next open would quarantine them and stop recording.
+function looksLikeRecoveryFile(parsed) {
+    return Boolean(parsed) && typeof parsed === 'object'
+        && parsed.kind === 'farkad-recovery';
+}
+
+// The best schedule the rescue file can be made to yield, with the queue it was carrying
+// replayed on top of it - which is what the phone would have shown at its next open.
+//
+// Every candidate is tried in order and the first one that passes the WHOLE document
+// check wins. Nothing here repairs anything: a record that will not parse is skipped and
+// named, never patched into something that looks plausible.
+function scheduleFromRecoveryRecords(records, fallback) {
+    const tried = [];
+    const parse = key => {
+        const raw = records[key];
+        if (typeof raw !== 'string') return null;
+        try {
+            return JSON.parse(raw);
+        } catch (error) {
+            tried.push(`${key}: לא נקרא`);
+            return null;
+        }
+    };
+
+    // The live record first, then its quarantined copies oldest-first, then whatever an
+    // older build left behind. A copy is bytes that were already refused once, so it is
+    // only reached when the live record cannot be used at all.
+    const candidates = ['scheduleData:v2']
+        .concat(Object.keys(records)
+            .filter(key => key.indexOf('scheduleData:v2:damaged') === 0).sort());
+
+    let document = null;
+    let from = null;
+    for (let i = 0; i < candidates.length && !document; i += 1) {
+        const parsed = parse(candidates[i]);
+        if (!parsed) continue;
+        const read = readReplacementDocument(parsed);
+        if (!read.document) {
+            tried.push(`${candidates[i]}: ${(read.problems || []).join(', ')}`);
+            continue;
+        }
+        document = read.document;
+        from = candidates[i];
+    }
+
+    // An old build's record, migrated the same way a first load migrates it.
+    let issues = [];
+    if (!document) {
+        const legacy = parse('scheduleData');
+        if (legacy) {
+            const result = migrateV1(legacy);
+            const read = readReplacementDocument(cloudDocument(result.schedule));
+            if (read.document) {
+                document = read.document;
+                from = 'scheduleData';
+                issues = result.issues || [];
+            } else {
+                tried.push(`scheduleData: ${(read.problems || []).join(', ')}`);
+            }
+        }
+    }
+
+    // Nothing on the disk could be read. What the app was HOLDING is the last thing
+    // left, and on the device this file exists for it is usually the only complete
+    // schedule that ever existed - see liveSchedule in exportRecoveryData. Reached last,
+    // on purpose: a record is evidence and this is a derivation from one.
+    if (!document && fallback) {
+        const read = readReplacementDocument(fallback);
+        if (read.document) {
+            document = read.document;
+            from = 'המצב שהיה על המסך';
+        } else {
+            tried.push(`liveSchedule: ${(read.problems || []).join(', ')}`);
+        }
+    }
+
+    if (!document) {
+        const error = new Error('no usable schedule in the rescue file');
+        error.problems = tried.length > 0 ? tried
+            : ['לא נמצאה בקובץ רשומה שאפשר לקרוא כלוח עבודה.'];
+        throw error;
+    }
+
+    const schedule = normaliseSchedule(document);
+
+    // The queue the broken phone was carrying, replayed. These are edits that were made
+    // and confirmed to their owner and had not yet reached the schedule record - the
+    // difference between "what was written last time" and "what the phone was showing".
+    let replayed = 0;
+    Object.keys(records).sort().forEach(key => {
+        if (key.indexOf('farkad:outbox') !== 0) return;
+        if (key.indexOf(':damaged') !== -1) return;
+        let parsed;
+        try {
+            parsed = JSON.parse(records[key]);
+        } catch (error) {
+            tried.push(`${key}: לא נקרא`);
+            return;
+        }
+        if (!parsed || typeof parsed !== 'object') return;
+
+        // Both shapes: a batch of operations, and the whole queue an older build kept
+        // inside the slot record.
+        const entries = [];
+        if (Array.isArray(parsed.ops)) {
+            parsed.ops.forEach(op => entries.push({
+                path: String((op || {}).path || ''), value: (op || {}).value,
+                seq: Number((op || {}).seq) || 0
+            }));
+        } else if (parsed.items && typeof parsed.items === 'object') {
+            Object.keys(parsed.items).forEach(path => entries.push({
+                path, value: parsed.items[path].value,
+                seq: Number(parsed.items[path].seq) || 0
+            }));
+        }
+
+        entries.sort((one, two) => one.seq - two.seq).forEach(entry => {
+            if (journalEntryProblems(entry.path, entry.value).length > 0) {
+                tried.push(`${key}: ${entry.path} לא נקרא`);
+                return;
+            }
+            applyJournalEntry(schedule, entry.path, entry.value);
+            replayed += 1;
+        });
+    });
+
+    // Read again AFTER the replay. An entry that is sound on its own can still leave a
+    // document this app would refuse - a day against a worker the schedule does not have
+    // - and importing that would put a record on the device that nothing can repair.
+    const after = readReplacementDocument(cloudDocument(schedule));
+    if (!after.document) {
+        const error = new Error('the rescued schedule does not hold together');
+        error.problems = after.problems;
+        throw error;
+    }
+
+    return { schedule: normaliseSchedule(after.document), from, issues, replayed, tried };
+}
+
+function readRecoveryFile(parsed) {
+    const records = parsed.records;
+    if (!records || typeof records !== 'object' || Array.isArray(records)) {
+        throw new Error('not a farkad recovery file');
+    }
+
+    const found = scheduleFromRecoveryRecords(records, parsed.liveSchedule);
+
+    // Decisions the migration refused to guess come from the file itself where the broken
+    // phone had any, and from the migration this import just ran where it did not.
+    let issues = found.issues;
+    if (typeof records['scheduleData:migrationIssues'] === 'string') {
+        try {
+            const held = JSON.parse(records['scheduleData:migrationIssues']);
+            if (Array.isArray(held) && held.length > 0) issues = held;
+        } catch (error) {
+            found.tried.push('scheduleData:migrationIssues: לא נקרא');
+        }
+    }
+    // And the ones the broken phone never got to write down. A held device does not save
+    // its migration, so the questions it raised exist only in the session that raised
+    // them - which is the session that exported this file.
+    if (issues.length === 0 && Array.isArray(parsed.pendingDecisions)) {
+        issues = parsed.pendingDecisions;
+    }
+
+    const counts = migrationTally(found.schedule);
+    const damaged = Object.keys(records).filter(key => key.indexOf(':damaged') !== -1);
+
+    return {
+        rescue: true,
+        schedule: found.schedule,
+        issues,
+        // Everything that could NOT be used, so the summary never implies the file was
+        // read whole when part of it was unreadable.
+        unread: found.tried,
+        damagedKeys: damaged,
+        // The file says whether the phone it came from managed to write down that it
+        // left. Either way this device treats it as a handover; the flag is carried so
+        // the person is told which of the two happened.
+        handoverRecorded: parsed.handoverRecorded !== false,
+        summary: `קובץ חילוץ ממכשיר אחר. נמצא לוח עבודה ב-\u2068${found.from}\u2069 עם `
+            + `${found.schedule.workers.length} עובדים ו-${counts.workDays} ימי עבודה`
+            + (found.replayed > 0 ? `, ועוד ${found.replayed} עריכות שלא הספיקו להישמר.` : '.')
+            + (found.tried.length > 0
+                ? ` ${found.tried.length} רשומות בקובץ לא נקראו והן נשארות בקובץ בלבד.`
+                : '')
+    };
+}
+
 function readBackupFile(parsed) {
     if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
+
+    // A rescue file, through its own door. It used to fall straight through to the check
+    // below and be refused as "not a farkad backup" - which is true and useless: the
+    // person holding it has just been told to export it, and the app that told them to
+    // would not open it.
+    if (looksLikeRecoveryFile(parsed)) return readRecoveryFile(parsed);
+
     if (!Array.isArray(parsed.workers) || !Array.isArray(parsed.places)) {
         throw new Error('not a farkad backup');
     }
@@ -1106,11 +1348,24 @@ function importBackup(event) {
         }
 
         const incoming = loaded.schedule;
-        const go = await askConfirm({
-            title: 'לטעון את הגיבוי?',
-            message: `${loaded.summary} הקובץ יחליף את כל הנתונים הקיימים, והמצב הנוכחי יישמר כגיבוי מקומי.`,
-            ok: 'טען'
-        });
+        // A rescue file says so, out loud, before anything is replaced. It is not a
+        // backup somebody chose to keep - it is everything a phone was holding at the
+        // moment it said it could not read its own records, and what comes out of it is
+        // the best that could be RESCUED, not a state anybody saved.
+        const go = await askConfirm(loaded.rescue
+            ? {
+                title: 'לטעון קובץ חילוץ?',
+                message: `${loaded.summary}\n\nזה לא קובץ גיבוי רגיל: זה מה שהצלחנו לחלץ ממכשיר `
+                    + 'שלא הצליח לקרוא את הנתונים שלו. הקובץ יחליף את כל הנתונים הקיימים כאן, '
+                    + 'והמצב הנוכחי יישמר כגיבוי מקומי. הרשומות הפגומות שבקובץ נשארות בקובץ '
+                    + 'ולא נכתבות למכשיר הזה, ומחיקה לצמיתות תישאר חסומה אחרי הטעינה.',
+                ok: 'טען חילוץ'
+            }
+            : {
+                title: 'לטעון את הגיבוי?',
+                message: `${loaded.summary} הקובץ יחליף את כל הנתונים הקיימים, והמצב הנוכחי יישמר כגיבוי מקומי.`,
+                ok: 'טען'
+            });
         if (!go) {
             event.target.value = '';
             return;
@@ -1133,6 +1388,18 @@ function importBackup(event) {
         const result = await FarkadSync.replaceEverything(incoming);
         event.target.value = '';
 
+        // EXPLICITLY, and after the replacement rather than instead of it.
+        //
+        // replaceEverything invalidates this device's own claims on its way through, and
+        // that is not the same statement. The roster that just arrived came out of a file
+        // that has been on at least two phones - so nobody in it was made here and never
+        // left, and the app must not offer to delete any of them for good on the strength
+        // of a generation number that happens to line up. Said again here, in one place,
+        // so that a reader of this file can see it is said at all.
+        if (loaded.rescue && result.ok !== false) {
+            if (FarkadSync.noteProvenanceUncertain) FarkadSync.noteProvenanceUncertain();
+        }
+
         if (!result.ok && result.stage !== 'cloud') {
             // The schedule was put back by the transaction; the issues are this file's
             // business and go back with it.
@@ -1149,7 +1416,9 @@ function importBackup(event) {
             if (!result.ok) askTell(replacementNotice(result.error));
             return;
         }
-        tellRestoreResult(result, 'הגיבוי נטען.');
+        tellRestoreResult(result, loaded.rescue
+            ? 'קובץ החילוץ נטען. מחיקה לצמיתות חסומה כאן מעכשיו - הארכיון עובד כרגיל.'
+            : 'הגיבוי נטען.');
     };
     reader.readAsText(file);
 }

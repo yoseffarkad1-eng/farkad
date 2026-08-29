@@ -1158,10 +1158,25 @@ function renderWorkerFormActions() {
 // queue rather than of the screen. Empty means deletable. Read in two places on purpose:
 // once to decide what to draw, and again at the moment of the write - a snapshot can
 // arrive while the confirmation is open.
+// Permanent deletion is OFF in this build; the switch is FARKAD_FLAGS in the model.
+//
+// Everything below it - the footprint, the queue, the provenance, the typed name - stays
+// exactly as it is and goes on being tested, because the day this is turned back on it
+// has to be the same gate it was. What the flag changes is only whether the gate can ever
+// open: while it is false the archive is the whole of what this screen offers, and the
+// one action with nothing behind it is not reachable by any path.
+function permanentDeletionEnabled() {
+    return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.permanentDeletion === true;
+}
+
 function deletionBlockers(workerId) {
     const footprint = workerFootprint(State.schedule, workerId);
     const sync = typeof FarkadSync !== 'undefined' ? FarkadSync : null;
     const blocked = [];
+
+    // First, so it is the reason named first: nothing else about this man is the point
+    // while the feature itself is off.
+    if (!permanentDeletionEnabled()) blocked.push('מחיקה סופית מושבתת בגרסה הזו');
 
     if (footprint.days.length > 0) blocked.push(`${footprint.days.length} ימים רשומים`);
     if (footprint.advances.length > 0) blocked.push(`${footprint.advances.length} מקדמות`);
@@ -1386,8 +1401,21 @@ async function deleteWorker(workerId) {
     render();
 }
 
+// The message names the CAUSE, and the two causes are not the same sentence.
+//
+// "Something changed about him meanwhile" is true of a snapshot that arrived while the
+// confirmation was open, and false - and confusing - when the reason is that this build
+// does not do permanent deletion at all. Somebody reading the second sentence goes
+// looking for the change that was never made.
 function refuseDeletion() {
     renderWorkerFormActions();
+    if (!permanentDeletionEnabled()) {
+        return askTell({
+            title: 'לא נמחק',
+            message: 'מחיקה סופית מושבתת בגרסה הזו. אפשר להעביר לארכיון - ' +
+                'כל הימים והמקדמות שלו יישמרו, והוא יורד מהרשימה.'
+        });
+    }
     return askTell({
         title: 'לא נמחק',
         message: 'בינתיים השתנה משהו על שמו, ולכן אי אפשר למחוק אותו. אפשר להעביר לארכיון - ' +

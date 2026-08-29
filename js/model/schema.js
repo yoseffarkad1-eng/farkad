@@ -19,6 +19,31 @@
 // Because every value hangs off a (date, worker) path, two people editing different
 // workers touch different fields and never collide.
 
+// ---------------------------------------------------------------- what this build does
+//
+// Features that are OFF, in one place, so that "is it on?" is a question with one answer
+// and not a guess made separately by four screens.
+//
+// Both of these are off because turning them on would be a decision about somebody's
+// money or somebody's record, and neither decision has been made. Every path behind them
+// is still here and still tested - a gate that rots while it is shut is not a gate - and
+// the suites that prove they work turn the flag on deliberately. Nothing in the app ever
+// writes to this object; there is no setting, no URL parameter and no dialog that reaches
+// it. It is changed by editing this line, in a commit, with the reason in the message.
+const FARKAD_FLAGS = {
+    // The one action with nothing behind it. Off because the proof it depends on - "made
+    // here and never sent anywhere" - is a statement about what two OTHER phones hold,
+    // and the evidence for it lives on this one. Getting it wrong deletes a man the other
+    // two are still recording days against. The archive does everything this was for.
+    permanentDeletion: false,
+
+    // Vehicles. Off because the owner cancelled the feature, and because the shape it had
+    // assumed that every active vehicle went out on every worked day - so one day with no
+    // vehicle state recorded quietly added the daily vehicle charge to somebody's pay.
+    // The stored vehicle records are NOT removed by this; see the retirement below.
+    vehicles: false
+};
+
 const SCHEMA_VERSION = 2;
 
 const RATE_NORMAL = 'normal';

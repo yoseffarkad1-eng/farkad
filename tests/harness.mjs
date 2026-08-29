@@ -122,18 +122,71 @@ function makeLocalStorage(initial) {
 // Enough DOM that the app's "is anything on screen?" guards take their null branch.
 // Every one of them is written as `const node = document.getElementById(...); if (!node)
 // return;`, so returning null everywhere disables the UI without disabling the logic.
-function makeDocument() {
+function makeDocument(downloads) {
     return {
         getElementById: () => null,
         querySelector: () => null,
         querySelectorAll: () => [],
         addEventListener: () => {},
         removeEventListener: () => {},
-        // click() is here because the export paths build an anchor and press it. What is
-        // being tested through them is what the device wrote down, not the download.
-        createElement: () => ({
-            style: {}, setAttribute: () => {}, appendChild: () => {}, click: () => {}
-        })
+        // The export paths build an anchor, set href and download on it, and press it.
+        // What comes off that press is the FILE - the one thing a person in trouble
+        // actually ends up holding - so pressing it records the name and the bytes here
+        // rather than throwing them away. A test that only wants the device's own state
+        // ignores the record; a test about the rescue file reads it.
+        createElement: () => {
+            const node = {
+                style: {}, setAttribute: () => {}, appendChild: () => {},
+                href: '', download: '',
+                click() {
+                    downloads.push({
+                        name: String(node.download),
+                        text: OBJECT_URLS.get(node.href) || null
+                    });
+                }
+            };
+            return node;
+        }
+    };
+}
+
+// The blob store behind URL.createObjectURL. A Blob in this harness is its text, because
+// every one this app makes is a JSON string it just serialised.
+const OBJECT_URLS = new Map();
+let objectUrlCount = 0;
+
+function makeBlob() {
+    return function Blob(parts) {
+        this.__text = (parts || []).map(String).join('');
+    };
+}
+
+function makeUrl() {
+    return {
+        createObjectURL(blob) {
+            objectUrlCount += 1;
+            const url = `blob:farkad/${objectUrlCount}`;
+            OBJECT_URLS.set(url, blob && blob.__text);
+            return url;
+        },
+        revokeObjectURL() { /* the bytes are kept: a test reads them after the press */ }
+    };
+}
+
+// A file the way the import handler is given one - through a real <input type="file">
+// change event and a real FileReader. Tests used to reach past both and hand the app a
+// storage object, which proved the parser worked and nothing about whether the app could
+// open the file a person is actually holding.
+function makeFileReader() {
+    return function FileReader() {
+        this.onload = null;
+        this.onerror = null;
+        this.readAsText = file => {
+            const text = file && typeof file.text === 'string' ? file.text : String(file);
+            setTimeout(() => {
+                if (this.onload) this.onload({ target: { result: text } });
+            }, 0);
+        };
     };
 }
 
@@ -194,9 +247,13 @@ export function makeDevice(options = {}) {
     // to affect it - which quietly turned "no room for the copy" into "copy made fine".
     if (options.quota) localStorage.__quota = options.quota;
 
+    const downloads = [];
     const sandbox = {
         localStorage,
-        document: makeDocument(),
+        document: makeDocument(downloads),
+        Blob: makeBlob(),
+        URL: makeUrl(),
+        FileReader: makeFileReader(),
         console: options.quiet === false ? console : {
             log: () => {}, info: () => {}, warn: () => {}, error: () => {}
         },
@@ -239,6 +296,14 @@ export function makeDevice(options = {}) {
         id,
         ctx: sandbox,
         renders,
+        // Every file this device has handed to the browser, oldest first: { name, text }.
+        downloads,
+        // The change event an <input type="file"> fires, with a real file on it. Handed
+        // to importBackup exactly as the DOM would hand it over.
+        fileEvent(name, text) {
+            const target = { files: [{ name, text }], value: name };
+            return { target };
+        },
         get Store() { return read('Store'); },
         get State() { return read('State'); },
         get Sync() { return read('FarkadSync'); },
