@@ -227,6 +227,14 @@ export function makeDevice(options = {}) {
     const id = options.deviceId || `d_test${deviceCount}`;
     read('Store').set('farkad:deviceId', id);
 
+    // The cross-tab send claim settles before it is read back, so that two tabs which
+    // both found it free can each see whose token actually landed. In the app that pause
+    // is tens of milliseconds; here everything else is measured in single ones, so the
+    // pause is scaled to match. The race it guards is the SCHEDULING of the two tabs, not
+    // the length of the wait - a suite that wants a longer one sets claimSettleMs itself.
+    read('FarkadSync').claimSettleMs = options.claimSettleMs === undefined
+        ? 1 : options.claimSettleMs;
+
     return {
         id,
         ctx: sandbox,

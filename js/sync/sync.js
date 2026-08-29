@@ -46,6 +46,153 @@ function outboxSlotKey(index) {
     return index === 0 ? OUTBOX_KEY : `farkad:outbox:active${index}`;
 }
 
+// Which slot `key` is, or -1. Built once: the scan below asks this of every key in the
+// store, and rebuilding twenty-five strings per question was most of what a drain cost.
+const SLOT_INDEX = (() => {
+    const map = new Map();
+    for (let i = 0; i < OUTBOX_SLOTS; i += 1) map.set(outboxSlotKey(i), i);
+    return map;
+})();
+
+function slotIndexOf(key) {
+    const found = SLOT_INDEX.get(key);
+    return found === undefined ? -1 : found;
+}
+
+// ---------------------------------------------------------------- the operation log
+//
+// The queue is a LOG OF OPERATIONS, and the five things it has to keep straight are kept
+// separately, because every bug this replaced came from two of them sharing a record:
+//
+//   1. the operations themselves   immutable, keyed by an id nothing else can wear
+//   2. the current value per path  DERIVED, never stored
+//   3. what supersedes what        recorded by the writer, not inferred from a clock
+//   4. what the cloud has          its own small key per operation
+//   5. what may be thrown away     a separate pass that cannot change any of the above
+//
+// The shape that came before this kept one record per PATH and reported the winner. The
+// loser stayed on the disk, invisible: prune the winner and the loser became the winner,
+// so a day somebody had corrected came back hours later, went to the cloud, and replaced
+// the correction on all three phones. Reporting "nothing pending" was true of the
+// projection and false of the disk.
+//
+//   <slot>:op:<batchId>   one user edit, or one bulk edit, written ONCE
+//                         {batchId, at, ops:[{opId, path, value, seq, after}]}
+//   <slot>:ack:<opId>     the cloud has this exact operation
+//   <slot>                the sequence mark, and an older build's whole queue
+//
+// A batch is atomic because it is one verified write. There is no rollback to trust and
+// nothing to undo: the record landed whole or it is not there. Two tabs mint two batch
+// ids and never share bytes.
+//
+// `after` is what makes this work. A tab that writes a value for a path names every live
+// operation it can see for that path, so "B supersedes A" is a fact B carries rather than
+// a comparison of two clocks - which is what a random suffix inside one millisecond was
+// deciding by coin toss. A superseded operation can never become current again, because
+// the record that supersedes it is on the disk beside it, and garbage collection removes
+// the superseded one FIRST or neither.
+const OP_MARK = ':op:';
+const ACK_MARK = ':ack:';
+
+// What an acknowledgement record says, exactly. Compared rather than merely found: a
+// disk that takes the write and hands back something else leaves a key that EXISTS and
+// says nothing, and reading its presence alone was enough to make collection throw the
+// operation away - so the only record of an edit went, on the strength of a byte that
+// had already been proved wrong.
+const ACK_VALUE = '1';
+
+// Ids carry no colon, so a quarantine copy - <key>:damaged - can never be read back as
+// one of these. That is not hygiene: the copy used to match the live scan, and every
+// reopen quarantined the quarantine.
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+// A stable id for a record that has none - an item an older build left inside a slot.
+// The same bytes must always produce the same id, or the item would look like a new
+// operation at every open and never be superseded by anything.
+function hashedId(text) {
+    let value = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        value = (Math.imul(value, 31) + text.charCodeAt(i)) | 0;
+    }
+    return (value >>> 0).toString(36);
+}
+
+function outboxOpKey(slotKey, batchId) { return slotKey + OP_MARK + batchId; }
+function outboxAckKey(slotKey, opId) { return slotKey + ACK_MARK + opId; }
+
+// The id in `key` if it is EXACTLY one of this slot's `mark` keys, else null.
+function outboxIdIn(slotKey, mark, key) {
+    const prefix = slotKey + mark;
+    if (key.indexOf(prefix) !== 0) return null;
+    const id = key.slice(prefix.length);
+    return SAFE_ID.test(id) ? id : null;
+}
+
+// Unique, and ordered by when it was made - the millisecond first, base-36 and fixed
+// width, so a plain string comparison of two ids is a comparison of two moments. The
+// random tail is uniqueness inside one millisecond and NOTHING ELSE decides by it: two
+// operations in the same millisecond are ordered by `after`, and only genuinely
+// concurrent ones - neither having seen the other - fall through to the id.
+function opIdNow() {
+    const stamp = Date.now().toString(36);
+    const padded = stamp.length >= 9 ? stamp : '0'.repeat(9 - stamp.length) + stamp;
+    return padded + '_' + newEntityId('q').slice(2);
+}
+
+// One batch as it sits on the disk. Null when it cannot be read, which is never the same
+// as "not there": the caller quarantines it and keeps the bytes.
+function readOpBatch(raw, batchId) {
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        return null;
+    }
+    if (!isPlainObject(parsed)) return null;
+    if (String(parsed.batchId) !== String(batchId)) return null;
+    if (!Array.isArray(parsed.ops) || parsed.ops.length === 0) return null;
+
+    const ops = [];
+    for (let i = 0; i < parsed.ops.length; i += 1) {
+        const op = parsed.ops[i];
+        if (!isPlainObject(op)) return null;
+        if (!SAFE_ID.test(String(op.opId || ''))) return null;
+        if (!isSafeSeq(op.seq)) return null;
+        if (!Object.prototype.hasOwnProperty.call(op, 'value')) return null;
+        if (op.after !== undefined && !Array.isArray(op.after)) return null;
+        // The path AND the value, against the families this app actually writes: a
+        // structurally sound entry naming a layer nobody wrote poisons the schedule in
+        // memory, and the next ordinary save puts that on the disk.
+        if (journalEntryProblems(String(op.path), op.value).length > 0) return null;
+        ops.push({
+            opId: String(op.opId), path: String(op.path), value: op.value, seq: op.seq,
+            after: Array.isArray(op.after) ? op.after.map(String) : []
+        });
+    }
+    return { batchId: String(batchId), ops };
+}
+
+// Which of two operations for one path is the current one.
+//
+// Superseded is decided first and by NAME: if one names the other in `after`, the one
+// that names it is later, full stop - it was written by somebody who had already read the
+// other. Nothing about clocks enters into it.
+//
+// Only when neither has seen the other are they genuinely concurrent, and then the rule
+// has to be deterministic so that three phones reading the same disk agree: the higher
+// sequence number, and the id as the tie. An item from an older build has no id and no
+// `after`, so it is compared on its sequence alone - which is the only thing it has, and
+// assuming it is older merely because an operation exists beside it is how a newer edit
+// from an old client gets overruled.
+function laterOperation(candidate, already) {
+    if (already.after && already.after.indexOf(candidate.opId) !== -1) return false;
+    if (candidate.after && candidate.after.indexOf(already.opId) !== -1) return true;
+    const a = Number(candidate.seq) || 0;
+    const b = Number(already.seq) || 0;
+    if (a !== b) return a > b;
+    return String(candidate.opId) > String(already.opId);
+}
+
 // A whole-document replacement - a backup restored, a file imported - that has not
 // reached the cloud yet. Kept on disk for the same reason the outbox is: the person was
 // TOLD it worked, and the state they asked for is now the only one they can see. If the
@@ -140,15 +287,43 @@ const SCHEDULE_KEY = 'scheduleData:v2';     // must match V2_KEY in state.js
 // restore does. What it must NOT get is a trip to the cloud when somebody signs in
 // weeks later: local-only means local-only, and a record that could not say so would
 // turn every offline restore into a push the person never asked for.
-function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud) {
+function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud, supersedes) {
     return {
         version: REPLACE_VERSION,
         phase,
         transactionId,
         supersedesSeq: Number(supersedesSeq) || 0,
+        // Every operation on the disk when the restore was asked for, named one by one.
+        // A number is a statement about one tab's counter, and an edit made in another
+        // tab AFTER the request could be handed the same number as the last one before it
+        // and be deleted by the restore. The work recorded after a restore request is
+        // exactly the work a restore must not touch.
+        supersedes: Array.isArray(supersedes) ? supersedes.map(String) : [],
         cloud: cloud !== false,
         document
     };
+}
+
+// The operations a restore replaces, or null when the envelope names none AT ALL - which
+// is what an envelope written before this shape looks like, and the only case the old
+// number is used for.
+//
+// An EMPTY list is a statement, not an absence: it says the restore supersedes nothing.
+// Reading it as "nothing named, fall back to the number" is how {supersedes: [],
+// supersedesSeq: 999} came to empty a queue.
+function supersededOpIds(envelope) {
+    if (!envelope || !Array.isArray(envelope.supersedes)) return null;
+    return new Set(envelope.supersedes.map(String));
+}
+
+// Is this queued operation one the restore replaces?
+//
+// By NAME where the envelope has names: an edit made after the prepare carries an id the
+// list cannot contain, whatever number it was handed. By number only for an envelope from
+// a build that recorded nothing else.
+function supersededByRestore(item, named, upTo) {
+    if (named) return Boolean(item.opId) && named.has(String(item.opId));
+    return (Number(item.seq) || 0) <= (Number(upTo) || 0);
 }
 
 function replacementId() {
@@ -228,6 +403,9 @@ function envelopeProblems(parsed) {
     }
 
     if (!isSafeSeq(parsed.supersedesSeq)) return ['bad supersede point'];
+    if (parsed.supersedes !== undefined && !Array.isArray(parsed.supersedes)) {
+        return ['bad supersede list'];
+    }
     return readReplacementDocument(parsed.document).problems;
 }
 
@@ -288,6 +466,47 @@ const MAX_PATHS_PER_WRITE = 300;
 // next write was allowed to start regardless, which is how two writes to one field came
 // to be open at once - see cloudWrite and flush.
 const SEND_STUCK_MS = 30000;
+
+// ---------------------------------------------------------------- one sender at a time
+//
+// Across TABS, not across function calls. The gate inside this object is a property of one
+// JavaScript context, and two tabs of this app are two contexts sharing one disk and one
+// cloud document: each was letting its own write out while the other's was still open, so
+// the older of the two could land last and write a stale day over a correction on all
+// three phones. Nothing in the queue can fix that afterwards - the overwrite has already
+// happened server-side.
+//
+// So the right to send is a record on the disk. Taken by writing a token and reading it
+// back AFTER a pause: two tabs that both find the claim free both write, and the pause is
+// what lets each of them see whose token actually ended up there. The loser does not
+// send; its retry ladder brings it back, by which time the winner has finished and the
+// loser rebuilds its payload from a disk that now holds the newer value.
+//
+// Stale after this long, because a tab that was closed mid-send must not lock the other
+// two out of the cloud for the rest of the evening.
+const SEND_CLAIM_KEY = 'farkad:sendClaim';
+const SEND_CLAIM_STALE_MS = 20000;
+const SEND_CLAIM_SETTLE_MS = 25;
+
+function readSendClaim() {
+    const raw = Store.durableGet(SEND_CLAIM_KEY);
+    if (raw === null) return null;
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        // Unreadable is not "free". A record here that will not parse is a tab that was
+        // writing one when it died, and assuming the cloud is unattended on the strength
+        // of bytes nobody can read is the assumption this whole file exists to refuse.
+        return { by: '', token: '', at: Date.now() };
+    }
+    if (!isPlainObject(parsed)) return { by: '', token: '', at: Date.now() };
+    return {
+        by: String(parsed.by || ''),
+        token: String(parsed.token || ''),
+        at: Number(parsed.at) || 0
+    };
+}
 
 // Resolves true when `promise` settles, false when `ms` goes by first. It never rejects:
 // what the caller needs to know is whether the earlier write FINISHED, not how it went.
@@ -458,34 +677,37 @@ const FarkadSync = {
         if (this._loaded) return;
         this._loaded = true;
 
-        // Walk the slots. The first that is empty or READS AS A QUEUE becomes the live
-        // one; every damaged one on the way is copied aside and left exactly where it is.
+        // Walk the slots. The first whose MARK is absent or readable becomes the one this
+        // session writes to; a damaged mark is copied aside and left exactly where it is.
         //
         // "Reads as a queue" is not "parses". A record that parses into {} is not an
-        // empty queue - the app never writes one, every write is {seq, items} - so it is
-        // something else that arrived under this key, and treating it as empty means the
-        // next edit writes straight over whatever it actually was.
+        // empty queue - the app never writes one - so it is something else that arrived
+        // under this key, and treating it as empty means the next edit writes straight
+        // over whatever it actually was.
         //
         // _activeKey starts as null and is only ever set to a slot that PASSED. The first
         // version assigned it at the top of each turn, so with every slot damaged it came
         // to rest on the last one and wrote the new journal straight over raw bytes it
         // had just finished quarantining.
         this._activeKey = null;
-        let queue = null;
+        let mark = null;
 
         for (let i = 0; i < OUTBOX_SLOTS; i += 1) {
             const key = outboxSlotKey(i);
             const candidate = Store.durableGet(key);
 
             if (candidate === null) {
-                this._activeKey = key;                      // free slot, nothing to load
-                return;
+                // A free slot as far as the MARK goes. Its operations are read below all
+                // the same: the mark and the work are different records now, and losing
+                // the mark is not losing the work.
+                this._activeKey = key;
+                break;
             }
 
             const read = readOutboxRecord(candidate);
             if (read) {
-                this._activeKey = key;                      // a queue, this is the live one
-                queue = read;
+                this._activeKey = key;
+                mark = read;
                 break;
             }
 
@@ -512,75 +734,415 @@ const FarkadSync = {
                 'לא נמצא מקום תקין לתור השליחה. הרישום מושבת עד שהנתונים הגולמיים ייוצאו.');
             return;
         }
-        if (!queue) return;
-
-        Object.keys(queue.items).forEach(path => {
-            const item = queue.items[path];
-            this._outbox.set(path, {
-                value: item.value,
-                seq: item.seq,
-                // Already in the cloud, still kept: it is only removed once the local
-                // schedule holding it has also been written.
-                sent: item.sent === true
-            });
-        });
 
         // The high-water mark, and it is READ rather than recomputed.
         //
-        // Deriving it from the items alone was G16.2: a restore prunes the entries it
-        // supersedes, which can leave {seq:N, items:{}} on the disk. The next open then
-        // computed a maximum over nothing, started again at zero, and handed the next
-        // edit a sequence number BELOW the boundary of the restore that was still
-        // pending - so the restore superseded an edit made after it, and deleted it.
-        //
-        // Taken as the larger of the two, because a record written by a build that did
-        // not persist the mark still has to load.
-        this._seq = queue.seq;
-        this._outbox.forEach(item => { this._seq = Math.max(this._seq, item.seq); });
+        // Deriving it from what is queued was G16.2: a restore prunes what it supersedes,
+        // which can leave a mark with nothing under it. The next open then computed a
+        // maximum over nothing, started again at zero, and handed the next edit a number
+        // BELOW the boundary of a restore that was still pending - so the restore
+        // superseded an edit made after it, and deleted it.
+        this._seq = mark ? mark.seq : 0;
+        this.physicalOperations().forEach(op => {
+            this._seq = Math.max(this._seq, Number(op.seq) || 0);
+        });
     },
 
-    // The queue as it stands in memory, written down. NOT optional: a restore point the
-    // device has no room for is a loss the app can live with; a pending edit it has no
-    // room for is the edit itself.
+    // EVERY operation on this device, from every slot, read fresh off the disk.
+    //
+    // The complete physical set - not a winner per path. Everything else here is derived
+    // from this list, and the reason it exists at all is that a queue which reports a
+    // projection cannot answer the only question that matters after a prune: is there
+    // anything left on this disk that could become current again?
+    //
+    // Items an older build left inside a slot's record are operations too. They carry no
+    // id and no `after`, so they are given a stable synthetic id and compete on the
+    // sequence they were written with - assuming one is older merely because an operation
+    // exists beside it is how a newer edit from an old client gets overruled.
+    physicalOperations() {
+        const out = [];
+        if (!this._activeKey && !this._loaded) return out;
+
+        // ONE pass over the keys, not one per slot. The per-slot loop this replaced was
+        // twenty-five walks of the whole store and a JSON.parse of every batch, on every
+        // call - and pendingCount(), the projection and each acknowledgement all call
+        // this. Draining a season's queue spent its whole budget re-parsing records that
+        // had not changed, and the flush that should have followed the first batch never
+        // got a turn: 300 days went and the other 150 sat there looking sent.
+        //
+        // The cache is keyed on the RAW BYTES. Another tab writing to the same storage
+        // changes them, so its work is picked up on the next call; a record that has not
+        // moved is not parsed again. Nothing is remembered about a key that is gone.
+        const parsed = this._batchCache || (this._batchCache = new Map());
+        const seen = new Set();
+        const acks = new Set();
+        const batchKeys = [];
+
+        Store.keys().forEach(key => {
+            const opAt = key.lastIndexOf(OP_MARK);
+            if (opAt > 0) {
+                const slot = key.slice(0, opAt);
+                if (slotIndexOf(slot) !== -1 && SAFE_ID.test(key.slice(opAt + OP_MARK.length))) {
+                    batchKeys.push({ key, slot, batchId: key.slice(opAt + OP_MARK.length) });
+                }
+                return;
+            }
+            const ackAt = key.lastIndexOf(ACK_MARK);
+            if (ackAt > 0 && slotIndexOf(key.slice(0, ackAt)) !== -1
+                && SAFE_ID.test(key.slice(ackAt + ACK_MARK.length))
+                // DURABLY, and saying what it is supposed to say. Store.keys() lists what
+                // this session has written as well as what the disk holds, so a refused
+                // acknowledgement stays in memory; and a disk that writes something else
+                // leaves one that is present and wrong. Either read alone said the cloud
+                // had an operation whose proof was never stored, and collection threw the
+                // operation away on the strength of it.
+                && Store.durableGet(key) === ACK_VALUE) {
+                acks.add(key);
+            }
+        });
+
+        // Slot order, then id, so the list is the same on every device that reads the
+        // same disk - a projection whose tie-break depended on enumeration order would
+        // answer differently in two tabs holding identical bytes.
+        batchKeys.sort((a, b) => (slotIndexOf(a.slot) - slotIndexOf(b.slot))
+            || (a.batchId < b.batchId ? -1 : a.batchId > b.batchId ? 1 : 0));
+
+        batchKeys.forEach(({ key, slot, batchId }) => {
+            const raw = Store.durableGet(key);
+            if (raw === null) return;
+            seen.add(key);
+
+            let batch;
+            const cached = parsed.get(key);
+            if (cached && cached.raw === raw) {
+                batch = cached.batch;
+            } else {
+                batch = readOpBatch(raw, batchId);
+                parsed.set(key, { raw, batch });
+            }
+
+            if (!batch) {
+                console.error('Queued batch does not read as one, holding it:', key);
+                this.outboxDamaged = true;
+                Recovery.damaged(key, raw,
+                    `קבוצת עריכות בתור השליחה לא נקראה: ${key}.`);
+                return;
+            }
+            batch.ops.forEach(op => out.push(Object.assign({}, op, {
+                slot, batchKey: key, batchId,
+                sent: acks.has(outboxAckKey(slot, op.opId))
+            })));
+        });
+
+        parsed.forEach((value, key) => { if (!seen.has(key)) parsed.delete(key); });
+
+        // Whatever a build before operations left inside a slot record.
+        for (let i = 0; i < OUTBOX_SLOTS; i += 1) {
+            const slot = outboxSlotKey(i);
+            const record = readOutboxRecord(Store.durableGet(slot));
+            if (!record) continue;
+            Object.keys(record.items).forEach(path => {
+                const item = record.items[path];
+                out.push({
+                    opId: 'legacy_' + hashedId(slot + '|' + path),
+                    path, value: item.value, seq: item.seq, after: [],
+                    slot, batchKey: slot, batchId: null, legacy: true,
+                    sent: item.sent === true
+                });
+            });
+        }
+        return out;
+    },
+
+    // The current value per path, derived from the whole physical set.
+    //
+    // An operation that another live operation names in `after` is superseded and can
+    // never be current - not now, and not later when the one that superseded it is
+    // collected. That is the difference between this and what it replaced: the fact that
+    // B came after A is written down in B, so removing B does not make A the winner
+    // again. Garbage collection removes A first or neither; see collectQueueGarbage.
+    projectedQueue() {
+        const all = this.physicalOperations();
+        const superseded = new Set();
+        all.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
+
+        const byPath = new Map();
+        all.forEach(op => {
+            if (superseded.has(op.opId)) return;
+            const already = byPath.get(op.path);
+            if (!already || laterOperation(op, already)) byPath.set(op.path, op);
+        });
+        return byPath;
+    },
+
+    // What the rest of the app calls the queue: path -> the current operation for it.
+    get _outbox() {
+        if (!this._loaded) this.loadOutbox();
+        return this.projectedQueue();
+    },
+    set _outbox(ignored) {
+        // Derived, never assigned. The setter exists because a version of this file used
+        // to hand memory a queue and let the disk disagree with it; anything still doing
+        // that is asking for the wrong thing and gets nothing.
+    },
+
+    // The queue as it stands, written down. Nothing to do: the operations ARE the queue,
+    // and they were written when they were made.
     saveOutbox() {
         this.loadOutbox();
-        return this.adoptJournal(this._outbox);
+        return !this.journalFailed;
     },
 
-    // Every path that REMOVES something from the journal goes through here.
+    // ------------------------------------------------------------ the one minting path
+
+    // Several edits, or one, as a SINGLE record.
     //
-    // The rule is the one queueBatch already follows: build the queue you want, write
-    // it, read it back, and only then let memory believe it. The versions that deleted
-    // from _outbox first and looked at the answer afterwards - or not at all - could
-    // leave memory empty while the disk still held the entries. Everything downstream
-    // then read the wrong queue: dropSupersededEntries reported a finished restore, the
-    // invariant inspected a queue that only this session could see, the pending record
-    // was removed, and the superseded days came back at the next open.
+    // The ONLY place an operation is created. Acknowledgement does not come here, nor
+    // pruning, nor replay, nor a restore: an operation is a thing a person did, and
+    // anything that mints one on their behalf is inventing work.
     //
-    // Returns whether the disk now holds `candidate`.
-    adoptJournal(candidate) {
+    // One verified write, so the batch is atomic without a rollback anybody has to trust:
+    // it landed whole or it is not there, and a process that dies at any moment leaves
+    // one of those two states. Half a roster - a worker present and missing from the
+    // order - cannot exist.
+    queueOperations(entries) {
         this.loadOutbox();
-        if (!this._activeKey) return false;
-        if (farkadWritesBlocked()) return false;
-        // Every path that marks, prunes or drops an entry comes through here, so this one
-        // line is the whole of "no queued entry may be acknowledged, marked sent, or
-        // pruned while a transaction is held". The queue stays byte-for-byte until the
-        // record that describes what it owes can be read again.
+        if (!entries || entries.length === 0) return true;
+        if (farkadWritesBlocked() || !this._activeKey) return false;
         if (this.replaceHeld) return false;
 
-        const items = {};
-        candidate.forEach((item, path) => { items[path] = item; });
-        const landed = Store.setVerified(this._activeKey,
-            JSON.stringify({ seq: this._seq, items }));
+        // What is live for each path RIGHT NOW, read off the disk. Naming them is what
+        // makes this batch later than them - by record rather than by clock.
+        const live = this.projectedQueue();
+        const all = this.physicalOperations();
+        const bySameId = new Map();
+        all.forEach(op => {
+            if (!bySameId.has(op.path)) bySameId.set(op.path, []);
+            bySameId.get(op.path).push(op.opId);
+        });
+
+        let seq = this._seq;
+        const ops = [];
+        entries.forEach(entry => {
+            if (!entry || !entry.path) return;
+            seq += 1;
+            ops.push({
+                opId: opIdNow(),
+                path: entry.path,
+                value: entry.value,
+                seq,
+                // Everything on the disk for this path, superseded by this one. Not only
+                // the projected winner: a loser left behind by a failed collection is
+                // still a record that could otherwise come back.
+                after: (bySameId.get(entry.path) || []).slice()
+            });
+            live.delete(entry.path);
+        });
+        if (ops.length === 0) return true;
+
+        const batchId = newEntityId('b').slice(2);
+        const landed = Store.setVerified(outboxOpKey(this._activeKey, batchId),
+            JSON.stringify({ batchId, at: new Date().toISOString(), ops }));
 
         this.journalFailed = !landed;
         if (!landed) {
+            // Out of the session cache too. A batch that never reached the disk is not a
+            // queued edit, and leaving it in memory would let this session read back an
+            // operation the next one will never see.
+            Store.forget(outboxOpKey(this._activeKey, batchId));
             if (typeof updateSyncNotice === 'function') updateSyncNotice();
             return false;
         }
 
-        this._outbox = candidate;
+        // The mark, raised and never lowered. Its own write, and its own failure: the
+        // work is already down, and a mark that could not move costs a number, not a day.
+        this._seq = seq;
+        const onDisk = readOutboxRecord(Store.durableGet(this._activeKey));
+        if (!onDisk || onDisk.seq < seq) {
+            Store.setVerified(this._activeKey, JSON.stringify({
+                seq, items: onDisk ? onDisk.items : {}
+            }));
+        }
         return true;
+    },
+
+    // ------------------------------------------------------------ what the cloud has
+
+    // Marked, not removed. The cloud has it; this device may still not, and until a
+    // schedule containing it is written here the operation is the only thing that can put
+    // it back. Its own key per operation, so acknowledging one edit never rewrites the
+    // record carrying the others - and a refused mark costs one re-send.
+    markAcknowledged(opIds) {
+        this.loadOutbox();
+        if (!this._activeKey || this.replaceHeld) return false;
+        if (farkadWritesBlocked()) return false;
+
+        // Read the disk ONCE for the whole acknowledgement. Asking per operation was a
+        // full scan per operation, and a batch of three hundred turned one answer from
+        // the cloud into a stall long enough that the rest of the queue never went.
+        const bySlot = new Map();
+        this.physicalOperations().forEach(op => {
+            if (!op.legacy) bySlot.set(op.opId, op.slot);
+        });
+
+        let whole = true;
+        opIds.forEach(opId => {
+            const slot = bySlot.get(opId);
+            if (slot === undefined) return;
+            const key = outboxAckKey(slot, opId);
+            if (Store.durableGet(key) === ACK_VALUE) return;
+            if (Store.setVerified(key, ACK_VALUE)) return;
+            // Same reason as the batch above: a proof that did not land is not a proof,
+            // and it must not be readable as one for the rest of this session.
+            Store.forget(key);
+            whole = false;
+        });
+        // The queue could not be written. Same flag, same meaning, same consequence as a
+        // refused edit: while this is true the device cannot record what the cloud has,
+        // so it must not adopt a snapshot that would take local work off the screen with
+        // nothing able to put it back.
+        this.journalFailed = !whole;
+        return whole;
+    },
+
+    // Named operations, removed. Used by a restore, which supersedes what it names by
+    // definition, and by clearOutbox.
+    //
+    // Order matters for the same reason collection has an order: an operation that
+    // supersedes another must not outlive it, or the older value becomes current again.
+    // Everything named here goes together, so within this set the order is not a hazard -
+    // but a batch is only removed when EVERY operation in it is named, because a batch
+    // record is immutable and half a batch cannot be written.
+    dropOperations(opIds) {
+        this.loadOutbox();
+        if (!this._activeKey || this.replaceHeld) return false;
+        if (farkadWritesBlocked()) return false;
+
+        const going = new Set((opIds || []).map(String));
+        if (going.size === 0) return true;
+
+        const all = this.physicalOperations();
+        const byBatch = new Map();
+        const legacy = [];
+        all.forEach(op => {
+            if (op.legacy) { legacy.push(op); return; }
+            if (!byBatch.has(op.batchKey)) byBatch.set(op.batchKey, []);
+            byBatch.get(op.batchKey).push(op);
+        });
+
+        let whole = true;
+        byBatch.forEach((ops, key) => {
+            if (!ops.every(op => going.has(op.opId))) {
+                // A batch only some of whose operations are named. It cannot be rewritten
+                // - the record is immutable - so the ones that are named are superseded
+                // by the restore rather than removed, and collection takes the batch when
+                // the rest of it is finished with too.
+                if (ops.some(op => going.has(op.opId))) whole = false;
+                return;
+            }
+            try { Store.remove(key); } catch (error) { whole = false; }
+            Store.forget(key);
+            if (Store.available && Store.durableGet(key) !== null) whole = false;
+            ops.forEach(op => {
+                const ack = outboxAckKey(op.slot, op.opId);
+                if (Store.durableGet(ack) === null) return;
+                try { Store.remove(ack); } catch (error) { /* bytes, not truth */ }
+                Store.forget(ack);
+            });
+        });
+
+        // Items an older build left inside a slot record are rewritten out of it, one
+        // slot at a time, because that record is not immutable and never was.
+        const slots = new Set(legacy.filter(op => going.has(op.opId)).map(op => op.slot));
+        slots.forEach(slot => {
+            const record = readOutboxRecord(Store.durableGet(slot));
+            if (!record) return;
+            const items = {};
+            Object.keys(record.items).forEach(path => {
+                const id = 'legacy_' + hashedId(slot + '|' + path);
+                if (!going.has(id)) items[path] = record.items[path];
+            });
+            if (Object.keys(items).length === Object.keys(record.items).length) return;
+            if (!Store.setVerified(slot, JSON.stringify({ seq: record.seq, items }))) {
+                whole = false;
+            }
+        });
+        return whole;
+    },
+
+    // ------------------------------------------------------------ what may be thrown away
+
+    // A separate pass, and it cannot change which value is current.
+    //
+    // Two rules, and the second is the one the old shape did not have:
+    //
+    //   an operation may go when the cloud has it AND a schedule holding it is on the
+    //   disk, or when something else supersedes it;
+    //
+    //   and it may only go once everything it supersedes has ALREADY gone. Removing a
+    //   superseding record before the record it superseded would make the old value
+    //   current again - which is the day that came back.
+    //
+    // A batch is removed whole or not at all, because a batch record is immutable. Bytes
+    // that could not be collected are bytes, and nothing more: the projection above does
+    // not consult this pass at all.
+    collectQueueGarbage() {
+        this.loadOutbox();
+        if (!this._activeKey || this.replaceHeld) return true;
+        if (farkadWritesBlocked()) return true;
+
+        const all = this.physicalOperations();
+        const present = new Set(all.map(op => op.opId));
+        const superseded = new Set();
+        all.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
+
+        // The schedule as the NEXT session would read it, parsed once. Cached on its own
+        // bytes: collection runs on every save and every acknowledgement, and a season's
+        // record is not something to re-parse per operation.
+        const raw = Store.durableGet(SCHEDULE_KEY);
+        let stored = null;
+        if (raw !== null) {
+            if (this._storedCache && this._storedCache.raw === raw) {
+                stored = this._storedCache.schedule;
+            } else {
+                try { stored = JSON.parse(raw); } catch (error) { stored = null; }
+                this._storedCache = { raw, schedule: stored };
+            }
+        }
+
+        const finished = op => {
+            if (op.legacy) return false;                 // an old record is rewritten, not removed
+            if (superseded.has(op.opId)) return true;
+            // The cloud has it AND the disk here holds it. Asked of the stored schedule
+            // rather than of a counter - see scheduleHoldsEntry.
+            return op.sent && scheduleHoldsEntry(stored, op.path, op.value);
+        };
+
+        const byBatch = new Map();
+        all.forEach(op => {
+            if (op.legacy || !op.batchId) return;
+            if (!byBatch.has(op.batchKey)) byBatch.set(op.batchKey, []);
+            byBatch.get(op.batchKey).push(op);
+        });
+
+        let whole = true;
+        byBatch.forEach((ops, key) => {
+            if (!ops.every(finished)) return;
+            // Nothing this batch supersedes may still be on the disk.
+            const owes = ops.some(op => (op.after || []).some(id => present.has(String(id))));
+            if (owes) return;
+
+            try { Store.remove(key); } catch (error) { whole = false; }
+            Store.forget(key);
+            if (Store.available && Store.durableGet(key) !== null) whole = false;
+            ops.forEach(op => {
+                const ack = outboxAckKey(op.slot, op.opId);
+                if (Store.durableGet(ack) === null) return;
+                try { Store.remove(ack); } catch (error) { /* bytes, not truth */ }
+                Store.forget(ack);
+            });
+        });
+        return whole;
     },
 
     // The journal as the DISK holds it, oldest first. Returns null when it cannot be
@@ -592,33 +1154,30 @@ const FarkadSync = {
     durableJournalEntries() {
         this.loadOutbox();
         if (!this._activeKey) return null;
-
-        const raw = Store.durableGet(this._activeKey);
-        if (raw === null) return [];        // no queue on the disk is an empty queue
-
-        let parsed;
-        try {
-            parsed = JSON.parse(raw);
-        } catch (error) {
-            return null;
-        }
-        const items = (parsed && parsed.items) || {};
-        return Object.keys(items)
-            .map(path => [path, items[path]])
-            .filter(([, item]) => item && typeof item === 'object')
+        if (this.outboxDamaged) return null;
+        return [...this.projectedQueue().entries()]
             .sort((a, b) => (Number(a[1].seq) || 0) - (Number(b[1].seq) || 0));
     },
 
     // The durable journal, replayed over `schedule`. False when the disk could not be
     // read - in which case the caller has no idea what this device holds and must not
     // pretend otherwise.
-    replayDurableJournal(schedule, after) {
+    //
+    // `envelope` is a pending replacement, or nothing. Where it names the operations it
+    // supersedes, they are skipped BY NAME; a number is a statement about one tab's
+    // counter and another tab numbering from the same stale mark could hand an edit made
+    // after the restore the same number as one made before it.
+    replayDurableJournal(schedule, envelope) {
         const entries = this.durableJournalEntries();
         if (!entries) return false;
 
-        const floor = Number(after) || 0;
+        const named = supersededOpIds(envelope);
+        const upTo = Number((envelope || {}).supersedesSeq) || 0;
+        const skipping = Boolean(envelope) && (named !== null || upTo > 0);
+
         entries.forEach(([path, item]) => {
-            if ((Number(item.seq) || 0) > floor) applyJournalEntry(schedule, path, item.value);
+            if (skipping && supersededByRestore(item, named, upTo)) return;
+            applyJournalEntry(schedule, path, item.value);
         });
         return true;
     },
@@ -645,11 +1204,14 @@ const FarkadSync = {
     // the whole record for its field, so applying it twice is applying it once.
     // `after` skips everything a replacement has superseded, which is what makes it
     // possible to say "the replacement, plus the work done since it was asked for".
-    replayJournal(schedule, after) {
+    replayJournal(schedule, envelope) {
         this.loadOutbox();
-        const floor = Number(after) || 0;
-        [...this._outbox.entries()]
-            .filter(([, item]) => item.seq > floor)
+        const named = supersededOpIds(envelope);
+        const upTo = Number((envelope || {}).supersedesSeq) || 0;
+        const skipping = Boolean(envelope) && (named !== null || upTo > 0);
+
+        [...this.projectedQueue().entries()]
+            .filter(([, item]) => !(skipping && supersededByRestore(item, named, upTo)))
             .sort((a, b) => a[1].seq - b[1].seq)
             .forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
     },
@@ -661,22 +1223,17 @@ const FarkadSync = {
         return this.pruneJournal();
     },
 
+    // Kept for the callers that ask by this name. Collection is a separate pass now and
+    // its failure changes nothing about which value is current - see collectQueueGarbage.
+    pruneJournal() {
+        return this.collectQueueGarbage();
+    },
+
     // An entry goes only when BOTH are true: the cloud has it, and a schedule containing
     // it has been written here. Either one alone leaves something that cannot be rebuilt.
     //
     // Returns whether the disk holds the pruned queue.
-    pruneJournal() {
-        this.loadOutbox();
 
-        const candidate = new Map();
-        let changed = false;
-        this._outbox.forEach((item, path) => {
-            if (item.sent && item.seq <= this._savedSeq) changed = true;
-            else candidate.set(path, item);
-        });
-        if (!changed) return true;
-        return this.adoptJournal(candidate);
-    },
 
     // Waiting to be SENT. Not the journal's size: an entry the cloud already has is kept
     // until the local schedule holding it is written, and telling somebody it is waiting
@@ -1073,6 +1630,27 @@ const FarkadSync = {
         return this._activeKey;
     },
 
+    // EVERY key the live queue is written across - the mark, each batch, each
+    // acknowledgement - so that whoever is copying this device off it copies all of it.
+    //
+    // The queue used to be one record, and the recovery export named it. Now it is a
+    // family, and an export carrying only the mark would hand somebody a file with the
+    // number of the last edit in it and none of the edits: the days that were recorded
+    // and never sent would be missing from the one file that exists because the device
+    // could not be trusted with them.
+    activeQueueKeys() {
+        this.loadOutbox();
+        if (!this._activeKey) return [];
+        const slot = this._activeKey;
+        const out = [slot];
+        Store.keys().forEach(key => {
+            if (key === slot) return;
+            if (outboxIdIn(slot, OP_MARK, key) !== null
+                || outboxIdIn(slot, ACK_MARK, key) !== null) out.push(key);
+        });
+        return out.sort();
+    },
+
     pendingPaths() {
         this.loadOutbox();
         return [...this._outbox.keys()];
@@ -1083,7 +1661,7 @@ const FarkadSync = {
     clearOutbox() {
         this.loadOutbox();
         this._sending = new Map();
-        return this.adoptJournal(new Map());
+        return this.dropOperations(this.physicalOperations().map(op => op.opId));
     },
 
     // Returns whether the entry is now on the disk. The caller needs to know: a queue
@@ -1105,69 +1683,22 @@ const FarkadSync = {
     // been read back. Nothing partial can survive, because nothing partial is ever
     // written - there is no prefix to clean up afterwards.
     queueBatch(entries) {
-        this.loadOutbox();
-        if (!entries || entries.length === 0) return true;
-        if (farkadWritesBlocked() || !this._activeKey) return false;
-
-        // The copy. Entries are Map values shared with _outbox, so a shallow clone of
-        // each is enough: nothing here mutates one in place.
-        const candidate = new Map(this._outbox);
-        let seq = this._seq;
-
-        entries.forEach(entry => {
-            if (!entry || !entry.path) return;
-            seq += 1;
-            // The same path twice in one batch is the later value, at the later seq -
-            // set() on a Map replaces, so this falls out rather than needing a rule.
-            candidate.set(entry.path, { value: entry.value, seq });
-        });
-
-        const items = {};
-        candidate.forEach((item, path) => { items[path] = item; });
-        const landed = Store.setVerified(this._activeKey, JSON.stringify({ seq, items }));
-
-        this.journalFailed = !landed;
-        if (!landed) {
-            if (typeof updateSyncNotice === 'function') updateSyncNotice();
-            return false;
-        }
-
-        // Adopted only now.
-        this._outbox = candidate;
-        this._seq = seq;
-        return true;
+        return this.queueOperations(entries);
     },
 
     // Called on acknowledgment, and only then. An entry whose seq has moved on was
     // edited again while the send was open, and that newer value has not been sent yet.
     acknowledge(sent) {
         this.loadOutbox();
-
-        // A COPY of each entry, not the live one. Marking the live object and writing
-        // afterwards meant a refused write left memory saying the cloud held an entry
-        // the disk still says it does not - and the next prune then dropped it for good.
-        const candidate = new Map();
-        let changed = false;
-        this._outbox.forEach((item, path) => {
-            if (sent.get(path) === item.seq && !item.sent) {
-                // MARKED, not removed. The cloud has it; this device may still not, and
-                // until a schedule containing it is written here the journal is the only
-                // thing that can put it back. The prune below takes it when both are true.
-                candidate.set(path, { value: item.value, seq: item.seq, sent: true });
-                changed = true;
-            } else {
-                candidate.set(path, item);
-            }
-        });
-        if (!changed) return true;
-
-        // Marked and pruned in ONE write. Two writes here are two chances to leave the
-        // two halves of the same fact disagreeing on the disk.
-        const pruned = new Map();
-        candidate.forEach((item, path) => {
-            if (!(item.sent && item.seq <= this._savedSeq)) pruned.set(path, item);
-        });
-        return this.adoptJournal(pruned);
+        // By operation id and nothing else. An acknowledgement is a statement about the
+        // exact edit that left this device: the path may have been corrected since, on
+        // this tab or another, and marking whatever now occupies it would tell the queue
+        // the cloud holds a value it has never seen.
+        const marked = this.markAcknowledged([...sent.values()]
+            .map(item => item && item.opId).filter(Boolean));
+        // Collection is allowed to fail; the acknowledgement is not undone by it.
+        this.collectQueueGarbage();
+        return marked;
     },
 
     // ------------------------------------------------------------ one writer at a time
@@ -1280,9 +1811,10 @@ const FarkadSync = {
     // days it removed. That is the resurrection: the restore is on the disk, the queue
     // still holds the entries it superseded because the prune was refused, and the next
     // open lays them straight back on top of it.
+    // The pending replacement itself, so the replay can skip what it NAMES rather than
+    // what a number happens to cover.
     supersededFloor() {
-        const envelope = this.pendingReplace();
-        return envelope ? (Number(envelope.supersedesSeq) || 0) : 0;
+        return this.pendingReplace();
     },
 
     connect(adapter) {
@@ -1589,13 +2121,41 @@ const FarkadSync = {
         // is still on the disk, nothing claims to be synced, and the status says the
         // connection is bad - which is the truth, and a far better outcome than a
         // silent overwrite.
-        if (this._sending.size > 0 || this._cloudOpen > 0) {
+        if (this._sending.size > 0 || this._cloudOpen > 0 || this._claiming) {
             // Waiting on a write that has not answered. Said on screen if it goes on -
             // and said is all it does. See watchForStuck.
             this.watchForStuck();
             return Promise.resolve();
         }
 
+        // AND one sender across the tabs, which the gate above cannot speak for. The
+        // payload is built after the claim is held, on purpose: whoever waited rebuilds
+        // it from a disk that now carries whatever the winner wrote, so the loser never
+        // sends the value it was about to send before the other tab corrected it.
+        this._claiming = true;
+        return this.takeSendClaim().then(mine => {
+            if (!mine) {
+                // Another tab is sending. Not an error and not a reason to climb the
+                // retry ladder - the ladder is for a cloud that will not answer, and a
+                // two-second wait for a tab that is about to release costs the person
+                // watching the status line two seconds for nothing. The debounce brings
+                // this back, and by then the payload is rebuilt from a disk that holds
+                // whatever the other tab wrote.
+                this._claiming = false;
+                this.scheduleFlush();
+                if (this.status === 'synced') this.setStatus('connecting');
+                return undefined;
+            }
+            return this.sendClaimed();
+        }).then(
+            value => { this.releaseSendClaim(); this._claiming = false; return value; },
+            error => { this.releaseSendClaim(); this._claiming = false; throw error; }
+        );
+    },
+
+    // The send itself, with the right to send already held. Split out of flush so that
+    // every path back through it gives the claim up again - including the early returns.
+    sendClaimed() {
         // Oldest first, so a queue too big for one write drains in the order it was
         // made rather than leaving the earliest days for last.
         // Nothing that carries a roster opinion until the first snapshot has arrived and
@@ -1616,7 +2176,12 @@ const FarkadSync = {
             .slice(0, MAX_PATHS_PER_WRITE)
             .forEach(([path, item]) => {
                 patch[path] = item.value;
-                sent.set(path, item.seq);
+                // The OPERATION that went out, not the path. Two versions of one path are
+                // two operations, and an acknowledgement naming only the path
+                // acknowledged whichever one happened to be there when the answer came
+                // back - which, after another tab had corrected the same day, was not the
+                // one that was sent.
+                sent.set(path, { opId: item.opId, seq: item.seq });
             });
 
         if (holding) {
@@ -1713,6 +2278,60 @@ const FarkadSync = {
                 this.fail(error);
                 this.scheduleRetry();
             });
+    },
+
+    // How long the claim is left to settle before it is read back. A property so the
+    // suites can spell the same race in milliseconds instead of seconds.
+    claimSettleMs: SEND_CLAIM_SETTLE_MS,
+    _claimToken: null,
+    // True from the moment the claim is asked for until the send it guards is answered.
+    // Without it a second flush in this same tab would start while the first was still
+    // waiting out the settle, and the two would race each other through one claim.
+    _claiming: false,
+
+    // Takes the right to send, or answers false. See SEND_CLAIM_KEY.
+    takeSendClaim() {
+        // A browser that stores nothing has no way to coordinate with anything, and
+        // refusing to sync would be a far larger failure than the one being guarded
+        // against - there is no second tab sharing a disk that does not exist.
+        if (!Store.available) return Promise.resolve(true);
+
+        const now = Date.now();
+        const held = readSendClaim();
+        if (held && held.token && (now - held.at) < SEND_CLAIM_STALE_MS
+            && held.token !== this._claimToken) {
+            return Promise.resolve(false);
+        }
+
+        const token = opIdNow();
+        if (!Store.setVerified(SEND_CLAIM_KEY,
+            JSON.stringify({ by: syncDeviceId(), token, at: now }))) {
+            // No room for the claim. Sending anyway would be sending uncoordinated, which
+            // is the thing this exists to stop.
+            Store.forget(SEND_CLAIM_KEY);
+            return Promise.resolve(false);
+        }
+
+        return new Promise(resolve => {
+            setTimeout(() => {
+                const after = readSendClaim();
+                const mine = Boolean(after) && after.token === token;
+                this._claimToken = mine ? token : null;
+                resolve(mine);
+            }, this.claimSettleMs);
+        });
+    },
+
+    // Given back the moment the send is answered, so the next tab does not wait out the
+    // staleness window. A removal that will not happen costs a delay, never a write.
+    releaseSendClaim() {
+        if (!this._claimToken) return;
+        const held = readSendClaim();
+        if (held && held.token === this._claimToken) {
+            try { Store.remove(SEND_CLAIM_KEY); } catch (error) { /* bytes, not truth */ }
+            Store.forget(SEND_CLAIM_KEY);
+        }
+        this._claimToken = null;
     },
 
     // Doubling, capped. Reset to the first interval by a successful send and by the
@@ -1819,8 +2438,15 @@ const FarkadSync = {
         // says so.
         if (!isFullScheduleDocument(document)) return false;
 
+        // Every operation on the disk RIGHT NOW, named. Read fresh and taken from the
+        // whole physical set rather than from a projection: an operation the projection
+        // does not show is still an operation, and one this tab has never seen is still
+        // work the restore is replacing.
+        const superseded = this.physicalOperations().map(op => op.opId);
+
         return this.rememberReplace(replacementEnvelope(
-            document, 'prepared', replacementId(), this._seq, cloudOwed !== false));
+            document, 'prepared', replacementId(), this._seq, cloudOwed !== false,
+            superseded));
     },
 
     // Says the device now holds it. Best effort on purpose: the phase is a hint, and the
@@ -1830,7 +2456,7 @@ const FarkadSync = {
         if (!envelope || envelope.phase === 'local-stored') return true;
         return this.rememberReplace(replacementEnvelope(
             envelope.document, 'local-stored', envelope.transactionId,
-            envelope.supersedesSeq, envelope.cloud));
+            envelope.supersedesSeq, envelope.cloud, envelope.supersedes));
     },
 
     // Undoes a prepare when the caller could not store the new state. The restore is not
@@ -1862,7 +2488,7 @@ const FarkadSync = {
         // superseded entries and the disk with them, so the two sides agreed on a state
         // the next open would not produce.
         const expected = normaliseSchedule(envelope.document);
-        if (!this.replayDurableJournal(expected, envelope.supersedesSeq)) return false;
+        if (!this.replayDurableJournal(expected, envelope)) return false;
         return replacementContent(actual) === replacementContent(expected);
     },
 
@@ -1905,7 +2531,7 @@ const FarkadSync = {
         const next = normaliseSchedule(envelope.document);
         // The DURABLE journal, so that what is stored here is exactly what the invariant
         // will look for afterwards. Reading it out of memory let the two disagree.
-        if (!this.replayDurableJournal(next, envelope.supersedesSeq)) {
+        if (!this.replayDurableJournal(next, envelope)) {
             // The queue cannot be read, so there is no way to know what this device is
             // still owed. Storing the bare document would drop it silently.
             return { stored: false, pruned: false };
@@ -1937,7 +2563,7 @@ const FarkadSync = {
             return { stored: false, pruned: false };
         }
 
-        const pruned = this.dropSupersededEntries(envelope.supersedesSeq);
+        const pruned = this.dropSupersededEntries(envelope);
         if (typeof render === 'function') render();
         return { stored: true, pruned };
     },
@@ -1949,19 +2575,26 @@ const FarkadSync = {
     // write: the version that mutated the map and ignored saveOutbox's answer reported a
     // finished restore while the old journal sat on the disk, ready to put the superseded
     // days back at the next open.
-    dropSupersededEntries(supersedesSeq) {
-        const upTo = Number(supersedesSeq) || 0;
-        if (upTo <= 0) return true;
+    dropSupersededEntries(envelope) {
         this.loadOutbox();
+        const named = supersededOpIds(envelope);
+        const upTo = Number((envelope || {}).supersedesSeq) || 0;
 
-        const candidate = new Map();
-        let changed = false;
-        this._outbox.forEach((item, path) => {
-            if (item.seq > upTo) candidate.set(path, item);
-            else changed = true;
-        });
-        if (!changed) return true;
-        return this.adoptJournal(candidate);
+        // Named, and the list may be empty - a restore that supersedes nothing.
+        if (named) {
+            if (named.size === 0) return true;
+            return this.dropOperations([...named]);
+        }
+        if (upTo <= 0) return true;
+
+        // An envelope from a build that named nothing has only its number to go on.
+        // Asked of the whole physical set, not of a projection: an operation the
+        // projection does not show is still an operation that could come back.
+        const going = this.physicalOperations()
+            .filter(op => (Number(op.seq) || 0) <= upTo)
+            .map(op => op.opId);
+        if (going.length === 0) return true;
+        return this.dropOperations(going);
     },
 
     // Picking a restore back up - at connect, on the retry ladder, when the connection
@@ -2360,8 +2993,15 @@ const FarkadSync = {
             document.updatedBy = syncDeviceId();
         }
 
+        // The operations queued at the moment of the freeze, named. A v71 record cannot
+        // say what its own boundary was, so this is the most that can honestly be
+        // claimed - and it is strictly safer than the number, which would sweep up
+        // anything a second tab numbered the same way afterwards.
+        const superseded = this.physicalOperations().map(op => op.opId);
+
         const frozen = replacementEnvelope(
-            document, 'prepared', 'legacy_' + replacementId().slice(2), this._seq, true);
+            document, 'prepared', 'legacy_' + replacementId().slice(2), this._seq, true,
+            superseded);
 
         if (!Store.setVerified(LEGACY_UPGRADE_KEY, JSON.stringify(frozen))) {
             // No second copy, so the raw record is still the only one there is. It is
@@ -2669,28 +3309,33 @@ const FarkadSync = {
             return null;
         };
 
-        const candidate = new Map();
-        let changed = false;
-        this._outbox.forEach((item, path) => {
+        // A CORRECTION, written as an operation of its own that supersedes the stale one.
+        //
+        // The queued array cannot be edited in place: a batch record is immutable, and
+        // the version of this that rewrote the queue is what let a refused rewrite leave
+        // the original entry sitting on the disk while memory believed it was clean. So
+        // the sanitised list is minted the same way any other change to what this device
+        // publishes is minted - one operation, naming the one it replaces - and if it
+        // cannot be written the caller is told and the queue is barred from flushing.
+        //
+        // Not an invention on somebody's behalf either. Once this device has heard that
+        // the man is gone, the sanitised array IS its opinion of the roster, and sending
+        // the old one would put him back into the document for every v78 reader.
+        const corrections = [];
+        this.projectedQueue().forEach((item, path) => {
             const kind = listedKind(path);
             const removed = kind ? gone[kind] : null;
-            if (removed && removed.size > 0 && Array.isArray(item.value)) {
-                // An array of records, or an array of bare ids - the same question
-                // either way: is this the man the document says is gone?
-                const kept = item.value.filter(entry => {
-                    const id = entry && typeof entry === 'object' ? entry.id : entry;
-                    return !removed.has(String(id));
-                });
-                if (kept.length !== item.value.length) {
-                    changed = true;
-                    candidate.set(path, { value: kept, seq: item.seq, sent: item.sent });
-                    return;
-                }
-            }
-            candidate.set(path, item);
+            if (!removed || removed.size === 0 || !Array.isArray(item.value)) return;
+            // An array of records, or an array of bare ids - the same question either
+            // way: is this the man the document says is gone?
+            const kept = item.value.filter(entry => {
+                const id = entry && typeof entry === 'object' ? entry.id : entry;
+                return !removed.has(String(id));
+            });
+            if (kept.length !== item.value.length) corrections.push({ path, value: kept });
         });
-        if (!changed) return true;
-        return this.adoptJournal(candidate);
+        if (corrections.length === 0) return true;
+        return this.queueOperations(corrections);
     },
 
     // ---------------------------------------------------------- the first snapshot
@@ -2968,6 +3613,73 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
             }
         }
     }
+}
+
+// Is this operation ALREADY in the schedule that is on the disk?
+//
+// The question collection used to answer with a sequence number, and a number could not
+// answer it. `_savedSeq` is one JavaScript context's count of its own writes: it says
+// nothing about an operation another tab minted, and nothing about which schedule
+// actually reached the disk when a save was refused. So an operation whose value was
+// never written anywhere was collected as though it had been, and the edit existed only
+// in a cloud this device no longer had any record of.
+//
+// This asks the disk instead, per path family, mirroring applyJournalEntry. Where the
+// answer is not obvious it is NO: a wrong "no" leaves bytes on the device, and a wrong
+// "yes" loses somebody's day.
+function scheduleHoldsEntry(schedule, path, value) {
+    if (!schedule || typeof schedule !== 'object') return false;
+    const parts = String(path).split('.');
+    const same = (a, b) => canonicalJson(a) === canonicalJson(b);
+
+    if (parts.length === 4 && parts[0] === 'days') {
+        const [, date, layer, workerId] = parts;
+        const day = (schedule.days || {})[date];
+        const held = day && day[layer] ? day[layer][workerId] : undefined;
+        return same(held, value);
+    }
+
+    if (parts.length === 2 && parts[0] === 'advances') {
+        const advances = schedule.advances || {};
+        const there = Object.prototype.hasOwnProperty.call(advances, parts[1]);
+        if (value === null) return !there;
+        return there && same(advances[parts[1]], value);
+    }
+
+    // A ledger entry is never removed by anything, so a null owes the schedule nothing.
+    if (parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'advances') {
+        if (value === null) return true;
+        const entries = (schedule.ledger || {}).advances || {};
+        return Object.prototype.hasOwnProperty.call(entries, parts[2])
+            && same(entries[parts[2]], value);
+    }
+
+    if (parts.length === 3 && parts[0] === 'roster'
+        && (parts[1] === 'workers' || parts[1] === 'places')) {
+        const list = schedule[parts[1]] || [];
+        const found = list.find(item => item && String(item.id) === parts[2]);
+        if (value === null) return found === undefined;
+        return found !== undefined && same(found, value);
+    }
+
+    // An order is held when the people it names appear in the stored list in the order it
+    // named them. Anybody it had not heard of is not its business - applyJournalEntry
+    // leaves them where they are rather than dropping them.
+    if (parts.length === 2 && parts[0] === 'roster'
+        && (parts[1] === 'workerOrder' || parts[1] === 'placeOrder')) {
+        const kind = parts[1] === 'workerOrder' ? 'workers' : 'places';
+        const stored = (schedule[kind] || [])
+            .filter(item => item && item.id).map(item => String(item.id));
+        const wanted = (Array.isArray(value) ? value : []).map(String)
+            .filter(id => stored.indexOf(id) !== -1);
+        return wanted.every((id, at) => stored[at] === id);
+    }
+
+    if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+        return same(schedule[parts[0]], value);
+    }
+
+    return false;
 }
 
 // `const` at the top level of a classic script creates a global BINDING, not a property

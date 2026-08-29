@@ -102,11 +102,14 @@ const Recovery = {
         if (schedule !== null) out['scheduleData:v2'] = schedule;
 
         // The queue that is actually being written to, which after a damaged one is not
-        // the key anybody would think to look under.
-        if (typeof FarkadSync !== 'undefined' && FarkadSync.activeOutboxKey) {
-            const key = FarkadSync.activeOutboxKey();
-            const live = Store.durableGet(key);
-            if (live !== null) out[key] = live;
+        // the key anybody would think to look under - and which is a FAMILY of keys, not
+        // one record. Naming only the slot would put the sequence number in the file and
+        // leave every unsent day out of it.
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.activeQueueKeys) {
+            FarkadSync.activeQueueKeys().forEach(key => {
+                const live = Store.durableGet(key);
+                if (live !== null) out[key] = live;
+            });
         }
 
         // A restore that was asked for and has not finished, and the frozen upgrade of an

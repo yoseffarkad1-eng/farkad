@@ -81,13 +81,19 @@ function seed(device) {
     return device;
 }
 
-// One site on a day, replacing whatever was there - assignPlace ADDS, so the day is
-// cleared first. Two probes turn on "the same path, two different values".
+// One site on a day, REPLACING whatever was there. Several probes turn on "the same path,
+// two different values", so the day has to end up holding one site and not two.
+//
+// assignPlace adds and is idempotent - it filters the site out and puts it straight back
+// - so calling it with the site that is already there clears nothing. unassignPlace is
+// the one that removes.
 function put(device, path, placeId) {
     const [, date, layer, workerId] = path.split('.');
-    const entries = device.call('entriesFor', device.State.schedule, date, workerId, layer);
-    entries.slice().forEach(entry => device.State.commit(device.call('assignPlace',
-        device.State.schedule, date, workerId, layer, entry.placeId)));
+    device.call('entriesFor', device.State.schedule, date, workerId, layer)
+        .slice()
+        .filter(entry => entry.placeId !== placeId)
+        .forEach(entry => device.State.commit(device.call('unassignPlace',
+            device.State.schedule, date, workerId, layer, entry.placeId)));
     return device.State.commit(device.call('assignPlace',
         device.State.schedule, date, workerId, layer, placeId));
 }
@@ -236,13 +242,24 @@ const connected = async (device, cloud) => {
     const b = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
     b.State.load();
 
-    // Every update is held, and each one gets its own gate, so the two can be completed
-    // in the opposite order to the one they were started in.
+    // Every update is held, and each one gets its own gate, so that whether two of them
+    // can be open at the same time is a fact this test can measure rather than assume.
     const held = [];
+    let open = 0;
+    let mostOpenAtOnce = 0;
     cloud.hold = (kind, payload) => {
         if (kind !== 'update') return null;
+        // By the device that SIGNED the write. Reading the payload for a site id
+        // classified A's send as B's - the roster it carries names every site, p_02
+        // included - and the setup then proved nothing about two tabs.
+        const from = payload && (payload.updatedBy
+            || (payload.data && payload.data.updatedBy));
         const gate = deferred();
-        held.push({ gate, at: JSON.stringify(payload).indexOf('p_02') !== -1 ? 'b' : 'a' });
+        open += 1;
+        mostOpenAtOnce = Math.max(mostOpenAtOnce, open);
+        const done = () => { open -= 1; };
+        gate.promise.then(done, done);
+        held.push({ gate, at: from === 'd_b' ? 'b' : 'a' });
         return gate.promise;
     };
 
@@ -253,22 +270,24 @@ const connected = async (device, cloud) => {
     put(b, PATH, 'p_02');
     await settle(TICK * 40);
 
-    check('both sends are open at once', held.filter(item => item.at === 'a').length > 0
-        && held.filter(item => item.at === 'b').length > 0,
-        JSON.stringify(held.map(item => item.at)));
+    // The guarantee, and the reason the rest of it holds: two tabs of this app share one
+    // disk and one document, and only one of them may have a write open at a time. While
+    // both could, the older of the two could answer last and put a stale day over a
+    // correction on all three phones, with nothing left anywhere able to put it back.
+    check('the two tabs never both have a send open',
+        mostOpenAtOnce === 1, `${mostOpenAtOnce} at once: ` + JSON.stringify(
+            held.map(item => item.at)));
 
-    // The NEWER one completes first, the older one last.
-    held.filter(item => item.at === 'b').forEach(item => item.gate.release());
-    await settle(TICK * 40);
-    held.filter(item => item.at === 'a').forEach(item => item.gate.release());
-    await settle(TICK * 80);
+    // A's write - the older value - is answered first. B's has not been made yet.
+    held.forEach(item => item.gate.release());
+    cloud.hold = null;
+    await settle(TICK * 120);
 
     check('the document keeps the newer value',
         cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02',
         JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01));
 
     const third = makeDevice({ deviceId: 'd_third' });
-    cloud.hold = null;
     await connected(third, cloud);
     await settle(TICK * 40);
     check('and a third phone agrees',
@@ -398,18 +417,22 @@ const connected = async (device, cloud) => {
 {
     suite('Q7: an edit the app refused is not left active');
 
+    // A roster commit is several field paths that only mean anything together: the person,
+    // the order he appears in, and the whole array an older phone reads. The shape this
+    // replaced wrote them one at a time and put the queue back by hand when one failed -
+    // so a refused write left some of them on the disk, the rollback of the rest failed
+    // too, and the app reported "that did not happen" over a device holding half of it.
+    //
+    // Two arms, because there are two ways for the disk to say no and they must not have
+    // the same answer.
     const device = makeDevice({ deviceId: 'd_here' });
     seed(device);
     put(device, PATH, 'p_01');
     const before = device.Sync.pendingPaths().sort().join();
 
-    // The batch lands; the write after it fails; and putting the batch back fails too.
-    let outboxWrites = 0;
-    device.setQuota(key => {
-        if (key.indexOf('farkad:outbox') !== 0) return false;
-        outboxWrites += 1;
-        return outboxWrites > 1;
-    });
+    // ARM ONE: the queue will not take the batch at all, and nothing can be removed
+    // either - so a rollback that had to delete anything could not run.
+    device.setQuota(key => String(key).indexOf('farkad:outbox') === 0);
     device.blockRemoval(key => String(key).indexOf('farkad:outbox') === 0);
     device.throwOnRemove(key => String(key).indexOf('farkad:outbox') === 0);
 
@@ -435,6 +458,49 @@ const connected = async (device, cloud) => {
     check('while the edit that WAS accepted is still owed',
         reopened.Sync.pendingPaths().sort().join() === before,
         `${before} vs ${reopened.Sync.pendingPaths().sort().join()}`);
+
+    // ARM TWO: the batch lands and the write AFTER it does not. This is the state that
+    // used to be half a roster on the disk. It cannot be one now - the batch is a single
+    // record - so the honest answer is that the edit happened, whole, and every part of
+    // it is there at the next open.
+    const second = makeDevice({ deviceId: 'd_two' });
+    seed(second);
+    let outboxWrites = 0;
+    second.setQuota(key => {
+        if (String(key).indexOf('farkad:outbox') !== 0) return false;
+        outboxWrites += 1;
+        return outboxWrites > 1;
+    });
+    second.blockRemoval(key => String(key).indexOf('farkad:outbox') === 0);
+    second.throwOnRemove(key => String(key).indexOf('farkad:outbox') === 0);
+
+    second.State.schedule.workers.push(
+        { id: 'w_zz', name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    const stood = second.State.commitRoster();
+    second.setQuota(null);
+    second.blockRemoval(null);
+    second.throwOnRemove(null);
+
+    check('a batch that landed is not reported as a failure', stood === true,
+        String(stood));
+    const reopenedTwo = makeDevice({ storage: second.dump(), deviceId: 'd_two' });
+    reopenedTwo.State.load();
+    check('and the reopen holds the WHOLE roster edit, not part of it',
+        Boolean(reopenedTwo.State.worker('w_zz'))
+        && (reopenedTwo.State.schedule.workers || [])
+            .filter(worker => worker && worker.id === 'w_zz').length === 1,
+        JSON.stringify((reopenedTwo.State.schedule.workers || [])
+            .map(worker => worker.id)));
+    check('with every path of it queued together or none of them',
+        (() => {
+            const paths = physicalOps(reopenedTwo)
+                .filter(op => JSON.stringify(op.value || '').indexOf('w_zz') !== -1
+                    || op.path.indexOf('w_zz') !== -1)
+                .map(op => op.path);
+            return paths.indexOf('roster.workers.w_zz') !== -1
+                && paths.indexOf('workers') !== -1;
+        })(),
+        JSON.stringify(physicalOps(reopenedTwo).map(op => op.path)));
 }
 
 // ================================================================ Q8
@@ -454,22 +520,28 @@ const connected = async (device, cloud) => {
     b.State.load();
     given('both tabs hold it', b.Sync.pendingPaths().includes(PATH));
 
-    // A sends it and prunes it; then a newer value arrives from somewhere else.
+    // A sends it and settles it.
     await connected(a, cloud);
     await settle(TICK * 60);
     given('A settled it', a.Sync.pendingCount() === 0, String(a.Sync.pendingCount()));
 
-    a.Sync.receive({
-        workers: a.State.schedule.workers, places: a.State.schedule.places,
-        days: { '2026-08-10': { plan: {}, actual: { w_01: {
-            entries: [{ placeId: 'p_02' }] } } } },
-        advances: {}, updatedAt: '2026-08-11T00:00:00.000Z', updatedBy: 'd_other'
-    });
-    await wait();
+    // A DIFFERENT PHONE corrects the day - its own disk, its own session, through the
+    // cloud like any other phone. The correction has to be the document's, not a
+    // synthetic snapshot handed to one device: the question is what the stale tab does to
+    // a document that has genuinely moved on.
+    const other = makeDevice({ deviceId: 'd_other' });
+    await connected(other, cloud);
+    await settle(TICK * 40);
+    put(other, PATH, 'p_02');
+    await settle(TICK * 60);
+    given('the other phone corrected it in the cloud',
+        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02',
+        JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01));
+    await settle(TICK * 40);
 
     // The stale tab records something else entirely.
     put(b, 'days.2026-08-12.actual.w_02', 'p_01');
-    await wait();
+    await settle(TICK * 60);
 
     check('recording an unrelated day did not put the settled one back',
         opsForPath(b, PATH).length === 0,
