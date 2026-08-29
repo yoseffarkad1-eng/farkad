@@ -52,8 +52,25 @@ function makeLocalStorage(initial) {
     const ls = {};
     const define = (name, value) => Object.defineProperty(ls, name, { value, enumerable: false });
 
-    define('getItem', key =>
-        (Object.prototype.hasOwnProperty.call(ls, key) ? ls[key] : null));
+    define('getItem', key => {
+        const value = Object.prototype.hasOwnProperty.call(ls, key) ? ls[key] : null;
+        // The only way to spell the moment BETWEEN a read and the write that depends on
+        // it. Two tabs are two threads: one can be preempted after it has read a record
+        // and before it writes the record back, and everything the other tab did in that
+        // gap is then overwritten by a value computed from stale bytes. Inside one Node
+        // thread that moment cannot happen by itself, so a test that needs it asks for it:
+        //
+        //   shared.interleave(key => { ...the other tab writes here... });
+        //
+        // Fired after the value is taken and before the caller can act on it, once - it
+        // clears itself, because a hook that fired on every read would recurse.
+        if (ls.__hook) {
+            const hook = ls.__hook;
+            ls.__hook = null;
+            hook(key, value);
+        }
+        return value;
+    });
     define('setItem', (key, value) => {
         // A device with no room throws here, which is a real state this app handles and
         // therefore one the harness has to be able to produce.
@@ -69,6 +86,10 @@ function makeLocalStorage(initial) {
             value: stored, enumerable: true, writable: true, configurable: true
         });
     });
+    // See getItem. Non-enumerable, like every other method here, because Store.keys()
+    // reads Object.keys(localStorage) and a hook is not a record.
+    Object.defineProperty(ls, '__hook', { value: null, enumerable: false, writable: true });
+    define('interleave', hook => { ls.__hook = hook; });
     define('removeItem', key => {
         // A remove the browser refuses. Rare, and the reason cancellation cannot be
         // assumed to have worked just because it was asked for.
@@ -108,7 +129,11 @@ function makeDocument() {
         querySelectorAll: () => [],
         addEventListener: () => {},
         removeEventListener: () => {},
-        createElement: () => ({ style: {}, setAttribute: () => {}, appendChild: () => {} })
+        // click() is here because the export paths build an anchor and press it. What is
+        // being tested through them is what the device wrote down, not the download.
+        createElement: () => ({
+            style: {}, setAttribute: () => {}, appendChild: () => {}, click: () => {}
+        })
     };
 }
 
@@ -149,10 +174,19 @@ function hashOf(text) {
 
 // One phone. `storage` carries over a previous device's localStorage contents, which is
 // how "close the app and open it again" is spelled: makeDevice({ storage: old.dump() }).
+//
+// `sharedStorage` is a different thing entirely and the only way to spell TWO TABS. A
+// reopen copies the bytes; two tabs of the same site are two JavaScript worlds looking at
+// ONE localStorage, and a lost update between them is invisible to every test built on
+// copies. Pass the same object to two devices and they share it, the way two tabs do:
+//
+//   const shared = sharedStore();
+//   const tabA = makeDevice({ sharedStorage: shared });
+//   const tabB = makeDevice({ sharedStorage: shared });
 export function makeDevice(options = {}) {
     deviceCount += 1;
 
-    const localStorage = makeLocalStorage(options.storage);
+    const localStorage = options.sharedStorage || makeLocalStorage(options.storage);
     const renders = { count: 0 };
 
     // Installed BEFORE the app's scripts run. sync.js reads its outbox the moment it
@@ -229,6 +263,12 @@ export function makeDevice(options = {}) {
         corruptOnWrite(key) {
             localStorage.__corrupt = (written) => written === key;
         },
+        // The same, for a family of keys. The queue is a set of keys since v87, so "the
+        // disk takes the write and gives back something else" is a statement about all of
+        // them rather than about one.
+        corruptWhen(matches) {
+            localStorage.__corrupt = (written) => matches(written);
+        },
         // Make removeItem silently do nothing for the matching keys.
         blockRemoval(fn) {
             localStorage.__blockRemoval = fn;
@@ -254,6 +294,11 @@ export function makeDevice(options = {}) {
 // Modelled on Firestore's actual behaviour rather than on what the adapter happens to
 // call: update() merges by dotted field path and REJECTS if the document does not exist,
 // which is the difference the first-sync bug lives in.
+// One localStorage that several devices can be handed, for the two-tab case above.
+export function sharedStore(initial) {
+    return makeLocalStorage(initial);
+}
+
 export function makeCloud(options = {}) {
     const cloud = {
         doc: options.doc || null,          // null = the document does not exist yet
