@@ -830,27 +830,70 @@ const SEND_STUCK_MS = 30000;
 //
 // Stale after this long, because a tab that was closed mid-send must not lock the other
 // two out of the cloud for the rest of the evening.
+//
+// The staleness is measured from the last HEARTBEAT, not from acquisition, and that is
+// the whole of the second fix here. It used to be measured from the moment the claim was
+// taken and nothing ever renewed it, while the request it guarded had no matching bound
+// at all - cloudWrite waits on the previous write settling and on nothing else, on
+// purpose, because "a timeout may say the connection is bad; it may not let go of the
+// lock". So a phone on one bar could hold a request open past twenty seconds, the second
+// tab would find the claim stale, take it, send a CORRECTION, have it acknowledged and
+// pruned - and then the first request would land its older value on top. The cloud held
+// the value that had been corrected, the correction was republished to every screen and
+// disk by the very snapshot that carried the mistake, and both tabs said synced with
+// nothing owing. Nothing anywhere disagreed, and nothing could put the correction back.
+//
+// An owner that is still working says so. An owner that has stopped saying so is gone,
+// and its claim is takeable exactly as before - which is the property that keeps a
+// crashed tab from locking the other two out for the evening.
 const SEND_CLAIM_KEY = 'farkad:sendClaim';
 const SEND_CLAIM_STALE_MS = 20000;
 const SEND_CLAIM_SETTLE_MS = 25;
+// Comfortably inside the staleness window, so an owner that is alive is never mistaken
+// for one that is gone, and short enough that a crashed owner is not waited on for long.
+const SEND_CLAIM_BEAT_MS = 4000;
 
+// Three answers, not two. A claim is HELD, FREE, or UNREADABLE - and unreadable is not
+// free.
+//
+// This used to say so in a comment and do the opposite: bytes that would not parse came
+// back as `{ by: '', token: '', at: Date.now() }`, and the one caller guards on
+// `held.token` being truthy, so an empty token short-circuited to "nobody is sending" and
+// the claim was taken over the top of a live one. Ten different byte-shapes did it -
+// truncated JSON, an array, a string, a number, null, an object with no token, a
+// timestamp that will not read, a timestamp that is not there, and bytes that are not
+// JSON at all. A truncated claim over a live send produced the same overwrite as the
+// expired one, in under a second, with the lease nowhere near running out.
+//
+// `at: Number(parsed.at) || 0` was the same fault wearing a different hat: a claim whose
+// timestamp is missing or unreadable became fifty-six years old and read as ANCIENT
+// rather than as uncertain, and that one survived a perfectly good token.
 function readSendClaim() {
     const raw = Store.durableGet(SEND_CLAIM_KEY);
     if (raw === null) return null;
+
+    const unreadable = () => ({ by: '', token: '', at: Date.now(), unreadable: true });
+
     let parsed;
     try {
         parsed = JSON.parse(raw);
     } catch (error) {
-        // Unreadable is not "free". A record here that will not parse is a tab that was
-        // writing one when it died, and assuming the cloud is unattended on the strength
-        // of bytes nobody can read is the assumption this whole file exists to refuse.
-        return { by: '', token: '', at: Date.now() };
+        return unreadable();
     }
-    if (!isPlainObject(parsed)) return { by: '', token: '', at: Date.now() };
+    if (!isPlainObject(parsed)) return unreadable();
+    if (typeof parsed.token !== 'string' || parsed.token === '') return unreadable();
+
+    const at = Number(parsed.at);
+    const beat = parsed.beat === undefined ? at : Number(parsed.beat);
+    if (!isFinite(at) || !isFinite(beat)) return unreadable();
+
     return {
         by: String(parsed.by || ''),
-        token: String(parsed.token || ''),
-        at: Number(parsed.at) || 0
+        token: parsed.token,
+        at,
+        // A record written by a build that did not send heartbeats still has one: its
+        // acquisition time. That is the old behaviour exactly, for the old shape only.
+        beat
     };
 }
 
@@ -2639,6 +2682,20 @@ const FarkadSync = {
             return Promise.resolve();
         }
 
+        // Asked again, in the instant before the request leaves. Everything since the
+        // claim was taken is time - the settle, reading the queue off the disk, building
+        // the payload - and a tab suspended across that gap wakes up still believing it
+        // owns a claim another tab took long ago, then hands its stale payload to the
+        // cloud. Nothing is lost by standing down: the queue is untouched, the ladder
+        // brings this back, and the payload is rebuilt from a disk that by then holds
+        // whatever the other tab wrote.
+        if (!this.stillOwnsSendClaim()) {
+            this._sending = new Map();
+            this.scheduleFlush();
+            if (this.status === 'synced') this.setStatus('connecting');
+            return Promise.resolve();
+        }
+
         this._sending = sent;
         this._stamp = null;
 
@@ -2692,6 +2749,47 @@ const FarkadSync = {
     // waiting out the settle, and the two would race each other through one claim.
     _claiming: false,
 
+    // The timer that keeps saying "still working". Null whenever nothing is owned.
+    _claimBeat: null,
+
+    // Is the claim on the disk free to take?
+    //
+    // Free means: nothing there, or an owner that has stopped saying it is alive. It does
+    // NOT mean bytes nobody can read - those are somebody's live claim seen through a
+    // half-finished write, and treating them as an empty cloud is the assumption this
+    // whole section exists to refuse. A quarantined copy is kept, once, so the person who
+    // eventually asks what happened has the evidence rather than a guess.
+    claimIsFree(held) {
+        if (!held) return true;
+        if (held.unreadable) {
+            this.quarantineSendClaim();
+            return false;
+        }
+        if (held.token === this._claimToken) return true;
+        return (Date.now() - held.beat) >= SEND_CLAIM_STALE_MS;
+    },
+
+    // Kept, not deleted, and only once: a second copy under one key would write over the
+    // evidence the first one preserved.
+    //
+    // Deliberately NOT through Recovery.damaged. That path is for a record that is
+    // somebody's WORK - it puts a problem on the screen and can hold every write on the
+    // device until a person acknowledges it, which is right for a day nobody can read and
+    // wrong for a coordination record. Losing the right to send costs a delay; being
+    // unable to record costs the evening. The bytes are preserved under the same
+    // :damaged suffix everything else uses, so the rescue file carries them and whoever
+    // eventually asks what happened has the evidence rather than a guess.
+    quarantineSendClaim() {
+        if (this._claimQuarantined) return;
+        this._claimQuarantined = true;
+        const raw = Store.durableGet(SEND_CLAIM_KEY);
+        if (raw === null) return;
+        const key = SEND_CLAIM_KEY + ':damaged';
+        if (Store.durableGet(key) !== null) return;
+        Store.setVerified(key, raw);
+    },
+    _claimQuarantined: false,
+
     // Takes the right to send, or answers false. See SEND_CLAIM_KEY.
     takeSendClaim() {
         // A browser that stores nothing has no way to coordinate with anything, and
@@ -2700,15 +2798,11 @@ const FarkadSync = {
         if (!Store.available) return Promise.resolve(true);
 
         const now = Date.now();
-        const held = readSendClaim();
-        if (held && held.token && (now - held.at) < SEND_CLAIM_STALE_MS
-            && held.token !== this._claimToken) {
-            return Promise.resolve(false);
-        }
+        if (!this.claimIsFree(readSendClaim())) return Promise.resolve(false);
 
         const token = opIdNow();
         if (!Store.setVerified(SEND_CLAIM_KEY,
-            JSON.stringify({ by: syncDeviceId(), token, at: now }))) {
+            JSON.stringify({ by: syncDeviceId(), token, at: now, beat: now }))) {
             // No room for the claim. Sending anyway would be sending uncoordinated, which
             // is the thing this exists to stop.
             Store.forget(SEND_CLAIM_KEY);
@@ -2718,19 +2812,68 @@ const FarkadSync = {
         return new Promise(resolve => {
             setTimeout(() => {
                 const after = readSendClaim();
-                const mine = Boolean(after) && after.token === token;
+                const mine = Boolean(after) && !after.unreadable && after.token === token;
                 this._claimToken = mine ? token : null;
+                if (mine) this.startClaimBeat();
                 resolve(mine);
             }, this.claimSettleMs);
         });
     },
 
+    // While this tab owns the claim it says so, on a timer, for as long as the request it
+    // guards is open. The other tab measures staleness from the last one of these - so an
+    // owner whose write is slow is never mistaken for an owner that is gone, and an owner
+    // that really has gone stops beating and is taken over exactly as before.
+    startClaimBeat() {
+        this.stopClaimBeat();
+        if (typeof setInterval !== 'function') return;
+        this._claimBeat = setInterval(() => {
+            if (!this._claimToken) { this.stopClaimBeat(); return; }
+            const held = readSendClaim();
+            // Somebody else's now, or bytes nobody can read. Either way this tab has
+            // stopped owning it and must not write over whatever is there.
+            if (!held || held.unreadable || held.token !== this._claimToken) {
+                this._claimToken = null;
+                this.stopClaimBeat();
+                return;
+            }
+            Store.setVerified(SEND_CLAIM_KEY, JSON.stringify({
+                by: syncDeviceId(), token: this._claimToken, at: held.at, beat: Date.now()
+            }));
+        }, SEND_CLAIM_BEAT_MS);
+        // Never a reason to hold a page open in Node or to keep a phone awake.
+        if (this._claimBeat && typeof this._claimBeat.unref === 'function') {
+            this._claimBeat.unref();
+        }
+    },
+
+    stopClaimBeat() {
+        if (this._claimBeat === null) return;
+        clearInterval(this._claimBeat);
+        this._claimBeat = null;
+    },
+
+    // Asked again, in the instant before the request is handed to the adapter.
+    //
+    // Everything between taking the claim and this line is time: the settle, building the
+    // payload, reading the queue off the disk. A tab suspended across that gap woke up
+    // still believing it owned a claim another tab had long since taken - and then handed
+    // its stale payload to the cloud. The answer is read off the DISK, because that is
+    // where the other tab wrote.
+    stillOwnsSendClaim() {
+        if (!Store.available) return true;
+        if (!this._claimToken) return false;
+        const held = readSendClaim();
+        return Boolean(held) && !held.unreadable && held.token === this._claimToken;
+    },
+
     // Given back the moment the send is answered, so the next tab does not wait out the
     // staleness window. A removal that will not happen costs a delay, never a write.
     releaseSendClaim() {
+        this.stopClaimBeat();
         if (!this._claimToken) return;
         const held = readSendClaim();
-        if (held && held.token === this._claimToken) {
+        if (held && !held.unreadable && held.token === this._claimToken) {
             try { Store.remove(SEND_CLAIM_KEY); } catch (error) { /* bytes, not truth */ }
             Store.forget(SEND_CLAIM_KEY);
         }
@@ -3131,6 +3274,14 @@ const FarkadSync = {
                     this._claiming = false;
                     return value;
                 };
+                // And asked once more, on the disk, in the instant before the request
+                // leaves - see sendClaimed. A whole-document save is the write where
+                // being wrong about this costs the most: it takes everybody out at once.
+                if (!this.stillOwnsSendClaim()) {
+                    done();
+                    throw new Error(
+                        'the right to send moved to another tab; the restore was not sent');
+                }
                 // A whole-document save takes everybody out at once.
                 if (!this.markSent(document)) {
                     done();

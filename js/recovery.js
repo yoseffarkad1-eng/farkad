@@ -303,7 +303,13 @@ const FARKAD_RECORD_KEYS = [
     'farkad:deviceId',
     'farkad:pendingReplace',
     'farkad:pendingReplace:v71',
-    'farkad:provenance:v1'
+    'farkad:provenance:v1',
+    // The cross-tab right to send. The record itself is never in the rescue file - it is
+    // coordination, it is worthless a second later, and fencing the snapshot on it made
+    // every export unprovable while another tab was merely sending. A QUARANTINED copy of
+    // it is a different thing: bytes nobody could read, kept because they are the only
+    // account of why a send waited, and the file is where an account belongs.
+    'farkad:sendClaim'
 ];
 
 function isFarkadRecordKey(key) {
