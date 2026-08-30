@@ -5,7 +5,7 @@
   "description": "Day and pay record for a construction crew. A PWA of classic scripts with no build step - this file exists so the tests can be run, not to introduce one.",
   "type": "module",
   "scripts": {
-    "test": "npm run test:isolation && npm run test:blobs && npm run test:build && npm run test:data && npm run test:recovery && npm run test:adversarial && npm run test:probes && npm run test:capacity && npm run test:concurrency && npm run test:exports && npm run test:fence && npm run test:money && npm run test:method && npm run test:restore && npm run test:upgrade && npm run test:vehicles && npm run test:xlsx && npm run test:nonassertions && npm run test:labels && npm run test:labelcache && npm run test:sendclaim",
+    "test": "npm run test:isolation && npm run test:blobs && npm run test:build && npm run test:data && npm run test:recovery && npm run test:adversarial && npm run test:probes && npm run test:capacity && npm run test:concurrency && npm run test:exports && npm run test:fence && npm run test:money && npm run test:money-ingress && npm run test:method && npm run test:restore && npm run test:upgrade && npm run test:vehicles && npm run test:xlsx && npm run test:nonassertions && npm run test:labels && npm run test:labelcache && npm run test:sendclaim",
     "test:all": "npm run test && npm run test:smoke && npm run test:print && npm run test:mobile && npm run test:update && npm run test:recovery-browser && npm run test:handover && npm run test:swrestart && npm run test:swidentity",
     "test:build": "node tests/build.test.mjs",
     "test:data": "node tests/data.test.mjs",
@@ -22,6 +22,7 @@
     "test:exports": "node tests/exports.test.mjs",
     "test:fence": "node tests/fence.test.mjs",
     "test:money": "node tests/money.test.mjs",
+    "test:money-ingress": "node tests/money.ingress.test.mjs",
     "test:method": "node tests/method.test.mjs",
     "test:restore": "node tests/restore.test.mjs",
     "test:upgrade": "node tests/upgrade.test.mjs",
