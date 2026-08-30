@@ -2250,25 +2250,32 @@ async function seedRoster(page) {
   // replaced there by whatever the network happens to be serving.
   const served = await page.evaluate(async () => {
     const keys = await caches.keys();
-    const cache = await caches.open(keys[0]);
+    // The BUILD SHELF, by name. keys[0] was the shelf back when a shelf was the only kind
+    // of cache here; there are two bookkeeping caches now and caches.keys() is in creation
+    // order, so the first name is as likely to be one of those - and then this measures
+    // whether index.html is in the registry, which it never is.
+    const shelves = keys.filter(key => key !== 'farkad-clients' && key !== 'farkad-shelves');
+    const cache = await caches.open(shelves[0]);
     const before = await cache.match('./index.html').then(r => r && r.text());
 
     // A navigation, the way a reload is one.
     await fetch('index.html', { mode: 'navigate' }).then(r => r.text()).catch(() => '');
     const after = await cache.match('./index.html').then(r => r && r.text());
 
-    // farkad-clients is not a shelf - see the note in tests/update.test.mjs.
+    // farkad-clients holds which window runs which build; farkad-shelves holds each
+    // shelf's lifecycle state, the active pointer, and the per-build manifests. Neither is
+    // a shelf - see the note in tests/update.test.mjs.
   return {
     cached: Boolean(before), unchanged: before === after,
-    caches: keys.filter(key => key !== 'farkad-clients').length,
-    bookkeeping: keys.includes('farkad-clients')
+    caches: shelves.length,
+    bookkeeping: keys.includes('farkad-clients') && keys.includes('farkad-shelves')
   };
   });
   check('the document is served from this version\'s cache', served.cached);
   check('and a navigation does not overwrite it', served.unchanged);
   check('exactly one version cache exists at a time', served.caches === 1,
     String(served.caches));
-  check('and which window is running which build is written down beside them',
+  check('and the bookkeeping sits beside them: who runs what, and each shelf\'s state',
     served.bookkeeping === true, String(served.bookkeeping));
 
   // A build mismatch is noticed and stops the app writing, rather than saving an edit in
@@ -7001,7 +7008,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 {
   const page = await open();
   const cached = await page.evaluate(async () => {
-    const names = await caches.keys();
+    const names = (await caches.keys())
+      .filter(key => key !== 'farkad-clients' && key !== 'farkad-shelves');
     const cache = await caches.open(names[0]);
     return (await cache.keys()).map(r => new URL(r.url).pathname);
   });
