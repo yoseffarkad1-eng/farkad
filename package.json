@@ -32,6 +32,7 @@
     "test:fence-legacy": "node tests/fence.legacy.test.mjs",
     "test:money-history": "node tests/money.history.test.mjs",
     "test:money-units": "node tests/money.units.test.mjs",
+    "test:money-cloud": "node tests/money.cloud.test.mjs",
     "test:xlsx": "node tests/xlsx.test.mjs",
     "test:nonassertions": "node tests/nonassertions.test.mjs",
     "test:handover": "node tests/handover.test.mjs",
