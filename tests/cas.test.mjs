@@ -24,7 +24,7 @@
 //      its own receipt and succeeds without applying anything twice.
 //   5. A whole-document restore is a write like any other and takes the same fence.
 
-import { makeDevice, makeCloud, settle } from './harness.mjs';
+import { makeDevice, makeCloud, sharedStore, settle } from './harness.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
 const TICK = 6;
@@ -196,6 +196,126 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
         JSON.stringify(cloud.doc) === JSON.stringify(held),
         `revision ${cloud.doc.revision}`);
     }
+}
+
+// ============================================================ a tab that stopped answering
+{
+    suite('one tab suspended with its request still open, and the other one working');
+
+    // The scenario the send claim cannot survive, and the reason the ordering had to move
+    // to the server.
+    //
+    // Two tabs of one browser share a localStorage lease that decides which of them may
+    // send. Tab A takes it and its request goes out; the phone is backgrounded and the
+    // request neither lands nor fails. Tab A keeps the claim - correctly, because its
+    // write may yet arrive, and stealing it would risk sending the same edit twice.
+    //
+    // Everything else then stops. Tab B records a correction to the same day and cannot
+    // send it, because the claim is the gate and the gate is held by a tab that is asleep.
+    // Property 7 of the protocol, in the brief's own words: a crashed client cannot lock
+    // all other phones forever. Under the lease it can, for as long as it stays asleep.
+    //
+    // What must hold once the server orders the writes:
+    //
+    //   B's correction leaves the device. It does not sit in a queue behind A.
+    //   When A's held write finally lands, it does not put back the value B corrected -
+    //     the path moved under it, so it is refused rather than rebased.
+    //   A does not report itself synced over a write it is holding.
+    //   And nobody steals A's claim, because stealing it was never the answer.
+
+    const cloud = makeCloud();
+    const shared = sharedStore();
+
+    const a = makeDevice({ sharedStorage: shared, deviceId: 'd_a' });
+    a.Sync.pushDelayMs = TICK;
+    a.setToday('2026-08-20');
+    a.ctx.askTell = () => Promise.resolve();
+    a.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+    a.State.schedule.places = [
+        { id: 'p_00', name: 'התחלה', active: true },
+        { id: 'p_01', name: 'הרצליה', active: true },
+        { id: 'p_02', name: 'תל אביב', active: true }];
+    a.State.save({ silent: true });
+
+    const b = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
+    b.Sync.pushDelayMs = TICK;
+    b.setToday('2026-08-20');
+    b.ctx.askTell = () => Promise.resolve();
+    b.State.load();
+
+    a.Sync.connect(cloud.adapter);
+    await settle(TICK * 10);
+    b.Sync.connect(cloud.adapter);
+    await settle(TICK * 10);
+
+    // assignPlace ADDS a site - two sites in one day is the ordinary case here, so a
+    // second assignment does not discard the first. That makes the whole entries array
+    // the value at days.<date>.actual.<worker>, which is exactly one field path: two tabs
+    // adding different sites to one worker's day are two writes CONTESTING one path, and
+    // whichever loses must not be silently reinstated over the other.
+    const site = (device, placeId) => device.State.commit(device.call('assignPlace',
+        device.State.schedule, DAY, 'w_01', 'actual', placeId));
+    const placesInCloud = () => {
+        const day = ((cloud.doc || {}).days || {})[DAY];
+        const held = day && day.actual && day.actual.w_01;
+        return ((held && held.entries) || []).map(entry => entry.placeId).sort();
+    };
+
+    site(a, 'p_00');
+    await settle(TICK * 30);
+    given('the day is in the cloud to begin with',
+        placesInCloud().join() === 'p_00', placesInCloud().join());
+
+    // Tab A's next write goes out and never comes back.
+    let releaseHeld = null;
+    cloud.hold = (kind, payload) => {
+        if (kind !== 'update' || !payload || payload.updatedBy !== 'd_a') return null;
+        return new Promise(resolve => { releaseHeld = resolve; });
+    };
+    const before = cloud.writes.length;
+    site(a, 'p_01');
+    a.Sync.flush();
+    await settle(TICK * 15);
+    given('tab A has a request open that will not answer',
+        releaseHeld !== null && cloud.writes.length === before,
+        `${cloud.writes.length - before} writes landed while it was held`);
+
+    // Tab B corrects the same day.
+    b.State.load();
+    site(b, 'p_02');
+    b.Sync.flush();
+    await settle(TICK * 40);
+
+    check('the other tab\'s correction leaves the device rather than queueing behind it',
+        b.Sync.pendingCount() === 0,
+        `${b.Sync.pendingCount()} still owed, status ${b.Sync.status}`);
+    check('and it is what the cloud holds',
+        placesInCloud().indexOf('p_02') !== -1, placesInCloud().join());
+
+    // Tab A wakes up. Its write was built before B's correction existed.
+    if (releaseHeld) releaseHeld();
+    cloud.hold = null;
+    await settle(TICK * 60);
+
+    check('the woken tab does not put its own value back over the other one\'s',
+        placesInCloud().indexOf('p_02') !== -1, placesInCloud().join());
+    check('and it does not call itself synced over a write it is still holding',
+        a.Sync.pendingCount() === 0 || a.Sync.status !== 'synced',
+        `${a.Sync.pendingCount()} owed, status ${a.Sync.status}`);
+
+    // A device opening the project afterwards is told the same thing.
+    const c = makeDevice({ deviceId: 'd_c' });
+    c.Sync.pushDelayMs = TICK;
+    c.setToday('2026-08-20');
+    c.ctx.askTell = () => Promise.resolve();
+    c.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+    const seen = ((c.State.schedule.days || {})[DAY] || {}).actual;
+    const held = ((seen && seen.w_01 && seen.w_01.entries) || [])
+        .map(entry => entry.placeId).sort();
+    check('and a phone opening the project afterwards is given the same day',
+        held.indexOf('p_02') !== -1, held.join());
 }
 
 report();
