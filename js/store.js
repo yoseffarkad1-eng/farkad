@@ -127,6 +127,17 @@ const Store = {
         if (this._ticking) return;
         if (key === WRITE_TICK_KEY) return;
         if (!this.available) return;
+        // Only for a record the rescue file carries. The counter exists to prove that
+        // the file's readings were one moment of this disk, and a write to a record the
+        // file does not contain cannot have moved anything under it: a restore point, an
+        // undo stack, a preference and the device id each cost a second synchronous write
+        // to prove a quiet moment for a file none of them appear in, and a second tab
+        // merely rewriting its send claim made every snapshot report itself unprovable.
+        //
+        // Guarded on the function existing because store.js loads before recovery.js:
+        // during that window the fence is wider than it needs to be, which is the safe
+        // direction to be wrong in.
+        if (typeof isFarkadSnapshotKey === 'function' && !isFarkadSnapshotKey(key)) return;
         this._ticking = true;
         try {
             const next = (Number(this.readWriteTick()) || 0) + 1;

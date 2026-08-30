@@ -314,6 +314,39 @@ function isFarkadRecordKey(key) {
         : false;
 }
 
+// The records the rescue FILE carries - which is not the same list as the records this
+// app writes, and the difference is the whole point of having two.
+//
+// farkad:deviceId is the trap: it is in FARKAD_RECORD_KEYS, it is minted by the sync
+// layer on any device that has lost it, and rawRecords does not put it in the file. So is
+// farkad:sendClaim, which a second tab rewrites twice per send. A fence built on the
+// wider list moves for both - and then a snapshot taken while another tab is merely
+// sending burns every attempt and reports itself unprovable over a key the file does not
+// contain, which tells somebody their rescue file is incomplete when it is not.
+//
+// Everything the file carries is here, and nothing else: the schedule and the record an
+// older build wrote, the decisions the migration refused to guess, an unfinished restore
+// and its frozen companion, the provenance, every key the queue is written across, and a
+// quarantined copy of any of them.
+const FARKAD_SNAPSHOT_KEYS = [
+    'scheduleData',
+    'scheduleData:v2',
+    'scheduleData:migrationIssues',
+    'farkad:pendingReplace',
+    'farkad:pendingReplace:v71',
+    'farkad:provenance:v1'
+];
+
+function isFarkadSnapshotKey(key) {
+    const name = String(key);
+    if (FARKAD_SNAPSHOT_KEYS.indexOf(name) !== -1) return true;
+    if (name.indexOf('farkad:prov:') === 0) return true;
+    if (isFarkadQuarantineKey(name)) return true;
+    return typeof FarkadSync !== 'undefined' && FarkadSync.isQueueKey
+        ? FarkadSync.isQueueKey(name)
+        : false;
+}
+
 // <base>:damaged, or <base>:damaged:<n> - and only when <base> is a record this app
 // writes. See quarantineRecord for where the suffix comes from.
 function isFarkadQuarantineKey(key) {
