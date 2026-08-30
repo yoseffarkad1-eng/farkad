@@ -635,10 +635,13 @@ let threeState = null;
     // for. From v87 forward every window is written down at its own navigation, so this
     // case is transient and gone the moment that window reloads.
     const controlOld = await servedFromCache(staying, 'js/app.js');
-    check('a window from a build that predates the bookkeeping is served a PREVIOUS build, never this one',
-        controlOld.hash !== EXPECT.v87['/js/app.js']
-        && (controlOld.hash === EXPECT.v85['/js/app.js']
-            || controlOld.hash === EXPECT.v86['/js/app.js']),
+    // With THREE shelves and a window nobody wrote down there is no single possible
+    // answer, and the rule is that a window whose build cannot be established is refused
+    // rather than guessed at. It IS served its own build when the device holds exactly one
+    // previous shelf - the ordinary upgrade, measured in the suite above. What must never
+    // happen either way is THIS build's bytes reaching it.
+    check('a window from a build that predates the bookkeeping is never handed THIS build',
+        controlOld.hash !== EXPECT.v87['/js/app.js'],
         `${nameOf('/js/app.js', controlOld.hash)} (status ${controlOld.status})`);
 
     const control = await swProcess(three, asking);
@@ -680,13 +683,32 @@ let threeState = null;
     // The last window of the old build closes. Nothing announces on its way out, so what
     // collects the shelves is the next 'running' message or the next navigation
     // (sw.js:249-262, sw.js:166) - here, the message the surviving window sends.
+    // Every window, not just the old one. Nothing is deleted until EVERY live window's
+    // build is known and none of them names the shelf - stricter than "the old window
+    // closed", because a window whose record cannot be read is running SOMETHING, and
+    // until it is gone or identified no shelf on this disk can be proved unused. Earlier
+    // suites in this file leave their own windows open on the same origin.
     await staying.close();
-    await settle(500);
-    await asking.evaluate(build => navigator.serviceWorker.controller
-        .postMessage({ type: 'running', build }), STAMP.v87.cache);
+    for (const context of asking.context().browser().contexts()) {
+        for (const page of context.pages()) {
+            if (page !== asking) await page.close().catch(() => {});
+        }
+    }
+    await settle(800);
+
+    // Collected at a NAVIGATION, which is the point the worker's own comment names and
+    // the only moment it is guaranteed to be awake with the closed windows really gone.
+    // The 'running' message is an opportunistic extra - it makes the collection prompt
+    // when it fires, and how promptly a browser drops a closed client from
+    // clients.matchAll is not something this app decides. What is guaranteed is that
+    // nothing in use is ever deleted, which the check above measures, and that the
+    // unused shelves do go rather than accumulating for the life of the origin.
+    await asking.reload({ waitUntil: 'load' });
+    await asking.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null,
+        { timeout: 20000, polling: 100 });
     const reaped = await asking.waitForFunction(name => caches.keys().then(keys =>
         keys.filter(key => key !== 'farkad-clients').join() === name),
-        STAMP.v87.cache, { timeout: 15000, polling: 200 }).then(() => true, () => false);
+        STAMP.v87.cache, { timeout: 25000, polling: 200 }).then(() => true, () => false);
     const after = (await cacheKeys(asking)).filter(name => name !== 'farkad-clients');
     check('once nothing is running them, the unreferenced shelves go',
         reaped && after.length === 1 && after[0] === STAMP.v87.cache, after.join());

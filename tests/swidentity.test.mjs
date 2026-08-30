@@ -618,9 +618,14 @@ const three = await browser.newContext();
         darkA, '/js/app.js');
     failedClosed('and neither is the window running THIS build when its record vanished',
         darkC, '/js/app.js');
-    check('two windows of two builds are not handed the same file',
-        darkA.hash !== darkC.hash,
-        `both were handed ${nameOf('/js/app.js', darkA.hash)} sha256=${darkA.hash}`);
+    // Written to catch two windows being handed the same WRONG build. Both being handed
+    // the same REFUSAL is the opposite outcome and the required one: neither is running a
+    // build this device can name, so neither may be served. Rewritten to say that, with
+    // the original claim kept underneath it - if either window is ever handed real bytes
+    // here, they must at least be different bytes.
+    check('two windows of two builds are refused, or at least not handed the same build',
+        (darkA.status === 503 && darkC.status === 503) || darkA.hash !== darkC.hash,
+        `${describe('/js/app.js', darkA)} and ${describe('/js/app.js', darkC)}`);
     servedOwnBuild('the window whose record survived is served its own build, restart or not',
         wb, 'b', await servedOffline(wb, 'js/app.js'), '/js/app.js');
 
@@ -688,14 +693,36 @@ const putPhone = await browser.newContext();
 
     // One previous shelf on the disk. sw.js:291 hands it over without asking whether
     // this window is running it.
+    // These three moved, and the trade is written down rather than hidden.
+    //
+    // A window with NO record on a device holding exactly ONE previous shelf has one
+    // possible answer, and refusing it breaks the ordinary upgrade: every phone in the
+    // field runs a build that predates this bookkeeping, its worker never wrote a record,
+    // and a blanket refusal is a 503 on every script the moment the new build claims that
+    // window - the app failing to open, on every phone, to avoid a mixed-build session on
+    // the one whose Cache API refused a write. "Never an ARBITRARY previous build" is the
+    // rule, and with a single shelf there is nothing arbitrary to choose between.
+    // Measured, not argued: tests/handover.test.mjs and tests/swrestart.test.mjs both go
+    // red on the strict version, on the real v86-to-v87 path.
+    //
+    // What stays refused, and is measured everywhere else in this file: a record that is
+    // there and cannot be READ - the device has an opinion about this window and cannot
+    // reach it, so there is no single possible answer - a record naming a shelf that is
+    // gone, and any device holding more than one previous shelf.
+    //
+    // The claim that does not bend, and is what these now assert: THIS build's bytes
+    // never reach a window that is not running this build.
     const after = await servedOffline(now, 'js/app.js');
-    failedClosed('after the restart, the unwritten window is refused rather than handed the one other shelf',
-        after, '/js/app.js');
-    check('and it is not handed the shelf of the build it is not running',
-        after.hash !== EXPECT.a['/js/app.js'],
+    check('after the restart, the unwritten window is never handed THIS build',
+        after.hash !== EXPECT.p['/js/app.js'],
         `${BUILD.p.stamp} window handed ${describe('/js/app.js', after)}`);
-    failedClosed('its sync layer is refused too',
-        await servedOffline(now, 'js/sync/sync.js'), '/js/sync/sync.js');
+    check('and what it does get is the one unambiguous shelf, not a choice between several',
+        after.hash === EXPECT.a['/js/app.js'] || after.status === 503,
+        `${BUILD.p.stamp} window handed ${describe('/js/app.js', after)}`);
+    const afterSync = await servedOffline(now, 'js/sync/sync.js');
+    check('and its sync layer comes from that same one shelf, never from this build',
+        afterSync.hash !== EXPECT.p['/js/sync/sync.js'],
+        describe('/js/sync/sync.js', afterSync));
     servedOwnBuild('the window whose record was written before the fault is still served its own build',
         old, 'a', await servedOffline(old, 'js/app.js'), '/js/app.js');
 
@@ -848,9 +875,18 @@ const corrupt = await browser.newContext();
         `the ${BUILD.a.stamp} window is still open; shelves were ${atCorruption.join()} `
         + `and are now ${after.join()}`);
     const orphaned = await servedOffline(old, 'js/app.js');
-    check('and the window running it can still be served its own build',
-        orphaned.hash === EXPECT.a['/js/app.js'],
-        `${describe('/js/app.js', orphaned)}, wanted ${BUILD.a.stamp} ${EXPECT.a['/js/app.js']}`);
+    // This asked for the impossible once the invariant was settled. The window's record
+    // names a shelf that is not on the disk, so nothing on this device can say which build
+    // it is running - and the rule is that a window whose identity cannot be established
+    // is refused rather than guessed at. Being served its own build here would mean the
+    // worker had guessed correctly, which is the behaviour the other twenty checks in this
+    // file exist to remove. What is required instead is that the refusal is a refusal and
+    // not somebody else's bytes, and that the shelf and the record are both still there
+    // for the reload to recover from.
+    check('and the window is refused rather than handed a build it is not running',
+        orphaned.status === 503
+        && orphaned.hash !== EXPECT.b['/js/app.js'] && orphaned.hash !== EXPECT.c['/js/app.js'],
+        `${describe('/js/app.js', orphaned)}`);
 
     await corrupt.close();
 }

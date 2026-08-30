@@ -158,7 +158,7 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     check('the old cache is deleted only after a successful install',
         /caches\.delete/.test(code) && !/caches\.delete/.test(install));
     check('and only caches that are not this version',
-        /keys\.filter\(key => key !== VERSION && key !== CLIENTS\)/.test(code)
+        /key !== VERSION && key !== CLIENTS && !isNewerShelf\(key\)/.test(code)
         && [...code.matchAll(/caches\.delete\(([^)]*)\)/g)]
             .every(match => ['key', 'request'].indexOf(match[1].trim()) !== -1));
 

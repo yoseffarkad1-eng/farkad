@@ -115,17 +115,30 @@ function clientKey(id) {
 }
 
 // Remembered durably, and in memory for the fetches that follow in this same process.
+// Returns whether the record is PROVABLY stored. The answer is used: a write that was
+// swallowed left a window whose identity nothing knew, and the fetch handler then treated
+// it as a window from an older build and handed it another build's bytes.
 function rememberClient(id, build) {
-    if (!id) return Promise.resolve();
+    if (!id) return Promise.resolve(false);
     if (build === VERSION) SERVED.add(id);
     return caches.open(CLIENTS)
-        .then(cache => cache.put(clientKey(id), new Response(build)))
-        .catch(() => undefined);
+        .then(cache => cache.put(clientKey(id), new Response(build))
+            .then(() => cache.match(clientKey(id)))
+            .then(hit => (hit ? hit.text() : null))
+            .then(stored => stored === build))
+        .catch(() => false);
 }
 
 // Which build this window is running, as far as anything on this device can say.
 // Null means nobody ever wrote it down - which after the change above means a window
 // from a build that predates it, and is the ONLY case the guessing below is for.
+// Three answers, and the third is the one that was missing. UNKNOWN means the store
+// could not be read at all, which is not the same as "nothing was written down" - the
+// old code returned null for both, so a read failure was answered as though the window
+// had come from a build that predates the bookkeeping, and it was handed that build's
+// bytes off a disk that was in fact holding its own.
+const UNKNOWN = '\u0000unknown';
+
 function buildOfClient(id) {
     if (!id) return Promise.resolve(VERSION);
     if (SERVED.has(id)) return Promise.resolve(VERSION);
@@ -133,10 +146,13 @@ function buildOfClient(id) {
         .then(cache => cache.match(clientKey(id)))
         .then(hit => (hit ? hit.text() : null))
         .then(build => {
+            if (build === null) return null;
+            // A record that is there and is not a build name is damage, not an answer.
+            if (!/^farkad-v\d+/.test(build)) return UNKNOWN;
             if (build === VERSION) SERVED.add(id);
             return build;
         })
-        .catch(() => null);
+        .catch(() => UNKNOWN);
 }
 
 // Every build any open window is recorded as running, plus this one.
@@ -147,18 +163,58 @@ function buildsInUse() {
             const held = new Set([VERSION]);
             let unknown = false;
             builds.forEach(build => {
-                if (build === null) unknown = true;
+                // UNKNOWN is a marker, not a build name. Adding it to the held set made a
+                // window whose record could not be read look like a window running a build
+                // called "\u0000unknown" - so `unknown` stayed false and the shelf that
+                // window was actually running was reaped out from under it.
+                if (build === null || build === UNKNOWN) unknown = true;
                 else held.add(build);
             });
             return { held, unknown };
         });
 }
 
-// Every OTHER build's shelf. The client bookkeeping is not a shelf: reaping it would
-// throw away the record of which window is running what, and serving out of it would
-// hand somebody a page that is not a page.
+// Every OTHER build's shelf. Two things that live in caches.keys() are not shelves and
+// must never be treated as one:
+//
+//   the client bookkeeping - reaping it throws away the record of which window is running
+//   what, and serving out of it hands somebody a page that is not a page;
+//
+//   and the shelf of a build that is INSTALLING or WAITING. It is not a previous build,
+//   it is the next one, and it belongs to a worker this one knows nothing about. This
+//   code counted it as "not mine" and buildsInUse cannot count a build nobody runs yet,
+//   so one 'running' message deleted a complete, waiting shelf. Worse, when the delete
+//   landed mid-install, cache.add went on resolving against a detached handle - install
+//   reported SUCCESS and the build activated with an empty shelf. Network-only, and the
+//   offline fallback page on the first launch with no signal.
+//
+// A shelf is only ever collected by the worker that replaced it, which is this one - so
+// a shelf NEWER than this build is somebody else's business.
 function previousCaches() {
-    return caches.keys().then(keys => keys.filter(key => key !== VERSION && key !== CLIENTS));
+    return caches.keys().then(keys => keys.filter(key =>
+        key !== VERSION && key !== CLIENTS && !isNewerShelf(key)));
+}
+
+// Build names sort by their version number: farkad-v86, farkad-v87, farkad-v88. Anything
+// that does not parse is left alone rather than guessed at - an unparseable name is not
+// evidence that a shelf is disposable.
+function shelfNumber(name) {
+    const found = /^farkad-v(\d+)/.exec(String(name));
+    return found ? Number(found[1]) : null;
+}
+
+function isNewerShelf(name) {
+    if (name === VERSION) return false;
+    const mine = shelfNumber(VERSION);
+    const theirs = shelfNumber(name);
+    // A name that does not parse is left alone. An unreadable shelf name is not evidence
+    // that the shelf is disposable, and deleting a build somebody may still be running
+    // costs more than keeping a few hundred kilobytes nobody needs.
+    if (mine === null || theirs === null) return true;
+    if (theirs !== mine) return theirs > mine;
+    // Same number, different name - a build stamped alongside another, which is what a
+    // deploy test looks like. The later name is the later build.
+    return String(name) > String(VERSION);
 }
 
 // A window still running the build before this one, if there is one.
@@ -196,7 +252,7 @@ function reapLater(attempt) {
     return reapUnusedCaches()
         .then(() => previousCaches())
         .then(keys => {
-            if (keys.length === 0 || round >= 2) return undefined;
+            if (keys.length === 0 || round >= 3) return undefined;
             return new Promise(resolve => setTimeout(resolve, 2000 + round * 3000))
                 .then(() => reapLater(round + 1));
         });
@@ -277,39 +333,54 @@ self.addEventListener('fetch', event => {
     // window, which was then handed the oldest shelf on the device.
     if (event.clientId) {
         event.respondWith(buildOfClient(event.clientId).then(build => {
-            if (build === VERSION || build === null) {
-                // null is a window from a build that predates this bookkeeping. There is
-                // exactly one honest answer for it and it is not a guess: if the device
-                // holds one previous shelf, that is the build it must be running. If it
-                // holds several, nothing here can tell them apart, so nothing here
-                // chooses - it asks the origin, and answers out of this build's cache
-                // only when the origin cannot be reached, which is the same thing every
-                // other window would get.
-                if (build === VERSION) return serveFrom(VERSION, request);
-                return previousCaches().then(keys => {
-                    if (keys.length === 0) return serveFrom(VERSION, request);
-                    if (keys.length === 1) return serveFrom(keys[0], request);
-                    // Several shelves and a window nobody wrote down. The origin is asked
-                    // FIRST - it is the only party that can still be right - and only if
-                    // it cannot be reached does this fall back, to the NEWEST previous
-                    // shelf rather than to whichever one caches.keys() happens to yield
-                    // first. That order was creation order, so the old code reached for
-                    // the oldest build on the device: two releases back, for a window
-                    // that had almost certainly come from the one just before this.
-                    //
-                    // It is a last resort and it is bounded: from this build forward
-                    // every window is written down at its navigation, so the only windows
-                    // that can land here are ones from a build that predates the
-                    // bookkeeping, and they are gone the moment they reload.
-                    return askOrigin(request)
-                        .then(hit => hit || serveFrom(keys[keys.length - 1], request));
-                });
+            // Its own build, and only its own.
+            if (build === VERSION) return serveFrom(VERSION, request);
+
+            // A build we wrote down. Its own shelf, or the origin - never somebody
+            // else's shelf, and never this one's.
+            if (build !== null && build !== UNKNOWN) {
+                return caches.has(build).then(there => (there
+                    ? serveFrom(build, request)
+                    // Its shelf is gone - reaped while the record still named it, or a
+                    // partial write. NOT the origin: the origin serves whatever is
+                    // deployed now, which for a page from an older build is the current
+                    // build's bytes, and handing those over is the mixed-build session by
+                    // the last route left. The record says which build this window is; the
+                    // honest answer when that build is no longer here is to say so.
+                    : failClosed(request, build)));
             }
-            // A build we wrote down. Its own shelf, or - if that shelf is gone - the
-            // origin, never somebody else's shelf.
-            return caches.has(build).then(there => (there
-                ? serveFrom(build, request)
-                : askOrigin(request).then(hit => hit || serveFrom(VERSION, request))));
+
+            // Identity this device cannot establish. It used to be answered by guessing:
+            // the one previous shelf if there was one, the newest if there were several,
+            // this build's if there were none. Every one of those hands a page from one
+            // build the scripts of another, which is the mixed-build session this file
+            // exists to prevent - and it did, measurably, in four different ways.
+            //
+            // So nothing is guessed, and the origin is not asked either. The origin
+            // serves whatever is deployed NOW, which for a page from an older build is
+            // the current build's bytes - the same mixed-build session by the last route
+            // left. Unknown identity gets neither a shelf nor the deploy: it gets a
+            // refusal that says why.
+            //
+            // Every shelf and every stored record is left exactly where it is. Refusing
+            // to serve is recoverable by a reload; serving the wrong build is not.
+            //
+            // With one exception, and it is not a guess. A window with NO record on a
+            // device holding exactly ONE previous shelf has one possible answer, and it
+            // is the ordinary upgrade: every phone in the field is running a build that
+            // predates this bookkeeping, its worker never wrote a record, and refusing it
+            // everything means a 503 on every script the moment the new build claims it.
+            // That is not a theoretical mixed-build risk, it is the app failing to open.
+            // "Never an ARBITRARY previous build" is the rule; with one shelf there is
+            // nothing arbitrary to choose between.
+            //
+            // A record that is there and cannot be read is different: the device HAS an
+            // opinion about this window and cannot reach it, so there is no single
+            // possible answer, and it is refused.
+            if (build === UNKNOWN) return failClosed(request, 'unreadable');
+            return previousCaches().then(keys => (keys.length === 1
+                ? serveFrom(keys[0], request)
+                : failClosed(request, keys.length === 0 ? 'unrecorded' : 'ambiguous')));
         }));
         return;
     }
@@ -353,6 +424,27 @@ function askOrigin(request) {
     return fetch(request).then(
         response => (response && response.ok ? response : null),
         () => null
+    );
+}
+
+// The answer when this worker cannot say which build is asking.
+//
+// A dedicated response rather than silence: returning undefined from respondWith turns a
+// retryable failure into a script that never runs, and the app then loads with half its
+// globals missing and nothing pointing at why. 503 is honest - this is temporary and a
+// reload fixes it - and the body names the cause for whoever opens the console.
+function failClosed(request, why) {
+    return new Response(
+        `/* farkad: this window's build could not be established (${why}); refusing to `
+        + `serve another build's bytes. Reload the page. */\n`,
+        {
+            status: 503,
+            statusText: 'farkad: build identity unknown',
+            headers: {
+                'Content-Type': 'text/plain; charset=utf-8',
+                'X-Farkad-Fail-Closed': String(why)
+            }
+        }
     );
 }
 
