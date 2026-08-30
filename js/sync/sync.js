@@ -3112,22 +3112,34 @@ const FarkadSync = {
                 // The right to send is the record both tabs read. Refused, the restore
                 // simply does not go: it stays on the disk, the ladder picks it up, and
                 // nothing has claimed to be finished.
+                // _claiming for the whole of it, the same flag flush() sets. Without it
+                // a debounced flush in THIS tab starts while the restore is still
+                // waiting out the claim's settle, and the two race each other through
+                // one claim - which is the failure the claim exists to stop, arriving
+                // from inside rather than from the next tab along.
+                this._claiming = true;
                 return this.takeSendClaim();
             })
             .then(mine => {
                 if (!mine) {
+                    this._claiming = false;
                     throw new Error(
                         'another tab holds the right to send; the restore was not sent');
                 }
+                const done = value => {
+                    this.releaseSendClaim();
+                    this._claiming = false;
+                    return value;
+                };
                 // A whole-document save takes everybody out at once.
                 if (!this.markSent(document)) {
-                    this.releaseSendClaim();
+                    done();
                     return Promise.reject(new Error(
                         'the record of what has been sent could not be stored; the replacement was not sent'));
                 }
                 return this.cloudWrite(() => this.adapter.save(document)).then(
-                    value => { this.releaseSendClaim(); return value; },
-                    error => { this.releaseSendClaim(); throw error; }
+                    done,
+                    error => { done(); throw error; }
                 );
             })
             .then(() => {

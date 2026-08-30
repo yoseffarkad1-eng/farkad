@@ -3592,6 +3592,13 @@ async function seedRoster(page) {
       window.__cloud.hold = null;
       Store.remove('scheduleData:undoStack');
       Store.remove('scheduleData:v2backup');
+      // The right to send. A case that blocks Store.remove leaves the record this tab
+      // wrote on the disk, and it is honoured for twenty seconds - so the next case's
+      // send or restore is refused by the previous case's fault rather than by anything
+      // it did itself.
+      Store.remove('farkad:sendClaim');
+      FarkadSync._claimToken = null;
+      FarkadSync._claiming = false;
       Store.set('scheduleData:snap:2026-08-01', restorePoint);
       Store.set('scheduleData:undoStack', JSON.stringify(
         [{ at: '2026-08-01T06:00:00.000Z', schedule: restorePoint }]));
