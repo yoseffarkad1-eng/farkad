@@ -3789,6 +3789,34 @@ const FarkadSync = {
     // three separate phones' clocks, and a device running a few minutes fast would judge
     // every incoming snapshot "older than mine" and quietly stop showing the other two
     // people's work - with no error, and nothing on screen to suggest it.
+    // The money in the RAW bytes, before normalising touches them. True means refused.
+    //
+    // This door had no gate at all. The three restore doors validate the raw document and
+    // refuse a bad one; receive() went straight to normaliseSchedule and adopted whatever
+    // came back - and normaliseSchedule's `Number(item.amount) || 0` is a COERCION, so
+    // "500" became five hundred payable shekels and anything unreadable became zero.
+    // Which is also why nothing was ever quarantined here: that expression always yields
+    // something readable, so there was never anything left to call damaged.
+    //
+    // Only the money, and only refusing to ADOPT. A snapshot carrying an advance this
+    // build cannot pay against is not a reason to throw away the roster or the days in
+    // it - and it is certainly not a reason to overwrite this device's own record with
+    // one somebody would be paid wrongly from. The bytes are kept where a person can
+    // still get at them and the queue is left exactly as it is.
+    //
+    // It is one function because it is asked TWICE now: once in the incomplete-document
+    // branch, which used to answer synced before anything looked at the money, and once
+    // on the ordinary path.
+    refuseBadMoney(raw) {
+        const money = advanceProblems({ advances: raw.advances }, null, true);
+        if (money.length === 0) return false;
+        Recovery.damaged('farkad:remoteAdvances', JSON.stringify(raw.advances),
+            'הגיעה מקדמה שאינה תקינה מהענן. הרישום במכשיר לא שונה. ' + money[0]);
+        this.fail(new Error('the arriving snapshot carries an advance this build '
+            + 'cannot pay against; it was not adopted'));
+        return true;
+    },
+
     receive(raw) {
         // A malformed document must not wipe a good local schedule, so it is normalised
         // and sanity-checked before it is allowed anywhere near State.
@@ -3836,6 +3864,14 @@ const FarkadSync = {
                 this.fail(new Error('remote document is not a schedule'));
                 return;
             }
+            // The money, before this branch is allowed to answer synced.
+            //
+            // This branch used to return first, so a document with no roster and an
+            // advance of minus five hundred was reported as synced while the gate below
+            // - on the very same bytes - was saying the amount was never handed over.
+            // Unfinished is a reason to wait for the rest of the document; it has never
+            // been a reason to stop looking at the part that is money.
+            if (this.refuseBadMoney(raw)) return;
             // Authoritative: the document exists and has no roster in it, so there is
             // nothing tombstoned for a queued array to contradict.
             this.noteCloudHeard();
@@ -3864,16 +3900,16 @@ const FarkadSync = {
         // in it - and it is certainly not a reason to overwrite this device's own record
         // with one somebody would be paid wrongly from. The bytes are kept where a person
         // can still get at them and the queue is left exactly as it is.
-        const money = advanceProblems(
-            { advances: (raw.advances && typeof raw.advances === 'object') ? raw.advances : {} },
-            null);
-        if (money.length > 0) {
-            Recovery.damaged('farkad:remoteAdvances', JSON.stringify(raw.advances),
-                'הגיעה מקדמה שאינה תקינה מהענן. הרישום במכשיר לא שונה. ' + money[0]);
-            this.fail(new Error('the arriving snapshot carries an advance this build '
-                + 'cannot pay against; it was not adopted'));
-            return;
-        }
+        // The raw container, handed over as it arrived. It used to be coerced to {} on
+        // the way in - `(raw.advances && typeof ...) ? raw.advances : {}` - so an empty
+        // array, a string and a null all reached the gate as an empty map, passed, and
+        // took a valid local advance off this phone's disk on the way past. The gate
+        // checks the container itself now, which it can only do if it is given one.
+        //
+        // `wire: true`: a null at an advance's path is this app's own deletion, sent by
+        // removeAdvance. Treating it as damage put the phone that pressed delete into
+        // recovery on the echo of its own write, and stopped every phone recording days.
+        if (this.refuseBadMoney(raw)) return;
 
         const remote = normaliseSchedule(raw, rememberedEntities(State.schedule));
         this.rememberRemoteRoster(remote);

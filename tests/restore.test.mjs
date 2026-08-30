@@ -275,8 +275,14 @@ const diskOf = device => JSON.parse(device.raw('scheduleData:v2'));
     delete document.ledger;
     const envelope = await restoredOnto(device, document, 'ledger shape');
     const durable = diskOf(device);
+    // The shape gained a second family: `unreadable`, where normaliseSchedule now puts a
+    // ledger entry this build cannot fold. It used to leave such an entry OUT of the
+    // object it built - and that object is what save() writes, so the only copy of
+    // somebody's correction was deleted by a read. What this given needs is that the
+    // empty ledger is spelled out at all, not that it has exactly one key in it.
     given('the restored record spells the empty ledger out',
-        JSON.stringify(durable.ledger) === '{"advances":{}}');
+        JSON.stringify((durable.ledger || {}).advances) === '{}',
+        JSON.stringify(durable.ledger));
     delete durable.ledger;
     device.putRaw('scheduleData:v2', JSON.stringify(durable));
     check('a record with no ledger key holds a restore that had none either',

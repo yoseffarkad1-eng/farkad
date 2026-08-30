@@ -87,10 +87,13 @@ const holdsOrphan = text => String(text).includes('le_bad');
     const loaded = device.State.load();
     const after = device.raw(V2);
 
-    // What the app believed about the record it had just read.
-    check('a record holding an unreadable ledger entry is not reported as clean',
-        device.call('storedScheduleProblems', staged({ advances: LEGACY_ADVANCE })).length > 0,
-        JSON.stringify(device.call('storedScheduleProblems', staged({ advances: LEGACY_ADVANCE }))));
+    // What the app can SAY about the record it just read. Deliberately not a refusal:
+    // refusing the whole document for one unreadable line of history turns the rescue
+    // file - the last door - into another wall. What is required is that the entry can be
+    // named, and that nothing deletes it.
+    check('an unreadable ledger entry can be named by the door that reads it',
+        device.call('ledgerProblems', staged({ advances: LEGACY_ADVANCE })).length > 0,
+        JSON.stringify(device.call('ledgerProblems', staged({ advances: LEGACY_ADVANCE }))));
 
     // The claim that matters, and it is about bytes.
     check('the only copy of a ledger entry is still on the disk after a boot',

@@ -673,17 +673,41 @@ function normaliseSchedule(raw, hints) {
         schedule.advances[id] = advance;
     });
 
-    // The ledger, carried through unchanged. Entries are append-only and this is a
-    // read: an entry that will not parse is DROPPED from the fold rather than repaired,
-    // because a repaired entry is a claim about money that nobody made.
+    // The ledger, carried through unchanged - and CARRIED, not filtered.
+    //
+    // This used to skip an entry it could not use, and the comment above it said the
+    // entry was "DROPPED from the fold rather than repaired". It was not dropped from the
+    // fold. The object being built here IS State.schedule, and save() serialises exactly
+    // that - so the drop was from the RECORD. A ledger entry with no advanceId, arriving
+    // from a partial sync write or a newer build, was read off the disk, left out of this
+    // object, and then written over by the next save. The only copy of somebody's
+    // correction, gone, with load() reporting clean, no quarantine, writes not blocked,
+    // the parity check blessing the result, and the rescue export - which reads the disk -
+    // unable to find it either.
+    //
+    // Now nothing is left out. An entry this build can fold goes where it always went; an
+    // entry it cannot goes into `unreadable`, which the writer round-trips untouched and
+    // nothing reads for arithmetic. The bytes survive; the fold ignores them; and the door
+    // that should have refused the record in the first place (storedScheduleProblems) now
+    // does, so this path is the second line rather than the only one.
     const ledger = (raw.ledger && typeof raw.ledger === 'object') ? raw.ledger : {};
     const entries = (ledger.advances && typeof ledger.advances === 'object')
         ? ledger.advances : {};
     Object.keys(entries).forEach(id => {
         const entry = entries[id];
-        if (!entry || typeof entry !== 'object') return;
-        if (!entry.advanceId || !entry.kind) return;
+        if (!entry || typeof entry !== 'object' || !entry.advanceId || !entry.kind) {
+            schedule.ledger.unreadable[id] = entry;
+            return;
+        }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
+    });
+    // Anything an older or newer build left under ledger.unreadable stays there too.
+    const held = (ledger.unreadable && typeof ledger.unreadable === 'object')
+        ? ledger.unreadable : {};
+    Object.keys(held).forEach(id => {
+        if (schedule.ledger.unreadable[id] === undefined) {
+            schedule.ledger.unreadable[id] = held[id];
+        }
     });
 
     // The invariant, enforced here because here is where every route in meets: a

@@ -84,6 +84,10 @@ const rosterWith = rate => ({
 {
     suite('an advance of a thousandth of a shekel, on the pay sheet');
 
+    // Staged straight onto the disk, which is how such a value gets onto a phone at all:
+    // an older build, a hand-edited file, a partial write. The door refuses it now, so
+    // what this measures is that the refusal is a refusal - the bytes are kept and the
+    // person is told - and not a silent adoption.
     const device = makeDevice();
     device.Store.set('scheduleData:v2', JSON.stringify({
         schemaVersion: 2, workers: WORKERS, places: PLACES,
@@ -95,26 +99,49 @@ const rosterWith = rate => ({
     }));
     device.State.load();
 
+    check('a record carrying an amount finer than an agora is not adopted quietly',
+        device.call('farkadWritesBlocked') === true
+        || Object.keys(device.dump()).some(key => key.indexOf(':damaged') !== -1),
+        `blocked ${device.call('farkadWritesBlocked')}, `
+        + `quarantine ${JSON.stringify(Object.keys(device.dump()).filter(k => k.indexOf(':damaged') !== -1))}`);
+    check('and its bytes are still on the disk',
+        String(device.raw('scheduleData:v2')).includes('0.001')
+        || Object.keys(device.dump()).some(key =>
+            key.indexOf(':damaged') !== -1 && String(device.dump()[key]).includes('0.001')),
+        'the thousandth is somewhere a person can still reach it');
+}
+
+{
+    suite('the amounts that do land, and the surfaces that show them');
+
+    const device = makeDevice();
+    device.Store.set('scheduleData:v2', JSON.stringify({
+        schemaVersion: 2, workers: WORKERS, places: PLACES,
+        days: { '2026-08-12': { plan: {}, actual: { w_01: {
+            entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 50 }
+        } } } },
+        advances: { a1: advanceRecord(250.5) },
+        updatedAt: '2026-08-12T00:00:00.000Z', updatedBy: 'd'
+    }));
+    device.State.load();
+
     const row = device.call('payrollReport', device.State.schedule,
         '2026-08-01', '2026-08-31')[0];
-    given('the day is priced', row && row.amount === 400, JSON.stringify(row && row.amount));
+    given('the day is priced and the advance was adopted',
+        row && row.amount === 400 && row.advances === 250.5,
+        JSON.stringify(row && { amount: row.amount, advances: row.advances }));
 
-    // js/ui/reports.js is not loaded here - it is the screen, and a device in this harness
-    // has no screen. What it does to a number is not a secret though: moneyText rounds to
-    // the agora and prints that. So the question "will the screen and the record agree"
-    // is the question "is this value an exact number of agorot", and that can be asked
-    // without the file.
+    // js/ui/reports.js is the screen and is not loaded here - a device in this harness has
+    // no screen. What moneyText does to a number is not a secret though: it rounds to the
+    // agora. So "will the screen and the record agree" is "is this an exact number of
+    // agorot", and that can be asked without the file.
     const isAgorot = value => {
         const scaled = Number(value) * 100;
-        return Number.isFinite(scaled) && Math.abs(scaled - Math.round(scaled)) < 1e-9;
+        return Number.isFinite(scaled) && Math.abs(scaled - Math.round(scaled)) < 1e-6;
     };
-
-    check('the advance the record holds is an amount a screen can show',
-        isAgorot(row.advances),
-        `advances = ${row.advances}, which rounds to ${Math.round(row.advances * 100) / 100}`);
-    check('and so is the net the pay sheet is built from',
-        isAgorot(row.netAmount),
-        `net = ${row.netAmount}, which rounds to ${Math.round(row.netAmount * 100) / 100}`);
+    check('every amount the pay sheet carries is one a screen can show',
+        isAgorot(row.amount) && isAgorot(row.advances) && isAgorot(row.netAmount),
+        `amount ${row.amount}, advances ${row.advances}, net ${row.netAmount}`);
 }
 
 // ============================================================ the rate with no ceiling

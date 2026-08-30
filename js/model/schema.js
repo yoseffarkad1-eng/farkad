@@ -106,7 +106,14 @@ function emptySchedule() {
         // by this build, written by nothing yet: three phones share this record and the
         // other two cannot read entries, so the old field above is still the one every
         // device writes until they have all updated.
-        ledger: { advances: {} },
+        // `unreadable` holds ledger entries this build cannot fold, kept verbatim.
+        //
+        // Nothing reads it for arithmetic and nothing repairs what is in it - a repaired
+        // entry is a claim about money that nobody made. It exists so that the read path
+        // has somewhere to put an entry it does not understand OTHER than the floor.
+        // Before it, normaliseSchedule left such an entry out of the object it built,
+        // save() serialised that object over the record, and the only copy was gone.
+        ledger: { advances: {}, unreadable: {} },
         updatedAt: null,
         updatedBy: null
     };
@@ -278,6 +285,56 @@ function storedScheduleProblems(raw) {
     rosterProblems(raw).forEach(problem => problems.push(problem));
     dayProblems(raw, null).forEach(problem => problems.push(problem));
     advanceProblems(raw, null).forEach(problem => problems.push(problem));
+    // The ledger is deliberately NOT a reason to refuse the whole record.
+    //
+    // It was, briefly, and that was the wrong shape: the rescue file's whole purpose is to
+    // salvage what can be read and NAME what cannot, so refusing the document for one
+    // unreadable line of history turned the last door into another wall. The entry is
+    // carried through normaliseSchedule verbatim instead - see the note there - which is
+    // what stops it being deleted, and ledgerProblems below is what lets a caller say so.
+    return problems;
+}
+
+// The ledger, checked at the door - which it never was.
+//
+// This gate asked about workers, places, days and advances, and the file's own comment
+// says all three run on the RAW parsed content before normaliseSchedule. The ledger was
+// not among them, while ledgerEntryProblems - the strict validator, in this same file,
+// which refuses exactly the entries that were being lost - had one caller, on the sync
+// path, guarding edits arriving from another phone.
+//
+// So a record whose ledger held an entry this build cannot fold was reported CLEAN, and
+// normaliseSchedule then quietly left the entry out of the object that save() writes.
+// The append-only history was deleted by a read.
+//
+// Refusing here sends the record to Recovery, which quarantines the bytes and blocks
+// writing until a person is told - which is what iron law 10 requires of anything
+// unreadable, and the ledger is the one record in this app that is never allowed to lose
+// an entry at all.
+function ledgerProblems(raw) {
+    if (raw.ledger === undefined || raw.ledger === null) return [];
+    if (!isPlainObject(raw.ledger)) return ['היסטוריית המקדמות ברישום אינה תקינה.'];
+
+    const entries = raw.ledger.advances;
+    if (entries === undefined || entries === null) return [];
+    if (!isPlainObject(entries)) return ['היסטוריית המקדמות ברישום אינה רשימה.'];
+
+    const problems = [];
+    Object.keys(entries).forEach(id => {
+        if (!isSafeId(id)) {
+            problems.push('מזהה רשומת היסטוריה שאינו תקין: ' + id + '.');
+            return;
+        }
+        // ledgerEntryProblems answers in English - it was written for the sync layer's
+        // own log, where nobody reads it. What comes out of THIS function is shown to a
+        // person, in a dialog, in Hebrew. So the entry is named and the reason is not
+        // translated word for word: what the person needs is that a line of the history
+        // cannot be read and that nothing was deleted, which is what the recovery banner
+        // goes on to say.
+        if (ledgerEntryProblems(id, entries[id]).length > 0) {
+            problems.push('רשומת היסטוריה ' + id + ' אינה קריאה.');
+        }
+    });
     return problems;
 }
 
@@ -403,10 +460,8 @@ function entityProblems(item, kind, label) {
     if (kind !== 'workers') return problems;
 
     ['dailyRate', 'hourlyRate'].forEach(field => {
-        if (item[field] === undefined) return;
-        if (!isFiniteNumber(item[field]) || item[field] < 0) {
-            problems.push(label + ' ' + item.id + ': השכר אינו מספר תקין.');
-        }
+        rateProblems(item[field], 'השכר של', label + ' ' + item.id)
+            .forEach(problem => problems.push(problem));
     });
     return problems;
 }
@@ -494,11 +549,13 @@ function recordProblems(known, date, workerId, record) {
         if (!isPlainObject(record.rates)) {
             problems.push('שכר שמור שאינו תקין' + who);
         } else {
+            // Stamped rates get the same ceiling as live ones. A stamped day is never
+            // restated - iron law 2 - but a stamp that is not a number anybody could be
+            // paid was never a rate, and admitting it makes every total downstream of it
+            // Infinity.
             ['daily', 'hourly'].forEach(field => {
-                if (record.rates[field] === undefined) return;
-                if (!isFiniteNumber(record.rates[field]) || record.rates[field] < 0) {
-                    problems.push('שכר שמור שאינו מספר תקין' + who);
-                }
+                rateProblems(record.rates[field], 'שכר שמור', who.replace(/^ /, ''))
+                    .forEach(problem => problems.push(problem));
             });
         }
     }
@@ -570,21 +627,90 @@ function advanceAmountProblems(id, amount) {
     if (amount > ADVANCE_MAX) {
         return ['הסכום של המקדמה ' + id + ' גדול מהמותר.'];
     }
-    if (!Number.isSafeInteger(Math.round(amount * 100))) {
-        return ['הסכום של המקדמה ' + id + ' אינו סכום שאפשר לחשב.'];
+    // AN EXACT NUMBER OF AGOROT, which is what the comment above has always said and
+    // what the line here never checked.
+    //
+    // It used to be `!Number.isSafeInteger(Math.round(amount * 100))`, and that branch
+    // could not fire. The three guards above already require 0 < amount <= ADVANCE_MAX,
+    // and ADVANCE_MAX is ten million - so amount * 100 is at most a billion, five orders
+    // of magnitude below MAX_SAFE_INTEGER, and Math.round of it is always a safe integer.
+    // The rule had no implementation, its sentence had never been shown to anybody, and
+    // no test named it. An advance of 0.001 was accepted, stored verbatim, netted into
+    // 399.999, and displayed as 0 while the sheet said 400.
+    //
+    // The tolerance is not slack, it is arithmetic: 0.29 * 100 is 28.999999999999996 in
+    // binary floating point, and 0.29 is a real amount somebody can hand over. What is
+    // refused is a value that is not an agora at all - a thousandth of a shekel, which no
+    // surface in this app can show and which three of them would round three ways.
+    const agorot = amount * 100;
+    if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+        return ['הסכום של המקדמה ' + id + ' מדויק מאגורה, ואי אפשר להציג אותו.'];
     }
     return [];
 }
 
-function advanceProblems(raw, known) {
+// The ceiling a rate never had.
+//
+// dailyRate and hourlyRate were checked for being finite and not negative, and nothing
+// else. A daily rate of 1e308 passed every door, and two days of it made a pay sheet row
+// of Infinity - which is not a wage anybody can be paid, and which then propagates into
+// every total, every export and every printed sheet.
+//
+// The bound is the same ten million the advance gate uses. Nobody is paid ten million
+// shekels for a day, and a value above it is a mistake or a corrupted byte, not a rate.
+const RATE_MAX = ADVANCE_MAX;
+
+function rateProblems(value, what, who) {
+    if (value === undefined || value === null) return [];
+    if (!isFiniteNumber(value) || value < 0) {
+        return [what + ' ' + who + ' אינו מספר תקין.'];
+    }
+    if (value > RATE_MAX) {
+        return [what + ' ' + who + ' גדול מכל שכר.'];
+    }
+    return [];
+}
+
+// `wire` marks a document that arrived from the cloud, where a null at an advance's path
+// is the app's own DELETION and not damage.
+//
+// removeAdvance sends `advances.<id> = null`, and the queue-path validator in this same
+// file agrees: `if (value === null) return []`. This function did not, so a person
+// pressing delete put every phone into recovery - the deleting one on the echo of its own
+// write - and neither could record a day afterwards. Two halves of one app disagreeing
+// about what a null means, and the disagreement cost the whole record.
+//
+// It stays damage for a STORED document. A null sitting in scheduleData:v2 is not a
+// deletion in flight; it is a record with a hole in it, and the restore doors are right to
+// refuse one.
+function advanceProblems(raw, known, wire) {
     const problems = [];
 
-    Object.keys(raw.advances).forEach(id => {
+    // THE CONTAINER, before anything in it.
+    //
+    // Every caller reached this function through
+    // `(raw.advances && typeof raw.advances === 'object') ? raw.advances : {}` - and an
+    // empty ARRAY is truthy and typeof 'object', so it arrived as a map with nothing in
+    // it, while a string and a null fell through to {}. Either way the gate validated an
+    // empty container, found nothing wrong, and let the device adopt a document with no
+    // advances - which deleted a valid, already acknowledged advance from memory and from
+    // the disk, quietly, with the status line reading synced.
+    //
+    // A container that is present and is not a map is damage. Absent is a different thing
+    // and is fine: a document that has never had an advance has no advances field.
+    if (raw.advances !== undefined && raw.advances !== null && !isPlainObject(raw.advances)) {
+        return ['רשימת המקדמות שהגיעה אינה רשימה.'];
+    }
+    if (raw.advances === null) return ['רשימת המקדמות שהגיעה ריקה מסוג שאינו רשימה.'];
+
+    Object.keys(raw.advances || {}).forEach(id => {
         if (!isSafeId(id)) {
             problems.push('מזהה מקדמה שאינו תקין: ' + id + '.');
             return;
         }
         const item = raw.advances[id];
+        // A deletion in flight, on the wire only. See the note above the function.
+        if (wire && item === null) return;
         if (!isPlainObject(item)) {
             problems.push('המקדמה ' + id + ' ברישום אינה תקינה.');
             return;
