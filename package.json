@@ -28,6 +28,7 @@
     "test:restore": "node tests/restore.test.mjs",
     "test:upgrade": "node tests/upgrade.test.mjs",
     "test:vehicles": "node tests/vehicles.test.mjs",
+    "test:vehicles-preserve": "node tests/vehicles.preserve.test.mjs",
     "test:xlsx": "node tests/xlsx.test.mjs",
     "test:nonassertions": "node tests/nonassertions.test.mjs",
     "test:handover": "node tests/handover.test.mjs",
