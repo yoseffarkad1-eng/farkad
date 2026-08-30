@@ -176,12 +176,23 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     // installed and is waiting, `retired` was replaced by the worker that took over its
     // windows - and only the last of those is collectable. A shelf with no mark at all
     // predates the registry, and an unmarked shelf is not evidence that it is disposable.
+    const reapable = code.slice(code.indexOf('function reapableShelves()'),
+        code.indexOf('function strangerOpen()'));
     check('and only shelves a worker explicitly retired after taking over their windows',
-        /state === 'retired' \? name : null/.test(code)
+        /if \(state === 'retired'\) return name;/.test(reapable)
+        && /if \(state !== null\) return null;/.test(reapable)
         && /key !== VERSION && key !== CLIENTS && key !== SHELVES/.test(code)
         && !/isNewerShelf/.test(code)
         && [...code.matchAll(/caches\.delete\(([^)]*)\)/g)]
-            .every(match => ['key', 'request'].indexOf(match[1].trim()) !== -1));
+            .every(match => ['key', 'request'].indexOf(match[1].trim()) !== -1),
+        reapable.length ? 'reapableShelves found' : 'reapableShelves NOT found');
+    // The one shelf with no mark that must still be protected: a build that predates the
+    // registry, installing or waiting RIGHT NOW - which is what a rollback to such a build
+    // looks like. That is answered from the browser's own lifecycle state, never from the
+    // shelf's name.
+    check('and never an unmarked shelf while anything is installing or waiting',
+        /self\.registration\.installing \|\| self\.registration\.waiting/.test(reapable)
+        && /return busy \? null : name;/.test(reapable));
 
     // The reap is guarded by what every open window is RUNNING. It used to reap and then
     // claim, so the old build's cache went while a window was still executing the old
