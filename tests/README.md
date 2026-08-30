@@ -3,9 +3,28 @@
 Twenty-two suites, sixteen of which need no browser at all. From a clean clone:
 
     npm ci
-    npm test                # the sixteen node suites - no browser, run before every commit
+    npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
     npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover
+    npm run test:release    # the RELEASE gate: test:all plus every open release blocker
     npm run test:rules      # firestore.rules against the local emulator (needs Java)
+
+`npm test` and `npm run test:all` are DEVELOPMENT gates. Neither one is permission to
+ship, and a green run of either must never be reported as a release gate.
+
+`npm run test:release` is the release gate, and it is RED right now, on purpose. It
+adds `test:sendclaim`, whose 66 checks stand at 41 passing and 25 failing — committed
+reproductions of the P0-B ordering defects: a backgrounded owner losing the send claim
+while its request is still open, a v86 owner that writes no heartbeat losing it the
+same way, another tab sending while the first request may still land, the cloud
+keeping the value that was corrected, a whole-document restore leaving after ownership
+moved, refused or corrupted heartbeat and quarantine writes that do not recover, and
+reopen paths that stay stuck.
+
+Those 25 are evidence, not debt to be tidied. They stay red until the ordering protocol
+that fixes them exists; none of them may be closed by weakening what it asserts. The
+suite was moved out of `npm test` for one reason only — so that unrelated repair work
+can read a meaningful green — and `npm run test:sendclaim` still runs it directly and
+still exits non-zero. Nothing anywhere may catch that exit code and print success.
 
 Any single suite runs on its own: `npm run test:build`, `node tests/data.test.mjs`,
 and so on — each file's header says exactly how to invoke it and why it exists.
