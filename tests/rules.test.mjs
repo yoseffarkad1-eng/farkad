@@ -292,6 +292,132 @@ async function denied(name, promise) {
         JSON.stringify(second.data().roster.workers));
 }
 
+// ---------------------------------------------------------------- the ordering protocol
+//
+// Three phones share one document and the client-side send claim is a localStorage lease -
+// it coordinates tabs of one browser profile and has never been able to order writes
+// across phones, which share no storage. The ordering has to be enforced by the only party
+// all three can agree with, which is this file.
+//
+// The protocol, in the shape the rules can check (see docs/sync-protocol.md):
+//
+//   protocol   an integer, the version the writer speaks. A write without one is refused,
+//              which is how a build that predates the protocol is noticed LOUDLY instead
+//              of diverging quietly.
+//   revision   an integer that goes up by exactly one per accepted write. This is the
+//              compare-and-set: two phones that both read revision 5 both try to write 6,
+//              and the second one's 6 is no longer old + 1, so it is refused rather than
+//              silently overwriting the first.
+//   lastOpId   the operation this write carries, which must have an immutable receipt
+//              created in the same commit. getAfter() is what makes that atomic: the rule
+//              can only be satisfied if both documents land together.
+//
+// Receipts are what make a retry safe. A request that may still land can be retried
+// because the second attempt finds its own receipt and stops.
+{
+    suite('the write protocol: a version on every write');
+
+    const db = as(ALLOWED);
+    const P = 'schedules/protocol';
+
+    await denied('a document created without a protocol version is refused',
+        setDoc(doc(db, P), schedule({ revision: 1 })));
+    await denied('and one without a revision is refused too',
+        setDoc(doc(db, P), schedule({ protocol: 1 })));
+    await denied('a first write whose revision is not one is refused',
+        setDoc(doc(db, P), schedule({ protocol: 1, revision: 7, lastOpId: 'op_a' })));
+
+    // A v86 phone writes neither field. It is refused, visibly, which is the requirement:
+    // a legacy writer cannot bypass the protocol unnoticed.
+    await denied('a write in the shape the released build sends is refused',
+        setDoc(doc(db, P), schedule()));
+}
+
+{
+    suite('the write protocol: one step at a time');
+
+    const db = as(ALLOWED);
+    const P = 'schedules/cas';
+    const receipt = (base, opId) => doc(db, `${P}/receipts/${opId}`);
+
+    // The first write of a document, with its receipt, in one commit.
+    await passes('a first write lands with its receipt',
+        (async () => {
+            const batch = [];
+            await runTransaction(db, async transaction => {
+                transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_1' }));
+                transaction.set(receipt(0, 'op_1'), { revision: 1, at: 'x', by: 'd_a' });
+            });
+            return batch;
+        })());
+
+    await denied('a write with no receipt beside it is refused',
+        updateDoc(doc(db, P), {
+            protocol: 1, revision: 2, lastOpId: 'op_2',
+            'days.2026-08-12.actual.w_01': { entries: [] },
+            updatedAt: new Date().toISOString()
+        }));
+
+    await denied('a write that skips a revision is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 9, lastOpId: 'op_9',
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt(1, 'op_9'), { revision: 9, at: 'x', by: 'd_a' });
+        }));
+
+    await denied('a write that repeats the revision it read is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 1, lastOpId: 'op_1b',
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt(0, 'op_1b'), { revision: 1, at: 'x', by: 'd_a' });
+        }));
+
+    await passes('the next write in order lands',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 2, lastOpId: 'op_2',
+                'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt(1, 'op_2'), { revision: 2, at: 'x', by: 'd_a' });
+        }));
+
+    await denied('a receipt whose revision disagrees with the document is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 3, lastOpId: 'op_3',
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt(2, 'op_3'), { revision: 99, at: 'x', by: 'd_a' });
+        }));
+}
+
+{
+    suite('receipts are immutable, which is what makes a retry safe');
+
+    const db = as(ALLOWED);
+    const P = 'schedules/receipts-immutable';
+
+    await passes('a receipt is created with its write',
+        runTransaction(db, async transaction => {
+            transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_r' }));
+            transaction.set(doc(db, `${P}/receipts/op_r`), { revision: 1, at: 'x', by: 'd_a' });
+        }));
+
+    await denied('and can never be changed afterwards',
+        updateDoc(doc(db, `${P}/receipts/op_r`), { revision: 2 }));
+    await denied('nor deleted',
+        deleteDoc(doc(db, `${P}/receipts/op_r`)));
+    await passes('but it can be read, which is how a retry knows it already succeeded',
+        getDoc(doc(db, `${P}/receipts/op_r`)));
+    await denied('and a stranger cannot read it',
+        getDoc(doc(as(STRANGER), `${P}/receipts/op_r`)));
+}
+
 // ---------------------------------------------------------------- everything else
 {
     suite('anything not named is denied');
