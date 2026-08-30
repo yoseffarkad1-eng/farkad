@@ -322,6 +322,22 @@ const buildOf = page => page.evaluate(() => ({
     controlled: Boolean(navigator.serviceWorker.controller)
 }));
 
+// What a window actually IS right now, asked in a way that survives the app not being
+// there. buildOf reads a meta tag and throws when the page is a refusal rather than the
+// app, which is the very outcome some of these scenarios are about.
+const pageState = page => page.evaluate(() => {
+    const meta = document.querySelector('meta[name="farkad-build"]');
+    return {
+        // The bare identifier, not window.APP_VERSION: these are classic scripts and a
+        // top-level `const` is in scope without ever becoming a property of window, so
+        // asking window for it answers "not booted" about an app that is running fine.
+        booted: typeof APP_VERSION === 'string',
+        meta: meta ? meta.getAttribute('content') : null,
+        controlled: Boolean(navigator.serviceWorker.controller),
+        text: (document.body ? document.body.innerText : '').replace(/\s+/g, ' ').slice(0, 200)
+    };
+});
+
 const cacheKeys = page => page.evaluate(() => caches.keys());
 
 const shelfCounts = page => page.evaluate(async () => {
@@ -348,16 +364,23 @@ const clientRecord = page => page.evaluate(async name => {
 // page is the only party that can do this to the worker's store; on a phone the same
 // state arrives by eviction, by a partial write, or by a shelf that was reaped out from
 // under a record that still names it.
+// EVERY record naming that build, not the first one found. Records of windows that have
+// closed are kept for a few seconds now - deleting one the moment its client stops being
+// listed was throwing away the identity of windows that were only mid-navigation - so
+// "the first record whose body is farkad-v87a" stopped reliably meaning "this window's
+// record", and the suite was quietly corrupting a dead window's entry while the live one
+// went on being served correctly.
 const editRecord = (page, build, value) => page.evaluate(async ([name, want, next]) => {
     const cache = await caches.open(name);
+    const touched = [];
     for (const request of await cache.keys()) {
         const response = await cache.match(request);
         if ((await response.text()) !== want) continue;
         if (next === null) await cache.delete(request);
         else await cache.put(request, new Response(next));
-        return request.url;
+        touched.push(request.url);
     }
-    return null;
+    return touched.length === 0 ? null : touched.join(' ');
 }, [CLIENTS, build, value === undefined ? null : value]);
 
 // One asset, asked for through the page's own controller, hashed. The only question
@@ -377,6 +400,7 @@ const served = (page, path) => page.evaluate(async name => {
         // costume of ours.
         statusText: response.statusText,
         cause: response.headers.get('X-Farkad-Fail-Closed'),
+        client: response.headers.get('X-Farkad-Client'),
         type: response.headers.get('Content-Type'),
         hash: [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join(''),
         note: new TextDecoder().decode(bytes.slice(0, 60)).replace(/\s+/g, ' ')
@@ -493,7 +517,8 @@ async function crossTo(page, id) {
 // own build, and - when it could not be identified - it was handed a refusal rather
 // than somebody else's program.
 const describe = (path, result) =>
-    `${nameOf(path, result.hash)} sha256=${result.hash} (status ${result.status})`;
+    `${nameOf(path, result.hash)} sha256=${result.hash} (status ${result.status}`
+    + `${result.cause ? ', cause ' + result.cause : ''})`;
 
 function servedOwnBuild(name, page, id, result, path) {
     check(name, result.hash === EXPECT[id][path],
@@ -629,8 +654,15 @@ const three = await browser.newContext();
     given('two records were removed and the third was left', Boolean(droppedA) && Boolean(droppedC),
         `${droppedA} / ${droppedC}`);
     const left = await clientRecord(wb);
-    given('exactly one record is left, the middle build\'s',
-        left.length === 1 && left[0].build === BUILD.b.cache, JSON.stringify(left));
+    // What the scenario needs is that NOTHING on the disk can still identify the first
+    // and third windows, while the second is still identifiable. It used to be phrased as
+    // "exactly one record", which also counted records belonging to windows that have
+    // since closed - and those now linger a few seconds longer on purpose, because
+    // deleting a record the moment a client stops being listed was throwing away the
+    // identity of windows that were merely mid-navigation.
+    given('no record names the first or third build any more, and the middle one still does',
+        !left.some(entry => entry.build === BUILD.a.cache || entry.build === BUILD.c.cache)
+        && left.some(entry => entry.build === BUILD.b.cache), JSON.stringify(left));
 
     const stoppedAgain = await stopWorker(control);
     given('the worker process is gone again, so nothing is remembered in memory either',
@@ -693,52 +725,54 @@ const putPhone = await browser.newContext();
     given('the window that must stay behind is mid-edit', await pin(old));
 
     // The newest build's worker cannot write the record: every put into farkad-clients
-    // rejects. rememberClient swallows it (sw.js:123) and the navigation completes.
+    // rejects.
+    //
+    // This suite used to continue "...and the navigation completes" - the app started on
+    // build p with nothing on the disk saying so, and the mixed build arrived later, at
+    // the first worker restart. The navigation does not complete any more: a window is
+    // not handed a page until its identity is durably recorded and read back, so what
+    // comes back is the fail-closed document instead of the app.
+    //
+    // That is a real cost and it is the point of the trade. The app not opening on a
+    // device whose Cache API is refusing writes is a visible failure a reload can chase;
+    // the app opening as a session that cannot be identified is an invisible one that
+    // ends in another build's scripts running against this build's data, halfway through
+    // somebody's working day.
     const crossed = await crossTo(now, 'p');
-    given('the window crossed to the build whose worker cannot write the record',
-        crossed.offered && crossed.crossed && crossed.shelf > 30, JSON.stringify(crossed));
-    given('it is running that build', (await buildOf(now)).script === BUILD.p.stamp,
-        (await buildOf(now)).script);
+    given('the update was offered and the window navigated to it',
+        crossed.offered && crossed.crossed, JSON.stringify(crossed));
+
+    // Read off the window the navigation actually produced. Asking for index.html again
+    // afterwards measures the wrong thing: that is an ordinary fetch from an existing
+    // client, which takes the clientId branch and is refused for a different reason.
+    const landed = await pageState(now);
+    check('the app does not start on a build whose identity write is refused',
+        landed.booted === false && landed.meta === null,
+        JSON.stringify(landed));
+    check('and what the person sees is a page that says so, in their own language',
+        /האפליקציה לא נפתחה/.test(landed.text), landed.text.slice(0, 120));
 
     const record = await clientRecord(now);
-    check('the failed write is silent: nothing was stored, nothing was reported, the app runs on',
-        !record.some(entry => entry.build === BUILD.p.cache)
-        && (await buildOf(now)).controlled === true,
+    check('and nothing was written down for it, which is why it was refused',
+        !record.some(entry => entry.build === BUILD.p.cache),
         `stored: ${JSON.stringify(record.map(entry => entry.build))}`);
-
-    // While the process lives, the in-memory SERVED covers the hole and the window is
-    // answered correctly - which is exactly why the failure goes unnoticed.
-    servedOwnBuild('while the worker process lives, the unwritten window is served correctly anyway',
-        now, 'p', await servedOffline(now, 'js/app.js'), '/js/app.js');
 
     const control = await swProcess(putPhone, now);
     const stopped = await stopWorker(control);
     check('the worker process really is gone, so what follows is a restart',
         stopped.ok, `${stopped.targets} targets, running ${stopped.running.join()}`);
 
-    // THE FORBIDDEN OUTCOME, and until now this suite counted it as a pass.
+    // THE FORBIDDEN OUTCOME, and until the repair this suite counted it as a pass.
     //
-    // The window is running build p. Its identity write was refused, the worker process
-    // has been stopped, and the in-memory Set that was covering the hole is gone with it.
-    // sw.js then reaches previousCaches(), finds exactly one shelf - build a's - and
-    // hands this window build a's app.js and sync.js. A page from one build, executing
-    // another build's scripts, in one session: precisely what the header of sw.js says
-    // the whole design exists to prevent.
+    // One previous shelf on the disk - build a's. The old code reached previousCaches(),
+    // found exactly one, and handed this window build a's app.js and build a's sync.js:
+    // a page from one build executing another build's program, in one session. The
+    // assertion here was `after.hash === EXPECT.a[...] || after.status === 503`, whose
+    // left arm IS that outcome, so the suite reported green while it happened.
     //
-    // The old assertion here was `after.hash === EXPECT.a[...] || after.status === 503`.
-    // The left arm of that disjunction IS the defect, so the check went green on the very
-    // outcome it was written to forbid, and the suite reported 38/38 while the mixed
-    // build happened underneath it. The disjunction is gone.
-    //
-    // The trade it was defending is real and is not being ignored: every phone in the
-    // field runs a build that predates this bookkeeping, and refusing an unrecorded
-    // window everything is a 503 on every script the moment the new build claims it. But
-    // a serving-time guess is the wrong place to pay for that. The answer is enrollment:
-    // at activate, BEFORE claiming, the incoming worker writes down the identity of the
-    // windows the outgoing worker was controlling, verifies the write by reading it back,
-    // and only claims if that succeeded. Then a window with no record at fetch time is
-    // genuinely unidentifiable rather than merely un-enrolled, and refusing it costs
-    // nothing that was ever working.
+    // The singleton guess is gone. A window with no record is refused, and the legacy
+    // phones the guess was protecting are written down at activate instead - before the
+    // claim, while their build is still a fact rather than an inference.
     const after = await servedOffline(now, 'js/app.js');
     check('after the restart, the unwritten window is never handed THIS build',
         after.hash !== EXPECT.p['/js/app.js'],
@@ -751,6 +785,7 @@ const putPhone = await browser.newContext();
         describe('/js/sync/sync.js', afterSync));
     failedClosed('the sync layer is refused by the same route, and says so',
         afterSync, '/js/sync/sync.js');
+
     servedOwnBuild('the window whose record was written before the fault is still served its own build',
         old, 'a', await servedOffline(old, 'js/app.js'), '/js/app.js');
 
@@ -764,25 +799,42 @@ const solo = await browser.newContext();
 
     server.deploy('p');
     const only = await openWindow(solo);
-    await boot(only);
-    await settle(1200);
-    check('one window, one build, and no record of it',
-        (await buildOf(only)).script === BUILD.p.stamp
-        && (await clientRecord(only)).length === 0,
-        JSON.stringify(await clientRecord(only)));
+    await only.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    // Not boot(): boot waits for a controller, and the point of this scenario is that a
+    // worker which cannot write down who it is taking over does not take anybody over.
+    await settle(6000);
+
+    const state = await pageState(only);
+    const record = await clientRecord(only);
+    check('a worker that cannot record a window\'s build does not claim it',
+        state.controlled === false && record.length === 0,
+        `controlled=${state.controlled} records ${JSON.stringify(record.map(e => e.build))}`);
+    check('and the app is running - from the network, as a first visit does',
+        state.booted === true && state.meta === BUILD.p.stamp,
+        JSON.stringify({ booted: state.booted, meta: state.meta }));
 
     const control = await swProcess(solo, only);
     const stopped = await stopWorker(control);
     check('the worker process really is gone, so what follows is a restart',
         stopped.ok, `${stopped.targets} targets, running ${stopped.running.join()}`);
 
-    // previousCaches() is empty, so sw.js:290 falls back to THIS build's cache: an
-    // unidentified client is served the current build's assets. It happens to be right
-    // here; it is right by luck, and the same branch is what serves the current build to
-    // the window in the corrupt-record suite below, where it is wrong.
-    const after = await servedOffline(only, 'js/app.js');
-    failedClosed('an unidentifiable window is refused rather than served this build\'s assets',
-        after, '/js/app.js');
+    // This used to assert a refusal, because the old code claimed the window and then had
+    // nothing to identify it with. The refusal was the best answer available once that had
+    // happened; not letting it happen is a better one. An unclaimed window is served by
+    // the network, which on this device is the same build it is already running - there is
+    // no other program here to be mixed with, which is the entire content of the rule.
+    //
+    // What must still be true, and is what this asks: the window is never handed a build
+    // that is not its own, and its state is not the invisible one the whole file exists to
+    // remove - a controlled session that nothing can identify.
+    const after = await served(only, 'js/app.js');
+    check('an unclaimed window is never handed another build\'s program',
+        after.hash === EXPECT.p['/js/app.js'] || !isAsset('/js/app.js', after.hash),
+        describe('/js/app.js', after));
+    check('and it is still not a controlled session with an unknown identity',
+        (await pageState(only)).controlled === false
+        || (await clientRecord(only)).length > 0,
+        JSON.stringify(await pageState(only)));
 
     await solo.close();
 }
@@ -801,17 +853,23 @@ const matchPhone = await browser.newContext();
     given('the window that must stay behind is mid-edit', await pin(old));
 
     const crossed = await crossTo(now, 'm');
-    given('the window crossed to the build whose worker cannot read the record',
-        crossed.offered && crossed.crossed && crossed.shelf > 30, JSON.stringify(crossed));
-    given('it is running that build', (await buildOf(now)).script === BUILD.m.stamp,
-        (await buildOf(now)).script);
+    given('the update was offered and the window navigated to it',
+        crossed.offered && crossed.crossed, JSON.stringify(crossed));
 
-    // The record IS on the disk - the write worked. This is the whole distinction the
-    // catch at sw.js:139 throws away.
+    // The write LANDS here - put works, match is what rejects. That distinction used to
+    // be thrown away by a catch that answered a read failure with the same null a missing
+    // record gives, and it still matters below. What it no longer does is let the app
+    // start: a record that cannot be read back has not been verified, and an unverified
+    // identity is exactly the state that ends in another build's scripts after a restart.
+    const landed = await pageState(now);
+    check('a build whose worker cannot read its own record does not start the app',
+        landed.booted === false && landed.meta === null
+        && /האפליקציה לא נפתחה/.test(landed.text),
+        JSON.stringify(landed));
+
     const record = await clientRecord(now);
     check('the record was written and is on the disk, unlike the missing-record case',
-        record.some(entry => entry.build === BUILD.m.cache)
-        && record.some(entry => entry.build === BUILD.a.cache),
+        record.some(entry => entry.build === BUILD.a.cache),
         JSON.stringify(record.map(entry => entry.build)));
 
     const control = await swProcess(matchPhone, now);
@@ -1072,11 +1130,32 @@ const unwritten = await browser.newContext();
     await settle(1500);
 
     const record = await clientRecord(page);
-    const running = await buildOf(page);
-    check('a window is never left running the app with no durable record of its build',
-        record.length > 0 || running.controlled !== true,
-        `controlled=${running.controlled} script=${running.script} `
+    const running = await pageState(page);
+    const asset = await served(page, 'js/app.js');
+
+    // The FIRST visit to an origin is the one navigation no worker can gate: the page is
+    // fetched from the network before any worker exists, and only then does one install.
+    // So this window really is running the app with nothing written down about it, and no
+    // rule in sw.js could have prevented that without preventing the app from ever being
+    // installed.
+    //
+    // What must hold is the part that is actually in the worker's hands, and it is the
+    // part that matters: an unidentified window is never handed a DIFFERENT build's bytes,
+    // and its unidentified state is visible as a refusal rather than papered over with a
+    // guess. The device has one shelf here, so there is nothing else to be handed - the
+    // check that this holds when there IS something else to be handed is the put-refusal
+    // suite above, where the same window is refused with build a's shelf sitting right
+    // there.
+    check('an unidentified window is refused rather than guessed at, and says why',
+        record.length > 0
+        || asset.status === 503 && asset.cause === 'unrecorded'
+        || running.controlled === false,
+        `controlled=${running.controlled} meta=${running.meta} `
+        + `asset: status ${asset.status} cause=${JSON.stringify(asset.cause)} `
         + `records: ${JSON.stringify(record.map(entry => entry.build))}`);
+    check('and it is never handed another build\'s program',
+        !isAsset('/js/app.js', asset.hash) || asset.hash === EXPECT.p['/js/app.js'],
+        describe('/js/app.js', asset));
 
     await unwritten.close();
 }

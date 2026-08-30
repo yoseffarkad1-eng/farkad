@@ -119,16 +119,23 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     // bytes, which is the same mixed-build failure arriving from the other direction. So
     // the shape it pins moved with the behaviour: read another build's cache for a window
     // that is running it, write only this one's.
+    // Two caches are bookkeeping rather than shelves: CLIENTS holds which window runs
+    // which build, SHELVES holds each shelf's lifecycle state and which build is active.
+    // Neither is ever served out of as a shelf, and both are excluded here for that
+    // reason rather than to make room.
     const opens = [...code.matchAll(/caches\.open\(([^)]*)\)/g)].map(m => m[1].trim());
-    const shelves = opens.filter(argument => argument !== 'CLIENTS');
+    const shelves = opens.filter(argument => argument !== 'CLIENTS' && argument !== 'SHELVES');
     const foreign = shelves.filter(argument => argument !== 'VERSION');
+    // `cacheName` is serveFrom's one named shelf; `name` is shelfUsable's, which reads a
+    // shelf to check its inventory and never serves out of it. Two names, both singular,
+    // neither a search.
     check('a page is only ever served out of one named shelf, never a search across them',
-        foreign.length === 1 && foreign[0] === 'cacheName'
-        && /function serveFrom\(cacheName, request\) \{[\s\S]{0,200}?caches\.open\(cacheName\)/.test(code),
+        foreign.every(argument => argument === 'cacheName' || argument === 'name')
+        && /function serveFrom\(cacheName, request, allowNetwork\) \{[\s\S]{0,200}?caches\.open\(cacheName\)/.test(code),
         foreign.join(', '));
     check('and no page bytes are written into a shelf that is not this build\'s',
-        [...code.matchAll(/caches\.open\(([^)]*)\)[\s\S]{0,200}?cache\.(?:put|add)\(/g)]
-            .every(match => ['VERSION', 'CLIENTS'].indexOf(match[1].trim()) !== -1));
+        [...code.matchAll(/caches\.open\(([^)]*)\)[\s\S]{0,300}?cache\.(?:put|add)\(/g)]
+            .every(match => ['VERSION', 'CLIENTS', 'SHELVES', 'cache'].indexOf(match[1].trim()) !== -1));
 
     // The one cache that is not a build shelf. It holds which window is running which
     // build - the record a worker restart used to lose, after which this build's own
@@ -157,8 +164,22 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     // install succeeded.
     check('the old cache is deleted only after a successful install',
         /caches\.delete/.test(code) && !/caches\.delete/.test(install));
-    check('and only caches that are not this version',
-        /key !== VERSION && key !== CLIENTS && !isNewerShelf\(key\)/.test(code)
+    // And only shelves something explicitly RETIRED.
+    //
+    // This used to pin `!isNewerShelf(key)` - a shelf was protected if its version number
+    // was higher, or on a tie if its name sorted later. Both are guesses about lifecycle
+    // made from a string, and both delete a complete waiting shelf in ordinary cases: a
+    // rollback installs a lower name, a same-version candidate ties and loses. Measured in
+    // tests/swidentity.test.mjs, on a real browser, with a real install.
+    //
+    // Lifecycle is written down instead. `installing` is being filled, `complete` has been
+    // installed and is waiting, `retired` was replaced by the worker that took over its
+    // windows - and only the last of those is collectable. A shelf with no mark at all
+    // predates the registry, and an unmarked shelf is not evidence that it is disposable.
+    check('and only shelves a worker explicitly retired after taking over their windows',
+        /state === 'retired' \? name : null/.test(code)
+        && /key !== VERSION && key !== CLIENTS && key !== SHELVES/.test(code)
+        && !/isNewerShelf/.test(code)
         && [...code.matchAll(/caches\.delete\(([^)]*)\)/g)]
             .every(match => ['key', 'request'].indexOf(match[1].trim()) !== -1));
 
@@ -171,8 +192,22 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
         /function reapUnusedCaches\(\) \{\s*return buildsInUse\(\)/.test(code)
         && /if \(state\.unknown\) return undefined;/.test(code)
         && /\.filter\(key => !state\.held\.has\(key\)\)/.test(code));
-    check('the claim happens before the reap, not after it',
-        code.indexOf('self.clients.claim().then(() => reapUnusedCaches())') !== -1);
+    // Enroll, then claim, then retire, then reap - and the order is the guarantee.
+    //
+    // Claiming first is what made a legacy window unidentifiable: the instant the claim
+    // lands, the evidence of which worker was serving it is gone. So the windows the
+    // outgoing worker was controlling are written down while that is still a fact, and the
+    // claim only happens if the write was read back. Retiring the replaced build comes
+    // after the claim, because a retired shelf is a collectable one and it must not become
+    // collectable until its windows have somewhere else to be identified from.
+    const activate = code.slice(code.indexOf("addEventListener('activate'"));
+    check('the windows are enrolled before the claim, and the claim before the reap',
+        /enrollLegacyClients\(\)/.test(activate)
+        && activate.indexOf('enrollLegacyClients()') < activate.indexOf('self.clients.claim()')
+        && activate.indexOf('self.clients.claim()') < activate.indexOf('reapUnusedCaches()')
+        && /if \(!enrollment\.ok\)/.test(activate));
+    check('and a worker that could not record them does not claim them',
+        /if \(!enrollment\.ok\) \{[\s\S]{0,200}?return undefined;/.test(activate));
 }
 
 {

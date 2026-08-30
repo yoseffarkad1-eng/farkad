@@ -110,8 +110,13 @@ const buildOnScreen = page => page.evaluate(() => ({
 // the record a worker restart used to lose, after which this build's own window was
 // served the oldest shelf on the device. It is never reaped as a shelf and never served
 // out of as one, and tests/build.test.mjs pins both.
+// The BUILD SHELVES. Two caches are bookkeeping and are not shelves: farkad-clients holds
+// which window is running which build, farkad-shelves holds each shelf's lifecycle state,
+// which build is active, and the per-build asset manifests. Neither is ever served out of
+// as a shelf and neither is reaped as one, so neither belongs in a count of shelves.
 const cacheNames = page => page.evaluate(() =>
-    caches.keys().then(keys => keys.filter(key => key !== 'farkad-clients')));
+    caches.keys().then(keys => keys.filter(key =>
+        key !== 'farkad-clients' && key !== 'farkad-shelves')));
 const allCacheNames = page => page.evaluate(() => caches.keys());
 
 // ---------------------------------------------------------------- the handover

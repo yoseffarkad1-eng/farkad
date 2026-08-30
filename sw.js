@@ -70,22 +70,174 @@ self.addEventListener('install', event => {
     // its scripts missing and no error pointing at why. A failed install leaves the
     // old version serving and is retried on a later visit; per-file failures are still
     // named in the log for whoever goes looking.
+    //
+    // The shelf says so about itself, before and after. `installing` is written BEFORE
+    // the first fetch and only becomes `complete` when every file is down, because the
+    // reaper below collects by lifecycle state and a shelf being written is the one thing
+    // it must never touch: a delete that lands mid-install leaves cache.add resolving
+    // against a handle to a cache that is no longer in the store, so the browser calls
+    // the install a success and the build activates with nothing on its shelf.
     event.waitUntil(
-        caches.open(VERSION).then(cache =>
-            Promise.all(SHELL.map(url =>
-                cache.add(url).catch(error => {
-                    console.error('[sw] could not cache', url, error);
-                    return url;
-                })
-            )).then(results => {
-                const missing = results.filter(Boolean);
-                if (missing.length > 0) {
-                    throw new Error('shell incomplete, keeping the old version: ' + missing.join(', '));
-                }
-            })
-        )
+        markShelf(VERSION, 'installing')
+            .then(() => caches.open(VERSION))
+            .then(cache =>
+                Promise.all(SHELL.map(url =>
+                    cache.add(url).catch(error => {
+                        console.error('[sw] could not cache', url, error);
+                        return url;
+                    })
+                )).then(results => {
+                    const missing = results.filter(Boolean);
+                    if (missing.length > 0) {
+                        throw new Error('shell incomplete, keeping the old version: ' + missing.join(', '));
+                    }
+                    return writeManifest(VERSION, cache);
+                }))
+            .then(() => markShelf(VERSION, 'complete'))
     );
 });
+
+// ---------------------------------------------------------------- the shelf registry
+//
+// Which shelves exist, and what each one IS. Everything the reaper does is decided from
+// this and from who is running what - never from the shelf's NAME.
+//
+// Names were the old answer: a shelf was collectable if its version number was lower, or
+// on a tie if its name sorted earlier. Both are guesses about lifecycle dressed as facts
+// about strings, and both are wrong in ordinary cases. A ROLLBACK installs a build whose
+// name sorts below the running one; a same-version candidate (a deploy test, a rebuild)
+// ties and loses the string comparison. Either one is a complete, waiting shelf that the
+// build it is about to replace deletes out from under it.
+//
+// So a shelf is only ever collected when something explicitly wrote down that it has
+// been retired - which only the worker that actually replaced it can say, and only after
+// it has taken over that shelf's windows.
+const SHELVES = 'farkad-shelves';
+const ACTIVE_KEY = 'https://farkad.invalid/shelf/@active';
+
+// The manifest lives in the REGISTRY, not in the shelf it describes. A shelf holds
+// exactly the files of its build and nothing else - three suites check that by
+// enumerating it, and they are right to: an extra key in a shelf is an asset the build
+// never had, and something will eventually serve it.
+function manifestKey(name) {
+    return new Request('https://farkad.invalid/manifest/' + encodeURIComponent(name));
+}
+
+function shelfKey(name) {
+    return new Request('https://farkad.invalid/shelf/' + encodeURIComponent(name));
+}
+
+// Written and read back. A lifecycle mark that was not stored is not a mark, and the
+// difference matters in the direction that deletes things: an unwritten `installing`
+// leaves a shelf that is being filled looking collectable.
+function markShelf(name, state) {
+    return caches.open(SHELVES)
+        .then(cache => cache.put(shelfKey(name), new Response(state))
+            .then(() => cache.match(shelfKey(name)))
+            .then(hit => (hit ? hit.text() : null))
+            .then(stored => stored === state))
+        .catch(() => false);
+}
+
+function shelfState(name) {
+    return caches.open(SHELVES)
+        .then(cache => cache.match(shelfKey(name)))
+        .then(hit => (hit ? hit.text() : null))
+        .catch(() => null);
+}
+
+// Which build is the active one. Read at activate BEFORE it is overwritten, so the
+// incoming worker learns the name of the build it is replacing - which is what the
+// windows it is about to claim are running.
+function readActive() {
+    return caches.open(SHELVES)
+        .then(cache => cache.match(new Request(ACTIVE_KEY)))
+        .then(hit => (hit ? hit.text() : null))
+        .then(name => (name && /^farkad-/.test(name) ? name : null))
+        .catch(() => null);
+}
+
+function writeActive(name) {
+    return caches.open(SHELVES)
+        .then(cache => cache.put(new Request(ACTIVE_KEY), new Response(name))
+            .then(() => cache.match(new Request(ACTIVE_KEY)))
+            .then(hit => (hit ? hit.text() : null))
+            .then(stored => stored === name))
+        .catch(() => false);
+}
+
+// What this shelf actually holds, hashed, written into the shelf itself at install.
+//
+// "The cache exists" was the whole of the old check, and a cache is allowed to lose
+// entries: the Cache API evicts per-entry under storage pressure without telling anybody.
+// A shelf that has lost a file is not that build's shelf any more, and serving from it
+// means falling through to the network for the missing piece - which is the current
+// deploy, which is a different build.
+function writeManifest(name, cache) {
+    return Promise.all(SHELL.map(url =>
+        cache.match(url)
+            .then(hit => (hit ? hit.clone().arrayBuffer() : null))
+            .then(bytes => (bytes === null ? null : crypto.subtle.digest('SHA-256', bytes)))
+            .then(digest => (digest === null ? null : [url, hex(digest)]))
+    )).then(pairs => {
+        const manifest = {};
+        pairs.filter(Boolean).forEach(([url, sum]) => { manifest[url] = sum; });
+        return caches.open(SHELVES).then(registry =>
+            registry.put(manifestKey(name),
+                new Response(JSON.stringify(manifest), {
+                    headers: { 'Content-Type': 'application/json' }
+                })));
+    }).catch(() => undefined);
+}
+
+function readManifest(name) {
+    return caches.open(SHELVES)
+        .then(registry => registry.match(manifestKey(name)))
+        .then(hit => (hit ? hit.json().catch(() => null) : null))
+        .catch(() => null);
+}
+
+function hex(buffer) {
+    return [...new Uint8Array(buffer)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Is this shelf complete enough to be that build's program?
+//
+// Inventory first: every file the shell names has to be there. Then, if the shelf
+// carries a manifest - which every build from v88 on writes at install - the BYTES are
+// checked against it, so a file that was replaced rather than lost is caught too. A
+// shelf from an older build has no manifest and is checked by inventory alone, which is
+// stated rather than hidden: it is the strongest claim the evidence supports.
+//
+// Memoised per process. It reads the whole shelf, and the answer cannot change while
+// this worker is alive without something else in here noticing.
+const SHELF_OK = new Map();
+
+function shelfUsable(name) {
+    if (SHELF_OK.has(name)) return SHELF_OK.get(name);
+    const answer = caches.has(name).then(there => {
+        if (!there) return { ok: false, why: 'missing' };
+        return caches.open(name).then(cache =>
+            readManifest(name)
+                .then(manifest => Promise.all(SHELL.map(url =>
+                    cache.match(url).then(hit => {
+                        if (!hit) return url;
+                        if (!manifest || !manifest[url]) return null;
+                        return hit.clone().arrayBuffer()
+                            .then(bytes => crypto.subtle.digest('SHA-256', bytes))
+                            .then(digest => (hex(digest) === manifest[url] ? null : url));
+                    })
+                )).then(bad => {
+                    const missing = bad.filter(Boolean);
+                    return missing.length === 0
+                        ? { ok: true, why: null }
+                        : { ok: false, why: 'incomplete', missing };
+                }))
+        );
+    }).catch(() => ({ ok: false, why: 'unreadable' }));
+    SHELF_OK.set(name, answer);
+    return answer;
+}
 
 // Which build each window is running.
 //
@@ -120,13 +272,122 @@ function clientKey(id) {
 // it as a window from an older build and handed it another build's bytes.
 function rememberClient(id, build) {
     if (!id) return Promise.resolve(false);
-    if (build === VERSION) SERVED.add(id);
     return caches.open(CLIENTS)
         .then(cache => cache.put(clientKey(id), new Response(build))
             .then(() => cache.match(clientKey(id)))
             .then(hit => (hit ? hit.text() : null))
             .then(stored => stored === build))
+        // The in-memory copy is written only once the durable one is PROVED. It used to
+        // be set first and unconditionally, so a refused put left the process asserting
+        // an identity that nothing on the disk agreed with - and answering fetches from
+        // it, correctly, right up until the browser stopped the worker. Then the Set came
+        // back empty and the window fell into the branch written for older builds.
+        //
+        // Marking a client served before its identity is stored does not make the write
+        // succeed; it only postpones finding out, past the point where anything can be
+        // done about it.
+        .then(stored => {
+            if (stored && build === VERSION) SERVED.add(id);
+            return stored;
+        })
         .catch(() => false);
+}
+
+// The windows the OUTGOING worker was controlling, written down before this one claims
+// them.
+//
+// This is the repair the fetch handler's refusals rest on. clients.claim() takes over
+// every window of the origin at once; at the instant before it runs, every window it is
+// about to take over was being controlled by the worker this one replaces, and is
+// therefore running THAT build. That is the only moment in the life of the device when a
+// legacy window's build is a fact. Nothing used it: the worker claimed first and asked
+// afterwards, at fetch time, when all that is left to go on is how many shelves happen to
+// be on the disk - and that guess handed a real window a real other build's program.
+//
+// Who the predecessor is, in order of what can actually be known:
+//
+//   the @active pointer, written by every worker from this build on. Exact.
+//   failing that, the one previous shelf, if there is exactly one. Not a guess in the way
+//     the fetch-time version was: these windows are known to be the outgoing worker's,
+//     and a device with one shelf has one build they can be running. Every phone in the
+//     field is in exactly this state, because v86 wrote no pointer.
+//   failing that, nothing. Two shelves and no pointer is a genuine ambiguity, and the
+//     answer is to leave the windows with the worker that is already serving them
+//     correctly rather than to pick one.
+//
+// If the records cannot be written and read back, this worker does NOT claim. That is the
+// safe half of the failure: unclaimed windows keep being served by the old worker out of
+// the shelf they are running, which is right, instead of by this one out of a guess.
+function enrollLegacyClients() {
+    // includeUncontrolled, and it is not a detail. The FIRST window ever opened on an
+    // origin is navigated before any worker exists, so nothing recorded it and nothing
+    // controls it - and it is precisely one of the windows this activate is about to
+    // claim. Without it here, that window is claimed having never been written down, and
+    // is then refused its own scripts for the rest of its life. Measured: the put-refusal
+    // scenario in tests/swidentity.test.mjs, where the window left behind on the first
+    // build was fail-closed out of a shelf that was sitting right there.
+    return Promise.all([
+        readActive(),
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    ])
+        .then(([pointed, windows]) => {
+            if (windows.length === 0) return { ok: true, predecessor: pointed, enrolled: 0 };
+            return unrecorded(windows).then(pending => {
+                if (pending.length === 0) return { ok: true, predecessor: pointed, enrolled: 0 };
+                return predecessorFor(pointed).then(predecessor => {
+                    if (!predecessor) return { ok: false, predecessor: null, enrolled: 0 };
+                    return Promise.all(pending.map(id => rememberClient(id, predecessor)))
+                        .then(results => ({
+                            ok: results.every(Boolean),
+                            predecessor,
+                            enrolled: results.filter(Boolean).length
+                        }));
+                });
+            });
+        })
+        .catch(() => ({ ok: false, predecessor: null, enrolled: 0 }));
+}
+
+// Windows this device has no usable record for. A window whose record is UNREADABLE is
+// deliberately not in this list: the device HAS an opinion about it and cannot reach it,
+// so writing a fresh one would be overwriting evidence with a guess.
+function unrecorded(windows) {
+    return Promise.all(windows.map(client =>
+        buildOfClient(client.id).then(build => (build === null ? client.id : null))
+    )).then(ids => ids.filter(Boolean));
+}
+
+// Which build the windows this worker is about to claim are running.
+//
+//   the @active pointer, written by every worker from this build on. Exact.
+//   failing that, the one other shelf, if there is exactly one. These windows are known
+//     to have been open before this worker arrived, and a device with one other shelf has
+//     one other program they can be running. Every phone in the field is in this state,
+//     because v86 wrote no pointer.
+//   failing THAT - no pointer and no other shelf at all - this build. Not a guess about
+//     which of several programs a window is running: there is only one program on this
+//     device, the one just installed, and a window that loaded from this origin while it
+//     was installing loaded that. Nothing else is here to be mixed with, which is the
+//     whole of what the rule protects.
+//   and with a pointer that is gone, or two shelves and no pointer, nothing. A genuine
+//     ambiguity is answered by leaving these windows with the worker already serving them
+//     correctly, not by picking one.
+function predecessorFor(pointed) {
+    if (pointed === VERSION) return Promise.resolve(null);
+    if (pointed) {
+        return caches.has(pointed).then(there => (there ? pointed : null)).catch(() => null);
+    }
+    return otherShelves().then(names => {
+        if (names.length === 0) return VERSION;
+        return names.length === 1 ? names[0] : null;
+    });
+}
+
+// Every cache that is a build's shelf and is not this build's. The bookkeeping caches are
+// not shelves, and reaping either of them throws away the record of who is running what.
+function otherShelves() {
+    return caches.keys().then(keys => keys.filter(key =>
+        key !== VERSION && key !== CLIENTS && key !== SHELVES && /^farkad-v/.test(key)));
 }
 
 // Which build this window is running, as far as anything on this device can say.
@@ -174,55 +435,59 @@ function buildsInUse() {
         });
 }
 
-// Every OTHER build's shelf. Two things that live in caches.keys() are not shelves and
-// must never be treated as one:
+// Every shelf this worker is allowed to collect.
 //
-//   the client bookkeeping - reaping it throws away the record of which window is running
-//   what, and serving out of it hands somebody a page that is not a page;
+// One question, asked of the registry: has something explicitly written down that this
+// shelf is RETIRED? Only the worker that actually replaced a build can say that, and only
+// after it has taken over that build's windows, so a `retired` mark is evidence rather
+// than inference.
 //
-//   and the shelf of a build that is INSTALLING or WAITING. It is not a previous build,
-//   it is the next one, and it belongs to a worker this one knows nothing about. This
-//   code counted it as "not mine" and buildsInUse cannot count a build nobody runs yet,
-//   so one 'running' message deleted a complete, waiting shelf. Worse, when the delete
-//   landed mid-install, cache.add went on resolving against a detached handle - install
-//   reported SUCCESS and the build activated with an empty shelf. Network-only, and the
-//   offline fallback page on the first launch with no signal.
-//
-// A shelf is only ever collected by the worker that replaced it, which is this one - so
-// a shelf NEWER than this build is somebody else's business.
-function previousCaches() {
-    return caches.keys().then(keys => keys.filter(key =>
-        key !== VERSION && key !== CLIENTS && !isNewerShelf(key)));
+// Everything else is kept. A shelf marked `installing` is being written right now. One
+// marked `complete` has been installed and is waiting for somebody to press the banner -
+// it is the NEXT build, not a previous one. A shelf with no mark at all came from a build
+// that predates this registry, and an unmarked shelf is not evidence that a shelf is
+// disposable. The old version of this decided by version number, and on a tie by string
+// comparison, which deleted rollbacks and same-version candidates - complete, waiting
+// shelves - out from under their own installs.
+function reapableShelves() {
+    // Is any other build mid-install or waiting to be pressed, RIGHT NOW? This is the
+    // browser's own lifecycle state rather than a guess made from a cache name, and it is
+    // what invariant "protect installing and waiting shelves" actually needs. While either
+    // is set, an unmarked shelf might be the one being written, so none of them are
+    // touched.
+    const busy = Boolean(self.registration
+        && (self.registration.installing || self.registration.waiting));
+    return otherShelves().then(names => Promise.all(names.map(name =>
+        shelfState(name).then(state => {
+            // Explicitly retired: the worker that replaced this build said so, after
+            // taking over its windows. Always collectable.
+            if (state === 'retired') return name;
+            // Explicitly installing, or complete and waiting to be pressed. Never.
+            if (state !== null) return null;
+            // No mark at all: a shelf from a build that predates this registry. It cannot
+            // be one that is being written now, because every build from here on writes
+            // `installing` before it fetches its first file - unless a build that predates
+            // the registry is installing or waiting at this moment, which is what the
+            // lifecycle check above is for. A rollback to such a build is exactly that
+            // case, and it is the one that used to lose its shelf mid-install.
+            //
+            // Otherwise it is an old shelf nobody retired because nothing at the time knew
+            // how to. Leaving it forever is not free either: a device that upgraded twice
+            // before this build would carry every shelf it ever had, and these are the
+            // devices most likely to be short of space. It goes only when no live window is
+            // running it and every live window's identity is known - which the caller
+            // enforces, and which is the same bar a retired shelf has to clear.
+            return busy ? null : name;
+        })
+    ))).then(names => names.filter(Boolean));
 }
 
-// Build names sort by their version number: farkad-v86, farkad-v87, farkad-v88. Anything
-// that does not parse is left alone rather than guessed at - an unparseable name is not
-// evidence that a shelf is disposable.
-function shelfNumber(name) {
-    const found = /^farkad-v(\d+)/.exec(String(name));
-    return found ? Number(found[1]) : null;
-}
-
-function isNewerShelf(name) {
-    if (name === VERSION) return false;
-    const mine = shelfNumber(VERSION);
-    const theirs = shelfNumber(name);
-    // A name that does not parse is left alone. An unreadable shelf name is not evidence
-    // that the shelf is disposable, and deleting a build somebody may still be running
-    // costs more than keeping a few hundred kilobytes nobody needs.
-    if (mine === null || theirs === null) return true;
-    if (theirs !== mine) return theirs > mine;
-    // Same number, different name - a build stamped alongside another, which is what a
-    // deploy test looks like. The later name is the later build.
-    return String(name) > String(VERSION);
-}
-
-// A window still running the build before this one, if there is one.
+// A window still running a build that is not this one, if there is one.
 function strangerOpen() {
     return buildsInUse().then(state => state.unknown || state.held.size > 1);
 }
 
-// Every other build's cache goes, but not while somebody is still running one of them.
+// Retired shelves that nobody is running, and not one byte more.
 //
 // This used to reap and THEN claim, so the old build's cache was deleted while a window
 // was still executing the old build - and after the claim that window had nowhere of its
@@ -234,10 +499,10 @@ function reapUnusedCaches() {
         // A window whose build nobody wrote down. It is running SOMETHING, and until it
         // is gone there is no shelf here that can be proved unused.
         if (state.unknown) return undefined;
-        return previousCaches().then(keys => Promise.all(keys
+        return reapableShelves().then(keys => Promise.all(keys
             .filter(key => !state.held.has(key))
             .map(key => caches.delete(key))));
-    }).then(() => forgetClosedClients());
+    });
 }
 
 // Now, and twice more as the browser catches up.
@@ -250,9 +515,9 @@ function reapUnusedCaches() {
 function reapLater(attempt) {
     const round = attempt || 0;
     return reapUnusedCaches()
-        .then(() => previousCaches())
+        .then(() => reapableShelves())
         .then(keys => {
-            if (keys.length === 0 || round >= 3) return undefined;
+            if (keys.length === 0 || round >= 3) return forgetClosedClients();
             return new Promise(resolve => setTimeout(resolve, 2000 + round * 3000))
                 .then(() => reapLater(round + 1));
         });
@@ -260,21 +525,101 @@ function reapLater(attempt) {
 
 // The record of a window that is gone. Bounded rather than tidy: without it the store
 // grows for the life of the origin, one entry per window ever opened.
+//
+// The live set is read TWICE - once to decide, and again immediately before each delete.
+// A window that opens between those two reads is a window whose identity was about to be
+// thrown away while it was running, and the gap is not theoretical: enumerating the store
+// and enumerating the clients are both async, and a person reopening the app lands in the
+// middle of them. The second read is what makes the delete a statement about now.
+// Long enough to cover a navigation, short enough that a closed window's record does not
+// outlive the session that reaps it.
+//
+// It is deliberately NOT inside reapUnusedCaches. Shelf collection and record forgetting
+// are separate jobs with separate urgencies, and chaining them made every reap round wait
+// out this pause before it could even look at the shelves - three rounds of that and a
+// device with two old shelves was still carrying them a full half-minute later. Shelves
+// go promptly; records are forgotten afterwards, unhurried, because being slow about
+// forgetting costs a few bytes and being quick about it costs a window its identity.
+const FORGET_GRACE_MS = 6000;
+
+// Every window this worker can see, controlled or not. `includeUncontrolled` matters: a
+// window that has not been claimed yet is still a window that is open and running
+// something, and leaving it out of this set is how its record gets collected.
+function liveClientUrls() {
+    return self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        .then(clients => new Set(clients.map(client => clientKey(client.id).url)))
+        // A reading that FAILED is not a reading that found nothing. Null says "I could
+        // not look", and the caller deletes nothing on it - the opposite of treating an
+        // error as an empty set, which would collect the identity of every open window.
+        .catch(() => null);
+}
+
 function forgetClosedClients() {
     return Promise.all([
         caches.open(CLIENTS).then(cache => cache.keys()),
-        self.clients.matchAll({ type: 'window' })
-    ]).then(([keys, clients]) => {
-        const open = new Set(clients.map(client => clientKey(client.id).url));
-        return caches.open(CLIENTS).then(cache => Promise.all(
-            keys.filter(request => !open.has(request.url))
-                .map(request => cache.delete(request))
-        ));
+        liveClientUrls()
+    ]).then(([keys, open]) => {
+        if (open === null) return undefined;
+        const stale = keys.filter(request => !open.has(request.url));
+        if (stale.length === 0) return undefined;
+        // A SECOND look, after a pause, and the pause is the point.
+        //
+        // clients.matchAll is a snapshot, and during a navigation a window that is very
+        // much open can be absent from it for a moment - the old client is going, the new
+        // one has not arrived. Deleting on one reading therefore throws away the identity
+        // of a window that is still running, which is worse than anything this function
+        // exists to prevent: an unbounded store costs a few bytes per window, while a lost
+        // record costs that window its own program, refused, until somebody reloads it.
+        //
+        // Measured, not argued: with a single reading, crossing one window to a new build
+        // deleted the OTHER window's record while it sat there mid-edit, and it was then
+        // fail-closed out of its own scripts.
+        //
+        // Two readings a few seconds apart, and only what is absent from both goes. The
+        // store stays bounded - a window that has really closed is absent from every
+        // reading from then on - and a navigation in flight is never mistaken for one.
+        return new Promise(resolve => setTimeout(resolve, FORGET_GRACE_MS))
+            .then(() => liveClientUrls())
+            .then(live => (live === null ? undefined
+                : caches.open(CLIENTS).then(cache => Promise.all(
+                    stale.filter(request => !live.has(request.url))
+                        .map(request => cache.delete(request))
+                ))));
     }).catch(() => undefined);
 }
 
+// Enroll, then claim, then retire what was replaced - in that order, and the order is
+// the whole point.
+//
+// Claiming first is what made a legacy window unidentifiable: the instant the claim lands
+// the evidence of which worker was serving it is gone, and every later question about it
+// is a guess. So the windows are written down while the answer is still known, and the
+// claim is CONDITIONAL on that having worked. A worker that cannot record who it is about
+// to take over does not take them over: they stay with the old worker, which is serving
+// them correctly out of the shelf they are actually running.
+//
+// Only after the claim is the replaced build marked retired, because that mark is what
+// makes its shelf collectable - and it must not become collectable until its windows have
+// somewhere else to be identified from.
 self.addEventListener('activate', event => {
-    event.waitUntil(self.clients.claim().then(() => reapUnusedCaches()));
+    event.waitUntil(
+        enrollLegacyClients()
+            .then(enrollment => {
+                if (!enrollment.ok) {
+                    console.warn('[sw] not claiming: could not record the windows of the '
+                        + 'build being replaced');
+                    return undefined;
+                }
+                return self.clients.claim()
+                    .then(() => writeActive(VERSION))
+                    .then(() => (enrollment.predecessor
+                        ? markShelf(enrollment.predecessor, 'retired')
+                        : undefined))
+                    .then(() => reapUnusedCaches())
+                    .then(() => forgetClosedClients());
+            })
+            .catch(error => console.error('[sw] activate', error))
+    );
 });
 
 self.addEventListener('fetch', event => {
@@ -298,15 +643,30 @@ self.addEventListener('fetch', event => {
     if (request.mode === 'navigate') {
         // The window this navigation creates is running THIS build, because this is the
         // page it is about to run. That is the one fact everything else here is built on,
-        // and it is written down durably so a worker restart cannot forget it.
-        if (event.resultingClientId) {
-            event.waitUntil(rememberClient(event.resultingClientId, VERSION));
-        }
+        // and it is written down durably BEFORE the page is handed over.
+        //
+        // It used to be written in waitUntil and the document served regardless, which is
+        // the same shape of mistake as claiming before enrolling: the app starts, and the
+        // record that says what it is starts separately and may never arrive. While the
+        // process lives the in-memory Set covers the hole, so nothing looks wrong; when
+        // the browser stops the worker - which it does whenever it likes - the window
+        // becomes unidentifiable, and unidentifiable is now refused.
+        //
+        // So a window is never left running the app with no durable record of its build.
+        // A session that cannot be identified is a session that will be refused its own
+        // scripts partway through somebody's working day; refusing to start it, with a
+        // page that says why, is the same failure discovered while it is still cheap.
         event.respondWith(
-            caches.open(VERSION)
-                .then(cache => cache.match('./index.html'))
-                .then(hit => hit || timedFetch(request, DOCUMENT_TIMEOUT_MS)
-                    .catch(() => offlineFallback()))
+            (event.resultingClientId
+                ? rememberClient(event.resultingClientId, VERSION)
+                : Promise.resolve(false))
+                .then(stored => {
+                    if (!stored) return cannotStart(event.resultingClientId ? 'unwritable' : 'no-client-id');
+                    return caches.open(VERSION)
+                        .then(cache => cache.match('./index.html'))
+                        .then(hit => hit || timedFetch(request, DOCUMENT_TIMEOUT_MS)
+                            .catch(() => offlineFallback()));
+                })
         );
         // The window that just left may have been the last one running the old build -
         // but it has not left yet. At the moment this handler runs, the client being
@@ -314,7 +674,8 @@ self.addEventListener('fetch', event => {
         // and never collects anything. waitUntil keeps this worker alive long enough for
         // the navigation to finish and the old client to go.
         event.waitUntil(new Promise(resolve => setTimeout(resolve, 1500))
-            .then(() => reapUnusedCaches()));
+            .then(() => reapUnusedCaches())
+            .then(() => forgetClosedClients()));
         return;
     }
 
@@ -333,21 +694,26 @@ self.addEventListener('fetch', event => {
     // window, which was then handed the oldest shelf on the device.
     if (event.clientId) {
         event.respondWith(buildOfClient(event.clientId).then(build => {
-            // Its own build, and only its own.
-            if (build === VERSION) return serveFrom(VERSION, request);
+            // Its own build, and only its own. The network is allowed here and nowhere
+            // else below: for THIS build the origin is serving the same build, so a file
+            // the shelf is missing comes back as itself.
+            if (build === VERSION) return serveFrom(VERSION, request, true);
 
-            // A build we wrote down. Its own shelf, or the origin - never somebody
-            // else's shelf, and never this one's.
+            // A build we wrote down. Its own shelf, and nothing else at all.
             if (build !== null && build !== UNKNOWN) {
-                return caches.has(build).then(there => (there
-                    ? serveFrom(build, request)
-                    // Its shelf is gone - reaped while the record still named it, or a
-                    // partial write. NOT the origin: the origin serves whatever is
-                    // deployed now, which for a page from an older build is the current
-                    // build's bytes, and handing those over is the mixed-build session by
-                    // the last route left. The record says which build this window is; the
-                    // honest answer when that build is no longer here is to say so.
-                    : failClosed(request, build)));
+                return shelfUsable(build).then(shelf => {
+                    // "The cache exists" was the whole of the old test, and a cache is
+                    // allowed to lose entries: the Cache API evicts per-entry under
+                    // storage pressure. A shelf that has lost a file is not that build's
+                    // program any more, and half of it plus the network is a mixed build
+                    // assembled one request at a time.
+                    if (!shelf.ok) return failClosed(request, 'shelf-' + shelf.why);
+                    // Not `hit || fetch(request)`. The origin serves whatever is deployed
+                    // NOW, so for a page from an older build the fallback IS the current
+                    // build's bytes - identity established correctly and mixed anyway, by
+                    // the one route the identity work does not cover.
+                    return serveFrom(build, request, false);
+                });
             }
 
             // Identity this device cannot establish. It used to be answered by guessing:
@@ -356,31 +722,23 @@ self.addEventListener('fetch', event => {
             // build the scripts of another, which is the mixed-build session this file
             // exists to prevent - and it did, measurably, in four different ways.
             //
-            // So nothing is guessed, and the origin is not asked either. The origin
-            // serves whatever is deployed NOW, which for a page from an older build is
-            // the current build's bytes - the same mixed-build session by the last route
-            // left. Unknown identity gets neither a shelf nor the deploy: it gets a
-            // refusal that says why.
+            // The last of those guesses to go was the singleton: one previous shelf, so
+            // one possible answer. It was defended as the ordinary upgrade - every phone
+            // in the field runs a build that predates this bookkeeping - and it really did
+            // keep those phones working. It also handed a window whose identity write had
+            // been REFUSED the other build's program, measurably, in a real browser, and
+            // no test could tell the two cases apart because at this point in the code
+            // they are the same case.
+            //
+            // They are separated earlier now instead. A legacy window is written down at
+            // activate, before the claim, while its build is still a fact (see
+            // enrollLegacyClients). What reaches here with no record is a window nothing
+            // on this device can identify, and refusing it costs nothing that was ever
+            // working.
             //
             // Every shelf and every stored record is left exactly where it is. Refusing
             // to serve is recoverable by a reload; serving the wrong build is not.
-            //
-            // With one exception, and it is not a guess. A window with NO record on a
-            // device holding exactly ONE previous shelf has one possible answer, and it
-            // is the ordinary upgrade: every phone in the field is running a build that
-            // predates this bookkeeping, its worker never wrote a record, and refusing it
-            // everything means a 503 on every script the moment the new build claims it.
-            // That is not a theoretical mixed-build risk, it is the app failing to open.
-            // "Never an ARBITRARY previous build" is the rule; with one shelf there is
-            // nothing arbitrary to choose between.
-            //
-            // A record that is there and cannot be read is different: the device HAS an
-            // opinion about this window and cannot reach it, so there is no single
-            // possible answer, and it is refused.
-            if (build === UNKNOWN) return failClosed(request, 'unreadable');
-            return previousCaches().then(keys => (keys.length === 1
-                ? serveFrom(keys[0], request)
-                : failClosed(request, keys.length === 0 ? 'unrecorded' : 'ambiguous')));
+            return failClosed(request, build === UNKNOWN ? 'unreadable' : 'unrecorded', event.clientId);
         }));
         return;
     }
@@ -433,7 +791,7 @@ function askOrigin(request) {
 // retryable failure into a script that never runs, and the app then loads with half its
 // globals missing and nothing pointing at why. 503 is honest - this is temporary and a
 // reload fixes it - and the body names the cause for whoever opens the console.
-function failClosed(request, why) {
+function failClosed(request, why, clientId) {
     return new Response(
         `/* farkad: this window's build could not be established (${why}); refusing to `
         + `serve another build's bytes. Reload the page. */\n`,
@@ -442,17 +800,27 @@ function failClosed(request, why) {
             statusText: 'farkad: build identity unknown',
             headers: {
                 'Content-Type': 'text/plain; charset=utf-8',
-                'X-Farkad-Fail-Closed': String(why)
+                'X-Farkad-Fail-Closed': String(why),
+                // Which window was refused. A refusal that does not say who it is about
+                // cannot be matched against what is on the disk, which is the first thing
+                // anybody debugging this has to do.
+                'X-Farkad-Client': String(clientId || '')
             }
         }
     );
 }
 
-// One shelf, then the network. Never a search across shelves.
-function serveFrom(cacheName, request) {
+// One shelf. Never a search across shelves, and the network only when the caller has
+// established that the origin is serving the same build the shelf holds - which is true
+// for THIS build and false for every other.
+function serveFrom(cacheName, request, allowNetwork) {
     return caches.open(cacheName)
         .then(cache => cache.match(request))
-        .then(hit => hit || fetch(request));
+        .then(hit => {
+            if (hit) return hit;
+            if (allowNetwork) return fetch(request);
+            return failClosed(request, 'shelf-gap:' + cacheName);
+        });
 }
 
 function timedFetch(request, timeout) {
@@ -463,6 +831,33 @@ function timedFetch(request, timeout) {
             error => { clearTimeout(timer); reject(error); }
         );
     });
+}
+
+// The document's own fail-closed answer. A 503 body of plain text where a page belongs
+// renders as a wall of text in a browser tab; this is the same refusal, said in the
+// language of the people who will see it, with the diagnostic header the tests match on
+// and nothing on the disk touched.
+function cannotStart(why) {
+    return new Response(
+        '<!doctype html><html dir="rtl" lang="he"><meta charset="utf-8">'
+        + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        + '<body style="font-family:system-ui;padding:2rem;text-align:center">'
+        + '<h1>האפליקציה לא נפתחה</h1>'
+        + '<p>המכשיר לא הצליח לרשום איזו גרסה חלון זה מריץ, ולכן האפליקציה לא הופעלה - '
+        + 'כדי שלא תרוץ חצי גרסה אחת וחצי אחרת.</p>'
+        + '<p>נסה לרענן. אם זה חוזר, סגור את שאר החלונות של האפליקציה ופתח מחדש. '
+        + 'שום נתון לא נמחק.</p>'
+        + `<p style="opacity:.6;font-size:.8rem">${why}</p>`
+        + '</body></html>',
+        {
+            status: 503,
+            statusText: 'farkad: build identity could not be recorded',
+            headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'X-Farkad-Fail-Closed': String(why)
+            }
+        }
+    );
 }
 
 function offlineFallback() {
@@ -488,12 +883,17 @@ self.addEventListener('message', event => {
     // the old build is replaced by one of this build, the old cache can go, instead of
     // waiting for the next launch.
     if (event.data && event.data.type === 'running' && typeof event.data.build === 'string') {
-        const id = event.source && event.source.id;
-        // Twice: now, and again a moment later. A window that has just been closed can
-        // still be listed by clients.matchAll for a short while, and while it is listed
-        // it is a window running something - so the first pass correctly collects
-        // nothing, and without the second the shelves would sit there until the next
-        // navigation, which on an installed app might be tomorrow.
-        event.waitUntil(rememberClient(id, event.data.build).then(() => reapLater()));
+        // What this message is NOT any more: a source of identity. It used to be written
+        // straight to the durable record, which made the page the authority on which
+        // build it is running - and the page is the party being placed. Any window could
+        // name any build and be believed, and a window that named a shelf it was not
+        // running would then be served that shelf.
+        //
+        // Identity comes from the worker now: recorded at the navigation that created the
+        // window, or enrolled at the activate that claimed it. This message says only
+        // "something changed, look again", which is all it was ever needed for - it is
+        // what lets the old shelf go the moment its last window is replaced, instead of
+        // at the next launch, which on an installed app might be tomorrow.
+        event.waitUntil(reapLater());
     }
 });

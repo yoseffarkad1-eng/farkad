@@ -50,6 +50,12 @@ import { suite, check, given, report } from './runner.mjs';
 import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 import { settle } from './harness.mjs';
 
+// The caches that are not build shelves. farkad-clients holds which window is running
+// which build; farkad-shelves holds each shelf's lifecycle state, which build is active,
+// and the per-build asset manifests. Neither is served out of as a shelf and neither is
+// reaped as one, so neither belongs in a list of shelves.
+const BOOKKEEPING = new Set(['farkad-clients', 'farkad-shelves']);
+
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const EXEC = process.env.CHROME_PATH || undefined;
 
@@ -604,7 +610,7 @@ let threeState = null;
     // membership test and was handed the OLDEST shelf on the device. It is never reaped
     // as a shelf and never served out of as one; tests/build.test.mjs pins both.
     const keys = await cacheKeys(asking);
-    const shelves = keys.filter(name => name !== 'farkad-clients');
+    const shelves = keys.filter(name => !BOOKKEEPING.has(name));
     check('all three builds\' shelves are on the disk at once, oldest first',
         shelves.length === 3 && shelves[0] === STAMP.v85.cache
         && shelves[1] === STAMP.v86.cache && shelves[2] === STAMP.v87.cache, keys.join());
@@ -676,7 +682,7 @@ let threeState = null;
     suite('a shelf goes when nothing is running it, and not before');
 
     const { asking, staying } = threeState;
-    const before = (await cacheKeys(asking)).filter(name => name !== 'farkad-clients');
+    const before = (await cacheKeys(asking)).filter(name => !BOOKKEEPING.has(name));
     check('while a window is still running an old build, nothing is reaped',
         before.length === 3, before.join());
 
@@ -706,10 +712,15 @@ let threeState = null;
     await asking.reload({ waitUntil: 'load' });
     await asking.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null,
         { timeout: 20000, polling: 100 });
+    // The filter is spelled out here rather than using BOOKKEEPING: this function is
+    // evaluated in the PAGE, where a constant declared in this file does not exist, and a
+    // ReferenceError inside waitForFunction reads exactly like the condition never coming
+    // true - a green-looking wait that is really a broken one.
     const reaped = await asking.waitForFunction(name => caches.keys().then(keys =>
-        keys.filter(key => key !== 'farkad-clients').join() === name),
+        keys.filter(key => key !== 'farkad-clients' && key !== 'farkad-shelves')
+            .join() === name),
         STAMP.v87.cache, { timeout: 25000, polling: 200 }).then(() => true, () => false);
-    const after = (await cacheKeys(asking)).filter(name => name !== 'farkad-clients');
+    const after = (await cacheKeys(asking)).filter(name => !BOOKKEEPING.has(name));
     check('once nothing is running them, the unreferenced shelves go',
         reaped && after.length === 1 && after[0] === STAMP.v87.cache, after.join());
 
