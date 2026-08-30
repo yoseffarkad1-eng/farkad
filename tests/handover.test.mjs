@@ -51,6 +51,7 @@ import { join, dirname, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { suite, check, same, given, report } from './runner.mjs';
+import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 import { settle } from './harness.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -61,7 +62,16 @@ const EXEC = process.env.CHROME_PATH || undefined;
 // so the same file can be run against a scratch clone before the stamps land: without
 // it, a run from any other directory silently measures whatever repository happens to
 // sit above it and reports the answer as if it were about this one.
-const REPO = process.env.FARKAD_REPO || fileURLToPath(new URL('..', import.meta.url));
+// Re-rootable, and bound. FARKAD_REPO points this suite at another tree; on its own
+// that is an absolute path written where no regex over source can see it, so it is
+// refused unless FARKAD_EXPECT_SHA names the commit that tree is expected to be AND the
+// tree's production bytes match that commit's Git blobs. Without the variable the answer
+// is this checkout, which is the only default that cannot be pointed elsewhere.
+const REPO_ENV = rootFromEnv(fileURLToPath(new URL('..', import.meta.url)));
+const REPO_REFUSAL = refuseUnlessVerified(REPO_ENV.root, REPO_ENV.overridden, REPO_ENV.expect);
+given('the tree this suite reads is the tree it was pointed at',
+    REPO_REFUSAL === null, String(REPO_REFUSAL));
+const REPO = REPO_ENV.root;
 
 // The released build this deploy hands over FROM. It ages: when the next build ships,
 // this moves to it, and that is a line in docs/releases.md rather than a mechanism.

@@ -17,6 +17,7 @@
 // browser binary, and PLAYWRIGHT_MODULE for a playwright installed somewhere else.
 
 import { serve } from './serve.mjs';
+import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const EXEC = process.env.CHROME_PATH || undefined;
@@ -26,12 +27,27 @@ const server = process.env.SMOKE_URL
   : await serve(new URL('..', import.meta.url).pathname);
 const BASE = server.url;
 
+// Whatever the ORIGIN handed the browser, hashed against the commit.
+//
+// SMOKE_URL points this suite at a server somebody is already running. Nothing checked
+// what that server served, so an origin rooted at another tree passed every check in this
+// file and the count meant nothing. Each shell path is fetched and compared with the Git
+// blob at the commit under test - which is also the honest answer to "which bytes did
+// these numbers come from".
+const SERVED_ROOT = new URL('..', import.meta.url).pathname;
+const SERVED_SHA = expectedShaFor(SERVED_ROOT);
+const SERVED = await verifyServedAssets(BASE, SERVED_ROOT, SERVED_SHA);
+
+
 const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 const results = [];
 const check = (name, pass, detail = '') => {
   results.push({ name, pass, detail });
   console.log(`${pass ? '  PASS' : '**FAIL**'}  ${name}${detail ? '  — ' + detail : ''}`);
 };
+
+check('the origin served this commit, byte for byte',
+  SERVED.ok, `${SERVED.checked} assets; ${SERVED.wrong.slice(0, 3).join(' | ')}`);
 
 async function open() {
   const ctx = await browser.newContext();

@@ -23,8 +23,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 
-const ROOT = process.env.FARKAD_REPO || join(dirname(fileURLToPath(import.meta.url)), '..');
+// See tests/treecheck.mjs: an override must name the commit it is allowed to point at.
+const ROOT_ENV = rootFromEnv(join(dirname(fileURLToPath(import.meta.url)), '..'));
+const ROOT_REFUSAL = refuseUnlessVerified(ROOT_ENV.root, ROOT_ENV.overridden, ROOT_ENV.expect);
+given('the tree this suite reads is the tree it was pointed at',
+    ROOT_REFUSAL === null, String(ROOT_REFUSAL));
+const ROOT = ROOT_ENV.root;
 const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
 const SHEETJS = process.env.FARKAD_SHEETJS ||
     join(ROOT, 'node_modules/xlsx/dist/xlsx.full.min.js');

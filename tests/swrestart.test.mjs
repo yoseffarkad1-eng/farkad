@@ -47,6 +47,7 @@ import { join, dirname, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { suite, check, given, report } from './runner.mjs';
+import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 import { settle } from './harness.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -55,7 +56,12 @@ const EXEC = process.env.CHROME_PATH || undefined;
 // The repository the trees come out of. Resolved from this file's own location, so the
 // copy that lives in tests/ measures the tree it ships in. The override exists only so
 // the same file can be run from a scratch directory before it lands.
-const REPO = process.env.FARKAD_REPO || fileURLToPath(new URL('..', import.meta.url));
+// See tests/treecheck.mjs: an override must name the commit it is allowed to point at.
+const REPO_ENV = rootFromEnv(fileURLToPath(new URL('..', import.meta.url)));
+const REPO_REFUSAL = refuseUnlessVerified(REPO_ENV.root, REPO_ENV.overridden, REPO_ENV.expect);
+given('the tree this suite reads is the tree it was pointed at',
+    REPO_REFUSAL === null, String(REPO_REFUSAL));
+const REPO = REPO_ENV.root;
 
 // The two released builds this test opens windows of. They age the same way
 // tests/handover.test.mjs's OLD_COMMIT does: a line in docs/releases.md, not a mechanism.

@@ -193,37 +193,43 @@ function offences(name, src) {
 // ---------------------------------------------------------------- the other way out
 //
 // An environment variable is the same offence as an absolute path, written where no regex
-// over source can see it. Three suites accept FARKAD_REPO and re-root everything they
-// read from it; four accept SMOKE_URL and serve the app from an origin that may be any
-// tree at all. Those seams are real and useful - the handover suite needs two trees - so
-// the rule is not "no env var". It is: a suite that takes one must SAY which bytes it
-// ended up with, and the default with no variable set must be this checkout.
+// over source can see it. Those seams are real and useful - the handover suite genuinely
+// needs two trees - so the rule is not "no env var". It is that every one of them goes
+// through ONE instrument, tests/treecheck.mjs, which refuses an override that does not
+// name the commit it is allowed to point at and whose bytes do not match that commit's
+// Git blobs. A suite that reads process.env itself is a suite that has stepped round it.
+//
+// tests/blobs.test.mjs is where that instrument is proved, against a real second
+// worktree with a sentinel planted in it.
 {
-    suite('a suite re-rooted by the environment still says which bytes it read');
+    suite('every re-rooting seam goes through the one instrument');
 
     const files = readdirSync(HERE).filter(name => /\.(mjs|js)$/.test(name));
-    const rooted = files.filter(name => {
-        const src = readFileSync(join(HERE, name), 'utf8');
-        return /process\.env\.(FARKAD_REPO|SMOKE_URL|FARKAD_ROOT|FARKAD_SHEETJS)/.test(src);
-    }).sort();
+    const reads = files.filter(name => name !== 'treecheck.mjs'
+        && /process\.env\.(FARKAD_REPO|FARKAD_EXPECT_SHA)/.test(
+            readFileSync(join(HERE, name), 'utf8'))).sort();
+    check('no suite reads the re-rooting variables for itself',
+        reads.length === 0, reads.join(', '));
 
-    given('the seams are still there to be checked', rooted.length > 0, rooted.join(', '));
+    // SMOKE_URL is read by the browser suites, because it is a URL and not a tree - but
+    // each of them must then hash what that origin actually served.
+    const served = files.filter(name =>
+        /process\.env\.SMOKE_URL/.test(readFileSync(join(HERE, name), 'utf8'))).sort();
+    const unhashed = served.filter(name =>
+        !/verifyServedAssets/.test(readFileSync(join(HERE, name), 'utf8')));
+    check('and every suite that takes an origin hashes what it served',
+        unhashed.length === 0, unhashed.join(', '));
 
-    // Every one of them falls back to this checkout when nothing is set. A suite whose
-    // default is somewhere else is a suite that tests another tree by accident.
-    const noDefault = rooted.filter(name => {
-        const src = readFileSync(join(HERE, name), 'utf8');
-        return !/import\.meta\.url/.test(src);
-    });
-    check('each of them defaults to its own checkout',
-        noDefault.length === 0, noDefault.join(', '));
+    same('the suites that take an origin are the ones we know about', served,
+        ['mobile.test.mjs', 'print.test.mjs', 'recovery.browser.mjs', 'smoke.mjs']
+            .filter(name => files.includes(name)));
 
-    // And each one is named here, so adding a new seam is a decision somebody makes on
-    // purpose rather than a line that slips in.
-    same('the suites that can be re-rooted are the ones we know about', rooted,
-        ['handover.test.mjs', 'mobile.test.mjs', 'print.test.mjs', 'recovery.browser.mjs',
-            'smoke.mjs', 'swrestart.test.mjs', 'xlsx.test.mjs'].filter(
-            name => files.includes(name)));
+    // And the instrument itself defaults to this checkout when nothing is set, which is
+    // the only default that cannot be pointed somewhere else by accident.
+    const instrument = readFileSync(join(HERE, 'treecheck.mjs'), 'utf8');
+    check('the instrument falls back to the checkout it was called from',
+        /function rootFromEnv\(fallbackRoot\)/.test(instrument)
+        && /if \(!named\) return \{ root: fallbackRoot, overridden: false/.test(instrument));
 }
 
 report();
