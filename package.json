@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "npm run test:isolation && npm run test:blobs && npm run test:build && npm run test:data && npm run test:recovery && npm run test:adversarial && npm run test:probes && npm run test:capacity && npm run test:concurrency && npm run test:exports && npm run test:fence && npm run test:money && npm run test:method && npm run test:restore && npm run test:upgrade && npm run test:vehicles && npm run test:xlsx && npm run test:nonassertions && npm run test:labels && npm run test:labelcache && npm run test:sendclaim",
-    "test:all": "npm run test && npm run test:smoke && npm run test:print && npm run test:mobile && npm run test:update && npm run test:recovery-browser && npm run test:handover && npm run test:swrestart",
+    "test:all": "npm run test && npm run test:smoke && npm run test:print && npm run test:mobile && npm run test:update && npm run test:recovery-browser && npm run test:handover && npm run test:swrestart && npm run test:swidentity",
     "test:build": "node tests/build.test.mjs",
     "test:data": "node tests/data.test.mjs",
     "test:recovery": "node tests/recovery.test.mjs",
@@ -30,6 +30,7 @@
     "test:nonassertions": "node tests/nonassertions.test.mjs",
     "test:handover": "node tests/handover.test.mjs",
     "test:swrestart": "node tests/swrestart.test.mjs",
+    "test:swidentity": "node tests/swidentity.test.mjs",
     "test:smoke": "node tests/smoke.mjs",
     "test:print": "node tests/print.test.mjs",
     "test:mobile": "node tests/mobile.test.mjs",
