@@ -130,11 +130,17 @@ let seasonDump = null;
     await settle(TICK * 80);
 
     const synced = site.dump();
+    // Two FULL writes, whatever a full write holds. It was spelled 600 here, which was
+    // two times the path cap at the time; the cap moved when every write started carrying
+    // the ordering envelope, and a hard-coded 600 then measured arithmetic rather than
+    // behaviour. Read from the app's own constant so it cannot drift again.
+    const sentInTwo = site.global('MAX_PATHS_PER_WRITE') * 2;
     check('two writes landed and the third did not, so the rest is still owed',
-        cloud.writes.length === 2 && site.Sync.pendingCount() === SEASON_EDITS - 600,
-        `${cloud.writes.length} writes, ${site.Sync.pendingCount()} pending`);
+        cloud.writes.length === 2 && site.Sync.pendingCount() === SEASON_EDITS - sentInTwo,
+        `${cloud.writes.length} writes, ${site.Sync.pendingCount()} pending, `
+        + `${sentInTwo} paths in two writes`);
     check('what the cloud has is off the disk, and took its acknowledgements with it',
-        opKeys(synced).length === SEASON_EDITS - 600
+        opKeys(synced).length === SEASON_EDITS - sentInTwo
         && ackKeys(synced).length === 0 && beatKeys(synced).length === 0,
         `${opKeys(synced).length} op / ${ackKeys(synced).length} ack / ${beatKeys(synced).length} beat`);
     check('the write tick is one key on the whole device, not one per record',
