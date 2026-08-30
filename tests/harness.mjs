@@ -45,6 +45,34 @@ const FILES = [
 
 const SOURCE = FILES.map(file => ({ file, code: readFileSync(join(ROOT, file), 'utf8') }));
 
+// The build stamp, as js/app.js declares it.
+//
+// app.js is not in the list above - it is boot and view switching, and a device here has
+// no views - but the stamp it declares is read by the DATA layer: store.js records which
+// build last kept the write fence, and recovery decides what a snapshot may claim partly
+// from that. With no APP_VERSION in the context, `typeof APP_VERSION === 'string'` was
+// false in every device in every suite, so that half of the fence was never once executed
+// in Node while being fully live in the app. Devices get the real stamp; a device standing
+// in for another build is given that build's.
+const APP_STAMP = (/const APP_VERSION = '([^']+)'/
+    .exec(readFileSync(join(ROOT, 'js/app.js'), 'utf8')) || [])[1] || null;
+
+export function appStamp() {
+    return APP_STAMP;
+}
+
+// The load order, published so a suite can build the same device out of a DIFFERENT tree.
+//
+// One question needs that and cannot be faked: what happens on a disk two builds are
+// sharing. The build in the field writes the records this build's rescue file carries and
+// knows nothing about the fence that file's stability claim rests on - and a synthetic
+// "old writer" written in this checkout is not evidence, because it is written by somebody
+// who has read the fence. tests/fence.legacy.test.mjs loads the real bytes of the released
+// build out of Git and runs them beside this one, on one localStorage.
+export function loadOrder() {
+    return FILES.slice();
+}
+
 // The bytes every device in every suite is actually running, named and hashed.
 //
 // A suite that reads production code by an absolute path tests whatever tree happened to
@@ -286,6 +314,10 @@ export function makeDevice(options = {}) {
     const downloads = [];
     const sandbox = {
         localStorage,
+        // See APP_STAMP. A classic script's top-level `const` is a binding rather than a
+        // property, so this is spelled as a sandbox global on purpose: it is what
+        // `typeof APP_VERSION` resolves against inside store.js.
+        APP_VERSION: options.appVersion || APP_STAMP,
         // The test seam for the shipped feature gates. Defined BEFORE the app's scripts
         // run, which is the only moment it can be read - schema.js freezes the flags at
         // definition time. A device given no flags gets exactly what a person installs.
@@ -309,7 +341,12 @@ export function makeDevice(options = {}) {
     sandbox.self = sandbox;
 
     const context = vm.createContext(sandbox);
-    SOURCE.forEach(({ file, code }) => {
+    // options.sources runs a device on bytes from somewhere other than this checkout -
+    // the released build, read out of Git - so that "an older window writing this disk"
+    // is the real older window. A suite that uses it publishes the hashes of what it
+    // loaded, the same way loadedSources() publishes these.
+    const running = options.sources || SOURCE;
+    running.forEach(({ file, code }) => {
         vm.runInContext(code, context, { filename: file });
     });
 

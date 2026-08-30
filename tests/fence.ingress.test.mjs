@@ -500,8 +500,14 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
 
     const original = String(paused.Store.durableGet(SCHEDULE));
     const bracket = {};
-    shared2.interleave((key, value) => {
-        if (key !== TICK) return;
+    // Re-armed until the counter is the key being read. interleave fires once, on the next
+    // read of ANY key, and then clears itself - so a hook aimed at one record is consumed
+    // by whatever happens to be read first. That was the counter when this was written;
+    // bumpWriteTick reads the build stamp before it now, and the bracket silently never
+    // ran. A hook that filters by key has to put itself back, or it is measuring the
+    // ordering of reads rather than the thing it names.
+    const arm = () => shared2.interleave((key, value) => {
+        if (key !== TICK) { arm(); return; }
         bracket.stale = value;
         // One durable write by somebody else, so the exporter's first look at the counter
         // is one ahead of the number the paused tab is holding.
@@ -514,6 +520,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
         other.Store.set(SCHEDULE, original);
         bracket.second = exporter.global('Recovery').rawRecords();
     });
+    arm();
     // The paused tab's own write: the same bytes back, so no reading can see it by value.
     paused.Store.set(SCHEDULE, original);
     shared2.interleave(null);
