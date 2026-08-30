@@ -129,6 +129,15 @@ function twoBuilds() {
     given('this device is running this build',
         now.global('APP_VERSION') !== LEGACY_STAMP, String(now.global('APP_VERSION')));
 
+    // A page a service worker is in charge of, which is the only way two builds can be
+    // running on one origin at all: an uncontrolled tab is served by the network and the
+    // network hands every tab the same deploy. So this is the real configuration, and the
+    // census is the answer the worker's own client enrollment provides.
+    now.ctx.navigator = { serviceWorker: { controller: {} } };
+    given('the worker\'s census names a window of the older build',
+        now.Store.noteOpenBuilds([`farkad-${LEGACY_STAMP}`,
+            `farkad-${now.global('APP_VERSION')}`], false));
+
     // The v87 tab writes once, so the counter exists and the keeper stamp says v87 - which
     // is the state every one of these devices is in the moment this build is opened.
     // A record the rescue file carries: the counter only moves for those, by design.
@@ -161,11 +170,17 @@ function twoBuilds() {
     // moment of this disk, and must not say it is.
     check('the snapshot must not call this a quiet moment',
         snapshot.stable !== true,
-        `stable=${snapshot.stable} captures=${snapshot.captures.length} `
-        + `fenceBroken=${now.Store.fenceBroken()}`);
-    check('and something on the device must be able to say the fence is unsound',
-        now.Store.fenceBroken() === true,
-        `fenceBroken=${now.Store.fenceBroken()}`);
+        `stable=${snapshot.stable} captures=${snapshot.captures.length}`);
+
+    // And the device can say WHY, rather than only declining to make a claim.
+    check('a window of an older build is recognised as a writer this fence cannot see',
+        now.Store.foreignWriterOpen() === true,
+        `foreignWriterOpen=${now.Store.foreignWriterOpen()}`);
+    const told = now.global('Recovery').rawSnapshot();
+    check('and the snapshot says so in words a person can be shown',
+        told.stable !== true
+        && told.unstableBecause.some(why => /another build/.test(why)),
+        `stable=${told.stable} because ${JSON.stringify(told.unstableBecause)}`);
 }
 
 {
@@ -179,6 +194,10 @@ function twoBuilds() {
     const { disk, old, now } = twoBuilds();
     // A record the rescue file carries: the counter only moves for those, by design.
     now.Store.set('scheduleData:v2', schedule({ '2026-08-03': day('p_01') }));
+    now.ctx.navigator = { serviceWorker: { controller: {} } };
+    given('the worker\'s census names a window of the older build',
+        now.Store.noteOpenBuilds([`farkad-${LEGACY_STAMP}`,
+            `farkad-${now.global('APP_VERSION')}`], false));
 
     // Nothing has been written by the old tab. It is merely OPEN, which is enough: it may
     // write at any point during the export, and the export cannot wait to find out.
@@ -186,6 +205,16 @@ function twoBuilds() {
     check('an export cannot claim stability while a window of an older build is open',
         snapshot.stable !== true,
         `stable=${snapshot.stable}; the ${LEGACY_STAMP} tab is open and has written nothing yet`);
+
+    // And a controlled page that has never been told anything is not entitled to assume it
+    // is alone. "Nobody has reported" is not "nobody is there".
+    const quiet = makeDevice({ deviceId: 'd_quiet' });
+    quiet.ctx.navigator = { serviceWorker: { controller: {} } };
+    quiet.Store.set('scheduleData:v2', schedule({ '2026-08-03': day('p_01') }));
+    check('and a page with a worker but no census does not assume it is alone',
+        quiet.Store.foreignWriterOpen() === null
+        && quiet.global('Recovery').rawSnapshot().stable !== true,
+        `foreignWriterOpen=${quiet.Store.foreignWriterOpen()}`);
 }
 
 {
@@ -215,17 +244,33 @@ function twoBuilds() {
         b.Store.set('scheduleData:v2', schedule({ '2026-08-06': day('p_01') }));
         peak = b.Store.readWriteTick();
     });
+    const fenceBefore = a.Store.fenceState();
     a.Store.set('scheduleData:v2', schedule({ '2026-08-07': day('p_01') }));
     const landed = a.Store.readWriteTick();
 
-    given('the counter really did go up and come back down', peak > landed,
+    given('the shared counter really did go up and come back down', peak > landed,
         `${start} -> peak ${peak} -> landed ${landed}`);
-    check('a counter that went backwards leaves a durable mark for every tab',
-        disk.getItem('farkad:writeTick:broken') !== null,
-        `broken=${JSON.stringify(disk.getItem('farkad:writeTick:broken'))}`);
-    check('and the other tab, which did not do it, can see it too',
-        b.Store.fenceBroken() === true,
-        `b.fenceBroken=${b.Store.fenceBroken()}`);
+
+    // The shared counter is still a read-modify-write and still goes backwards - it is
+    // kept only because a build in the field reads it. What must not go backwards is the
+    // EVIDENCE, and the evidence is now every tab's own counter together. For that set to
+    // read the same across those writes, a tab would have to lower its own count, and no
+    // tab ever writes another's key or lowers its own.
+    given('the evidence was readable throughout',
+        fenceBefore !== null && a.Store.fenceState() !== null,
+        `${fenceBefore} -> ${a.Store.fenceState()}`);
+    const valuesOf = text => String(text).split(' ').filter(Boolean)
+        .map(part => Number(part.split('=')[1]));
+    const wasValues = valuesOf(fenceBefore);
+    const nowValues = valuesOf(a.Store.fenceState());
+    check('the evidence a snapshot compares moved, and every part of it moved forward',
+        a.Store.fenceState() !== fenceBefore
+        && nowValues.length >= wasValues.length
+        && wasValues.every((value, at) => nowValues[at] >= value),
+        `before ${fenceBefore} / after ${a.Store.fenceState()}`);
+    check('and each tab\'s evidence has exactly one author, so none can be put back',
+        Object.keys(disk).filter(key => key.indexOf('farkad:writeTick:tab:') === 0).length === 2,
+        Object.keys(disk).filter(key => key.indexOf('farkad:writeTick:tab:') === 0).join(' '));
 }
 
 {
@@ -239,21 +284,33 @@ function twoBuilds() {
     // A record the rescue file carries: the counter only moves for those, by design.
     now.Store.set('scheduleData:v2', schedule({ '2026-08-03': day('p_01') }));
 
-    const before = now.Store.readWriteTick();
-    let peak = before;
-    // Another tab writes twice and the counter reaches before+2 - then something puts the
-    // counter back. A paused read-modify-write does exactly this, and so does a browser
-    // restoring a storage snapshot after a crash.
-    onReadOf(disk, 'scheduleData:v2', 1, () => {
-        disk.setItem('farkad:writeTick', String(before + 2));
-        peak = Number(disk.getItem('farkad:writeTick'));
-        disk.setItem('farkad:writeTick', String(before));
+    // Another TAB writes the record and puts it back, between the snapshot's two readings.
+    // The bytes are identical at both ends, so comparing records sees nothing, and the
+    // shared counter is identical at both ends too because it was read-modify-written up
+    // and then set back. What survives this is the other tab's OWN counter, which only
+    // that tab writes and which only ever goes up.
+    const other = makeDevice({ sharedStorage: disk, deviceId: 'd_other' });
+    const original = String(disk.getItem('scheduleData:v2'));
+    const shared = now.Store.readWriteTick();
+    // On EVERY reading, not one. rawSnapshot retries up to five times and returns as soon
+    // as it finds a quiet pass - which is right, and means a single perturbation proves
+    // nothing: the second attempt would be quiet and the file would be stable, correctly.
+    // The scenario is a tab that is actively working while somebody exports, so it writes
+    // through all of them.
+    onReadOf(disk, 'scheduleData:v2', 40, () => {
+        other.Store.set('scheduleData:v2',
+            schedule({ '2026-08-03': day('p_01'), '2026-08-04': day('p_01') }));
+        other.Store.set('scheduleData:v2', original);
+        disk.setItem('farkad:writeTick', String(shared));
     });
     const snapshot = now.global('Recovery').rawSnapshot();
 
-    given('the counter went up and came back to where it started', peak === before + 2,
-        `${before} -> ${peak} -> ${now.Store.readWriteTick()}`);
-    check('two equal readings of a counter that moved are not a quiet moment',
+    given('the record was rewritten and put back, byte for byte',
+        String(disk.getItem('scheduleData:v2')) === original,
+        'both readings of the record are identical');
+    given('and the shared counter reads the same at both ends',
+        now.Store.readWriteTick() === shared, `${shared} -> ${now.Store.readWriteTick()}`);
+    check('a disk that was written under the snapshot is not a quiet moment',
         snapshot.stable !== true, `stable=${snapshot.stable}`);
 }
 
@@ -268,9 +325,10 @@ function twoBuilds() {
     writer.Store.set('scheduleData:v2', schedule({}));
     const exporter = makeDevice({ sharedStorage: disk, deviceId: 'd_x' });
 
-    disk.__quota = key => key === 'farkad:writeTick' || key === 'farkad:writeTick:broken';
+    // Every key the fence writes: the shared counter, this tab's own counter, and the
+    // broken mark itself. The record has room; its evidence does not.
+    disk.__quota = key => String(key).indexOf('farkad:writeTick') === 0;
     writer.Store.set('scheduleData:v2', schedule({ '2026-08-08': day('p_01') }));
-    disk.__quota = null;
 
     given('the record landed while its evidence did not',
         JSON.parse(disk.getItem('scheduleData:v2')).days['2026-08-08'] !== undefined
@@ -278,11 +336,21 @@ function twoBuilds() {
         `broken=${JSON.stringify(disk.getItem('farkad:writeTick:broken'))}`);
     check('the tab that could not store its evidence knows',
         writer.Store.fenceBroken() === true);
-    check('and so does every other tab, which is the whole point of writing it down',
+    check('and while the disk refuses the evidence, no tab claims a quiet moment either',
+        exporter.global('Recovery').rawSnapshot().stable !== true,
+        'the exporting tab cannot prove its own fence while the disk is refusing it');
+
+    // The phone does not stop after one edit. The next write - once an archive or a
+    // cleared quarantine has made room - carries the mark that could not be stored
+    // earlier, because the reason was held in memory and re-offered rather than dropped.
+    disk.__quota = null;
+    writer.Store.set('scheduleData:v2', schedule({ '2026-08-09': day('p_01') }));
+    check('the mark that could not be stored is written the moment there is room',
+        disk.getItem('farkad:writeTick:broken') !== null,
+        `broken=${JSON.stringify(disk.getItem('farkad:writeTick:broken'))}`);
+    check('and then every other tab can see it, which is why it is written down at all',
         exporter.Store.fenceBroken() === true,
         `exporter.fenceBroken=${exporter.Store.fenceBroken()}`);
-    check('so the export from that other tab cannot claim a quiet moment',
-        exporter.global('Recovery').rawSnapshot().stable !== true);
 }
 
 {
@@ -320,41 +388,59 @@ function twoBuilds() {
     // anywhere else.
     const device = makeDevice({ deviceId: 'd_pick' });
     const share = device.ctx;
+    device.Store.set('scheduleData:v2', schedule({ '2026-08-01': day('p_01') }));
+    device.State.load();
 
-    const A = {
-        'scheduleData:v2': schedule({ '2026-08-01': day('p_01'), '2026-08-02': day('p_01') })
-    };
-    const B = {
-        'scheduleData:v2': schedule({ '2026-08-01': day('p_01') }),
-        'farkad:outbox': JSON.stringify([{
-            id: 'op_1', path: 'days.2026-08-03.actual.w_01',
-            value: day('p_01').actual.w_01, at: '2026-08-03T18:00:00.000Z'
-        }])
-    };
+    // A real queued edit, made the way one is made: the 3rd is recorded while there is
+    // nowhere to send it, so it lives in the durable queue and not yet in the schedule
+    // record. That is the state a phone being rescued is actually in.
+    device.State.commit(device.call('assignPlace',
+        device.State.schedule, '2026-08-03', 'w_01', 'actual', 'p_01'));
 
-    const chosen = share.richestRecovery(A, [A, B]);
-    const daysIn = records => Object.keys(
-        JSON.parse(records['scheduleData:v2']).days || {}).sort();
-    const queued = records => {
-        try { return JSON.parse(records['farkad:outbox'] || '[]').length; }
-        catch (error) { return 0; }
+    // A capture taken MID-COMMIT: the queue record had landed, the schedule record had
+    // not yet been read back. That is not a contrivance - it is what a reading of a disk
+    // being written looks like, and it is the reason the rescue file carries several.
+    const B = device.global('Recovery').rawRecords();
+    const queueKeys = Object.keys(B).filter(key => device.Sync.isQueueKey(key));
+    B['scheduleData:v2'] = schedule({ '2026-08-01': day('p_01') });
+    given('one capture holds the third of August only in its queue',
+        queueKeys.length > 0
+        && !Object.keys(JSON.parse(B['scheduleData:v2']).days).includes('2026-08-03'),
+        `queue keys: ${queueKeys.join(' ')}`);
+
+    // The other capture is the same phone read a moment earlier or later: its schedule
+    // record has the 1st and the 2nd, and its queue has already been folded away. Neither
+    // reading contains the other.
+    const A = Object.assign({}, B);
+    queueKeys.forEach(key => { delete A[key]; });
+    A['scheduleData:v2'] = schedule({ '2026-08-01': day('p_01'), '2026-08-02': day('p_01') });
+
+    const chosen = share.dominantRecovery(A, [A, B], null);
+    const daysIn = records => {
+        try { return Object.keys(JSON.parse(records['scheduleData:v2']).days || {}).sort(); }
+        catch (error) { return []; }
     };
+    const queued = records =>
+        Object.keys(records).filter(key => device.Sync.isQueueKey(key)).length;
 
     given('neither capture contains the other',
-        daysIn(A).join() !== daysIn(B).join() && queued(A) === 0 && queued(B) === 1,
+        daysIn(A).join() !== daysIn(B).join() && queued(A) === 0 && queued(B) > 0,
         `A ${daysIn(A).join()} +${queued(A)} queued / B ${daysIn(B).join()} +${queued(B)} queued`);
 
-    // Either the chosen capture accounts for everything both readings hold, or nothing is
-    // chosen at all and the person is asked. What is forbidden is the third thing, which
-    // is what happens today: one is picked by a score and the other's evidence is gone.
-    const accountsForBoth = chosen !== null && chosen !== undefined
-        && daysIn(chosen).includes('2026-08-01')
-        && daysIn(chosen).includes('2026-08-02')
-        && queued(chosen) === 1;
+    const picked = chosen.records;
+    const accountsForBoth = picked
+        && daysIn(picked).includes('2026-08-01')
+        && daysIn(picked).includes('2026-08-02')
+        && queued(picked) > 0;
     check('an incomparable pair is not resolved by a score that ignores the queue',
-        accountsForBoth || chosen === null,
-        `chose the one holding ${daysIn(chosen).join()} and ${queued(chosen)} queued edits; `
-        + 'the third of August is in the other one and is now in no file at all');
+        chosen.asked === true || accountsForBoth,
+        chosen.asked
+            ? 'the person is asked'
+            : `chose the one holding ${daysIn(picked).join()} and ${queued(picked)} queued `
+                + 'edits; the third of August is in the other one and is now in no file at all');
+    check('and when it cannot be settled, every reading is kept to choose between',
+        chosen.asked !== true || chosen.candidates.length === 2,
+        `asked=${chosen.asked} candidates=${(chosen.candidates || []).length}`);
 }
 
 {

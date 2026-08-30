@@ -896,4 +896,29 @@ self.addEventListener('message', event => {
         // at the next launch, which on an installed app might be tomorrow.
         event.waitUntil(reapLater());
     }
+
+    // THE CENSUS: which builds have a window open on this origin, right now.
+    //
+    // The page cannot work this out and neither can the disk. A build that predates the
+    // write fence writes every record the rescue file carries and moves no counter doing
+    // it, so no reading of any counter can see it - and detecting it by a key means that
+    // writer writing a key it has never heard of. The only party that knows is this
+    // worker, which enrolled every window it claimed and recorded every one it handed a
+    // page to.
+    //
+    // Answered on the port the page opened, so the reply reaches the window that asked
+    // rather than every window of the origin.
+    if (event.data && event.data.type === 'which-builds') {
+        const reply = event.ports && event.ports[0];
+        if (!reply) return;
+        event.waitUntil(buildsInUse().then(state => {
+            reply.postMessage({
+                type: 'builds',
+                builds: [...state.held],
+                // A window whose identity nothing on this device can establish. It is
+                // running SOMETHING and this is not the place to guess what.
+                unknown: state.unknown === true
+            });
+        }).catch(() => reply.postMessage({ type: 'builds', builds: [], unknown: true })));
+    }
 });

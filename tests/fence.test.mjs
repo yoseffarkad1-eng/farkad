@@ -329,7 +329,11 @@ function abaDuringSnapshot(shared, tabA, tabB, key) {
     const held = seed(makeDevice());
     held.setToday('2026-03-01');
     record(held, '2026-03-01', 'w_01', 'p_01');
-    held.setQuota(key => key === 'farkad:writeTick');
+    // Every key the fence writes, not just the shared one. The evidence is one counter per
+    // tab now - farkad:writeTick:tab:<who>:<epoch> - because a single shared number is a
+    // read-modify-write another tab can put back. Faulting only the shared key would fault
+    // a value nothing consults and leave this suite measuring nothing.
+    held.setQuota(key => String(key).indexOf('farkad:writeTick') === 0);
 
     const landed = record(held, '2026-03-02', 'w_02', 'p_02');
     given('the day itself still reached the disk', landed === true);

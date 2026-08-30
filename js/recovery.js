@@ -193,25 +193,47 @@ const Recovery = {
             return records;
         };
 
+        // A window of another build, or one nothing can identify, is an UNFENCED WRITER.
+        // It writes the records this file carries and moves no counter doing it, so no
+        // reading of any counter can see it - and every phone in the field is such a
+        // window for the length of a rollout. Asked once, before the readings, because the
+        // answer cannot improve by being asked later.
+        //
+        // Three answers and the third is the point: true, false, and null for "nothing on
+        // this device has ever reported". Null is NOT false. A device that has never been
+        // told who is open cannot claim that nobody is.
+        const foreign = Store.foreignWriterOpen();
+        const alone = foreign === false;
+
+        // And the fence is EXERCISED before it is trusted. A disk can have room for the
+        // record and none for the evidence: the schedule write lands, the counter and the
+        // broken mark are both refused, and a tab that did none of it reads a disk with no
+        // trace and calls the file quiet. Writing our own counter and reading it back is
+        // the difference between "nothing reported a problem" and "this works".
+        const proven = Store.proveFence();
+
         for (let attempt = 0; attempt < 5; attempt += 1) {
-            const before = Store.readWriteTick();
+            const before = Store.fenceState();
             const first = keep(this.rawRecords());
             const second = keep(this.rawRecords());
-            const after = Store.readWriteTick();
+            const after = Store.fenceState();
 
-            // Quiet means: the counter was readable at both ends, it did not move, it did
-            // not go BACKWARDS - a read-modify-write across two calls lets a paused
-            // context put an older value back, measured going 7 to 5 on an unfaulted disk
-            // - and nothing on this origin has reported the fence broken. That last one
-            // used to be `Store.unfenced`, a boolean in THIS tab's memory, so a counter
-            // that had stopped moving in the other tab was invisible here and the file
-            // declared itself a single quiet moment of a disk being written under it.
-            const quiet = before !== null && after !== null && after >= before
+            // Quiet means: the WHOLE fence was readable at both ends and identical, no
+            // window of another build is open, and nothing on this origin has reported the
+            // fence broken.
+            //
+            // The fence is every tab's own counter, together. It used to be one shared
+            // number, which a paused tab could put back - measured going 1 to 3 to 2 with
+            // two equal readings around it - and comparing values could not see that. No
+            // tab writes another's counter now and none ever lowers its own, so a set that
+            // reads the same at both ends is a set nothing moved.
+            const quiet = proven && alone && before !== null && after !== null
                 && before === after && !Store.fenceBroken();
             if (quiet && sameRecordMap(first, second)) {
                 return {
                     records: second,
                     stable: true,
+                    unstableBecause: [],
                     storageReadable: Store.available,
                     captures: [second]
                 };
@@ -231,6 +253,14 @@ const Recovery = {
         return {
             records: last,
             stable: false,
+            // Why it is not stable, so the sentence a person reads can say something more
+            // useful than "something changed". These are facts about this device, not a
+            // diagnosis: a rescue file is opened by whoever is holding the phone.
+            unstableBecause: (foreign === true ? ['another build has a window open']
+                : foreign === null ? ['this device cannot say which builds are open'] : [])
+                .concat(Store.fenceBroken() ? ['the write fence is broken'] : [])
+                .concat(Store.fenceState() === null ? ['the write fence cannot be read'] : [])
+                .concat(proven ? [] : ['this device cannot record that a write happened']),
             storageReadable: Store.available,
             // Every reading, because on a device this file exists for the difference
             // between two of them may be the evening somebody is looking for.

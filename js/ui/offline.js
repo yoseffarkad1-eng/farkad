@@ -79,6 +79,38 @@ function registerOffline() {
     announce();
     container.addEventListener('controllerchange', announce);
 
+    // Ask the worker which builds have a window open, and hand the answer to Store.
+    //
+    // The rescue export's stability claim rests on nothing having written the disk while
+    // the file was being read, and the one writer it cannot see is a window running a
+    // build that predates the write fence - every phone in the field, for the length of a
+    // rollout. The worker knows, because it enrolled those windows before it claimed them.
+    //
+    // Asked on a fresh MessageChannel so the answer comes back to THIS window; asked again
+    // whenever the page is brought forward, because a window can be opened at any moment
+    // and a census from ten minutes ago is not an answer about now.
+    const census = () => {
+        const worker = container.controller;
+        if (!worker || typeof MessageChannel !== 'function') return;
+        try {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = event => {
+                const said = event.data;
+                if (!said || said.type !== 'builds') return;
+                Store.noteOpenBuilds(said.builds, said.unknown);
+            };
+            worker.postMessage({ type: 'which-builds' }, [channel.port2]);
+        } catch (error) {
+            // No answer is not an answer. Store treats a census it never received as
+            // "nobody has said", which is not the same as "nobody is there".
+        }
+    };
+    census();
+    container.addEventListener('controllerchange', census);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) census();
+    });
+
     container.addEventListener('controllerchange', () => {
         // This also fires the first time a worker claims the page, which is not an
         // update - reloading there makes every first visit load twice, and reload the

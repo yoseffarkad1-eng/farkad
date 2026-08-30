@@ -8504,11 +8504,17 @@ function brokenPhone(options = {}) {
     // THE SOURCE KEEPS EVERY BYTE. A complete before/after map, not a spot check on the
     // two keys the test happened to think of.
     const after = device.dump();
-    // The write counter is not a record: it is the fence a snapshot is bracketed by, and
-    // the export writes the handover, so it moves by design. Everything a person could
-    // lose is in the comparison; this is the one key that is allowed to differ.
+    // The fence is not a record: it is what a snapshot is bracketed by, and the export
+    // writes the handover, so it moves by design. It is also EXERCISED before the export
+    // claims anything - written and read back - because a disk can have room for the
+    // record and none for the evidence, and a tab that only ever reads the fence cannot
+    // tell that from a fence that is working.
+    //
+    // That is every farkad:writeTick key: the shared counter a build in the field reads,
+    // and this tab's own counter, which is what the fence actually compares. Everything a
+    // person could lose is still in the comparison.
     const lost = Object.keys(before)
-        .filter(key => key !== 'farkad:writeTick')
+        .filter(key => String(key).indexOf('farkad:writeTick') !== 0)
         .filter(key => after[key] !== before[key]);
     check('and the phone it came from kept every byte it had',
         lost.length === 0, JSON.stringify(lost.map(key => ({

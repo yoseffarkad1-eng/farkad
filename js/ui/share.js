@@ -863,9 +863,18 @@ function exportRecoveryData() {
     // The file name is Latin inside a Hebrew sentence, and the dialog writes textContent
     // only - so the LTR isolation travels in the string itself, U+2066 before and U+2069
     // after, or the bidi algorithm folds the date backwards.
+    // The sentence describes the FILE that was handed over, not one of the readings that
+    // went into it.
+    //
+    // The payload records `stable: snapshot.stable && evidence.stable && readable` - all
+    // three - and this used to choose its words from `snapshot.stable` alone. So a file
+    // that marks itself unstable was announced with the ordinary healthy title, and the
+    // one moment the app has to say "this was taken while something was changing" went by
+    // in silence. Whoever opens that file later has the flag; the person holding the phone
+    // had the sentence, and the two disagreed.
     if (typeof askTell === 'function') {
         askTell({
-            title: !snapshot.stable
+            title: !payload.stable
                 ? 'הקובץ נמסר, אבל נלקח בזמן שמשהו השתנה'
                 : (recorded ? 'הקובץ נמסר לדפדפן' : 'הקובץ נמסר, אבל לא נרשם במכשיר'),
             message: recorded
@@ -1149,27 +1158,137 @@ function renderStorageRoom() {
 // How much work a reading of the disk actually yields. Days, because a day is what
 // somebody is looking for; the record count breaks ties, because a reading that carries
 // more of the queue carries more unsent work.
-function recoveryWeight(records) {
-    if (!records || typeof records !== 'object' || Array.isArray(records)) return -1;
-    let days = 0;
-    try {
-        const parsed = JSON.parse(String(records['scheduleData:v2'] || '{}'));
-        days = Object.keys((parsed && parsed.days) || {}).length;
-    } catch (error) {
-        days = 0;
+// Choosing between two readings of a damaged disk.
+//
+// The rescue file can carry several captures of the same phone, taken moments apart while
+// the disk was being written. They are not versions of one thing in an order; they are
+// separate readings, and one of them can hold an evening the other does not.
+//
+// This used to score them: days in the schedule record times a thousand, plus the number
+// of records, highest wins. Two things are wrong with that and both lose work. It reads
+// only the schedule RECORD, so a capture whose extra evening is in the durable queue -
+// edits made, confirmed to the person, not yet folded in - scores lower than one without
+// it and is discarded. And it picks a winner between captures that are not comparable at
+// all, which is a guess about somebody's week dressed as arithmetic.
+//
+// So nothing is scored. Every capture is REPLAYED - queue and all, through the same
+// projector the phone uses - into the state that capture actually yields, and the states
+// are compared as sets of facts. A capture is chosen only when it provably contains
+// everything every other capture holds. When none does, none is chosen: the person is
+// asked, and every capture stays in the file either way.
+
+// Every fact a rebuilt state asserts, flattened so two states can be compared without
+// caring how they are shaped. Ordering is included where it is a decision somebody made:
+// the roster is drawn in the order it is stored, and a rescue that silently reorders it
+// has changed something the person arranged.
+function recoveryFacts(schedule) {
+    const facts = {};
+    const put = (key, value) => { facts[key] = canonicalJson(value); };
+    if (!schedule || typeof schedule !== 'object') return facts;
+
+    const days = schedule.days || {};
+    Object.keys(days).forEach(date => {
+        ['plan', 'actual'].forEach(layer => {
+            const held = (days[date] || {})[layer] || {};
+            Object.keys(held).forEach(workerId => {
+                put(`day:${date}:${layer}:${workerId}`, held[workerId]);
+            });
+        });
+        if ((days[date] || {}).vehicles !== undefined) {
+            put(`dayVehicles:${date}`, days[date].vehicles);
+        }
+    });
+
+    (schedule.workers || []).forEach(worker => put(`worker:${worker.id}`, worker));
+    (schedule.places || []).forEach(place => put(`place:${place.id}`, place));
+    (schedule.vehicles || []).forEach(vehicle => put(`vehicle:${vehicle.id}`, vehicle));
+    put('workerOrder', (schedule.workers || []).map(worker => worker.id));
+    put('placeOrder', (schedule.places || []).map(place => place.id));
+
+    const advances = schedule.advances || {};
+    Object.keys(advances).forEach(id => put(`advance:${id}`, advances[id]));
+
+    // The ledger is a map of families keyed by kind - { advances: { id: entry } } today -
+    // not a list. Walking it as an array threw, and the throw was being caught one level
+    // up as "this capture cannot be rebuilt", which is how a mistake in this function
+    // turned into a capture quietly dropped from the choice. Both shapes are walked, and
+    // neither is assumed.
+    const ledger = schedule.ledger;
+    if (Array.isArray(ledger)) {
+        ledger.forEach(entry => put(`ledger:${(entry || {}).id}`, entry));
+    } else if (ledger && typeof ledger === 'object') {
+        Object.keys(ledger).forEach(family => {
+            const held = ledger[family];
+            if (Array.isArray(held)) held.forEach(entry => put(`ledger:${family}:${(entry || {}).id}`, entry));
+            else if (held && typeof held === 'object') {
+                Object.keys(held).forEach(id => put(`ledger:${family}:${id}`, held[id]));
+            }
+        });
     }
-    return days * 1000 + Object.keys(records).length;
+
+    return facts;
 }
 
-function richestRecovery(records, captures) {
-    if (!Array.isArray(captures) || captures.length === 0) return records;
-    let best = records;
-    let bestWeight = recoveryWeight(records);
-    captures.forEach(capture => {
-        const weight = recoveryWeight(capture);
-        if (weight > bestWeight) { best = capture; bestWeight = weight; }
+// Does `big` account for everything `small` holds, without contradicting any of it?
+//
+// Two different answers to one fact - the same day of the same worker with different
+// hours - is a CONFLICT, and a conflict is not domination in either direction. That is
+// the case where a person has to look, and the case the old scoring silently resolved.
+function accountsFor(big, small) {
+    const keys = Object.keys(small);
+    for (let at = 0; at < keys.length; at += 1) {
+        if (big[keys[at]] !== small[keys[at]]) return false;
+    }
+    return true;
+}
+
+// The captures in the file, deduplicated, with the top-level records first: that is the
+// reading the exporting build itself chose to put at the front.
+function recoveryCandidates(records, captures) {
+    const all = [records].concat(Array.isArray(captures) ? captures : [])
+        .filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry));
+    return all.filter((entry, at) =>
+        all.findIndex(other => canonicalJson(other) === canonicalJson(entry)) === at);
+}
+
+// The one capture that contains all the others, or null.
+//
+// Null is an answer, not a failure: it means these readings disagree or each holds
+// something the other does not, and there is no arithmetic that can settle it. The caller
+// asks. Nothing is discarded either way - every capture is still in the file.
+function dominantRecovery(records, captures, liveSchedule) {
+    const candidates = recoveryCandidates(records, captures);
+    if (candidates.length <= 1) return { records: candidates[0] || records, asked: false };
+
+    const rebuilt = candidates.map(candidate => {
+        let found;
+        try {
+            found = scheduleFromRecoveryRecords(candidate, liveSchedule);
+        } catch (error) {
+            // A capture that cannot be rebuilt is not a candidate to be chosen - and is
+            // not evidence against the others either. It stays in the file.
+            return { candidate, facts: null, usable: false };
+        }
+        // OUTSIDE the catch, on purpose. Reading the facts out of a schedule that has
+        // already been rebuilt cannot fail for any reason that is about the data, so a
+        // throw here is a mistake in this file - and swallowing it would mark a perfectly
+        // good capture unusable and drop it from the choice, which is the exact failure
+        // this whole function exists to prevent. It happened: recoveryFacts walked the
+        // ledger as an array, both captures "failed to rebuild", and the old scoring
+        // answer came back by the side door.
+        return { candidate, facts: recoveryFacts(found.schedule), usable: true };
     });
-    return best;
+
+    const usable = rebuilt.filter(entry => entry.usable);
+    if (usable.length === 0) return { records: candidates[0], asked: false };
+    if (usable.length === 1) return { records: usable[0].candidate, asked: false };
+
+    const winners = usable.filter(entry =>
+        usable.every(other => other === entry || accountsFor(entry.facts, other.facts)));
+    if (winners.length === 0) {
+        return { records: null, asked: true, candidates: usable.map(entry => entry.candidate) };
+    }
+    return { records: winners[0].candidate, asked: false };
 }
 
 function looksLikeRecoveryFile(parsed) {
@@ -1447,7 +1566,17 @@ function readRecoveryFile(parsed) {
     // readings may be the evening somebody is looking for. So the richest one is used,
     // measured by the days it actually yields, and ties keep `records` - the reading the
     // export itself chose.
-    const records = richestRecovery(parsed.records, parsed.captures);
+    const chosen = dominantRecovery(parsed.records, parsed.captures, parsed.liveSchedule);
+    if (chosen.asked) {
+        // No capture contains the others. Picking one here would throw away an evening
+        // somebody worked, quietly, at the exact moment this file exists to prevent that.
+        const error = new Error('the rescue file holds readings that disagree');
+        error.needsChoice = chosen.candidates;
+        error.problems = ['הקובץ מכיל כמה קריאות של המכשיר, ואף אחת מהן לא מכילה את כולן. '
+            + 'צריך לבחור איזו קריאה לשחזר - שום קריאה לא נמחקה מהקובץ.'];
+        throw error;
+    }
+    const records = chosen.records;
     if (!records || typeof records !== 'object' || Array.isArray(records)) {
         throw new Error('not a farkad recovery file');
     }

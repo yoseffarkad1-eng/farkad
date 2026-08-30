@@ -55,6 +55,24 @@ const { suite, check, given, report } =
     await import(pathToFileURL(join(TESTS, 'runner.mjs')).href);
 
 const TICK = 'farkad:writeTick';
+// THE EVIDENCE, which is no longer that one key.
+//
+// The fence used to be a single shared counter, and every fault in this file was armed on
+// it by name. It is now one counter PER TAB - farkad:writeTick:tab:<who>:<epoch> - because
+// a shared counter is a read-modify-write that another tab can put back, measured going 1
+// to 3 to 2 with two equal readings around it and no mark anywhere. A tab only ever writes
+// its own key and only ever upward, so the set cannot move backwards at all.
+//
+// The shared key is still written, for a build in the field that reads it, and nothing
+// decides anything from it. So a fault armed on `TICK` alone now faults a value nobody
+// consults - the suite would go green while measuring nothing. These faults are armed on
+// everything the fence writes.
+const isFenceKey = key => String(key).indexOf('farkad:writeTick') === 0;
+const TAB_PREFIX = 'farkad:writeTick:tab:';
+// The keys that actually carry the evidence on this disk, in the order a snapshot sees
+// them. A test that wants to damage the fence damages these.
+const evidenceKeys = shared => Object.keys(shared)
+    .filter(key => key.indexOf(TAB_PREFIX) === 0).sort();
 const SCHEDULE = 'scheduleData:v2';
 const PENDING = 'farkad:pendingReplace';
 const LAST_READ = 'farkad:pendingReplace:v71';   // the last key every reading passes through
@@ -262,7 +280,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
 
     // No room for the counter and room for everything else. This is the phone at the end
     // of a long evening, and it is the state where pretending is worst.
-    tabB.setQuota(key => key === TICK);
+    tabB.setQuota(isFenceKey);
 
     const seen = abaDuringSnapshot(shared, tabA, tabB, SCHEDULE);
 
@@ -295,7 +313,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
 {
     suite('F2: the counter write is accepted and stored nowhere');
 
-    const disk = swallowing(sharedStore(), key => key === TICK);
+    const disk = swallowing(sharedStore(), isFenceKey);
     const { shared, tabA, tabB } = twoTabs(disk);
 
     given('nothing threw, so no tab was told anything',
@@ -326,17 +344,17 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
 
     // The disk takes the write and hands back something else. Nothing throws; the only
     // way to find out is to read it back.
-    tabB.corruptWhen(key => key === TICK);
+    tabB.corruptWhen(isFenceKey);
     tabB.Store.set(SCHEDULE, String(tabB.Store.durableGet(SCHEDULE)));
 
-    given('the counter on the disk is no longer a number',
-        /[^0-9]/.test(String(onDisk(shared, TICK))),
-        JSON.stringify(onDisk(shared, TICK)));
+    const damaged = evidenceKeys(shared).filter(key => /[^0-9]/.test(String(onDisk(shared, key))));
+    given('the evidence on the disk is no longer a number',
+        damaged.length > 0,
+        evidenceKeys(shared).map(key => `${key}=${JSON.stringify(onDisk(shared, key))}`).join(' '));
 
-    check('a counter that came back corrupted is not read as the number zero',
-        tabA.Store.readWriteTick() !== 0,
-        `on disk ${JSON.stringify(onDisk(shared, TICK))}, `
-        + `readWriteTick() -> ${JSON.stringify(tabA.Store.readWriteTick())}, was ${before}`);
+    check('evidence that came back corrupted is not read as a fence at zero',
+        tabA.Store.fenceState() === null,
+        `fenceState() -> ${JSON.stringify(tabA.Store.fenceState())}, was ${before}`);
 
     check('and somebody was told the fence stopped working',
         tabA.Store.unfenced === true || tabB.Store.unfenced === true,
@@ -363,11 +381,19 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
     ];
 
     NONSENSE.forEach(([label, bytes]) => {
-        const { tabA } = twoTabs();
+        const { shared, tabA } = twoTabs();
+        // Both: the shared counter a build in the field reads, and this tab's own counter,
+        // which is what a snapshot here actually compares. Damaging only the first would
+        // damage a value nothing consults.
         tabA.putRaw(TICK, bytes);
-        const read = tabA.Store.readWriteTick();
+        evidenceKeys(shared).forEach(key => tabA.putRaw(key, bytes));
         check(`a counter of ${label} does not read as the number zero`,
-            read !== 0, `readWriteTick() -> ${JSON.stringify(read)} for ${JSON.stringify(bytes)}`);
+            tabA.Store.readWriteTick() !== 0,
+            `readWriteTick() -> ${JSON.stringify(tabA.Store.readWriteTick())} `
+            + `for ${JSON.stringify(bytes)}`);
+        check(`and evidence of ${label} is not a fence at zero either`,
+            tabA.Store.fenceState() === null,
+            `fenceState() -> ${JSON.stringify(tabA.Store.fenceState())}`);
 
         const snapshot = tabA.global('Recovery').rawSnapshot();
         check(`and a snapshot taken over a counter of ${label} does not claim one moment`,
@@ -384,18 +410,29 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
 
     STUCK.forEach(([label, bytes]) => {
         const { shared, tabA, tabB } = twoTabs();
+        // Put the unusable value where the evidence lives. A counter that cannot be
+        // incremented used to freeze the fence for the life of the device: past 2^53 an
+        // integer plus one is itself, and four hundred digits is Infinity, which
+        // round-trips through String and Number and never reads back as a number again.
+        // The tab whose counter that is now rolls to a new key and counts from one in it,
+        // so the fence keeps working and the old value is left where it is - it is still
+        // evidence of writes that happened.
         tabA.putRaw(TICK, bytes);
+        evidenceKeys(shared).forEach(key => tabB.putRaw(key, bytes));
+        const stuckKeys = evidenceKeys(shared);
         const held = String(tabB.Store.durableGet(SCHEDULE));
-        const before = tabA.Store.readWriteTick();
+        const before = tabA.Store.fenceState();
 
         tabB.Store.set(SCHEDULE, held + ' ');
-        const mid = tabA.Store.readWriteTick();
+        const mid = tabA.Store.fenceState();
         tabB.Store.set(SCHEDULE, held);
-        const after = tabA.Store.readWriteTick();
-        check(`${label}: every durable write to a record the file carries moves it`,
-            mid !== before && after !== mid,
-            `${String(before)} -> ${String(mid)} -> ${String(after)}, `
-            + `on disk ${String(onDisk(shared, TICK)).slice(0, 24)}`);
+        const after = tabA.Store.fenceState();
+        check(`${label}: every durable write to a record the file carries moves the fence`,
+            mid !== null && after !== null && mid !== before && after !== mid,
+            `${String(before)} -> ${String(mid)} -> ${String(after)}`);
+        check(`${label}: the counter that cannot be incremented is left where it is`,
+            stuckKeys.every(key => String(onDisk(shared, key)) === bytes),
+            stuckKeys.map(key => `${key}=${String(onDisk(shared, key)).slice(0, 12)}`).join(' '));
 
         const seen = abaDuringSnapshot(shared, tabA, tabB, SCHEDULE);
         given(`${label}: the other tab wrote and put the old value back`,
@@ -412,7 +449,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
 
     const { shared, tabA, tabB } = twoTabs();
     const { before: S0, after: S1 } = twoStates(tabA);
-    tabB.corruptWhen(key => key === TICK);       // the fence, broken the quietest way
+    tabB.corruptWhen(isFenceKey);       // the fence, broken the quietest way
 
     const restore = restoreDuringExport(shared, tabB, { schedule: S0, pending: P0 },
         { schedule: S1, pending: P1 });
@@ -457,6 +494,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
     record(tabA, '2026-03-01', 'w_01', 'p_01');
 
     const start = tabA.Store.readWriteTick();
+    const fenceStart = tabA.Store.fenceState();
     const bytes = String(tabB.Store.durableGet(SCHEDULE));
     let stale = null;
     let peak = start;
@@ -475,6 +513,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
     waitForTick();
     tabB.Store.set(SCHEDULE, bytes);
     shared.interleave(null);
+    const fenceAfter = tabA.Store.fenceState();
 
     const landed = tabA.Store.readWriteTick();
     given('the paused tab really did read an out-of-date counter',
@@ -482,8 +521,23 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
     given('and other contexts moved it on while it was paused', peak > Number(start),
         `${start} -> ${peak}`);
 
+    // The SHARED counter does go backwards here, and that is now expected and harmless:
+    // it is written for a build in the field that reads it, and nothing decides anything
+    // from it. What must never go backwards is the evidence, and it cannot - a tab writes
+    // only its own key and only upward, so tab C's two writes are still there in the set
+    // no matter what tab B's stale value does to the shared number.
+    const parts = String(fenceAfter).split(' ').filter(Boolean);
+    const wasParts = String(fenceStart).split(' ').filter(Boolean);
+    const valueOf = (list, key) => {
+        const hit = list.find(part => part.indexOf(key + '=') === 0);
+        return hit ? Number(hit.split('=')[1]) : 0;
+    };
     check('the fence never goes backwards',
-        landed >= peak, `read ${stale}, others reached ${peak}, ended at ${landed}`);
+        fenceAfter !== null && fenceStart !== null
+        && parts.length >= wasParts.length
+        && wasParts.every(part => valueOf(parts, part.split('=')[0]) >= Number(part.split('=')[1])),
+        `shared counter ${stale} -> ${peak} -> ${landed}; `
+        + `evidence ${JSON.stringify(fenceStart)} -> ${JSON.stringify(fenceAfter)}`);
 
     // What that costs, in the exact order rawSnapshot does it: the counter is read, the
     // records are read twice with another tab writing in between, the counter is read
@@ -513,7 +567,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
         // is one ahead of the number the paused tab is holding.
         other.Store.set('farkad:provenance:v1', '{"mine":["w_01"]}');
 
-        bracket.before = exporter.Store.readWriteTick();
+        bracket.before = exporter.Store.fenceState();
         bracket.first = exporter.global('Recovery').rawRecords();
         // The disk holds something else, and puts it back: the ABA the counter exists for.
         other.Store.set(SCHEDULE, original + ' ');
@@ -524,8 +578,12 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
     // The paused tab's own write: the same bytes back, so no reading can see it by value.
     paused.Store.set(SCHEDULE, original);
     shared2.interleave(null);
-    bracket.after = exporter.Store.readWriteTick();
+    bracket.after = exporter.Store.fenceState();
 
+    // The app's own verdict, in the app's own terms: the whole fence read at both ends,
+    // Recovery's own sameRecordMap, Store.unfenced. Only the ORDER is supplied by the
+    // test, because the paused tab's write has to land between the second reading and the
+    // second look at the fence.
     const sameRecordMap = exporter.global('sameRecordMap');
     const quiet = bracket.before !== null && bracket.after !== null
         && bracket.before === bracket.after && !exporter.Store.unfenced;
@@ -554,7 +612,7 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
     record(tabA, '2026-08-10', 'w_01', 'p_01');
     const { before: S0, after: S1 } = twoStates(tabA);
     const said = answering(tabA);
-    tabB.corruptWhen(key => key === TICK);
+    tabB.corruptWhen(isFenceKey);
 
     const restore = restoreDuringExport(shared, tabB, { schedule: S0, pending: P0 },
         { schedule: S1, pending: P1 });
