@@ -799,12 +799,24 @@ function replacementContent(source) {
 const RETRY_FIRST_MS = 2000;
 const RETRY_MAX_MS = 60000;
 
-// Most fields in one write. Someone can record for a month before they ever sign in -
+// Most EDIT paths in one write. Someone can record for a month before they ever sign in -
 // that is the ordinary way this app gets adopted - and the whole month is then waiting
 // in the outbox. Sent as a single update it is one enormous write against Firestore's
 // per-write limits, and if it is refused, NONE of it lands. In batches the queue drains
 // steadily and a refusal costs one batch, which is still on disk to retry.
-const MAX_PATHS_PER_WRITE = 300;
+//
+// The budget is about the WRITE, not about this number. Every write also carries
+// updatedAt, updatedBy, and the three ordering fields - protocol, revision, lastOpId -
+// so the cap on edits is the budget minus those five. It was 300 when there were two,
+// and lowering it to 297 keeps the write exactly the size it always was rather than
+// quietly spending the margin that number was chosen to leave.
+const MAX_PATHS_PER_WRITE = 297;
+
+// How many times one batch may be rebuilt against a newer revision before the device
+// stops and says so. Three is enough for the ordinary case - two other phones writing the
+// same evening - and small enough that a device which genuinely cannot get a word in
+// reports it instead of spinning. See the conflict branch in sendNow.
+const CAS_REBASE_LIMIT = 3;
 
 // How long a write may stay open before the app says the connection is bad.
 //
@@ -2742,6 +2754,19 @@ const FarkadSync = {
         this._sending = sent;
         this._stamp = null;
 
+        // THE ORDERING ENVELOPE, stamped last, onto the patch that is about to leave.
+        //
+        // Computed from the batch every time rather than cached. It is already stable for
+        // one batch by construction - the digest is over the operations themselves - so
+        // caching it bought nothing and cost everything: a cached id carried from the
+        // create of the document into the NEXT batch, the server found the receipt the
+        // create had written, answered "already applied", and the day was silently
+        // swallowed. Status said synced, the queue was pruned, and the evening was in no
+        // document anywhere. Which is exactly the failure the receipt exists to prevent,
+        // arriving through the receipt.
+        this._sendOpId = this.operationIdFor(sent);
+        this.stampProtocol(patch, this._sendOpId);
+
         // Through the chain, so that a whole-document replacement started after this one
         // cannot land before it. createDocument is inside the same slot on purpose - it
         // is this write, taking the other branch, not a second one.
@@ -2758,6 +2783,27 @@ const FarkadSync = {
                 // the same slot on purpose - this write taking the other branch, not a
                 // second one.
                 if (error && error.code === 'not-found') return this.createDocument(patch);
+
+                // THE DOCUMENT MOVED. Somebody else wrote between the base this write was
+                // built on and the moment it arrived.
+                //
+                // Rebasing and sending the SAME operation again is not a retry that could
+                // duplicate anything: the operation id is derived from the batch, so if
+                // the first attempt did land, the server answers from its receipt. What
+                // changes is only the revision the write claims.
+                //
+                // It is what keeps disjoint edits merging. Two people filling in one
+                // evening write different field paths; the second is refused for being
+                // built on a stale base, and without a rebase its day would be held for a
+                // conflict that is not one. Bounded, because a device that cannot get a
+                // word in after several tries is a device that should say so rather than
+                // spin.
+                if (error && error.code === 'conflict' && this._rebases < CAS_REBASE_LIMIT) {
+                    this._rebases += 1;
+                    if (Number.isInteger(error.revision)) this._revision = error.revision;
+                    this.stampProtocol(patch, this._sendOpId);
+                    return this.adapter.update(patch);
+                }
                 throw error;
             });
         })
@@ -2767,6 +2813,7 @@ const FarkadSync = {
                 const acked = this.acknowledge(sent);
                 this._sending = new Map();
                 this._retryAt = 0;
+                this._rebases = 0;
 
                 if (!acked) {
                     // The cloud has the batch and the queue could not be written to say
@@ -3027,10 +3074,24 @@ const FarkadSync = {
             return Promise.reject(
                 new Error('the record of what has been sent could not be stored; the document was not created'));
         }
+
+        // The ordering envelope, on the create as well. It is the first write of the
+        // document, so its revision is one and the rules accept nothing else - and it
+        // carries the same operation id as the update it is standing in for, because it
+        // IS that write taking the other branch, not a second one. Sent twice, the second
+        // attempt finds the receipt the first wrote.
+        //
+        // The patch is stamped too: when the create loses the race and comes back
+        // 'already-exists', the update below goes out against a document another device
+        // has just created, so its base is whatever that device left - which the snapshot
+        // that create published has by then told us.
+        this.stampProtocol(seed, this._sendOpId || this.operationIdFor(this._sending));
         return Promise.resolve(this.adapter.create(seed))
             .catch(error => {
                 if (error && error.code === 'already-exists') {
-                    return this.adapter.update(patch);
+                    return this.adapter.update(
+                        this.stampProtocol(patch, this._sendOpId
+                            || this.operationIdFor(this._sending)));
                 }
                 throw error;
             });
@@ -3381,6 +3442,17 @@ const FarkadSync = {
                         return Promise.reject(new Error(
                             'the right to send moved to another tab; the restore was not sent'));
                     }
+                    // The ordering envelope on the restore too. A whole-document
+                    // replacement is a write like any other and takes the same fence -
+                    // which is the point: a restore racing an ordinary edit used to have
+                    // no ordering at all, and the loser was silent.
+                    //
+                    // The operation id is the transaction's own, so a restore that is
+                    // retried after a request that may still have landed is recognised by
+                    // its receipt rather than applied a second time over work that
+                    // happened in between.
+                    this.stampProtocol(document,
+                        'r' + digestOf(String(envelope && envelope.transactionId)));
                     return Promise.resolve(this.adapter.save(document)).then(value => {
                         // And AGAIN, on the far side of the request. Reading the disk and
                         // then acting on what it said is two steps, and the other tab
@@ -3789,6 +3861,68 @@ const FarkadSync = {
     // three separate phones' clocks, and a device running a few minutes fast would judge
     // every incoming snapshot "older than mine" and quietly stop showing the other two
     // people's work - with no error, and nothing on screen to suggest it.
+    // ---------------------------------------------------------------- the ordering protocol
+    //
+    // The server orders the writes; this is the client's side of the same contract. See
+    // docs/sync-protocol.md, firestore.rules which enforces it, and tests/cas.test.mjs
+    // which measures this half.
+    //
+    // The base is READ, never assumed. It comes from the last snapshot the server sent -
+    // the only revision this device can honestly claim to have seen - so a write built
+    // against a base that has moved is refused rather than landing on somebody's evening.
+    PROTOCOL: 1,
+    _revision: null,
+    _sendOpId: null,
+    _rebases: 0,
+
+    // Every snapshot carries the revision it is. A document written by a build that
+    // predates the protocol carries none, and null is the honest answer for "this device
+    // has not been told" - it is not zero, and it is not a licence to guess.
+    noteRevision(raw) {
+        const said = raw && raw.revision;
+        if (!Number.isInteger(said) || said < 0) return;
+        // MONOTONIC. A snapshot never lowers the base.
+        //
+        // Firestore delivers a cached snapshot first and the server's afterwards, and the
+        // cached one can be behind. Taking whatever arrived last as the base meant a
+        // device that had already seen revision 4 built its next write against the cached
+        // 2 - which the rules refuse, correctly, and the edit never landed. Measured: the
+        // cached-first suite in tests/data.test.mjs, where a site edit stopped reaching
+        // the cloud at all.
+        //
+        // A revision only ever goes up: every accepted write increments it and a restore
+        // increments it too, so the highest number this device has been shown is the
+        // best base it has. Being too high is refused and rebased below; being too low
+        // would be refused forever, because nothing would ever correct it.
+        if (this._revision === null || said > this._revision) this._revision = said;
+    },
+
+    // The envelope this write travels in, stamped onto the patch itself - which is how it
+    // reaches the rules, since Firestore evaluates them against the document as it would
+    // be after the merge.
+    stampProtocol(patch, opId) {
+        patch.protocol = this.PROTOCOL;
+        patch.lastOpId = String(opId);
+        // No snapshot yet means no base. One is the only revision a document that does
+        // not exist can be created at, and the rules refuse anything else - so a device
+        // that guessed would simply be refused, which is the right failure.
+        patch.revision = (this._revision === null ? 0 : this._revision) + 1;
+        return patch;
+    },
+
+    // A stable name for one batch of operations.
+    //
+    // Built from the operations themselves - their paths, sequence numbers and operation
+    // ids - so the same batch sent twice carries the same name, which is what lets the
+    // server recognise the second attempt as a replay of the first rather than as a
+    // second edit. A fresh id per attempt would turn one edit into two.
+    operationIdFor(sent) {
+        const parts = [...sent.entries()]
+            .map(([path, item]) => `${path}#${item && item.seq}#${item && item.opId}`)
+            .sort();
+        return 'b' + digestOf(parts.join('|'));
+    },
+
     // The money in the RAW bytes, before normalising touches them. True means refused.
     //
     // This door had no gate at all. The three restore doors validate the raw document and
@@ -3824,6 +3958,13 @@ const FarkadSync = {
             this.fail(new Error('remote document is not a schedule'));
             return;
         }
+
+        // The base every write from here is built on, taken from the server's own answer
+        // rather than from anything this device believes. Recorded FIRST, before any of
+        // the branches below can return early: a snapshot this device refuses to ADOPT is
+        // still a snapshot that tells it what revision the document is at, and writing
+        // against a stale base is refused by the rules, which is a worse way to find out.
+        this.noteRevision(raw);
 
         // A restore is waiting to go out. Everything arriving right now is, by
         // definition, the state the person asked to replace - adopting it would undo

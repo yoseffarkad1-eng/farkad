@@ -146,21 +146,74 @@ if (!isConfigured()) {
             button.setAttribute('onclick', 'farkadSignOut()');
         }
 
+        // The receipts live under the schedule document, which is what firestore.rules
+        // matches on: schedules/{docId}/receipts/{opId}. Built from the same configured
+        // path as the document itself, so a project that renames it keeps them together.
+        const receiptRef = opId =>
+            doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'receipts', String(opId));
+
+        // One write, one receipt, one transaction. `apply` does the schedule half.
+        function withReceipt(payload, apply) {
+            return runTransaction(db, transaction =>
+                transaction.get(receiptRef(payload.lastOpId)).then(receipt => {
+                    // Already applied. Answering success is not optimism: the receipt is
+                    // immutable and was written in the same transaction as the revision it
+                    // names, so its existence IS the proof that this operation landed.
+                    if (receipt.exists()) return;
+                    return transaction.get(scheduleRef).then(snapshot => {
+                        if (!snapshot.exists()) {
+                            const error = new Error('No document to update');
+                            error.code = 'not-found';
+                            throw error;
+                        }
+                        const held = snapshot.data().revision;
+                        const base = Number.isInteger(held) ? held : 0;
+                        if (payload.revision !== base + 1) {
+                            const error = new Error('the document moved while this write '
+                                + 'was being prepared');
+                            error.code = 'conflict';
+                            error.revision = base;
+                            throw error;
+                        }
+                        apply(transaction);
+                        transaction.set(receiptRef(payload.lastOpId), {
+                            revision: payload.revision,
+                            at: new Date().toISOString(),
+                            by: payload.updatedBy || null
+                        });
+                    });
+                }));
+        }
+
         window.FarkadSync.connect({
             // Firestore merges dotted field paths server-side, so two people writing
             // days.2026-08-12.plan.w_01 and ...plan.w_07 both land. This is what lets the
             // three of them build the evening roster at the same time.
+            // Every write is a transaction now, and it writes TWO documents: the
+            // schedule and the immutable receipt for the operation it carries. See
+            // docs/sync-protocol.md and firestore.rules, which refuse either one without
+            // the other - getAfter() is what makes them land together.
+            //
+            // The receipt is read first. If it is already there, this operation has
+            // already been applied and the answer is success without touching anything:
+            // that is what makes retrying a request which may still have landed safe,
+            // rather than a way to record the same edit twice.
+            //
+            // A base that has moved comes back as `conflict`, carrying the revision the
+            // document is actually at, so the sync layer can rebuild the same operation
+            // against it. Firestore's own error for the rules refusing a write is
+            // 'permission-denied', which cannot be told apart from "you are not on the
+            // allowlist" - so the check is made here, in the transaction, where the real
+            // revision is in hand.
             update(patch) {
-                // 'not-found' travels back to the sync layer untouched. Answering it
-                // here used to mean writing an empty {} - which the rules refuse, since
-                // they require a timestamp on every write - so the first sync of a new
-                // project failed twice over and reported only "sync error". What to put
-                // in a document that does not exist yet is a question about the
-                // schedule, and this file is not allowed to know what a schedule is.
-                return updateDoc(scheduleRef, ...patchToUpdateArgs(patch));
+                return withReceipt(patch, transaction => {
+                    transaction.update(scheduleRef, ...patchToUpdateArgs(patch));
+                });
             },
             save(data) {
-                return setDoc(scheduleRef, data);
+                return withReceipt(data, transaction => {
+                    transaction.set(scheduleRef, data);
+                });
             },
 
             // The first write of a new project. A transaction rather than a plain set:
@@ -178,6 +231,11 @@ if (!isConfigured()) {
                             throw error;
                         }
                         transaction.set(scheduleRef, data);
+                        transaction.set(receiptRef(data.lastOpId), {
+                            revision: data.revision,
+                            at: new Date().toISOString(),
+                            by: data.updatedBy || null
+                        });
                     }));
             },
 

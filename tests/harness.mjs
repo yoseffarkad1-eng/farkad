@@ -575,8 +575,13 @@ export function makeCloud(options = {}) {
             // The compare-and-set failing is not an error in the ordinary sense - it
             // means somebody else got there first, and the caller has to decide what to
             // do about it rather than retry blindly.
-            return refuse('conflict',
+            const said = refuse('conflict',
                 `the document moved: expected revision ${held + 1}, the write said ${data.revision}`);
+            // The authoritative base, handed back with the refusal. A client that is told
+            // only "no" can do nothing but guess; a client told what the revision actually
+            // is can rebuild its write against it and send the same operation again.
+            said.revision = held;
+            return said;
         }
         return null;
     }

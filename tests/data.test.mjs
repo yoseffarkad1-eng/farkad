@@ -3569,9 +3569,13 @@ const diskDays = device => {
     await settle(TICK * 10);
     given('a stamp-only write is open',
         cloud.attempts.filter(a => a.kind === 'update').length > 0);
+    // No field paths - only the stamp, and the ordering envelope every write carries.
+    // protocol, revision and lastOpId are not edits: they are how the server decides
+    // whether this write may land at all. See docs/sync-protocol.md.
+    const ENVELOPE = ['updatedAt', 'updatedBy', 'protocol', 'lastOpId', 'revision'];
     given('and it carries no field paths',
         Object.keys(cloud.attempts[cloud.attempts.length - 1].payload)
-            .every(key => key === 'updatedAt' || key === 'updatedBy'),
+            .every(key => ENVELOPE.indexOf(key) !== -1),
         JSON.stringify(Object.keys(cloud.attempts[cloud.attempts.length - 1].payload)));
     given('so the sending map is empty', device.Sync._sending.size === 0,
         String(device.Sync._sending.size));
