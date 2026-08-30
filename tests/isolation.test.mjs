@@ -132,8 +132,18 @@ function offences(name, src) {
 {
     suite('a suite run from another checkout reads that checkout');
 
-    const stamp = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    given('this checkout is a git worktree with a commit', /^[0-9a-f]{40}$/.test(stamp), stamp);
+    // Read in a try, because the one place this suite matters most is a tree materialised
+// by `git archive` - which has no .git at all. A bare execFileSync there THROWS, and the
+// guard for archive-based verification becomes the single thing that cannot run under it.
+    let stamp = '';
+    try {
+        stamp = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch (error) {
+        stamp = '';
+    }
+    check('a checkout with git says which commit it is; one without still runs',
+        stamp === '' || /^[0-9a-f]{40}$/.test(stamp), stamp || '(no git here)');
 
     // The one production file every device loads, hashed here and hashed by the harness
     // inside a device - so the claim is about the bytes the app actually ran, not about a
@@ -178,6 +188,42 @@ function offences(name, src) {
     check('the hashes compared are real and distinct',
         distinct.size === loaded.length && loaded.every(entry => /^[0-9a-f]{64}$/.test(entry.sha256)),
         `${distinct.size} of ${loaded.length}`);
+}
+
+// ---------------------------------------------------------------- the other way out
+//
+// An environment variable is the same offence as an absolute path, written where no regex
+// over source can see it. Three suites accept FARKAD_REPO and re-root everything they
+// read from it; four accept SMOKE_URL and serve the app from an origin that may be any
+// tree at all. Those seams are real and useful - the handover suite needs two trees - so
+// the rule is not "no env var". It is: a suite that takes one must SAY which bytes it
+// ended up with, and the default with no variable set must be this checkout.
+{
+    suite('a suite re-rooted by the environment still says which bytes it read');
+
+    const files = readdirSync(HERE).filter(name => /\.(mjs|js)$/.test(name));
+    const rooted = files.filter(name => {
+        const src = readFileSync(join(HERE, name), 'utf8');
+        return /process\.env\.(FARKAD_REPO|SMOKE_URL|FARKAD_ROOT|FARKAD_SHEETJS)/.test(src);
+    }).sort();
+
+    given('the seams are still there to be checked', rooted.length > 0, rooted.join(', '));
+
+    // Every one of them falls back to this checkout when nothing is set. A suite whose
+    // default is somewhere else is a suite that tests another tree by accident.
+    const noDefault = rooted.filter(name => {
+        const src = readFileSync(join(HERE, name), 'utf8');
+        return !/import\.meta\.url/.test(src);
+    });
+    check('each of them defaults to its own checkout',
+        noDefault.length === 0, noDefault.join(', '));
+
+    // And each one is named here, so adding a new seam is a decision somebody makes on
+    // purpose rather than a line that slips in.
+    same('the suites that can be re-rooted are the ones we know about', rooted,
+        ['handover.test.mjs', 'mobile.test.mjs', 'print.test.mjs', 'recovery.browser.mjs',
+            'smoke.mjs', 'swrestart.test.mjs', 'xlsx.test.mjs'].filter(
+            name => files.includes(name)));
 }
 
 report();

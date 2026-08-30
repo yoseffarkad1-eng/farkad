@@ -6,7 +6,7 @@
 // Store, State and FarkadSync - so two devices editing at once, and a device closed and
 // reopened against a cloud that is behind, are both things a test can simply say.
 
-import { makeDevice, makeCloud, settle, deferred } from './harness.mjs';
+import { makeDevice, makeCloud, settle, settleUntil, deferred } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 // Real time, kept short. The sync layer debounces before it sends, and a test that does
@@ -580,8 +580,15 @@ function record(device, date, workerId, placeId, rate) {
     given('the queue is bigger than one write', device.Sync.pendingCount() > 300);
 
     await connected(device, cloud);
-    // Long enough for several rounds of the debounce.
-    await settle(TICK * 60);
+    // The queue drains over SEVERAL rounds of the debounce, and how many milliseconds
+    // that takes is a fact about the host, not about the app. Waited out as a sleep it
+    // was three red checks on a loaded machine and four green ones on an idle one. So the
+    // barrier is the CONDITION, and the budget is only there so a genuine hang is still a
+    // failure - reported as a check of its own, named, rather than as three unrelated
+    // ones failing about whatever the sleep happened to catch.
+    check('the queue drained inside the budget',
+        await settleUntil(() => device.Sync.pendingCount() === 0, 5000),
+        String(device.Sync.pendingCount()));
 
     check('no single write exceeded the batch size',
         cloud.writes.filter(w => w.patch).every(w => Object.keys(w.patch).length <= 302),
@@ -2860,6 +2867,18 @@ const diskDays = device => {
     again.State.load();
     again.Sync.pushDelayMs = TICK;
     again.Sync.connect(cloud.adapter);
+    // connect() resumes the transaction WITHOUT being awaited, so there is nothing here
+    // to await - the barrier has to be the outcome. A sleep long enough on an idle host
+    // was four red checks on a loaded one, and at the short end it was not even a red
+    // check: the suite threw on a cloud document that had not been written yet and took
+    // the four hundred checks after it down with it.
+    given('the resumed restore finished',
+        await settleUntil(() => again.Sync.pendingReplace() === null, 5000),
+        JSON.stringify(again.Sync.pendingReplace()));
+    // The transaction is over; the WRITES it released are still in flight. The barrier
+    // above removes the flake - it no longer matters how long the resume took - and this
+    // is the window the checks below sample the cloud over, which is a different thing
+    // and is still a sleep on purpose.
     await settle(TICK * 40);
 
     check('the restore happened',
@@ -3027,6 +3046,14 @@ const diskDays = device => {
     device.blockRemoval(null);
     device.Sync.pushDelayMs = TICK;
     await device.Sync.resumeReplace();
+    given('the resumed restore finished',
+        await settleUntil(() => device.Sync.pendingReplace() === null
+            && device.Sync.pendingPaths().length === 0, 5000),
+        JSON.stringify(device.Sync.pendingReplace()));
+    // The transaction is over; the WRITES it released are still in flight. The barrier
+    // above removes the flake - it no longer matters how long the resume took - and this
+    // is the window the checks below sample the cloud over, which is a different thing
+    // and is still a sleep on purpose.
     await settle(TICK * 40);
     check('the restore finishes once the disk lets go',
         device.Sync.pendingReplace() === null,
@@ -3884,7 +3911,16 @@ for (const ending of ['succeeds', 'fails']) {
 
     // A: the day, recorded at one site.
     record(device, '2026-08-12', 'w_01', 'p_01');
-    await wait();
+    // The race this suite is about is spelled with a deferred, which is exact. Getting to
+    // the starting line was left to a sleep, which is not: a debounce that fires late on a
+    // loaded host makes this given() exit the process, and every check below it in this
+    // file is never run. A precondition waits for itself to be true.
+    //
+    // The settle a few lines below is NOT given the same treatment, deliberately. It is
+    // the WINDOW over which the next two checks count what the other tab attempted, and
+    // returning early from it moves the sample: measured, it turns 1944/1944 into
+    // 1942/1944 by catching a retry the fixed window excluded.
+    await settleUntil(() => cloudEntries(cloud, '2026-08-12', 'w_01') === 'p_01', 5000);
     given('A reached the cloud', cloudEntries(cloud, '2026-08-12', 'w_01') === 'p_01',
         cloudEntries(cloud, '2026-08-12', 'w_01'));
 

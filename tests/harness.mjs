@@ -574,6 +574,34 @@ export function makeCloud(options = {}) {
 
 // Let queued promises and the sync layer's debounce run. The push delay is real time in
 // the app, so tests set FarkadSync.pushDelayMs low and wait a little longer than that.
+// A barrier on the CONDITION, not on the clock.
+//
+// A sleep long enough on an idle host is a red check on a loaded one, and how many
+// milliseconds a debounce takes to drain a queue is a fact about the machine, not about
+// the app. Worse than red: a precondition that has not come true yet aborts the run, so
+// one loaded moment on one line loses the thousand checks below it, and a resumed restore
+// that had not been written yet threw on a document that was not there and took four
+// hundred with it.
+//
+// Resolves true the moment `ready()` answers true, false if `limitMs` goes by first. The
+// budget is deliberately far larger than any sleep it replaces: it is not a timing
+// tolerance, it is the line between "slow host" and "this will never finish", and only
+// the second one is a fault worth reporting.
+//
+// It does NOT replace every settle(). Some of them are a sampling WINDOW rather than a
+// wait - the span over which a test counts what the other tab attempted - and returning
+// early from one of those moves the sample and changes what is measured. The rule is:
+// if the next line asks "has it happened yet", this is the barrier; if the next line asks
+// "how many happened while I waited", the sleep is the point.
+export async function settleUntil(ready, limitMs = 5000, stepMs = 5) {
+    const deadline = Date.now() + limitMs;
+    for (;;) {
+        if (ready()) return true;
+        if (Date.now() >= deadline) return false;
+        await new Promise(resolve => setTimeout(resolve, stepMs));
+    }
+}
+
 export function settle(ms = 30) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
