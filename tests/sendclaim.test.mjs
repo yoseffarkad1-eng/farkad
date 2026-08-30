@@ -808,8 +808,17 @@ function noticeOn(device) {
     check('a whole-document restore is not handed over after the claim moved to another tab',
         saves.length === 0,
         JSON.stringify({ saves, claimAtTheCall: saves[0], mine: 'd_a' }));
+    // "Not told it was sent" is what this asks, and replaceEverything says that by
+    // RESOLVING with a stage rather than by rejecting - {ok:false, stage:'cloud'} is the
+    // app's word for "the cloud half did not go", and tests/data.test.mjs and
+    // tests/concurrency.test.mjs both depend on that contract. The first version of this
+    // check tested the promise wrapper, which required a rejection: a stricter thing than
+    // the claim, and a different one. Either answer is accepted here; being told `done` is
+    // not.
     check('and the tab is not told the restore was sent when another tab held the claim',
-        saves.length === 0 || result.ok === false, JSON.stringify(result));
+        saves.length === 0 || result.ok === false
+        || (result.value && result.value.ok === false && result.value.stage !== 'done'),
+        JSON.stringify(result));
     check('the day the restore removed did not come back through a second tab\'s claim',
         saves.length === 0 || cloudPlace(cloud) === null,
         JSON.stringify({ cloud: cloudPlace(cloud) }));
@@ -837,10 +846,25 @@ function noticeOn(device) {
     given('the device is connected and says so', device.Sync.status === 'synced',
         `${device.Sync.status} — ${healthy}`);
 
-    // From here on the claim record is unreadable, for ever. Nothing in this app rewrites
-    // it: the writer refuses to take it, and only a tab that minted the token removes it.
+    // From here on the claim record is unreadable AND cannot be copied.
+    //
+    // Damaged bytes alone are no longer terminal: once a copy of them is provably kept,
+    // the record is treated as abandoned and the device claims over it and carries on -
+    // which is right, because bytes no session can read do not repair themselves and no
+    // owner is coming back to release them. What is still terminal, and must be, is
+    // damage the device cannot even preserve: the evidence of what went wrong is worth
+    // more than the convenience of sending, so the app stops and says so instead.
+    //
+    // That is the state this suite is about, and it is staged by refusing the one write
+    // that would rescue it.
     const mark = cloud.writes.length;
     device.putRaw(KEY, '{"by":"d_a","token":"tok');
+    // Corrupted on the way in rather than refused for room: a quota refusal routes
+    // through Store's full-disk path, which draws a banner, and this device's document is
+    // a stub with one notice node in it. What is being staged is the app's state, not the
+    // browser's - a copy the disk accepts and hands back as something else is the same
+    // "no evidence could be kept" answer, reached without the DOM.
+    device.corruptWhen(key => key === KEY + ':damaged');
 
     for (let n = 0; n < 6; n += 1) {
         put(device, `days.2026-08-1${n}.actual.w_01`, 'p_01');

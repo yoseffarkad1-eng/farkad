@@ -852,6 +852,10 @@ const SEND_CLAIM_SETTLE_MS = 25;
 // Comfortably inside the staleness window, so an owner that is alive is never mistaken
 // for one that is gone, and short enough that a crashed owner is not waited on for long.
 const SEND_CLAIM_BEAT_MS = 4000;
+// How many refusals in a row before the person is told. One unreadable answer is a
+// half-finished write in the other tab and heals by itself; five in a row, across the
+// retry ladder, is a record that is not going to repair.
+const CLAIM_DAMAGE_LIMIT = 5;
 
 // Three answers, not two. A claim is HELD, FREE, or UNREADABLE - and unreadable is not
 // free.
@@ -868,6 +872,20 @@ const SEND_CLAIM_BEAT_MS = 4000;
 // `at: Number(parsed.at) || 0` was the same fault wearing a different hat: a claim whose
 // timestamp is missing or unreadable became fifty-six years old and read as ANCIENT
 // rather than as uncertain, and that one survived a perfectly good token.
+// A stored timestamp, or null. Deliberately narrow: a real `Date.now()` and nothing
+// else. Anything from before this feature existed, and anything more than a minute ahead
+// of this device's clock, is a record that cannot be reasoned about - and the one thing
+// that must never happen is reasoning about it anyway and calling the cloud free.
+const CLAIM_EPOCH_MS = 1735689600000;   // 2025-01-01
+const CLAIM_SKEW_MS = 60000;
+
+function momentOrNull(value) {
+    if (typeof value !== 'number' || !isFinite(value)) return null;
+    if (value < CLAIM_EPOCH_MS) return null;
+    if (value > Date.now() + CLAIM_SKEW_MS) return null;
+    return value;
+}
+
 function readSendClaim() {
     const raw = Store.durableGet(SEND_CLAIM_KEY);
     if (raw === null) return null;
@@ -883,9 +901,18 @@ function readSendClaim() {
     if (!isPlainObject(parsed)) return unreadable();
     if (typeof parsed.token !== 'string' || parsed.token === '') return unreadable();
 
-    const at = Number(parsed.at);
-    const beat = parsed.beat === undefined ? at : Number(parsed.beat);
-    if (!isFinite(at) || !isFinite(beat)) return unreadable();
+    // A NUMBER, and a number that could be a moment. `Number()` alone is a coercion, not
+    // a check: null, false, [], "" and " " all become 0, and 0 reads as an owner who last
+    // said anything in 1970 - so a live token was taken over the top of. The comment above
+    // says this fault was fixed; what went was the `|| 0`, and `Number()` coerces just as
+    // well. Negatives do it too.
+    //
+    // The far end is the worse one: a beat in the FUTURE makes the age negative, so the
+    // claim never expires at all - permanently, on that disk, for every tab, through every
+    // reopen. A moment that has not happened yet is not a heartbeat.
+    const at = momentOrNull(parsed.at);
+    const beat = parsed.beat === undefined ? at : momentOrNull(parsed.beat);
+    if (at === null || beat === null) return unreadable();
 
     return {
         by: String(parsed.by || ''),
@@ -2379,6 +2406,22 @@ const FarkadSync = {
         this.setStatus('error', error);
     },
 
+    // The right to send is stuck, and a person can see it. See claimIsFree.
+    noteClaimTrouble(why) {
+        if (this._claimStuck) return;
+        this._claimStuck = true;
+        this.setStatus('claimstuck', new Error(why));
+    },
+
+    // Cleared the moment a claim is actually taken, so a fault that healed does not leave
+    // the screen alarming about it.
+    clearClaimTrouble() {
+        if (!this._claimStuck) return;
+        this._claimStuck = false;
+        if (this.status === 'claimstuck') this.setStatus('connecting');
+    },
+    _claimStuck: false,
+
     // One changed field, e.g. days.2026-08-12.plan.w_03. Queued by path so that editing
     // the same worker twice before the flush sends one write, while edits to different
     // workers all survive.
@@ -2702,12 +2745,22 @@ const FarkadSync = {
         // Through the chain, so that a whole-document replacement started after this one
         // cannot land before it. createDocument is inside the same slot on purpose - it
         // is this write, taking the other branch, not a second one.
-        return this.cloudWrite(() => Promise.resolve(this.adapter.update(patch))
-            .catch(error => {
-                // Not an edge case: this is the first write of every new project.
+        return this.cloudWrite(() => {
+            // Asked HERE, not before the task was queued. cloudWrite defers everything
+            // through the previous write's promise, so a check made outside is a check
+            // made at a different moment from the one the request actually leaves at.
+            if (!this.stillOwnsSendClaim()) {
+                return Promise.reject(new Error(
+                    'the right to send moved to another tab; the batch was not sent'));
+            }
+            return Promise.resolve(this.adapter.update(patch)).catch(error => {
+                // Not an edge case: this is the first write of every new project. Inside
+                // the same slot on purpose - this write taking the other branch, not a
+                // second one.
                 if (error && error.code === 'not-found') return this.createDocument(patch);
                 throw error;
-            }))
+            });
+        })
             .then(() => {
                 // Only now. Up to this point the edits were on disk and would have been
                 // replayed by the next session; from here the cloud is holding them.
@@ -2762,7 +2815,27 @@ const FarkadSync = {
     claimIsFree(held) {
         if (!held) return true;
         if (held.unreadable) {
-            this.quarantineSendClaim();
+            const kept = this.quarantineSendClaim();
+            this._claimDamage = (this._claimDamage || 0) + 1;
+            if (this._claimDamage >= CLAIM_DAMAGE_LIMIT) {
+                // Still not free - and now said out loud.
+                //
+                // Bytes nobody can read do not repair themselves and no owner is coming
+                // back to release them, so this device cannot send until somebody acts.
+                // The tempting fix is to claim over them once a copy is kept; it is
+                // refused. What is on the other side of those bytes may be a live tab
+                // mid-write, and taking the cloud from it is the overwrite this whole
+                // section exists to prevent - the failure that costs somebody's day rather
+                // than an evening's delay.
+                //
+                // So the app stops sending and SAYS so. The queue is untouched, every edit
+                // is on the disk, and the way out is on the screen. The silence this
+                // replaces was the real fault: a retry loop with no end, wearing the same
+                // line a tunnel produces, that nobody could see was happening.
+                this.noteClaimTrouble(kept
+                    ? 'the record that coordinates sending cannot be read'
+                    : 'the record that coordinates sending cannot be read or copied');
+            }
             return false;
         }
         if (held.token === this._claimToken) return true;
@@ -2795,7 +2868,16 @@ const FarkadSync = {
         // A browser that stores nothing has no way to coordinate with anything, and
         // refusing to sync would be a far larger failure than the one being guarded
         // against - there is no second tab sharing a disk that does not exist.
-        if (!Store.available) return Promise.resolve(true);
+        //
+        // Unless there IS one, and this session has already read its claim. Storage can go
+        // unavailable mid-session - a quota error routes through Store.fallback - and this
+        // exception then reopened the uncoordinated door on a device that had just been
+        // reading another tab's damaged claim off a disk that plainly does exist.
+        if (!Store.available) {
+            if (!this._claimDamage) return Promise.resolve(true);
+            this.noteClaimTrouble('the disk stopped answering while another tab was sending');
+            return Promise.resolve(false);
+        }
 
         const now = Date.now();
         if (!this.claimIsFree(readSendClaim())) return Promise.resolve(false);
@@ -2814,7 +2896,11 @@ const FarkadSync = {
                 const after = readSendClaim();
                 const mine = Boolean(after) && !after.unreadable && after.token === token;
                 this._claimToken = mine ? token : null;
-                if (mine) this.startClaimBeat();
+                if (mine) {
+                    this._claimDamage = 0;
+                    this.clearClaimTrouble();
+                    this.startClaimBeat();
+                }
                 resolve(mine);
             }, this.claimSettleMs);
         });
@@ -2837,9 +2923,17 @@ const FarkadSync = {
                 this.stopClaimBeat();
                 return;
             }
-            Store.setVerified(SEND_CLAIM_KEY, JSON.stringify({
+            // The answer is read. A heartbeat the disk refused, or accepted and stored as
+            // something else, used to leave this tab believing it still owned a claim the
+            // other tab would take twenty seconds later. Ownership that cannot be renewed
+            // has ended, and saying so here is what lets the other tab get on with it.
+            if (!Store.setVerified(SEND_CLAIM_KEY, JSON.stringify({
                 by: syncDeviceId(), token: this._claimToken, at: held.at, beat: Date.now()
-            }));
+            }))) {
+                this._claimToken = null;
+                this.stopClaimBeat();
+                this.noteClaimTrouble('the right to send could not be renewed');
+            }
         }, SEND_CLAIM_BEAT_MS);
         // Never a reason to hold a page open in Node or to keep a phone awake.
         if (this._claimBeat && typeof this._claimBeat.unref === 'function') {
@@ -3274,24 +3368,36 @@ const FarkadSync = {
                     this._claiming = false;
                     return value;
                 };
-                // And asked once more, on the disk, in the instant before the request
-                // leaves - see sendClaimed. A whole-document save is the write where
-                // being wrong about this costs the most: it takes everybody out at once.
-                if (!this.stillOwnsSendClaim()) {
-                    done();
-                    throw new Error(
-                        'the right to send moved to another tab; the restore was not sent');
-                }
                 // A whole-document save takes everybody out at once.
                 if (!this.markSent(document)) {
                     done();
                     return Promise.reject(new Error(
                         'the record of what has been sent could not be stored; the replacement was not sent'));
                 }
-                return this.cloudWrite(() => this.adapter.save(document)).then(
-                    done,
-                    error => { done(); throw error; }
-                );
+                return this.cloudWrite(() => {
+                    // Asked inside the task - see sendClaimed for why outside is the wrong
+                    // moment.
+                    if (!this.stillOwnsSendClaim()) {
+                        return Promise.reject(new Error(
+                            'the right to send moved to another tab; the restore was not sent'));
+                    }
+                    return Promise.resolve(this.adapter.save(document)).then(value => {
+                        // And AGAIN, on the far side of the request. Reading the disk and
+                        // then acting on what it said is two steps, and the other tab
+                        // writes between them: the claim was mine at the check and
+                        // somebody else's at the call. No amount of reading harder closes
+                        // that - the write itself has to carry the ownership so the CLOUD
+                        // can refuse it, which is the versioned protocol and is not this.
+                        // What IS closable here is the lie: a restore that went out under
+                        // another tab's claim must not come back as done. The transaction
+                        // record stays on the disk and the ladder picks it up.
+                        if (!this.stillOwnsSendClaim()) {
+                            throw new Error('the right to send moved while the restore was '
+                                + 'in flight; it is not confirmed');
+                        }
+                        return value;
+                    });
+                }).then(done, error => { done(); throw error; });
             })
             .then(() => {
                 this._replacing = false;
@@ -4385,6 +4491,8 @@ function updateSyncNotice() {
         off: 'הנתונים נשמרים במכשיר הזה בלבד.',
         blocked: 'הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד.',
         connecting: 'מתחבר לענן…',
+        claimstuck: 'הרישום שמור במכשיר. השליחה תקועה - סגור את שאר החלונות של האפליקציה, '
+            + 'ואם זה נמשך ייצא גיבוי ופתח מחדש.',
         synced: 'מסונכרן בין המכשירים.',
         offline: 'אין חיבור - השינויים יישלחו כשהחיבור יחזור.',
         error: 'שגיאת סנכרון - הנתונים שמורים במכשיר הזה.'
