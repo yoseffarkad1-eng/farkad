@@ -144,11 +144,19 @@ try { HEAD = git(['rev-parse', 'HEAD']).trim(); } catch (error) { HEAD = ''; }
     // tree is expected to be, and must verify it before reading a byte. Without that,
     // "run the gate against commit X" is a wish - the variable can point anywhere and the
     // suite reports a number about a tree nobody named.
+    // Bound one of two ways, because there are two kinds of override. A suite handed a
+    // TREE goes through refuseUnlessVerified, which demands FARKAD_EXPECT_SHA and then
+    // compares that tree's production bytes with the commit's blobs. A suite handed an
+    // ORIGIN cannot verify a directory - it has a URL - so it goes through
+    // verifyServedAssets, which fetches every shell path and compares what the server
+    // actually served with the same blobs. Either way the answer is Git's, and neither
+    // suite reads the variable for itself. What is refused is a third way: a suite that
+    // takes an override and checks nothing.
     const unbound = overriding.filter(name => {
         const src = readFileSync(join(HERE, name), 'utf8');
-        return !/FARKAD_EXPECT_SHA/.test(src);
+        return !/refuseUnlessVerified/.test(src) && !/verifyServedAssets/.test(src);
     });
-    check('every re-rootable suite requires an expected SHA with the override',
+    check('every re-rootable suite binds its override to a commit',
         unbound.length === 0, unbound.join(', '));
 
     // And the browser suites authenticate what the server actually handed them.
