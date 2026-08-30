@@ -645,6 +645,13 @@ function renderAttendanceChips(days) {
 // is still a plain מקדמה - the record does not guess.
 const ADVANCE_METHOD_LABELS = { cash: 'מקדמה במזומן', transfer: 'מקדמה בהעברה' };
 
+// One reading of the record, for the screen and for the message the worker is sent - a
+// word this build does not draw is not a word it invents a label for.
+function advanceMethodLabel(method) {
+    return Object.prototype.hasOwnProperty.call(ADVANCE_METHOD_LABELS, method)
+        ? ADVANCE_METHOD_LABELS[method] : 'מקדמה';
+}
+
 // Cash handed over before settlement day. Recorded here, next to the days it will be
 // deducted from, because the question it answers - "how much is left" - is asked on this
 // screen and nowhere else.
@@ -653,9 +660,7 @@ function renderAdvanceRow(item) {
     const parsed = parseLocalDate(item.date);
 
     const when = el('div', 'wday-date');
-    when.appendChild(el('strong', null,
-        Object.prototype.hasOwnProperty.call(ADVANCE_METHOD_LABELS, item.method)
-            ? ADVANCE_METHOD_LABELS[item.method] : 'מקדמה'));
+    when.appendChild(el('strong', null, advanceMethodLabel(item.method)));
     when.appendChild(el('span', null, formatFullDate(parsed)));
     row.appendChild(when);
 
@@ -964,8 +969,12 @@ function workerStatementText(workerId) {
 
     if (advances.length > 0) {
         lines.push('');
+        // The same three words the screen draws over the same record. The man is the one
+        // person who will ever dispute "you were paid in cash", and his own copy used to
+        // be the one document in the app that could not answer.
         advances.forEach(item => lines.push(
-            `מקדמה ${formatShortDate(parseLocalDate(item.date))}: ${minusAmount(item.amount)}`));
+            `${advanceMethodLabel(item.method)} ${formatShortDate(parseLocalDate(item.date))}: `
+            + `${minusAmount(item.amount)}`));
     }
 
     if (priced) {
@@ -1233,13 +1242,43 @@ function payrollSheetRows() {
     ].concat(withVehicles
         ? [row.vehicleDays || 0, Math.round(row.vehicleAmount || 0)]
         : []
-    ).concat([
-        row.dailyRate,
-        row.amount === null ? '' : Math.round(row.amount),
-        row.advances > 0 ? -Math.round(row.advances) : 0,
-        row.netAmount === null ? '' : Math.round(row.netAmount),
-        row.hoursUnpriced ? 'שעות נוספות בלי שכר שעה - לא נכללו' : ''
-    ])));
+    ).concat(moneyCells(row))));
+}
+
+// נצבר, מקדמות and לתשלום - the three columns a bookkeeper adds up, and the one
+// reconciliation this file states in its own headings. Two faults lived in rounding each
+// of them on its own and reading the net off a different number than the two cells above
+// it:
+//
+//   Half a shekel. 400 earned, 250.5 taken, 149.5 left, rounded separately: 400, -251,
+//   150 - and 400 − 251 is 149. One shekel, printed twice as two different answers, on
+//   the row somebody is paid from. The advance form refuses a fraction, so this arrives
+//   from another phone, an import or a restore - and the wire accepts it. So the net is
+//   computed FROM the two cells as they are printed, never rounded on its own.
+//
+//   A man with no daily rate who was handed cash. His נצבר is blank - a man whose rate
+//   was never entered is owed an unknown amount, which is not the same statement as
+//   being owed nothing - but the 300 he was handed is not unknown at all, and it used to
+//   sit alone in the מקדמות column with no total in the file that included it. Down the
+//   column, נצבר less מקדמות did not equal לתשלום and the 300 in the gap was money
+//   nobody could find; the person who found it was the bookkeeper, next month, in an
+//   argument about 300 shekels.
+//
+//   So a row that has money in it is a row that adds up. With advances and no rate the
+//   three cells are written as numbers - 0, -300, -300 - and the הערה says why the 0 is
+//   there, because on its own it would read as a claim that he earned nothing. With no
+//   rate AND no advances there is nothing to add up and all three stay blank, which is
+//   where "unknown rather than zero" was argued and where it still holds.
+function moneyCells(row) {
+    const advances = row.advances > 0 ? -Math.round(row.advances) : 0;
+    const priced = row.amount !== null;
+    const gross = priced ? Math.round(row.amount) : (advances === 0 ? '' : 0);
+    const net = gross === '' ? '' : gross + advances;
+
+    const notes = [];
+    if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
+    if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');
+    return [row.dailyRate, gross, advances, net, notes.join(' · ')];
 }
 
 function invoiceSheetRows() {
@@ -1280,6 +1319,9 @@ function reportSheets() {
 // the app to scroll a fortnight.
 function detailRows() {
     const rows = [['תאריך', 'יום', 'עובד', 'אתר', 'סוג', 'שעות נוספות', 'לתשלום ליום']];
+    // Read once for the whole sheet: the numbering has to be the same on every row, and
+    // the same as the column this day is billed in on the invoice sheet beside it.
+    const unlisted = unlistedPlaceIds(State.schedule);
 
     payrollRows().forEach(row => {
         const worker = State.worker(row.workerId);
@@ -1297,12 +1339,11 @@ function detailRows() {
                 // The day's pay is written once, on its first line: repeating it against
                 // every site would add up to double when the column is summed.
                 day.entries.forEach((entry, index) => {
-                    const place = State.place(entry.placeId);
                     rows.push([
                         day.date,
                         HEBREW_DAY_NAMES[parsed.getDay()],
                         worker.name,
-                        place ? place.name : entry.placeId,
+                        placeLabelIn(State.schedule, entry.placeId, unlisted),
                         RATE_LABELS[entryRate(entry)],
                         entryExtraHours(entry) || '',
                         index === 0 ? (day.amount === null ? '' : Math.round(day.amount)) : ''

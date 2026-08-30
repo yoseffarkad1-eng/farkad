@@ -302,13 +302,19 @@ const TWO_CLIENTS = [['הרצליה', 7], ['תל אביב', 3]];
     const run = reportsIn(device);
     const sheet = JSON.parse(JSON.stringify(run('payrollSheetRows()')));
 
+    // עלי's row moved in the commit that made this file reconcile. He has no daily rate,
+    // so his נצבר cannot be computed - but he was handed 300, and a row with money in it
+    // has to add up or the money is in a column no total reaches. The 0 is not a claim
+    // that he earned nothing; the הערה beside it says so. A man with no rate and no
+    // advances still gets three blanks: nothing there needs adding up.
     same('eleven columns, and the same money the screen shows under them',
         sheet,
         [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר',
             'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה'],
             ['דוד', 6, 7, 1, 3, 1, 500, 3050, -500, 2550, ''],
             ['שרה', 2, 2, 0, 2, 0, 350, 700, 0, 700, 'שעות נוספות בלי שכר שעה - לא נכללו'],
-            ['עלי', 1, 1, 0, 0, 0, 0, '', -300, '', '']]);
+            ['עלי', 1, 1, 0, 0, 0, 0, 0, -300, -300,
+                'בלי שכר יומי - הנצבר לא חושב']]);
 
     // Column indices, named once: the file is read by position and a shifted column is a
     // man paid another man's net.

@@ -192,7 +192,7 @@ function csvRows(text) {
         + '• שלישי 11/08 - הרצליה (‎+2 ש׳) - 500\n'
         + '• רביעי 12/08 - נעדר\n\n'
         + 'סה״כ 2 ימי נוכחות\n3 ימי שכר · מתוכם יום כפול אחד · 2 שעות נוספות\n'
-        + 'נצבר: 1300\n\nמקדמה 12/08: ‎-500\n\nנותר לתשלום: 800');
+        + 'נצבר: 1300\n\nמקדמה בהעברה 12/08: ‎-500\n\nנותר לתשלום: 800');
 
     // A name that is not plain Hebrew is a left-to-right run inside a right-to-left
     // sentence and slides to wherever the bidi algorithm puts it - so the isolate travels
@@ -203,7 +203,7 @@ function csvRows(text) {
     // A leading hyphen resolves to the paragraph direction: "-500" lays out as "500-" and
     // the man reads backwards the one number that says money was already taken.
     check('the advance carries the left-to-right mark before its minus',
-        statement.indexOf('מקדמה 12/08: ‎-500') !== -1);
+        statement.indexOf('מקדמה בהעברה 12/08: ‎-500') !== -1);
 
     // The screen puts a * on unpriced hours and the sheet explains it; the message he
     // actually receives must not be the one place that pretends the number is complete.

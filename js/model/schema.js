@@ -959,6 +959,54 @@ function recoveredEntityName(kind, id) {
     return (kind === 'workers' ? 'עובד שנמחק (' : 'אתר שנמחק (') + id + ')';
 }
 
+// A site a day names and the roster has not got.
+//
+// Not exotic: days and roster entries travel as separate field paths, so an edit made on
+// another phone lands here while the write that would have introduced the site is still
+// queued behind it or was refused for room. The day is real, somebody worked it, and it
+// is paid for on the pay sheet - so it has to be billed to somebody and it has to be
+// called something on paper.
+//
+// The name is NOT recoveredEntityName: that one carries the record id, which is right
+// where the app is talking to itself about a record it is repairing, and wrong in a file
+// a bookkeeper opens - an id is not a site name, is not translatable, and is the one
+// place an internal key would reach a person outside the app. So they are numbered, in
+// the order the ids sort, which is the same order on every phone reading the same days.
+function unlistedPlaceIds(schedule, fromDate, toDate) {
+    const known = new Set(((schedule && schedule.places) || []).map(place => String(place.id)));
+    const days = (schedule && schedule.days) || {};
+    const found = new Set();
+    Object.keys(days).forEach(date => {
+        if (fromDate !== undefined && (date < fromDate || date > toDate)) return;
+        const layers = days[date] || {};
+        Object.keys(layers).forEach(layer => {
+            const byWorker = layers[layer] || {};
+            if (layer === 'vehiclesOff') return;
+            Object.keys(byWorker).forEach(workerId => {
+                const record = byWorker[workerId];
+                const entries = (record && record.entries) || [];
+                entries.forEach(entry => {
+                    const id = entry && entry.placeId !== undefined ? String(entry.placeId) : '';
+                    if (id && !known.has(id)) found.add(id);
+                });
+            });
+        });
+    });
+    return Array.from(found).sort();
+}
+
+// What a site is called on paper: the roster's name, or a number if the roster has lost
+// it. One reading, so the invoice column header and the detail row say the same thing
+// about the same day.
+function placeLabelIn(schedule, placeId, unlisted) {
+    const places = (schedule && schedule.places) || [];
+    const place = places.find(item => String(item.id) === String(placeId));
+    if (place) return place.name;
+    const ids = unlisted || unlistedPlaceIds(schedule);
+    const at = ids.indexOf(String(placeId));
+    return 'אתר שאינו ברשימה ' + (at === -1 ? 1 : at + 1);
+}
+
 // Whatever is referenced and missing, put back - archived, and as WHOLE as anything
 // still remembers him.
 //
@@ -1732,7 +1780,15 @@ function invoiceReport(schedule, fromDate, toDate) {
         .filter(date => date >= fromDate && date <= toDate)
         .sort();
 
-    return schedule.places.map(place => {
+    // The roster first, then every site the days name that the roster has not got. A
+    // sheet built by walking the roster alone drops those days off the invoice while the
+    // pay sheet still pays for them - three sheets in one file, and the money in them not
+    // adding up to the same fortnight.
+    const unlisted = unlistedPlaceIds(schedule, fromDate, toDate);
+    const columns = schedule.places.map(place => ({ id: place.id, name: place.name }))
+        .concat(unlisted.map(id => ({ id, name: placeLabelIn(schedule, id, unlisted) })));
+
+    return columns.map(place => {
         const row = { placeId: place.id, name: place.name, workerDays: 0, byDate: {}, days: [] };
 
         dates.forEach(date => {

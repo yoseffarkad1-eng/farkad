@@ -81,12 +81,17 @@ function foldAdvance(entries) {
                 amount: Number(entry.amount) || 0,
                 note: String(entry.note || '')
             };
+            // How the money moved, only when the entry says. An absent method is not
+            // 'cash': every entry written by this build's boot mirror before v87 says
+            // nothing at all, and inventing a default here would put a word on the
+            // statement the person handing the money over never chose.
+            if (typeof entry.method === 'string' && entry.method) state.method = entry.method;
             return;
         }
         if (!state) return;
         if (entry.kind === 'cancelled') { state = null; return; }
         if (entry.kind === 'corrected') {
-            state = {
+            const corrected = {
                 id: state.id,
                 // A correction may move it to another man or another day - that is the
                 // commonest correction there is, and the one a mutation loses entirely.
@@ -95,6 +100,13 @@ function foldAdvance(entries) {
                 amount: entry.amount === undefined ? state.amount : (Number(entry.amount) || 0),
                 note: entry.note === undefined ? state.note : String(entry.note || '')
             };
+            // A correction that fixes the amount and says nothing about the method has
+            // not retracted the method. The commonest correction there is mentions one
+            // field; reading its silence as 'it was not cash after all' would rewrite a
+            // fact nobody touched.
+            const method = entry.method === undefined ? state.method : entry.method;
+            if (typeof method === 'string' && method) corrected.method = method;
+            state = corrected;
         }
     });
     return state;
@@ -138,14 +150,26 @@ function currentAdvances(schedule) {
     Object.keys(legacy).forEach(id => {
         const item = legacy[id];
         if (!item || typeof item !== 'object') return;
-        if (folded[id] || cancelled.has(String(id))) return;
-        folded[id] = {
+        if (cancelled.has(String(id))) return;
+        if (folded[id]) {
+            // The overlay lays in what ONLY the old field knows, field by field - it
+            // never overwrites the entry. Today every entry is silent about the method
+            // and the legacy field is the only place the answer lives; the day an entry
+            // does carry one, the entry is the newer statement and it wins.
+            if (!folded[id].method && typeof item.method === 'string' && item.method) {
+                folded[id].method = item.method;
+            }
+            return;
+        }
+        const state = {
             id: String(id),
             workerId: String(item.workerId),
             date: String(item.date),
             amount: Number(item.amount) || 0,
             note: String(item.note || '')
         };
+        if (typeof item.method === 'string' && item.method) state.method = item.method;
+        folded[id] = state;
     });
     return folded;
 }
@@ -168,14 +192,22 @@ function appendLedgerEntry(schedule, entry) {
     // advance have to mint the SAME key, or the union keeps both and the fold's winner
     // is decided by whichever random id sorts later.
     const id = entry.id ? String(entry.id) : ledgerEntryId();
-    const record = Object.assign({}, entry, { id });
+    // Undefined fields are dropped, never stored. `method: undefined` survives
+    // Object.assign as an own property, and an entry that carries the KEY without a
+    // value reads as an entry that was asked how the money moved and answered
+    // nothing - which is a different statement from never having been asked.
+    const record = { id };
+    Object.keys(entry).forEach(field => {
+        if (field === 'id' || entry[field] === undefined) return;
+        record[field] = entry[field];
+    });
     schedule.ledger = schedule.ledger || { advances: {} };
     schedule.ledger.advances = schedule.ledger.advances || {};
     schedule.ledger.advances[id] = record;
     return { path: ledgerPath(id), value: record };
 }
 
-function recordAdvanceGiven(schedule, advanceId, workerId, date, amount, note, at, by) {
+function recordAdvanceGiven(schedule, advanceId, workerId, date, amount, note, at, by, method) {
     return appendLedgerEntry(schedule, {
         advanceId: String(advanceId),
         kind: 'given',
@@ -183,6 +215,7 @@ function recordAdvanceGiven(schedule, advanceId, workerId, date, amount, note, a
         date: String(date),
         amount: Number(amount) || 0,
         note: String(note || ''),
+        method: typeof method === 'string' && method ? method : undefined,
         at: String(at || ''),
         by: String(by || '')
     });
@@ -195,7 +228,7 @@ function recordAdvanceCorrected(schedule, advanceId, changes, at, by) {
         at: String(at || ''),
         by: String(by || '')
     };
-    ['workerId', 'date', 'note'].forEach(field => {
+    ['workerId', 'date', 'note', 'method'].forEach(field => {
         if (changes && changes[field] !== undefined) entry[field] = String(changes[field]);
     });
     if (changes && changes.amount !== undefined) entry.amount = Number(changes.amount) || 0;
@@ -246,6 +279,7 @@ function migrateAdvancesToLedger(schedule, deviceId) {
             date: String(item.date),
             amount: Number(item.amount) || 0,
             note: String(item.note || ''),
+            method: typeof item.method === 'string' && item.method ? item.method : undefined,
             at: '',
             by: String(deviceId || ''),
             origin: 'migration'
