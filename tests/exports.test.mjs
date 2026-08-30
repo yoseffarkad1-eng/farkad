@@ -298,7 +298,10 @@ function csvRows(text) {
     odd.State.commit(odd.call('addAdvance', odd.State.schedule, 'w_01', '2026-08-15', 0.5, ''));
     await run(odd, 'exportReports()');
     const oddRows = csvRows(fileNamed(odd, `שכר_${STAMP}.csv`));
-    given('the fraction reached the file', oddRows[1][8] === '-501');
+    // -500.5, not -501. The agora is no longer rounded away on the way into the file:
+    // six surfaces used to round gross, advance and net independently, from the exact
+    // value, and produced six answers to one question. See moneyOf in js/ui/reports.js.
+    given('the fraction reached the file', oddRows[1][8] === '-500.5', oddRows[1][8]);
     check('and it still adds up when an advance arrives with an agora on it',
         unbalanced(oddRows).length === 0,
         unbalanced(oddRows).map(row => row.join('/')).join(' | '));

@@ -3849,6 +3849,32 @@ const FarkadSync = {
         // The local roster is handed over as a name source: if this snapshot carries a
         // day for somebody it has itself forgotten, this device may be the last place
         // his name exists, and it is holding it right now.
+        // The money in the RAW bytes, before normalising touches them.
+        //
+        // This door had no gate at all. The three restore doors validate the raw document
+        // and refuse a bad one; receive() went straight to normaliseSchedule and adopted
+        // whatever came back - and normaliseSchedule's `Number(item.amount) || 0` is a
+        // COERCION, so "500" became five hundred payable shekels and anything unreadable
+        // became zero. Which is also why nothing was ever quarantined here: that
+        // expression always yields something readable, so there was never anything left
+        // to call damaged.
+        //
+        // Only the money, and only refusing to ADOPT. A snapshot carrying an advance this
+        // build cannot pay against is not a reason to throw away the roster or the days
+        // in it - and it is certainly not a reason to overwrite this device's own record
+        // with one somebody would be paid wrongly from. The bytes are kept where a person
+        // can still get at them and the queue is left exactly as it is.
+        const money = advanceProblems(
+            { advances: (raw.advances && typeof raw.advances === 'object') ? raw.advances : {} },
+            null);
+        if (money.length > 0) {
+            Recovery.damaged('farkad:remoteAdvances', JSON.stringify(raw.advances),
+                'הגיעה מקדמה שאינה תקינה מהענן. הרישום במכשיר לא שונה. ' + money[0]);
+            this.fail(new Error('the arriving snapshot carries an advance this build '
+                + 'cannot pay against; it was not adopted'));
+            return;
+        }
+
         const remote = normaliseSchedule(raw, rememberedEntities(State.schedule));
         this.rememberRemoteRoster(remote);
 

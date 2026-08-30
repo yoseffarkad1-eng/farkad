@@ -584,8 +584,8 @@ const three = await browser.newContext();
 
     const control = await swProcess(three, wc);
     const stopped = await stopWorker(control);
-    given('the worker process is gone', stopped.ok,
-        `${stopped.targets} targets, running ${stopped.running.join()}`);
+    check('the worker process really is gone, so what follows is a restart',
+        stopped.ok, `${stopped.targets} targets, running ${stopped.running.join()}`);
 
     for (const [id, page] of [['a', wa], ['b', wb], ['c', wc]]) {
         const hit = await servedOffline(page, 'js/app.js');
@@ -688,8 +688,8 @@ const putPhone = await browser.newContext();
 
     const control = await swProcess(putPhone, now);
     const stopped = await stopWorker(control);
-    given('the worker process is gone', stopped.ok,
-        `${stopped.targets} targets, running ${stopped.running.join()}`);
+    check('the worker process really is gone, so what follows is a restart',
+        stopped.ok, `${stopped.targets} targets, running ${stopped.running.join()}`);
 
     // One previous shelf on the disk. sw.js:291 hands it over without asking whether
     // this window is running it.
@@ -738,15 +738,15 @@ const solo = await browser.newContext();
     const only = await openWindow(solo);
     await boot(only);
     await settle(1200);
-    given('one window, one build, and no record of it',
+    check('one window, one build, and no record of it',
         (await buildOf(only)).script === BUILD.p.stamp
         && (await clientRecord(only)).length === 0,
         JSON.stringify(await clientRecord(only)));
 
     const control = await swProcess(solo, only);
     const stopped = await stopWorker(control);
-    given('the worker process is gone', stopped.ok,
-        `${stopped.targets} targets, running ${stopped.running.join()}`);
+    check('the worker process really is gone, so what follows is a restart',
+        stopped.ok, `${stopped.targets} targets, running ${stopped.running.join()}`);
 
     // previousCaches() is empty, so sw.js:290 falls back to THIS build's cache: an
     // unidentified client is served the current build's assets. It happens to be right
@@ -788,8 +788,8 @@ const matchPhone = await browser.newContext();
 
     const control = await swProcess(matchPhone, now);
     const stopped = await stopWorker(control);
-    given('the worker process is gone', stopped.ok,
-        `${stopped.targets} targets, running ${stopped.running.join()}`);
+    check('the worker process really is gone, so what follows is a restart',
+        stopped.ok, `${stopped.targets} targets, running ${stopped.running.join()}`);
 
     const after = await servedOffline(now, 'js/app.js');
     failedClosed('a window whose record cannot be READ is refused, not handed another shelf',

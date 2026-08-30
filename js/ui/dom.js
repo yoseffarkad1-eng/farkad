@@ -55,12 +55,18 @@ const HEBREW_DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', '�
 // left-to-right mark (U+200E) before the sign pins the whole token. Works in DOM text
 // and in a WhatsApp message alike, which CSS direction cannot.
 function minusAmount(value) {
-    return '\u200E-' + Math.round(value);
+    // The value as the record holds it, to the agora, NOT rounded to a shekel here. Six
+    // surfaces show money and each of them used to round on its own, from the exact
+    // value - so 250.5 taken printed as 251 on the screen while the net beside it was
+    // computed from 250.5, and the row said 400 − 251 = 150. See moneyOf in
+    // js/ui/reports.js: the rounding happens once, and this only draws what it produced.
+    const at = Math.round(Number(value) * 100) / 100;
+    return '\u200E-' + (Number.isInteger(at) ? at : at.toFixed(2).replace(/0$/, ''));
 }
 
 // Any amount that MIGHT be negative goes through here; positives pass untouched.
 function bidiAmount(value) {
-    return value < 0 ? minusAmount(Math.abs(value)) : String(value);
+    return Number(value) < 0 ? minusAmount(Math.abs(Number(value))) : String(value);
 }
 
 // A leading plus has the same problem as the minus above - "+2" lays out as "2+" in

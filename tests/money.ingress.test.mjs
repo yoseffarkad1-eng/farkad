@@ -290,6 +290,7 @@ const DOORS = ['import', 'restore', 'cloud', 'journal'];
 const RUN = { import: viaImport, restore: viaRestore, cloud: viaCloud, journal: viaJournal };
 
 const MATRIX = [];
+const surfaceRuns = [];
 for (const entry of VALUES) {
     const row = { entry, name: entry.name };
     for (const door of DOORS) row[door] = await RUN[door](entry);
@@ -702,6 +703,7 @@ for (const entry of VALUES) {
     workOneDay(device);
     await adoptAdvance(device, taken.after.stored);
     const seen = surfaces(device);
+    surfaceRuns.push(seen);
     console.log('  ' + `${entry.name} (${show(taken.after.stored)})`.padEnd(16)
         + String(show(seen.model.net)).padEnd(11)
         + `${plain(seen.screen.gross)}/${seen.screen.advance === null ? '-' : plain(seen.screen.advance)}/${plain(seen.screen.net)}`.padEnd(24)
@@ -710,7 +712,19 @@ for (const entry of VALUES) {
         + `${seen.sheet[7]}/${seen.sheet[8]}/${seen.sheet[9]}`.padEnd(23)
         + String(seen.screen.hasAdvanceColumn));
 }
-check('the surface matrix ran', true);
+// Not `check(..., true)`: an assertion that cannot fail prints PASS beside a sentence
+// nobody proved. What is claimed is that every surface produced something to read, which
+// is what makes the comparisons above it mean anything.
+// Every row the matrix reached, and every one of them readable. Most of the fourteen
+// values are refused at their door now and never reach a surface at all - which is the
+// point of the gate - so what is claimed is that the ones that DO arrive produce a
+// complete set of surfaces to compare, not that all fourteen do.
+check('every row the matrix reached produced a full set of surfaces',
+    surfaceRuns.length > 0
+    && surfaceRuns.every(run => Array.isArray(run.sheet) && run.sheet.length > 8
+        && run.model && run.screen && run.modal
+        && Array.isArray(run.screen.headers) && run.screen.headers.length > 3),
+    `${surfaceRuns.length} row(s) of ${VALUES.length} values reached a surface`);
 
 // ---------------------------------------------------------------- the reported defect
 
@@ -745,8 +759,16 @@ suite('the reported defect, end to end: gross 400, advance -500');
     check('payroll did not increase: a man who earned 400 is not owed more than 400',
         seen.model.net <= seen.model.gross,
         `gross ${seen.model.gross}, net ${seen.model.net}`);
-    check('the screen shows the advance that changed the net',
-        seen.screen.hasAdvanceColumn, `headers ${JSON.stringify(seen.screen.headers)}`);
+    // Two branches, and both are the same claim: money that is on the record is visible,
+    // and money that never got onto it is not there to show. This value arrives through
+    // the CLOUD door, which now refuses it - so the row carries no advance at all, and a
+    // column for it would be a column of nothing. Were it already on a disk (a record
+    // written before this build, or planted directly), the column appears: anyAdvance
+    // asks whether the amount is non-zero rather than whether it is payable, precisely so
+    // that an amount this build refuses to net is still seen by a person.
+    check('an advance on the record is shown; one that was refused is not on the record',
+        seen.screen.hasAdvanceColumn === (Number(seen.model.advances) !== 0),
+        `column ${seen.screen.hasAdvanceColumn}, model advances ${show(seen.model.advances)}`);
     check('the spreadsheet carries the advance the model deducted',
         seen.sheet[8] === -seen.model.advances,
         `sheet ${seen.sheet[8]}, model deducted ${seen.model.advances}`);
@@ -881,8 +903,12 @@ async function workbookFrom(device) {
     device.ctx.__caught.length = 0;
     await device.run('exportReports()');
     await settle(40);
-    given('exportReports wrote exactly one workbook',
-        device.ctx.__caught.length === 1, String(device.ctx.__caught.length));
+    // Thrown rather than given(): this is a helper, and a given() here aborts the whole
+    // run from inside a function whose caller has its own checks to report. A helper that
+    // cannot do its job says so to its caller.
+    if (device.ctx.__caught.length !== 1) {
+        throw new Error(`exportReports wrote ${device.ctx.__caught.length} workbooks, not 1`);
+    }
     return workbookOf(Buffer.from(device.ctx.__caught[0].bytes));
 }
 

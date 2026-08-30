@@ -534,6 +534,48 @@ function recordProblems(known, date, workerId, record) {
     return problems;
 }
 
+// What an advance amount may be, in ONE place.
+//
+// This used to be `isFiniteNumber` and nothing else - no sign, no zero, no magnitude -
+// while the real rule lived in the advance form and nowhere else: digits only, greater
+// than zero, at most ten million. So nothing on the wire, in a file, or out of a restore
+// was held to any part of it, and gross 400 with an advance of -500 reported a man as
+// owed 900. payrollReport does gross minus advances, which is correct arithmetic on a
+// value that should never have been admitted.
+//
+// The domain, stated rather than assumed:
+//
+//   a positive amount of money, in shekels, that a person actually handed over;
+//   at most ten million, which is the form's own ceiling and is already far past any
+//     real day's cash;
+//   never zero - handing over nothing is not an advance, and the form refuses it, so a
+//     zero arriving from anywhere else is a record of something that did not happen;
+//   never negative - money going the other way is a repayment, which this build does
+//     not have and must not silently pay for by INCREASING what is owed;
+//   never more precise than an agora, because three surfaces round it independently and
+//     a value they cannot all represent is a value they will disagree about.
+//
+// Fractions that are already on somebody's disk are NOT refused: refusing them would
+// quarantine a record that exists and has been paid against. Only what arrives is held
+// to the agora rule.
+const ADVANCE_MAX = 10000000;
+
+function advanceAmountProblems(id, amount) {
+    if (typeof amount !== 'number' || !isFinite(amount)) {
+        return ['הסכום של המקדמה ' + id + ' אינו מספר תקין.'];
+    }
+    if (amount <= 0) {
+        return ['הסכום של המקדמה ' + id + ' אינו סכום שנמסר.'];
+    }
+    if (amount > ADVANCE_MAX) {
+        return ['הסכום של המקדמה ' + id + ' גדול מהמותר.'];
+    }
+    if (!Number.isSafeInteger(Math.round(amount * 100))) {
+        return ['הסכום של המקדמה ' + id + ' אינו סכום שאפשר לחשב.'];
+    }
+    return [];
+}
+
 function advanceProblems(raw, known) {
     const problems = [];
 
@@ -559,9 +601,7 @@ function advanceProblems(raw, known) {
         if (!isRealDate(item.date)) {
             problems.push('למקדמה ' + id + ' אין תאריך אמיתי.');
         }
-        if (!isFiniteNumber(item.amount)) {
-            problems.push('הסכום של המקדמה ' + id + ' אינו מספר תקין.');
-        }
+        problems.push(...advanceAmountProblems(id, item.amount));
     });
 
     return problems;
@@ -1739,7 +1779,14 @@ function payrollReport(schedule, fromDate, toDate) {
         }
         if (row.amount !== null) row.amount += row.vehicleAmount;
 
-        row.netAmount = row.amount === null ? null : row.amount - row.advances;
+        // Only a POSITIVE advance is money that was handed over, and only that is netted.
+        // A negative one is not a repayment this build knows how to account for; netting
+        // it reports a man as owed MORE than he earned, which is exactly how gross 400
+        // with an advance of -500 came out as 900 - on a document that passed every gate
+        // this build had. The amount stays in `advances` so the screen can show it and a
+        // person can see there is money here the app is refusing to account for.
+        const netted = row.advances > 0 ? row.advances : 0;
+        row.netAmount = row.amount === null ? null : row.amount - netted;
 
         return row;
     });

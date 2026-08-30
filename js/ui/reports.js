@@ -309,7 +309,11 @@ function renderPayrollTable() {
     // accounts with no advances is not carrying two empty columns across every card.
     // NOT gated on anyRate: cash handed over is real whether or not rates were entered,
     // and hiding it because the rates are blank made 500 shekels disappear in silence.
-    const anyAdvance = rows.some(row => row.advances > 0);
+    // Any advance at all, not just a payable one. A record can hold an amount this build
+    // refuses to net - a negative one, which would INCREASE what somebody is owed - and
+    // hiding the column then made that money invisible on the one screen where it is
+    // read. It is shown, and it does not move the net: see moneyOf.
+    const anyAdvance = rows.some(row => Number(row.advances) !== 0);
 
     // Vehicles get their own two columns, on the same rule as the advances: they appear
     // once somebody owns one that went out. Two columns and not one, because the days and
@@ -331,14 +335,16 @@ function renderPayrollTable() {
             cells.push(row.dailyRate);
             // null, not 0: a worker whose rate was never entered owes an unknown amount,
             // which is a different statement from owing nothing.
-            cells.push(row.amount === null ? '—'
-                : Math.round(row.amount) + (row.hoursUnpriced ? ' *' : ''));
-        }
-        if (anyAdvance) cells.push(row.advances > 0 ? minusAmount(row.advances) : 0);
-        if (anyRate) {
+            const money = moneyOf(row);
+            cells.push(money.gross === null ? '—'
+                : moneyText(money.gross) + (row.hoursUnpriced ? ' *' : ''));
+            if (anyAdvance) cells.push(money.advances === 0 ? 0 : minusAmount(-money.advances));
             // The * follows the money onto the number actually paid.
-            cells.push(row.netAmount === null ? '—'
-                : bidiAmount(Math.round(row.netAmount)) + (row.hoursUnpriced ? ' *' : ''));
+            cells.push(money.net === null ? '—'
+                : bidiAmount(moneyText(money.net)) + (row.hoursUnpriced ? ' *' : ''));
+        } else if (anyAdvance) {
+            const money = moneyOf(row);
+            cells.push(money.advances === 0 ? 0 : minusAmount(-money.advances));
         }
         return cells;
     }));
@@ -362,9 +368,12 @@ function renderPayrollTable() {
         ? `סה״כ לתשלום · ${countedIn(paid, 'עובד אחד', 'עובדים')}`
         : 'סה״כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
-    if (anyRate) footer.push('', Math.round(totals.amount));
-    if (anyAdvance) footer.push(minusAmount(totals.advances));
-    if (anyRate) footer.push(bidiAmount(Math.round(totals.amount - totals.advances)));
+    // The band under the column adds up the same way each row did - see moneyOf.
+    const bandGross = agora(totals.amount);
+    const bandTaken = agora(totals.advances);
+    if (anyRate) footer.push('', moneyText(bandGross));
+    if (anyAdvance) footer.push(bandTaken === 0 ? 0 : minusAmount(bandTaken));
+    if (anyRate) footer.push(bidiAmount(moneyText(agora(bandGross - bandTaken))));
     table.appendChild(totalRow(footer, headers));
 
     // The net is the last cell of every row - the column order is the ledger's - and it
@@ -681,9 +690,10 @@ function renderNetRow(days, worker, advances) {
     const row = el('div', 'wday wday-total wday-net');
     row.appendChild(el('div', 'wday-date', 'נותר לתשלום'));
     row.appendChild(el('div', 'wday-what',
-        `${Math.round(earned)} נצבר · ${Math.round(taken)} מקדמות`));
+        `${moneyText(agora(earned))} נצבר · ${moneyText(agora(taken))} מקדמות`));
     row.appendChild(el('div', 'wday-money',
-        Number(worker.dailyRate) > 0 ? bidiAmount(Math.round(earned - taken)) : '—'));
+        Number(worker.dailyRate) > 0
+            ? bidiAmount(moneyText(agora(agora(earned) - agora(taken)))) : '—'));
     return row;
 }
 
@@ -956,7 +966,7 @@ function workerStatementText(workerId) {
     const summary = workerDaysSummary(days);
     lines.push('סה״כ ' + countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות'));
     lines.push(workUnitsLine(summary));
-    if (priced) lines.push(`נצבר: ${Math.round(earned)}`);
+    if (priced) lines.push(`נצבר: ${moneyText(agora(earned))}`);
 
     // The screen puts a * on unpriced hours and the sheet explains it; the message the
     // worker actually receives must not be the one place that pretends the number is
@@ -979,7 +989,8 @@ function workerStatementText(workerId) {
 
     if (priced) {
         lines.push('');
-        lines.push(`נותר לתשלום: ${bidiAmount(Math.round(earned - taken))}`);
+        lines.push(`נותר לתשלום: `
+            + `${bidiAmount(moneyText(agora(agora(earned) - agora(taken))))}`);
     }
 
     return lines.join('\n');
@@ -1297,11 +1308,54 @@ function payrollSheetRows() {
 //   there, because on its own it would read as a claim that he earned nothing. With no
 //   rate AND no advances there is nothing to add up and all three stay blank, which is
 //   where "unknown rather than zero" was argued and where it still holds.
-function moneyCells(row) {
-    const advances = row.advances > 0 ? -Math.round(row.advances) : 0;
+// ONE derivation of displayed money, for every surface.
+//
+// Six surfaces show these three numbers - the table on screen, its totals band, the
+// worker's modal, the message he is sent, the CSV and the workbook - and each of them
+// rounded gross, advance and net independently, from the exact value. For 400 earned and
+// 250.5 taken that produced 150, 150, 150, 149, 149 and a screen whose own columns said
+// 400 − 251 = 150. Six answers to one question, on the rows somebody is paid from.
+//
+// So the rounding happens ONCE, to the agora, and the net is computed from the rounded
+// parts rather than from the exact ones. An agora is the precision the record can hold:
+// the advance form refuses a fraction, but the wire accepts one, so a fraction arrives
+// from another phone, an import or a restore - and a value the surfaces cannot all
+// represent is a value they will disagree about.
+const agora = value => Math.round(Number(value) * 100) / 100;
+
+// A number as a person reads it: whole shekels stay whole, an agora is shown rather than
+// hidden. Showing 150 for 149.5 is not a rounding, it is a different number from the one
+// the record holds, and somebody is paid from it.
+function moneyText(value) {
+    const at = agora(value);
+    return Number.isInteger(at) ? String(at) : at.toFixed(2).replace(/0$/, '');
+}
+
+// The three numbers, derived together. `advances` is negative or zero, `net` is their
+// sum, and `gross` is null when the man has no rate - unknown is not zero.
+function moneyOf(row) {
+    // Only a POSITIVE advance is money that was handed over, and only that is netted. A
+    // negative one is not a repayment this build knows how to account for - netting it
+    // would report a man as owed MORE than he earned, which is how gross 400 with an
+    // advance of -500 came out as 900. It is shown, in the column, and it changes nothing.
+    const taken = Number(row.advances);
+    const netted = taken > 0 ? -agora(taken) : 0;
     const priced = row.amount !== null;
-    const gross = priced ? Math.round(row.amount) : (advances === 0 ? '' : 0);
-    const net = gross === '' ? '' : gross + advances;
+    const gross = priced ? agora(row.amount) : null;
+    return {
+        gross,
+        advances: taken === 0 ? 0 : -agora(taken),
+        netted,
+        net: gross === null ? null : agora(gross + netted)
+    };
+}
+
+function moneyCells(row) {
+    const money = moneyOf(row);
+    const advances = money.netted;
+    const priced = row.amount !== null;
+    const gross = priced ? money.gross : (advances === 0 ? '' : 0);
+    const net = gross === '' ? '' : agora(gross + advances);
 
     const notes = [];
     if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
