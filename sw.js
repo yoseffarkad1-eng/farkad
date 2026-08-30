@@ -87,28 +87,83 @@ self.addEventListener('install', event => {
     );
 });
 
-// Which windows this worker has actually handed a page to.
+// Which build each window is running.
 //
-// A window in here navigated through THIS worker, so it is running THIS build. A window
-// that is open and is not in here was loaded by the build before - claimed away from its
-// own worker by the claim below, still executing the old scripts. That distinction is
-// the whole of what the two rules under it need, and it is derived rather than reported:
-// a page cannot be asked, because the page that needs identifying is one shipped before
-// anybody thought to ask it.
+// A window this worker handed a page to is running THIS build. A window that is open and
+// is not one of those was loaded by the build before - claimed away from its own worker,
+// still executing the old scripts. That distinction is the whole of what the rules below
+// need, and it is derived rather than reported: the page that most needs identifying is
+// one shipped before anybody thought to ask it.
 //
-// It is in memory, so a worker the browser has terminated and restarted forgets it. That
-// is the safe direction: a window it has forgotten reads as "not this build", so the old
-// cache is kept and the old bytes are served - the same answer, reached again.
+// It used to live only in a Set in this worker's memory, and that was wrong in the one
+// direction the comment here claimed was safe. A service worker is a process the browser
+// stops and restarts at will - same version, same registration, same controller object,
+// so `controllerchange` never fires and nothing in the page ever re-announces. The Set
+// came back empty and THIS build's own window then failed the membership test and fell
+// into the branch written for the previous build's window: it was handed v86's scripts,
+// and with two shelves down there v85's, because caches.keys() is creation-ordered and
+// the search took the oldest. Measured, in a real browser, with the origin withholding
+// the file so the answer could only have come from a cache.
+//
+// So it is written down where a restart cannot reach it. The Cache API is the only
+// durable store a worker has, and one entry per client is a few bytes.
 const SERVED = new Set();
+const CLIENTS = 'farkad-clients';
 
+function clientKey(id) {
+    return new Request('https://farkad.invalid/client/' + encodeURIComponent(id));
+}
+
+// Remembered durably, and in memory for the fetches that follow in this same process.
+function rememberClient(id, build) {
+    if (!id) return Promise.resolve();
+    if (build === VERSION) SERVED.add(id);
+    return caches.open(CLIENTS)
+        .then(cache => cache.put(clientKey(id), new Response(build)))
+        .catch(() => undefined);
+}
+
+// Which build this window is running, as far as anything on this device can say.
+// Null means nobody ever wrote it down - which after the change above means a window
+// from a build that predates it, and is the ONLY case the guessing below is for.
+function buildOfClient(id) {
+    if (!id) return Promise.resolve(VERSION);
+    if (SERVED.has(id)) return Promise.resolve(VERSION);
+    return caches.open(CLIENTS)
+        .then(cache => cache.match(clientKey(id)))
+        .then(hit => (hit ? hit.text() : null))
+        .then(build => {
+            if (build === VERSION) SERVED.add(id);
+            return build;
+        })
+        .catch(() => null);
+}
+
+// Every build any open window is recorded as running, plus this one.
+function buildsInUse() {
+    return self.clients.matchAll({ type: 'window' })
+        .then(clients => Promise.all(clients.map(client => buildOfClient(client.id))))
+        .then(builds => {
+            const held = new Set([VERSION]);
+            let unknown = false;
+            builds.forEach(build => {
+                if (build === null) unknown = true;
+                else held.add(build);
+            });
+            return { held, unknown };
+        });
+}
+
+// Every OTHER build's shelf. The client bookkeeping is not a shelf: reaping it would
+// throw away the record of which window is running what, and serving out of it would
+// hand somebody a page that is not a page.
 function previousCaches() {
-    return caches.keys().then(keys => keys.filter(key => key !== VERSION));
+    return caches.keys().then(keys => keys.filter(key => key !== VERSION && key !== CLIENTS));
 }
 
 // A window still running the build before this one, if there is one.
 function strangerOpen() {
-    return self.clients.matchAll({ type: 'window' })
-        .then(clients => clients.some(client => !SERVED.has(client.id)));
+    return buildsInUse().then(state => state.unknown || state.held.size > 1);
 }
 
 // Every other build's cache goes, but not while somebody is still running one of them.
@@ -119,11 +174,47 @@ function strangerOpen() {
 // of the app that window can still run; it is kept until nothing is running it, and then
 // it goes at the next activate or the next navigation.
 function reapUnusedCaches() {
-    return strangerOpen().then(stranger => {
-        if (stranger) return undefined;
-        return previousCaches()
-            .then(keys => Promise.all(keys.map(key => caches.delete(key))));
-    });
+    return buildsInUse().then(state => {
+        // A window whose build nobody wrote down. It is running SOMETHING, and until it
+        // is gone there is no shelf here that can be proved unused.
+        if (state.unknown) return undefined;
+        return previousCaches().then(keys => Promise.all(keys
+            .filter(key => !state.held.has(key))
+            .map(key => caches.delete(key))));
+    }).then(() => forgetClosedClients());
+}
+
+// Now, and twice more as the browser catches up.
+//
+// A window that has just been closed can still be listed by clients.matchAll for a
+// second or two, and while it is listed it is a window running something - so the first
+// pass correctly collects nothing. Without the later ones the shelves would sit there
+// until the next navigation, which on an installed app might be tomorrow. It stops as
+// soon as there is nothing left to collect.
+function reapLater(attempt) {
+    const round = attempt || 0;
+    return reapUnusedCaches()
+        .then(() => previousCaches())
+        .then(keys => {
+            if (keys.length === 0 || round >= 2) return undefined;
+            return new Promise(resolve => setTimeout(resolve, 2000 + round * 3000))
+                .then(() => reapLater(round + 1));
+        });
+}
+
+// The record of a window that is gone. Bounded rather than tidy: without it the store
+// grows for the life of the origin, one entry per window ever opened.
+function forgetClosedClients() {
+    return Promise.all([
+        caches.open(CLIENTS).then(cache => cache.keys()),
+        self.clients.matchAll({ type: 'window' })
+    ]).then(([keys, clients]) => {
+        const open = new Set(clients.map(client => clientKey(client.id).url));
+        return caches.open(CLIENTS).then(cache => Promise.all(
+            keys.filter(request => !open.has(request.url))
+                .map(request => cache.delete(request))
+        ));
+    }).catch(() => undefined);
 }
 
 self.addEventListener('activate', event => {
@@ -150,8 +241,11 @@ self.addEventListener('fetch', event => {
     // nowhere was the difference between opening and staring at white.
     if (request.mode === 'navigate') {
         // The window this navigation creates is running THIS build, because this is the
-        // page it is about to run. That is the one fact everything else here is built on.
-        if (event.resultingClientId) SERVED.add(event.resultingClientId);
+        // page it is about to run. That is the one fact everything else here is built on,
+        // and it is written down durably so a worker restart cannot forget it.
+        if (event.resultingClientId) {
+            event.waitUntil(rememberClient(event.resultingClientId, VERSION));
+        }
         event.respondWith(
             caches.open(VERSION)
                 .then(cache => cache.match('./index.html'))
@@ -168,8 +262,7 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // A window this worker never served is a window running the build before it, claimed
-    // away from its own worker. It gets ITS build's bytes, not this one's.
+    // Whatever build this window is running, from the shelf that build was installed on.
     //
     // clients.claim() takes over every window of the origin, and this handler only ever
     // opened caches.open(VERSION) - so a page still executing the old scripts was handed
@@ -177,18 +270,47 @@ self.addEventListener('fetch', event => {
     // page, one session: the exact failure the header of this file says the design exists
     // to prevent. The page catches up on its own at the first safe moment (see
     // js/ui/offline.js); until it does, it is served the app it is running.
-    if (event.clientId && !SERVED.has(event.clientId)) {
-        event.respondWith(
-            previousCaches()
-                .then(keys => keys.reduce(
-                    (found, key) => found.then(hit => hit
-                        || caches.open(key).then(cache => cache.match(request))),
-                    Promise.resolve(null)
-                ))
-                .then(hit => hit || caches.open(VERSION)
-                    .then(cache => cache.match(request))
-                    .then(inThis => inThis || fetch(request)))
-        );
+    //
+    // The window's build is READ, not guessed. It used to be "not in the in-memory set,
+    // therefore old, therefore the first previous cache that has the file" - three
+    // inferences, and after a worker restart the first one was wrong for THIS build's own
+    // window, which was then handed the oldest shelf on the device.
+    if (event.clientId) {
+        event.respondWith(buildOfClient(event.clientId).then(build => {
+            if (build === VERSION || build === null) {
+                // null is a window from a build that predates this bookkeeping. There is
+                // exactly one honest answer for it and it is not a guess: if the device
+                // holds one previous shelf, that is the build it must be running. If it
+                // holds several, nothing here can tell them apart, so nothing here
+                // chooses - it asks the origin, and answers out of this build's cache
+                // only when the origin cannot be reached, which is the same thing every
+                // other window would get.
+                if (build === VERSION) return serveFrom(VERSION, request);
+                return previousCaches().then(keys => {
+                    if (keys.length === 0) return serveFrom(VERSION, request);
+                    if (keys.length === 1) return serveFrom(keys[0], request);
+                    // Several shelves and a window nobody wrote down. The origin is asked
+                    // FIRST - it is the only party that can still be right - and only if
+                    // it cannot be reached does this fall back, to the NEWEST previous
+                    // shelf rather than to whichever one caches.keys() happens to yield
+                    // first. That order was creation order, so the old code reached for
+                    // the oldest build on the device: two releases back, for a window
+                    // that had almost certainly come from the one just before this.
+                    //
+                    // It is a last resort and it is bounded: from this build forward
+                    // every window is written down at its navigation, so the only windows
+                    // that can land here are ones from a build that predates the
+                    // bookkeeping, and they are gone the moment they reload.
+                    return askOrigin(request)
+                        .then(hit => hit || serveFrom(keys[keys.length - 1], request));
+                });
+            }
+            // A build we wrote down. Its own shelf, or - if that shelf is gone - the
+            // origin, never somebody else's shelf.
+            return caches.has(build).then(there => (there
+                ? serveFrom(build, request)
+                : askOrigin(request).then(hit => hit || serveFrom(VERSION, request))));
+        }));
         return;
     }
 
@@ -223,6 +345,24 @@ self.addEventListener('fetch', event => {
 // wrong is one load of a slightly older page; the next one goes to the network again.
 const DOCUMENT_TIMEOUT_MS = 3000;
 
+// The origin, or null. A REFUSAL is not an answer: a deploy in progress hands back 404s
+// and 503s, and passing one to a page that asked for a script is the same as handing it
+// nothing - the script silently never runs and the app loads with half its globals
+// missing. Null means "the origin could not answer", which is what the caller needs.
+function askOrigin(request) {
+    return fetch(request).then(
+        response => (response && response.ok ? response : null),
+        () => null
+    );
+}
+
+// One shelf, then the network. Never a search across shelves.
+function serveFrom(cacheName, request) {
+    return caches.open(cacheName)
+        .then(cache => cache.match(request))
+        .then(hit => hit || fetch(request));
+}
+
 function timedFetch(request, timeout) {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('network too slow')), timeout);
@@ -255,8 +395,13 @@ self.addEventListener('message', event => {
     // SERVED already gives. What this adds is promptness: the moment the last window of
     // the old build is replaced by one of this build, the old cache can go, instead of
     // waiting for the next launch.
-    if (event.data && event.data.type === 'running' && event.data.build === VERSION) {
-        if (event.source && event.source.id) SERVED.add(event.source.id);
-        event.waitUntil(reapUnusedCaches());
+    if (event.data && event.data.type === 'running' && typeof event.data.build === 'string') {
+        const id = event.source && event.source.id;
+        // Twice: now, and again a moment later. A window that has just been closed can
+        // still be listed by clients.matchAll for a short while, and while it is listed
+        // it is a window running something - so the first pass correctly collects
+        // nothing, and without the second the shelves would sit there until the next
+        // navigation, which on an installed app might be tomorrow.
+        event.waitUntil(rememberClient(id, event.data.build).then(() => reapLater()));
     }
 });

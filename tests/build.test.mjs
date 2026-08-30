@@ -120,16 +120,23 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     // the shape it pins moved with the behaviour: read another build's cache for a window
     // that is running it, write only this one's.
     const opens = [...code.matchAll(/caches\.open\(([^)]*)\)/g)].map(m => m[1].trim());
-    const foreign = opens.filter(argument => argument !== 'VERSION');
-    check('the only cache opened that is not this build\'s is opened to read',
-        foreign.length === 1 && foreign[0] === 'key'
-        && /caches\.open\(key\)\.then\(cache => cache\.match\(request\)\)/.test(code),
+    const shelves = opens.filter(argument => argument !== 'CLIENTS');
+    const foreign = shelves.filter(argument => argument !== 'VERSION');
+    check('a page is only ever served out of one named shelf, never a search across them',
+        foreign.length === 1 && foreign[0] === 'cacheName'
+        && /function serveFrom\(cacheName, request\) \{[\s\S]{0,200}?caches\.open\(cacheName\)/.test(code),
         foreign.join(', '));
-    check('and nothing is written into it',
-        !/caches\.open\(key\)[\s\S]{0,200}?cache\.(put|add)\(/.test(code));
-    check('every cache written to is this build\'s',
+    check('and no page bytes are written into a shelf that is not this build\'s',
         [...code.matchAll(/caches\.open\(([^)]*)\)[\s\S]{0,200}?cache\.(?:put|add)\(/g)]
-            .every(match => match[1].trim() === 'VERSION'));
+            .every(match => ['VERSION', 'CLIENTS'].indexOf(match[1].trim()) !== -1));
+
+    // The one cache that is not a build shelf. It holds which window is running which
+    // build - the record a worker restart used to lose, after which this build's own
+    // window was served the oldest shelf on the device. It is never a shelf itself: not
+    // reaped as one, not served out of as one.
+    check('the client bookkeeping is not treated as a build shelf',
+        /key !== VERSION && key !== CLIENTS/.test(code)
+        && !/serveFrom\(CLIENTS/.test(code));
 
     check('no cache is searched across every version',
         !/caches\.match\(/.test(code));
@@ -151,17 +158,19 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     check('the old cache is deleted only after a successful install',
         /caches\.delete/.test(code) && !/caches\.delete/.test(install));
     check('and only caches that are not this version',
-        /keys\.filter\(key => key !== VERSION\)/.test(code)
+        /keys\.filter\(key => key !== VERSION && key !== CLIENTS\)/.test(code)
         && [...code.matchAll(/caches\.delete\(([^)]*)\)/g)]
-            .every(match => match[1].trim() === 'key'));
+            .every(match => ['key', 'request'].indexOf(match[1].trim()) !== -1));
 
-    // The reap is guarded by whether anybody is still RUNNING one of those caches. It
-    // used to reap and then claim, so the old build's cache went while a window was still
-    // executing the old build - and after the claim that window had nowhere of its own
-    // left to be served from.
+    // The reap is guarded by what every open window is RUNNING. It used to reap and then
+    // claim, so the old build's cache went while a window was still executing the old
+    // build - and after the claim that window had nowhere of its own left to be served
+    // from. A window whose build nobody wrote down holds EVERY shelf: it is running
+    // something, and until it is gone nothing here can be proved unused.
     check('and not while a window is still running one of them',
-        /function reapUnusedCaches\(\) \{\s*return strangerOpen\(\)/.test(code)
-        && /if \(stranger\) return undefined;/.test(code));
+        /function reapUnusedCaches\(\) \{\s*return buildsInUse\(\)/.test(code)
+        && /if \(state\.unknown\) return undefined;/.test(code)
+        && /\.filter\(key => !state\.held\.has\(key\)\)/.test(code));
     check('the claim happens before the reap, not after it',
         code.indexOf('self.clients.claim().then(() => reapUnusedCaches())') !== -1);
 }

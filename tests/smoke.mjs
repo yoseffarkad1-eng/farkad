@@ -2241,12 +2241,19 @@ async function seedRoster(page) {
     await fetch('index.html', { mode: 'navigate' }).then(r => r.text()).catch(() => '');
     const after = await cache.match('./index.html').then(r => r && r.text());
 
-    return { cached: Boolean(before), unchanged: before === after, caches: keys.length };
+    // farkad-clients is not a shelf - see the note in tests/update.test.mjs.
+  return {
+    cached: Boolean(before), unchanged: before === after,
+    caches: keys.filter(key => key !== 'farkad-clients').length,
+    bookkeeping: keys.includes('farkad-clients')
+  };
   });
   check('the document is served from this version\'s cache', served.cached);
   check('and a navigation does not overwrite it', served.unchanged);
   check('exactly one version cache exists at a time', served.caches === 1,
     String(served.caches));
+  check('and which window is running which build is written down beside them',
+    served.bookkeeping === true, String(served.bookkeeping));
 
   // A build mismatch is noticed and stops the app writing, rather than saving an edit in
   // a shape the other half of the app does not read.

@@ -106,7 +106,13 @@ const buildOnScreen = page => page.evaluate(() => ({
     caches: null
 }));
 
-const cacheNames = page => page.evaluate(() => caches.keys());
+// The SHELVES. farkad-clients is not one: it holds which window is running which build -
+// the record a worker restart used to lose, after which this build's own window was
+// served the oldest shelf on the device. It is never reaped as a shelf and never served
+// out of as one, and tests/build.test.mjs pins both.
+const cacheNames = page => page.evaluate(() =>
+    caches.keys().then(keys => keys.filter(key => key !== 'farkad-clients')));
+const allCacheNames = page => page.evaluate(() => caches.keys());
 
 // ---------------------------------------------------------------- the handover
 {
@@ -201,7 +207,10 @@ const cacheNames = page => page.evaluate(() => caches.keys());
     check('the new build has its own cache', caches.includes(BUILDS.new.cache), caches.join());
     check('and the old one is gone, not left to be served from later',
         !caches.includes(BUILDS.old.cache), caches.join());
-    check('exactly one cache is left', caches.length === 1, String(caches.length));
+    check('exactly one shelf is left', caches.length === 1, String(caches.length));
+    check('and beside it, the record of which window is running what',
+        (await allCacheNames(page)).includes('farkad-clients'),
+        (await allCacheNames(page)).join());
 
     // The point of all of it: the build a person is now running is the build that ships,
     // offline as well as online.
