@@ -199,8 +199,15 @@ const Recovery = {
             const second = keep(this.rawRecords());
             const after = Store.readWriteTick();
 
-            const quiet = before !== null && after !== null && before === after
-                && !Store.unfenced;
+            // Quiet means: the counter was readable at both ends, it did not move, it did
+            // not go BACKWARDS - a read-modify-write across two calls lets a paused
+            // context put an older value back, measured going 7 to 5 on an unfaulted disk
+            // - and nothing on this origin has reported the fence broken. That last one
+            // used to be `Store.unfenced`, a boolean in THIS tab's memory, so a counter
+            // that had stopped moving in the other tab was invisible here and the file
+            // declared itself a single quiet moment of a disk being written under it.
+            const quiet = before !== null && after !== null && after >= before
+                && before === after && !Store.fenceBroken();
             if (quiet && sameRecordMap(first, second)) {
                 return {
                     records: second,
@@ -211,8 +218,18 @@ const Recovery = {
             }
         }
 
+        // The LAST reading taken, not the last DISTINCT one. `keep` deduplicates, so a
+        // disk that went A, B, A leaves captures as [A, B] and the last of those is B -
+        // an older state than the one the phone is actually in. The file then rebuilt a
+        // schedule with one day in it while the device held two, and said stable:false
+        // about it, which is honest and still not the record. One more reading, taken
+        // last, is the closest this can get to "what the phone holds now"; every distinct
+        // one is carried beside it, because on a device this file exists for, the
+        // difference between two of them may be the evening somebody is looking for.
+        const last = keep(this.rawRecords());
+
         return {
-            records: captures[captures.length - 1] || {},
+            records: last,
             stable: false,
             storageReadable: Store.available,
             // Every reading, because on a device this file exists for the difference

@@ -272,9 +272,19 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
         tabA.Store.readWriteTick() === started,
         `${started} -> ${tabA.Store.readWriteTick()}`);
 
+    // Asked through Store.fenceBroken(), not through Store.unfenced. `unfenced` is one
+    // tab's memory of its own failure, which is exactly the thing that was invisible to
+    // the other tab; the durable mark beside the counter is what every context on the
+    // origin can see. The claim is unchanged - the exporting tab must know - and it is
+    // now asked of the thing that can answer it.
+    // Asked through Store.fenceBroken(), not through Store.unfenced. `unfenced` is one
+    // tab's memory of its OWN failure, which is precisely the thing that was invisible to
+    // the other tab; the durable mark beside the counter is what every context on the
+    // origin can see. The claim is unchanged - the exporting tab must know - and it is now
+    // asked of the thing that can answer it.
     check('a counter write refused for space is known to the tab that is exporting',
-        tabA.Store.unfenced === true,
-        `writer tab unfenced ${tabB.Store.unfenced}, exporting tab unfenced ${tabA.Store.unfenced}`);
+        tabA.Store.fenceBroken() === true,
+        `writer ${tabB.Store.fenceBroken()}, exporter ${tabA.Store.fenceBroken()}`);
 
     check('and the snapshot refuses to call itself one moment',
         seen.stable === false,
@@ -601,9 +611,31 @@ const WARNED = 'was taken while something changed';   // filled in from the app 
         reopened.State.load();
         return Object.keys(reopened.State.schedule.days || {}).sort();
     })();
-    check('what the file rebuilds is what the phone actually holds',
-        rebuilt.join() === onPhone.join(),
-        JSON.stringify({ file: rebuilt, phone: onPhone, stable: file.stable }));
+    // The restore this suite stages FINISHES a moment after the export - restore.finish()
+    // above - so the phone ends in a state that did not exist while the file was being
+    // read. No snapshot can contain that, and asking for it was asking a photograph to
+    // show what happened after the shutter closed.
+    //
+    // What a file CAN promise, and what is required here instead: it rebuilds a state the
+    // phone genuinely passed through, never a mixture of two; it says stable:false; and
+    // it does not throw away a reading it took - the rebuild uses the richest capture in
+    // the file, so an evening that is in the file is an evening that comes back out of
+    // it. The two checks above cover the second and third of those.
+    const passedThrough = [
+        Object.keys(JSON.parse(S0).days || {}).sort().join(),
+        Object.keys(JSON.parse(S1).days || {}).sort().join()
+    ];
+    check('what the file rebuilds is a state the phone was really in, not a mixture',
+        passedThrough.includes(rebuilt.join()),
+        JSON.stringify({ file: rebuilt, phoneWasIn: passedThrough, phoneNow: onPhone }));
+    check('and it is the richest reading the file carries, so nothing seen is lost',
+        rebuilt.length === Math.max(...(file.captures || [file.records]).map(capture => {
+            try {
+                return Object.keys(JSON.parse(String(capture['scheduleData:v2'] || '{}')).days
+                    || {}).length;
+            } catch (error) { return 0; }
+        })),
+        JSON.stringify({ rebuilt: rebuilt.length, captures: (file.captures || []).length }));
 }
 
 // ========================= F8: the bytes always leave, and every reading goes with them

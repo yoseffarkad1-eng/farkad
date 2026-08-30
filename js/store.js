@@ -24,6 +24,11 @@ function isQuotaError(error) {
 // The counter every durable write moves. Its own key, outside every record family this
 // app reads, so nothing that enumerates the app's records has to know about it.
 const WRITE_TICK_KEY = 'farkad:writeTick';
+// Written next to the counter when the fence stops working, and read by every context on
+// the origin. See breakWriteFence.
+const WRITE_FENCE_BROKEN_KEY = 'farkad:writeTick:broken';
+// The build that last kept the fence. See bumpWriteTick.
+const WRITE_FENCE_BUILD_KEY = 'farkad:writeTick:build';
 
 const Store = {
     available: true,
@@ -125,7 +130,8 @@ const Store = {
 
     bumpWriteTick(key) {
         if (this._ticking) return;
-        if (key === WRITE_TICK_KEY) return;
+        if (key === WRITE_TICK_KEY || key === WRITE_FENCE_BROKEN_KEY) return;
+        if (key === WRITE_FENCE_BUILD_KEY) return;
         if (!this.available) return;
         // Only for a record the rescue file carries. The counter exists to prove that
         // the file's readings were one moment of this disk, and a write to a record the
@@ -139,25 +145,136 @@ const Store = {
         // direction to be wrong in.
         if (typeof isFarkadSnapshotKey === 'function' && !isFarkadSnapshotKey(key)) return;
         this._ticking = true;
+        // Which build is participating in the fence. A build that predates it writes the
+        // records the file carries and never moves the counter at all - so the OTHER
+        // window, for the whole length of a rollout, is an unfenced writer that two equal
+        // readings cannot see. Every phone in the field is that window today. This build
+        // cannot make an older one announce itself; what it can do is record that the
+        // fence is being kept by THIS build, so a snapshot can tell whether the build
+        // that last wrote is one that participates at all.
         try {
-            const next = (Number(this.readWriteTick()) || 0) + 1;
-            localStorage.setItem(WRITE_TICK_KEY, String(next));
+            const stamp = typeof APP_VERSION === 'string' ? APP_VERSION : '';
+            if (stamp && localStorage.getItem(WRITE_FENCE_BUILD_KEY) !== stamp) {
+                localStorage.setItem(WRITE_FENCE_BUILD_KEY, stamp);
+            }
+        } catch (error) {
+            // The stamp is a hint, never a gate. Its absence is handled where it is read.
+        }
+        try {
+            const was = this.readWriteTick();
+
+            // Unreadable, or past the point where adding one still moves it. The fence is
+            // broken and the file has to be told - but the counter is RESET rather than
+            // left stuck, because a counter that never moves again is a device where
+            // nothing can ever be fenced, and the next honest snapshot deserves a working
+            // one. The broken mark stays: this build never clears it, so no export on
+            // this device claims a quiet moment again without somebody looking.
+            if (was === null) {
+                this.breakWriteFence('the counter could not be read');
+                localStorage.setItem(WRITE_TICK_KEY, String(this.tick + 1));
+                this.tick += 1;
+                return;
+            }
+
+            // Backwards. The counter is a read-modify-write across two calls, so a paused
+            // context resumes and puts an older value back over a newer one - measured
+            // going 7 to 5 on a disk with no fault in it at all. Two equal readings across
+            // that are not one quiet moment, they are a moment that was undone, and the
+            // snapshot cannot see the difference by comparing values.
+            if (was < this.tick) {
+                this.breakWriteFence('the counter went backwards');
+            }
+            // Read ONCE MORE, immediately before writing. Everything between the first
+            // read and the write is a window another tab can write in, and a value
+            // computed from the earlier read then lands ON TOP of theirs - which is the
+            // put-back this guard is about. Two reads do not close the window; they
+            // narrow it, and the read-back below catches what is left.
+            const fresh = this.readWriteTick();
+            const base = Math.max(was, fresh === null ? was : fresh, this.tick);
+            if (base > was) this.breakWriteFence('the counter moved under this write');
+            const next = base + 1;
+            const text = String(next);
+            localStorage.setItem(WRITE_TICK_KEY, text);
+            // READ BACK. This is the one write the whole stability claim rests on, and it
+            // was the one write nobody looked at - on a disk this app never trusts
+            // otherwise. A disk that accepts a write and hands back something else pinned
+            // the counter for the life of the device with nothing flagged anywhere, and
+            // every export afterwards said it was one moment of a disk it could not see.
+            if (localStorage.getItem(WRITE_TICK_KEY) !== text) {
+                this.breakWriteFence('the counter did not read back');
+                return;
+            }
+            this.tick = next;
         } catch (error) {
             // No room for the counter, or no storage at all. The write itself is not the
             // counter's business; what is lost is the ability to PROVE a quiet moment.
-            this.unfenced = true;
+            this.breakWriteFence('the counter could not be written');
         } finally {
             this._ticking = false;
         }
     },
 
+    // The fence is broken, and every context on this origin has to know.
+    //
+    // `unfenced` was a boolean in the memory of the TAB THAT FAILED, and the exporter
+    // reads its own: two tabs are two JavaScript worlds sharing one disk, so a counter
+    // that stopped moving in one of them was invisible to the other, which then declared
+    // its file a single quiet moment of a disk that had been written under it.
+    //
+    // So it is written DOWN, next to the counter. A mark that cannot itself be written is
+    // the same answer once more - this tab knows, and says so in memory - and the export
+    // is refused a stable verdict either way. The mark is never cleared by this build: a
+    // fence that has failed once on this device cannot be trusted again without somebody
+    // looking, and the cost of being wrong is a file that says an evening is in it.
+    breakWriteFence(why) {
+        this.unfenced = true;
+        try {
+            localStorage.setItem(WRITE_FENCE_BROKEN_KEY, String(why || '1'));
+        } catch (error) {
+            // Nothing more to do: this context knows, and a snapshot taken HERE will say
+            // so. A snapshot taken in the other tab cannot know, which is exactly the
+            // failure this mark exists to prevent and cannot prevent on a full disk.
+        }
+    },
+
+    // Whether anything on this origin has reported the fence broken - this tab's own
+    // memory, or the durable mark another tab left.
+    fenceBroken() {
+        if (this.unfenced) return true;
+        if (!this.available) return false;
+        try {
+            if (localStorage.getItem(WRITE_FENCE_BROKEN_KEY) !== null) return true;
+            // A counter that exists but has never been kept by a build that says so. On a
+            // device where an older window is writing the records this file carries, the
+            // counter simply does not move for those writes - two equal readings across
+            // them mean nothing at all, and the file would call that a quiet moment.
+            const stamp = typeof APP_VERSION === 'string' ? APP_VERSION : '';
+            if (!stamp) return false;
+            const kept = localStorage.getItem(WRITE_FENCE_BUILD_KEY);
+            return kept !== null && kept !== stamp;
+        } catch (error) {
+            return true;
+        }
+    },
+
     // What the disk says the counter is. Read durably, because the question is about
     // what every context on this origin can see, not about what this one wrote.
+    // The counter, or NULL. Null means "there is no usable fence", which the snapshot
+    // already knows how to answer; it is not the same as zero.
+    //
+    // `Number(raw) || 0` was a coercion that failed OPEN: "abc", "", "{}", "null" and any
+    // corrupted value all came back as a counter genuinely at zero, so a disk that had
+    // damaged this record read as a quiet one. And there was no ceiling, so past 2^53 an
+    // increment rounds away and a long digit string is Infinity - which round-trips
+    // through String and Number and freezes the counter for good.
     readWriteTick() {
         if (!this.available) return null;
         try {
             const raw = localStorage.getItem(WRITE_TICK_KEY);
-            return raw === null ? 0 : (Number(raw) || 0);
+            if (raw === null) return 0;
+            if (!/^[0-9]+$/.test(raw)) return null;
+            const value = Number(raw);
+            return Number.isSafeInteger(value) ? value : null;
         } catch (error) {
             return null;
         }

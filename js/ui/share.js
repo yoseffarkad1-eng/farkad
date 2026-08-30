@@ -1146,6 +1146,32 @@ function renderStorageRoom() {
 //   and the raw records are evidence. They are reported, never imported: writing another
 //   device's wreckage onto this one would put unreadable bytes under the keys this app
 //   reads, and the next open would quarantine them and stop recording.
+// How much work a reading of the disk actually yields. Days, because a day is what
+// somebody is looking for; the record count breaks ties, because a reading that carries
+// more of the queue carries more unsent work.
+function recoveryWeight(records) {
+    if (!records || typeof records !== 'object' || Array.isArray(records)) return -1;
+    let days = 0;
+    try {
+        const parsed = JSON.parse(String(records['scheduleData:v2'] || '{}'));
+        days = Object.keys((parsed && parsed.days) || {}).length;
+    } catch (error) {
+        days = 0;
+    }
+    return days * 1000 + Object.keys(records).length;
+}
+
+function richestRecovery(records, captures) {
+    if (!Array.isArray(captures) || captures.length === 0) return records;
+    let best = records;
+    let bestWeight = recoveryWeight(records);
+    captures.forEach(capture => {
+        const weight = recoveryWeight(capture);
+        if (weight > bestWeight) { best = capture; bestWeight = weight; }
+    });
+    return best;
+}
+
 function looksLikeRecoveryFile(parsed) {
     return Boolean(parsed) && typeof parsed === 'object'
         && parsed.kind === 'farkad-recovery';
@@ -1412,7 +1438,16 @@ function rescueLoadedNotice(loaded) {
 }
 
 function readRecoveryFile(parsed) {
-    const records = parsed.records;
+    // The reading that loses least, out of every reading the file carries.
+    //
+    // A file taken while the other tab was writing holds several distinct readings of the
+    // disk, and `records` is only one of them - so an evening that IS in the file, in a
+    // capture beside it, was thrown away by the rebuild. The captures are exactly what
+    // they are for: on the device this file exists for, the difference between two
+    // readings may be the evening somebody is looking for. So the richest one is used,
+    // measured by the days it actually yields, and ties keep `records` - the reading the
+    // export itself chose.
+    const records = richestRecovery(parsed.records, parsed.captures);
     if (!records || typeof records !== 'object' || Array.isArray(records)) {
         throw new Error('not a farkad recovery file');
     }
