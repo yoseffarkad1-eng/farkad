@@ -768,10 +768,22 @@ function isLegacyReplacement(parsed) {
 // re-stamps it with this device and this clock, which is correct and is not a difference
 // in the record. schemaVersion is in, because a document from another version is not the
 // same document.
+//
+// And it is read off the SOURCE, not off the normalised copy. normaliseSchedule starts
+// from emptySchedule(), which stamps SCHEMA_VERSION, and never copies the raw field - so
+// both sides read 2 whatever the record says, and the sentence above described a
+// guarantee this function did not provide: a stored record stamped with another version
+// answered "yes, I hold the replacement".
+//
+// A record with NO version falls back to the stamp, and that is not a loophole - it is
+// the v71 case, and the only one. A v71 record is the bare cloud document with no version
+// on it at all, and the frozen companion it is bound to is an upgraded document carrying
+// 2. Reading absence as a difference would hold every genuine v71 restore for ever.
 function replacementContent(source) {
     const schedule = normaliseSchedule(source);
+    const stated = source && typeof source === 'object' ? source.schemaVersion : undefined;
     return canonicalJson({
-        schemaVersion: schedule.schemaVersion,
+        schemaVersion: stated === undefined ? schedule.schemaVersion : stated,
         workers: schedule.workers,
         places: schedule.places,
         days: schedule.days,
@@ -2893,7 +2905,17 @@ const FarkadSync = {
 
         let schedule;
         try {
-            schedule = normaliseSchedule(JSON.parse(raw));
+            const parsed = JSON.parse(raw);
+            schedule = normaliseSchedule(parsed);
+            // What the record SAYS it is, not what normalising it stamped on. This is the
+            // one caller that has to know: normaliseSchedule starts from emptySchedule(),
+            // which stamps SCHEMA_VERSION, so a stored record written by another version
+            // read as this one - and localDurableHolds answered "yes, I hold the
+            // replacement" over a document that is not the same document. A record with
+            // no version at all keeps the stamp, which is the v71 case.
+            if (parsed && typeof parsed === 'object' && parsed.schemaVersion !== undefined) {
+                schedule.schemaVersion = parsed.schemaVersion;
+            }
         } catch (error) {
             return null;
         }
@@ -3963,6 +3985,17 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
                 if (!schedule.days[date][layer]) schedule.days[date][layer] = {};
                 schedule.days[date][layer][workerId] = value;
+                return;
+            }
+
+            // days.<date>.vehiclesOff - three segments, and about the day rather than
+            // about a person. An empty list travels as null and is deleted rather than
+            // stored: a field that is always there saying "nothing" is a field on every
+            // device's document forever.
+            if (parts.length === 3 && parts[0] === 'days' && parts[2] === 'vehiclesOff') {
+                if (!schedule.days[parts[1]]) schedule.days[parts[1]] = { plan: {}, actual: {} };
+                if (value === null) delete schedule.days[parts[1]].vehiclesOff;
+                else schedule.days[parts[1]].vehiclesOff = value;
                 return;
             }
 

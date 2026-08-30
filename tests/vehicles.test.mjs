@@ -233,10 +233,16 @@ async function staged(options = {}) {
     suite('the shipped build does not do vehicles');
 
     const device = loaded();
-    given('the flags a person installs have vehicles off',
-        device.global('FARKAD_FLAGS').vehicles === false);
-    given('and the fixture is on this phone',
-        device.State.schedule.vehicles.length === 3);
+    given('the fixture is on this phone',
+        device.State.schedule.vehicles.length === 3,
+        String((device.State.schedule.vehicles || []).length));
+    // A claim about the app, not a precondition for one: the shipped flags are what
+    // decides whether any of the rest of this file is describing a live feature. It
+    // aborted the run instead of failing, so a build that turned vehicles on would have
+    // been reported as a broken test rather than as the release it is.
+    check('the flags a person installs have vehicles off',
+        device.global('FARKAD_FLAGS').vehicles === false,
+        JSON.stringify(device.global('FARKAD_FLAGS')));
 }
 
 // ---------------------------------------------------------------- the money

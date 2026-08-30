@@ -809,6 +809,12 @@ async function showAddVehicleModal() {
 }
 
 async function renameVehicle(vehicleId) {
+    // The same gate showAddVehicleModal and setVehicleOut carry. Nothing draws the
+    // button that calls this, but a screen drawn by an older build, an undo held
+    // from before a reload, or a hand in a console still reaches it - and it writes
+    // a vehicle record and commits it to the disk. Nothing moves money while the
+    // flag is off, and renaming is money the moment anybody turns it back on.
+    if (!vehiclesEnabled()) return;
     const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
     if (!vehicle) return;
 
@@ -822,6 +828,12 @@ async function renameVehicle(vehicleId) {
 }
 
 async function changeVehicleRate(vehicleId) {
+    // The same gate showAddVehicleModal and setVehicleOut carry. Nothing draws the
+    // button that calls this, but a screen drawn by an older build, an undo held
+    // from before a reload, or a hand in a console still reaches it - and it writes
+    // a vehicle record and commits it to the disk. Nothing moves money while the
+    // flag is off, and a new rate is money the moment anybody turns it back on.
+    if (!vehiclesEnabled()) return;
     const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
     if (!vehicle) return;
 
@@ -843,6 +855,12 @@ async function changeVehicleRate(vehicleId) {
 }
 
 async function toggleVehicleActive(vehicleId) {
+    // The same gate showAddVehicleModal and setVehicleOut carry. Nothing draws the
+    // button that calls this, but a screen drawn by an older build, an undo held
+    // from before a reload, or a hand in a console still reaches it - and it writes
+    // a vehicle record and commits it to the disk. Nothing moves money while the
+    // flag is off, and archiving is money the moment anybody turns it back on.
+    if (!vehiclesEnabled()) return;
     const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
     if (!vehicle) return;
 

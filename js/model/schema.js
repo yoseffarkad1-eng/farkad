@@ -613,6 +613,23 @@ function journalEntryProblems(path, value) {
 
     // days.<date>.<layer>.<workerId> - one person, one day, one side of it.
     if (parts[0] === 'days') {
+        // days.<date>.vehiclesOff - the one field on a day that is about the day rather
+        // than about a person, so it is three segments and not four. The wire has to
+        // accept it or the app's own edit is quarantined on its way to the queue and
+        // recording stops on the phone; the feature is retired, but the shape the day it
+        // is turned back on has to be one the queue already understands.
+        if (parts.length === 3 && parts[2] === 'vehiclesOff') {
+            if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
+            if (value === null) return [];
+            if (!Array.isArray(value)) return ['a stayed-in list that is not a list'];
+            const seen = new Set();
+            for (let i = 0; i < value.length; i += 1) {
+                if (!isSafeSegment(value[i])) return ['a stayed-in list naming an unusable id'];
+                if (seen.has(value[i])) return ['a stayed-in list naming the same one twice'];
+                seen.add(value[i]);
+            }
+            return [];
+        }
         if (parts.length !== 4) return ['a day path with the wrong number of segments'];
         if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
         if (parts[2] !== 'plan' && parts[2] !== 'actual') return ['a layer nobody wrote'];

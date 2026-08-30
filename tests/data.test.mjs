@@ -9289,7 +9289,8 @@ function withAdvances(device, rows) {
         { workerId: 'w_02', date: '2026-08-05', amount: 300 }
     ]);
     given('two advances and no entries - this build recorded them the old way, then',
-        device.call('ledgerEntries', device.State.schedule).length >= 0);
+        device.call('ledgerEntries', device.State.schedule).length === 0,
+        String(device.call('ledgerEntries', device.State.schedule).length));
 
     // The reopen IS the migration: nobody calls anything.
     const booted = makeDevice({ storage: device.dump(), deviceId: device.id });

@@ -272,13 +272,36 @@ function ruleSelfCompare(site) {
     return null;
 }
 
-// given(what, condition) takes two parameters; tests/runner.mjs:27 drops anything after
-// them. An author who writes a third argument has written a failure report - the number
-// or the JSON that says WHY - and a failure report is what check() prints and given()
-// throws away. On abort the operator sees `SETUP FAILED: <name>` and none of it.
-function ruleGivenDetail(site) {
-    if (site.fn !== 'given' || site.args.length <= 2) return null;
-    return `${tidy(site.args[0].text)} — discarded: ${tidy(site.args.slice(2).map(a => a.text).join(', ')).slice(0, 90)}`;
+// An assignment where a comparison was meant. `check('...', ready = true)` assigns and
+// then evaluates to the assigned value, so it passes for every value that is not falsy,
+// for ever, under a sentence nobody has proved - and it also QUIETLY MOVES the variable
+// it names, so the assertions after it are reading a state this line invented.
+//
+// Only at the top level of the condition. A default inside a call, a destructured
+// parameter and an arrow's own body all sit behind a bracket, and the depth scan is what
+// tells them apart from the one character that matters.
+//
+// (This slot held a rule about a third argument handed to given(). The runner discarded
+// it; it prints it now - tests/runner.mjs - so writing one is no longer throwing a
+// failure report away, and the rule was retired rather than left standing over behaviour
+// that had changed underneath it.)
+function ruleAssignment(site) {
+    if (site.fn !== 'check' && site.fn !== 'given') return null;
+    if (site.args.length < 2) return null;
+    const arg = site.args[1];
+    let depth = 0;
+    for (let i = 0; i < arg.masked.length; i += 1) {
+        const ch = arg.masked[i];
+        if (ch === '(' || ch === '[' || ch === '{') { depth += 1; continue; }
+        if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+        if (ch !== '=' || depth !== 0) continue;
+        const before = i > 0 ? arg.masked[i - 1] : '';
+        const after = arg.masked[i + 1] || '';
+        if (before === '=' || before === '!' || before === '<' || before === '>') continue;
+        if (after === '=' || after === '>') continue;
+        return tidy(arg.text);
+    }
+    return null;
 }
 
 // A given with no check below it inside its own suite is protecting nothing. There is no
@@ -307,7 +330,7 @@ const RULES = [
     { id: 'V2', what: 'a top-level `|| true` alternative', fn: ruleOrTrue },
     { id: 'V3', what: 'a condition that is a literal', fn: ruleLiteral },
     { id: 'V4', what: 'a call compared with itself', fn: ruleSelfCompare },
-    { id: 'V5', what: 'a given() carrying a detail the runner discards', fn: ruleGivenDetail }
+    { id: 'V5', what: 'a condition that assigns rather than compares', fn: ruleAssignment }
 ];
 
 function findings(file, src) {
@@ -338,7 +361,7 @@ check('V1 here', device.call('entries', s).length >= 0, 'x');
 check('V2 here', out.status !== 'synced' || true);
 check('V3 here', true);
 check('V4 here', read(node) === read(node));
-given('V5 here', result.ok === true, JSON.stringify(result));
+check('V5 here', ready = true);
 check('so V5 is not also V6', 1 === 1 - 0);
 suite('a second block');
 given('V6 here, with nothing below it', ready === true);
@@ -356,8 +379,10 @@ check('a real comparison', read('p_11') === read('p_01'));
 check('the throw is the assertion', true);
 check('the throw is the assertion', false, 'why');
 same('two shapes', left(a), right(b));
-given('a real precondition', device.State.commitRoster() === true);
+given('a real precondition', device.State.commitRoster() === true, String(1));
 check('protected by the given above', disk === 'p_01');
+check('an arrow inside is not an assignment', rows.some(row => row.id === 'w_01'));
+check('a default inside a call is not one either', label({ n: 1 }) === 'x');
 const pattern = /const APP_VERSION = '[^']*';/;
 check('found after a regex holding an apostrophe', pattern.test(text));
 `;
@@ -385,7 +410,7 @@ check('found after a regex holding an apostrophe', pattern.test(text));
         !quiet.some(f => f.rule === 'V3'), JSON.stringify(quiet.filter(f => f.rule === 'V3')));
     check("two calls that differ only inside their strings are two calls",
         !quiet.some(f => f.rule === 'V4'), JSON.stringify(quiet.filter(f => f.rule === 'V4')));
-    check('a two-argument precondition is a precondition',
+    check('an arrow and a default inside a call are not assignments',
         !quiet.some(f => f.rule === 'V5'), JSON.stringify(quiet.filter(f => f.rule === 'V5')));
     check('a given with a check below it is protecting something',
         !quiet.some(f => f.rule === 'V6'), JSON.stringify(quiet.filter(f => f.rule === 'V6')));
@@ -397,7 +422,7 @@ check('found after a regex holding an apostrophe', pattern.test(text));
     const seen = scanFile('near-misses.mjs', NEAR_MISSES).sites
         .filter(s => s.fn !== 'suite').length;
     check('an assertion after a regex holding an apostrophe is still seen',
-        seen === 12, String(seen));
+        seen === 14, String(seen));
 }
 
 // ---------------------------------------------------------------- the corpus
@@ -444,7 +469,7 @@ console.log(`---- ${CORPUS.length} files, ${ALL.length} sites ------------------
         of('V3').length === 0, listing(of('V3')).join(' | '));
     check('no assertion compares a call with itself',
         of('V4').length === 0, listing(of('V4')).join(' | '));
-    check('no given() is handed the failure report only check() can print',
+    check('no condition assigns where it meant to compare',
         of('V5').length === 0, `${of('V5').length} sites: ` + listing(of('V5')).slice(0, 6).join(' | '));
     check('every given() inside a suite has a check below it that it protects',
         of('V6').length === 0, listing(of('V6')).join(' | '));
