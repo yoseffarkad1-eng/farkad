@@ -5,13 +5,25 @@
   "description": "Day and pay record for a construction crew. A PWA of classic scripts with no build step - this file exists so the tests can be run, not to introduce one.",
   "type": "module",
   "scripts": {
-    "test": "npm run test:build && npm run test:data && npm run test:recovery && npm run test:adversarial && npm run test:probes",
-    "test:all": "npm run test:build && npm run test:data && npm run test:recovery && npm run test:adversarial && npm run test:probes && npm run test:smoke && npm run test:print && npm run test:mobile && npm run test:update && npm run test:recovery-browser",
+    "test": "npm run test:build && npm run test:data && npm run test:recovery && npm run test:adversarial && npm run test:probes && npm run test:capacity && npm run test:concurrency && npm run test:exports && npm run test:fence && npm run test:money && npm run test:method && npm run test:restore && npm run test:upgrade && npm run test:vehicles && npm run test:xlsx && npm run test:nonassertions",
+    "test:all": "npm run test && npm run test:handover && npm run test:smoke && npm run test:print && npm run test:mobile && npm run test:update && npm run test:recovery-browser",
     "test:build": "node tests/build.test.mjs",
     "test:data": "node tests/data.test.mjs",
     "test:recovery": "node tests/recovery.test.mjs",
     "test:adversarial": "node tests/adversarial.test.mjs",
     "test:probes": "node tests/probes.test.mjs",
+    "test:capacity": "node tests/capacity.test.mjs",
+    "test:concurrency": "node tests/concurrency.test.mjs",
+    "test:exports": "node tests/exports.test.mjs",
+    "test:fence": "node tests/fence.test.mjs",
+    "test:money": "node tests/money.test.mjs",
+    "test:method": "node tests/method.test.mjs",
+    "test:restore": "node tests/restore.test.mjs",
+    "test:upgrade": "node tests/upgrade.test.mjs",
+    "test:vehicles": "node tests/vehicles.test.mjs",
+    "test:xlsx": "node tests/xlsx.test.mjs",
+    "test:nonassertions": "node tests/nonassertions.test.mjs",
+    "test:handover": "node tests/handover.test.mjs",
     "test:smoke": "node tests/smoke.mjs",
     "test:print": "node tests/print.test.mjs",
     "test:mobile": "node tests/mobile.test.mjs",
@@ -26,7 +38,8 @@
     "@firebase/rules-unit-testing": "^3.0.4",
     "firebase": "^10.12.2",
     "firebase-tools": "^13.29.1",
-    "playwright": "1.56.1"
+    "playwright": "1.56.1",
+    "xlsx": "^0.18.5"
   },
   "engines": {
     "node": ">=20.11 <23"
