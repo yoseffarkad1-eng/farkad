@@ -46,11 +46,100 @@ service cloud.firestore {
       return request.resource.data.updatedAt is string;
     }
 
+    // ---------------------------------------------------------------- the ordering
+    //
+    // Three phones share this document. Firestore merges disjoint field paths server-side,
+    // which is what lets two people fill in the same evening at once - but everything that
+    // is NOT a disjoint merge had no ordering at all: a restore raced an edit and the loser
+    // was silent, a stale writer overwrote a newer document, and a request that might still
+    // land was treated as dead and sent twice.
+    //
+    // The client's send claim cannot fix that. It is a lease in localStorage: it
+    // coordinates tabs of one browser profile, and the three phones share no storage. The
+    // only party all three can agree with is this file.
+    //
+    // Three fields carry it, and none of them is a clock. updatedAt stays exactly what it
+    // was - a phone's own time, informational, never load-bearing.
+
+    // The version of the protocol the writer speaks. A write without one is refused.
+    //
+    // This is the backward-compatibility decision, stated rather than finessed: a build
+    // that predates the protocol writes no such field, and there is no rule that both
+    // accepts those writes and orders them - accepting them IS the hole. So it is refused,
+    // the old build shows a visible sync error, and it cannot diverge quietly. Which is
+    // why these rules are published only once every phone is on the new build; there is no
+    // permissive transition, because such a transition is the defect wearing a rollout
+    // plan. See docs/sync-protocol.md.
+    function versioned() {
+      return request.resource.data.protocol is int
+        && request.resource.data.protocol >= 1;
+    }
+
+    // The compare-and-set. Exactly one more than what is there.
+    //
+    // Two phones that both read revision 5 both try to write 6. The first lands; for the
+    // second, the document now says 6, its write still says 6, and 6 is not 6 + 1 - so it
+    // is refused instead of silently overwriting work that is already there. The client
+    // turns that refusal into a held conflict rather than a retry that would overwrite.
+    function nextRevision() {
+      return request.resource.data.revision is int
+        && request.resource.data.revision == resource.data.revision + 1;
+    }
+
+    function firstRevision() {
+      return request.resource.data.revision is int
+        && request.resource.data.revision == 1;
+    }
+
+    // The operation this write carries, and its receipt - which must exist AFTER this
+    // commit. getAfter() is the whole of the atomicity guarantee: the rule can only be
+    // satisfied if the document and the receipt land together, so a reader never sees a
+    // revision without the receipt that explains it, or a receipt for a revision that was
+    // never applied.
+    //
+    // The receipt is also what makes a retry safe. A request that may still land can be
+    // sent again, because the second attempt finds its own receipt and stops - which is
+    // the difference between "sent twice" and "acknowledged once".
+    function carriesReceipt(docId) {
+      return request.resource.data.lastOpId is string
+        && request.resource.data.lastOpId.size() > 0
+        && request.resource.data.lastOpId.size() < 128
+        && getAfter(/databases/$(database)/documents/schedules/$(docId)/receipts/$(request.resource.data.lastOpId)).data.revision
+             == request.resource.data.revision;
+    }
+
     match /schedules/{docId} {
       allow read: if allowed();
-      allow write: if allowed()
+
+      allow create: if allowed()
         && stamped()
+        && versioned()
+        && firstRevision()
+        && carriesReceipt(docId)
         && (!isFullReplacement() || fullDocumentOk());
+
+      allow update: if allowed()
+        && stamped()
+        && versioned()
+        && nextRevision()
+        && carriesReceipt(docId)
+        && (!isFullReplacement() || fullDocumentOk());
+
+      // Nothing deletes the schedule. It is the record of who worked where.
+      allow delete: if false;
+
+      // The receipts. Created with the write they belong to, and then frozen.
+      //
+      // Immutable on purpose: a receipt that could be changed or removed is a receipt that
+      // cannot answer "did my operation already land", which is the one question a retry
+      // has to ask. Readable, because that is how the retry asks it.
+      match /receipts/{opId} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && request.resource.data.revision is int
+          && request.resource.data.revision >= 1;
+        allow update, delete: if false;
+      }
     }
 
     // One copy of the schedule per day, and the reason sync is not the same thing as a

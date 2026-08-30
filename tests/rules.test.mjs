@@ -56,6 +56,59 @@ async function denied(name, promise) {
     catch (error) { check(name, false, String(error.message || error).slice(0, 120)); }
 }
 
+// ---------------------------------------------------------------- writing the way the client does
+//
+// Every write to the schedule now carries the ordering envelope: a protocol version, the
+// next revision, and the id of the operation it applies - whose immutable receipt has to
+// land in the same commit. See docs/sync-protocol.md and the protocol suites at the end of
+// this file for what each part is for.
+//
+// These helpers exist so the suites above them keep asking their own questions. A test
+// about the allowlist should fail because the address is not listed, not because it forgot
+// a revision, and before these helpers every one of them was writing in the shape the
+// released build sends - which the rules now refuse on purpose.
+let opSeq = 0;
+const nextOp = () => `op_${opSeq += 1}`;
+
+const envelope = (data, revision, opId) =>
+    Object.assign({}, data, { protocol: 1, revision, lastOpId: opId });
+
+// A first write and its receipt, in one commit.
+function createProtocol(db, path, data) {
+    const opId = nextOp();
+    return runTransaction(db, async transaction => {
+        transaction.set(doc(db, path), envelope(data || schedule(), 1, opId));
+        transaction.set(doc(db, `${path}/receipts/${opId}`),
+            { revision: 1, at: new Date().toISOString(), by: 'd_test' });
+    });
+}
+
+// An ordinary edit at the next revision. The base is READ, never assumed - which is the
+// compare-and-set: if another device wrote between the read and this commit, the rule
+// refuses it rather than letting it overwrite.
+async function editProtocol(db, path, patch) {
+    const snapshot = await getDoc(doc(db, path));
+    const revision = ((snapshot.data() || {}).revision || 0) + 1;
+    const opId = nextOp();
+    return runTransaction(db, async transaction => {
+        transaction.update(doc(db, path), envelope(patch, revision, opId));
+        transaction.set(doc(db, `${path}/receipts/${opId}`),
+            { revision, at: new Date().toISOString(), by: 'd_test' });
+    });
+}
+
+// A whole-document replacement at the next revision - a restore, or the v71 upgrade.
+async function editProtocolReplace(db, path, data) {
+    const snapshot = await getDoc(doc(db, path));
+    const revision = ((snapshot.data() || {}).revision || 0) + 1;
+    const opId = nextOp();
+    return runTransaction(db, async transaction => {
+        transaction.set(doc(db, path), envelope(data, revision, opId));
+        transaction.set(doc(db, `${path}/receipts/${opId}`),
+            { revision, at: new Date().toISOString(), by: 'd_test' });
+    });
+}
+
 // ---------------------------------------------------------------- who gets in
 {
     suite('the allowlist is the whole access control');
@@ -63,16 +116,16 @@ async function denied(name, promise) {
     await env.clearFirestore();
 
     await passes('a listed address can create the schedule',
-        setDoc(doc(as(ALLOWED), PATH), schedule()));
+        createProtocol(as(ALLOWED), PATH));
     await passes('and read it back',
         getDoc(doc(as(ALLOWED), PATH)));
     await passes('a second listed address can write to the same document',
-        updateDoc(doc(as(ALSO_ALLOWED), PATH), { updatedAt: new Date().toISOString() }));
+        editProtocol(as(ALSO_ALLOWED), PATH, { updatedAt: new Date().toISOString() }));
 
     await denied('an address nobody listed cannot read it',
         getDoc(doc(as(STRANGER), PATH)));
     await denied('nor write to it',
-        setDoc(doc(as(STRANGER), PATH), schedule()));
+        createProtocol(as(STRANGER), PATH));
     await denied('and neither can somebody with no account at all',
         getDoc(doc(anonymous(), PATH)));
 
@@ -101,12 +154,12 @@ async function denied(name, promise) {
         setDoc(doc(as(ALLOWED), PATH), { workers: [], updatedAt: new Date().toISOString() }));
 
     await passes('a complete stamped document is accepted',
-        setDoc(doc(as(ALLOWED), PATH), schedule()));
+        createProtocol(as(ALLOWED), PATH));
 
     // A field-level edit carries only the path it changed, so it is exempt from the
     // shape check - requiring the roster there would reject every ordinary write.
     await passes('a single field edit needs only its own path and a stamp',
-        updateDoc(doc(as(ALLOWED), PATH), {
+        editProtocol(as(ALLOWED), PATH, {
             'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
             updatedAt: new Date().toISOString()
         }));
@@ -122,7 +175,7 @@ async function denied(name, promise) {
     // wrong one: it would turn a retry after a failed send into a permission error, which
     // is the worst possible answer to a write that has already failed once.
     await passes('an unstamped edit is not caught here - the merged document still has one',
-        updateDoc(doc(as(ALLOWED), PATH), {
+        editProtocol(as(ALLOWED), PATH, {
             'days.2026-08-13.actual.w_01': { entries: [{ placeId: 'p_01' }] }
         }));
 }
@@ -136,15 +189,25 @@ async function denied(name, promise) {
     const one = as(ALLOWED);
     const two = as(ALSO_ALLOWED);
 
-    const create = db => runTransaction(db, async transaction => {
-        const snapshot = await transaction.get(doc(db, PATH));
-        if (snapshot.exists()) {
-            const error = new Error('already-exists');
-            error.code = 'already-exists';
-            throw error;
-        }
-        transaction.set(doc(db, PATH), schedule({ updatedBy: db === one ? 'd_one' : 'd_two' }));
-    });
+    // The first write, with its receipt, both inside the transaction that checks the
+    // document is not there yet. The receipt id has to be distinct per attempt or the two
+    // racers would be writing the same receipt - which is the one document a retry is
+    // allowed to find, and would make the loser look like a duplicate of the winner.
+    const create = db => {
+        const opId = nextOp();
+        return runTransaction(db, async transaction => {
+            const snapshot = await transaction.get(doc(db, PATH));
+            if (snapshot.exists()) {
+                const error = new Error('already-exists');
+                error.code = 'already-exists';
+                throw error;
+            }
+            transaction.set(doc(db, PATH), envelope(
+                schedule({ updatedBy: db === one ? 'd_one' : 'd_two' }), 1, opId));
+            transaction.set(doc(db, `${PATH}/receipts/${opId}`),
+                { revision: 1, at: new Date().toISOString(), by: 'd_test' });
+        });
+    };
 
     const outcomes = await Promise.allSettled([create(one), create(two)]);
     const won = outcomes.filter(o => o.status === 'fulfilled').length;
@@ -160,7 +223,7 @@ async function denied(name, promise) {
     // The loser's work is not lost: its edits become an ordinary field merge, which is
     // what they were always going to be.
     await passes('the device that lost the race can still write its day',
-        updateDoc(doc(two, PATH), {
+        editProtocol(two, PATH, {
             'days.2026-08-13.actual.w_01': { entries: [{ placeId: 'p_01' }] },
             updatedAt: new Date().toISOString()
         }));
@@ -222,17 +285,19 @@ async function denied(name, promise) {
         }
     };
 
-    await passes('the project exists first', setDoc(doc(db, PATH), schedule()));
+    await passes('the project exists first', createProtocol(db, PATH));
 
     // This is why the upgrade stamps it. Sent as it stands, the rules refuse it - and
     // they refuse it again on every retry, for as long as the record exists.
     await denied('the record as v71 left it is refused, and always would be',
         setDoc(doc(db, PATH), v71));
 
-    // What freezeLegacyReplacement makes of it.
+    // What freezeLegacyReplacement makes of it. It also has to carry the ordering
+    // envelope now - a whole-document replacement is a write like any other, and the
+    // revision it claims has to be the one after what is there.
     const upgraded = { ...v71, updatedAt: new Date().toISOString(), updatedBy: 'd_here' };
     await passes('the upgraded document is accepted',
-        setDoc(doc(db, PATH), upgraded));
+        editProtocolReplace(db, PATH, upgraded));
 
     const after = await getDoc(doc(db, PATH));
     check('and it lands whole, roster and all',
@@ -258,7 +323,7 @@ async function denied(name, promise) {
     // which is why the adapter constructs segments in the first place.
     const db = as(ALLOWED);
     await env.clearFirestore();
-    await passes('the document exists first', setDoc(doc(db, PATH), schedule({
+    await passes('the document exists first', createProtocol(db, PATH, schedule({
         roster: {
             workers: { w_01: { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 } },
             places: { p_01: { id: 'p_01', name: 'הרצליה', active: true } },
@@ -267,10 +332,23 @@ async function denied(name, promise) {
         }
     })));
 
+    // Through the same FieldPath the adapter builds, and with the envelope beside it - a
+    // dotted string would throw on days.2026-08-12, which is why the adapter constructs
+    // segments in the first place.
+    const tombstoneOp = nextOp();
     await passes('a null at roster.workers.<id> is accepted',
-        updateDoc(doc(db, PATH),
-            new FieldPath('roster', 'workers', 'w_01'), null,
-            new FieldPath('updatedAt'), '2026-08-12T10:00:00.000Z'));
+        runTransaction(db, async transaction => {
+            const snapshot = await transaction.get(doc(db, PATH));
+            const revision = ((snapshot.data() || {}).revision || 0) + 1;
+            transaction.update(doc(db, PATH),
+                new FieldPath('roster', 'workers', 'w_01'), null,
+                new FieldPath('updatedAt'), '2026-08-12T10:00:00.000Z',
+                new FieldPath('protocol'), 1,
+                new FieldPath('revision'), revision,
+                new FieldPath('lastOpId'), tombstoneOp);
+            transaction.set(doc(db, `${PATH}/receipts/${tombstoneOp}`),
+                { revision, at: new Date().toISOString(), by: 'd_test' });
+        }));
 
     const after = await getDoc(doc(db, PATH));
     const roster = after.data().roster.workers;

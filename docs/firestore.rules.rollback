@@ -1,0 +1,75 @@
+rules_version = '2';
+
+// The real access control for this app. The web config in js/sync/firebase-config.js is
+// public and protects nothing; these rules are enforced on the server and are the only
+// thing standing between the schedule and anyone who finds the URL.
+//
+// Everyone listed writes. The evening roster is built by the three of them together and
+// they divide the work between themselves, so there is deliberately no reader/writer
+// split here - the protection against overwriting each other is technical, not a
+// permission: the client sends one field path per edit, never the whole document.
+//
+// Deployment: Firebase console -> Firestore Database -> Rules -> paste -> Publish.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Put the real addresses here. Anyone not listed is refused even with a valid Google
+    // account - public sign-up is closed on purpose.
+    function allowed() {
+      return request.auth != null && request.auth.token.email in [
+        'yosef.farkad1@gmail.com',
+        'farkad1963@gmail.com',
+        'mu.mahameed1992@gmail.com'
+        // A fourth goes here the same way: comma on the line above, address below, then
+        // Publish in the console. Lower case - the token's email arrives lower-cased and
+        // an address with a capital in it would match nobody.
+      ];
+    }
+
+    // Guards the shape of a full replacement (import, backup restore). A field-level
+    // edit is exempt because it carries only the one path it changed - requiring the top
+    // level keys there would reject every normal write.
+    function fullDocumentOk() {
+      return request.resource.data.keys().hasAll(['workers', 'places', 'updatedAt'])
+        && request.resource.data.workers is list
+        && request.resource.data.places is list;
+    }
+
+    function isFullReplacement() {
+      return request.resource.data.keys().hasAny(['workers', 'places']);
+    }
+
+    // Every write must carry a timestamp: the client's merge rule depends on it, and a
+    // write without one would make the document look older than it is.
+    function stamped() {
+      return request.resource.data.updatedAt is string;
+    }
+
+    match /schedules/{docId} {
+      allow read: if allowed();
+      allow write: if allowed()
+        && stamped()
+        && (!isFullReplacement() || fullDocumentOk());
+    }
+
+    // One copy of the schedule per day, and the reason sync is not the same thing as a
+    // backup. Everything above is a mirror: a deletion propagates to all three phones as
+    // faithfully as a correction does, and by the time it is noticed everyone agrees
+    // with it.
+    //
+    // CREATE only. Not update - so a day's copy can never be overwritten by a later,
+    // already-damaged state. Not delete - so nothing here can be lost to a careless tap
+    // or a bug in the client, which is exactly what a backup has to promise. Enforced on
+    // the server, so no version of the app can break it.
+    match /history/{day} {
+      allow read, create: if allowed();
+      allow update, delete: if false;
+    }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
