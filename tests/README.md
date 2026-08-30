@@ -1,10 +1,10 @@
 # The suites
 
-Seven suites, three of which need no browser at all. From a clean clone:
+Twenty-two suites, sixteen of which need no browser at all. From a clean clone:
 
     npm ci
-    npm test                # build + data - seconds, no browser, run before every commit
-    npm run test:all        # adds smoke, print, mobile, update (Chromium via Playwright)
+    npm test                # the sixteen node suites - no browser, run before every commit
+    npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover
     npm run test:rules      # firestore.rules against the local emulator (needs Java)
 
 Any single suite runs on its own: `npm run test:build`, `node tests/data.test.mjs`,
@@ -14,9 +14,10 @@ Node 20 or 22 (`engines` in package.json).
 Green means EVERY check passes. The runner prints `N/N checks passed` and exits
 non-zero on any failure; a `SETUP FAILED` from `given()` means a precondition of the
 test broke, not the app — fix the setup before reading anything into the run. At the
-commit this file was added, `npm test` is 18/18 (build) and 1857/1857 (data). The
-counts grow with every guarantee; the release-time numbers per build are recorded in
-`docs/releases.md`. (The count in the root README predates several waves of tests and
+commit this line was written, `npm test` is 2638 checks across sixteen suites, and
+`npm run test:all` adds 1547 more, five of them in a real browser and one across two
+real trees. The counts grow with every
+guarantee; the release-time numbers per build are recorded in `docs/releases.md`. (The count in the root README predates several waves of tests and
 is stale — trust a run, not a prose number.)
 
 ## What each suite proves
@@ -29,6 +30,22 @@ is stale — trust a run, not a prose number.)
 | print | `print.test.mjs` | What lands on paper. Half of it opens every overlay and inspects PRINT-media boxes; the other half prints a real multi-page PDF and READS it back (`pdf.mjs`) — page by page, fill by fill — because "the modal's computed display is none" is a claim about a stylesheet, not a page. |
 | mobile | `mobile.test.mjs` | The phone, measured: facts about rectangles at four widths, portrait and landscape, both color schemes, with and without a home indicator, at doubled text size. 44px targets in both dimensions, bars cleared, no sideways scroll. Headless Chromium is the right tool for layout arithmetic and it is NOT an iPhone — nothing here is coverage of a real device, and the suite's header says so. |
 | update | `update.test.mjs` | The road every fix travels: a served copy of the app has its three version stamps rewritten while a browser sits on the old build — which is what a deploy is — and the suite walks the banner, the handover, the re-offer after a restart, the mid-typing wait, and the manual check. Nothing stubbed. |
+| recovery | `recovery.test.mjs` | What the app does with a record it cannot read: quarantine, the raw snapshot, and the export that is the only thing left when a phone will not open. Nothing unreadable is deleted, overwritten, or treated as empty. |
+| adversarial | `adversarial.test.mjs` | The twenty-item matrix a correctness pass was written against: a hidden loser that must never resurrect, legacy operations converging, restore fencing, the mutation fence under an export, and the vehicle feature's future contract. |
+| probes | `probes.test.mjs` | Two tabs of one app on one disk, interleaved at the write. Whoever loses a race loses it durably, and neither tab ever reports work it did not do. |
+| capacity | `capacity.test.mjs` | A season of days on a disk that fills up, and a restore over the queue an older build left behind. |
+| concurrency | `concurrency.test.mjs` | The cross-tab hazards named C1-C5: retirement by operation and not by path, an acknowledgement one tab wrote and the other reads, the right to send against a restore, the ABA fence, and a removal the disk refused. |
+| exports | `exports.test.mjs` | The three files that leave the phone, read back off the browser: the pay sheet, the invoice sheet, the detail sheet, and the message a worker himself receives. |
+| fence | `fence.test.mjs` | The write counter that lets a rescue file claim its readings were one moment - what moves it, what must not, and what it costs per edit. |
+| method | `method.test.mjs` | How an advance was handed over, through all four doors and the ledger mirror, the fold and the overlay. |
+| money | `money.test.mjs` | The same literal shekels on the far side of four real doors: a reopen, a second phone, an export, and a restore. |
+| nonassertions | `nonassertions.test.mjs` | A test that fails when a test stops testing: every assertion in `tests/` is scanned for the shapes that cannot fail, and the scanner is itself proved against written offenders and written near-misses. |
+| restore | `restore.test.mjs` | A device holding only part of a restore is caught, subtree by subtree, and a frozen v71 companion is bound to the primary it belongs to. |
+| upgrade | `upgrade.test.mjs` | A v86 disk opened by this build: the retired identity scheme's marks, a restore over an older queue, a v71 companion, and an undo entry that cannot speak for the questions it left. |
+| vehicles | `vehicles.test.mjs` | The retired feature, from both sides: nothing writes a vehicle record while the flag is off, and with the gate open the arithmetic that was argued over is still there. |
+| xlsx | `xlsx.test.mjs` | The same arithmetic proved through a real `.xlsx`, read back out of the zip. Needs the `xlsx` devDependency, pinned at the version the app loads from the CDN. |
+| recovery-browser | `recovery.browser.mjs` | The rescue export driven through the real button in a real Chromium, with the actual Blob captured off `URL.createObjectURL`. |
+| handover | `handover.test.mjs` | The v86 -> v87 handover between two REAL trees - a released commit and the working tree - one origin serving whichever it is pointed at. Every assertion is a SHA-256 of bytes a browser actually holds or an answer from a production function. It does not run while both trees carry the same build, and says so rather than pretending. |
 | rules | `rules.test.mjs` | The real `firestore.rules` against the Firestore emulator. The web config is public by design, so these rules are the only thing between the schedule and anyone with the URL. Never touches the real project. |
 
 `shot.mjs` is not a suite: it takes one screenshot and asserts nothing, for the

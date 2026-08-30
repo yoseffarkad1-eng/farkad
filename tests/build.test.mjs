@@ -112,12 +112,24 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
 {
     suite('an older cache is never written to');
 
-    // Every cache this worker opens is THIS version's. Opening any other - or falling
-    // through to caches.match() across all of them - serves or overwrites an asset from
-    // the build before this one, which is the mixed-build failure by another route.
+    // Nothing is ever WRITTEN into another build's cache, and the one place another
+    // build's cache is opened at all is the read path that serves a window still running
+    // it. This rule used to be "every cache opened is this version's" - and it was right
+    // until clients.claim() started handing a page from the old build the new build's
+    // bytes, which is the same mixed-build failure arriving from the other direction. So
+    // the shape it pins moved with the behaviour: read another build's cache for a window
+    // that is running it, write only this one's.
     const opens = [...code.matchAll(/caches\.open\(([^)]*)\)/g)].map(m => m[1].trim());
     const foreign = opens.filter(argument => argument !== 'VERSION');
-    check('every cache opened is this version\'s', foreign.length === 0, foreign.join(', '));
+    check('the only cache opened that is not this build\'s is opened to read',
+        foreign.length === 1 && foreign[0] === 'key'
+        && /caches\.open\(key\)\.then\(cache => cache\.match\(request\)\)/.test(code),
+        foreign.join(', '));
+    check('and nothing is written into it',
+        !/caches\.open\(key\)[\s\S]{0,200}?cache\.(put|add)\(/.test(code));
+    check('every cache written to is this build\'s',
+        [...code.matchAll(/caches\.open\(([^)]*)\)[\s\S]{0,200}?cache\.(?:put|add)\(/g)]
+            .every(match => match[1].trim() === 'VERSION'));
 
     check('no cache is searched across every version',
         !/caches\.match\(/.test(code));
@@ -125,18 +137,33 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     // A failed install must leave the old cache serving. The shape that guarantees it:
     // the install handler counts what could not be cached and throws, rather than
     // swallowing the failure and letting a half-fetched build activate.
-    const install = code.slice(code.indexOf("addEventListener('install'"),
-        code.indexOf("addEventListener('activate'"));
+    // To the end of the HANDLER, not to the next listener: the helpers the reap is built
+    // from sit between the two, and slicing to the activate listener swept them into the
+    // install handler and reported a delete inside it that is not there.
+    const installAt = code.indexOf("addEventListener('install'");
+    const install = code.slice(installAt, code.indexOf('\n});', installAt) + 4);
     check('a half-fetched shell fails the install rather than activating',
         /throw new Error\('shell incomplete/.test(install));
 
-    // And deleting the previous cache happens only in activate, which the browser does
-    // not run unless install succeeded.
-    const activate = code.slice(code.indexOf("addEventListener('activate'"));
+    // And nothing in the install handler deletes a cache at all: reaping is reachable
+    // only from activate and from a navigation, and the browser runs neither unless the
+    // install succeeded.
     check('the old cache is deleted only after a successful install',
-        /caches\.delete/.test(activate) && !/caches\.delete/.test(install));
+        /caches\.delete/.test(code) && !/caches\.delete/.test(install));
     check('and only caches that are not this version',
-        /keys\.filter\(key => key !== VERSION\)/.test(activate));
+        /keys\.filter\(key => key !== VERSION\)/.test(code)
+        && [...code.matchAll(/caches\.delete\(([^)]*)\)/g)]
+            .every(match => match[1].trim() === 'key'));
+
+    // The reap is guarded by whether anybody is still RUNNING one of those caches. It
+    // used to reap and then claim, so the old build's cache went while a window was still
+    // executing the old build - and after the claim that window had nowhere of its own
+    // left to be served from.
+    check('and not while a window is still running one of them',
+        /function reapUnusedCaches\(\) \{\s*return strangerOpen\(\)/.test(code)
+        && /if \(stranger\) return undefined;/.test(code));
+    check('the claim happens before the reap, not after it',
+        code.indexOf('self.clients.claim().then(() => reapUnusedCaches())') !== -1);
 }
 
 {

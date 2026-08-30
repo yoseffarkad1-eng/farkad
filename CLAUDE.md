@@ -57,16 +57,23 @@ different from what was done.
 6. **Hebrew strings are product decisions, not copy.** Many are pinned verbatim by
    tests; all of them were argued over. Changing one is a behavior change and the
    pinned string moves with it, deliberately, in the same commit.
-7. **Safe-area via `env()`, never a hardcoded inset** — and the bar heights are
+7. **A session runs one build, end to end — and so does every OTHER window.**
+   `clients.claim()` takes over every window of the origin, so `sw.js` serves a window
+   it did not itself hand a page to from THAT window's build, keeps that build's cache
+   while it is open, and the page reloads itself at the first moment nobody is typing.
+   A build already on somebody's phone cannot be given new code, so the catch-up half
+   only holds from v87 forward; `tests/handover.test.mjs` measures the rest against two
+   real trees.
+8. **Safe-area via `env()`, never a hardcoded inset** — and the bar heights are
    MEASURED (`js/ui/bars.js`) and published as custom properties, never written into
    the stylesheet as numbers.
-8. **44px touch targets and 16px inputs are floors, not tastes.** Below 16px iOS zooms
+9. **44px touch targets and 16px inputs are floors, not tastes.** Below 16px iOS zooms
    the page on focus; below 44px in EITHER dimension a finger misses. The mobile suite
    measures both.
-9. **Nothing unreadable is ever deleted, overwritten, or treated as empty.**
-   `Recovery` quarantines a copy, keeps the original, and blocks writes until the
-   person is told. A record that will not parse is still the only record of work.
-10. **No `prompt`/`confirm`/`alert`, ever** — they are silently ignored in embedded
+10. **Nothing unreadable is ever deleted, overwritten, or treated as empty.**
+    `Recovery` quarantines a copy, keeps the original, and blocks writes until the
+    person is told. A record that will not parse is still the only record of work.
+11. **No `prompt`/`confirm`/`alert`, ever** — they are silently ignored in embedded
     frames. Use `askText`/`askConfirm`/`askTell` from `js/ui/ask.js`.
 
 ## Running it, and what green means
@@ -74,12 +81,12 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # build + data suites; no browser, runs in seconds
-    npm run test:all        # adds smoke, print, mobile, update (needs Chromium)
+    npm test                # the sixteen node suites; no browser, runs in a minute
+    npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover
     npm run test:rules      # firestore.rules against the local emulator (needs Java)
 
-Node 20 or 22 (`engines` says `>=20.11 <23`). At this commit `npm test` is
-**18/18 (build) and 1857/1857 (data)** — anything less than every check passing is a
+Node 20 or 22 (`engines` says `>=20.11 <23`). At this commit `npm test` is **2638/2638**
+and `npm run test:all` adds **1547/1547** — anything less than every check passing is a
 stop, not a warning. The browser suites need Playwright's Chromium once
 (`npm run browsers`), or point `CHROME_PATH` at a browser that is already installed —
 see `tests/README.md` before downloading anything.
@@ -98,8 +105,8 @@ written down so it cannot happen twice.
 
     js/app.js                  boot, view switching, one render(); APP_VERSION; crash banner; imports the adapter after boot
     js/dates.js                local calendar; never toISOString for a day; the Friday-anchored 14-day account
-    js/store.js                every localStorage touch; setVerified reads back; full ≠ blocked; the reclaim ladder
-    js/recovery.js             quarantine for unreadable records; never deletes; blocks writes until acknowledged
+    js/store.js                every localStorage touch; setVerified reads back; full ≠ blocked; the reclaim ladder; the write tick
+    js/recovery.js             quarantine for unreadable records; never deletes; blocks writes until acknowledged; what the rescue file carries
     js/state.js                the one live schedule; journal-first commits; save vs persist; the ledger mirror at boot
     js/model/schema.js         the v2 model, validators, field paths, payroll and invoice arithmetic; pure functions
     js/model/migrate.js        v1→v2; never guesses; ambiguous cells become decisions, not data
@@ -121,10 +128,10 @@ written down so it cannot happen twice.
     js/ui/reports.js           pay and invoice reports; the advance form
     js/ui/share.js             the WhatsApp message, backups, snapshots, the four restore doors, exports
     js/ui/migration.js         the cells the migration refused to guess, put to a person
-    js/ui/offline.js           SW registration, the update banner, midEdit(), checkForUpdate()
+    js/ui/offline.js           SW registration, the update banner, midEdit(), checkForUpdate(); the other window's catch-up
     js/ui/install.js           the add-to-home-screen warning (iOS evicts browser-tab storage)
     js/ui/settings.js          the ⋯ panel: sync, backup, restores, version, device state, ledger parity
-    tests/runner.mjs           suite/check/same/given/report
+    tests/runner.mjs           suite/check/same/given/report; given prints its detail too
     tests/harness.mjs          devices in Node: V8 contexts, a faithful fake localStorage and Firestore
     tests/build.test.mjs       the three stamps agree; the shell is complete; caches never cross builds
     tests/data.test.mjs        storage, sync, and the money arithmetic — the big one
@@ -132,6 +139,22 @@ written down so it cannot happen twice.
     tests/mobile.test.mjs      layout facts at four widths, both orientations, both schemes, 2x text
     tests/print.test.mjs       print isolation, proved against a real PDF (tests/pdf.mjs reads it)
     tests/update.test.mjs      a real deploy against a real service worker
+    tests/recovery.test.mjs    quarantine, the raw snapshot, and the export of last resort
+    tests/adversarial.test.mjs the twenty-item correctness matrix
+    tests/probes.test.mjs      two tabs of one app on one disk, interleaved at the write
+    tests/capacity.test.mjs    a season of days on a disk that fills up
+    tests/concurrency.test.mjs C1-C5: the cross-tab hazards, one at a time
+    tests/exports.test.mjs     the three files that leave the phone, read back
+    tests/fence.test.mjs       the write counter: what moves it, and what it costs
+    tests/method.test.mjs      how an advance was handed over, through all four doors
+    tests/money.test.mjs       the same shekels on the far side of four real doors
+    tests/nonassertions.test.mjs a test that fails when a test stops testing
+    tests/restore.test.mjs     a device holding only part of a restore is caught
+    tests/upgrade.test.mjs     a v86 disk opened by this build
+    tests/vehicles.test.mjs    the retired feature, from both sides of its flag
+    tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx
+    tests/recovery.browser.mjs the rescue export through the real button
+    tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing

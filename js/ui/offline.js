@@ -68,22 +68,59 @@ function registerOffline() {
         console.info('Offline support unavailable:', error);
     });
 
+    // Tell the worker which build is running here, whenever one is in charge. It cannot
+    // work this out for a page shipped before the message existed, so silence keeps that
+    // page's cache and that page's bytes; this is what lets the cache go promptly once
+    // the last window running it has been replaced.
+    const announce = () => {
+        const worker = container.controller;
+        if (worker) worker.postMessage({ type: 'running', build: 'farkad-' + APP_VERSION });
+    };
+    announce();
+    container.addEventListener('controllerchange', announce);
+
     container.addEventListener('controllerchange', () => {
         // This also fires the first time a worker claims the page, which is not an
         // update - reloading there makes every first visit load twice, and reload the
         // screen out from under whatever the person had already started typing.
-        if (!applyingUpdate) return;
-        if (midEdit()) {
-            // Come back to it. The new worker is already in control; the page catches up
-            // as soon as the dialog is closed or the field is left.
-            setTimeout(function retry() {
-                if (midEdit()) { setTimeout(retry, 2000); return; }
-                location.reload();
-            }, 2000);
-            return;
-        }
-        location.reload();
+        //
+        // It ALSO fires in every other window of the app, because the new worker claims
+        // all of them. That window did not press anything and must not be reloaded under
+        // somebody's hands - but leaving it there for ever is not the answer either: it
+        // is a page from one build under a worker from the next, for as long as it stays
+        // open. So it waits for the one safe moment and then catches up.
+        if (!applyingUpdate && !crossedUnderUs()) return;
+        catchUpWhenSafe();
     });
+}
+
+// Whether this page was already under a worker when it loaded. Read ONCE, at load: a
+// controllerchange with no controller beforehand is a first install claiming the page,
+// and reloading there makes every first visit load twice and throws away whatever the
+// person had already started typing. A controllerchange with one beforehand is a
+// different build taking over a running page, which is the case below.
+// Read inside a try: in a sandboxed frame without allow-same-origin, merely READING
+// navigator.serviceWorker throws - it does not return undefined - and this runs at
+// definition time, so an unguarded read takes the whole app down before the first render
+// in exactly the frame the app is embedded in.
+const hadController = (() => {
+    try {
+        return Boolean(navigator.serviceWorker && navigator.serviceWorker.controller);
+    } catch (error) {
+        return false;
+    }
+})();
+
+function crossedUnderUs() {
+    return hadController;
+}
+
+// Reload, at the first moment it costs nobody anything. Not on a timer that gives up:
+// the page and the worker are from different builds until this happens, and half a
+// session of that is exactly what sw.js is written to prevent.
+function catchUpWhenSafe() {
+    if (!midEdit()) { location.reload(); return; }
+    setTimeout(catchUpWhenSafe, 500);
 }
 
 function showUpdateBanner(worker) {

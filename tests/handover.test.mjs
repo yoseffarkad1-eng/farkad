@@ -22,13 +22,23 @@
 // a deploy is. Every assertion below is either a SHA-256 of the bytes a browser actually
 // holds in its cache, or an answer from a production function running in the page.
 //
-// Three of the checks are RED, deliberately, and they are the reason the file exists:
+// Three of the checks were RED when this file was written, and they are the reason it
+// exists:
 //   * no worker from the new build serves a page still running the old one
 //   * the old build's cache is still there while a window is still running it
 //   * once the typing is finished the window catches up to its worker's build
-// clients.claim() takes over EVERY window of the origin, js/ui/offline.js reloads only
-// the window that pressed the banner, and activate() reaps the old cache before it
-// claims anything. Two windows of one app, and only one of them crosses.
+// clients.claim() took over EVERY window of the origin, js/ui/offline.js reloaded only
+// the window that pressed the banner, and activate() reaped the old cache before it
+// claimed anything. Two windows of one app, and only one of them crossed.
+//
+// The first two are closed and are measured below. The THIRD cannot be measured from
+// here and never will be: the code that makes a window catch up runs in the window, and
+// that window is running the OLD build - a build already on somebody's phone cannot be
+// given new code. So it is proved from v87 onward by tests/update.test.mjs, which
+// deploys two builds that both carry it, and what this file measures in its place is the
+// guarantee that does hold across a handover FROM a build that predates it: the old
+// window stays a coherent old session for the whole of its life, and crosses on its next
+// open.
 //
 // What it cannot do is prove any of it on iOS, where a home-screen app is resumed rather
 // than reopened. That limit is the same one tests/update.test.mjs names.
@@ -516,20 +526,40 @@ const phone = await openPhone();
     check('the old build\'s cache is still there while a window is still running it',
         left.includes(oldStamps.cache), left.join());
 
-    // RED. The window that never pressed anything is never reloaded: controllerchange
-    // returns early unless THIS window set applyingUpdate. So the moment the typing is
-    // finished - the one safe moment to catch up - nothing happens, and the window stays
-    // half-and-half for as long as it is open.
+    // The catch-up, and the one thing this file cannot measure.
+    //
+    // The window that never pressed anything now reloads itself at the first moment that
+    // costs nobody anything - and that code is in js/ui/offline.js, which is to say in the
+    // NEW build. The window it has to run in is the OLD one. A build already installed on
+    // somebody's phone cannot be given new code, so no v87 can make a v86 page reload
+    // itself, and no test can pretend otherwise: the catch-up is proved from v87 onward
+    // by tests/update.test.mjs, which deploys two builds that both carry it.
+    //
+    // What IS guaranteed here, and is what this pair measures: the old window stays a
+    // COHERENT old session for the whole of its life - never half-and-half - and it
+    // crosses on its next open, taking the old cache with it.
     await typing.fill('#workerFormName', '');
     await typing.keyboard.press('Escape');
     await typing.waitForTimeout(400);
     given('the edit is over and a reload would cost nothing',
         (await typing.evaluate(() => midEdit())) === false);
-    const caught = await typing.waitForFunction(
-        expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
-        newStamps.app, { timeout: 12000, polling: 250 }).then(() => true, () => false);
-    check('once the typing is finished the window catches up to its worker\'s build',
-        caught, (await buildOf(typing)).script);
+
+    server.withhold('/js/app.js');
+    const stillOld = await fetchedScript(typing, 'js/app.js');
+    server.restore('/js/app.js');
+    check('a window running the old build is served the old build for as long as it is open',
+        (await buildOf(typing)).script === oldStamps.app
+        && stillOld.hash === EXPECT.old['/js/app.js'],
+        `${(await buildOf(typing)).script} / ${nameOfBuild(stillOld.hash)}`);
+
+    await typing.reload({ waitUntil: 'load' });
+    await typing.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null,
+        { timeout: 20000, polling: 100 });
+    await settle(2500);
+    check('and its next open crosses, taking the build it left behind with it',
+        (await buildOf(typing)).script === newStamps.app
+        && !(await typing.evaluate(() => caches.keys())).includes(oldStamps.cache),
+        `${(await buildOf(typing)).script} / ${(await typing.evaluate(() => caches.keys())).join()}`);
 
     await asking.context().close();
 }

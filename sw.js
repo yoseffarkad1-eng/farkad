@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v86';
+const VERSION = 'farkad-v87';
 
 const SHELL = [
     './',
@@ -87,14 +87,47 @@ self.addEventListener('install', event => {
     );
 });
 
+// Which windows this worker has actually handed a page to.
+//
+// A window in here navigated through THIS worker, so it is running THIS build. A window
+// that is open and is not in here was loaded by the build before - claimed away from its
+// own worker by the claim below, still executing the old scripts. That distinction is
+// the whole of what the two rules under it need, and it is derived rather than reported:
+// a page cannot be asked, because the page that needs identifying is one shipped before
+// anybody thought to ask it.
+//
+// It is in memory, so a worker the browser has terminated and restarted forgets it. That
+// is the safe direction: a window it has forgotten reads as "not this build", so the old
+// cache is kept and the old bytes are served - the same answer, reached again.
+const SERVED = new Set();
+
+function previousCaches() {
+    return caches.keys().then(keys => keys.filter(key => key !== VERSION));
+}
+
+// A window still running the build before this one, if there is one.
+function strangerOpen() {
+    return self.clients.matchAll({ type: 'window' })
+        .then(clients => clients.some(client => !SERVED.has(client.id)));
+}
+
+// Every other build's cache goes, but not while somebody is still running one of them.
+//
+// This used to reap and THEN claim, so the old build's cache was deleted while a window
+// was still executing the old build - and after the claim that window had nowhere of its
+// own left to be served from. A cache is a few hundred kilobytes and it is the only copy
+// of the app that window can still run; it is kept until nothing is running it, and then
+// it goes at the next activate or the next navigation.
+function reapUnusedCaches() {
+    return strangerOpen().then(stranger => {
+        if (stranger) return undefined;
+        return previousCaches()
+            .then(keys => Promise.all(keys.map(key => caches.delete(key))));
+    });
+}
+
 self.addEventListener('activate', event => {
-    event.waitUntil(
-        caches.keys()
-            .then(keys => Promise.all(
-                keys.filter(key => key !== VERSION).map(key => caches.delete(key))
-            ))
-            .then(() => self.clients.claim())
-    );
+    event.waitUntil(self.clients.claim().then(() => reapUnusedCaches()));
 });
 
 self.addEventListener('fetch', event => {
@@ -116,11 +149,45 @@ self.addEventListener('fetch', event => {
     // appears, which on a site with a signal that is technically connected and going
     // nowhere was the difference between opening and staring at white.
     if (request.mode === 'navigate') {
+        // The window this navigation creates is running THIS build, because this is the
+        // page it is about to run. That is the one fact everything else here is built on.
+        if (event.resultingClientId) SERVED.add(event.resultingClientId);
         event.respondWith(
             caches.open(VERSION)
                 .then(cache => cache.match('./index.html'))
                 .then(hit => hit || timedFetch(request, DOCUMENT_TIMEOUT_MS)
                     .catch(() => offlineFallback()))
+        );
+        // The window that just left may have been the last one running the old build -
+        // but it has not left yet. At the moment this handler runs, the client being
+        // replaced is still open and still a stranger, so a reap here always finds one
+        // and never collects anything. waitUntil keeps this worker alive long enough for
+        // the navigation to finish and the old client to go.
+        event.waitUntil(new Promise(resolve => setTimeout(resolve, 1500))
+            .then(() => reapUnusedCaches()));
+        return;
+    }
+
+    // A window this worker never served is a window running the build before it, claimed
+    // away from its own worker. It gets ITS build's bytes, not this one's.
+    //
+    // clients.claim() takes over every window of the origin, and this handler only ever
+    // opened caches.open(VERSION) - so a page still executing the old scripts was handed
+    // the new build's for everything it asked for after the handover. New sync layer, old
+    // page, one session: the exact failure the header of this file says the design exists
+    // to prevent. The page catches up on its own at the first safe moment (see
+    // js/ui/offline.js); until it does, it is served the app it is running.
+    if (event.clientId && !SERVED.has(event.clientId)) {
+        event.respondWith(
+            previousCaches()
+                .then(keys => keys.reduce(
+                    (found, key) => found.then(hit => hit
+                        || caches.open(key).then(cache => cache.match(request))),
+                    Promise.resolve(null)
+                ))
+                .then(hit => hit || caches.open(VERSION)
+                    .then(cache => cache.match(request))
+                    .then(inThis => inThis || fetch(request)))
         );
         return;
     }
@@ -181,4 +248,15 @@ function offlineFallback() {
 // are entering a day.
 self.addEventListener('message', event => {
     if (event.data === 'skip-waiting') self.skipWaiting();
+
+    // A page saying which build it is running. Only pages from this build and later can
+    // say it - the one that needs identifying is a page shipped before anybody thought to
+    // ask - so silence means "not this build", which is the safe reading and the one
+    // SERVED already gives. What this adds is promptness: the moment the last window of
+    // the old build is replaced by one of this build, the old cache can go, instead of
+    // waiting for the next launch.
+    if (event.data && event.data.type === 'running' && event.data.build === VERSION) {
+        if (event.source && event.source.id) SERVED.add(event.source.id);
+        event.waitUntil(reapUnusedCaches());
+    }
 });
