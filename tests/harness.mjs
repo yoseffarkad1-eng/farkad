@@ -581,6 +581,9 @@ export function makeCloud(options = {}) {
             // only "no" can do nothing but guess; a client told what the revision actually
             // is can rebuild its write against it and send the same operation again.
             said.revision = held;
+            // And the document as it stands, so the client can tell a path nobody touched
+            // from a path somebody corrected while this write was in flight.
+            said.document = cloud.doc ? JSON.parse(JSON.stringify(cloud.doc)) : null;
             return said;
         }
         return null;

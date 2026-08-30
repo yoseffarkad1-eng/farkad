@@ -2799,10 +2799,19 @@ const FarkadSync = {
                 // word in after several tries is a device that should say so rather than
                 // spin.
                 if (error && error.code === 'conflict' && this._rebases < CAS_REBASE_LIMIT) {
-                    this._rebases += 1;
-                    if (Number.isInteger(error.revision)) this._revision = error.revision;
-                    this.stampProtocol(patch, this._sendOpId);
-                    return this.adapter.update(patch);
+                    // Only when nothing this write touches has moved. A path whose value
+                    // on the server is still what the base held is a path nobody
+                    // corrected, and rebasing it is the ordinary two-people-one-evening
+                    // merge. A path that HAS moved is a contest, and the write built on
+                    // the older base does not get to put the old value back.
+                    const contested = this.contestedPaths(patch, error.document || this._latestRaw);
+                    if (contested.length === 0) {
+                        this._rebases += 1;
+                        if (Number.isInteger(error.revision)) this._revision = error.revision;
+                        this.stampProtocol(patch, this._sendOpId);
+                        return this.adapter.update(patch);
+                    }
+                    error.contested = contested;
                 }
                 throw error;
             });
@@ -3878,6 +3887,26 @@ const FarkadSync = {
     // Every snapshot carries the revision it is. A document written by a build that
     // predates the protocol carries none, and null is the honest answer for "this device
     // has not been told" - it is not zero, and it is not a licence to guess.
+    // The document this device's writes are built on, kept beside the revision.
+    //
+    // Without it a conflict cannot be told apart from a contest. Two people filling in one
+    // evening write different field paths and both should land; two people correcting the
+    // SAME entry must not both land, and the one built on the older base must not be
+    // rebased on top of the correction. The only way to know which is which is to know
+    // what the path held when this write was built.
+    _baseDoc: null,
+
+    // What the base document holds at a field path, or undefined.
+    baseValueAt(path) {
+        let node = this._baseDoc;
+        const parts = String(path).split('.');
+        for (let at = 0; at < parts.length; at += 1) {
+            if (!node || typeof node !== 'object') return undefined;
+            node = node[parts[at]];
+        }
+        return node;
+    },
+
     noteRevision(raw) {
         const said = raw && raw.revision;
         if (!Number.isInteger(said) || said < 0) return;
@@ -3894,7 +3923,47 @@ const FarkadSync = {
         // increments it too, so the highest number this device has been shown is the
         // best base it has. Being too high is refused and rebased below; being too low
         // would be refused forever, because nothing would ever correct it.
-        if (this._revision === null || said > this._revision) this._revision = said;
+        if (this._revision === null || said > this._revision) {
+            this._revision = said;
+            try {
+                this._baseDoc = JSON.parse(JSON.stringify(raw));
+            } catch (error) {
+                // A document that will not copy is a document this device cannot use as a
+                // base. Null means "no base", which makes every conflict a contest - the
+                // careful direction to be wrong in.
+                this._baseDoc = null;
+            }
+        }
+    },
+
+    // Which paths in this write somebody else has changed since the base it was built on.
+    //
+    // This is the whole of the difference between a merge and an overwrite. A path whose
+    // value on the server is still what the base had is a path nobody has touched: this
+    // write is simply late, and rebasing it onto the newer revision is exactly right -
+    // that is two people filling in one evening, and it is the behaviour the field-path
+    // design exists for.
+    //
+    // A path whose value has MOVED is a path somebody corrected while this write was in
+    // flight. Rebasing there would put the corrected value back, which is the one thing
+    // the ordering is for. Measured: a tab suspended with its request still open, whose
+    // held write resurrected the site another person had already fixed.
+    contestedPaths(patch, current) {
+        if (!current || typeof current !== 'object') return Object.keys(patch);
+        const read = (root, path) => {
+            let node = root;
+            const parts = String(path).split('.');
+            for (let at = 0; at < parts.length; at += 1) {
+                if (!node || typeof node !== 'object') return undefined;
+                node = node[parts[at]];
+            }
+            return node;
+        };
+        return Object.keys(patch).filter(path => {
+            if (path === 'protocol' || path === 'revision' || path === 'lastOpId') return false;
+            if (path === 'updatedAt' || path === 'updatedBy') return false;
+            return canonicalJson(read(current, path)) !== canonicalJson(this.baseValueAt(path));
+        });
     },
 
     // The envelope this write travels in, stamped onto the patch itself - which is how it
@@ -3965,6 +4034,7 @@ const FarkadSync = {
         // still a snapshot that tells it what revision the document is at, and writing
         // against a stale base is refused by the rules, which is a worse way to find out.
         this.noteRevision(raw);
+        this._latestRaw = raw;
 
         // A restore is waiting to go out. Everything arriving right now is, by
         // definition, the state the person asked to replace - adopting it would undo
