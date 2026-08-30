@@ -935,9 +935,9 @@ function workerStatementText(workerId) {
         const when = `${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`;
         if (day.absent) { lines.push(`• ${when} - נעדר`); return; }
 
+        const labels = reportPlaceLabels();
         const where = day.entries.map(entry => {
-            const place = State.place(entry.placeId);
-            const name = place ? place.name : entry.placeId;
+            const name = placeLabelFrom(labels, entry.placeId);
             const rate = entryRate(entry);
             if (rate === RATE_DOUBLE) return `${name} (כפול)`;
             if (rate === RATE_EXTRA) {
@@ -1015,10 +1015,10 @@ function renderWorkerDayRow(day, worker) {
     if (day.absent) {
         what.appendChild(el('span', 'tag tag-absent', 'נעדר'));
     } else {
+        const labels = reportPlaceLabels();
         day.entries.forEach(entry => {
-            const place = State.place(entry.placeId);
             const tag = el('span', 'tag tag-place');
-            appendSiteName(tag, entry.placeId, place ? place.name : entry.placeId);
+            appendSiteName(tag, entry.placeId, placeLabelFrom(labels, entry.placeId));
             paintSite(tag, entry.placeId);
 
             const rate = entryRate(entry);
@@ -1215,6 +1215,26 @@ function scopedExportPlace() {
         .places.find(place => place.placeId === INVOICE_PLACE) || null;
 }
 
+// The one labelling map this page draws every site from.
+//
+// Built over REPORT_RANGE, because that is the span a report covers, and rebuilt whenever
+// the range or the record moves. Every surface the reports page produces reads it: the
+// invoice sheet's column headers, the detail sheet's אתר column, the table on screen, the
+// worker's own modal, the message he is sent, and the printed page. They used to ask
+// separately - two of them with different spans and three of them not at all, printing
+// the record id - so one site could carry three names in one export.
+let LABELS = null;
+let LABELS_FOR = null;
+
+function reportPlaceLabels() {
+    const key = `${REPORT_RANGE.from}|${REPORT_RANGE.to}|${State.schedule.places.length}|`
+        + `${Object.keys(State.schedule.days || {}).length}`;
+    if (LABELS && LABELS_FOR === key) return LABELS;
+    LABELS = placeLabelsIn(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
+    LABELS_FOR = key;
+    return LABELS;
+}
+
 // Each sheet built on its own, so a test can hold the rows up to the light without a
 // browser or the spreadsheet library - the leak this file had lived exactly in what got
 // bundled, not in any one sheet's arithmetic.
@@ -1319,9 +1339,10 @@ function reportSheets() {
 // the app to scroll a fortnight.
 function detailRows() {
     const rows = [['תאריך', 'יום', 'עובד', 'אתר', 'סוג', 'שעות נוספות', 'לתשלום ליום']];
-    // Read once for the whole sheet: the numbering has to be the same on every row, and
-    // the same as the column this day is billed in on the invoice sheet beside it.
-    const unlisted = unlistedPlaceIds(State.schedule);
+    // The page's own map - the same one the invoice sheet beside it bills into. It used to
+    // read the whole schedule while the invoice read the report range, so the same missing
+    // site was numbered differently on two sheets of one file.
+    const labels = reportPlaceLabels();
 
     payrollRows().forEach(row => {
         const worker = State.worker(row.workerId);
@@ -1343,7 +1364,7 @@ function detailRows() {
                         day.date,
                         HEBREW_DAY_NAMES[parsed.getDay()],
                         worker.name,
-                        placeLabelIn(State.schedule, entry.placeId, unlisted),
+                        placeLabelFrom(labels, entry.placeId),
                         RATE_LABELS[entryRate(entry)],
                         entryExtraHours(entry) || '',
                         index === 0 ? (day.amount === null ? '' : Math.round(day.amount)) : ''

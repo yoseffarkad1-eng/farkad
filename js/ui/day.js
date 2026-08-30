@@ -384,10 +384,10 @@ function renderDayWorkerList() {
         } else if (entries.length === 0) {
             value.appendChild(el('span', 'tag tag-empty', 'טרם נרשם'));
         } else {
+            const labels = placeLabelsIn(State.schedule);
             entries.forEach(entry => {
-                const place = State.place(entry.placeId);
                 const tag = el('span', 'tag tag-place');
-                appendSiteName(tag, entry.placeId, place ? place.name : entry.placeId);
+                appendSiteName(tag, entry.placeId, placeLabelFrom(labels, entry.placeId));
                 paintSite(tag, entry.placeId);
 
                 const rate = entryRate(entry);

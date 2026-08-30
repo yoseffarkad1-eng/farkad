@@ -17,11 +17,19 @@ import { makeDevice, settle } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 // The reports screen is a classic script like everything else in this app, so it runs
 // here the way the model does - loaded into a device's own scope, no browser and no
 // spreadsheet library. Same seam tests/data.test.mjs already uses for reportSheets().
-const REPORTS = readFileSync('/home/user/farkad/js/ui/reports.js', 'utf8');
+// Derived from THIS FILE's location, never from an absolute workspace path. A suite that
+// names /home/user/farkad reads the checkout the author happened to be sitting in - so
+// run from a detached worktree it silently tests somebody else's bytes and reports a
+// result about a tree it never opened. See tests/isolation.test.mjs, which fails when any
+// suite grows one back.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
 
 // Fixed, because every file this suite reads is stamped with the day it left the phone,
 // and a suite whose expected filename changes at midnight is a suite nobody trusts.

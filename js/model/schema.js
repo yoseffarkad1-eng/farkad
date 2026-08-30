@@ -1012,16 +1012,37 @@ function unlistedPlaceIds(schedule, fromDate, toDate) {
     return Array.from(found).sort();
 }
 
-// What a site is called on paper: the roster's name, or a number if the roster has lost
-// it. One reading, so the invoice column header and the detail row say the same thing
-// about the same day.
-function placeLabelIn(schedule, placeId, unlisted) {
-    const places = (schedule && schedule.places) || [];
-    const place = places.find(item => String(item.id) === String(placeId));
-    if (place) return place.name;
-    const ids = unlisted || unlistedPlaceIds(schedule);
-    const at = ids.indexOf(String(placeId));
-    return 'אתר שאינו ברשימה ' + (at === -1 ? 1 : at + 1);
+// What every site is called, over one span of days: a MAP, built once and handed to every
+// consumer of it.
+//
+// It was a function each caller invoked for itself, and two callers scoped it differently
+// - the invoice sheet over the report range, the detail sheet over the whole schedule - so
+// one missing site was 'אתר שאינו ברשימה 1' on one sheet and '2' on the other, in the same
+// export, for the same day. Three more surfaces printed the raw record id instead. One
+// site had three names in one file.
+//
+// So the numbering happens once, for a span, and the map is the only reading. Everything
+// that shows a site over that span asks the same map, or it is not showing the same
+// report. Two spans exist deliberately - a report is drawn over its range, a day or a
+// week screen over what it shows - and no artefact ever mixes them.
+function placeLabelsIn(schedule, fromDate, toDate) {
+    const labels = new Map();
+    ((schedule && schedule.places) || []).forEach(place => {
+        if (place && place.id !== undefined) labels.set(String(place.id), place.name);
+    });
+    unlistedPlaceIds(schedule, fromDate, toDate).forEach((id, at) => {
+        labels.set(id, 'אתר שאינו ברשימה ' + (at + 1));
+    });
+    return labels;
+}
+
+// One site out of that map. A site the map has never heard of - a day outside the span,
+// an entry arriving mid-render - still never shows its record id: it is named for what it
+// is, which is a site this report does not cover.
+function placeLabelFrom(labels, placeId) {
+    const id = String(placeId);
+    if (labels && labels.has(id)) return labels.get(id);
+    return 'אתר שאינו ברשימה';
 }
 
 // Whatever is referenced and missing, put back - archived, and as WHOLE as anything
@@ -1801,9 +1822,10 @@ function invoiceReport(schedule, fromDate, toDate) {
     // sheet built by walking the roster alone drops those days off the invoice while the
     // pay sheet still pays for them - three sheets in one file, and the money in them not
     // adding up to the same fortnight.
-    const unlisted = unlistedPlaceIds(schedule, fromDate, toDate);
+    const labels = placeLabelsIn(schedule, fromDate, toDate);
     const columns = schedule.places.map(place => ({ id: place.id, name: place.name }))
-        .concat(unlisted.map(id => ({ id, name: placeLabelIn(schedule, id, unlisted) })));
+        .concat(unlistedPlaceIds(schedule, fromDate, toDate)
+            .map(id => ({ id, name: placeLabelFrom(labels, id) })));
 
     return columns.map(place => {
         const row = { placeId: place.id, name: place.name, workerDays: 0, byDate: {}, days: [] };

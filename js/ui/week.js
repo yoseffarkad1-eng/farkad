@@ -150,13 +150,13 @@ function renderWeekCell(worker, date) {
         const entries = entriesFor(State.schedule, date, worker.id, State.layer);
         if (entries.length > 0) {
             cell.classList.add('cell-filled');
+            const labels = placeLabelsIn(State.schedule);
             entries.forEach(entry => {
-                const place = State.place(entry.placeId);
                 // The same badge the day screen uses. This grid is read across a whole
                 // week at once, which is precisely where a colour beats reading a name in
                 // every cell - and where two different sites must not look alike.
                 const line = el('div', 'cell-line tag tag-place');
-                appendSiteName(line, entry.placeId, place ? place.name : entry.placeId);
+                appendSiteName(line, entry.placeId, placeLabelFrom(labels, entry.placeId));
                 paintSite(line, entry.placeId);
 
                 const rate = entryRate(entry);

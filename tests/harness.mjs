@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import vm from 'node:vm';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,6 +44,28 @@ const FILES = [
 ];
 
 const SOURCE = FILES.map(file => ({ file, code: readFileSync(join(ROOT, file), 'utf8') }));
+
+// The bytes every device in every suite is actually running, named and hashed.
+//
+// A suite that reads production code by an absolute path tests whatever tree happened to
+// be at that path - and two of them did, so a verification gate that materialised an
+// exact SHA was, for those two files, reading the checkout next door and reporting a
+// result about a tree it never opened. ROOT above is derived from this file, so the
+// devices were always right; what was missing was any way for a suite to SAY so. This is
+// that way: tests/isolation.test.mjs compares these hashes against the files in its own
+// checkout, and a suite may assert them itself when the answer would otherwise rest on a
+// path nobody re-reads.
+export function loadedSources() {
+    return SOURCE.map(entry => ({
+        file: entry.file,
+        bytes: entry.code.length,
+        sha256: createHash('sha256').update(entry.code).digest('hex')
+    }));
+}
+
+export function sourceRoot() {
+    return ROOT;
+}
 
 // Store.keys() calls Object.keys(localStorage), which in a browser returns the stored
 // keys - so the data has to sit on the object as own enumerable properties and the

@@ -174,7 +174,9 @@ function makeNode(tag) {
 async function staged(options = {}) {
     const { readFileSync } = await import('node:fs');
     const vm = (await import('node:vm')).default;
-    const root = new URL('file:///home/user/farkad/');
+    // From this file, not from an absolute workspace path - see the note in
+    // tests/exports.test.mjs and the suite that enforces it.
+    const root = new URL('../', import.meta.url);
 
     const device = loaded(options);
     const files = [];
