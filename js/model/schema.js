@@ -278,6 +278,63 @@ function storedScheduleProblems(raw) {
     rosterProblems(raw).forEach(problem => problems.push(problem));
     dayProblems(raw, null).forEach(problem => problems.push(problem));
     advanceProblems(raw, null).forEach(problem => problems.push(problem));
+    vehicleProblems(raw).forEach(problem => problems.push(problem));
+    return problems;
+}
+
+// The vehicles, checked BEFORE anything normalises them.
+//
+// This gate never mentioned them, so five different malformed shapes passed every
+// restore door - and js/state.js then turned three of them into an EMPTY ARRAY. A
+// subtree nobody could read became a subtree that said there were no vehicles, which is
+// a different and much more confident statement, and it is the one that got written to
+// the disk. Law 10 says nothing unreadable is deleted, overwritten or treated as empty;
+// this is the door it was walking through.
+//
+// The asymmetry that gave it away: a duplicate WORKER id is refused outright, and a
+// duplicate vehicle id was admitted. The feature is off - none of this is drawn or paid
+// - but the bytes are somebody's record of a van, and the day the gate opens they are
+// what the arithmetic runs on.
+function vehicleProblems(raw) {
+    if (raw.vehicles === undefined) return [];
+    if (!Array.isArray(raw.vehicles)) return ['רשימת הרכבים ברישום אינה תקינה.'];
+
+    const problems = [];
+    const seen = new Set();
+    raw.vehicles.forEach((item, at) => {
+        if (!isPlainObject(item)) {
+            problems.push('רכב ' + (at + 1) + ' ברישום אינו תקין.');
+            return;
+        }
+        if (!isSafeId(item.id)) {
+            problems.push('לרכב ' + (at + 1) + ' אין מזהה תקין.');
+            return;
+        }
+        if (seen.has(String(item.id))) {
+            problems.push('הרכב ' + item.id + ' רשום פעמיים.');
+            return;
+        }
+        seen.add(String(item.id));
+        if (item.name !== undefined && typeof item.name !== 'string') {
+            problems.push('לרכב ' + item.id + ' יש שם שאינו טקסט.');
+        }
+        if (item.ownerId !== undefined && item.ownerId !== null && !isSafeId(item.ownerId)) {
+            problems.push('הרכב ' + item.id + ' משויך לבעלים שאינו תקין.');
+        }
+        if (item.rates !== undefined) {
+            if (!Array.isArray(item.rates)) {
+                problems.push('היסטוריית המחירים של הרכב ' + item.id + ' אינה תקינה.');
+            } else {
+                item.rates.forEach(rate => {
+                    if (!isPlainObject(rate)) {
+                        problems.push('מחיר ברכב ' + item.id + ' אינו תקין.');
+                    } else if (rate.amount !== undefined && !isFiniteNumber(rate.amount)) {
+                        problems.push('מחיר ברכב ' + item.id + ' אינו מספר.');
+                    }
+                });
+            }
+        }
+    });
     return problems;
 }
 
@@ -1228,20 +1285,114 @@ function vehiclesEnabled() {
 //
 // The remote copy wins where both have the same id: that is an ordinary field merge, and
 // it is what would happen if anybody were editing them. What it may not do is remove.
+// Two vehicle records, compared by their content and not by their identity.
+//
+// schema.js is the pure layer and loads BEFORE js/sync/sync.js, so it cannot borrow that
+// file's canonicalJson: at call time the global happens to be there, and one day the
+// script order moves and this silently starts comparing undefined to undefined - which
+// answers "the same" for every pair, and quietly drops one of the two records.
+function stableJson(value) {
+    if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+    if (isPlainObject(value)) {
+        return '{' + Object.keys(value).sort()
+            .map(key => JSON.stringify(key) + ':' + stableJson(value[key]))
+            .join(',') + '}';
+    }
+    return JSON.stringify(value === undefined ? null : value);
+}
+
+// A record's held disagreements are not part of what the record SAYS about its van, so
+// they are left out of the comparison. Without this, a record that has already absorbed
+// one conflict never again looks equal to the plain record it came from, and the pair
+// re-merges forever.
+function stripConflict(item) {
+    if (!isPlainObject(item)) return item;
+    const copy = Object.assign({}, item);
+    delete copy.conflict;
+    return copy;
+}
+
+function sameRecord(a, b) {
+    return stableJson(stripConflict(a)) === stableJson(stripConflict(b));
+}
+
 function mergeVehiclesInto(target, source) {
     if (!target || !source) return target;
     const held = Array.isArray(source.vehicles) ? source.vehicles : [];
     if (held.length === 0) return target;
 
     const merged = Array.isArray(target.vehicles) ? target.vehicles.slice() : [];
-    const known = new Set(merged.filter(item => item && item.id).map(item => String(item.id)));
+    const byId = new Map(merged.filter(item => item && item.id)
+        .map((item, at) => [String(item.id), at]));
+
     held.forEach(item => {
-        if (!item || !item.id || known.has(String(item.id))) return;
-        merged.push(item);
-        known.add(String(item.id));
+        if (!item || !item.id) return;
+        const id = String(item.id);
+        if (!byId.has(id)) {
+            byId.set(id, merged.push(item) - 1);
+            return;
+        }
+
+        // ONE ID, TWO DIFFERENT RECORDS. This used to skip the local copy silently, and
+        // at the call site the target is the REMOTE snapshot - so name, ownerId, plate,
+        // every unknown field and the WHOLE RATE HISTORY went together, on a comment that
+        // called it "an ordinary field merge". It is a record merge, and a dropped rate
+        // stamp is iron law 2 read from the vehicle side: a day keeps the rate it was
+        // worked at, and the history is where that rate lives.
+        //
+        // Vehicle ids are still "one past the highest" - the pre-v79 scheme newEntityId's
+        // own comment calls a pay-sheet bug - so two phones offline on the same evening
+        // really do mint the same id for two different vans. Choosing between them is
+        // choosing which van somebody is paid for.
+        //
+        // Neither is chosen. Both are kept: the difference is written onto the record
+        // that survives, so whoever eventually looks has the other one rather than a
+        // guess, and nothing anywhere can call this settled.
+        const at = byId.get(id);
+        const theirs = merged[at];
+        if (sameRecord(theirs, item)) return;
+
+        // `item` is THIS DEVICE'S record and `theirs` is the arriving one - the call site
+        // merges the previous local schedule INTO the remote snapshot, so the array being
+        // built started life as the remote's. The local copy is kept as the record, not
+        // because it is more likely to be right but because it is the one this device can
+        // still be asked about: the other phone still has its own, and nothing here has
+        // to guess which van somebody was paid for.
+        //
+        // The rate history is UNIONED rather than chosen. Rates are append-only - a day
+        // keeps the rate it was worked at - so two histories of one vehicle are two
+        // halves of one record, and dropping either restates a period that was already
+        // settled. Same stamp on both sides keeps this device's amount and the
+        // disagreement is on the record beside it.
+        const stamps = new Map();
+        (Array.isArray(theirs.rates) ? theirs.rates : []).forEach(rate => {
+            if (isPlainObject(rate) && rate.from !== undefined) stamps.set(String(rate.from), rate);
+        });
+        (Array.isArray(item.rates) ? item.rates : []).forEach(rate => {
+            if (isPlainObject(rate) && rate.from !== undefined) stamps.set(String(rate.from), rate);
+        });
+        const rates = Array.from(stamps.keys()).sort().map(from => stamps.get(from));
+
+        // Held disagreements are a SET, not a log. receive() runs on every snapshot, and
+        // the same two records meet again on every one of them; appending each time would
+        // grow one van's record without bound until the document stopped fitting. A
+        // record already held is already the evidence - it is not more true twice.
+        const before = (Array.isArray(item.conflict) ? item.conflict : [])
+            .filter(isPlainObject);
+        const kept = before.some(other => sameRecord(other, theirs))
+            ? before
+            : before.concat([stripConflict(theirs)]);
+        merged[at] = Object.assign({}, item, { rates, conflict: kept });
     });
+
     target.vehicles = merged;
     return target;
+}
+
+// Is any vehicle on this record holding a disagreement nobody has settled?
+function vehicleConflicts(schedule) {
+    return ((schedule && schedule.vehicles) || [])
+        .filter(item => item && Array.isArray(item.conflict) && item.conflict.length > 0);
 }
 
 // The other half of the same fact: which vehicles stayed in the yard on a given evening.
