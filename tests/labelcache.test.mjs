@@ -208,8 +208,10 @@ function surfaces(device, workerId = 'w_01') {
 
     return {
         invoiceHeader, detailSites, byDate, statement, modal, rows: rows.length, sheets,
-        // The memo key the page is holding, and the map it is holding under it.
-        key: run(device, 'LABELS_FOR'),
+        // What the page's own map says RIGHT NOW. There is no memo key any more - see
+        // the last suite in this file - so what is observed is the thing the key was
+        // ever a proxy for: whether the map reflects the record as it is.
+        key: JSON.stringify([...run(device, 'reportPlaceLabels()')].sort()),
         labelled: sites => sites.map(id => run(device,
             `placeLabelFrom(reportPlaceLabels(), ${JSON.stringify(id)})`))
     };
@@ -458,38 +460,55 @@ const uniq = list => [...new Set(list)].sort();
         whole.get('p_01') === 'הרצליה מערב', String(whole.get('p_01')));
     check('and neither file holds a map across renders',
         DAY.indexOf('placeLabelsIn(State.schedule)') !== -1
-        && WEEK.indexOf('placeLabelsIn(State.schedule)') !== -1
-        && DAY.indexOf('LABELS_FOR') === -1 && WEEK.indexOf('LABELS_FOR') === -1);
+        && WEEK.indexOf('placeLabelsIn(State.schedule)') !== -1);
 }
 
 // ---------------------------------------------------------------- the key itself
+//
+// This suite was written against a memo keyed on `from|to|places.length|days.length`, and
+// every check in it asked the same question in the same way: does the key move when the
+// record moves? It does not exist any more, and the reason is worth keeping rather than
+// deleting with it - a key that would have been CORRECT has to be a hash of every place
+// and of every day's site references, which is most of the work the map itself does. So
+// the map is built per render, and what is asserted here is the guarantee the key was
+// ever a proxy for, asked of the map directly: after each of the three mutations that
+// left the counts equal, does the page's own map say the new thing?
 {
-    suite('the memo key, held up against the thing it is a key for');
+    suite('the map answers for the record as it is, not as it was');
 
     const device = seed(phone());
     setRange(device, FROM, TO);
     surfaces(device);
-    const start = run(device, 'LABELS_FOR');
 
-    const keyNow = () => run(device,
-        `${'`'}\${REPORT_RANGE.from}|\${REPORT_RANGE.to}|\${State.schedule.places.length}|`
-        + `\${Object.keys(State.schedule.days || {}).length}${'`'}`);
+    const mapNow = () => run(device, 'reportPlaceLabels()');
+    const sizes = () => `${device.State.schedule.places.length}|`
+        + `${Object.keys(device.State.schedule.days || {}).length}`;
 
-    given('the key is what reports.js says it is', keyNow() === start, `${keyNow()} vs ${start}`);
+    const before = sizes();
+    given('the map is there to be asked', mapNow().size > 0, String(mapNow().size));
 
     run(device, `State.place('p_01').name = 'שם אחר'; State.commitRoster();`);
-    check('a rename moves the key', keyNow() !== start, `${start} -> ${keyNow()}`);
+    check('a rename is answered, with the counts unchanged',
+        mapNow().get('p_01') === 'שם אחר' && sizes() === before,
+        `${mapNow().get('p_01')} @ ${sizes()} (was ${before})`);
 
     land(device, '2026-08-12', 'w_01', ALEF);
     device.State.save({ silent: true });
-    check('a day changing site moves the key', keyNow() !== start, `${start} -> ${keyNow()}`);
+    check('a day moving to another site is answered, with the counts unchanged',
+        mapNow().has(ALEF) && sizes() === before,
+        `${[...mapNow().keys()].join()} @ ${sizes()} (was ${before})`);
 
-    // A site archived, then unarchived: the collections never change size, and the label
-    // for a day at that site changes twice. Named separately because this one needs no
-    // sync, no restore and no second phone - it is two taps on the roster screen.
-    device.State.place('p_02').active = false;
-    device.State.commitRoster();
-    check('archiving a site moves the key', keyNow() !== start, `${start} -> ${keyNow()}`);
+    run(device, `State.place('p_02').active = false; State.commitRoster();`);
+    check('archiving a site leaves it named rather than numbered',
+        mapNow().get('p_02') === 'תל אביב' && sizes() === before,
+        `${mapNow().get('p_02')} @ ${sizes()}`);
+
+    // And the memo is gone from the file, not merely bypassed: a second one added later
+    // would reintroduce every failure this suite was written for.
+    const REPORTS_SRC = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+    check('reports.js holds no label map across renders',
+        REPORTS_SRC.indexOf('LABELS_FOR') === -1
+        && /function reportPlaceLabels\(\) \{\s*return placeLabelsIn\(/.test(REPORTS_SRC));
 }
 
 report();

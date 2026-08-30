@@ -1217,22 +1217,30 @@ function scopedExportPlace() {
 
 // The one labelling map this page draws every site from.
 //
-// Built over REPORT_RANGE, because that is the span a report covers, and rebuilt whenever
-// the range or the record moves. Every surface the reports page produces reads it: the
-// invoice sheet's column headers, the detail sheet's אתר column, the table on screen, the
-// worker's own modal, the message he is sent, and the printed page. They used to ask
-// separately - two of them with different spans and three of them not at all, printing
-// the record id - so one site could carry three names in one export.
-let LABELS = null;
-let LABELS_FOR = null;
-
+// Built over REPORT_RANGE, because that is the span a report covers. Every surface the
+// reports page produces reads it: the invoice sheet's column headers, the detail sheet's
+// אתר column, the table on screen, the worker's own modal, the message he is sent, and
+// the printed page. They used to ask separately - two of them with different spans and
+// three of them not at all, printing the record id - so one site could carry three names
+// in one export.
+//
+// It is NOT memoised, and that is the point of this version. It was, on
+// `from|to|places.length|days.length` - collection SIZES, not contents - so anything that
+// kept the counts equal left a stale map standing: a site renamed, a day moved from one
+// site to another, a whole different record restored. And because only three of the
+// consumers read the memo while the invoice half rebuilds its labels fresh in the model,
+// a stale map did not merely age, it SPLIT ONE EXPORT IN TWO - the invoice sheet saying
+// the new name and the detail sheet the old, in one workbook, for one site.
+//
+// Worse than an old name: unlisted sites are numbered positionally over a sorted list, so
+// a stale map yields a wrong NUMBER. Moving one day renumbered a day nobody had touched.
+//
+// A correct key would have to be a hash of every place and every day's site references,
+// which is most of the work the map itself does. So there is no key. It is a walk over
+// the days in range, built per render, and the alternative to paying for it is a report
+// that names a site by a number that belongs to a different site.
 function reportPlaceLabels() {
-    const key = `${REPORT_RANGE.from}|${REPORT_RANGE.to}|${State.schedule.places.length}|`
-        + `${Object.keys(State.schedule.days || {}).length}`;
-    if (LABELS && LABELS_FOR === key) return LABELS;
-    LABELS = placeLabelsIn(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
-    LABELS_FOR = key;
-    return LABELS;
+    return placeLabelsIn(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
 }
 
 // Each sheet built on its own, so a test can hold the rows up to the light without a
