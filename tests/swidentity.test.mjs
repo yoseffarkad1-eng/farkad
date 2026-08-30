@@ -1099,7 +1099,7 @@ const enroll = await browser.newContext();
         one, 'a', await servedOffline(one, 'js/app.js'), '/js/app.js');
     const control = await swProcess(enroll, two);
     const stopped = await stopWorker(control);
-    given('the worker process is gone, so nothing is answered from memory',
+    check('the worker process is gone, so nothing is answered from memory',
         stopped.ok, `${stopped.targets} targets`);
     servedOwnBuild('and still served its own build after the worker restarts',
         one, 'a', await servedOffline(one, 'js/app.js'), '/js/app.js');
