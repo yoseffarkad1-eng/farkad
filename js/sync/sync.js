@@ -2629,29 +2629,33 @@ const FarkadSync = {
             return Promise.resolve();
         }
 
-        // AND one sender across the tabs, which the gate above cannot speak for. The
-        // payload is built after the claim is held, on purpose: whoever waited rebuilds
-        // it from a disk that now carries whatever the winner wrote, so the loser never
-        // sends the value it was about to send before the other tab corrected it.
+        // The claim is asked for, and NOT WAITED FOR.
+        //
+        // It used to be a gate: a tab that could not get it did not send, and came back
+        // later. That was the only thing standing between two tabs and a lost update,
+        // because the server took whatever arrived and kept the last of it. It is not any
+        // more - every write carries the revision it was built on, the server refuses one
+        // built on a base that has moved, and a path another tab changed in between is
+        // held rather than overwritten. See docs/sync-protocol.md.
+        //
+        // As a gate it had a failure with no floor. A tab suspended with its request still
+        // open keeps the claim - correctly, because that request may yet land and stealing
+        // it would risk sending the same edit twice - and every other tab then waits
+        // behind it. Measured on two tabs of one browser: the second tab's day sat in its
+        // queue, unsent, status "connecting", while the sleeping tab's write was the only
+        // thing the cloud ever saw. A backgrounded client must not be able to lock the
+        // others out, and under the old rule it could, for as long as it stayed asleep.
+        //
+        // So it is a courtesy now. Holding it keeps the ordinary case to one writer, which
+        // costs the server fewer refusals; not holding it costs a rebase. Neither can lose
+        // an edit, and that is the whole of the difference.
         this._claiming = true;
-        return this.takeSendClaim().then(mine => {
-            if (!mine) {
-                // Another tab is sending. Not an error and not a reason to climb the
-                // retry ladder - the ladder is for a cloud that will not answer, and a
-                // two-second wait for a tab that is about to release costs the person
-                // watching the status line two seconds for nothing. The debounce brings
-                // this back, and by then the payload is rebuilt from a disk that holds
-                // whatever the other tab wrote.
-                this._claiming = false;
-                this.scheduleFlush();
-                if (this.status === 'synced') this.setStatus('connecting');
-                return undefined;
-            }
-            return this.sendClaimed();
-        }).then(
-            value => { this.releaseSendClaim(); this._claiming = false; return value; },
-            error => { this.releaseSendClaim(); this._claiming = false; throw error; }
-        );
+        return this.takeSendClaim()
+            .then(() => this.sendClaimed())
+            .then(
+                value => { this.releaseSendClaim(); this._claiming = false; return value; },
+                error => { this.releaseSendClaim(); this._claiming = false; throw error; }
+            );
     },
 
     // The send itself, with the right to send already held. Split out of flush so that
@@ -2737,19 +2741,14 @@ const FarkadSync = {
             return Promise.resolve();
         }
 
-        // Asked again, in the instant before the request leaves. Everything since the
-        // claim was taken is time - the settle, reading the queue off the disk, building
-        // the payload - and a tab suspended across that gap wakes up still believing it
-        // owns a claim another tab took long ago, then hands its stale payload to the
-        // cloud. Nothing is lost by standing down: the queue is untouched, the ladder
-        // brings this back, and the payload is rebuilt from a disk that by then holds
-        // whatever the other tab wrote.
-        if (!this.stillOwnsSendClaim()) {
-            this._sending = new Map();
-            this.scheduleFlush();
-            if (this.status === 'synced') this.setStatus('connecting');
-            return Promise.resolve();
-        }
+        // The claim moving is no longer a reason to stand down.
+        //
+        // It was, and it had to be: the payload was built from a disk another tab might
+        // have written since, and there was nothing on the server able to catch a stale
+        // write. Now there is. A payload built on a base that has moved is refused by its
+        // revision, and a path the other tab changed is held rather than put back - so
+        // standing down here buys nothing, and costs the one thing it cannot afford:
+        // a tab that never sends because another one is asleep with a request open.
 
         this._sending = sent;
         this._stamp = null;
@@ -2771,13 +2770,9 @@ const FarkadSync = {
         // cannot land before it. createDocument is inside the same slot on purpose - it
         // is this write, taking the other branch, not a second one.
         return this.cloudWrite(() => {
-            // Asked HERE, not before the task was queued. cloudWrite defers everything
-            // through the previous write's promise, so a check made outside is a check
-            // made at a different moment from the one the request actually leaves at.
-            if (!this.stillOwnsSendClaim()) {
-                return Promise.reject(new Error(
-                    'the right to send moved to another tab; the batch was not sent'));
-            }
+            // The claim is not consulted here either - see the note above sendClaimed.
+            // The write carries its own base and the server decides; the claim only ever
+            // said who went first.
             return Promise.resolve(this.adapter.update(patch)).catch(error => {
                 // Not an edge case: this is the first write of every new project. Inside
                 // the same slot on purpose - this write taking the other branch, not a
@@ -2823,6 +2818,7 @@ const FarkadSync = {
                 this._sending = new Map();
                 this._retryAt = 0;
                 this._rebases = 0;
+                this._sendBase = null;
 
                 if (!acked) {
                     // The cloud has the batch and the queue could not be written to say
@@ -2844,6 +2840,7 @@ const FarkadSync = {
                 // Nothing is removed. The queue is still on disk exactly as it was, so
                 // this survives the app being closed as well as the network coming back.
                 this._sending = new Map();
+                this._sendBase = null;
                 this.fail(error);
                 this.scheduleRetry();
             });
@@ -3883,6 +3880,9 @@ const FarkadSync = {
     _revision: null,
     _sendOpId: null,
     _rebases: 0,
+    // The base values, per field path, that the write currently in flight was built on.
+    // See stampProtocol for why it is frozen rather than read.
+    _sendBase: null,
 
     // Every snapshot carries the revision it is. A document written by a build that
     // predates the protocol carries none, and null is the honest answer for "this device
@@ -3959,10 +3959,13 @@ const FarkadSync = {
             }
             return node;
         };
+        const base = this._sendBase || {};
         return Object.keys(patch).filter(path => {
             if (path === 'protocol' || path === 'revision' || path === 'lastOpId') return false;
             if (path === 'updatedAt' || path === 'updatedBy') return false;
-            return canonicalJson(read(current, path)) !== canonicalJson(this.baseValueAt(path));
+            // Against the base this write FROZE, not against whatever the base has become
+            // since. See stampProtocol.
+            return canonicalJson(read(current, path)) !== base[path];
         });
     },
 
@@ -3970,6 +3973,25 @@ const FarkadSync = {
     // reaches the rules, since Firestore evaluates them against the document as it would
     // be after the merge.
     stampProtocol(patch, opId) {
+        // THE BASE THIS WRITE WAS BUILT ON, frozen here, path by path.
+        //
+        // It cannot be read live at conflict time. Snapshots keep arriving while a request
+        // is open, and _baseDoc moves with them - so a write held open across another
+        // tab's edit came back to find the base already updated to include that edit,
+        // decided nothing had moved under it, rebased, and put its own older value back
+        // over the newer one. The conflict rule was reading the answer AFTER the thing it
+        // was meant to detect had already been absorbed.
+        //
+        // Frozen only the first time: a rebase re-stamps the same patch, and re-freezing
+        // there would capture the state the rebase is reacting to.
+        if (!this._sendBase) {
+            this._sendBase = {};
+            Object.keys(patch).forEach(path => {
+                if (path === 'updatedAt' || path === 'updatedBy') return;
+                if (path === 'protocol' || path === 'revision' || path === 'lastOpId') return;
+                this._sendBase[path] = canonicalJson(this.baseValueAt(path));
+            });
+        }
         patch.protocol = this.PROTOCOL;
         patch.lastOpId = String(opId);
         // No snapshot yet means no base. One is the only revision a document that does

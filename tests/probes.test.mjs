@@ -270,13 +270,24 @@ const connected = async (device, cloud) => {
     put(b, PATH, 'p_02');
     await settle(TICK * 40);
 
-    // The guarantee, and the reason the rest of it holds: two tabs of this app share one
-    // disk and one document, and only one of them may have a write open at a time. While
-    // both could, the older of the two could answer last and put a stale day over a
-    // correction on all three phones, with nothing left anywhere able to put it back.
-    check('the two tabs never both have a send open',
-        mostOpenAtOnce === 1, `${mostOpenAtOnce} at once: ` + JSON.stringify(
-            held.map(item => item.at)));
+    // This used to require that only one tab ever had a write open, and that WAS the
+    // guarantee for as long as the server accepted whatever arrived and kept the last of
+    // it: while both could be open, the older of the two could answer last and put a
+    // stale day over a correction on all three phones.
+    //
+    // The server orders the writes now. Every one carries the revision it was built on,
+    // one built on a base that has moved is refused, and a path another tab changed in
+    // between is held rather than overwritten - so the older write answering last cannot
+    // win, whether or not the two overlapped.
+    //
+    // Keeping the old check would have pinned the mechanism instead of the guarantee, and
+    // the mechanism had a cost with no floor: the single-writer rule was a localStorage
+    // lease, and a tab suspended with its request still open held it against every other
+    // tab indefinitely. So both tabs may now be open at once, and the two checks below -
+    // which are the guarantee, and which were already here - say what that must not cost.
+    check('both tabs may have a write open, which is what the ordering is for',
+        mostOpenAtOnce >= 1 && held.length >= 2,
+        `${mostOpenAtOnce} at once: ` + JSON.stringify(held.map(item => item.at)));
 
     // A's write - the older value - is answered first. B's has not been made yet.
     held.forEach(item => item.gate.release());
