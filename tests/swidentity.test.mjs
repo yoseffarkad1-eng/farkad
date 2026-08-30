@@ -370,6 +370,14 @@ const served = (page, path) => page.evaluate(async name => {
     const digest = await crypto.subtle.digest('SHA-256', bytes);
     return {
         status: response.status,
+        // The refusal's own shape, not merely "these are not somebody's bytes". A test
+        // that accepts any non-asset answer as a refusal also accepts a network error, a
+        // 404 from a deploy in progress, and an empty body - none of which tell the
+        // person anything, and one of which is the browser's own failure wearing the
+        // costume of ours.
+        statusText: response.statusText,
+        cause: response.headers.get('X-Farkad-Fail-Closed'),
+        type: response.headers.get('Content-Type'),
         hash: [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join(''),
         note: new TextDecoder().decode(bytes.slice(0, 60)).replace(/\s+/g, ' ')
     };
@@ -491,9 +499,26 @@ function servedOwnBuild(name, page, id, result, path) {
     check(name, result.hash === EXPECT[id][path],
         `${describe(path, result)}, wanted ${BUILD[id].stamp} ${EXPECT[id][path]}`);
 }
-function failedClosed(name, result, path) {
-    check(name, !isAsset(path, result.hash),
-        `handed ${describe(path, result)}: "${result.note}"`);
+// A refusal is a refusal only if it is THE refusal.
+//
+// This used to ask one question - "are these bytes not any build's asset" - and every
+// other way of not answering passes that: a network error with hash null, a 404 while a
+// deploy is in flight, an empty body, a worker that threw. So the suite could go green
+// on the app simply failing to load, which is a different outcome from the app being
+// told why it cannot load, and only one of them is recoverable by a reload.
+//
+// The exact shape is required instead: status 503, the diagnostic header naming a cause,
+// and - when the caller knows which cause it should be - that exact cause. `cause` is
+// checked against the header rather than the body so a reworded message is not a test
+// failure, while a refusal that stops saying why is.
+function failedClosed(name, result, path, cause) {
+    const shaped = result.status === 503
+        && typeof result.cause === 'string' && result.cause.length > 0
+        && !isAsset(path, result.hash)
+        && (cause === undefined || result.cause === cause);
+    check(name, shaped,
+        `status ${result.status} "${result.statusText}" cause=${JSON.stringify(result.cause)}`
+        + `${cause === undefined ? '' : ` (wanted ${cause})`}, handed ${describe(path, result)}`);
 }
 
 // ================================================================ three builds, three windows
@@ -691,38 +716,41 @@ const putPhone = await browser.newContext();
     check('the worker process really is gone, so what follows is a restart',
         stopped.ok, `${stopped.targets} targets, running ${stopped.running.join()}`);
 
-    // One previous shelf on the disk. sw.js:291 hands it over without asking whether
-    // this window is running it.
-    // These three moved, and the trade is written down rather than hidden.
+    // THE FORBIDDEN OUTCOME, and until now this suite counted it as a pass.
     //
-    // A window with NO record on a device holding exactly ONE previous shelf has one
-    // possible answer, and refusing it breaks the ordinary upgrade: every phone in the
-    // field runs a build that predates this bookkeeping, its worker never wrote a record,
-    // and a blanket refusal is a 503 on every script the moment the new build claims that
-    // window - the app failing to open, on every phone, to avoid a mixed-build session on
-    // the one whose Cache API refused a write. "Never an ARBITRARY previous build" is the
-    // rule, and with a single shelf there is nothing arbitrary to choose between.
-    // Measured, not argued: tests/handover.test.mjs and tests/swrestart.test.mjs both go
-    // red on the strict version, on the real v86-to-v87 path.
+    // The window is running build p. Its identity write was refused, the worker process
+    // has been stopped, and the in-memory Set that was covering the hole is gone with it.
+    // sw.js then reaches previousCaches(), finds exactly one shelf - build a's - and
+    // hands this window build a's app.js and sync.js. A page from one build, executing
+    // another build's scripts, in one session: precisely what the header of sw.js says
+    // the whole design exists to prevent.
     //
-    // What stays refused, and is measured everywhere else in this file: a record that is
-    // there and cannot be READ - the device has an opinion about this window and cannot
-    // reach it, so there is no single possible answer - a record naming a shelf that is
-    // gone, and any device holding more than one previous shelf.
+    // The old assertion here was `after.hash === EXPECT.a[...] || after.status === 503`.
+    // The left arm of that disjunction IS the defect, so the check went green on the very
+    // outcome it was written to forbid, and the suite reported 38/38 while the mixed
+    // build happened underneath it. The disjunction is gone.
     //
-    // The claim that does not bend, and is what these now assert: THIS build's bytes
-    // never reach a window that is not running this build.
+    // The trade it was defending is real and is not being ignored: every phone in the
+    // field runs a build that predates this bookkeeping, and refusing an unrecorded
+    // window everything is a 503 on every script the moment the new build claims it. But
+    // a serving-time guess is the wrong place to pay for that. The answer is enrollment:
+    // at activate, BEFORE claiming, the incoming worker writes down the identity of the
+    // windows the outgoing worker was controlling, verifies the write by reading it back,
+    // and only claims if that succeeded. Then a window with no record at fetch time is
+    // genuinely unidentifiable rather than merely un-enrolled, and refusing it costs
+    // nothing that was ever working.
     const after = await servedOffline(now, 'js/app.js');
     check('after the restart, the unwritten window is never handed THIS build',
         after.hash !== EXPECT.p['/js/app.js'],
         `${BUILD.p.stamp} window handed ${describe('/js/app.js', after)}`);
-    check('and what it does get is the one unambiguous shelf, not a choice between several',
-        after.hash === EXPECT.a['/js/app.js'] || after.status === 503,
-        `${BUILD.p.stamp} window handed ${describe('/js/app.js', after)}`);
+    failedClosed('and it is not handed the one other shelf on the disk either',
+        after, '/js/app.js');
     const afterSync = await servedOffline(now, 'js/sync/sync.js');
-    check('and its sync layer comes from that same one shelf, never from this build',
-        afterSync.hash !== EXPECT.p['/js/sync/sync.js'],
+    check('and its sync layer comes from this build or from nowhere, never from another',
+        afterSync.hash !== EXPECT.a['/js/sync/sync.js'],
         describe('/js/sync/sync.js', afterSync));
+    failedClosed('the sync layer is refused by the same route, and says so',
+        afterSync, '/js/sync/sync.js');
     servedOwnBuild('the window whose record was written before the fault is still served its own build',
         old, 'a', await servedOffline(old, 'js/app.js'), '/js/app.js');
 
@@ -930,6 +958,277 @@ const waiting = await browser.newContext();
         + `; shelves now ${JSON.stringify(after)}`);
 
     await waiting.close();
+}
+
+// ================================================================ enrollment before the claim
+const enroll = await browser.newContext();
+{
+    suite('the windows a new worker claims from the worker before it');
+
+    // The repair the rest of this file's refusals depend on, stated as its own scenario.
+    //
+    // clients.claim() takes over every window of the origin. At the moment it runs, the
+    // windows it is taking over are - by construction - the ones the OUTGOING worker was
+    // controlling: they are running the previous build, and this is the one moment in the
+    // life of the device when that is known rather than guessed. sw.js does not use that
+    // moment. It claims first and asks afterwards, at fetch time, by which point the only
+    // thing left to go on is how many shelves happen to be on the disk.
+    //
+    // So: before claiming, write down who those windows are. Read it back. Claim only if
+    // that succeeded. After that a window with no record is not "a phone from before the
+    // bookkeeping" - it is a window nothing on this device can identify, and refusing it
+    // costs nothing that was ever working.
+    server.deploy('a');
+    const one = await openWindow(enroll);
+    await boot(one);
+    const two = await openWindow(enroll);
+    await boot(two);
+    await quiesce();
+    given('two windows are running the first build',
+        (await buildOf(one)).script === BUILD.a.stamp
+        && (await buildOf(two)).script === BUILD.a.stamp);
+    given('the window that must stay behind is mid-edit', await pin(one));
+
+    // Take the records away, so what is on the disk afterwards can only have been put
+    // there by the incoming worker rather than left over from the outgoing one. This is
+    // the state every phone in the field is actually in: v86's worker wrote no records.
+    await one.evaluate(async name => {
+        const cache = await caches.open(name);
+        for (const request of await cache.keys()) await cache.delete(request);
+    }, CLIENTS);
+    given('neither window has a record any more, exactly as a pre-v87 phone has none',
+        (await clientRecord(one)).length === 0);
+
+    // And this window will not tell the worker what it is running, because a real one
+    // cannot. The 'running' message is js/ui/offline.js code that ships in v87 and later;
+    // the windows this whole problem is about were loaded by v86, whose page says nothing
+    // and whose worker wrote nothing. Without this the suite measures the wrong thing: the
+    // record appears, but it appears because the PAGE asserted its own identity after the
+    // claim, which no page in the field can do and which no worker should believe anyway
+    // - a page can name any build it likes, and the one asking is the one being placed.
+    //
+    // Enrollment has to come from the worker, at activate, from the fact that these
+    // windows were already being controlled when it arrived.
+    await one.evaluate(() => {
+        const proto = window.ServiceWorker && window.ServiceWorker.prototype;
+        if (!proto || proto.__farkadNoAnnounce) return;
+        const real = proto.postMessage;
+        proto.postMessage = function (data) {
+            if (data && data.type === 'running') return undefined;
+            return real.apply(this, arguments);
+        };
+        proto.__farkadNoAnnounce = true;
+    });
+    given('and it will not announce itself either, as a v86 page cannot',
+        await one.evaluate(() => Boolean(window.ServiceWorker.prototype.__farkadNoAnnounce)));
+
+    const crossed = await crossTo(two, 'b');
+    given('the second window crossed to the next build and its shelf is complete',
+        crossed.offered && crossed.crossed && crossed.shelf > 30, JSON.stringify(crossed));
+    await settle(1500);
+
+    const enrolled = await clientRecord(two);
+    check('claiming a window means writing down which build it is running, first',
+        enrolled.length >= 2,
+        `records on the disk: ${JSON.stringify(enrolled.map(entry => entry.build))}`);
+    check('the window left behind is recorded as running the build it is running',
+        enrolled.some(entry => entry.build === BUILD.a.cache),
+        `wanted ${BUILD.a.cache} among ${JSON.stringify(enrolled.map(entry => entry.build))}`);
+
+    // And the point of all of it: the enrolled window is served its own build with no
+    // guess anywhere in the path, and the process can die without changing the answer.
+    servedOwnBuild('the enrolled window is served its own build',
+        one, 'a', await servedOffline(one, 'js/app.js'), '/js/app.js');
+    const control = await swProcess(enroll, two);
+    const stopped = await stopWorker(control);
+    given('the worker process is gone, so nothing is answered from memory',
+        stopped.ok, `${stopped.targets} targets`);
+    servedOwnBuild('and still served its own build after the worker restarts',
+        one, 'a', await servedOffline(one, 'js/app.js'), '/js/app.js');
+
+    await enroll.close();
+}
+
+// ================================================================ booting without an identity
+const unwritten = await browser.newContext();
+{
+    suite('a navigation whose identity cannot be written down');
+
+    // Invariant: a navigation must not boot the app until its build identity is durably
+    // recorded AND read back. sw.js writes the record in event.waitUntil and answers the
+    // navigation regardless (sw.js:303-311), so a window whose write was refused runs the
+    // app anyway - with nothing on the disk saying what it is running. Every later fetch
+    // from that window is then a question with no answer, and the only reason it looks
+    // fine is the in-memory Set that dies with the process.
+    //
+    // The app not opening is a bad outcome. Opening as a session that will be handed
+    // another build's scripts the moment the worker restarts is a worse one, and it is
+    // the one that corrupts a day's work rather than delaying it.
+    server.deploy('p');
+    const page = await openWindow(unwritten);
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), null,
+        { timeout: 25000, polling: 100 }).catch(() => {});
+    await settle(1500);
+
+    const record = await clientRecord(page);
+    const running = await buildOf(page);
+    check('a window is never left running the app with no durable record of its build',
+        record.length > 0 || running.controlled !== true,
+        `controlled=${running.controlled} script=${running.script} `
+        + `records: ${JSON.stringify(record.map(entry => entry.build))}`);
+
+    await unwritten.close();
+}
+
+// ================================================================ a shelf that cannot answer
+const gappy = await browser.newContext();
+{
+    suite('a known build\'s shelf that is missing the file being asked for');
+
+    // Invariant 6: if build X's shelf lacks an application asset, the current origin is
+    // NOT the fallback. serveFrom is `hit || fetch(request)` (sw.js:455-457), and the
+    // origin serves whatever is deployed now - so a page from an older build asking for a
+    // file its shelf has lost is handed the CURRENT build's copy of it. That is the mixed
+    // build again, arriving by the one route the identity work does not cover: identity
+    // was established correctly, and the shelf simply could not answer.
+    server.deploy('a');
+    const stay = await openWindow(gappy);
+    await boot(stay);
+    const move = await openWindow(gappy);
+    await boot(move);
+    await quiesce();
+    given('the window that must stay behind is mid-edit', await pin(stay));
+    const crossed = await crossTo(move, 'b');
+    given('the other window crossed, so the first build is a previous build now',
+        crossed.offered && crossed.crossed && crossed.shelf > 30, JSON.stringify(crossed));
+
+    // One file removed from the old shelf. On a phone this is eviction: the Cache API is
+    // allowed to drop entries under storage pressure, per-entry, without telling anybody.
+    const dropped = await stay.evaluate(async ([name, path]) => {
+        const cache = await caches.open(name);
+        for (const request of await cache.keys()) {
+            if (new URL(request.url).pathname.endsWith(path)) {
+                await cache.delete(request);
+                return request.url;
+            }
+        }
+        return null;
+    }, [BUILD.a.cache, '/js/app.js']);
+    given('one application script is gone from the old build\'s shelf', Boolean(dropped),
+        String(dropped));
+
+    // The origin is UP and serving the NEW build. That is the whole point: the wrong
+    // answer is available and free, and must not be taken.
+    const hit = await served(stay, 'js/app.js');
+    check('the missing file is not fetched from the origin, which serves a different build',
+        hit.hash !== EXPECT.b['/js/app.js'],
+        `${BUILD.a.stamp} window handed ${describe('/js/app.js', hit)}`);
+    failedClosed('it is refused, and the refusal says which build could not be served',
+        hit, '/js/app.js');
+
+    await gappy.close();
+}
+
+// ================================================================ the shelf that rolled back
+const rolled = await browser.newContext();
+{
+    suite('a waiting shelf whose name sorts below the running build');
+
+    // Invariants 8 and 9: installing and waiting shelves are protected by LIFECYCLE, not
+    // by comparing names. isNewerShelf (sw.js:206-219) protects a shelf only if its
+    // version number is higher, or - on a tie - if its name sorts after this build's. So
+    // a rollback, and any same-version candidate whose name happens to sort lower, is not
+    // "newer", lands in previousCaches(), and is deleted by the build it is replacing -
+    // while its install is still resolving against a handle to a cache that is no longer
+    // in the store, so the browser calls that install a success.
+    //
+    // Deploying build a on top of build b is exactly that shape: same version number,
+    // 'a' sorts below 'b'. It is what a rollback looks like from the worker's side.
+    server.deploy('b');
+    const page = await openWindow(rolled);
+    await boot(page);
+    await quiesce();
+    given('the running build is the one whose name sorts higher',
+        (await buildOf(page)).script === BUILD.b.stamp);
+
+    server.deploy('a');
+    await page.evaluate(() => navigator.serviceWorker.getRegistration()
+        .then(registration => registration.update()).catch(() => {}));
+    const installed = await page.waitForFunction(
+        ([name, count]) => caches.open(name).then(cache => cache.keys())
+            .then(keys => keys.length >= count).catch(() => false),
+        [BUILD.a.cache, 30], { timeout: 40000, polling: 150 }).then(() => true, () => false);
+    given('the rollback installed a complete shelf and is waiting to be pressed', installed,
+        JSON.stringify(await shelfCounts(page)));
+
+    await page.evaluate(build => navigator.serviceWorker.controller
+        .postMessage({ type: 'running', build }), BUILD.b.cache);
+    await settle(3000);
+    const after = await shelfCounts(page);
+    check('a waiting shelf is not reaped for sorting below the build it replaces',
+        (after[BUILD.a.cache] || 0) > 30,
+        `${BUILD.a.cache} ${BUILD.a.cache in after ? 'holds ' + after[BUILD.a.cache] + ' files' : 'is gone'}`
+        + `; shelves now ${JSON.stringify(after)}`);
+
+    await rolled.close();
+}
+
+// ================================================================ every script, not one
+const whole = await browser.newContext();
+{
+    suite('every application script a correctly identified window is handed');
+
+    // The suites above ask about js/app.js and js/sync/sync.js because those are the two
+    // that tell the builds apart cheaply. That leaves the rest of the shell asserted by
+    // implication, and "the two files we check are right" is not the invariant - the
+    // invariant is that a window runs ONE build, which is a claim about all of them.
+    server.deploy('a');
+    const stay = await openWindow(whole);
+    await boot(stay);
+    const move = await openWindow(whole);
+    await boot(move);
+    await quiesce();
+    given('the window that must stay behind is mid-edit', await pin(stay));
+    const crossed = await crossTo(move, 'b');
+    given('the other window crossed to the next build',
+        crossed.offered && crossed.crossed && crossed.shelf > 30, JSON.stringify(crossed));
+
+    const SCRIPTS = TRACKED.filter(name => name.endsWith('.js') && name !== 'sw.js');
+    given('there are enough scripts for this to mean something', SCRIPTS.length >= 20,
+        `${SCRIPTS.length} scripts`);
+
+    server.darken(true);
+    const wrong = [];
+    for (const name of SCRIPTS) {
+        const hit = await served(stay, name);
+        if (hit.hash !== EXPECT.a['/' + name]) {
+            wrong.push(`${name}: ${nameOf('/' + name, hit.hash)} (status ${hit.status})`);
+        }
+    }
+    server.darken(false);
+    check('the window left behind is handed its own build\'s bytes for every one of them',
+        wrong.length === 0,
+        wrong.length === 0
+            ? `all ${SCRIPTS.length} scripts matched ${BUILD.a.stamp}`
+            : `${wrong.length} of ${SCRIPTS.length} came from elsewhere: ${wrong.slice(0, 6).join('; ')}`);
+
+    const moved = [];
+    server.darken(true);
+    for (const name of SCRIPTS) {
+        const hit = await served(move, name);
+        if (hit.hash !== EXPECT.b['/' + name]) {
+            moved.push(`${name}: ${nameOf('/' + name, hit.hash)} (status ${hit.status})`);
+        }
+    }
+    server.darken(false);
+    check('and the window that crossed is handed its own build\'s bytes for every one of them',
+        moved.length === 0,
+        moved.length === 0
+            ? `all ${SCRIPTS.length} scripts matched ${BUILD.b.stamp}`
+            : `${moved.length} of ${SCRIPTS.length} came from elsewhere: ${moved.slice(0, 6).join('; ')}`);
+
+    await whole.close();
 }
 
 await browser.close();
