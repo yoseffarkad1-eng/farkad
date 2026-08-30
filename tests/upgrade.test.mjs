@@ -155,11 +155,15 @@ const slotItems = device => {
             [`farkad:outbox:beat:${retiredId('farkad:outbox', ADVANCE)}`]: '1'
         }
     });
-    device.State.load();
-
+    // Asserted before the app opens. The device collects a mark naming an operation
+    // nobody holds at the first opportunity it gets, and the first opportunity is inside
+    // State.load() - so this says what the fixture put on the disk, which is the claim
+    // it was always making.
     given('the two retired-scheme marks are on the disk',
         device.raw(`farkad:outbox:ack:${retiredId('farkad:outbox', DAY)}`) === '1'
         && device.raw(`farkad:outbox:beat:${retiredId('farkad:outbox', ADVANCE)}`) === '1');
+
+    device.State.load();
 
     const ops = device.Sync.physicalOperations();
     const dayOp = ops.find(op => op.path === DAY);

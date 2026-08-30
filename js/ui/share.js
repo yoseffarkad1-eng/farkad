@@ -1747,6 +1747,16 @@ async function restoreLocalBackup() {
     if (result.stage !== 'prepare' && result.stage !== 'local' && decisions !== null) {
         State.migrationIssues = decisions;
         writeIssues(decisions);
+    } else if (result.stage !== 'prepare' && result.stage !== 'local'
+        && State.migrationIssues.length > 0) {
+        // A way back from a build whose stack held the schedule and nothing else cannot
+        // say what questions were open when it was written, so the questions on this
+        // device are deliberately left standing rather than cleared on that entry's
+        // behalf. But the record on the disk is bound to the schedule it was written
+        // against, and that schedule has just been replaced - so the next open judged it
+        // stale and showed nothing. The person was shown an open question once and never
+        // again, and nothing said so. Re-bound to the record they are now standing over.
+        writeIssues(State.migrationIssues);
     }
 
     if (result.ok) {

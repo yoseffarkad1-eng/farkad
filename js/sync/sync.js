@@ -1322,30 +1322,54 @@ const FarkadSync = {
             }
             try { Store.remove(key); } catch (error) { whole = false; }
             Store.forget(key);
-            if (Store.available && Store.durableGet(key) !== null) whole = false;
-            ops.forEach(op => {
-                const ack = outboxAckKey(op.slot, op.opId);
-                if (Store.durableGet(ack) === null) return;
-                try { Store.remove(ack); } catch (error) { /* bytes, not truth */ }
-                Store.forget(ack);
-            });
+            // Same rule as the collector: a mark is taken off only a record that is
+            // proved gone. See the note there.
+            if (!Store.available || Store.durableGet(key) !== null) {
+                whole = false;
+                return;
+            }
+            ops.forEach(op => this.forgetQueueMarks(op));
         });
 
         // Items an older build left inside a slot record are rewritten out of it, one
         // slot at a time, because that record is not immutable and never was.
-        const slots = new Set(legacy.filter(op => going.has(op.opId)).map(op => op.slot));
-        slots.forEach(slot => {
+        //
+        // The paths come from the OPERATIONS, never from a second computation of their
+        // ids. This branch used to recompute one - 'legacy_' + hash(slot + '|' + path) -
+        // and no other line in this file has computed a legacy id that way since the
+        // identity became injective and revision-sensitive: the set never matched, the
+        // record was never rewritten, and a restore left the item an older build had
+        // queued sitting inside it. The next open replayed that item over the restore
+        // and put the replaced day back on the screen. One reading of an identity, or
+        // the two readings disagree exactly where it costs a day.
+        const goingBySlot = new Map();
+        legacy.forEach(op => {
+            if (!going.has(op.opId)) return;
+            if (!goingBySlot.has(op.slot)) goingBySlot.set(op.slot, new Set());
+            goingBySlot.get(op.slot).add(op.path);
+        });
+        goingBySlot.forEach((paths, slot) => {
             const record = readOutboxRecord(Store.durableGet(slot));
-            if (!record) return;
+            if (!record) { whole = false; return; }
             const items = {};
             Object.keys(record.items).forEach(path => {
-                const id = 'legacy_' + hashedId(slot + '|' + path);
-                if (!going.has(id)) items[path] = record.items[path];
+                if (!paths.has(path)) items[path] = record.items[path];
             });
             if (Object.keys(items).length === Object.keys(record.items).length) return;
             if (!Store.setVerified(slot, JSON.stringify({ seq: record.seq, items }))) {
                 whole = false;
             }
+        });
+
+        // And the marks those items collected go with them. An acknowledgement or a
+        // retirement naming an operation nobody holds is a key no pass will ever look at
+        // again - the projection reads them by the id of an operation that is gone - so
+        // it is bytes that accumulate for the life of the device.
+        legacy.forEach(op => {
+            if (!going.has(op.opId)) return;
+            const paths = goingBySlot.get(op.slot);
+            if (!paths || !paths.has(op.path)) return;
+            this.forgetQueueMarks(op);
         });
         return whole;
     },
@@ -1372,6 +1396,7 @@ const FarkadSync = {
         if (farkadWritesBlocked()) return true;
 
         const all = this.physicalOperations();
+        const decodedUnreadable = decodeQueue(this.durableQueueRecords()).unreadable.length > 0;
         const present = new Set(all.map(op => op.opId));
         const superseded = new Set();
         all.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
@@ -1458,7 +1483,18 @@ const FarkadSync = {
 
             try { Store.remove(key); } catch (error) { whole = false; }
             Store.forget(key);
-            if (Store.available && Store.durableGet(key) !== null) whole = false;
+            // The marks go only once the record they describe is PROVED gone. A removal
+            // localStorage quietly refused used to take the retirement with it while the
+            // beaten value was still on the disk - and a retirement is the only thing
+            // keeping that value out of the projection, so the loser read as an ordinary
+            // live candidate again at the next open and the day came back. The
+            // acknowledgement is the same loss going the other way: taken off over a
+            // record that is still there, the edit the cloud had already answered for
+            // went out again at every open, for as long as the disk kept refusing.
+            if (!Store.available || Store.durableGet(key) !== null) {
+                whole = false;
+                return;
+            }
             ops.forEach(op => this.forgetQueueMarks(op));
         });
 
@@ -1475,6 +1511,30 @@ const FarkadSync = {
             Store.forget(key);
             whole = false;
         });
+
+        // A mark naming an operation nobody holds.
+        //
+        // Two ways one appears, and both are ordinary. A phone that upgraded once before
+        // carries marks minted under an identity this build cannot compute - the scheme
+        // was abandoned for not being injective - and no operation will ever wear those
+        // names again. And a rescue file brings in marks belonging to another device's
+        // operations. Either way they are queue keys by shape, so every projection reads
+        // them and every rescue export carries them, and forgetQueueMarks cannot reach
+        // them: it removes the marks of an operation that exists.
+        //
+        // Only when the whole queue read. An operation inside a record that would not
+        // parse is not absent - it is unreadable - and its marks are the truth about it.
+        if (!this.outboxDamaged && !decodedUnreadable) {
+            this.queueKeys().forEach(key => {
+                const kind = queueKeyKind(key);
+                if (kind !== 'ack' && kind !== 'beat') return;
+                const mark = kind === 'ack' ? ACK_MARK : BEAT_MARK;
+                const opId = key.slice(key.lastIndexOf(mark) + mark.length);
+                if (present.has(opId)) return;
+                try { Store.remove(key); } catch (error) { /* bytes, not truth */ }
+                Store.forget(key);
+            });
+        }
 
         return whole;
     },
@@ -3018,12 +3078,35 @@ const FarkadSync = {
                     throw new Error(
                         'an earlier cloud write has not finished; the restore was not sent');
                 }
+                // And ordered after every cloud write ANOTHER TAB started.
+                //
+                // cloudQuiet only knows about the writes this context began, and a second
+                // tab on the same phone is a second context: its open field update is
+                // invisible here. So the restore went out under it, the update landed on
+                // top of the whole-document save, and the cloud held a day the restore had
+                // removed - while the tab that asked for it had already been told "done",
+                // and every phone subscribed at that moment adopted the day back.
+                //
+                // The right to send is the record both tabs read. Refused, the restore
+                // simply does not go: it stays on the disk, the ladder picks it up, and
+                // nothing has claimed to be finished.
+                return this.takeSendClaim();
+            })
+            .then(mine => {
+                if (!mine) {
+                    throw new Error(
+                        'another tab holds the right to send; the restore was not sent');
+                }
                 // A whole-document save takes everybody out at once.
                 if (!this.markSent(document)) {
+                    this.releaseSendClaim();
                     return Promise.reject(new Error(
                         'the record of what has been sent could not be stored; the replacement was not sent'));
                 }
-                return this.cloudWrite(() => this.adapter.save(document));
+                return this.cloudWrite(() => this.adapter.save(document)).then(
+                    value => { this.releaseSendClaim(); return value; },
+                    error => { this.releaseSendClaim(); throw error; }
+                );
             })
             .then(() => {
                 this._replacing = false;
@@ -3172,6 +3255,19 @@ const FarkadSync = {
         // not the same as the bytes being gone.
         try { Store.remove(REPLACE_KEY); } catch (error) { /* checked below */ }
         Store.forget(REPLACE_KEY);
+
+        // The frozen companion goes with the transaction it belongs to.
+        //
+        // It is written first and normally dropped the moment the raw record is rewritten
+        // over it - but on the path where the companion was ALREADY frozen on an earlier
+        // open, the raw record is never rewritten and nothing else ever removed it. A
+        // whole schedule document was left on a phone the app warns about running out of
+        // room on: nothing would read it again, and every rescue export from then on
+        // carried a finished restore. It is removed here, at the one point where the
+        // transaction is over however it got there, and never reported as a failure -
+        // the transaction ended, and this is bytes about a transaction that is done.
+        try { Store.remove(LEGACY_UPGRADE_KEY); } catch (error) { /* bytes, not truth */ }
+        Store.forget(LEGACY_UPGRADE_KEY);
 
         // With no readable storage there is no way to prove anything left the disk, and
         // Store.available === false is not that proof.

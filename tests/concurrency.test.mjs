@@ -362,8 +362,15 @@ function twoReopens(dump) {
     delete restored.days['2026-08-10'];
     const result = await tabB.Sync.replaceEverything(restored);
     const duringHold = cloud.writes.slice(mark).map(write => write.kind);
-    given('the second tab was told the restore was done',
-        result.ok === true && result.stage === 'done', JSON.stringify(result));
+    // Written when the restore went out under the other tab's open write and came back
+    // ok: that is what the two checks below are about, and it is what changed. The
+    // restore is refused while the other tab holds the right to send, so the second tab
+    // is told the cloud half did not go - the record stays on the disk and the ladder
+    // finishes it, which is what the last four checks in this suite then watch happen.
+    // Reporting "done" over a restore whose cloud half never left would be the fake
+    // success this file exists to refuse.
+    given('the second tab was told the cloud half did not go',
+        result.ok === false && result.stage === 'cloud', JSON.stringify(result));
 
     // RED. The restore reads the claim nowhere: executePreparedReplace waits only on the
     // writes THIS context started, and the other tab's open update is not one of them.
