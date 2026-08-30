@@ -465,6 +465,9 @@ export function makeCloud(options = {}) {
         subscribers: [],
         // Set to a function to reject specific writes: (kind, payload) => Error | null
         reject: options.reject || null,
+        // Whether this server enforces the ordering protocol. On by default; a suite
+        // sets false to model the unordered server the released build talks to.
+        protocol: options.protocol !== false,
         // Set to a function to HOLD a write open: (kind, payload) => Promise | null.
         // The call is made and counted immediately, as it is in the app, and the write
         // does not land until the returned promise resolves. That gap is where a
@@ -534,7 +537,68 @@ export function makeCloud(options = {}) {
         cloud.subscribers.forEach(fn => fn(snapshot));
     }
 
+    // THE ORDERING PROTOCOL, modelled the way firestore.rules enforces it.
+    //
+    // The fake has to speak the same contract as the rules or it is testing a different
+    // server. See docs/sync-protocol.md and the protocol suites in tests/rules.test.mjs,
+    // which run these same properties against the real rules on the emulator.
+    //
+    //   a write without a protocol version is refused;
+    //   a write whose revision is not exactly one more than the stored one is refused -
+    //     that is the compare-and-set, and it is what stops a stale writer overwriting a
+    //     newer document;
+    //   a write must carry lastOpId and land its receipt in the same commit;
+    //   receipts are immutable, and finding one is how a retry learns it already won.
+    //
+    // `cloud.protocol` is on by default. A suite that wants the old unordered server -
+    // to model a build in the field, or to check that this build refuses to write to
+    // one - sets makeCloud({ protocol: false }).
+    cloud.receipts = new Map();
+
+    function refuse(code, message) {
+        const error = new Error(message);
+        error.code = code;
+        return error;
+    }
+
+    // Returns an Error to throw, or null. `creating` allows revision 1 against nothing.
+    function protocolProblem(data, creating) {
+        if (!cloud.protocol) return null;
+        if (!Number.isInteger(data.protocol) || data.protocol < 1) {
+            return refuse('permission-denied', 'a write with no protocol version');
+        }
+        if (typeof data.lastOpId !== 'string' || data.lastOpId.length === 0) {
+            return refuse('permission-denied', 'a write with no operation id');
+        }
+        const held = creating ? 0 : ((cloud.doc && cloud.doc.revision) || 0);
+        if (!Number.isInteger(data.revision) || data.revision !== held + 1) {
+            // The compare-and-set failing is not an error in the ordinary sense - it
+            // means somebody else got there first, and the caller has to decide what to
+            // do about it rather than retry blindly.
+            return refuse('conflict',
+                `the document moved: expected revision ${held + 1}, the write said ${data.revision}`);
+        }
+        return null;
+    }
+
+    // The receipt this operation would have written, if it already has one. A retry of a
+    // request that may still have landed finds it and stops.
+    function receiptFor(opId) {
+        return cloud.receipts.has(opId) ? cloud.receipts.get(opId) : null;
+    }
+
+    function landReceipt(data) {
+        if (!cloud.protocol) return;
+        // Immutable: created once, never changed. The rules enforce this with
+        // `allow update, delete: if false`.
+        if (!cloud.receipts.has(data.lastOpId)) {
+            cloud.receipts.set(data.lastOpId, { revision: data.revision });
+        }
+    }
+
     cloud.adapter = {
+        // The envelope travels IN the patch, exactly as it does on the wire: the client
+        // sets protocol, revision and lastOpId as ordinary fields of the same write.
         update(patch) {
             const problem = guard('update', patch);
             if (problem) return Promise.reject(problem);
@@ -542,11 +606,19 @@ export function makeCloud(options = {}) {
                 // Firestore refuses to update a document that is not there. The adapter's
                 // recovery from this is the thing under test, so it must be modelled.
                 if (!cloud.doc) {
-                    const error = new Error('No document to update');
-                    error.code = 'not-found';
-                    throw error;
+                    throw refuse('not-found', 'No document to update');
                 }
+                // Idempotent success. The operation is already recorded, so this is a
+                // retry of a request that did land - answering it with a conflict would
+                // make the caller hold work the cloud is already holding.
+                if (cloud.protocol && receiptFor(patch.lastOpId)) {
+                    cloud.writes.push({ kind: 'update', patch, replayed: true });
+                    return;
+                }
+                const said = protocolProblem(patch, false);
+                if (said) throw said;
                 Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
+                landReceipt(patch);
                 cloud.writes.push({ kind: 'update', patch });
                 publish();
             });
@@ -555,7 +627,14 @@ export function makeCloud(options = {}) {
             const problem = guard('save', data);
             if (problem) return Promise.reject(problem);
             return landing('save', data, () => {
+                if (cloud.protocol && receiptFor(data.lastOpId)) {
+                    cloud.writes.push({ kind: 'save', data, replayed: true });
+                    return;
+                }
+                const said = protocolProblem(data, !cloud.doc);
+                if (said) throw said;
                 cloud.doc = JSON.parse(JSON.stringify(data));
+                landReceipt(data);
                 cloud.writes.push({ kind: 'save', data });
                 publish();
             });
@@ -565,11 +644,16 @@ export function makeCloud(options = {}) {
             if (problem) return Promise.reject(problem);
             return landing('create', data, () => {
                 if (cloud.doc) {
-                    const error = new Error('Document already exists');
-                    error.code = 'already-exists';
-                    throw error;
+                    throw refuse('already-exists', 'Document already exists');
                 }
+                if (cloud.protocol && receiptFor(data.lastOpId)) {
+                    cloud.writes.push({ kind: 'create', data, replayed: true });
+                    return;
+                }
+                const said = protocolProblem(data, true);
+                if (said) throw said;
                 cloud.doc = JSON.parse(JSON.stringify(data));
+                landReceipt(data);
                 cloud.writes.push({ kind: 'create', data });
                 publish();
             });
