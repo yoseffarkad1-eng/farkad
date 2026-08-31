@@ -258,34 +258,43 @@ function payrollRows() {
     // A vehicle does the same, and for the same reason. Its owner is paid for the days it
     // went out whether or not he was on a site, so a man with three vans and a fortnight
     // off is owed real money and had no row to be owed it on.
+    // What an unsettled advance did to this account, worked out ONCE and carried on the
+    // row. Every surface below reads it from here rather than asking again: the walk goes
+    // back over every account this man has ever had, and two callers doing that separately
+    // is both slow and a second place for the answer to differ.
+    //
+    // ONLY OVER A WHOLE ACCOUNT, which is the condition the arithmetic needs and the one
+    // this first got wrong. An account is a Friday and the thirteen days after it; the
+    // report range is whatever somebody picked, and "החודש" is a month. Handed a month,
+    // the walk stepped back through fourteen-day accounts from the first advance and then
+    // counted an advance INSIDE the displayed range as carried in from before it - the
+    // same 500 deducted twice, on a pay sheet. A range that is not an account gets no
+    // carry and the arithmetic this build has always done; a month is not a payday, and
+    // the carry is a statement about what one payday left owed to the next.
+    //
+    // With the gate off, `carry` is absent everywhere and every reader falls through the
+    // same way - see moneyOf.
+    const carrying = advanceCarryEnabled()
+        && wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to);
+
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
-        .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
-            || (vehiclesEnabled() && row.vehicleDays > 0))
-        // What an unsettled advance did to this account, worked out ONCE and carried on
-        // the row. Every surface below reads it from here rather than asking again: the
-        // walk goes back over every account this man has ever had, and two callers doing
-        // that separately is both slow and a second place for the answer to differ.
-        //
-        // ONLY OVER A WHOLE ACCOUNT, which is the condition the arithmetic needs and the
-        // one this first got wrong. An account is a Friday and the thirteen days after
-        // it; the report range is whatever somebody picked, and "החודש" is a month. Handed
-        // a month, the walk stepped back through fourteen-day accounts from the first
-        // advance and then counted an advance that is INSIDE the displayed range as
-        // carried in from before it - the same 500 deducted twice, on a pay sheet.
-        //
-        // A range that is not an account gets no carry and the arithmetic this build has
-        // always done. That is not a lesser answer for a month: a month is not a payday,
-        // and the carry is a statement about what one payday left owed to the next.
-        //
-        // With the gate off, `carry` is absent everywhere and every reader falls through
-        // the same way - see moneyOf.
-        .map(row => (advanceCarryEnabled()
-            && wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)
+        // The carry is worked out BEFORE the filter, because it is one of the things that
+        // keeps a row alive - see the next comment.
+        .map(row => (carrying
             ? Object.assign({}, row, {
                 carry: advanceAccount(State.schedule, row.workerId,
                     REPORT_RANGE.from, REPORT_RANGE.to)
             })
-            : row));
+            : row))
+        .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
+            // A DEBT KEEPS A ROW ALIVE TOO, for the same reason an advance does, one line
+            // up: a man who owes a carried balance and worked no days this fortnight had
+            // no row to owe it on, so he dropped off the sheet and the debt went with
+            // him - out of the total, off the paper, and off the screen that is supposed
+            // to say what is still outstanding. Found by a check that asked the open
+            // period for his opening balance and got back undefined.
+            || (row.carry && (row.carry.carriedIn > 0 || row.carry.carriedForward > 0))
+            || (vehiclesEnabled() && row.vehicleDays > 0));
 }
 
 function invoiceRows() {
@@ -722,9 +731,20 @@ function renderAdvanceRow(item) {
     // record one. There is no third state worth shipping.
     const settled = ledgerWritesEnabled() && advanceCarryEnabled()
         ? advanceSettled(State.schedule, item.id) : null;
+    // THE TWO LABELS THAT NEVER SWAP.
+    //
+    // "חוב פתוח" is the live number - what this man still owes as of today, and it moves
+    // with every new transaction. "יתרת סגירה" is the historical one, printed on a closed
+    // payslip and fixed there forever. They are different questions with different
+    // answers, and the moment a screen uses one word for both, somebody reads a settled
+    // fortnight's figure as what is still owed - or the reverse, which is worse.
+    //
+    // Taken from the design's HistoryVsToday frame, where the whole point of the frame is
+    // that these two never trade places.
     if (settled && settled.repaid > 0) {
         what.appendChild(el('span', 'wday-note',
-            `${moneyText(settled.repaid)} ₪ הוחזרו · נותרו ${moneyText(settled.left)} ₪`));
+            `${moneyText(settled.repaid)} ₪ הוחזרו במזומן · `
+            + `חוב פתוח ${moneyText(settled.left)} ₪`));
     }
     if (settled && settled.left > 0) {
         what.appendChild(button('החזר', 'btn-secondary',
@@ -768,7 +788,7 @@ function openRepaymentForm(item, settled, row) {
 
     const form = el('div', 'advance-form');
     form.appendChild(el('div', 'advance-form-title',
-        `החזר מקדמה · נותרו ${moneyText(settled.left)} ₪`));
+        `החזר מקדמה · חוב פתוח ${moneyText(settled.left)} ₪`));
 
     const field = (labelText, input) => {
         form.appendChild(el('label', 'field-label', labelText));
@@ -815,7 +835,8 @@ function openRepaymentForm(item, settled, row) {
             return;
         }
         if (amount > settled.left) {
-            error.textContent = `אי אפשר להחזיר יותר ממה שנותר - ${moneyText(settled.left)} ₪.`;
+            error.textContent = 'אי אפשר להחזיר יותר מהחוב הפתוח - '
+                + `${moneyText(settled.left)} ₪.`;
             amountInput.focus();
             return;
         }
@@ -1539,6 +1560,11 @@ function moneyCells(row) {
 
     const notes = [];
     // Said in shekels, not in a word like "partial": the man asking is asking how much.
+    // A closed period says so, in the design's words, before it says anything else: the
+    // figures beside that sentence are a record and not a reckoning.
+    if (row.carry && row.carry.closed) {
+        notes.push('החשבון נסגר ולא ישתנה');
+    }
     if (row.carry && row.carry.carriedIn > 0) {
         notes.push(`${moneyText(row.carry.carriedIn)} ₪ מקדמה מחשבון קודם`);
     }
@@ -1546,7 +1572,15 @@ function moneyCells(row) {
     // note saying the same shekels are ALSO going to the next account would have the
     // sheet counting one advance twice.
     if (row.carry && row.carry.gross !== null && row.carry.carriedOut > 0) {
-        notes.push(`${moneyText(row.carry.carriedOut)} ₪ מקדמה עוברים לחשבון הבא`);
+        notes.push(row.carry.closed
+            ? `יתרת סגירה ${moneyText(row.carry.carriedOut)} ₪`
+            : `${moneyText(row.carry.carriedOut)} ₪ מקדמה עוברים לחשבון הבא`);
+    }
+    // A transaction that arrived after the period shut. The payslip does not move; this
+    // says why the two numbers differ rather than leaving them on the page unexplained.
+    if (row.carry && row.carry.closed && row.carry.lateSinceClose !== 0) {
+        notes.push('הגיעה תנועה אחרי סגירת התקופה · '
+            + `חוב פתוח ${moneyText(row.carry.carriedForward)} ₪`);
     }
     if (row.carry && row.carry.repaid > 0) {
         notes.push(`${moneyText(row.carry.repaid)} ₪ הוחזרו במזומן`);

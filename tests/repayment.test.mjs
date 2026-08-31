@@ -582,4 +582,48 @@ function omer(flags) {
         [1550, 200, 1350]);
 }
 
+// ------------------------------------------- the two labels that must never trade places
+{
+    suite('היסטורי מול נוכחי: two labels, two numbers, never swapped');
+
+    const vm = (await import('node:vm')).default;
+    const { readFileSync } = await import('node:fs');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        advanceId, 'w_01', OMER_A.from, OMER_A.to, 3050,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 1950));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 200, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash'));
+
+    const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
+    run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+
+    // The CLOSED period. Its figures are a record, and the sheet says so before it says
+    // anything else.
+    run(`REPORT_RANGE.from = '${OMER_A.from}'; REPORT_RANGE.to = '${OMER_A.to}';`
+        + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+    const closedSheet = run('payrollSheetRows()');
+    const noteAt = closedSheet[0].indexOf('הערה');
+    const closedNote = String((closedSheet.find(r => r[0] === 'עומר סעד') || [])[noteAt]);
+    check('a closed period says it is closed, and names its יתרת סגירה',
+        closedNote.indexOf('החשבון נסגר ולא ישתנה') !== -1
+        && closedNote.indexOf('יתרת סגירה 1950 ₪') !== -1,
+        JSON.stringify(closedNote));
+    check('and never calls that historical figure a חוב פתוח',
+        closedNote.indexOf('חוב פתוח') === -1, JSON.stringify(closedNote));
+
+    // The OPEN period. Its figure is live.
+    run(`REPORT_RANGE.from = '${OMER_B.from}'; REPORT_RANGE.to = '${OMER_B.to}';`);
+    const openSheet = run('payrollSheetRows()');
+    const openNote = String((openSheet.find(r => r[0] === 'עומר סעד') || [])[noteAt]);
+    check('an open period never claims to be closed',
+        openNote.indexOf('החשבון נסגר') === -1 && openNote.indexOf('יתרת סגירה') === -1,
+        JSON.stringify(openNote));
+    check('and carries the opening balance it inherited',
+        openNote.indexOf('1950 ₪ מקדמה מחשבון קודם') !== -1, JSON.stringify(openNote));
+}
+
 report();
