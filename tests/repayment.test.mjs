@@ -626,4 +626,71 @@ function omer(flags) {
         openNote.indexOf('1950 ₪ מקדמה מחשבון קודם') !== -1, JSON.stringify(openNote));
 }
 
+// ------------------------------------------------- a mistake is reversed, never deleted
+{
+    suite('תנועת ביטול: both rows stay, and the balance comes back');
+
+    // The design's AdvReverse example, exactly: a 300 advance recorded by mistake on
+    // 25/08, and a reversal of −300 carrying the reason "נרשם פעמיים בטעות". Two lines
+    // remain in the ledger and the balance returns to 1,750.
+    //
+    // This is the confirmed rule that the ledger's existing 'cancelled' kind does not
+    // keep: cancelling drops the advance out of the fold entirely, which is a deletion
+    // wearing another word. Nothing in the app has ever called it - there is no
+    // production caller - so no record has been lost to it, and the kind that replaces
+    // it compensates rather than removes.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        advanceId, 'w_01', OMER_A.from, OMER_A.to, 3050,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 1950));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 200, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash'));
+
+    const before = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to).carriedForward;
+    given('he owes 1,750 before the mistake', before === 1750, String(before));
+
+    // The mistake: a second 300 nobody handed over.
+    const wrong = device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-25', 300, '');
+    device.State.commit(wrong);
+    const withWrong = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to).carriedForward;
+    given('and 2,050 with it', withWrong === 2050, String(withWrong));
+
+    // The reversal, with its reason.
+    const undo = device.call('recordAdvanceReversed', device.State.schedule,
+        wrong.value.id, 300, '2026-08-25', 'נרשם פעמיים בטעות',
+        '2026-08-25T10:00:00.000Z', 'd_omer');
+    device.State.commit(undo);
+
+    const after = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to).carriedForward;
+    check('the balance comes back to 1,750', after === 1750, String(after));
+
+    // BOTH ROWS. A reversal that hides the row it reverses is a deletion with extra steps.
+    const entries = device.State.schedule.ledger.advances;
+    const rows = Object.keys(entries).map(id => entries[id])
+        .filter(entry => String(entry.advanceId) === String(wrong.value.id));
+    check('and both lines are still in the ledger, the mistake and its reversal',
+        rows.length === 2 && rows.some(r => r.kind === 'reversed'),
+        JSON.stringify(rows.map(r => [r.kind, r.amount])));
+    check('the reversal carries the reason it was made for',
+        rows.filter(r => r.kind === 'reversed')[0].reason === 'נרשם פעמיים בטעות',
+        JSON.stringify(rows.filter(r => r.kind === 'reversed')[0]));
+
+    // A reversal with no reason is not a reversal; it is an unexplained edit to money.
+    const noReason = { id: 'le_x', advanceId: wrong.value.id, kind: 'reversed',
+        amount: 300, date: '2026-08-25' };
+    check('a reversal with no reason is refused',
+        device.call('ledgerEntryProblems', 'le_x', noReason).length > 0,
+        JSON.stringify(device.call('ledgerEntryProblems', 'le_x', noReason)));
+    check('and one that gives back more than was ever given is refused too',
+        device.call('ledgerEntryProblems', 'le_x', Object.assign({}, noReason,
+            { reason: 'למה', amount: -5 })).length > 0,
+        JSON.stringify(device.call('ledgerEntryProblems', 'le_x',
+            Object.assign({}, noReason, { reason: 'למה', amount: -5 }))));
+}
+
 report();
