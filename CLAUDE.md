@@ -84,18 +84,25 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the sixteen node suites; no browser, runs in a minute
-    npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover
-    npm run test:rules      # firestore.rules against the local emulator (needs Java)
+    npm test                # the thirty node suites; no browser, runs in a few minutes
+    npm run test:all        # adds smoke, print, mobile, update, recovery-browser,
+                            #   handover, swrestart, swidentity
+    npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
+    npm run test:emulator   # rules, the production adapter's CAS, the rollout (needs Java)
 
-Node 20 or 22 (`engines` says `>=20.11 <23`). At this commit `npm test` is **3104/3104**
-across 28 suites, and `npm run test:release` — which adds the browser suites and
-`sendclaim` — is the gate a build has to pass whole. Anything less than every check
-passing is a stop, not a warning. `npm test` and `npm run test:release` are different
-gates and are reported separately; neither is wrapped in anything that turns a nonzero
-exit into a success. The browser suites need Playwright's Chromium once
-(`npm run browsers`), or point `CHROME_PATH` at a browser that is already installed —
-see `tests/README.md` before downloading anything.
+Node 20 or 22 (`engines` says `>=20.11 <23`). Measured at this commit, from one clean
+detached worktree and copied from no other: `npm test` is **3188/3188 across 30 suites**,
+and `npm run test:release` — which adds the eight browser suites, `sendclaim` and the
+three emulator suites — is **5004/5004 across 42 suites**, and is the gate a build has to
+pass whole. Anything less than every check passing is a stop, not a warning. `npm test`
+and `npm run test:release` are different gates and are reported separately; neither is
+wrapped in anything that turns a nonzero exit into a success. A count carried over from
+another commit is worse than no count: re-measure, or say you did not.
+
+The browser suites need Playwright's Chromium once (`npm run browsers`), or point
+`CHROME_PATH` at a browser that is already installed — see `tests/README.md` before
+downloading anything. The emulator suites need Java and run through
+`firebase emulators:exec`; they never touch the real project.
 
 ## The culture
 
@@ -167,6 +174,9 @@ written down so it cannot happen twice.
     tests/recovery.browser.mjs the rescue export through the real button
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
+    tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator
+    tests/rollout.test.mjs     publishing the rules over a genuine legacy document, and the cutover
+    tests/ledger.ingress.test.mjs malformed ledger data through every door: held aside, never coerced
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe
