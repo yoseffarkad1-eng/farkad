@@ -789,4 +789,69 @@ function rebuild(device, payload) {
         String(device.global('FARKAD_FLAGS').vehicles));
 }
 
+// ------------------------------------------------------- E7: more than one wreck
+{
+    suite('E7: several damaged records, and every one of them off the phone');
+
+    // The numbered quarantine exists - tests/data.test.mjs proves a second copy goes
+    // BESIDE the first rather than on top of it. What that proves is that the bytes are
+    // kept. It does not prove they leave.
+    //
+    // The rescue file is the only route off the phone, and it sweeps quarantine keys by a
+    // predicate. A predicate that recognised <base>:damaged but not <base>:damaged:2
+    // would keep every copy safely on a device nobody can read, which is the same
+    // outcome as deleting them and a worse one to discover.
+    const FIRST = '{"first":';
+    const SECOND = '{"second":';
+    const THIRD = '{"third":';
+    const device = makeDevice({
+        storage: {
+            'farkad:outbox': THIRD,
+            'farkad:outbox:damaged': FIRST,
+            'farkad:outbox:damaged:2': SECOND
+        }
+    });
+    device.Sync.loadOutbox();
+
+    given('three distinct wrecks are on the disk, none written over the others',
+        device.raw('farkad:outbox:damaged') === FIRST
+        && device.raw('farkad:outbox:damaged:2') === SECOND
+        && device.raw('farkad:outbox:damaged:3') === THIRD,
+        JSON.stringify(Object.keys(device.dump()).filter(k => k.includes('damaged'))));
+
+    const rescue = device.global('Recovery').rawRecords();
+    const carried = [FIRST, SECOND, THIRD].filter(bytes =>
+        Object.keys(rescue).some(key => rescue[key] === bytes));
+    check('all three leave the phone in the rescue file, not just the first',
+        carried.length === 3,
+        `${carried.length} of 3 — keys ${JSON.stringify(
+            Object.keys(rescue).filter(k => k.includes('damaged')))}`);
+}
+
+// -------------------------------------------------- E7: the ceiling on the copies
+{
+    suite('E7: a disk already holding twenty wrecks does not lose the twenty-first');
+
+    // quarantineRecord stops at twenty and answers null. Null means "no copy could be
+    // kept", which is the mustHold case - the original is the only thing there is, and
+    // the device holds rather than letting an ordinary write near it. That is the right
+    // answer and it is worth pinning, because the tempting alternative - wrap around to
+    // :damaged:2 and reuse it - destroys the first wreck to make room for the last.
+    const storage = { 'farkad:outbox': '{"newest":' };
+    storage['farkad:outbox:damaged'] = '{"n1":';
+    for (let n = 2; n <= 20; n += 1) storage['farkad:outbox:damaged:' + n] = `{"n${n}":`;
+
+    const device = makeDevice({ storage });
+    device.Sync.loadOutbox();
+
+    check('the earliest wreck is not recycled to make room',
+        device.raw('farkad:outbox:damaged') === '{"n1":',
+        JSON.stringify(device.raw('farkad:outbox:damaged')));
+    check('and a device that could not keep the copy holds instead of writing near it',
+        device.global('Recovery').blocked() === true
+        && device.global('Recovery').acknowledge() === false,
+        JSON.stringify({ blocked: device.global('Recovery').blocked(),
+            problems: device.global('Recovery').problems.length }));
+}
+
 report();
