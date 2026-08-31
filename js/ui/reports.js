@@ -691,13 +691,25 @@ function renderAdvanceRow(item) {
 
     // WHAT IS LEFT ON IT, and the way to settle some of that in cash.
     //
-    // Both are behind the ledger's writer gate, because a repayment IS a ledger entry -
-    // there is nowhere else to put one. schedule.advances holds a single number per
-    // advance and no room for a second event about it, so a build that recorded a
-    // repayment with the gate shut would be writing something the other two phones
-    // cannot read: money handed back and nowhere on their pay sheets, which is the
-    // failure the gate exists to prevent, pointed the other way.
-    const settled = ledgerWritesEnabled() ? advanceSettled(State.schedule, item.id) : null;
+    // BEHIND BOTH GATES, and it has to be both.
+    //
+    // The writer gate, because a repayment IS a ledger entry - schedule.advances holds a
+    // single number per advance and no room for a second event about it - so recording
+    // one with that gate shut writes something the other two phones cannot read: money
+    // handed back and nowhere on their pay sheets, which is the failure the gate exists
+    // to prevent, pointed the other way.
+    //
+    // And the CARRY gate, which is the half that was missing. moneyOf reads the deduction
+    // off row.carry, and with the carry off there is no row.carry - so with the writer
+    // alone open, a man hands back 200, this row says "200 ₪ הוחזרו · נותרו 300", and the
+    // pay column goes on deducting the whole 500. Recorded, visible, and absent from the
+    // sum somebody is paid from. A repayment nobody deducts is worse than no repayment at
+    // all, because it reads as settled and is not.
+    //
+    // Either a build deducts what it lets somebody record, or it does not offer a way to
+    // record one. There is no third state worth shipping.
+    const settled = ledgerWritesEnabled() && advanceCarryEnabled()
+        ? advanceSettled(State.schedule, item.id) : null;
     if (settled && settled.repaid > 0) {
         what.appendChild(el('span', 'wday-note',
             `${moneyText(settled.repaid)} ₪ הוחזרו · נותרו ${moneyText(settled.left)} ₪`));

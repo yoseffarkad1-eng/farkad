@@ -395,45 +395,73 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     suite('a repayment nobody deducts is worse than no repayment at all');
 
     // Found while preparing the branch that would open the writer gate, which is the
-    // moment this becomes real rather than theoretical.
+    // moment this stops being theoretical.
     //
-    // The control was gated on the WRITER alone. With the writer open and the carry shut,
-    // a person hands back 200, the row says so - "200 ₪ הוחזרו · נותרו 300" - and the pay
-    // column goes on deducting the whole 500, because moneyOf reads the deduction off
-    // row.carry and there is no row.carry with the carry off.
+    // The control was gated on the WRITER alone. Open the writer and leave the carry shut
+    // - exactly the state that branch creates - and a person hands back 200, the row says
+    // so, and the pay column goes on deducting the whole 500: moneyOf reads the deduction
+    // off row.carry, and with the carry off there is no row.carry. Money that changed
+    // hands, recorded, visible on the screen, and absent from the sum somebody is paid
+    // from. It reads as settled and is not.
     //
-    // That is the failure this whole area exists to prevent, arrived at from the other
-    // side: money that changed hands, recorded, visible on the screen, and absent from
-    // the sum somebody is paid from. A repayment nobody deducts is worse than no
-    // repayment at all - it reads as settled and is not.
-    const device = crew({ deviceId: 'd_half_gate', flags: { ledgerWrites: true } });
-    work(device, A_DAYS);
-    device.State.commit(device.call('addAdvance', device.State.schedule,
-        'w_01', '2026-08-10', 500, ''));
-    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    // Either a build deducts what it lets somebody record, or it does not offer a way to
+    // record one. The invariant is asked of both halves, because either alone can be
+    // satisfied by a build nobody should ship.
+    const vm = (await import('node:vm')).default;
+    const { readFileSync } = await import('node:fs');
 
-    given('the writer is open and the carry is not',
-        device.call('ledgerWritesEnabled') === true
-        && device.call('advanceCarryEnabled') === false,
-        JSON.stringify([device.call('ledgerWritesEnabled'),
-            device.call('advanceCarryEnabled')]));
+    async function screen(flags, deviceId) {
+        const device = crew({ deviceId, flags });
+        work(device, A_DAYS);
+        device.State.commit(device.call('addAdvance', device.State.schedule,
+            'w_01', '2026-08-10', 500, ''));
+        device.setToday('2026-08-18');
+        const advanceId = Object.keys(device.State.schedule.advances)[0];
+        device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+            advanceId, 200, '2026-08-18', '', '2026-08-18T09:00:00.000Z', deviceId, 'cash'));
 
-    const paid = device.call('recordAdvanceRepaid', device.State.schedule,
-        advanceId, 200, '2026-08-18', '', '2026-08-18T09:00:00.000Z', 'd_half_gate', 'cash');
-    device.State.commit(paid);
+        const nodes = {
+            reportsView: makeNode('div'), workerDaysTitle: makeNode('h2'),
+            workerDaysMeta: makeNode('p'), workerDaysBody: makeNode('div'),
+            workerDaysModal: makeNode('div')
+        };
+        device.ctx.document = {
+            body: makeNode('body'),
+            head: { appendChild(tag) { if (tag.onerror) tag.onerror(); return tag; } },
+            getElementById: id => nodes[id] || null,
+            querySelector: () => null, querySelectorAll: () => [],
+            addEventListener() {}, removeEventListener() {},
+            createElement: tag => makeNode(tag),
+            createElementNS: (ns, tag) => makeNode(tag)
+        };
+        const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
+        run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        run(`REPORT_RANGE.from = '${A.from}'; REPORT_RANGE.to = '${A.to}';`
+            + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+        run(`openWorkerDays('w_01')`);
 
-    const row = device.call('payrollReport', device.State.schedule, A.from, A.to)
-        .find(item => item.workerId === 'w_01');
-    given('and the record holds the repayment',
-        Object.keys(device.State.schedule.ledger.advances)
-            .some(id => device.State.schedule.ledger.advances[id].kind === 'repaid'),
-        JSON.stringify(row.advances));
+        const offers = nodes.workerDaysBody.querySelectorAll('button')
+            .some(node => String(node.textContent).indexOf('החזר') !== -1);
+        const deducted = device.call('payrollReport', device.State.schedule, A.from, A.to)
+            .find(item => item.workerId === 'w_01').advances;
+        const shown = Number(run('moneyOf(payrollRows()[0]).netted'));
+        return { offers, deducted, shown };
+    }
 
-    // The check. Either the deduction reflects what he handed back, or this build must
-    // not offer a way to record one - those are the only two honest states.
-    const deducted = row.advances;
-    check('a build that lets somebody record a repayment also deducts it',
-        deducted === 300, `${deducted} deducted against 500 given and 200 handed back`);
+    // The half-open build: the writer says a repayment may be written, the carry says
+    // nothing will read it. It must not offer the control.
+    const half = await screen({ ledgerWrites: true }, 'd_half_gate');
+    check('with nothing to deduct it, no build offers a way to record a repayment',
+        half.offers === false,
+        JSON.stringify(half));
+
+    // And the build that does offer it deducts what was handed back: 500 given, 200
+    // returned, 300 off the wage.
+    const both = await screen({ ledgerWrites: true, carryAdvances: true }, 'd_both_gates');
+    check('and the build that offers it deducts what was handed back',
+        both.offers === true && both.shown === -300,
+        JSON.stringify(both));
 }
 
 report();
