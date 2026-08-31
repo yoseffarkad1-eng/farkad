@@ -529,6 +529,17 @@ function omer(flags) {
     same('תקופה ב׳: opening 1,950, 200 handed back, 1,750 still owed',
         [b.carriedIn, b.repaid, b.carriedOut], [1950, 200, 1750]);
 
+    // תקופה א׳ CLOSES, and the deduction is written down. This is the act that makes the
+    // payslip a record rather than a reckoning - see recordPeriodClosed.
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        advanceId, 'w_01', OMER_A.from, OMER_A.to, 3050,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 1950));
+    const closedRow = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    same('the closed period reports the same figures it was closed on',
+        [closedRow.deducted, closedRow.net, closedRow.carriedOut, closedRow.closed],
+        [3050, 0, 1950, true]);
+
     // THE INVARIANT THE OWNER SET, and the one thing that can break it: an entry dated
     // INSIDE a period that was already closed and paid. The form clamps a repayment to
     // the current account, but the wire does not - a phone that was offline for three
@@ -551,9 +562,24 @@ function omer(flags) {
     // A check that passes for the wrong reason is worse than no check, so this asks for
     // the row a reprint has to produce, whole.
     same('a back-dated entry does not move the closed payslip of תקופה א׳',
-        [reprinted.carriedIn, reprinted.given, reprinted.repaid,
+        [reprinted.carriedIn, reprinted.given,
             reprinted.deducted, reprinted.net, reprinted.carriedOut],
-        [0, 5000, 0, 3050, 0, 1950]);
+        [0, 5000, 3050, 0, 1950]);
+
+    // AND THE 400 IS NOT LOST. Freezing the payslip and stopping there would take a
+    // repayment a man actually made and reduce nothing with it, anywhere - money out of
+    // the sum, which is the failure the freeze was meant to prevent, arrived at from the
+    // other side. It moves into the period that is open.
+    check('but the money he handed back is carried into the open period, not lost',
+        reprinted.carriedForward === 1550 && reprinted.lateSinceClose === -400,
+        JSON.stringify([reprinted.carriedOut, reprinted.carriedForward,
+            reprinted.lateSinceClose]));
+
+    const after = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to);
+    same('so תקופה ב׳ opens on 1,550 and owes 1,350 after the 200 he handed back in it',
+        [after.carriedIn, after.repaid, after.carriedForward],
+        [1550, 200, 1350]);
 }
 
 report();

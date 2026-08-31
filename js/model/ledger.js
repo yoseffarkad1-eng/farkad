@@ -260,6 +260,69 @@ function recordAdvanceGiven(schedule, advanceId, workerId, date, amount, note, a
     });
 }
 
+// THE DEDUCTION, WRITTEN DOWN, at the moment a period closes.
+//
+// Until this existed the deduction was computed on every read - correct arithmetic over
+// the entries dated on or before the period's last day, and correct only for as long as
+// that set never changed. It changes. The advance form clamps a repayment into the
+// current account, but the wire does not: a phone that was offline for three weeks, an
+// import, a restore all deliver entries dated inside a fortnight that was printed and
+// paid, and the closing balance moves underneath a payslip somebody was handed.
+//
+// So a closed period carries a RECORD of what came off, and every later read of that
+// period reports the record rather than doing the sum again. That is the difference
+// between a period that happens not to have changed yet and one that cannot.
+//
+// `periodFrom` and `periodTo` name the account it closes, so the record can be found
+// again without trusting a date range somebody passed in.
+function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at, by,
+    balanceAfter) {
+    return appendLedgerEntry(schedule, {
+        advanceId: String(advanceId),
+        kind: 'deducted',
+        workerId: String(workerId),
+        // What was still owed when the period shut - the "יתרה: 1,950" the ledger screen
+        // prints beside the closure row. Recorded rather than recomputed for the same
+        // reason the deduction is: it is the number the NEXT period was opened on and the
+        // number a man was told he still owed.
+        balanceAfter: balanceAfter === undefined ? undefined : (Number(balanceAfter) || 0),
+        // The period's LAST day: the deduction happens at its close, and dating it there
+        // is what puts it inside the period it belongs to on any timeline.
+        date: String(to),
+        periodFrom: String(from),
+        periodTo: String(to),
+        amount: Number(amount) || 0,
+        at: String(at || ''),
+        by: String(by || '')
+    });
+}
+
+// Every closure recorded against this man, by the period they closed.
+function closedPeriods(schedule, workerId) {
+    const advances = (schedule && schedule.advances) || {};
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    const out = {};
+    Object.keys(held).map(id => held[id])
+        .filter(entry => entry && entry.kind === 'deducted' && entry.periodFrom)
+        .filter(entry => {
+            const of = advances[entry.advanceId];
+            const who = of ? of.workerId : entry.workerId;
+            return String(who) === String(workerId);
+        })
+        .forEach(entry => {
+            const key = String(entry.periodFrom);
+            // Append, never replace: two advances can each be deducted at one close, and
+            // a fold that kept the last would report half of what came off his wage.
+            const at = out[key] || { deducted: 0, balanceAfter: undefined };
+            at.deducted += Number(entry.amount) || 0;
+            if (entry.balanceAfter !== undefined) {
+                at.balanceAfter = (at.balanceAfter || 0) + (Number(entry.balanceAfter) || 0);
+            }
+            out[key] = at;
+        });
+    return out;
+}
+
 // Cash handed BACK against an advance. Its own entry, on its own date - which is the
 // whole point: an account deducts what is dated inside it and nothing else, so a
 // repayment in September cannot move a number on a fortnight somebody was paid from in

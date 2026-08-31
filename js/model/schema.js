@@ -1287,7 +1287,7 @@ function ledgerEntryProblems(id, value) {
     if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
         return ['a ledger entry with no advance behind it'];
     }
-    if (!['given', 'corrected', 'cancelled', 'repaid'].includes(String(value.kind))) {
+    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted'].includes(String(value.kind))) {
         return ['a ledger entry of a kind nobody wrote'];
     }
     if (value.kind === 'given') {
@@ -1306,6 +1306,25 @@ function ledgerEntryProblems(id, value) {
     // somebody's wage. A NEGATIVE one is worse than invisible: it is a second advance
     // wearing the wrong name, adding to what the man owes through a form whose whole
     // meaning is that he paid.
+    // A CLOSURE is money coming off a wage, and is checked like money. It also has to
+    // name the period it closes, or it cannot be found again and cannot freeze anything.
+    if (String(value.kind) === 'deducted') {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.periodFrom))
+            || !/^\d{4}-\d{2}-\d{2}$/.test(String(value.periodTo))) {
+            return ['a period closed over no period'];
+        }
+        if (String(value.periodTo) < String(value.periodFrom)) {
+            return ['a period that closed before it opened'];
+        }
+        const off = Number(value.amount);
+        if (!Number.isFinite(off)) return ['a deduction of no amount'];
+        if (off < 0) return ['a deduction of less than nothing'];
+        if (off > ADVANCE_MAX) return ['a deduction beyond any wage'];
+        const agorot = off * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            return ['a deduction finer than an agora'];
+        }
+    }
     if (String(value.kind) === 'repaid') {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
             return ['money handed back on no date'];
@@ -1451,7 +1470,10 @@ function accountsBefore(schedule, workerId, fromDate) {
 function advanceCarryInto(schedule, workerId, fromDate) {
     let balance = 0;
     accountsBefore(schedule, workerId, fromDate).forEach(account => {
-        balance = advanceWalk(schedule, workerId, account.from, account.to, balance).carriedOut;
+        // carriedForward, not carriedOut: the payslip is frozen, the money is not. See
+        // the two-balance block in advanceWalk.
+        balance = advanceWalk(schedule, workerId, account.from, account.to, balance)
+            .carriedForward;
     });
     return agoraRound(balance);
 }
@@ -1463,6 +1485,22 @@ function advanceCarryInto(schedule, workerId, fromDate) {
 function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     const given = advancesTotal(schedule, workerId, fromDate, toDate);
     const repaid = advanceRepaymentsFor(schedule, workerId, fromDate, toDate);
+
+    // A CLOSED PERIOD REPORTS ITS RECORD, and does not do the sum again.
+    //
+    // Recomputing is correct arithmetic over the entries dated on or before this
+    // period's last day - and correct only while that set never changes. It changes: the
+    // advance form clamps a repayment into the current account, but the wire does not,
+    // and a phone offline for three weeks, an import or a restore all deliver entries
+    // dated inside a fortnight that was printed and paid. Measured before this: a
+    // back-dated repayment of 400 moved a closed period's closing balance from 1,950 to
+    // 1,550, without moving either of the two figures on the payslip itself.
+    //
+    // See recordPeriodClosed in js/model/ledger.js. With no closure recorded - every
+    // device today, since the writer gate is shut - this is absent and the walk below
+    // runs exactly as it did.
+    const closed = typeof closedPeriods === 'function'
+        ? closedPeriods(schedule, workerId)[String(fromDate)] : undefined;
 
     const row = payrollReport(schedule, fromDate, toDate)
         .find(item => item.workerId === workerId);
@@ -1479,7 +1517,30 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // conversation, not an arithmetic result this app may reach on its own.
     if (balance < 0) balance = 0;
 
-    const deducted = gross === null ? 0 : agoraRound(Math.min(balance, Math.max(gross, 0)));
+    // The record wins where there is one. It is what came off that man's wage on the day
+    // the period closed, and no later entry gets to revise it.
+    const deducted = closed !== undefined
+        ? agoraRound(closed.deducted)
+        : (gross === null ? 0 : agoraRound(Math.min(balance, Math.max(gross, 0))));
+
+    // TWO BALANCES OUT OF A CLOSED PERIOD, and the difference between them is the whole
+    // point.
+    //
+    // `carriedOut` is what the payslip says and says forever: the figure the period was
+    // closed on. `carriedForward` is what the NEXT period actually opens owing, which
+    // includes anything that arrived dated into this period after it shut.
+    //
+    // They have to be two numbers. Freezing only the payslip would lose a late
+    // repayment entirely - a man hands back 400, it is dated into a fortnight that has
+    // closed, and it reduces nothing anywhere - and that is money vanishing from the
+    // sum, which is the failure this whole area exists to prevent. Freezing neither
+    // rewrites a payslip somebody was already paid from.
+    //
+    // So the payslip is frozen and the money still moves, into the period that is open.
+    const live = agoraRound(balance - deducted);
+    const frozen = closed !== undefined && closed.balanceAfter !== undefined
+        ? agoraRound(closed.balanceAfter)
+        : live;
     return {
         from: fromDate,
         to: toDate,
@@ -1488,8 +1549,18 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
         repaid: agoraRound(repaid),
         gross,
         deducted,
-        carriedOut: agoraRound(balance - deducted),
-        net: gross === null ? null : agoraRound(gross - deducted)
+        // What the payslip says, forever.
+        carriedOut: frozen,
+        // What the next period opens owing. Equal to carriedOut unless something arrived
+        // dated into this period after it closed.
+        carriedForward: live,
+        // Named so a screen can say "הגיעה תנועה אחרי סגירת התקופה" rather than leaving
+        // two numbers on the page with nothing explaining why they differ.
+        lateSinceClose: agoraRound(live - frozen),
+        net: gross === null ? null : agoraRound(gross - deducted),
+        // Whether this row is a record or a reckoning, said out loud - the screen shows
+        // "החשבון נסגר ולא ישתנה" only where it is true.
+        closed: closed !== undefined
     };
 }
 
@@ -1534,7 +1605,7 @@ function planAdvanceCarry(schedule) {
                     carriedOut: walked.carriedOut
                 });
             }
-            balance = walked.carriedOut;
+            balance = walked.carriedForward;
             at = advanceDayStep(at, 14);
             // Stop once nothing is left owed and no advance remains to be reached. A
             // balance that never clears - a man with no rate - is why the date is a
