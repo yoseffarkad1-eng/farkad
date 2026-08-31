@@ -1761,4 +1761,144 @@ function omer(flags) {
         share.indexOf('reason') !== -1 || reports.indexOf('reason') !== -1);
 }
 
+
+// ------------------------------------------------- a closure that cannot be true
+{
+    suite('L5: a closure is checked against the record, not taken on trust');
+
+    // ledgerEntryProblems checks the SHAPE of a closure. Every one of these passes it,
+    // and every one of them is a lie - and each arrives the same way, from another phone
+    // or an import, carrying an amount and a balance somebody else's device computed.
+    const base = () => {
+        const device = omer({ carryAdvances: true, ledgerWrites: true });
+        return { device, id: Object.keys(device.State.schedule.advances)[0] };
+    };
+    const closure = (extra) => Object.assign({
+        id: 'le_close_test', kind: 'deducted', workerId: 'w_01',
+        date: OMER_A.to, periodFrom: OMER_A.from, periodTo: OMER_A.to,
+        amount: 3050, balanceAfter: 1950, at: '2026-08-20T18:00:00.000Z', by: 'd_x'
+    }, extra);
+
+    {
+        const { device, id } = base();
+        const good = closure({ advanceId: id });
+        check('the honest closure passes, or nothing below means anything',
+            device.call('closureProblems', device.State.schedule, good).length === 0,
+            JSON.stringify(device.call('closureProblems', device.State.schedule, good)));
+        check('and its shape passes the entry check too',
+            device.call('ledgerEntryProblems', good.id, good).length === 0);
+    }
+
+    const BAD = [
+        ['deducting more than the advance had left on it',
+            { amount: 6000, balanceAfter: 0 }],
+        ['deducting more than the wage it came off',
+            { amount: 4000, balanceAfter: 1000 }],
+        ['a carried balance that is not what the record leaves',
+            { amount: 3050, balanceAfter: 400 }],
+        ['a period that does not start an account',
+            { periodFrom: '2026-08-09', periodTo: '2026-08-22' }],
+        ['a last day that is not its own account\'s',
+            { periodTo: '2026-08-31' }]
+    ];
+    BAD.forEach(([label, extra]) => {
+        const { device, id } = base();
+        const entry = closure(Object.assign({ advanceId: id }, extra));
+        // Every one of them is well-formed. That is the point.
+        given(`${label}: the shape check passes it`,
+            device.call('ledgerEntryProblems', entry.id, entry).length === 0,
+            JSON.stringify(device.call('ledgerEntryProblems', entry.id, entry)));
+        check(`refused: ${label}`,
+            device.call('closureProblems', device.State.schedule, entry).length > 0,
+            JSON.stringify(device.call('closureProblems', device.State.schedule, entry)));
+    });
+}
+
+{
+    suite('L5: an impossible closure arriving from another phone is held aside');
+
+    // THROUGH THE DOOR IT ACTUALLY COMES THROUGH. A closure is not typed on this phone;
+    // it arrives in a document, and normaliseSchedule is where every door meets.
+    const source = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(source.State.schedule.advances)[0];
+    const raw = JSON.parse(JSON.stringify(source.State.schedule));
+    raw.ledger = raw.ledger || { advances: {}, unreadable: {} };
+    raw.ledger.advances.le_close_lie = {
+        id: 'le_close_lie', advanceId: id, kind: 'deducted', workerId: 'w_01',
+        date: OMER_A.to, periodFrom: OMER_A.from, periodTo: OMER_A.to,
+        amount: 4000, balanceAfter: 1000, at: '2026-08-20T18:00:00.000Z', by: 'd_other'
+    };
+
+    const device = makeDevice({ deviceId: 'd_lie',
+        flags: { carryAdvances: true, ledgerWrites: true },
+        storage: Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) }) });
+    device.State.load();
+
+    check('the record still opens', device.State.schedule.workers.length === 1);
+    check('the closure is not in the fold',
+        device.State.schedule.ledger.advances.le_close_lie === undefined,
+        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
+    check('its bytes are held aside, exactly as they arrived',
+        JSON.stringify(device.State.schedule.ledger.unreadable.le_close_lie)
+            === JSON.stringify(raw.ledger.advances.le_close_lie),
+        JSON.stringify(device.State.schedule.ledger.unreadable.le_close_lie));
+    check('the person is told', device.global('Recovery').problems.length > 0,
+        JSON.stringify(device.global('Recovery').problems.map(p => p.key)));
+    check('and the device stops writing while the money is uncertain',
+        device.call('farkadWritesBlocked') === true);
+
+    // AND NOTHING WAS DEDUCTED ON ITS SAY-SO. That is the whole of what it would have
+    // cost: 4,000 off a wage of 3,050, frozen forever, from a number this phone never
+    // computed.
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    check('the advance still stands at what this device can actually verify',
+        state.deducted === 0 && state.left === 5000, JSON.stringify(state));
+
+    // Close and reopen: a device that forgot would fold the lie at the next boot.
+    const again = makeDevice({ deviceId: 'd_lie2', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    check('it is still held aside after a close and reopen',
+        again.State.schedule.ledger.advances.le_close_lie === undefined
+        && Boolean(again.State.schedule.ledger.unreadable.le_close_lie));
+    check('and the rescue export still carries it out',
+        JSON.stringify(again.global('Recovery').rawRecords()).indexOf('le_close_lie') !== -1
+        || JSON.stringify(again.global('Recovery').rawRecords()).indexOf('4000') !== -1,
+        JSON.stringify(Object.keys(again.global('Recovery').rawRecords())));
+}
+
+{
+    suite('L5: the closure this build writes itself is always true');
+
+    // The other side of it. Everything above is about a closure somebody else computed;
+    // this asks whether the one this build writes can ever fail its own check.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const changes = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_omer');
+    given('there is a closure to write', changes.length === 1, String(changes.length));
+    device.State.commitMany(changes);
+
+    const written = changes[0].value;
+    check('it passes the accounting check it will be judged by',
+        device.call('closureProblems', device.State.schedule, written).length === 0,
+        JSON.stringify(device.call('closureProblems', device.State.schedule, written)));
+    check('and nothing on this device is held aside',
+        device.call('impossibleClosures', device.State.schedule).length === 0,
+        JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+
+    // And it survives its own reopen, which is the path an imported one takes.
+    const again = makeDevice({ deviceId: 'd_true', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    check('a reopen folds it rather than holding it aside',
+        Boolean(again.State.schedule.ledger.advances[written.id]),
+        JSON.stringify(Object.keys(again.State.schedule.ledger.advances)));
+    check('and the payslip reads what it was closed on',
+        again.call('advanceAccount', again.State.schedule, 'w_01',
+            OMER_A.from, OMER_A.to).carriedOut === 1950,
+        JSON.stringify(again.call('advanceAccount', again.State.schedule, 'w_01',
+            OMER_A.from, OMER_A.to)));
+}
+
 report();

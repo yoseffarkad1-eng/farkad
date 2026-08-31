@@ -746,6 +746,25 @@ function normaliseSchedule(raw, hints) {
         }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
     });
+    // A CLOSURE THAT CANNOT BE TRUE, held aside like anything else this build cannot use.
+    //
+    // The entry check above is about SHAPE, and every closure here has already passed it.
+    // This is the other question: is it true against the record it claims to be about. A
+    // closure deducting more than the advance had left, or more than the man earned, or
+    // carrying a balance that is not what the arithmetic leaves, is a well-formed entry
+    // that is a lie - and the amount and the balance are numbers somebody else's phone
+    // computed, which this device has no reason to believe.
+    //
+    // Run after the entries are in, because judging one closure needs all the others.
+    // Held aside rather than corrected: nothing here invents a number to replace it, and
+    // the bytes stay exactly as they arrived.
+    if (typeof impossibleClosures === 'function') {
+        impossibleClosures(schedule).forEach(id => {
+            schedule.ledger.unreadable[id] = schedule.ledger.advances[id];
+            delete schedule.ledger.advances[id];
+        });
+    }
+
     // Anything an older or newer build left under ledger.unreadable stays there too.
     const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {

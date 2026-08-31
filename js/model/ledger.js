@@ -337,6 +337,98 @@ function advanceOutstanding(schedule, advanceId) {
     };
 }
 
+// ------------------------------------------------ a closure, against accounting reality
+//
+// ledgerEntryProblems checks the SHAPE of a closure: a real date, a real amount, an end
+// that is not before its beginning. Every one of those can hold while the entry is a lie.
+//
+//   a closure deducting 4,000 from an advance with 500 left on it
+//   a closure deducting 3,000 from a fortnight the man earned 900 in
+//   a closure whose balanceAfter says 400 when the record leaves 1,950
+//   a closure over "2026-08-09 to 2026-08-31", which is not an account at all
+//
+// None of those is damage. Each is a well-formed entry that is not true, and every one of
+// them arrives the same way: from another phone, from an import, from a restore. The
+// amount and the balanceAfter are numbers somebody else computed, and this device has no
+// reason to believe either of them - it has the record they were computed FROM.
+//
+// So they are checked against it. What cannot be true is held aside rather than folded -
+// see normaliseSchedule, which is where every door meets.
+
+// What an advance stands at, ignoring ONE entry - which is how a closure is judged
+// against the debt as it was before that closure.
+function outstandingWithout(schedule, advanceId, ignoreId) {
+    const copy = { advances: (schedule && schedule.advances) || {},
+        ledger: { advances: {} } };
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    Object.keys(held).forEach(id => {
+        if (String(id) === String(ignoreId)) return;
+        copy.ledger.advances[id] = held[id];
+    });
+    return advanceOutstanding(copy, advanceId);
+}
+
+function closureProblems(schedule, entry) {
+    const out = [];
+    if (!entry || String(entry.kind) !== 'deducted') return out;
+
+    // THE PERIOD HAS TO BE AN ACCOUNT. A closure over a hand-picked window freezes a
+    // figure for a fortnight nobody is paid on, and every later read of that period
+    // reports the record rather than doing the sum - so a wrong window is wrong forever.
+    const from = String(entry.periodFrom);
+    const to = String(entry.periodTo);
+    const start = parseLocalDate(from);
+    if (!start || toLocalDateStr(accountStart(start)) !== from) {
+        out.push('a closure over a period that does not start an account');
+    } else if (advanceDayStep(from, 13) !== to) {
+        out.push('a closure whose last day is not its own account\'s');
+    }
+
+    const off = Number(entry.amount) || 0;
+    const before = outstandingWithout(schedule, entry.advanceId, entry.id);
+
+    // MORE THAN WAS OWED. The man is recorded as having had money taken off his wage
+    // against a debt that was not there.
+    if (off > before.left + 1e-6) {
+        out.push('a closure deducting more than the advance had left on it');
+    }
+
+    // MORE THAN HE EARNED. A deduction is money coming off a wage; it cannot exceed the
+    // wage, and it cannot leave one below zero - a man does not owe his employer his
+    // labour back.
+    const advance = ((schedule && schedule.advances) || {})[String(entry.advanceId)];
+    const who = String(entry.workerId || (advance || {}).workerId || '');
+    const row = who && typeof payrollReport === 'function'
+        ? payrollReport(schedule, from, to).find(item => item.workerId === who) : null;
+    const gross = row && row.amount !== null ? Number(row.amount) : null;
+    if (gross !== null && off > gross + 1e-6) {
+        out.push('a closure deducting more than the wage it came off');
+    }
+    if (gross !== null && agoraRound(gross - off) < 0) {
+        out.push('a closure leaving a wage below zero');
+    }
+
+    // AND THE CARRIED BALANCE HAS TO BE THE ARITHMETIC. It is the number the NEXT period
+    // opens on and the number a man was told he still owed; taken on trust from whoever
+    // sent it, one wrong figure propagates to every later account.
+    if (entry.balanceAfter !== undefined) {
+        const expected = agoraRound(Math.max(0, before.left - off));
+        if (Math.abs((Number(entry.balanceAfter) || 0) - expected) > 1e-6) {
+            out.push('a closure whose carried balance is not what the record leaves');
+        }
+    }
+    return out;
+}
+
+// Every closure on this device that cannot be true, by entry id.
+function impossibleClosures(schedule) {
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    return Object.keys(held)
+        .filter(id => held[id] && String(held[id].kind) === 'deducted')
+        .filter(id => closureProblems(schedule, held[id]).length > 0)
+        .sort();
+}
+
 // EVERY ADVANCE OF THIS MAN'S THAT HAS BEEN OVER-SETTLED, and it is not a rounding error.
 //
 // Two phones, one advance of 500, both offline. Each records a repayment of 500 against
