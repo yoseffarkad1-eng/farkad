@@ -2811,7 +2811,22 @@ const FarkadSync = {
                     // corrected, and rebasing it is the ordinary two-people-one-evening
                     // merge. A path that HAS moved is a contest, and the write built on
                     // the older base does not get to put the old value back.
-                    const contested = this.contestedPaths(patch, error.document || this._latestRaw);
+                    // THE TRANSACTION'S OWN DOCUMENT, and nothing else.
+                    //
+                    // This read `error.document || this._latestRaw`, and the fallback was
+                    // the fault. _latestRaw is the last thing onSnapshot delivered - a
+                    // different channel from the transaction's read, with no ordering
+                    // between them - so a refusal that arrived before its snapshot was
+                    // compared against a document one revision behind, where the path
+                    // somebody had just corrected still held the value this write was
+                    // built on. Uncontested, rebased, and the correction overwritten.
+                    //
+                    // With no document there is nothing this client can honestly compare,
+                    // so it compares nothing: contestedPaths answers "all of them" for a
+                    // base it cannot read, the write is held, and the person is told. An
+                    // adapter that does not carry the document costs a delay; one that
+                    // lets a stale listener decide costs somebody's correction.
+                    const contested = this.contestedPaths(patch, error.document);
                     if (contested.length === 0) {
                         this._rebases += 1;
                         if (Number.isInteger(error.revision)) this._revision = error.revision;

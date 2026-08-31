@@ -33,6 +33,123 @@ import {
 
 import { firebaseConfig, SCHEDULE_DOC_PATH } from './firebase-config.js';
 
+// THE WRITE PATH, AT MODULE SCOPE, so that something other than a signed-in browser can
+// run it.
+//
+// All of this used to live inside the `else` branch below, inside an auth callback, three
+// closures deep. It worked, and it was unreachable: no test could get at it, so the one
+// financially critical path in this file - the transaction that decides whether a write
+// is a conflict, and what it hands back when it refuses - was the only part of the app
+// with no coverage against a real Firestore at all. That is how it came to differ from
+// the fake cloud the CAS suite exercises, and nobody found out.
+//
+// Nothing here knows about auth, the DOM or the app. It takes a database handle and the
+// two document references, and returns the operations. The browser path builds it from
+// the real project; tests/cas.emulator.test.mjs builds it from the emulator and runs
+// these exact functions.
+
+// The sync layer's paths look like days.2026-08-12.plan.w_01. Passing that to updateDoc
+// as a STRING would throw "invalid field path": in a string path, any segment that starts
+// with a digit or contains a dash has to be backtick-escaped, and every date segment does
+// both. So every single field write would have failed the first time sync was switched on
+// - the design would have died on contact.
+//
+// The FieldPath constructor takes the segments raw and does its own escaping, and
+// updateDoc accepts (path, value, path, value, ...) pairs.
+export function patchToUpdateArgs(patch) {
+    const args = [];
+    Object.keys(patch).forEach(path => {
+        args.push(new FieldPath(...path.split('.')), patch[path]);
+    });
+    return args;
+}
+
+export function firestoreOps(db, scheduleRef, receiptRef) {
+    // One write, one receipt, one transaction. `apply` does the schedule half.
+    function withReceipt(payload, apply) {
+        return runTransaction(db, transaction =>
+            transaction.get(receiptRef(payload.lastOpId)).then(receipt => {
+                // Already applied. Answering success is not optimism: the receipt is
+                // immutable and was written in the same transaction as the revision it
+                // names, so its existence IS the proof that this operation landed.
+                if (receipt.exists()) return;
+                return transaction.get(scheduleRef).then(snapshot => {
+                    if (!snapshot.exists()) {
+                        const error = new Error('No document to update');
+                        error.code = 'not-found';
+                        throw error;
+                    }
+                    const held = snapshot.data().revision;
+                    const base = Number.isInteger(held) ? held : 0;
+                    if (payload.revision !== base + 1) {
+                        const error = new Error('the document moved while this write '
+                            + 'was being prepared');
+                        error.code = 'conflict';
+                        error.revision = base;
+                        // THE DOCUMENT THE TRANSACTION ACTUALLY READ, handed back with the
+                        // refusal.
+                        //
+                        // Without it the client fell back to its last onSnapshot delivery,
+                        // which is a different channel with no ordering against this read.
+                        // The window is real: this transaction sees revision N+1 and
+                        // refuses, the snapshot for N+1 has not arrived, so the client
+                        // compares against revision N - where the path another phone just
+                        // corrected still holds the value this write was built on. It
+                        // reads as uncontested, rebases, and puts the older value back
+                        // over the correction.
+                        //
+                        // A COPY, not the snapshot's own object: what travels to the
+                        // client must not be a live handle into the SDK's cache.
+                        error.document = JSON.parse(JSON.stringify(snapshot.data()));
+                        throw error;
+                    }
+                    apply(transaction);
+                    transaction.set(receiptRef(payload.lastOpId), {
+                        revision: payload.revision,
+                        at: new Date().toISOString(),
+                        by: payload.updatedBy || null
+                    });
+                });
+            }));
+    }
+
+    return {
+        withReceipt,
+        update(patch) {
+            return withReceipt(patch, transaction => {
+                transaction.update(scheduleRef, ...patchToUpdateArgs(patch));
+            });
+        },
+        save(data) {
+            return withReceipt(data, transaction => {
+                transaction.set(scheduleRef, data);
+            });
+        },
+        // The first write of a new project. A transaction rather than a plain set: two
+        // phones opened the same evening are both told the document is missing and both
+        // try to create it, and a set would let the second silently overwrite the first.
+        // Inside the transaction the read and the write are one operation, so exactly one
+        // wins and the other is handed 'already-exists' - which the sync layer turns back
+        // into an ordinary field merge.
+        create(data) {
+            return runTransaction(db, transaction =>
+                transaction.get(scheduleRef).then(snapshot => {
+                    if (snapshot.exists()) {
+                        const error = new Error('the schedule already exists');
+                        error.code = 'already-exists';
+                        throw error;
+                    }
+                    transaction.set(scheduleRef, data);
+                    transaction.set(receiptRef(data.lastOpId), {
+                        revision: data.revision,
+                        at: new Date().toISOString(),
+                        by: data.updatedBy || null
+                    });
+                }));
+        }
+    };
+}
+
 function isConfigured() {
     return Boolean(firebaseConfig && firebaseConfig.projectId && firebaseConfig.apiKey);
 }
@@ -45,21 +162,6 @@ if (!isConfigured()) {
     const db = getFirestore(app);
     const scheduleRef = doc(db, ...SCHEDULE_DOC_PATH.split('/'));
 
-    // The sync layer's paths look like days.2026-08-12.plan.w_01. Passing that to
-    // updateDoc as a STRING would throw "invalid field path": in a string path, any
-    // segment that starts with a digit or contains a dash has to be backtick-escaped,
-    // and every date segment does both. So every single field write would have failed
-    // the first time sync was switched on - the design would have died on contact.
-    //
-    // The FieldPath constructor takes the segments raw and does its own escaping, and
-    // updateDoc accepts (path, value, path, value, ...) pairs.
-    function patchToUpdateArgs(patch) {
-        const args = [];
-        Object.keys(patch).forEach(path => {
-            args.push(new FieldPath(...path.split('.')), patch[path]);
-        });
-        return args;
-    }
 
     // Sign-in has to happen INSIDE the app, and on an iPhone that rules out both of the
     // usual routes. A home-screen web app has its own storage, separate from Safari's,
@@ -152,38 +254,7 @@ if (!isConfigured()) {
         const receiptRef = opId =>
             doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'receipts', String(opId));
 
-        // One write, one receipt, one transaction. `apply` does the schedule half.
-        function withReceipt(payload, apply) {
-            return runTransaction(db, transaction =>
-                transaction.get(receiptRef(payload.lastOpId)).then(receipt => {
-                    // Already applied. Answering success is not optimism: the receipt is
-                    // immutable and was written in the same transaction as the revision it
-                    // names, so its existence IS the proof that this operation landed.
-                    if (receipt.exists()) return;
-                    return transaction.get(scheduleRef).then(snapshot => {
-                        if (!snapshot.exists()) {
-                            const error = new Error('No document to update');
-                            error.code = 'not-found';
-                            throw error;
-                        }
-                        const held = snapshot.data().revision;
-                        const base = Number.isInteger(held) ? held : 0;
-                        if (payload.revision !== base + 1) {
-                            const error = new Error('the document moved while this write '
-                                + 'was being prepared');
-                            error.code = 'conflict';
-                            error.revision = base;
-                            throw error;
-                        }
-                        apply(transaction);
-                        transaction.set(receiptRef(payload.lastOpId), {
-                            revision: payload.revision,
-                            at: new Date().toISOString(),
-                            by: payload.updatedBy || null
-                        });
-                    });
-                }));
-        }
+        const ops = firestoreOps(db, scheduleRef, receiptRef);
 
         window.FarkadSync.connect({
             // Firestore merges dotted field paths server-side, so two people writing
@@ -205,39 +276,10 @@ if (!isConfigured()) {
             // 'permission-denied', which cannot be told apart from "you are not on the
             // allowlist" - so the check is made here, in the transaction, where the real
             // revision is in hand.
-            update(patch) {
-                return withReceipt(patch, transaction => {
-                    transaction.update(scheduleRef, ...patchToUpdateArgs(patch));
-                });
-            },
-            save(data) {
-                return withReceipt(data, transaction => {
-                    transaction.set(scheduleRef, data);
-                });
-            },
+            update: ops.update,
+            save: ops.save,
 
-            // The first write of a new project. A transaction rather than a plain set:
-            // two phones opened the same evening are both told the document is missing
-            // and both try to create it, and a set would let the second silently
-            // overwrite the first. Inside the transaction the read and the write are one
-            // operation, so exactly one wins and the other is handed 'already-exists' -
-            // which the sync layer turns back into an ordinary field merge.
-            create(data) {
-                return runTransaction(db, transaction =>
-                    transaction.get(scheduleRef).then(snapshot => {
-                        if (snapshot.exists()) {
-                            const error = new Error('the schedule already exists');
-                            error.code = 'already-exists';
-                            throw error;
-                        }
-                        transaction.set(scheduleRef, data);
-                        transaction.set(receiptRef(data.lastOpId), {
-                            revision: data.revision,
-                            at: new Date().toISOString(),
-                            by: data.updatedBy || null
-                        });
-                    }));
-            },
+            create: ops.create,
 
             // Sync is not a backup: a deletion syncs as faithfully as a correction, and
             // by the time it is noticed every phone agrees with it. These are the copies

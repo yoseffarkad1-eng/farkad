@@ -13,3 +13,7 @@ ui-debug.log
 # Playwright
 test-results/
 playwright-report/
+
+# Written and deleted by tests/cas.emulator.test.mjs while it runs.
+js/sync/_adapter-under-test.mjs
+js/sync/_adapter-test-config.mjs
