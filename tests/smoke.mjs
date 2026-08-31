@@ -1378,8 +1378,30 @@ async function seedRoster(page) {
     `${cached.length} entries`);
   check('the icons are cached too',
     cached.some(c => c.endsWith('/icons/icon-192.png')));
-  check('the third-party CDN is NOT cached',
-    !cached.some(c => c.includes('xlsx')));
+  // This used to read "the third-party CDN is NOT cached", and it was right while the
+  // spreadsheet library came from one: caching a CDN response would have put somebody
+  // else's bytes in the shell. The library is a file in this repo now, so the guarantee
+  // is the same one stated the other way round - the shell holds it, and holds nothing
+  // that came from anywhere else.
+  check('the spreadsheet library is in the shell, so an offline phone can export',
+    cached.some(c => c.endsWith('/vendor/xlsx-0.18.5.min.js')),
+    `${cached.length} entries`);
+  const offOrigin = await page.evaluate(() =>
+    caches.keys().then(keys => Promise.all(keys.map(k =>
+      caches.open(k).then(c => c.keys().then(reqs => reqs.map(r => r.url)))
+    )).then(all => all.flat().filter(url => {
+      const at = new URL(url);
+      if (at.origin === location.origin) return false;
+      // The worker's own bookkeeping. sw.js keys its shelf registry, its manifests and
+      // its client records as Requests on a sentinel origin that resolves nowhere - see
+      // the block over SHELVES in sw.js. Those are this app's records about itself, not
+      // somebody else's bytes in the shell, and counting them here would report the
+      // service worker as a third party.
+      if (at.hostname === 'farkad.invalid') return false;
+      return true;
+    }))));
+  check('and nothing from another origin is in it',
+    offOrigin.length === 0, offOrigin.join(', '));
 
   await seedRoster(page);
   await page.evaluate(() => {
@@ -1736,17 +1758,28 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
-// ------------------------------------------------- the export, and the CDN it may need
+// ------------------------------------------------- the export, with no signal at all
 //
-// SheetJS is fetched from a CDN, which on a building site is a request that hangs rather
-// than fails. Two rules follow: it is not asked for until somebody presses export, and
-// when it does not arrive the numbers still come off the phone.
+// SheetJS used to come from a CDN, which on a building site is a request that hangs
+// rather than fails - so the rules were "do not ask for it until somebody presses export"
+// and "when it does not arrive the numbers still come off the phone". The second was a
+// consolation prize: three CSVs, under three names, for a bookkeeper expecting one
+// workbook.
+//
+// It is a file on this origin now, precached with the rest of the shell. So the question
+// changed, and it is a better one: with the network switched OFF, does the pay sheet come
+// off the phone as the workbook it is supposed to be. That is the van, at the end of a
+// fortnight, which is where this export is actually used.
 {
   const page = await open();
-  const asked = [];
-  await page.route('**://cdnjs.cloudflare.com/**', route => {
-    asked.push(Date.now());
-    // Hangs, the way it does on one bar of signal.
+  // Every off-origin request, with a mark dropped when the export is pressed - so the
+  // Firebase SDK's boot fetch from gstatic, which is documented and happens before any of
+  // this, is not confused with the export reaching for something.
+  const offOrigin = [];
+  await page.route('**', route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== new URL(BASE).origin) { offOrigin.push(url.href); route.abort(); return; }
+    route.continue();
   });
 
   await seedRoster(page);
@@ -1754,29 +1787,45 @@ async function seedRoster(page) {
     assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
     assignPlace(State.schedule, '2026-08-11', 'w_02', 'actual', 'p_01');
     State.save();
+  });
+  // Let the worker take the shell down before the plug is pulled - which is exactly the
+  // order it happens in on a phone: the app is opened once with signal, then used without.
+  await page.waitForTimeout(1500);
+  await page.context().setOffline(true);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(800);
+  await page.evaluate(() => {
     REPORT_RANGE.from = '2026-08-01';
     REPORT_RANGE.to = '2026-08-31';
   });
   await page.click('#tab-reports');
   await page.waitForTimeout(400);
 
-  check('opening the reports asks the CDN for nothing', asked.length === 0,
-    String(asked.length));
+  check('the reports open with the network off',
+    (await page.evaluate(() => document.getElementById('reportsView').children.length > 0)));
 
-  // Pressed for real, from the screen, and the CSV files caught as they are saved.
-  const files = [];
-  page.on('download', download => files.push(download.suggestedFilename()));
-  await page.evaluate(() => { loadXlsx(600); });
+  const beforeExport = offOrigin.length;
+  const saved = [];
+  page.on('download', download => saved.push(download));
   await page.locator('#reportsView button').filter({ hasText: 'יצוא' }).click();
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(3000);
 
-  check('pressing export is what fetches it', asked.length > 0, String(asked.length));
-  // Three files, one per report. The names the browser hands back are sanitised - the
-  // real ones are Hebrew - so what is counted is the saves, not the spelling.
-  check('and when it does not arrive the numbers come out as three files anyway',
-    files.length === 3, files.join(', '));
-  check('the person is told which format they got, rather than left guessing',
-    (await page.textContent('#askModal')).includes('CSV'),
+  check('one file comes out, not three', saved.length === 1, String(saved.length));
+
+  // The BYTES, not the name. Playwright hands back a sanitised filename for a Hebrew one,
+  // so the extension says nothing; an .xlsx is a zip, and a zip begins PK\x03\x04.
+  let head = '';
+  if (saved.length === 1) {
+    const where = await saved[0].path();
+    head = where ? (await import('node:fs')).readFileSync(where).subarray(0, 4).toString('hex') : '';
+  }
+  check('and it is a real workbook, on a phone with no signal at all',
+    head === '504b0304', head || 'nothing saved');
+  check('the export itself asked nothing of any other origin',
+    offOrigin.length === beforeExport,
+    offOrigin.slice(beforeExport).join(', '));
+  check('and nobody was told to settle for CSV',
+    !((await page.textContent('#askModal')) || '').includes('CSV'),
     await page.textContent('#askModal'));
 
   await page.context().close();
