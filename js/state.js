@@ -696,9 +696,35 @@ function normaliseSchedule(raw, hints) {
     // refused - the rescue file has to be able to open it, which is the reasoning written
     // into storedScheduleProblems and it is right - but this path is now the real line,
     // and js/app.js stops the device WRITING while any of it is unreadable.
-    const ledger = (raw.ledger && typeof raw.ledger === 'object') ? raw.ledger : {};
-    const entries = (ledger.advances && typeof ledger.advances === 'object')
-        ? ledger.advances : {};
+    // AND THE CONTAINER BEFORE THE ENTRIES, because there is not always a container.
+    //
+    // This line read `typeof raw.ledger === 'object'` and fell back to {} for anything
+    // else. A `ledger` that arrived as a string was therefore dropped on the floor; one
+    // that arrived as an array was read as a record with no advances. Either way the
+    // schedule that came out carried an EMPTY history, load() reported clean, nothing was
+    // blocked, and the first ordinary save wrote that emptiness over the only copy of
+    // somebody's advances.
+    //
+    // The entry checks below could not catch it: there were no entries to check. So the
+    // container is checked first, its bytes are carried on the schedule under a name
+    // nothing reads for arithmetic, and Recovery is told under a key of its own - the
+    // trouble is a different trouble from an unreadable entry and deserves its own
+    // sentence and its own quarantine slot.
+    const containerProblem = typeof ledgerContainerProblem === 'function'
+        ? ledgerContainerProblem(raw) : null;
+    if (containerProblem) {
+        schedule.ledger.unreadableContainer = raw.ledger;
+        if (typeof Recovery !== 'undefined') {
+            Recovery.damaged('scheduleData:v2:ledger:container',
+                JSON.stringify(raw.ledger),
+                'היסטוריית המקדמות ברישום אינה בצורה שאפשר לקרוא. שום דבר לא נמחק - '
+                + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי, '
+                + 'כדי שלא ייכתב רישום ריק על ההיסטוריה.');
+        }
+    }
+    // A container that could not be read has nothing this build may take entries out of.
+    const ledger = (!containerProblem && isPlainObject(raw.ledger)) ? raw.ledger : {};
+    const entries = isPlainObject(ledger.advances) ? ledger.advances : {};
     Object.keys(entries).forEach(id => {
         const entry = entries[id];
         // THE WHOLE CHECK, not a shape test.
@@ -721,8 +747,7 @@ function normaliseSchedule(raw, hints) {
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
     });
     // Anything an older or newer build left under ledger.unreadable stays there too.
-    const held = (ledger.unreadable && typeof ledger.unreadable === 'object')
-        ? ledger.unreadable : {};
+    const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {
         if (schedule.ledger.unreadable[id] === undefined) {
             schedule.ledger.unreadable[id] = held[id];

@@ -282,5 +282,82 @@ const conflictOf = async promise => {
         JSON.stringify([fake.document.revision, real.document.revision]));
 }
 
+
+// ------------------------------------------------ a receipt is only proof if it is true
+{
+    suite('a poisoned receipt is refused, not believed');
+
+    // The rules refuse to create a receipt on its own now (receiptMatchesSchedule in
+    // firestore.rules). This suite is about the one they cannot reach: a receipt already
+    // sitting in the project from before those rules were published.
+    //
+    // The client is built to believe a receipt - that is what makes a retry safe - so it
+    // would find this one, answer success, acknowledge, and prune the queue. An evening
+    // off somebody's phone on the strength of a record that nothing wrote. So the client
+    // asks the document too, and a receipt claiming a revision the schedule never reached
+    // is not proof of anything.
+    await reset();
+    const db = as(ALLOWED);
+    const ops = opsFor(db);
+
+    const held = await readDoc();
+    given('the document is at revision 1', held.revision === 1, String(held.revision));
+
+    // Written with the rules switched off, which is the only way it can exist at all -
+    // and exactly how one from before the rules would have got there.
+    await env.withSecurityRulesDisabled(async ctx => {
+        await setDoc(doc(ctx.firestore(), ...PATH, 'receipts', 'op_never_applied'),
+            { revision: 999, at: 'x', by: 'nobody' });
+    });
+
+    const refused = await conflictOf(ops.update({
+        'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'd_a',
+        protocol: 1,
+        revision: 2,
+        lastOpId: 'op_never_applied'
+    }));
+    check('the write is refused rather than answered as already applied',
+        Boolean(refused), refused ? refused.code : 'accepted');
+    check('and it is refused for the reason it actually is',
+        refused && refused.code === 'receipt-mismatch',
+        refused ? `${refused.code}: ${refused.message}` : 'accepted');
+
+    const after = await readDoc();
+    check('nothing was written to the document',
+        after.revision === 1 && !after.days['2026-08-12'],
+        JSON.stringify({ revision: after.revision, days: Object.keys(after.days || {}) }));
+
+    // AND THE HONEST CASE STILL WORKS, which is the whole point of receipts. A receipt
+    // whose revision the document has actually reached is proof, and the retry that finds
+    // it stops without applying anything twice.
+    const opId = 'op_real';
+    await ops.update({
+        'days.2026-08-13.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'd_a',
+        protocol: 1,
+        revision: 2,
+        lastOpId: opId
+    });
+    const landed = await readDoc();
+    given('a real write landed at revision 2', landed.revision === 2, String(landed.revision));
+
+    const replay = await conflictOf(ops.update({
+        'days.2026-08-13.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'd_a',
+        protocol: 1,
+        revision: 2,
+        lastOpId: opId
+    }));
+    check('replaying it is still answered as success', replay === null,
+        replay ? `${replay.code}: ${replay.message}` : 'accepted');
+    const twice = await readDoc();
+    check('and the revision did not move for the replay', twice.revision === 2,
+        String(twice.revision));
+}
+
 await env.cleanup();
 report();

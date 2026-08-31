@@ -10,9 +10,12 @@
 // without a home indicator, in portrait and landscape, and at twice the text size.
 //
 // A word on what this is not. Playwright drives a desktop Chromium with a phone-sized
-// viewport. That is the right tool for layout arithmetic and it is NOT an iPhone: Safari's
-// dynamic toolbars, its rubber-band scrolling and its own idea of a safe area are not
-// emulated here, and nothing in this file should be read as coverage of a real device.
+// viewport. That is the right tool for layout arithmetic and it is NOT an iPhone: WebKit's
+// dynamic toolbars, its rubber-band scrolling, its own idea of a safe area and iOS Dynamic
+// Type are not emulated here, and nothing in this file should be read as coverage of a
+// real device. The 200% pass below forces every computed font-size to twice its value,
+// which genuinely changes what is rendered and is genuinely not Dynamic Type. See
+// docs/iphone-acceptance.md, which lists what each suite in this repository runs on.
 
 import { serve } from './serve.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
@@ -422,20 +425,73 @@ for (const width of WIDTHS) {
 }
 
 // ---------------------------------------------------------------- text at 200%
+//
+// WHAT THIS DOES, AND WHAT IT IS NOT.
+//
+// It used to set document.documentElement.style.fontSize = '32px' and call that 200%.
+// Measured before and after that line, on this app:
+//
+//   day header 17px -> 17px      tab 14px -> 14px
+//   button     14px -> 14px      body 17px -> 17px
+//
+// Nothing moved. This stylesheet is written in fixed pixels - deliberately, and there are
+// seven `rem` in the whole file - so the root font size is a number almost nothing reads.
+// The suite was therefore drawing the app at its ordinary size and reporting it as
+// doubled text: not a weak test, a test of nothing, printing four green lines a person
+// would have relied on.
+//
+// So the size is forced where the app actually reads it. Every element's COMPUTED
+// font-size is read and set back at twice the value, which changes what is rendered - and
+// the suite asserts that it changed, because a scaling mechanism that silently stops
+// working is how the last one survived.
+//
+// It is still not iOS Dynamic Type. Chromium cannot model that: AX2 changes text metrics
+// through the system, interacts with -apple-system font faces and with Safari's own
+// minimum sizes, and reflows some controls the way no stylesheet here can be made to.
+// What this proves is that the layout survives text at twice the size. Dynamic Type at
+// AX2 on a real phone stays a physical check, and docs/iphone-acceptance.md says so.
+const doubleEveryFontSize = page => page.evaluate(() => {
+    const sizes = new Map();
+    document.querySelectorAll('*').forEach(node => {
+        const px = parseFloat(getComputedStyle(node).fontSize);
+        if (Number.isFinite(px)) sizes.set(node, px);
+    });
+    sizes.forEach((px, node) => { node.style.fontSize = (px * 2) + 'px'; });
+    return sizes.size;
+});
+
+const sampleSizes = page => page.evaluate(() => {
+    const at = selector => {
+        const node = document.querySelector(selector);
+        return node ? parseFloat(getComputedStyle(node).fontSize) : null;
+    };
+    return { header: at('.day-header'), tab: at('.tab'), body: at('body'),
+        button: at('.day-actions button') };
+});
 
 for (const width of WIDTHS) {
     const label = `${width}px at 200% text`;
     suite(label);
 
     const page = await open({ width, height: HEIGHTS[width] });
-    await page.evaluate(() => { document.documentElement.style.fontSize = '32px'; });
+    const before = await sampleSizes(page);
+    const touched = await doubleEveryFontSize(page);
     await page.waitForTimeout(300);
+    const after = await sampleSizes(page);
+
+    // THE MECHANISM ITSELF, asserted first. Everything below is worthless if the text did
+    // not actually grow, and that is exactly the state this suite was in.
+    const grew = Object.keys(before).filter(key =>
+        before[key] !== null && after[key] !== null && after[key] >= before[key] * 2 - 0.5);
+    check(`${label}: the text really is twice the size, measured`,
+        touched > 0 && grew.length === Object.keys(before).filter(k => before[k] !== null).length,
+        JSON.stringify({ touched, before, after }));
 
     const views = await page.evaluate(async () => {
         const out = {};
         for (const view of ['day', 'week', 'roster', 'reports']) {
             showView(view);
-            await new Promise(done => setTimeout(done, 200));
+            await new Promise(done => setTimeout(done, 250));
             out[view] = {
                 doc: document.documentElement.scrollWidth,
                 inner: document.documentElement.clientWidth
@@ -452,6 +508,66 @@ for (const width of WIDTHS) {
     const date = await page.evaluate(() =>
         document.querySelector('.day-header').textContent.includes('12/08/2026'));
     check(`${label}: the date is still on the header`, date === true);
+
+    // NOTHING ESSENTIAL DISAPPEARS. Text at twice the size that pushes a control out of
+    // the layout, or clips a number to nothing, is the failure this is for - a screen
+    // that fits across while having lost the button is not a screen that survived.
+    const alive = await page.evaluate(() => {
+        const shown = selector => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const box = node.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility !== 'hidden';
+        };
+        return {
+            tabs: [...document.querySelectorAll('.tab')].filter(node => {
+                const box = node.getBoundingClientRect();
+                return box.width > 0 && box.height > 0;
+            }).length,
+            dock: shown('.day-actions'),
+            whatsapp: shown('.day-actions .btn-success'),
+            settings: shown('#settingsBtn') !== false,
+            rows: document.querySelectorAll('.worker-row, .wrow').length
+        };
+    });
+    check(`${label}: every tab is still on the bar`, alive.tabs >= 4, JSON.stringify(alive));
+    check(`${label}: the day's dock and its send button are still there`,
+        alive.dock === true && alive.whatsapp === true, JSON.stringify(alive));
+    check(`${label}: and the crew is still listed`, alive.rows > 0, JSON.stringify(alive));
+
+    // The bottom bars still clear each other, which is what decides whether the last
+    // worker in the list can be reached at all.
+    const bars = await page.evaluate(() => {
+        const dock = document.querySelector('.day-actions');
+        const nav = document.querySelector('.tabbar');
+        if (!dock || !nav) return null;
+        return {
+            dock: Math.round(dock.getBoundingClientRect().bottom),
+            nav: Math.round(nav.getBoundingClientRect().top),
+            viewport: Math.round(window.innerHeight)
+        };
+    });
+    check(`${label}: the dock still sits above the nav bar rather than under it`,
+        bars === null || bars.dock <= bars.nav + 2, JSON.stringify(bars));
+
+    // AND A SHEET, which is the control most likely to be pushed off a short screen.
+    const sheet = await page.evaluate(async () => {
+        openAssignSheet('w_01');
+        await new Promise(done => setTimeout(done, 350));
+        const content = document.querySelector('#assignSheet .sheet-content');
+        const foot = document.querySelector('#assignSheet .sheet-foot');
+        if (!content || !foot) return null;
+        const box = content.getBoundingClientRect();
+        const footBox = foot.getBoundingClientRect();
+        return {
+            shown: box.width > 0 && box.height > 0,
+            footInside: footBox.bottom <= window.innerHeight + 2,
+            height: Math.round(box.height),
+            viewport: Math.round(window.innerHeight)
+        };
+    });
+    check(`${label}: the assign sheet opens and its buttons are on the screen`,
+        sheet !== null && sheet.shown && sheet.footInside, JSON.stringify(sheet));
 
     await page.context().close();
 }
@@ -1244,6 +1360,158 @@ for (const width of [320, 390]) {
     check('and a second tap folds it back', await page.evaluate(() =>
         document.querySelector('.bulk-chip').offsetParent === null &&
         document.querySelector('.bulk-toggle').getAttribute('aria-expanded') === 'false'));
+
+    await page.context().close();
+}
+
+
+// ---------------------------------------------------------------- a name that ate the week
+//
+// The 44x44 floor holds for an ordinary roster. Reproduced with a real one:
+//
+//   viewport 320   scroll box 296   name column 305   day cells visible 0 of 7
+//   375 / 390 / 430                                            2 / 2 / 3 of 7
+//
+// with a name a crew on this site actually has. The week table is laid out `auto` so the
+// day columns can hold their floor, and auto layout sizes a column to its widest content
+// - so one long name took the pinned first column wider than the box it lives in, and the
+// grid had nothing left to show. overflow and text-overflow on the cell do not help:
+// they clip what is drawn, after the column has been made wide enough not to clip.
+//
+// Both scripts, because this crew writes in both.
+const LONG_NAMES = [
+    ['Hebrew', 'מוחמד עבד אל רחמן מחאמיד שם ארוך מאוד'],
+    ['Arabic', 'محمد عبد الرحمن محاميد اسم طويل جدا']
+];
+
+for (const [script, longName] of LONG_NAMES) {
+    for (const width of WIDTHS) {
+        suite(`${width}px: the week with a very long ${script} name`);
+
+        const page = await open({ width, height: HEIGHTS[width] });
+        await setInset(page, 34);
+        await page.evaluate(name => {
+            State.schedule.workers[0].name = name;
+            State.schedule.workers[1].name = name + ' 2';
+            State.save();
+        }, longName);
+        await page.click('#tab-week');
+        await page.waitForTimeout(400);
+
+        const box = await page.evaluate(() => {
+            const wrap = document.querySelector('#weekView .table-scroll');
+            const edge = wrap.getBoundingClientRect();
+            const nameCell = document.querySelector('.week-table tbody .name-cell');
+            const cells = [...document.querySelectorAll('.week-table tbody tr:first-child .week-cell')];
+            // A day cell is VISIBLE when the whole of it is inside the box - a 44px target
+            // half under the pinned names is not a target.
+            const visible = cells.filter(cell => {
+                const at = cell.getBoundingClientRect();
+                return at.width >= 44 && at.height >= 44
+                    && at.left >= edge.left - 0.5 && at.right <= edge.right + 0.5;
+            });
+            return {
+                boxWidth: Math.round(edge.width),
+                nameWidth: Math.round(nameCell.getBoundingClientRect().width),
+                cells: cells.length,
+                visible: visible.length,
+                narrowest: Math.round(Math.min(...cells.map(c => c.getBoundingClientRect().width))),
+                title: nameCell.querySelector('.name-clip').getAttribute('title'),
+                label: nameCell.getAttribute('aria-label'),
+                page: document.documentElement.scrollWidth,
+                client: document.documentElement.clientWidth
+            };
+        });
+
+        check(`${width}px: the name column does not take the whole box`,
+            box.nameWidth < box.boxWidth / 2, JSON.stringify(box));
+        check(`${width}px: at least one whole day is on the screen before any scrolling`,
+            box.visible >= 1, JSON.stringify(box));
+        check(`${width}px: and every day is still a 44px target`,
+            box.narrowest >= 44 && box.cells === 7, JSON.stringify(box));
+        check(`${width}px: the page itself still does not scroll sideways`,
+            box.page <= box.client + 1, JSON.stringify(box));
+        check(`${width}px: the whole name is still there for a reader`,
+            box.title === longName && box.label === longName,
+            JSON.stringify({ title: box.title, label: box.label }));
+
+        // AND SCROLLING REACHES ALL SEVEN. A day that cannot be reached at all is a day
+        // that is not in the week, however wide its cell is.
+        const reached = await page.evaluate(async () => {
+            const wrap = document.querySelector('#weekView .table-scroll');
+            const cells = [...document.querySelectorAll('.week-table tbody tr:first-child .week-cell')];
+            const seen = new Set();
+            const look = () => {
+                const edge = wrap.getBoundingClientRect();
+                cells.forEach((cell, at) => {
+                    const rect = cell.getBoundingClientRect();
+                    if (rect.left >= edge.left - 0.5 && rect.right <= edge.right + 0.5) seen.add(at);
+                });
+            };
+            look();
+            // RTL scrolls negative in this engine; push to both ends and look on the way.
+            for (const to of [-wrap.scrollWidth, wrap.scrollWidth, 0]) {
+                wrap.scrollLeft = to;
+                await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+                look();
+            }
+            return { seen: seen.size, of: cells.length };
+        });
+        check(`${width}px: scrolling reaches every one of the seven days`,
+            reached.seen === reached.of, JSON.stringify(reached));
+
+        // The name still belongs to its row, which is the whole reason the column is
+        // pinned in the first place.
+        const rowed = await page.evaluate(() => {
+            const row = document.querySelector('.week-table tbody tr');
+            const nameCell = row.querySelector('.name-cell');
+            const dayCell = row.querySelector('.week-cell');
+            const a = nameCell.getBoundingClientRect();
+            const b = dayCell.getBoundingClientRect();
+            return { sameRow: Math.abs(a.top - b.top) < 2, parent: nameCell.parentElement === row };
+        });
+        check(`${width}px: the name is still on the same row as its days`,
+            rowed.sameRow && rowed.parent, JSON.stringify(rowed));
+
+        await page.context().close();
+    }
+}
+
+// ---------------------------------------------------------------- long names, big text
+{
+    suite('320px: a long name at doubled text still leaves a day on the screen');
+
+    const page = await open({ width: 320, height: 568 });
+    await setInset(page, 34);
+    await page.evaluate(() => {
+        State.schedule.workers.forEach((worker, at) => {
+            worker.name = 'מוחמד עבד אל רחמן מחאמיד ' + (at + 1);
+        });
+        State.save();
+        document.documentElement.style.fontSize = '32px';
+    });
+    await page.click('#tab-week');
+    await page.waitForTimeout(400);
+
+    const box = await page.evaluate(() => {
+        const wrap = document.querySelector('#weekView .table-scroll');
+        const edge = wrap.getBoundingClientRect();
+        const cells = [...document.querySelectorAll('.week-table tbody tr:first-child .week-cell')];
+        const visible = cells.filter(cell => {
+            const at = cell.getBoundingClientRect();
+            return at.width >= 44 && at.left >= edge.left - 0.5 && at.right <= edge.right + 0.5;
+        });
+        return {
+            rows: document.querySelectorAll('.week-table tbody tr').length,
+            visible: visible.length,
+            page: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth
+        };
+    });
+    check('the whole crew is still drawn', box.rows === CREW, JSON.stringify(box));
+    check('a day is still reachable without scrolling', box.visible >= 1, JSON.stringify(box));
+    check('and the page still does not scroll sideways',
+        box.page <= box.client + 1, JSON.stringify(box));
 
     await page.context().close();
 }

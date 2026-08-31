@@ -1,13 +1,13 @@
 # The suites
 
-Forty-two suites, thirty of which need no browser at all. From a clean clone:
+Forty-four suites, thirty-one of which need no browser at all. From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
     npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover,
                             #   swrestart, swidentity
     npm run test:release    # the RELEASE gate: test:all plus sendclaim and the emulator suites
-    npm run test:emulator   # rules, the production adapter's CAS, and the rollout (needs Java)
+    npm run test:emulator   # rules, the adapter's CAS, the rollout, the cutover (needs Java)
 
 `npm test` and `npm run test:all` are DEVELOPMENT gates. Neither one is permission to
 ship, and a green run of either must never be reported as a release gate.
@@ -47,20 +47,20 @@ test broke, not the app — fix the setup before reading anything into the run.
 
 MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no other:
 
-    npm test           30 suites   3290/3290
-    npm run test:all   + 8 suites  + 1688   (smoke 1029, print 65, mobile 427,
+    npm test           31 suites   3320/3320
+    npm run test:all   + 8 suites  + 1772   (smoke 1030, print 65, mobile 510,
                                              update 30, recovery-browser 25,
                                              handover 26, swrestart 31, swidentity 55)
-    test:release       + 4 suites  + 128    (sendclaim 43, rules 49,
-                                             cas-emulator 19, rollout 17)
+    test:release       + 5 suites  + 163    (sendclaim 43, rules 56, cas-emulator 24,
+                                             rollout 17, bootstrap 23)
     ------------------------------------------------------------------
-    the whole gate     42 suites   5106/5106
+    the whole gate     44 suites   5255/5255
 
-Those are THIS branch's numbers, and this branch is not main: it is the one with both
-ledger gates open. `claude/farkad-v87-clean-repair` runs the same 42 suites with them
-shut and comes out at 3235 and 5051 — the difference is the D-suites that only have
-something to measure once the writer is open, plus the two checks that are inverted here
-on purpose (`tests/data.test.mjs` and `tests/smoke.mjs`, both marked in place).
+Those are re-measured on THIS branch, and this branch is not main: it is the one with
+both ledger gates open. `claude/farkad-v87-clean-repair` runs the same suites with them
+shut and comes out lower — the difference is the D- and L-suites, which have nothing to
+measure until the writer is open, plus the two checks that are inverted here on purpose
+(`tests/data.test.mjs` and `tests/smoke.mjs`, both marked in place).
 
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers
@@ -95,6 +95,8 @@ several waves of tests and is stale.)
 | handover | `handover.test.mjs` | The v86 -> v87 handover between two REAL trees - a released commit and the working tree - one origin serving whichever it is pointed at. Every assertion is a SHA-256 of bytes a browser actually holds or an answer from a production function. It does not run while both trees carry the same build, and says so rather than pretending. |
 | rules | `rules.test.mjs` | The real `firestore.rules` against the Firestore emulator. The web config is public by design, so these rules are the only thing between the schedule and anyone with the URL. Never touches the real project. |
 | cas-emulator | `cas.emulator.test.mjs` | The PRODUCTION adapter's write path against the real emulator, not the harness: a conflict carries the authoritative document, disjoint field edits still merge, a receipt makes a retry idempotent, and the harness and the adapter refuse in the same shape. The client half alone is `cas.test.mjs`; a green harness-only run would prove only that the harness and the client agree with each other. |
+| bootstrap | `bootstrap.emulator.test.mjs` | THE CUTOVER, through the production write path. The real js/sync/sync.js against the real js/sync/firebase-adapter.js against the emulator, asking what `rollout` and `cas.emulator` fall between: the live document is legacy and holds a day another phone corrected, and this phone has an older value for that same day in its outbox. Before it, the queued value won at revision 1 with nothing refused and nothing said. Five scenarios: the reproduction, the bootstrap touching five fields and no other, a disjoint edit still merging, two phones racing to exactly one revision-1 receipt, and process death mid-flight. |
+| status | `status.test.mjs` | What the line is ALLOWED to say. Asserts transitions rather than final states, because a claim made and withdrawn is invisible to a final-state check and that claim is the defect: it wraps setStatus and records what was asked for, what was said, and what was owed at that moment. A queue larger than one write, a restore the cloud will not take, a record Recovery could not read, and a close-and-reopen. |
 | rollout | `rollout.test.mjs` | Publishing the rules, from a GENUINE legacy document — roster, days and an advance, no `protocol`, no `revision`, no receipt. The first protocol write preserves every legacy byte; a bootstrap without its receipt is refused; two phones racing produce exactly one bootstrap and the loser rebases; the exception is one write wide; an un-updated phone works before cutover and is refused after; and a missing document is a different road from a legacy one. |
 | ledger-ingress | `ledger.ingress.test.mjs` | Thirteen shapes of malformed ledger data through every door — boot, load, cloud snapshot, restore, JSON import, raw recovery, migration, full replacement. Each is named by the check that catches it, held aside rather than folded, never normalised or coerced to zero; the record still opens, the bytes are kept, the person is told, writes are blocked, and the rescue export still carries the bytes. |
 | repayment | `repayment.test.mjs` | The advance that outlives its fortnight: the carry, dated cash repayments, the two labels that never swap, the reversal that compensates instead of deleting, the surplus that is named rather than clamped, and the closure that is identified by the period it closes. |

@@ -91,9 +91,9 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
     npm run test:emulator   # rules, the production adapter's CAS, the rollout (needs Java)
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). Measured at this commit, from one clean
-detached worktree and copied from no other: `npm test` is **3290/3290 across 30 suites**,
+detached worktree and copied from no other: `npm test` is **3320/3320 across 31 suites**,
 and `npm run test:release` — which adds the eight browser suites, `sendclaim` and the
-three emulator suites — is **5106/5106 across 42 suites**, and is the gate a build has to
+four emulator suites — is **5255/5255 across 44 suites**, and is the gate a build has to
 pass whole.
 
 **THIS BRANCH IS NOT MAIN.** `claude/farkad-ledger-enable-ready` is the build with
@@ -102,7 +102,10 @@ be run end to end before anybody commits to it. Merging it is the decision iron 
 reserves for a person, and it is only theirs to make once all three phones are known to
 be past v79 AND they have read every row of `planAdvanceCarry`. It carries its own build
 stamp — v89 — because it is not the same bytes as v88 and two builds sharing a cache name
-serve a mixture. Anything less than every check passing is a stop, not a warning. `npm test`
+serve a mixture. The counts above are re-measured on THIS branch; the core branch runs
+the same suites with the gates shut and comes out lower.
+
+Anything less than every check passing is a stop, not a warning. `npm test`
 and `npm run test:release` are different gates and are reported separately; neither is
 wrapped in anything that turns a nonzero exit into a success. A count carried over from
 another commit is worse than no count: re-measure, or say you did not.

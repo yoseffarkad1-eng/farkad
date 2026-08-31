@@ -5050,12 +5050,13 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
           if (node.getAttribute('aria-hidden') === 'true') return;
           const box = node.getBoundingClientRect();
           if (box.width === 0 || box.height === 0) return;
-          // The week grid is the one deliberate exception, and only across: seven days
-          // plus the names have to fit the narrowest phone, so a column is 42px rather
-          // than 44. It is full height, and a mis-tap there opens the wrong day's picker
-          // - which names the day before anything is recorded.
-          const floor = node.classList.contains('week-cell') ? 40 : 44;
-          if (box.width >= floor && box.height >= 44) return;
+          // NO EXCEPTION. This carried one for .week-cell - 40px across rather than 44 -
+          // on the argument that seven days plus the names have to fit the narrowest
+          // phone. They do not have to: what does not fit on the screen fits in a box
+          // that scrolls, and the cells are 44 everywhere now. An exemption left in a
+          // floor is a list of the controls that were allowed to be too small, written
+          // in the place a reader looks for the guarantee.
+          if (box.width >= 44 && box.height >= 44) return;
           out.push({
             cls: String(node.className).slice(0, 30),
             text: (node.textContent || node.value || '').trim().slice(0, 14),
@@ -5857,8 +5858,17 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     FarkadSync.receive({ days: { '2026-08-12': { actual: {} } }, updatedAt: '2026-08-12T10:00:00Z' });
     return { status: FarkadSync.status, queued: FarkadSync.pendingPaths() };
   });
+  // NOT A FAILURE, and not finished either - which is the whole of what changed here.
+  //
+  // This read `fresh.status === 'synced'` and it was the reproduction of the defect it
+  // sat next to: ten roster operations queued and the line saying everything was on the
+  // other two phones. The check's point was that an unfinished document must not lock the
+  // status on "sync error" while writes are in fact landing, and that point is intact -
+  // 'sending' is not an error. It is the state the line had no word for.
   check('a server document with no roster yet is not treated as a failure',
-    fresh.status === 'synced', JSON.stringify(fresh));
+    fresh.status !== 'error' && fresh.status !== 'contested', JSON.stringify(fresh));
+  check('and it does not claim to be finished with ten roster paths still queued',
+    fresh.status === 'sending' && fresh.queued.length > 0, JSON.stringify(fresh));
   check('and this device seeds it with the roster it has',
     fresh.queued.includes('workers'), JSON.stringify(fresh));
 
@@ -7091,8 +7101,18 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
 // ---------------------------------------------------------------- install prompt
 {
-  // An iPhone in Safari: no install event exists, and the storage is wiped after a week
-  // unless the site is on the home screen - so the instructions have to be spelled out.
+  // CHROMIUM WEARING AN IPHONE'S USER-AGENT STRING. Not Safari, and this comment used to
+  // say it was.
+  //
+  // What is actually being tested is the app's own branch: it reads the user-agent, finds
+  // no beforeinstallprompt event, and draws the by-hand instructions instead. That branch
+  // is real code and this proves it runs. What it does not prove is anything about
+  // WebKit - not the install flow, not the storage eviction the banner is warning about,
+  // not the share sheet the instructions point at. A string is not a browser.
+  //
+  // The behaviour behind it is real and is why the banner exists: an iPhone wipes a
+  // site's storage after a week unless it is on the home screen. That fact is from
+  // Apple's documentation, not from this run.
   const page = await open({
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
   });

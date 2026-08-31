@@ -13,7 +13,7 @@
 // a browser charges them: two per UTF-16 unit, key as well as value. Nothing estimates,
 // and nothing reads the app's source to decide what the app should say.
 
-import { makeDevice, makeCloud, settle } from './harness.mjs';
+import { makeDevice, makeCloud, settle, settleUntil } from './harness.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
 const TICK = 6;
@@ -127,7 +127,14 @@ let seasonDump = null;
     site.Sync.pushDelayMs = TICK;
     site.Sync.stuckMs = 200;
     site.Sync.connect(cloud.adapter);
-    await settle(TICK * 80);
+    // WAITED FOR, not counted out in ticks. `settle(TICK * 80)` was a guess at how long
+    // two writes of three hundred paths take, and it was a guess that had been right for
+    // a while - so when the cutover write joined the sequence the suite went red one run
+    // in three, on timing rather than on behaviour. The condition is what the checks are
+    // about, so it is the condition that is waited for.
+    await settleUntil(() => cloud.writes.filter(write => write.kind === 'update').length >= 2
+        || site.Sync.pendingCount() === 0, 8000, 10);
+    await settle(TICK * 20);
 
     const synced = site.dump();
     // Two FULL writes, whatever a full write holds. It was spelled 600 here, which was
@@ -135,10 +142,19 @@ let seasonDump = null;
     // the ordering envelope, and a hard-coded 600 then measured arithmetic rather than
     // behaviour. Read from the app's own constant so it cannot drift again.
     const sentInTwo = site.global('MAX_PATHS_PER_WRITE') * 2;
+    // UPDATES, counted as updates. `cloud.writes.length === 2` was the same statement
+    // while an update was the only kind of write that ever reached this document; it is
+    // not any more. A device that has never been told a revision now sends a protocol-only
+    // bootstrap first - no days, no roster, nothing a person recorded - and that is a real
+    // write to the document and belongs in the log. Counting every kind here would have
+    // this check fail over the cutover write while saying "the third update landed", which
+    // is a sentence about a thing that did not happen.
+    const updates = cloud.writes.filter(write => write.kind === 'update');
     check('two writes landed and the third did not, so the rest is still owed',
-        cloud.writes.length === 2 && site.Sync.pendingCount() === SEASON_EDITS - sentInTwo,
-        `${cloud.writes.length} writes, ${site.Sync.pendingCount()} pending, `
-        + `${sentInTwo} paths in two writes`);
+        updates.length === 2 && site.Sync.pendingCount() === SEASON_EDITS - sentInTwo,
+        `${updates.length} updates of ${cloud.writes.length} writes `
+        + `(${cloud.writes.map(w => w.kind).join(',')}), `
+        + `${site.Sync.pendingCount()} pending, ${sentInTwo} paths in two writes`);
     check('what the cloud has is off the disk, and took its acknowledgements with it',
         opKeys(synced).length === SEASON_EDITS - sentInTwo
         && ackKeys(synced).length === 0 && beatKeys(synced).length === 0,

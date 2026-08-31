@@ -139,6 +139,32 @@ service cloud.firestore {
     // The receipt is also what makes a retry safe. A request that may still land can be
     // sent again, because the second attempt finds its own receipt and stops - which is
     // the difference between "sent twice" and "acknowledged once".
+    // THE OTHER HALF OF THE PAIR, read from the receipt's side.
+    //
+    // carriesReceipt() asks, of a schedule write, "is the receipt there afterwards".
+    // This asks, of a receipt write, "is the schedule pointing at me afterwards" - the
+    // same single commit, checked from both ends, so neither half can land without the
+    // other whichever one the client sends first.
+    //
+    // Three things, and each of them is load-bearing. The schedule must exist, or this is
+    // a receipt for a document that is not there. Its lastOpId must be THIS operation, or
+    // the receipt is naming somebody else's write. And its revision must equal the
+    // revision the receipt claims, or a retry that finds this receipt is told the
+    // operation landed at a revision it did not.
+    // NOT exists(). That reads the state BEFORE this commit, and the commonest legitimate
+    // pair is the very first write of a document: the schedule is created and its receipt
+    // beside it, in one transaction, and before that transaction there is no schedule at
+    // all. An exists() here refused every create - the first write of every new project.
+    //
+    // getAfter alone is the whole test. If the schedule does not exist afterwards there is
+    // nothing to read a field from, the rule errors, and the write is denied - which is
+    // exactly the answer an orphan receipt deserves.
+    function receiptMatchesSchedule(docId, opId) {
+      let after = getAfter(/databases/$(database)/documents/schedules/$(docId)).data;
+      return after.lastOpId == opId
+        && after.revision == request.resource.data.revision;
+    }
+
     function carriesReceipt(docId) {
       return request.resource.data.lastOpId is string
         && request.resource.data.lastOpId.size() > 0
@@ -178,11 +204,30 @@ service cloud.firestore {
       // Immutable on purpose: a receipt that could be changed or removed is a receipt that
       // cannot answer "did my operation already land", which is the one question a retry
       // has to ask. Readable, because that is how the retry asks it.
+      //
+      // AND NEVER ALONE. This rule used to require only that the receipt name an integer
+      // revision of one or more, which let anyone on the list create
+      //
+      //   schedules/current/receipts/op_never_applied   { revision: 999 }
+      //
+      // without a schedule write anywhere near it. The client treats an existing receipt
+      // as proof that its operation landed - that is the whole point of a receipt, and it
+      // is what makes a retry safe - so a receipt for an operation that was never applied
+      // is a lie the client is built to believe. It would find it, stop, acknowledge, and
+      // prune the queue: an evening pruned off the phone on the strength of a record that
+      // nothing wrote.
+      //
+      // So a receipt is only creatable together with the schedule write it names, and
+      // getAfter is what says "together". After this commit the schedule must exist, must
+      // be pointing at THIS operation, and must be at exactly the revision this receipt
+      // claims. There is no order of writes that satisfies all three except the one that
+      // applies the operation - which is what the receipt was always supposed to mean.
       match /receipts/{opId} {
         allow read: if allowed();
         allow create: if allowed()
           && request.resource.data.revision is int
-          && request.resource.data.revision >= 1;
+          && request.resource.data.revision >= 1
+          && receiptMatchesSchedule(docId, opId);
         allow update, delete: if false;
       }
     }

@@ -330,8 +330,46 @@ function storedScheduleProblems(raw) {
 // writing until a person is told - which is what iron law 10 requires of anything
 // unreadable, and the ledger is the one record in this app that is never allowed to lose
 // an entry at all.
+// THE CONTAINER ITSELF, which nothing checked.
+//
+// Every check below this one is about an ENTRY inside the map. There has to be a map for
+// that to mean anything, and there is not always one. Reproduced: `ledger` arriving as a
+// string, as an array, or with `advances` as either - at which point normaliseSchedule
+// read `typeof raw.ledger === 'object'`, fell back to {} for anything else, and produced
+// a schedule with an EMPTY history. The first ordinary save then wrote that empty history
+// over the only copy of somebody's advances, with the load reporting clean and nothing
+// blocked.
+//
+// The entry checks could not catch it: there were no entries to check. A container this
+// build cannot read is not an absent container, and the difference is a man's money.
+//
+// Returns a reason, or null. English, like every other diagnostic in this file - the
+// screen says it in Hebrew in its own words.
+function ledgerContainerProblem(raw) {
+    const ledger = raw && raw.ledger;
+    // Absent is not malformed. Every device that has never recorded an advance has none,
+    // and a build that predates the ledger writes none.
+    if (ledger === undefined || ledger === null) return null;
+    if (!isPlainObject(ledger)) return 'the advances history is not a record';
+    if (ledger.advances !== undefined && ledger.advances !== null
+        && !isPlainObject(ledger.advances)) {
+        return 'the entries of the advances history are not a record';
+    }
+    // An array here would read as a record with numeric keys, which is how a list of
+    // entries would arrive from a build that stored them differently - readable-looking
+    // and not this build's shape.
+    if (ledger.unreadable !== undefined && ledger.unreadable !== null
+        && !isPlainObject(ledger.unreadable)) {
+        return 'the held-aside part of the advances history is not a record';
+    }
+    return null;
+}
+
 function ledgerProblems(raw) {
     if (raw.ledger === undefined || raw.ledger === null) return [];
+    if (ledgerContainerProblem(raw) !== null) {
+        return ['היסטוריית המקדמות ברישום אינה תקינה.'];
+    }
     if (!isPlainObject(raw.ledger)) return ['היסטוריית המקדמות ברישום אינה תקינה.'];
 
     const entries = raw.ledger.advances;
@@ -371,6 +409,24 @@ function fullScheduleProblems(raw) {
     };
     dayProblems(raw, known).forEach(problem => problems.push(problem));
     advanceProblems(raw, known).forEach(problem => problems.push(problem));
+
+    // A REPLACEMENT WHOSE FINANCIAL HISTORY CANNOT BE READ IS NOT ACCEPTED - and this is
+    // the one gate where refusing is right.
+    //
+    // storedScheduleProblems deliberately does not refuse such a record: the rescue file's
+    // whole purpose is to open what can be opened and name what cannot, so a document that
+    // will not open is a wall where the last door should be. That reasoning is about
+    // READING.
+    //
+    // This is the other thing. A replacement is a deliberate act that overwrites the
+    // record on every phone - a restore, an imported backup, the v71 upgrade - and
+    // accepting one whose ledger container is a string or a list would propagate an
+    // unreadable financial history to all three of them, from a button whose promise is
+    // the opposite. An unreadable ENTRY is carried through and held aside; an unreadable
+    // container has nothing to hold entries in, and the honest answer at this door is no.
+    if (typeof ledgerContainerProblem === 'function' && ledgerContainerProblem(raw) !== null) {
+        problems.push('היסטוריית המקדמות בקובץ אינה בצורה שאפשר לקרוא.');
+    }
     return problems;
 }
 
