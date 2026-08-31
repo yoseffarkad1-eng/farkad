@@ -173,4 +173,63 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
             .find(row => row.workerId === 'w_01').advances === 0);
 }
 
+// ------------------------------------------------------------- what the sheet says
+{
+    suite('the three columns a bookkeeper adds up, with the carry on');
+
+    const vm = (await import('node:vm')).default;
+    const { readFileSync } = await import('node:fs');
+
+    function sheetFor(device, range) {
+        const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
+        run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        run(`REPORT_RANGE.from = '${range.from}'; REPORT_RANGE.to = '${range.to}';`
+            + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+        const rows = run('payrollSheetRows()');
+        const head = rows[0];
+        const row = rows.find(line => line[0] === 'דוד');
+        return {
+            gross: row[head.indexOf('נצבר')],
+            advances: row[head.indexOf('מקדמות')],
+            net: row[head.indexOf('לתשלום')],
+            note: row[head.indexOf('הערה')]
+        };
+    }
+
+    // The account the 5,000 was taken in. He earned 3,200, so 3,200 is what can come off
+    // it - and the reconciliation the sheet states in its own headings has to hold:
+    // נצבר plus מקדמות equals לתשלום, on the row somebody is paid from.
+    const one = crew({ deviceId: 'd_sheet_a', flags: { carryAdvances: true } });
+    work(one, A_DAYS);
+    work(one, B_DAYS);
+    one.State.commit(one.call('addAdvance', one.State.schedule,
+        'w_01', '2026-08-10', 5000, ''));
+    const a = sheetFor(one, A);
+    same('account A: 3,200 earned, 3,200 deducted, nothing to pay',
+        [a.gross, a.advances, a.net], [3200, -3200, 0]);
+    check('and the sheet says what did not fit, rather than leaving it unsaid',
+        String(a.note).indexOf('1800') !== -1 || String(a.note).indexOf('1,800') !== -1,
+        JSON.stringify(a.note));
+
+    const two = crew({ deviceId: 'd_sheet_b', flags: { carryAdvances: true } });
+    work(two, A_DAYS);
+    work(two, B_DAYS);
+    two.State.commit(two.call('addAdvance', two.State.schedule,
+        'w_01', '2026-08-10', 5000, ''));
+    const b = sheetFor(two, B);
+    same('account B: 2,800 earned, the 1,800 it inherited deducted, 1,000 to pay',
+        [b.gross, b.advances, b.net], [2800, -1800, 1000]);
+
+    // And with the switch off, which is how it ships, nothing about the sheet moves.
+    const off = crew({ deviceId: 'd_sheet_off' });
+    work(off, A_DAYS);
+    work(off, B_DAYS);
+    off.State.commit(off.call('addAdvance', off.State.schedule,
+        'w_01', '2026-08-10', 5000, ''));
+    same('with the carry off, account B is the sheet this build ships today',
+        [sheetFor(off, B).gross, sheetFor(off, B).advances, sheetFor(off, B).net],
+        [2800, 0, 2800]);
+}
+
 report();
