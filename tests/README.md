@@ -47,14 +47,14 @@ test broke, not the app — fix the setup before reading anything into the run.
 
 MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no other:
 
-    npm test           31 suites   3320/3320
+    npm test           31 suites   3326/3326
     npm run test:all   + 8 suites  + 1772   (smoke 1030, print 65, mobile 510,
                                              update 30, recovery-browser 25,
                                              handover 26, swrestart 31, swidentity 55)
     test:release       + 5 suites  + 163    (sendclaim 43, rules 56, cas-emulator 24,
                                              rollout 17, bootstrap 23)
     ------------------------------------------------------------------
-    the whole gate     44 suites   5255/5255
+    the whole gate     44 suites   5261/5261
 
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers
