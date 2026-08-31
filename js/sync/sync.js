@@ -2404,10 +2404,39 @@ const FarkadSync = {
         if (this.status === 'blocked') this.setStatus('off');
     },
 
+    // WHAT 'synced' ACTUALLY CLAIMS, and why it is checked at one door.
+    //
+    // It says: everything this person recorded is on the other two phones. Six callers
+    // could set it, and every one of them was right about its own half - a snapshot
+    // adopted, a batch acknowledged, a restore finished - while being wrong about the
+    // whole. Measured: a device with six roster operations held behind the initial
+    // snapshot barrier sent one safe day patch, acknowledged it, and the line read
+    // "מסונכרן" with six still on the disk. Then back to "מתחבר", then synced again. A
+    // person watching that has been told the opposite of the truth, twice.
+    //
+    // So the claim is tested here rather than at six call sites, and it returns the
+    // status that IS true instead. Nothing about this makes a status stickier: the moment
+    // the queue empties the next setStatus('synced') is allowed through.
+    honestStatusFor(status) {
+        if (status !== 'synced') return status;
+        // A record this device could not read. Nothing may be called finished while the
+        // financial history is uncertain - see js/recovery.js.
+        if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return 'blocked';
+        // A whole-document restore that has not reached the cloud. The most dangerous
+        // thing this app queues, and the one a person is most likely to walk away from.
+        if (this.pendingReplace()) return 'sending';
+        // Anything still owed, whatever went out beside it. A partial send is not a send.
+        if (this.pendingCount() > 0) return 'sending';
+        // And work the ladder is still going back for.
+        if (this._retryTimer) return 'sending';
+        return 'synced';
+    },
+
     setStatus(status, error) {
-        this.status = status;
+        const said = this.honestStatusFor(status);
+        this.status = said;
         this.lastError = error || null;
-        if (status === 'synced') {
+        if (said === 'synced') {
             this.lastSyncedAt = new Date();
         }
         updateSyncNotice();
@@ -2921,6 +2950,12 @@ const FarkadSync = {
                 const acked = this.acknowledge(sent);
                 this._sending = new Map();
                 this._retryAt = 0;
+                // AND THE TIMER WITH IT. _retryAt was reset and the pending timer left
+                // running, so a ladder scheduled before a successful send went on ticking
+                // for work that had already landed - which is harmless on its own and is
+                // not once the status asks whether a retry is outstanding.
+                clearTimeout(this._retryTimer);
+                this._retryTimer = null;
                 this._rebases = 0;
                 this._sendBase = null;
 
@@ -3780,6 +3815,9 @@ const FarkadSync = {
         const landed = Store.setVerified(REPLACE_KEY, JSON.stringify(envelope));
         if (landed) {
             this._replace = envelope;
+            // The most dangerous thing this app queues has just become outstanding, and
+            // the line was still reading "מסונכרן" from before it. See refreshStatus.
+            this.refreshStatus();
             return true;
         }
 
@@ -4708,6 +4746,25 @@ const FarkadSync = {
     scheduleFlush() {
         clearTimeout(this._timer);
         this._timer = setTimeout(() => this.flush(), this.pushDelayMs);
+        // AFTER the flush is scheduled, and that order is deliberate. The line going
+        // honest is worth doing and it is not worth risking the send: anything this throws
+        // - a disk that will not answer, a notice that will not draw - must not be able to
+        // leave the queue with nothing scheduled to carry it.
+        //
+        // The window it closes: between an edit being journalled and the flush that takes
+        // it, the status still read "מסונכרן" with the edit sitting on the disk.
+        this.refreshStatus();
+    },
+
+    // Ask the gate again about the status this device is already showing.
+    //
+    // setStatus only tests the claim at the moment it is made, and owed-ness changes
+    // underneath a status that has already been set: an edit is journalled, a restore is
+    // prepared, a record turns out to be unreadable. Cheap enough to call at each of
+    // those - it is once per event, not once per render - and it never promotes anything:
+    // honestStatusFor leaves every status but 'synced' exactly as it found it.
+    refreshStatus() {
+        if (this.status === 'synced') this.setStatus('synced');
     }
 };
 
@@ -4980,6 +5037,11 @@ function updateSyncNotice() {
         claimstuck: 'הרישום שמור במכשיר. השליחה תקועה - סגור את שאר החלונות של האפליקציה, '
             + 'ואם זה נמשך ייצא גיבוי ופתח מחדש.',
         synced: 'מסונכרן בין המכשירים.',
+        // CONNECTED, AND NOT FINISHED. The state between them, which the line had no word
+        // for: everything is on this disk, some of it has gone, and the rest has not. It
+        // is not 'connecting' - the connection is made - and it is emphatically not
+        // 'synced'. The queue count the line already appends says how much.
+        sending: 'מחובר. יש רישומים שעדיין נשלחים.',
         offline: 'אין חיבור - השינויים יישלחו כשהחיבור יחזור.',
         error: 'שגיאת סנכרון - הנתונים שמורים במכשיר הזה.',
         contested: 'הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - '
@@ -4996,7 +5058,7 @@ function updateSyncNotice() {
     // and "worry".
     const offlineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
     const cloudState = FarkadSync.status === 'synced' || FarkadSync.status === 'connecting'
-        || FarkadSync.status === 'error';
+        || FarkadSync.status === 'error' || FarkadSync.status === 'sending';
     const status = offlineNow && cloudState
         ? (FarkadSync.pendingCount() > 0 ? 'offline' : 'offlineClean')
         : FarkadSync.status;
