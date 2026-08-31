@@ -2985,7 +2985,23 @@ const diskDays = device => {
     again.setQuota(null);
     again.Sync.pushDelayMs = TICK;
     again.Sync.connect(cloud.adapter);
-    await settle(TICK * 40);
+    // WAITED FOR, not budgeted for.
+    //
+    // This was `settle(TICK * 40)`, and forty ticks is enough on an idle machine and not
+    // always enough on a loaded one: the restore finishes through a retry with backoff,
+    // and under a full release gate the timers do not get to fire that many times. It
+    // went red once in a clean-worktree run and passed nine times in a row afterwards,
+    // including six concurrent runs - which is the worst kind of red, because it teaches
+    // whoever sees it to press the button again instead of reading it.
+    //
+    // The ceiling is still there and the check still fails if the restore never
+    // finishes; what has gone is the assumption that a fixed number of ticks is a
+    // duration.
+    // Both halves, because the three checks that failed beside this one were the cloud
+    // and the status, and a wait that stops at the local transaction leaves them racing.
+    await settleUntil(() => again.Sync.pendingReplace() === null
+        && again.Sync.pendingPaths().length === 0
+        && again.Sync.status === 'synced', 5000);
 
     check('the restore finishes once there is room',
         again.Sync.pendingReplace() === null,
