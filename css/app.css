@@ -1897,7 +1897,20 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 /* A note about money that is missing from a total has to survive the print stylesheet,
    where every other hint is dropped. */
 .hint-warn { color: var(--warn); font-weight: 600; }
-@media print { .hint-warn { display: block !important; color: #000; } }
+/* Lifted back onto the paper by SPECIFICITY, not by position.
+
+   A warning is not decoration: "* שעות נוספות בלי שכר שעה - לא נכללו בסכום" says a man
+   worked hours this sheet did not pay him for, and it is the one line that stops the
+   total being read as the whole story.
+
+   This read `.hint-warn` and lost. The print block further down hides `.hint` - another
+   single class, also !important, so equal specificity and the later declaration won. The
+   rule written to keep the warning had been losing since the day that one was added, and
+   the failure is silent: the number that needs the warning still prints.
+
+   `.hint.hint-warn` is two classes and wins wherever it sits, so reordering this file
+   cannot quietly take the warning off somebody's pay sheet again. */
+@media print { .hint.hint-warn { display: block !important; color: #000; } }
 .empty-hint { color: var(--ink-3); font-size: 15px; padding: 14px 0; margin: 0; }
 
 @media (max-width: 700px) {
