@@ -345,6 +345,49 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     check('the control is there, on the advance it settles',
         open.reportsView.textContent.indexOf('החזר') !== -1,
         open.reportsView.textContent.slice(0, 300));
+
+    // AND IT IS PRESSED. A control that exists and does nothing is the same to a person
+    // as no control, and worse to whoever reads the test that only looked for it.
+    const press = node => (node.listeners.click || []).forEach(fn => fn({
+        preventDefault() {}, stopPropagation() {}
+    }));
+    const repayButton = open.reportsView.querySelectorAll('button')
+        .find(node => String(node.textContent).indexOf('החזר') !== -1);
+    given('the repayment button is reachable', Boolean(repayButton));
+    press(repayButton);
+
+    const form = open.reportsView.querySelector('.advance-form');
+    given('and it opens a form', Boolean(form), String(form && form.textContent));
+
+    // Prefilled with the whole of what is left, because settling in full is what usually
+    // happens and typing it again is a chance to type it wrong.
+    const amountField = form.querySelectorAll('INPUT')
+        .find(node => node.type === 'text' && node.value !== '');
+    check('the amount is prefilled with what is still owed',
+        amountField && amountField.value === '5000',
+        JSON.stringify(amountField && amountField.value));
+
+    // Half of it, in cash, today - which the form clamps into the current account.
+    amountField.value = '1800';
+    const dateField = form.querySelectorAll('INPUT').find(node => node.type === 'date');
+    dateField.value = '2026-08-18';
+    press(form.querySelectorAll('button').find(node => node.textContent === 'שמור'));
+
+    const entries = open.device.State.schedule.ledger.advances;
+    const repaid = Object.keys(entries).map(id => entries[id])
+        .filter(entry => entry.kind === 'repaid');
+    same('one repayment is recorded, for what was typed, on the day it was typed for',
+        repaid.map(entry => [entry.amount, entry.date]), [[1800, '2026-08-18']]);
+    check('and it reached the disk, not just the screen',
+        JSON.parse(open.device.dump()['scheduleData:v2']).ledger.advances[repaid[0].id]
+            .amount === 1800);
+
+    // The account it lands in deducts less from his wage by exactly what he handed back.
+    const account = open.device.call('advanceAccount', open.device.State.schedule,
+        'w_01', A.from, A.to);
+    same('and the account it lands in stops deducting what he already settled',
+        [account.given, account.repaid, account.deducted, account.carriedOut],
+        [5000, 1800, 3200, 0]);
 }
 
 report();

@@ -688,11 +688,131 @@ function renderAdvanceRow(item) {
 
     const what = el('div', 'wday-what');
     if (item.note) what.appendChild(el('span', 'wday-note', item.note));
+
+    // WHAT IS LEFT ON IT, and the way to settle some of that in cash.
+    //
+    // Both are behind the ledger's writer gate, because a repayment IS a ledger entry -
+    // there is nowhere else to put one. schedule.advances holds a single number per
+    // advance and no room for a second event about it, so a build that recorded a
+    // repayment with the gate shut would be writing something the other two phones
+    // cannot read: money handed back and nowhere on their pay sheets, which is the
+    // failure the gate exists to prevent, pointed the other way.
+    const settled = ledgerWritesEnabled() ? advanceSettled(State.schedule, item.id) : null;
+    if (settled && settled.repaid > 0) {
+        what.appendChild(el('span', 'wday-note',
+            `${moneyText(settled.repaid)} ₪ הוחזרו · נותרו ${moneyText(settled.left)} ₪`));
+    }
+    if (settled && settled.left > 0) {
+        what.appendChild(button('החזר', 'btn-secondary',
+            () => openRepaymentForm(item, settled, row), 'רישום החזר מזומן'));
+    }
+
     what.appendChild(button('✕', 'btn-icon', () => removeAdvanceRow(item), 'מחק מקדמה'));
     row.appendChild(what);
 
     row.appendChild(el('div', 'wday-money', minusAmount(item.amount)));
     return row;
+}
+
+// How much of this advance is still owed, from the ledger's own entries.
+//
+// `amount` is what was handed over and never changes - see foldAdvance. What a person
+// asks on this screen is the other number, and it is the difference.
+function advanceSettled(schedule, advanceId) {
+    const folded = foldLedger(schedule)[String(advanceId)];
+    const given = folded ? Number(folded.amount) || 0
+        : Number(((schedule.advances || {})[advanceId] || {}).amount) || 0;
+    const repaid = folded ? Number(folded.repaid) || 0 : 0;
+    return { given: agora(given), repaid: agora(repaid), left: agora(given - repaid) };
+}
+
+// Cash handed back, recorded against the advance it settles.
+//
+// Deliberately the same shape as the advance form above it, because it is the same act
+// seen from the other side and a person who has used one should not have to learn the
+// other. The two differences are the ones that matter:
+//
+//   the ceiling      a repayment larger than what is left is not a repayment, it is a
+//                    number somebody mistyped - and accepting it would credit a man for
+//                    money the firm never lent him
+//   the account      dated inside the CURRENT account, like an advance, because a
+//                    repayment filed into a fortnight that was printed and paid weeks
+//                    ago moves a number on a sheet somebody was already handed
+function openRepaymentForm(item, settled, row) {
+    const host = row.parentNode;
+    if (!host || host.querySelector('.advance-form')) return;
+
+    const form = el('div', 'advance-form');
+    form.appendChild(el('div', 'advance-form-title',
+        `החזר מקדמה · נותרו ${moneyText(settled.left)} ₪`));
+
+    const field = (labelText, input) => {
+        form.appendChild(el('label', 'field-label', labelText));
+        form.appendChild(input);
+        return input;
+    };
+
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.setAttribute('inputmode', 'decimal');
+    amountInput.dir = 'ltr';
+    // The whole of what is left, because settling in full is what usually happens and
+    // typing it again is a chance to type it wrong.
+    amountInput.value = String(settled.left);
+    field('סכום שהוחזר', amountInput);
+
+    const today = todayStr();
+    const accountFrom = accountStart(parseLocalDate(today));
+    const accountTo = new Date(accountFrom);
+    accountTo.setDate(accountFrom.getDate() + 13);
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = today;
+    dateInput.min = toLocalDateStr(accountFrom);
+    dateInput.max = toLocalDateStr(accountTo);
+    field('תאריך', dateInput);
+
+    const noteInput = document.createElement('input');
+    noteInput.type = 'text';
+    noteInput.maxLength = 120;
+    field('הערה (לא חובה)', noteInput);
+
+    const error = el('p', 'field-error');
+    form.appendChild(error);
+
+    const save = () => {
+        const typed = amountInput.value.trim()
+            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+        const amount = Number(typed);
+        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0) {
+            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
+            amountInput.focus();
+            return;
+        }
+        if (amount > settled.left) {
+            error.textContent = `אי אפשר להחזיר יותר ממה שנותר - ${moneyText(settled.left)} ₪.`;
+            amountInput.focus();
+            return;
+        }
+        const date = dateInput.value;
+        if (!isRealDate(date) || date < dateInput.min || date > dateInput.max) {
+            error.textContent = 'בחר תאריך בתוך תקופת החשבון הנוכחית - החזר מחוץ לה ' +
+                'ישנה חשבון שכבר שולם.';
+            return;
+        }
+
+        const change = recordAdvanceRepaid(State.schedule, item.id, amount, date,
+            noteInput.value.trim(), new Date().toISOString(), syncDeviceId(), 'cash');
+        if (!State.commit(change)) return;
+        openWorkerDays(item.workerId);
+    };
+
+    const buttons = el('div', 'modal-actions');
+    buttons.appendChild(button('שמור', 'btn-primary', save));
+    buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
+    form.appendChild(buttons);
+    host.insertBefore(form, row.nextSibling);
 }
 
 function renderNetRow(days, worker, advances) {

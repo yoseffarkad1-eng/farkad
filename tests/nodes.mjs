@@ -17,6 +17,15 @@ export function makeNode(tag) {
         parentNode: null, listeners: {}, _text: '',
         get firstChild() { return kids[0] || null; },
         appendChild(child) { child.parentNode = node; kids.push(child); return child; },
+        // A form that opens BESIDE the row it belongs to, rather than at the end of the
+        // list. A stub without it does not fail a check - it throws, from inside the
+        // production function, which reads as the app being broken.
+        insertBefore(child, before) {
+            const at = before === null || before === undefined ? -1 : kids.indexOf(before);
+            child.parentNode = node;
+            if (at < 0) kids.push(child); else kids.splice(at, 0, child);
+            return child;
+        },
         removeChild(child) {
             const at = kids.indexOf(child);
             if (at >= 0) kids.splice(at, 1);
