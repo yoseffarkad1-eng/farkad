@@ -457,7 +457,11 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
             '2026-08-01', 'w_01', 'actual', 'p_01'));
         await settle(TICK * 25);
 
-        device.putRaw('farkad:sendClaim', make());
+        // Built ONCE. The future-dated shape stamps Date.now() into the record, so
+        // calling make() again to compare against later builds a different string and
+        // fails a check about the export over a clock, not over the export.
+        const bytes = make();
+        device.putRaw('farkad:sendClaim', bytes);
         device.Store.forget('farkad:sendClaim');
 
         device.State.commit(device.call('assignPlace', device.State.schedule,
@@ -472,7 +476,133 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
         check(`${label}: and nothing is left owed`,
             device.Sync.pendingCount() === 0,
             `${device.Sync.pendingCount()} owed, status ${device.Sync.status}`);
+
+        // AND THE BYTES ARE STILL SOMEWHERE A PERSON CAN GET AT THEM.
+        //
+        // Not blocking on the damage is only half of iron law 10. The other half is that
+        // nothing unreadable is quietly lost - and the rescue file is where an unreadable
+        // record is supposed to end up, because it is the only route off the phone.
+        //
+        // The claim is quarantined under a :damaged suffix and the export sweeps those by
+        // allowlist, so the copy is carried. When the copy CANNOT be made - a disk with no
+        // room left, which is exactly the state that produces half-written records in the
+        // first place - the original is all there is, and it was in the export under no
+        // name at all.
+        const rescue = device.global('Recovery').rawRecords();
+        check(`${label}: the unreadable bytes are in the rescue file`,
+            Object.keys(rescue).some(key => rescue[key] === bytes),
+            `keys ${JSON.stringify(Object.keys(rescue).filter(k => k.includes('sendClaim')))}`);
     }
+}
+
+// ===================================================== what the damage is reported AS
+{
+    suite('a damaged claim is described the way it actually is');
+
+    // Two sentences the app says about a damaged claim, both of which stopped being true
+    // when the claim stopped being a gate.
+    //
+    // The first is on the screen. 'claimstuck' reads "השליחה תקועה - סגור את שאר החלונות":
+    // sending is stuck, close your other windows. It was accurate while the damage held
+    // the device back. It is not accurate now - the write goes out, the server orders it,
+    // the day lands - and it asks somebody standing on a building site to go and close
+    // windows on two other phones to fix something that is not broken.
+    //
+    // The second is the diagnosis behind it. quarantineSendClaim() returns nothing on
+    // every path, so `kept` is always undefined and the reason recorded is always "cannot
+    // be read OR COPIED" - including when the copy was made and verified. A record that
+    // says the bytes were not preserved, when they were, is the same class of untruth as
+    // a green tick over a failed save.
+    const cloud = makeCloud();
+    const device = phone(cloud, 'd_told');
+    await settle(TICK * 10);
+
+    // One edit per round, because a flush with an empty queue never asks for the claim
+    // and so never sees the damage.
+    const DAYS = ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06',
+        '2026-08-07', '2026-08-10', '2026-08-11'];
+    for (const day of DAYS) {
+        device.putRaw('farkad:sendClaim', 'not a record');
+        device.Store.forget('farkad:sendClaim');
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            day, 'w_01', 'actual', 'p_01'));
+        device.Sync.flush();
+        await settle(TICK * 25);
+    }
+
+    given('the damage was seen often enough for the app to speak',
+        (device.Sync._claimDamage || 0) >= 5, String(device.Sync._claimDamage));
+    given('and every day went to the cloud anyway',
+        DAYS.every(day => Boolean(((cloud.doc || {}).days || {})[day])),
+        JSON.stringify(Object.keys((cloud.doc || {}).days || {})));
+
+    check('the person is not told to close windows over a send that is working',
+        device.Sync.status !== 'claimstuck',
+        `status ${device.Sync.status}, reason ${(device.Sync.lastError || {}).message || '-'}`);
+
+    // The copy succeeded here - the disk is fine - so a reason naming a failed copy is
+    // simply wrong about what is on the device.
+    //
+    // Asked of quarantineSendClaim directly rather than through the status line, because
+    // the status line does not hold still: a send that succeeds a moment later sets
+    // 'synced' and clears lastError, so reading the reason off the device tests the
+    // ordering of two timers. The answer this function gives is what claimIsFree branches
+    // on, and it is the thing that is wrong.
+    given('the quarantine copy was in fact made',
+        device.dump()['farkad:sendClaim:damaged'] !== undefined,
+        JSON.stringify(Object.keys(device.dump()).filter(k => k.includes('sendClaim'))));
+    check('and quarantining the bytes reports that it kept them',
+        device.Sync.quarantineSendClaim() === true,
+        String(device.Sync.quarantineSendClaim()));
+}
+
+// ============================================ the copy that could not be made at all
+{
+    suite('unreadable claim bytes on a disk with no room for the copy');
+
+    // The case the export was actually missing. A half-written record and a full disk are
+    // the same event seen twice: the write that ran out of room is what left the record
+    // half written. So the shape where quarantine FAILS is not exotic - it is the likely
+    // one - and there the original under farkad:sendClaim is the only copy of those bytes
+    // in existence.
+    //
+    // The rescue file walks quarantine keys by allowlist and a handful of named records.
+    // farkad:sendClaim was in neither list, so on the disk where the copy could not be
+    // made, the bytes reached nothing: not the screen, not the export, nowhere.
+    const cloud = makeCloud();
+    const device = phone(cloud, 'd_nocopy');
+    await settle(TICK * 10);
+    device.State.commit(device.call('assignPlace', device.State.schedule,
+        '2026-08-01', 'w_01', 'actual', 'p_01'));
+    await settle(TICK * 25);
+
+    const BYTES = '{"by":"d_other","token":"tok';
+    device.putRaw('farkad:sendClaim', BYTES);
+    device.Store.forget('farkad:sendClaim');
+    // Room for everything except the quarantine copy.
+    device.setQuota(key => key === 'farkad:sendClaim:damaged');
+
+    device.State.commit(device.call('assignPlace', device.State.schedule,
+        DAY, 'w_01', 'actual', 'p_01'));
+    device.Sync.flush();
+    await settle(TICK * 40);
+
+    given('the copy really could not be made',
+        device.dump()['farkad:sendClaim:damaged'] === undefined,
+        JSON.stringify(Object.keys(device.dump()).filter(k => k.includes('sendClaim'))));
+    given('and the original was not written over',
+        device.dump()['farkad:sendClaim'] === BYTES,
+        JSON.stringify(device.dump()['farkad:sendClaim']));
+
+    check('the day still reaches the cloud',
+        Boolean(((cloud.doc || {}).days || {})[DAY]),
+        `days ${JSON.stringify(Object.keys((cloud.doc || {}).days || {}))}, `
+        + `${device.Sync.pendingCount()} owed`);
+
+    const rescue = device.global('Recovery').rawRecords();
+    check('and the only copy of the bytes leaves the phone in the rescue file',
+        Object.keys(rescue).some(key => rescue[key] === BYTES),
+        `keys ${JSON.stringify(Object.keys(rescue).filter(k => k.includes('sendClaim')))}`);
 }
 
 // ============================================================ a restore under the fence
