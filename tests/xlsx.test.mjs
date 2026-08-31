@@ -32,15 +32,43 @@ given('the tree this suite reads is the tree it was pointed at',
     ROOT_REFUSAL === null, String(ROOT_REFUSAL));
 const ROOT = ROOT_ENV.root;
 const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+// THE SHIPPED BYTES, not a devDependency's copy of them.
+//
+// This suite proves what a real workbook contains, so it has to run the library a phone
+// actually runs. That used to be node_modules/xlsx - the same version, installed beside
+// the app rather than in it - and while the app fetched the library from a CDN there was
+// no shipped copy to prefer. There is now: vendor/, in the service worker's shell, named
+// by js/ui/reports.js. Reading anything else would prove the arithmetic of a file no
+// phone has.
 const SHEETJS = process.env.FARKAD_SHEETJS ||
-    join(ROOT, 'node_modules/xlsx/dist/xlsx.full.min.js');
+    join(ROOT, 'vendor/xlsx-0.18.5.min.js');
 
 // dist/xlsx.full.min.js, not `import('xlsx')` - that resolves to a DIFFERENT build of
 // the package, and a test that proves the wrong build proves nothing about the file a
-// phone writes.
-given(`SheetJS is installed (${SHEETJS} - run npm ci, or set FARKAD_SHEETJS)`,
+// phone writes. The vendored file IS that dist build, copied in.
+given(`SheetJS is in the tree (${SHEETJS} - or set FARKAD_SHEETJS)`,
     existsSync(SHEETJS));
 const SHEETJS_CODE = readFileSync(SHEETJS, 'utf8');
+
+// And the app asks for exactly this file. A vendored library the code does not name is a
+// megabyte of dead weight in the cache; a name the tree does not hold is an export that
+// fails on every phone at once.
+{
+    suite('the spreadsheet library the app names is the one in this tree');
+
+    const named = /const XLSX_URL = '([^']+)'/.exec(REPORTS);
+    given('js/ui/reports.js names one', named !== null, String(named && named[1]));
+    check('and it is a file on this origin, not a CDN',
+        named && named[1].indexOf('//') === -1 && named[1].indexOf(':') === -1,
+        String(named && named[1]));
+    check('and that file is in the tree',
+        named && existsSync(join(ROOT, named[1])), String(named && named[1]));
+
+    const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+    check('and the service worker precaches it, so an offline phone can still export',
+        named && sw.indexOf(`'./${named[1]}'`) !== -1,
+        String(named && named[1]));
+}
 
 // ---------------------------------------------------------------- a zip reader, by hand
 
@@ -408,15 +436,19 @@ check('two presses while it is in flight share one fetch',
     offline.run('(function () { var a = loadXlsx(60); var b = loadXlsx(60); return a === b; })()')
         === true);
 same('and one script tag was appended, not two', offline.fetched.length, 1);
-same('pointing at the pinned build of the library', offline.fetched[0].src,
-    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+// This moved off a CDN and onto this origin - see the block over XLSX_URL. The pinned
+// string moves with it, deliberately: what it exists to catch is the library silently
+// becoming a different one, and after the move the same silent change looks like a
+// filename nobody noticed rather than a URL nobody noticed.
+same('pointing at the pinned build of the library, on this origin', offline.fetched[0].src,
+    'vendor/xlsx-0.18.5.min.js');
 check('fetched out of the way of the page, not blocking it', offline.fetched[0].async === true);
 
-// The version in that URL and the version this suite proved the file against have to be
-// the same build, or the proof is about a library no phone loads.
+// The version in that filename and the version this suite proved the file against have to
+// be the same build, or the proof is about a library no phone loads.
 same('and that is the build these checks were run against',
     main.run('XLSX.version'),
-    /xlsx\/([^/]+)\//.exec(offline.fetched[0].src)[1]);
+    /xlsx-([0-9][0-9.]*)\.min\.js$/.exec(offline.fetched[0].src)[1]);
 
 await offline.run('loadXlsx(60)');
 check('after it fails the button re-arms rather than remembering the failure',
@@ -436,8 +468,14 @@ check('and its rows end CRLF',
 same('the pay sheet carries the same numbers the workbook did',
     offline.downloads[0].text.split('\r\n')[1],
     '"דוד","2","3","1","2","1","400","1300","-500","800",""');
+// The words moved with the cause. While the library came from a CDN, reaching here meant
+// no signal, and the message said so gently because waiting was the remedy. The file is
+// in the shell now, so reaching here means the build on this phone is incomplete - and no
+// amount of waiting fixes that. The person is told which of the two it is, because the
+// two have different remedies.
 same('and the person is told, in the words the app pins',
-    offline.told, ['ספריית Excel לא נטענה, ולכן הקבצים יוצאו כ-CSV.']);
+    offline.told, ['חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
+        + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.']);
 
 const scopedCsv = phone(FORTNIGHT + `REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`,
     { sheetjs: false });
@@ -446,7 +484,8 @@ await scopedCsv.run('exportReports()');
 same("the client's fallback is still the client's file alone",
     scopedCsv.downloads.map(file => file.name), ['חיוב_2026-08-01_2026-08-31.csv']);
 same('and its own sentence, not the other one', scopedCsv.told,
-    ['ספריית Excel לא נטענה, ולכן קובץ החיוב יוצא כ-CSV.']);
+    ['חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
+        + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.']);
 
 // A site called '=תל אביב' is a formula in Excel, and a name is not markup - but a
 // negative advance opens with a minus and must stay a number the bookkeeper can total.

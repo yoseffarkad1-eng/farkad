@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v87';
+const VERSION = 'farkad-v88';
 
 const SHELL = [
     './',
@@ -58,6 +58,14 @@ const SHELL = [
     // an installed app that cannot fetch them signs nobody in and says nothing about why.
     './js/sync/firebase-adapter.js',
     './js/sync/firebase-config.js',
+    // The spreadsheet library, on this origin and in the shell.
+    //
+    // It used to come from a CDN, which made the export the one thing in this app that
+    // needed a signal - and the pay sheet is worked out in the van, where there is none.
+    // Precached like everything else, so a phone that has opened the app once can hand a
+    // bookkeeper a workbook from a tunnel. It is 860K, which is most of this cache: that
+    // is what one offline export costs, paid once per build rather than once per press.
+    './vendor/xlsx-0.18.5.min.js',
     './manifest.webmanifest',
     './icons/icon-192.png',
     './icons/icon-512.png'

@@ -64,8 +64,11 @@ const { suite, check, same, given, report } =
 // Both are classic scripts and both run in the device's own scope.
 const REPORTS = readFileSync(join(ROOT, 'js/ui/sitecolor.js'), 'utf8')
     + '\n' + readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+// The SHIPPED library, for the same reason tests/xlsx.test.mjs reads it: a workbook
+// proved against a copy installed beside the app says nothing about the file a phone
+// writes. vendor/ is what the service worker precaches and what XLSX_URL names.
 const SHEETJS = process.env.FARKAD_SHEETJS
-    || join(ROOT, 'node_modules/xlsx/dist/xlsx.full.min.js');
+    || join(ROOT, 'vendor/xlsx-0.18.5.min.js');
 
 // ---------------------------------------------------------------- the crew
 

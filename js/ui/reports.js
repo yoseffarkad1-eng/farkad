@@ -1438,15 +1438,26 @@ function detailRows() {
     return rows;
 }
 
-// SheetJS, fetched only when somebody actually asks for a spreadsheet.
+// SheetJS, from this origin, loaded only when somebody actually asks for a spreadsheet.
 //
 // It used to be a plain script tag in the head, which is the most expensive place a
 // third-party library can be: synchronous, before anything on the page, and on a slow
 // mobile connection it does not fail so much as sit there - taking the whole app down
-// with it for a feature used once a fortnight. Nothing is loaded now until the export
-// button is pressed, and if it does not arrive in a few seconds the CSV path takes over,
-// which is the same fallback as before and produces the same numbers.
-const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+// with it for a feature used once a fortnight. Nothing is loaded until the button is
+// pressed.
+//
+// And it used to come from a CDN, which meant the spreadsheet was the one thing in this
+// app that needed a signal. On a building site that is not an edge case, it is most
+// Tuesdays: the pay sheet is worked out on the phone, in the van, where the phone has
+// been offline all day - and the export quietly produced three CSVs instead, under
+// different filenames, for a bookkeeper expecting one workbook.
+//
+// It is a file on this origin now, in the service worker's shell like every other script,
+// so a phone that has opened the app once can export from a tunnel. Pinned by filename to
+// the exact version the arithmetic was proved against: tests/xlsx.test.mjs reads a real
+// generated workbook back, and a silent version bump underneath it would change what that
+// proves.
+const XLSX_URL = 'vendor/xlsx-0.18.5.min.js';
 let xlsxLoading = null;
 
 function loadXlsx(timeoutMs = 8000) {
@@ -1482,16 +1493,27 @@ async function exportReports() {
 
     await loadXlsx();
 
-    // Falls back to CSV rather than failing when the SheetJS CDN is unreachable - which
-    // on a building site is a normal Tuesday, not an exception. The client-scoped
-    // export stays scoped here too: only the billing sheet exists to fall back to.
+    // CSV is still written rather than nothing - the numbers are the point and a person
+    // who pressed export at the end of a fortnight must not be handed an error and an
+    // empty hand. What changed is what it MEANS.
+    //
+    // While the library came from a CDN this was the ordinary offline path, and the
+    // message said so gently. The file is on this origin now and in the shell, so
+    // reaching here means the build itself is incomplete - a shelf that installed without
+    // it, or a phone serving an app it only half has. That is worth saying plainly,
+    // because the remedy is different: no amount of waiting for signal fixes it, and the
+    // person needs to know the workbook is not coming back on its own.
+    //
+    // The client-scoped export stays scoped: only the billing sheet exists to fall back to.
     if (typeof XLSX === 'undefined') {
         if (sheets.payroll) downloadCsv(sheets.payroll, `שכר_${stamp}.csv`);
         downloadCsv(sheets.invoice, `חיוב_${stamp}.csv`);
         if (sheets.detail) downloadCsv(sheets.detail, `פירוט_${stamp}.csv`);
         askTell(client
-            ? 'ספריית Excel לא נטענה, ולכן קובץ החיוב יוצא כ-CSV.'
-            : 'ספריית Excel לא נטענה, ולכן הקבצים יוצאו כ-CSV.');
+            ? 'חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
+                + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.'
+            : 'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
+                + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
         return;
     }
 
