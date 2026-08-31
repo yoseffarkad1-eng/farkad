@@ -1042,4 +1042,222 @@ function omer(flags) {
             OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_a').length === 0);
 }
 
+
+// ------------------------------------------------- an advance without its own origin
+{
+    suite('L1: creating an advance writes the record every phone reads AND its origin');
+
+    // openAdvanceForm called addAdvance and nothing else, and recordAdvanceGiven had no
+    // production caller anywhere. So an advance made today exists in schedule.advances -
+    // which is what every phone reads, and is right - and NOT in the ledger, which is
+    // what the money is supposed to be folded from once the writer opens.
+    //
+    // It does not stay invisible. A repayment recorded against it before the app is next
+    // closed writes a 'repaid' entry standing on nothing:
+    //
+    //   history:        repaid only
+    //   given entry:    missing
+    //   foldAdvance:    undefined
+    //
+    // and the fold answers undefined for the whole advance, because foldAdvance builds
+    // its state from the 'given' and ignores everything that arrives before one.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+        '2026-08-25', 300, 'מזומן', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+    check('creating an advance produces two changes, not one',
+        Array.isArray(made) && made.length === 2, JSON.stringify(made && made.length));
+    check('one of them is the record every phone still reads',
+        made.some(change => String(change.path).indexOf('advances.') === 0
+            && String(change.path).indexOf('ledger.') !== 0),
+        JSON.stringify(made.map(c => c.path)));
+    check('and the other is the immutable origin in the ledger',
+        made.some(change => String(change.path).indexOf('ledger.advances.') === 0
+            && change.value.kind === 'given'),
+        JSON.stringify(made.map(c => `${c.path}#${c.value && c.value.kind}`)));
+
+    device.State.commitMany(made);
+    const id = made[0].value.id;
+    const history = device.call('advanceHistory', device.State.schedule, id);
+    check('the origin is on the record before anything else happens',
+        history.length === 1 && history[0].kind === 'given' && history[0].amount === 300,
+        JSON.stringify(history.map(e => [e.kind, e.amount])));
+
+    // AND NOW THE REPAYMENT, in the same session, with no reboot and no migration.
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 100, '2026-08-26', '', '2026-08-26T09:00:00.000Z', 'd_omer', 'cash'));
+    const folded = device.call('foldLedger', device.State.schedule)[id];
+    check('the fold knows the advance, because it has an origin to stand on',
+        Boolean(folded) && folded.amount === 300 && folded.repaid === 100,
+        JSON.stringify(folded));
+    same('and what is owed on it is the ordinary arithmetic',
+        (({ given, repaid, left }) => ({ given, repaid, left }))(
+            device.call('advanceOutstanding', device.State.schedule, id)),
+        { given: 300, repaid: 100, left: 200 });
+}
+
+{
+    suite('L1: no repayment, reversal or deduction may stand on no origin');
+
+    // The check the model owes: an entry about an advance that has no 'given' behind it is
+    // an event about money nobody recorded giving. It is not repaired here - nothing is
+    // invented - it is NAMED, so a screen can say so and a fold can refuse to price it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+        '2026-08-25', 300, '', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commitMany(made);
+    const id = made[0].value.id;
+
+    check('an advance created properly has its origin',
+        device.call('advanceHasOrigin', device.State.schedule, id) === true);
+
+    // One that arrived from somewhere else with only a repayment against it.
+    device.State.schedule.advances.a_orphan = {
+        id: 'a_orphan', workerId: 'w_01', date: '2026-08-20', amount: 500, note: ''
+    };
+    device.State.schedule.ledger.advances.le_orphan = {
+        id: 'le_orphan', advanceId: 'a_orphan', kind: 'repaid', date: '2026-08-22',
+        amount: 200, at: '2026-08-22T09:00:00.000Z', by: 'd_b'
+    };
+    check('and one carrying only a repayment does not',
+        device.call('advanceHasOrigin', device.State.schedule, 'a_orphan') === false);
+    const orphans = device.call('advancesWithoutOrigin', device.State.schedule);
+    check('the orphan is named, and only the orphan',
+        orphans.length === 1 && orphans[0] === 'a_orphan', JSON.stringify(orphans));
+}
+
+{
+    suite('L1: migration asks for a valid origin, not for any entry at all');
+
+    // THE DEFECT THIS CLOSES. migrateAdvancesToLedger built its "already done" set from
+    // every entry's advanceId, whatever the entry was. So an advance whose only entry was
+    // a repayment looked migrated, the migration skipped it, and the origin was never
+    // written - by the one mechanism that exists to write it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    // An advance from a build that wrote no entries, with a repayment recorded against it
+    // by a phone that did.
+    device.State.schedule.advances.a_legacy = {
+        id: 'a_legacy', workerId: 'w_01', date: '2026-08-20', amount: 500, note: ''
+    };
+    device.State.schedule.ledger.advances.le_repay = {
+        id: 'le_repay', advanceId: 'a_legacy', kind: 'repaid', date: '2026-08-22',
+        amount: 200, at: '2026-08-22T09:00:00.000Z', by: 'd_b'
+    };
+
+    const plan = device.call('migrateAdvancesToLedger', device.State.schedule, 'd_omer');
+    check('the migration writes the origin the repayment was standing on',
+        plan.added.indexOf('a_legacy') !== -1, JSON.stringify(plan.added));
+    const history = device.call('advanceHistory', device.State.schedule, 'a_legacy');
+    check('and the history now reads origin first, repayment after',
+        history.length === 2 && history[0].kind === 'given' && history[1].kind === 'repaid',
+        JSON.stringify(history.map(e => [e.kind, e.amount])));
+    check('the fold prices it, which it could not do before',
+        device.call('advanceOutstanding', device.State.schedule, 'a_legacy').left === 300,
+        JSON.stringify(device.call('advanceOutstanding', device.State.schedule, 'a_legacy')));
+
+    // AND NOT TWICE. An advance that already has a real origin is left alone.
+    const again = device.call('migrateAdvancesToLedger', device.State.schedule, 'd_omer');
+    check('running it again writes nothing', again.added.length === 0,
+        JSON.stringify(again.added));
+
+    // A MALFORMED origin is not an origin. An entry of kind 'given' that the validator
+    // refuses cannot be what stops the migration writing a real one.
+    device.State.schedule.advances.a_bad = {
+        id: 'a_bad', workerId: 'w_01', date: '2026-08-20', amount: 400, note: ''
+    };
+    device.State.schedule.ledger.advances.le_bad_given = {
+        id: 'le_bad_given', advanceId: 'a_bad', kind: 'given', workerId: 'w_01',
+        date: '2026-08-20', amount: 'abc'
+    };
+    const third = device.call('migrateAdvancesToLedger', device.State.schedule, 'd_omer');
+    check('an unreadable given does not count as an origin',
+        third.added.indexOf('a_bad') !== -1, JSON.stringify(third.added));
+}
+
+{
+    suite('L1: a refused write cannot leave half an advance');
+
+    // The two halves are one logical operation. If the disk takes one and refuses the
+    // other, the record is a repayment waiting to happen against money nobody recorded -
+    // or an origin for an advance no phone reads. Neither may exist.
+    const FAULTS = [
+        ['the disk is full', device => device.setQuota(() => true)],
+        ['the browser refuses the write', device => device.failWrite(() => true)]
+    ];
+    FAULTS.forEach(([label, breakIt]) => {
+        const device = omer({ carryAdvances: true, ledgerWrites: true });
+        breakIt(device);
+        const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+            '2026-08-25', 300, '', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+        const newId = made[0].value.id;
+        device.State.commitMany(made);
+
+        // BY ID, not by counting. The reopen below runs the boot mirror, which writes an
+        // origin for the advance this crew already had - correct, and it moves the count.
+        // What is being asked here is about THIS advance and nothing else.
+        const reopened = makeDevice({ deviceId: 'd_half', storage: device.dump(),
+            flags: { carryAdvances: true, ledgerWrites: true } });
+        reopened.State.load();
+        const legacy = Boolean(reopened.State.schedule.advances[newId]);
+        const origin = reopened.call('advanceHasOrigin', reopened.State.schedule, newId);
+        // EITHER BOTH OR NEITHER, and that is the whole of it. A disk that took one half
+        // would leave an advance no fold can price, or an origin for money no phone reads.
+        check(`${label}: the two halves landed together or not at all`,
+            legacy === origin, JSON.stringify({ legacy, origin }));
+        check(`${label}: and nothing anywhere is standing on no origin`,
+            reopened.call('advancesWithoutOrigin', reopened.State.schedule).length === 0,
+            JSON.stringify(reopened.call('advancesWithoutOrigin', reopened.State.schedule)));
+    });
+}
+
+{
+    suite('L1: the origin survives a close and reopen, without the migration');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+        '2026-08-25', 300, '', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commitMany(made);
+    const id = made[0].value.id;
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 100, '2026-08-26', '', '2026-08-26T09:00:00.000Z', 'd_omer', 'cash'));
+
+    const again = makeDevice({ deviceId: 'd_reopen1', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    const history = again.call('advanceHistory', again.State.schedule, id);
+    check('the origin is still first on the record after a reopen',
+        history.length === 2 && history[0].kind === 'given',
+        JSON.stringify(history.map(e => [e.kind, e.amount])));
+    check('and the migration finds nothing left to do',
+        again.call('migrateAdvancesToLedger', again.State.schedule, 'd_reopen1')
+            .added.length === 0);
+    same('the money reads the same on the far side of the reopen',
+        (({ given, repaid, left }) => ({ given, repaid, left }))(
+            again.call('advanceOutstanding', again.State.schedule, id)),
+        { given: 300, repaid: 100, left: 200 });
+
+    // TWO PHONES MIRRORING ONE ADVANCE mint the SAME origin id, or the union keeps both
+    // and the man is recorded as having been handed the money twice.
+    const mirror = device.call('originEntryId', id);
+    check('the origin id is derived from the advance, so two phones write one entry',
+        typeof mirror === 'string' && mirror.indexOf(id) !== -1
+        && again.State.schedule.ledger.advances[mirror] !== undefined,
+        JSON.stringify({ mirror, present: Boolean(again.State.schedule.ledger.advances[mirror]) }));
+}
+
+{
+    suite('L1: the form is what writes it, and it writes both halves');
+
+    // The source, because a button is easy to change back and this is the rule it would
+    // break. openAdvanceForm called addAdvance directly; it must go through the one
+    // function that writes the origin beside it, and commit them together.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('the advance form calls recordNewAdvance',
+        reports.indexOf('recordNewAdvance(') !== -1);
+    check('and commits both halves in one operation',
+        /recordNewAdvance\([\s\S]{0,400}commitMany/.test(reports));
+    check('nothing in the reports screen calls addAdvance on its own',
+        /(^|[^a-zA-Z])addAdvance\s*\(/m.test(reports) === false,
+        JSON.stringify((reports.match(/.{0,40}addAdvance\s*\(.{0,20}/g) || []).slice(0, 3)));
+}
+
 report();

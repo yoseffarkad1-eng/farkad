@@ -404,6 +404,88 @@ function appendLedgerEntry(schedule, entry) {
     return { path: ledgerPath(id), value: record };
 }
 
+// THE NAME OF AN ADVANCE'S ORIGIN, derived from the advance and from nothing else.
+//
+// Two phones holding the same advance must mint the SAME entry id or the union keeps both
+// and the record says a man was handed the money twice. The migration has always done this
+// - `le_mig_a_x` - and CREATION now has to agree with it, because the two write the same
+// fact and either can happen first: this phone creates the advance and writes the origin,
+// that phone receives the advance through the field every build reads and migrates it.
+// One id, one entry, whichever arrives.
+//
+// The prefix still says `mig`, which is now half a lie, and it stays: every origin already
+// written on every phone carries it, and a new scheme would orphan all of them into
+// duplicates - which is the exact failure this function exists to prevent.
+function originEntryId(advanceId) {
+    return 'le_mig_' + String(advanceId);
+}
+
+// Whether this advance has an origin the fold can stand on.
+//
+// Not "has an entry". A 'given' the validator refuses is not an origin - it is a line
+// nobody can price - and treating it as one is how an advance ends up with a repayment
+// against money no record says was handed over.
+function advanceHasOrigin(schedule, advanceId) {
+    return advanceHistory(schedule, advanceId).some(entry =>
+        String(entry.kind) === 'given'
+        && ledgerEntryProblems(String(entry.id), entry).length === 0);
+}
+
+// Every advance on this device carrying events but no origin, named rather than repaired.
+//
+// Nothing is invented here. An advance whose only entry is a repayment is a real question
+// about real money - somebody handed some back against something - and the answer is a
+// person's, not an average. This is what lets a screen ask it.
+function advancesWithoutOrigin(schedule) {
+    const legacy = (schedule && schedule.advances) || {};
+    const seen = {};
+    ledgerEntries(schedule).forEach(entry => { seen[String(entry.advanceId)] = true; });
+    return Object.keys(seen)
+        .filter(id => legacy[id] !== undefined || foldLedger(schedule)[id] !== undefined
+            || seen[id])
+        .filter(id => !advanceHasOrigin(schedule, id))
+        .sort();
+}
+
+// CREATING AN ADVANCE: the record every phone reads, and the origin it will be folded
+// from, as ONE logical operation.
+//
+// openAdvanceForm called addAdvance and nothing else, and recordAdvanceGiven had no caller
+// anywhere in the app. So an advance made today lived only in schedule.advances - which is
+// correct and is not enough - and the ledger learned about it at the next boot, from the
+// migration, if it ever ran.
+//
+// It did not stay invisible until then. A repayment recorded in the same session wrote a
+// 'repaid' entry standing on nothing: foldAdvance builds its state from the 'given' and
+// ignores everything that arrives before one, so the fold answered undefined for the whole
+// advance. And the migration then looked at that repayment, saw an entry with this
+// advance's id, and concluded the advance was already migrated - so the origin was never
+// written by the one mechanism that exists to write it.
+//
+// The two changes go back as a list on purpose. The caller commits them with commitMany,
+// which is all-or-nothing: a disk that takes one and refuses the other would leave either
+// an advance no fold can price, or an origin for money no phone reads.
+//
+// With the writer gate shut this returns the legacy change alone - which is exactly what
+// the build has always done, and what a phone that cannot read entries needs.
+function recordNewAdvance(schedule, workerId, date, amount, note, at, by, method) {
+    const change = addAdvance(schedule, workerId, date, amount, note);
+    if (typeof method === 'string' && method) change.value.method = method;
+    if (!ledgerWritesEnabled()) return [change];
+    return [change, appendLedgerEntry(schedule, {
+        id: originEntryId(change.value.id),
+        advanceId: String(change.value.id),
+        kind: 'given',
+        workerId: String(workerId),
+        date: String(date),
+        amount: Number(amount) || 0,
+        note: String(note || ''),
+        method: typeof method === 'string' && method ? method : undefined,
+        at: String(at || ''),
+        by: String(by || '')
+    })];
+}
+
 function recordAdvanceGiven(schedule, advanceId, workerId, date, amount, note, at, by, method) {
     return appendLedgerEntry(schedule, {
         advanceId: String(advanceId),
@@ -654,7 +736,17 @@ function recordAdvanceCancelled(schedule, advanceId, note, at, by) {
 function migrateAdvancesToLedger(schedule, deviceId) {
     if (!schedule) return { added: [], paths: {} };
 
-    const known = new Set(ledgerEntries(schedule).map(entry => String(entry.advanceId)));
+    // A VALID ORIGIN, not any entry at all.
+    //
+    // This read every entry's advanceId, whatever the entry was. An advance whose only
+    // entry was a repayment therefore looked migrated: the migration skipped it, and the
+    // origin the repayment was standing on was never written. An unreadable 'given' counts
+    // for nothing here either - a line the validator refuses is not something a fold can
+    // stand on, and letting it stop the migration would freeze the gap in place.
+    const known = new Set(ledgerEntries(schedule)
+        .filter(entry => String(entry.kind) === 'given'
+            && ledgerEntryProblems(String(entry.id), entry).length === 0)
+        .map(entry => String(entry.advanceId)));
     const legacy = schedule.advances || {};
     const added = [];
     const paths = {};
@@ -667,8 +759,10 @@ function migrateAdvancesToLedger(schedule, deviceId) {
 
         const written = appendLedgerEntry(schedule, {
             // Deterministic, derived from the advance: every phone that mirrors a_x
-            // writes le_mig_a_x, and mergeLedgerInto collapses the copies into one.
-            id: 'le_mig_' + String(id),
+            // writes the same id, and mergeLedgerInto collapses the copies into one.
+            // Shared with recordNewAdvance, because the two write the same fact and
+            // either can happen first - see originEntryId.
+            id: originEntryId(id),
             advanceId: String(id),
             kind: 'given',
             workerId: String(item.workerId),

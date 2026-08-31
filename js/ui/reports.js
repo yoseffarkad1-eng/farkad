@@ -1235,12 +1235,21 @@ function openAdvanceForm(worker, actions) {
             return;
         }
 
-        const change = addAdvance(State.schedule, worker.id, date, amount,
-            noteInput.value.trim());
-        // On the record object itself, before the commit, so the journal entry and the
-        // saved schedule carry it together.
-        change.value.method = method;
-        if (!State.commit(change)) return;
+        // BOTH HALVES, IN ONE OPERATION.
+        //
+        // This called addAdvance and committed the one change it returned. That wrote the
+        // record every phone reads - which is right, and is not all of it: the ledger
+        // learned about the advance at the next boot, from the migration, if it ever ran.
+        // A repayment recorded before then stood on nothing, the fold answered undefined
+        // for the whole advance, and the migration then took that repayment as proof the
+        // advance had already been migrated. See recordNewAdvance in js/model/ledger.js.
+        //
+        // commitMany, not commit: the two changes are one logical act and the journal
+        // writes them all or none. A disk that took the advance and refused its origin
+        // would leave money nobody can price.
+        const changes = recordNewAdvance(State.schedule, worker.id, date, amount,
+            noteInput.value.trim(), new Date().toISOString(), syncDeviceId(), method);
+        if (!State.commitMany(changes)) return;
         openWorkerDays(worker.id);
     };
 
