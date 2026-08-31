@@ -18,8 +18,11 @@ What does not work is everything that is not a disjoint field merge:
 - The local send claim (`js/sync/sync.js`, `SEND_CLAIM_KEY`) is a lease in
   `localStorage`. It coordinates **tabs of one browser profile**. It has never been able
   to order writes across phones and cannot be made to: the three phones share no storage.
-  That is the whole of what `tests/sendclaim.test.mjs` has been measuring, and why 25 of
-  its 66 checks are red and stay red until this is replaced.
+  That is the whole of what `tests/sendclaim.test.mjs` was measuring, and why 25 of its
+  66 checks were red. They are not red any more, and none of them was closed by weakening
+  what it asserts: the suite was rewritten around the protocol below, and stands at 43
+  of 43. The claim itself still coordinates only tabs - that has not changed and cannot -
+  but it is no longer the thing being asked to order three phones.
 
 The server is the only party all three phones can agree with. So the ordering has to be
 enforced there.

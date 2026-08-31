@@ -1,30 +1,41 @@
 # The suites
 
-Twenty-two suites, sixteen of which need no browser at all. From a clean clone:
+Forty-two suites, thirty of which need no browser at all. From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
-    npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover
-    npm run test:release    # the RELEASE gate: test:all plus every open release blocker
-    npm run test:rules      # firestore.rules against the local emulator (needs Java)
+    npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover,
+                            #   swrestart, swidentity
+    npm run test:release    # the RELEASE gate: test:all plus sendclaim and the emulator suites
+    npm run test:emulator   # rules, the production adapter's CAS, and the rollout (needs Java)
 
 `npm test` and `npm run test:all` are DEVELOPMENT gates. Neither one is permission to
 ship, and a green run of either must never be reported as a release gate.
 
-`npm run test:release` is the release gate, and it is RED right now, on purpose. It
-adds `test:sendclaim`, whose 66 checks stand at 41 passing and 25 failing — committed
-reproductions of the P0-B ordering defects: a backgrounded owner losing the send claim
-while its request is still open, a v86 owner that writes no heartbeat losing it the
-same way, another tab sending while the first request may still land, the cloud
-keeping the value that was corrected, a whole-document restore leaving after ownership
-moved, refused or corrupted heartbeat and quarantine writes that do not recover, and
-reopen paths that stay stuck.
+`npm run test:release` is the release gate. It adds `test:sendclaim` and the three
+emulator suites, and at the commit this line was written it is GREEN.
 
-Those 25 are evidence, not debt to be tidied. They stay red until the ordering protocol
-that fixes them exists; none of them may be closed by weakening what it asserts. The
-suite was moved out of `npm test` for one reason only — so that unrelated repair work
-can read a meaningful green — and `npm run test:sendclaim` still runs it directly and
-still exits non-zero. Nothing anywhere may catch that exit code and print success.
+It was not. This paragraph used to say the gate was red on purpose: `test:sendclaim`
+stood at 41 of 66, and the 25 failures were committed reproductions of the ordering
+defects — a backgrounded owner losing the send claim while its request was still open,
+another tab sending while the first request might still land, the cloud keeping the
+value that was corrected, a whole-document restore leaving after ownership moved. They
+were evidence, and the note said they would stay red until the ordering protocol that
+fixes them existed.
+
+That protocol exists — `protocol`/`revision`/`lastOpId`, immutable receipts,
+conflict-carries-the-document, rebase-if-uncontested and hold-if-contested; see
+`docs/sync-protocol.md`. The suite was rewritten around it rather than weakened, and
+none of the reproductions was closed by softening what it asserts. It is 43 checks and
+all 43 pass. `npm run test:sendclaim` still runs it directly and still exits non-zero on
+any failure; nothing anywhere may catch that exit code and print success.
+
+A green sendclaim is not the same as a green protocol. The client half is measured in
+`tests/cas.test.mjs` against the harness, and a harness-only green would prove only that
+the harness and the client agree with each other — so the PRODUCTION adapter is measured
+against the real Firestore emulator in `tests/cas.emulator.test.mjs`, and the rollout
+that has to publish it in `tests/rollout.test.mjs`. Both are in `test:release`. A manual
+emulator run on the side is not the gate.
 
 Any single suite runs on its own: `npm run test:build`, `node tests/data.test.mjs`,
 and so on — each file's header says exactly how to invoke it and why it exists.
@@ -32,12 +43,23 @@ Node 20 or 22 (`engines` in package.json).
 
 Green means EVERY check passes. The runner prints `N/N checks passed` and exits
 non-zero on any failure; a `SETUP FAILED` from `given()` means a precondition of the
-test broke, not the app — fix the setup before reading anything into the run. At the
-commit this line was written, `npm test` is 2638 checks across sixteen suites, and
-`npm run test:all` adds 1547 more, five of them in a real browser and one across two
-real trees. The counts grow with every
-guarantee; the release-time numbers per build are recorded in `docs/releases.md`. (The count in the root README predates several waves of tests and
-is stale — trust a run, not a prose number.)
+test broke, not the app — fix the setup before reading anything into the run.
+
+MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no other:
+
+    npm test           30 suites   3188/3188
+    npm run test:all   + 8 suites  + 1688   (smoke 1029, print 65, mobile 427,
+                                             update 30, recovery-browser 25,
+                                             handover 26, swrestart 31, swidentity 55)
+    test:release       + 4 suites  + 128    (sendclaim 43, rules 49,
+                                             cas-emulator 19, rollout 17)
+    ------------------------------------------------------------------
+    the whole gate     42 suites   5004/5004
+
+The counts grow with every guarantee, and a count taken from a different commit is
+worse than no count at all — trust a run, not a prose number. The release-time numbers
+per build are recorded in `docs/releases.md`. (The count in the root README predates
+several waves of tests and is stale.)
 
 ## What each suite proves
 
@@ -66,6 +88,10 @@ is stale — trust a run, not a prose number.)
 | recovery-browser | `recovery.browser.mjs` | The rescue export driven through the real button in a real Chromium, with the actual Blob captured off `URL.createObjectURL`. |
 | handover | `handover.test.mjs` | The v86 -> v87 handover between two REAL trees - a released commit and the working tree - one origin serving whichever it is pointed at. Every assertion is a SHA-256 of bytes a browser actually holds or an answer from a production function. It does not run while both trees carry the same build, and says so rather than pretending. |
 | rules | `rules.test.mjs` | The real `firestore.rules` against the Firestore emulator. The web config is public by design, so these rules are the only thing between the schedule and anyone with the URL. Never touches the real project. |
+| cas-emulator | `cas.emulator.test.mjs` | The PRODUCTION adapter's write path against the real emulator, not the harness: a conflict carries the authoritative document, disjoint field edits still merge, a receipt makes a retry idempotent, and the harness and the adapter refuse in the same shape. The client half alone is `cas.test.mjs`; a green harness-only run would prove only that the harness and the client agree with each other. |
+| rollout | `rollout.test.mjs` | Publishing the rules, from a GENUINE legacy document — roster, days and an advance, no `protocol`, no `revision`, no receipt. The first protocol write preserves every legacy byte; a bootstrap without its receipt is refused; two phones racing produce exactly one bootstrap and the loser rebases; the exception is one write wide; an un-updated phone works before cutover and is refused after; and a missing document is a different road from a legacy one. |
+| ledger-ingress | `ledger.ingress.test.mjs` | Thirteen shapes of malformed ledger data through every door — boot, load, cloud snapshot, restore, JSON import, raw recovery, migration, full replacement. Each is named by the check that catches it, held aside rather than folded, never normalised or coerced to zero; the record still opens, the bytes are kept, the person is told, writes are blocked, and the rescue export still carries the bytes. |
+| repayment | `repayment.test.mjs` | The advance that outlives its fortnight: the carry, dated cash repayments, the two labels that never swap, the reversal that compensates instead of deleting, the surplus that is named rather than clamped, and the closure that is identified by the period it closes. |
 
 `shot.mjs` is not a suite: it takes one screenshot and asserts nothing, for the
 question the suites cannot answer — whether the screen is worth looking at.
