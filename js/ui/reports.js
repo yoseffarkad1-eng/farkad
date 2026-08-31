@@ -260,7 +260,20 @@ function payrollRows() {
     // off is owed real money and had no row to be owed it on.
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
         .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
-            || (vehiclesEnabled() && row.vehicleDays > 0));
+            || (vehiclesEnabled() && row.vehicleDays > 0))
+        // What an unsettled advance did to this account, worked out ONCE and carried on
+        // the row. Every surface below reads it from here rather than asking again: the
+        // walk goes back over every account this man has ever had, and two callers doing
+        // that separately is both slow and a second place for the answer to differ.
+        //
+        // Only when the carry is on. With it off `carry` is absent and every reader falls
+        // back to the arithmetic this build has always done - see moneyOf.
+        .map(row => (advanceCarryEnabled()
+            ? Object.assign({}, row, {
+                carry: advanceAccount(State.schedule, row.workerId,
+                    REPORT_RANGE.from, REPORT_RANGE.to)
+            })
+            : row));
 }
 
 function invoiceRows() {
@@ -1339,7 +1352,16 @@ function moneyOf(row) {
     // would report a man as owed MORE than he earned, which is how gross 400 with an
     // advance of -500 came out as 900. It is shown, in the column, and it changes nothing.
     const taken = Number(row.advances);
-    const netted = taken > 0 ? -agora(taken) : 0;
+    // WHAT COMES OFF THIS FORTNIGHT, which is not always what was taken in it.
+    //
+    // With the carry on, an advance larger than the wage is deducted only as far as the
+    // wage reaches and the rest goes to the next account, so the number in this column is
+    // the DEDUCTION - and moneyCells says so in the note, because a column quietly
+    // showing less than was handed over, with nothing explaining where the remainder
+    // went, is a worse sheet than the one it replaces.
+    const netted = row.carry
+        ? -agora(row.carry.deducted)
+        : (taken > 0 ? -agora(taken) : 0);
     const priced = row.amount !== null;
     const gross = priced ? agora(row.amount) : null;
     return {
@@ -1358,6 +1380,16 @@ function moneyCells(row) {
     const net = gross === '' ? '' : agora(gross + advances);
 
     const notes = [];
+    // Said in shekels, not in a word like "partial": the man asking is asking how much.
+    if (row.carry && row.carry.carriedIn > 0) {
+        notes.push(`${moneyText(row.carry.carriedIn)} ₪ מקדמה מחשבון קודם`);
+    }
+    if (row.carry && row.carry.carriedOut > 0) {
+        notes.push(`${moneyText(row.carry.carriedOut)} ₪ מקדמה עוברים לחשבון הבא`);
+    }
+    if (row.carry && row.carry.repaid > 0) {
+        notes.push(`${moneyText(row.carry.repaid)} ₪ הוחזרו במזומן`);
+    }
     if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
     if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');
     return [row.dailyRate, gross, advances, net, notes.join(' · ')];

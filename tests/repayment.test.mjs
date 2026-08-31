@@ -180,10 +180,17 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     const vm = (await import('node:vm')).default;
     const { readFileSync } = await import('node:fs');
 
+    // Loaded once per device. These are classic scripts full of top-level const, so
+    // running them a second time in the same context throws on the first redeclaration -
+    // which is a fact about the harness, not about the app.
+    const loadedInto = new Set();
     function sheetFor(device, range) {
         const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
-        run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        if (!loadedInto.has(device)) {
+            loadedInto.add(device);
+            run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+            run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        }
         run(`REPORT_RANGE.from = '${range.from}'; REPORT_RANGE.to = '${range.to}';`
             + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
         const rows = run('payrollSheetRows()');
