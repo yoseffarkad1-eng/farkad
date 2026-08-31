@@ -195,6 +195,14 @@ function phone(seed, options = {}) {
     };
     const told = [];
     device.ctx.askTell = message => { told.push(message); };
+    // The workbook hand-over dialog. Captured separately from askTell because it is a
+    // CONFIRM - it offers "שמירה חוזרת" - and answering true is what stops the export
+    // re-running forever in a test that never presses anything.
+    const confirmed = [];
+    device.ctx.askConfirm = options => {
+        confirmed.push(options);
+        return Promise.resolve(true);
+    };
 
     device.State.schedule.workers = options.workers || [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
@@ -225,7 +233,7 @@ function phone(seed, options = {}) {
              };`);
     }
     return {
-        device, run, caught, fetched, told,
+        device, run, caught, fetched, told, confirmed,
         downloads: device.downloads,
         hangOnFetch: () => { onAppend = null; },
         failOnFetch: () => { onAppend = tag => tag.onerror(); },
@@ -397,6 +405,43 @@ same('only that site, and only the dates it was worked', client.sheets['חיוב
 check('and nobody is named, or priced, anywhere in its bytes',
     !['דוד', 'שרה', 'שכר', 'לתשלום', 'פירוט', '400', '1300']
         .some(secret => client.text.includes(secret)));
+
+// ------------------------------------------------- the workbook, handed over out loud
+//
+// The download used to be silent. A person pressed export at the end of a fortnight, the
+// sheet did not visibly change, and nothing on the screen said whether a file had been
+// made - so the honest thing to do was press it again, which is how three copies of one
+// workbook reach a bookkeeper with nobody sure which is current.
+//
+// The sentence stops exactly where the backup dialog stops: the browser was HANDED the
+// file. Never "נשמר בהצלחה" - this app cannot see the Files app and must not claim to.
+{
+    suite('the workbook says it was handed over, and stops there');
+
+    const said = phone(FORTNIGHT);
+    await said.run('exportReports()');
+
+    given('a workbook really was written', said.caught.length === 1,
+        String(said.caught.length));
+    check('the person is told, once', said.confirmed.length === 1,
+        String(said.confirmed.length));
+    check('in the words the app pins, naming the file',
+        said.confirmed[0] && said.confirmed[0].title === 'קובץ ה-Excel נמסר לשמירה'
+        && said.confirmed[0].message
+            === '\u2066דוחות_2026-08-01_2026-08-31.xlsx\u2069 נמסר לדפדפן — '
+                + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
+        JSON.stringify(said.confirmed[0]));
+    // The claim it must never make, and the filename's isolation, which a Hebrew sentence
+    // around a Latin name needs or the date folds backwards.
+    check('it never claims the file was saved, only that it was handed over',
+        said.confirmed[0].title.indexOf('נשמר') === -1
+        && said.confirmed[0].message.indexOf('\u2066') !== -1
+        && said.confirmed[0].message.indexOf('\u2069') !== -1,
+        JSON.stringify(said.confirmed[0].title));
+    check('and it offers the second press rather than leaving somebody guessing',
+        said.confirmed[0].ok === 'הבנתי' && said.confirmed[0].cancel === 'שמירה חוזרת',
+        JSON.stringify([said.confirmed[0].ok, said.confirmed[0].cancel]));
+}
 
 // ---------------------------------------------------------------- the fallback
 

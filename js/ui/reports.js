@@ -1733,7 +1733,30 @@ async function exportReports() {
         if (sheets.detail) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');
         }
-        XLSX.writeFile(wb, client ? `חיוב_${stamp}.xlsx` : `דוחות_${stamp}.xlsx`);
+        const name = client ? `חיוב_${stamp}.xlsx` : `דוחות_${stamp}.xlsx`;
+        XLSX.writeFile(wb, name);
+
+        // SAID OUT LOUD, on the same pattern as the backup above it.
+        //
+        // The download was silent. A person pressed export at the end of a fortnight, the
+        // sheet did not visibly change, and there was nothing on the screen to say
+        // whether a file had been made - so the honest thing to do was press it again,
+        // and again, which is how three copies of one workbook end up in a bookkeeper's
+        // inbox with nobody sure which is current.
+        //
+        // The wording follows the backup dialog word for word in its shape, and stops
+        // exactly where the backup does: the browser was HANDED the file. It is never
+        // "נשמר בהצלחה", because this app cannot see the Files app and must not claim to.
+        // The filename is Latin inside a Hebrew sentence, so it travels wrapped in
+        // LRI…PDI - askConfirm writes textContent, so the isolation has to be in the
+        // string or the bidi algorithm folds the date backwards.
+        askConfirm({
+            title: 'קובץ ה-Excel נמסר לשמירה',
+            message: '\u2066' + name + '\u2069 נמסר לדפדפן — '
+                + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
+            ok: 'הבנתי',
+            cancel: 'שמירה חוזרת'
+        }).then(again => { if (!again) exportReports(); });
     } catch (error) {
         console.error('Report export failed:', error);
         // Named, the way the crash banner does it: which file failed, that the record
