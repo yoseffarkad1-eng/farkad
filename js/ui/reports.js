@@ -1381,10 +1381,124 @@ function renderLedgerEntry(entry) {
         entry.amount !== undefined && isFinite(amount) ? bidiAmount(moneyText(amount)) : ''));
 
     if (entry.note) row.appendChild(el('div', 'ledger-note', entry.note));
+    // THE REASON, ON THE ROW. A correction is the one entry that explains nothing on its
+    // own - the amount and the date say what moved and when, and neither says why - so an
+    // unexplained adjustment to money is exactly what this would be without it.
+    if (entry.reason) {
+        row.appendChild(el('div', 'ledger-reason', `סיבה: ${entry.reason}`));
+    }
+    // And WHICH line stopped being true. A correction floating beside four transactions
+    // is a correction of whichever one the reader guesses.
+    if (entry.targetKind) {
+        row.appendChild(el('div', 'ledger-note',
+            `מתקן: ${LEDGER_KIND_LABELS[entry.targetKind] || entry.targetKind}`));
+    }
     if (entry.origin === 'migration') {
         row.appendChild(el('div', 'ledger-origin', 'הועתק מהרישום הקיים'));
     }
+
+    // CORRECTING THIS TRANSACTION, offered here and nowhere else - this is the only place
+    // in the app where the immutable id of one event is on the screen, and the id is what
+    // a correction has to name. Behind the writing gate, like every other writer.
+    if (typeof eventReversalRoom === 'function'
+        && financialWritingEnabled(State.schedule)
+        && eventReversalRoom(State.schedule, entry.id) > 0) {
+        row.appendChild(button('תיקון', 'btn-secondary',
+            () => openEventReversalForm(entry, row),
+            `תיקון-היפוך של ${LEDGER_KIND_LABELS[entry.kind] || entry.kind}`));
+    }
     return row;
+}
+
+// CORRECTING ONE TRANSACTION, by its immutable id.
+//
+// The advance-level form corrects an ADVANCE - "this was never handed over" - and that is
+// the only sentence it can say. A cash repayment entered twice, or against the wrong man,
+// is at least as common and could not be expressed at all: reversing the advance to fix a
+// repayment reduces the debt, which credits him twice for money that was never there.
+//
+// So this names the transaction. Its sign follows the kind of what it corrects, which the
+// model decides and this form does not - see recordEventReversed in js/model/ledger.js.
+function openEventReversalForm(entry, row) {
+    const host = row.parentNode;
+    if (!host || host.querySelector('.advance-form')) return;
+
+    const room = eventReversalRoom(State.schedule, entry.id);
+    const form = el('div', 'advance-form');
+    form.appendChild(el('div', 'advance-form-title',
+        `${LEDGER_KIND_LABELS.reversed} · ${LEDGER_KIND_LABELS[entry.kind] || entry.kind}`
+        + ` ${moneyText(room)} ₪`));
+
+    const field = (labelText, input) => {
+        form.appendChild(el('label', 'field-label', labelText));
+        form.appendChild(input);
+        return input;
+    };
+
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.setAttribute('inputmode', 'decimal');
+    amountInput.dir = 'ltr';
+    amountInput.value = String(room);
+    field('סכום לתיקון', amountInput);
+
+    // Dated on the transaction's own day: this entry says that transaction did not
+    // happen, so it belongs where the transaction is. Dating it today would move money
+    // between two fortnights to undo something that happened in one of them.
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = entry.date || todayStr();
+    field('תאריך', dateInput);
+
+    const reasonInput = document.createElement('input');
+    reasonInput.type = 'text';
+    reasonInput.maxLength = 120;
+    field('סיבה (חובה)', reasonInput);
+
+    const error = el('p', 'field-error');
+    form.appendChild(error);
+
+    const save = () => {
+        const typed = amountInput.value.trim()
+            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+        const amount = Number(typed);
+        const reason = reasonInput.value.trim();
+        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0) {
+            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
+            amountInput.focus();
+            return;
+        }
+        if (reason === '') {
+            error.textContent = 'צריך לכתוב למה - תיקון בלי סיבה הוא שינוי בכסף '
+                + 'שאיש לא הסביר.';
+            reasonInput.focus();
+            return;
+        }
+        // The model has the last word, asked about the record as it is NOW: the other
+        // phone may have corrected this same transaction while the form was open.
+        const problems = eventReversalProblems(State.schedule, entry.id, amount, reason);
+        if (problems.length > 0) {
+            const left = eventReversalRoom(State.schedule, entry.id);
+            error.textContent = left <= 0
+                ? 'התנועה הזו כבר תוקנה. תיקון נוסף יזיז את הכסף פעמיים.'
+                : `אפשר לתקן עד ${moneyText(left)} ₪ מהתנועה הזו.`;
+            amountInput.focus();
+            return;
+        }
+
+        const change = recordEventReversed(State.schedule, entry.id, amount,
+            dateInput.value, reason, new Date().toISOString(), syncDeviceId());
+        if (!change) { form.remove(); return; }
+        if (!State.commit(change)) return;
+        openWorkerDays(entry.workerId || (State.schedule.advances[entry.advanceId] || {}).workerId);
+    };
+
+    const buttons = el('div', 'modal-actions');
+    buttons.appendChild(button('שמור תיקון', 'btn-primary', save));
+    buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
+    form.appendChild(buttons);
+    host.insertBefore(form, row.nextSibling);
 }
 
 // The statement the worker gets on payday, in the same shape as the screen it came from:

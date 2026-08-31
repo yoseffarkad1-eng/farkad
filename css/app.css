@@ -1512,6 +1512,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wday-date span { color: var(--ink-3); font-size: 13px; }
 .wday-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wday-note { color: var(--ink-3); font-size: 12px; }
+/* The reason a correction was made, on the row it corrects. An adjustment to money
+   with no reason beside it is the thing the ledger exists to refuse. */
+.ledger-reason { grid-column: 1 / -1; color: var(--ink-2); font-size: 12px; }
 /* Sealing an account is the last thing on this screen and the only irreversible one
    on it, so it is set apart above the line rather than sitting among the rows. */
 .period-closure { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }

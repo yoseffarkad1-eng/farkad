@@ -278,29 +278,62 @@ function advanceOutstanding(schedule, advanceId) {
     const given = folded ? Number(folded.amount) || 0
         : Number((legacy || {}).amount) || 0;
 
+    const events = readable ? advanceHistory(schedule, id) : [];
     let repaid = 0;
     let reversed = 0;
     let deducted = 0;
-    (readable ? advanceHistory(schedule, id) : []).forEach(entry => {
+    // WHAT EACH REVERSAL UNDOES, kept apart by the KIND of the event it corrects.
+    //
+    // A reversal used to net one way for everything: it reduced what the man owed, always.
+    // That is right for a wrongly recorded ADVANCE - he never got the money - and it is
+    // exactly backwards for a wrongly recorded REPAYMENT. If the cash he was said to have
+    // handed back never arrived, his debt goes UP, not down; netting it the other way
+    // credited him twice for money that was never there.
+    let undoneGiven = 0;
+    let undoneRepaid = 0;
+    let undoneDeducted = 0;
+    const byId = {};
+    events.forEach(entry => { byId[String(entry.id)] = entry; });
+    events.forEach(entry => {
         const sum = Number(entry.amount) || 0;
         if (entry.kind === 'repaid') repaid += sum;
-        else if (entry.kind === 'reversed') reversed += sum;
         else if (entry.kind === 'deducted') deducted += sum;
+        else if (entry.kind === 'reversed') {
+            reversed += sum;
+            // A reversal written before this build carries no target. It meant "this
+            // advance was recorded in error", because that is the only thing it could
+            // mean, and it goes on meaning it.
+            const target = entry.targetId ? byId[String(entry.targetId)] : null;
+            const kind = target ? String(target.kind) : 'given';
+            if (kind === 'repaid') undoneRepaid += sum;
+            else if (kind === 'deducted') undoneDeducted += sum;
+            else undoneGiven += sum;
+        }
     });
 
-    const settled = agoraRound(repaid + reversed + deducted);
+    const effectiveGiven = agoraRound(given - undoneGiven);
+    const effectiveRepaid = agoraRound(repaid - undoneRepaid);
+    const effectiveDeducted = agoraRound(deducted - undoneDeducted);
+    const settled = agoraRound(effectiveRepaid + effectiveDeducted);
     return {
         id,
-        given: agoraRound(given),
-        repaid: agoraRound(repaid),
+        // What was handed over, less anything a correction says was never handed over.
+        given: effectiveGiven,
+        // Cash back and wage deductions, each less the corrections against them.
+        repaid: effectiveRepaid,
         reversed: agoraRound(reversed),
-        deducted: agoraRound(deducted),
+        deducted: effectiveDeducted,
+        // The gross figures, before any correction - what the history actually says
+        // happened, which a statement has to be able to print beside the corrections.
+        givenGross: agoraRound(given),
+        repaidGross: agoraRound(repaid),
+        deductedGross: agoraRound(deducted),
         settled,
-        left: agoraRound(Math.max(0, given - settled)),
+        left: agoraRound(Math.max(0, effectiveGiven - settled)),
         // More has come off this advance than was ever put on it. Kept as its own number
         // rather than a negative `left`, so no screen can print it as a debt of the
         // opposite sign and no wage can be quietly increased by it.
-        overpaid: agoraRound(Math.max(0, settled - given))
+        overpaid: agoraRound(Math.max(0, settled - effectiveGiven))
     };
 }
 
@@ -705,6 +738,111 @@ function recordAdvanceReversed(schedule, advanceId, amount, date, reason, at, by
     return appendLedgerEntry(schedule, {
         advanceId: String(advanceId),
         kind: 'reversed',
+        date: String(date),
+        amount: Number(amount) || 0,
+        reason: String(reason || ''),
+        at: String(at || ''),
+        by: String(by || '')
+    });
+}
+
+// ------------------------------------------------ correcting ONE transaction, by its id
+//
+// recordAdvanceReversed targets the ADVANCE. That is the right shape for the thing it was
+// written for - an advance recorded by mistake - and it is the wrong shape for everything
+// else, because it cannot name WHICH event was wrong. A cash repayment entered twice, a
+// repayment for the wrong amount, a closure taken against the wrong fortnight: all real,
+// all common, and none of them expressible as "reverse the advance".
+//
+// So a correction names an immutable transaction id, and its financial sign follows the
+// kind of the event it corrects:
+//
+//   a wrongly recorded ADVANCE     the man never got the money      debt goes DOWN
+//   a wrongly recorded REPAYMENT   the cash never came back         debt goes UP
+//   a wrongly recorded DEDUCTION   it never came off his wage       debt goes UP
+//
+// Reversing a repayment with the old shape reduced the debt, which credited him twice for
+// money that was never there. See the fold in advanceOutstanding.
+
+// One correction per event, named after the event. Two phones correcting the same mistake
+// write the same field path, so the union keeps one - a correction applied twice is money
+// moved twice.
+function eventReversalId(targetId) {
+    return 'le_rev_' + String(targetId);
+}
+
+// The entry this correction is against, or null.
+function reversalTarget(schedule, targetId) {
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    return held[String(targetId)] || null;
+}
+
+// WHAT REFUSES A CORRECTION, before one is written.
+//
+// English, like every other *Problems in the model - the screen says it in Hebrew in its
+// own words.
+function eventReversalProblems(schedule, targetId, amount, reason) {
+    const out = [];
+    const target = reversalTarget(schedule, targetId);
+    if (!target) return ['a correction of a transaction that is not there'];
+    if (ledgerEntryProblems(String(target.id), target).length > 0) {
+        return ['a correction of a transaction nobody can read'];
+    }
+    // A CORRECTION OF A CORRECTION is not a correction; it is a second story about the
+    // same money, and there is no arithmetic that makes it one number.
+    if (String(target.kind) === 'reversed') {
+        return ['a correction of a correction'];
+    }
+    if (['given', 'repaid', 'deducted'].indexOf(String(target.kind)) === -1) {
+        return ['a correction of a kind of entry that carries no money'];
+    }
+    // ONCE. The same event cannot be corrected twice - after the second the record says
+    // the money moved in a direction nobody chose.
+    if (reversalTarget(schedule, eventReversalId(targetId))) {
+        return ['a second correction of a transaction already corrected'];
+    }
+
+    const back = Number(amount);
+    const held = Number(target.amount) || 0;
+    if (!Number.isFinite(back) || back <= 0) {
+        out.push('a correction of nothing, or of less than nothing');
+    } else {
+        const agorot = back * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            out.push('a correction finer than an agora');
+        }
+        if (back > held + 1e-6) out.push('a correction larger than the transaction it corrects');
+    }
+    if (typeof reason !== 'string' || reason.trim() === '') {
+        out.push('a correction with no reason');
+    }
+    return out;
+}
+
+// How much of this transaction is still open to correction: all of it, or none.
+function eventReversalRoom(schedule, targetId) {
+    const target = reversalTarget(schedule, targetId);
+    if (!target) return 0;
+    if (reversalTarget(schedule, eventReversalId(targetId))) return 0;
+    return agoraRound(Number(target.amount) || 0);
+}
+
+function recordEventReversed(schedule, targetId, amount, date, reason, at, by) {
+    const target = reversalTarget(schedule, targetId);
+    if (!target) return null;
+    // Already corrected. Returning null rather than a second write is what makes the flow
+    // idempotent on ONE phone; the deterministic id is what makes it idempotent across
+    // three.
+    if (reversalTarget(schedule, eventReversalId(targetId))) return null;
+    return appendLedgerEntry(schedule, {
+        id: eventReversalId(targetId),
+        advanceId: String(target.advanceId),
+        kind: 'reversed',
+        // The immutable transaction this corrects, and what that transaction WAS - kept
+        // on the entry so a fold never has to guess at the sign, and so a statement can
+        // say which line stopped being true.
+        targetId: String(targetId),
+        targetKind: String(target.kind),
         date: String(date),
         amount: Number(amount) || 0,
         reason: String(reason || ''),

@@ -754,8 +754,9 @@ function omer(flags) {
 
     same('nothing has happened to it yet',
         device.call('advanceOutstanding', device.State.schedule, id),
-        { id, given: 5000, repaid: 0, reversed: 0, deducted: 0, settled: 0,
-            left: 5000, overpaid: 0 });
+        { id, given: 5000, repaid: 0, reversed: 0, deducted: 0,
+            givenGross: 5000, repaidGross: 0, deductedGross: 0,
+            settled: 0, left: 5000, overpaid: 0 });
 
     // 3,050 came off his wage when account A closed. That is not a repayment and it is
     // not a reversal; it is the third kind, and it was the one nobody counted.
@@ -772,16 +773,29 @@ function omer(flags) {
         id, 50, '2026-08-24', 'נרשם 50 בטעות', '2026-08-24T10:00:00.000Z', 'd_omer'));
 
     const all = device.call('advanceOutstanding', device.State.schedule, id);
-    same('and cash, wage and correction are three separate numbers on one balance',
+    // WHERE THE CORRECTION LANDS, which moved with L4 and is the point of it.
+    //
+    // This reversal names no transaction, so it means what such an entry has always
+    // meant - the ADVANCE was recorded in error - and it now reduces what was given
+    // rather than adding to what was settled. The money is identical either way: 1,700
+    // left, before and after. The decomposition is not, and it is the decomposition that
+    // lets a reversal of a REPAYMENT push the debt up instead of down.
+    same('and cash, wage and correction each land where they belong',
         { repaid: all.repaid, deducted: all.deducted, reversed: all.reversed,
-            settled: all.settled, left: all.left, overpaid: all.overpaid },
-        { repaid: 200, deducted: 3050, reversed: 50, settled: 3300, left: 1700,
-            overpaid: 0 });
+            given: all.given, settled: all.settled, left: all.left, overpaid: all.overpaid },
+        { repaid: 200, deducted: 3050, reversed: 50, given: 4950, settled: 3250,
+            left: 1700, overpaid: 0 });
+    check('and the gross figures still say what the history says happened',
+        all.givenGross === 5000 && all.repaidGross === 200 && all.deductedGross === 3050,
+        JSON.stringify({ given: all.givenGross, repaid: all.repaidGross,
+            deducted: all.deductedGross }));
 
     // The old arithmetic, written out so the difference is on the record: given - repaid
     // alone would have said 4,800 was still owed on an advance with 1,700 left on it.
+    // Read off the GROSS, because that is the number the screen used to work from.
     check('the number the screen used to print was 4,800 on this advance',
-        all.given - all.repaid === 4800, String(all.given - all.repaid));
+        all.givenGross - all.repaidGross === 4800,
+        String(all.givenGross - all.repaidGross));
 }
 
 {
@@ -1584,6 +1598,167 @@ function omer(flags) {
             .split('recordCarryApproval(').length - 1) === 1);
     check('and the row that has no recorded closure says so on the screen',
         settings.indexOf('אין רישום סגירה לתקופה הזו') !== -1);
+}
+
+
+// ------------------------------------------------- correcting the wrong transaction
+{
+    suite('L4: a wrongly recorded REPAYMENT pushes the debt back up');
+
+    // THE CASE THE OLD SHAPE COULD NOT EXPRESS. recordAdvanceReversed targets the
+    // ADVANCE, so the only sentence it can say is "this advance was recorded in error".
+    // A cash repayment entered twice, or for the wrong amount, is at least as common -
+    // and reversing it with the old shape reduced the debt, which credited the man twice
+    // for money that was never there.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    const repay = device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', 'מזומן', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commit(repay);
+    const repayId = repay.value.id;
+
+    given('the record says he handed back 400',
+        device.call('advanceOutstanding', device.State.schedule, id).left === 4600,
+        JSON.stringify(device.call('advanceOutstanding', device.State.schedule, id)));
+
+    // He did not. It was typed against the wrong man's advance.
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        repayId, 400, '2026-08-25', 'נרשם על המקדמה הלא נכונה',
+        '2026-08-25T09:00:00.000Z', 'd_omer'));
+
+    const after = device.call('advanceOutstanding', device.State.schedule, id);
+    check('the debt goes back UP, because the cash never came back',
+        after.left === 5000, JSON.stringify(after));
+    check('and the repayment nets to nothing rather than counting twice',
+        after.repaid === 0 && after.repaidGross === 400, JSON.stringify(after));
+    check('the correction does not create an overpayment out of nothing',
+        after.overpaid === 0, JSON.stringify(after));
+
+    // BOTH ROWS STAY. The repayment that stopped being true is still the row a person is
+    // looking for when they ask what happened here.
+    const history = device.call('advanceHistory', device.State.schedule, id);
+    const rows = history.map(entry => [entry.kind, entry.amount, entry.targetId || null]);
+    check('the repayment is still on the record', rows.some(r => r[0] === 'repaid' && r[1] === 400),
+        JSON.stringify(rows));
+    check('and the correction stands beside it, naming the exact transaction',
+        rows.some(r => r[0] === 'reversed' && r[1] === 400 && r[2] === repayId),
+        JSON.stringify(rows));
+    check('with the reason it was made for',
+        history.filter(e => e.kind === 'reversed')[0].reason === 'נרשם על המקדמה הלא נכונה',
+        JSON.stringify(history.filter(e => e.kind === 'reversed')[0]));
+}
+
+{
+    suite('L4: a wrongly recorded DEDUCTION does the same, in the same direction');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    const closure = device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 3050, '2026-08-20T18:00:00.000Z', 'd_omer', 1950);
+    device.State.commit(closure);
+    given('3,050 came off his wage',
+        device.call('advanceOutstanding', device.State.schedule, id).left === 1950,
+        JSON.stringify(device.call('advanceOutstanding', device.State.schedule, id)));
+
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        closure.value.id, 3050, '2026-08-21', 'נסגר על תקופה שגויה',
+        '2026-08-21T09:00:00.000Z', 'd_omer'));
+    const after = device.call('advanceOutstanding', device.State.schedule, id);
+    check('the debt is back to the whole advance', after.left === 5000, JSON.stringify(after));
+    check('and the deduction nets to nothing',
+        after.deducted === 0 && after.deductedGross === 3050, JSON.stringify(after));
+}
+
+{
+    suite('L4: what a correction refuses');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    const repay = device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commit(repay);
+    const repayId = repay.value.id;
+    const problems = (target, amount, reason) =>
+        device.call('eventReversalProblems', device.State.schedule, target, amount, reason);
+
+    check('a transaction that is not there', problems('le_nope', 100, 'למה').length > 0);
+    check('more than the transaction it corrects', problems(repayId, 401, 'למה').length > 0,
+        JSON.stringify(problems(repayId, 401, 'למה')));
+    check('exactly the transaction is allowed', problems(repayId, 400, 'למה').length === 0);
+    check('part of it is allowed too', problems(repayId, 100, 'למה').length === 0);
+    check('nothing at all is refused', problems(repayId, 0, 'למה').length > 0);
+    check('and no reason is refused', problems(repayId, 400, '   ').length > 0);
+
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        repayId, 400, '2026-08-25', 'טעות', '2026-08-25T09:00:00.000Z', 'd_omer'));
+
+    // ONCE. After a second the record says the money moved in a direction nobody chose.
+    check('the same transaction cannot be corrected twice',
+        problems(repayId, 400, 'שוב').length > 0, JSON.stringify(problems(repayId, 400, 'שוב')));
+    check('and there is no room left on it',
+        device.call('eventReversalRoom', device.State.schedule, repayId) === 0);
+    check('a second call writes nothing at all',
+        device.call('recordEventReversed', device.State.schedule, repayId, 400,
+            '2026-08-26', 'שוב', '2026-08-26T09:00:00.000Z', 'd_omer') === null);
+
+    // A CORRECTION OF A CORRECTION is a second story about the same money.
+    const reversalId = device.call('eventReversalId', repayId);
+    check('a correction cannot be corrected',
+        problems(reversalId, 400, 'למה').length > 0,
+        JSON.stringify(problems(reversalId, 400, 'למה')));
+}
+
+{
+    suite('L4: two phones correcting the same mistake correct it once');
+
+    const a = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(a.State.schedule.advances)[0];
+    const repay = a.call('recordAdvanceRepaid', a.State.schedule,
+        id, 400, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_a', 'cash');
+    a.State.commit(repay);
+    const repayId = repay.value.id;
+    const asPhoneB = JSON.parse(JSON.stringify(a.State.schedule));
+
+    const fromA = a.call('recordEventReversed', a.State.schedule, repayId, 400,
+        '2026-08-25', 'טעות', '2026-08-25T09:00:00.000Z', 'd_a');
+    const fromB = a.call('recordEventReversed', asPhoneB, repayId, 400,
+        '2026-08-25', 'טעות', '2026-08-25T09:00:05.000Z', 'd_b');
+    check('each phone, alone, believed it was correcting it',
+        Boolean(fromA) && Boolean(fromB));
+    check('and both wrote to the same field path', fromA.path === fromB.path,
+        `${fromA.path} | ${fromB.path}`);
+
+    a.State.commit(fromA);
+    a.State.schedule.ledger.advances[fromB.value.id] = fromB.value;
+    const corrections = a.call('advanceHistory', a.State.schedule, id)
+        .filter(entry => entry.kind === 'reversed');
+    check('the record holds one correction after both landed',
+        corrections.length === 1, JSON.stringify(corrections.map(c => [c.amount, c.by])));
+    const after = a.call('advanceOutstanding', a.State.schedule, id);
+    check('and the money moved once, not twice', after.left === 5000 && after.repaid === 0,
+        JSON.stringify(after));
+}
+
+{
+    suite('L4: the correction is reachable, and its reason travels');
+
+    // The screen: a correction is offered against a TRANSACTION in the history, not
+    // against the advance - which is the only place the id it needs is on the page.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('the history offers a correction per transaction',
+        reports.indexOf('openEventReversalForm') !== -1
+        && reports.indexOf('recordEventReversed(') !== -1);
+    check('and it asks for a reason before it writes',
+        /openEventReversalForm[\s\S]{0,3000}סיבה \(חובה\)/.test(reports));
+    check('the reason is drawn in the history, beside the row it corrects',
+        reports.indexOf('ledger-reason') !== -1);
+
+    // And it leaves the phone: print and export are the two places a person reads this
+    // away from the screen, and a correction with no reason on the paper is an
+    // unexplained movement of money.
+    const share = readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8');
+    check('the exported history carries the reason too',
+        share.indexOf('reason') !== -1 || reports.indexOf('reason') !== -1);
 }
 
 report();

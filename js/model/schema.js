@@ -1460,6 +1460,16 @@ function ledgerEntryProblems(id, value) {
     // "somebody changed a number and nobody wrote down why" is the state this prevents.
     if (String(value.kind) === 'reversed') {
         if (!isRealDate(String(value.date))) return ['a reversal on no date'];
+        // The transaction it corrects, when it names one. An entry written before
+        // corrections targeted a transaction names none, and means "this advance was
+        // recorded in error" - which is what it has always meant.
+        if (value.targetId !== undefined && !isSafeSegment(String(value.targetId))) {
+            return ['a reversal naming a transaction id nobody could write'];
+        }
+        if (value.targetKind !== undefined
+            && ['given', 'repaid', 'deducted'].indexOf(String(value.targetKind)) === -1) {
+            return ['a reversal of a kind of entry that carries no money'];
+        }
         if (typeof value.reason !== 'string' || value.reason.trim() === '') {
             return ['a reversal with no reason'];
         }
