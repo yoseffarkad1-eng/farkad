@@ -91,9 +91,9 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
     npm run test:emulator   # rules, the production adapter's CAS, the rollout (needs Java)
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). Measured at this commit, from one clean
-detached worktree and copied from no other: `npm test` is **3235/3235 across 30 suites**,
+detached worktree and copied from no other: `npm test` is **3320/3320 across 31 suites**,
 and `npm run test:release` — which adds the eight browser suites, `sendclaim` and the
-three emulator suites — is **5051/5051 across 42 suites**, and is the gate a build has to
+four emulator suites — is **5255/5255 across 44 suites**, and is the gate a build has to
 pass whole. Anything less than every check passing is a stop, not a warning. `npm test`
 and `npm run test:release` are different gates and are reported separately; neither is
 wrapped in anything that turns a nonzero exit into a success. A count carried over from
