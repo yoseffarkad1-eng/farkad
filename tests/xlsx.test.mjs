@@ -50,26 +50,6 @@ given(`SheetJS is in the tree (${SHEETJS} - or set FARKAD_SHEETJS)`,
     existsSync(SHEETJS));
 const SHEETJS_CODE = readFileSync(SHEETJS, 'utf8');
 
-// And the app asks for exactly this file. A vendored library the code does not name is a
-// megabyte of dead weight in the cache; a name the tree does not hold is an export that
-// fails on every phone at once.
-{
-    suite('the spreadsheet library the app names is the one in this tree');
-
-    const named = /const XLSX_URL = '([^']+)'/.exec(REPORTS);
-    given('js/ui/reports.js names one', named !== null, String(named && named[1]));
-    check('and it is a file on this origin, not a CDN',
-        named && named[1].indexOf('//') === -1 && named[1].indexOf(':') === -1,
-        String(named && named[1]));
-    check('and that file is in the tree',
-        named && existsSync(join(ROOT, named[1])), String(named && named[1]));
-
-    const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
-    check('and the service worker precaches it, so an offline phone can still export',
-        named && sw.indexOf(`'./${named[1]}'`) !== -1,
-        String(named && named[1]));
-}
-
 // ---------------------------------------------------------------- a zip reader, by hand
 
 // An .xlsx is a zip of XML parts. zlib does the only hard part; the rest is the central
@@ -420,7 +400,7 @@ check('and nobody is named, or priced, anywhere in its bytes',
 
 // ---------------------------------------------------------------- the fallback
 
-suite('the CDN is unreachable, which on a building site is a Tuesday');
+suite('the library does not load, which now means the build is incomplete');
 
 const offline = phone(FORTNIGHT, { sheetjs: false });
 
@@ -539,5 +519,25 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
     orphanDetail.filter(row => row[4] !== 'נעדר').length === orphanTotal,
     `${orphanDetail.length} worked, ${orphanTotal} billed, אתר reads ` +
         JSON.stringify(orphanDetail.map(row => row[3])));
+
+// And the app asks for exactly this file. A vendored library the code does not name is a
+// megabyte of dead weight in the cache; a name the tree does not hold is an export that
+// fails on every phone at once.
+{
+    suite('the spreadsheet library the app names is the one in this tree');
+
+    const named = /const XLSX_URL = '([^']+)'/.exec(REPORTS);
+    given('js/ui/reports.js names one', named !== null, String(named && named[1]));
+    check('and it is a file on this origin, not a CDN',
+        named && named[1].indexOf('//') === -1 && named[1].indexOf(':') === -1,
+        String(named && named[1]));
+    check('and that file is in the tree',
+        named && existsSync(join(ROOT, named[1])), String(named && named[1]));
+
+    const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+    check('and the service worker precaches it, so an offline phone can still export',
+        named && sw.indexOf(`'./${named[1]}'`) !== -1,
+        String(named && named[1]));
+}
 
 report();
