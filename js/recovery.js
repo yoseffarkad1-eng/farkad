@@ -373,7 +373,23 @@ const FARKAD_RECORD_KEYS = [
     // every export unprovable while another tab was merely sending. A QUARANTINED copy of
     // it is a different thing: bytes nobody could read, kept because they are the only
     // account of why a send waited, and the file is where an account belongs.
-    'farkad:sendClaim'
+    'farkad:sendClaim',
+    // THE LEDGER'S QUARANTINE, and it is here for the same reason the send claim is.
+    //
+    // There is no live record under this name: js/state.js calls Recovery.damaged with it
+    // when part of the advances history will not read, and what lands on the disk is
+    // `scheduleData:v2:ledger:damaged`. This list is what isFarkadQuarantineKey checks the
+    // BASE of - so without this line those copies are not recognised as quarantines of
+    // anything this app writes, and the sweep that puts every wreck on the device into the
+    // rescue file walked straight past them.
+    //
+    // The consequence, measured: a device that quarantined a damaged ledger, and later
+    // quarantined a second one, exported a file containing the SECOND and not the first.
+    // The second is in there only because this session's problem list names it; the first
+    // was made in an earlier session, its original has since been written over by an
+    // ordinary save, and the copy was the only trace of those bytes left anywhere. That is
+    // the exact failure the sweep was added to prevent, on the one record that is money.
+    'scheduleData:v2:ledger'
 ];
 
 function isFarkadRecordKey(key) {
