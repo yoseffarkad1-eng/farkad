@@ -6453,7 +6453,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
       open: node.open,
       title: node.querySelector('summary').textContent,
       entries: [...node.querySelectorAll('.ledger-entry')].map(entry => entry.textContent),
-      controls: node.querySelectorAll('button, input, select, textarea').length
+      controls: node.querySelectorAll('button, input, select, textarea').length,
+      buttons: [...node.querySelectorAll('button')].map(button => button.textContent.trim())
     };
   });
   check('the fold is there, closed, named for the record it reads',
@@ -6465,13 +6466,34 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     JSON.stringify(fold.entries));
   check('and says where the entry came from',
     fold.entries[0].includes('הועתק מהרישום הקיים'), JSON.stringify(fold.entries));
-  check('read-only means read only: no control of any kind inside the fold',
-    fold.controls === 0, String(fold.controls));
-  // INVERTED ON THIS BRANCH. On main this reads `=== false`;
-  // claude/farkad-ledger-enable-ready is the branch that opens it, and this is one of two
-  // checks in the whole gate that had to move for that. Left loud rather than deleted.
+  // MOVED ON THIS BRANCH, deliberately, and this is the third check in the whole gate
+  // that had to.
+  //
+  // It read `fold.controls === 0`, and on main it still would: with the writer gate shut
+  // nothing in this app can write a ledger entry, so a control inside the history would
+  // be a button that cannot do anything. This branch opens that gate, and a correction
+  // has to name the immutable transaction it corrects - which means the control belongs
+  // beside the transaction, and the history is the only place each one is shown.
+  //
+  // So the guarantee is narrowed rather than dropped, because what it was protecting is
+  // still true: nothing in the history EDITS or DELETES anything. The one control appends
+  // a correction, with a reason, leaving both rows on the record - see recordEventReversed
+  // in js/model/ledger.js and the L4 suites in tests/repayment.test.mjs.
+  check('the history appends, and offers nothing that edits or deletes',
+    fold.buttons.every(text => text === 'תיקון'),
+    JSON.stringify(fold.buttons));
+  check('one correction control, on the one transaction that can be corrected',
+    fold.controls === 1 && fold.buttons.length === 1,
+    JSON.stringify({ controls: fold.controls, buttons: fold.buttons }));
   check('the gate is open, because this branch is the one that opens it',
     (await page.evaluate(() => ledgerWritesEnabled())) === true);
+  // And it is drawn for a reason this page can state: financial writing is open here.
+  // What happens to it when that is shut - the case main ships - is measured against the
+  // record rather than the browser, in tests/repayment.test.mjs; this record has nothing
+  // for the carry to restate, so emptying its approvals would not shut anything.
+  check('and it is drawn because this record may be written to',
+    (await page.evaluate(() => financialWritingEnabled(State.schedule))) === true);
+  // Left loud rather than deleted.
 
   await page.evaluate(() => openWorkerDays('w_02'));
   await page.waitForTimeout(200);
