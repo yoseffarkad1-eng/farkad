@@ -1260,4 +1260,127 @@ function omer(flags) {
         JSON.stringify((reports.match(/.{0,40}addAdvance\s*\(.{0,20}/g) || []).slice(0, 3)));
 }
 
+
+// ------------------------------------------------- one account, read by every surface
+{
+    suite('L2: the same fortnight reads the same on every surface');
+
+    // FOUR SURFACES, ONE MAN, ONE PERIOD. The payroll row, the printed sheet, the
+    // exported workbook and the message the worker himself is sent are four different
+    // functions, and three of them did their own arithmetic:
+    //
+    //   renderNetRow          earned - sum(advances in range)
+    //   workerStatementText   earned - sum(advances in range)
+    //   openAdvanceBalance    sum(every advance ever), ignoring every repayment
+    //
+    // while payrollRows priced the same fortnight through advanceAccount, which knows
+    // about the opening balance, the cash that came back and the money already taken off
+    // his wage. So a man could be told 1,950 on the screen, 5,000 in the archive warning
+    // and 3,050 on WhatsApp, about the same fortnight, on the same evening.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 3050,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 1950));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 200, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash'));
+
+    // THE ONE ANSWER, which every surface below must agree with.
+    const account = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to);
+    given('the account opens owing what the closed period carried out',
+        account.carriedIn === 1950, String(account.carriedIn));
+
+    const vm = await import('node:vm');
+    const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:l2' });
+    run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(`REPORT_RANGE.from = '${OMER_B.from}'; REPORT_RANGE.to = '${OMER_B.to}';`
+        + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+
+    // Every surface, asked for the same man and the same fortnight.
+    const surfaces = run(`(function () {
+        const worker = State.worker('w_01');
+        const sheet = payrollSheetRows();
+        const head = sheet[0];
+        const row = sheet.find(r => r[0] === worker.name) || [];
+        return {
+            account: workerAccountFor(worker.id),
+            sheetNet: row[head.indexOf('לתשלום')],
+            sheetAdvances: row[head.indexOf('מקדמות')],
+            statement: workerStatementText(worker.id),
+            openBalance: openAdvanceBalance(State.schedule, worker.id)
+        };
+    })()`);
+
+    // The payroll row and the export are the same function and always agreed; the point
+    // here is that the OTHERS now agree with them.
+    check('the pay sheet deducts what the account says was deducted',
+        Math.abs(Number(surfaces.sheetAdvances)) === account.deducted,
+        JSON.stringify({ sheet: surfaces.sheetAdvances, account: account.deducted }));
+
+    // THE STATEMENT the man himself receives.
+    check('the statement names the opening balance the account opened on',
+        surfaces.statement.indexOf('1,950') !== -1 || surfaces.statement.indexOf('1950') !== -1,
+        JSON.stringify(surfaces.statement.split('\n').filter(l => l.indexOf('1,950') !== -1
+            || l.indexOf('1950') !== -1)));
+    check('and it names the cash he handed back',
+        surfaces.statement.indexOf('200') !== -1
+        && surfaces.statement.indexOf('הוחזר במזומן') !== -1,
+        JSON.stringify(surfaces.statement.split('\n').filter(l => l.indexOf('200') !== -1)));
+    check('the statement never prints a number the account does not hold',
+        surfaces.statement.indexOf('5,000') === -1 && surfaces.statement.indexOf('5000') === -1,
+        JSON.stringify(surfaces.statement.split('\n').filter(l => l.indexOf('5') !== -1)));
+
+    // THE ARCHIVE WARNING, which decides whether a man may be put away.
+    check('the archive warning reports what is still owed, not what was ever handed over',
+        surfaces.openBalance !== null && surfaces.openBalance.total === account.carriedForward,
+        JSON.stringify({ warning: surfaces.openBalance, owed: account.carriedForward }));
+    check('and it is not the gross 5,000 any more',
+        surfaces.openBalance === null || surfaces.openBalance.total !== 5000,
+        JSON.stringify(surfaces.openBalance));
+
+    // AND ONE FUNCTION BEHIND ALL OF THEM. The check that keeps it that way.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('every surface goes through the one account reader',
+        (reports.match(/workerAccountFor\(/g) || []).length >= 3,
+        String((reports.match(/workerAccountFor\(/g) || []).length));
+}
+
+{
+    suite('L2: with the gates shut every surface still agrees, the old way');
+
+    // The other half of the promise. With the writer closed there is no account to read,
+    // and the surfaces must still say ONE thing - the thing this build has always said.
+    //
+    // Shut EXPLICITLY. This branch ships both gates open, so `omer({})` here would have
+    // measured the open build twice and called one of them closed.
+    const device = omer({ carryAdvances: false, ledgerWrites: false });
+    const vm = await import('node:vm');
+    const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:l2b' });
+    run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(`REPORT_RANGE.from = '${OMER_A.from}'; REPORT_RANGE.to = '${OMER_A.to}';`
+        + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+
+    const shut = run(`(function () {
+        const sheet = payrollSheetRows();
+        const head = sheet[0];
+        const row = sheet.find(r => r[0] === 'עומר סעד') || [];
+        return {
+            sheetAdvances: Math.abs(Number(row[head.indexOf('מקדמות')])),
+            openBalance: openAdvanceBalance(State.schedule, 'w_01'),
+            statement: workerStatementText('w_01')
+        };
+    })()`);
+    check('the sheet deducts the whole advance, as this build always has',
+        shut.sheetAdvances === 5000, String(shut.sheetAdvances));
+    check('and the archive warning says the same number',
+        shut.openBalance && shut.openBalance.total === 5000,
+        JSON.stringify(shut.openBalance));
+    check('and so does the statement',
+        shut.statement.indexOf('5,000') !== -1 || shut.statement.indexOf('5000') !== -1,
+        JSON.stringify(shut.statement.split('\n').filter(l => l.indexOf('5') !== -1).slice(0, 3)));
+}
+
 report();

@@ -1065,9 +1065,22 @@ function openAdvanceBalance(schedule, workerId) {
     const advances = workerFootprint(schedule, workerId).advances;
     if (advances.length === 0) return null;
 
-    const total = advances.reduce(
-        (sum, id) => sum + (Number((schedule.advances[id] || {}).amount) || 0), 0);
-    return total > 0 ? { count: advances.length, total } : null;
+    // WHAT IS STILL OWED, not what was ever handed over.
+    //
+    // This summed the amount of every advance the man has ever had, and nothing else -
+    // no repayment, no reversal, and no money already taken off his wage. So the sentence
+    // that decides whether somebody may be put away said 5,000 about a man who owed 1,750,
+    // on a screen whose whole purpose is to be the last word before he is archived.
+    //
+    // advanceOutstanding is the one fold; it is feature-detected because the ledger file
+    // may not be loaded, and gated on the carry because with it shut there are no
+    // repayments to read and the gross IS the answer - which is what this build has always
+    // said and what a phone that cannot read entries needs it to keep saying.
+    const folded = typeof advanceOutstanding === 'function' && advanceCarryEnabled();
+    const total = advances.reduce((sum, id) => (folded
+        ? sum + advanceOutstanding(schedule, id).left
+        : sum + (Number((schedule.advances[id] || {}).amount) || 0)), 0);
+    return total > 0 ? { count: advances.length, total: agoraRound(total) } : null;
 }
 
 // ---------------------------------------------------------------- the wire form

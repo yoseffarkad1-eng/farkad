@@ -1092,15 +1092,44 @@ function openReversalForm(item, settled, row) {
     host.insertBefore(form, row.nextSibling);
 }
 
+// THE ONE ACCOUNT READER, and every surface in this file goes through it.
+//
+// Four surfaces priced the same fortnight and three of them did their own arithmetic:
+//
+//   renderNetRow          earned - sum(advances dated in the range)
+//   workerStatementText   earned - sum(advances dated in the range)
+//   openAdvanceBalance    sum(every advance ever), ignoring every repayment
+//
+// while payrollRows priced it through advanceAccount, which knows about the opening
+// balance, the cash that came back and the money already taken off his wage. So one man,
+// one evening, one fortnight could read 1,950 on the screen, 5,000 in the archive warning
+// and 3,050 on WhatsApp - and each of those numbers was arrived at honestly.
+//
+// Null when there is no account to read: the carry gate is shut, or the range somebody
+// picked is not a whole account. Every caller falls back to the arithmetic this build has
+// always done, which is what a phone with the gates closed must keep saying.
+function workerAccountFor(workerId) {
+    if (!advanceCarryEnabled()) return null;
+    if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)) return null;
+    if (typeof advanceAccount !== 'function') return null;
+    return advanceAccount(State.schedule, workerId, REPORT_RANGE.from, REPORT_RANGE.to);
+}
+
 function renderNetRow(days, worker, advances) {
     const earned = days.filter(day => !day.absent)
         .reduce((sum, day) => sum + (day.amount || 0), 0);
-    const taken = advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    const account = workerAccountFor(worker.id);
+    // What comes off THIS fortnight, which is not the same as what was handed over in it:
+    // an advance bigger than the wage is deducted up to the wage and the rest carries.
+    const taken = account
+        ? account.deducted
+        : advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
     const row = el('div', 'wday wday-total wday-net');
     row.appendChild(el('div', 'wday-date', 'נותר לתשלום'));
-    row.appendChild(el('div', 'wday-what',
-        `${moneyText(agora(earned))} נצבר · ${moneyText(agora(taken))} מקדמות`));
+    const what = `${moneyText(agora(earned))} נצבר · ${moneyText(agora(taken))} מקדמות`;
+    row.appendChild(el('div', 'wday-what', account && account.carriedIn > 0
+        ? `${what} · ${moneyText(account.carriedIn)} מחשבון קודם` : what));
     row.appendChild(el('div', 'wday-money',
         Number(worker.dailyRate) > 0
             ? bidiAmount(moneyText(agora(agora(earned) - agora(taken)))) : '—'));
@@ -1365,7 +1394,14 @@ function workerStatementText(workerId) {
     const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
     const worked = days.filter(day => !day.absent);
     const earned = worked.reduce((sum, day) => sum + (day.amount || 0), 0);
-    const taken = advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    // THE SAME ACCOUNT THE SCREEN AND THE SHEET READ. This summed the advances dated in
+    // the range, which is a different question from what comes off this man's wage - and
+    // his own copy was the one document that answered it differently from the sheet he
+    // is paid against.
+    const account = workerAccountFor(worker.id);
+    const taken = account
+        ? account.deducted
+        : advances.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
     const priced = Number(worker.dailyRate) > 0;
 
     const lines = [
@@ -1410,6 +1446,14 @@ function workerStatementText(workerId) {
         lines.push('* שעות נוספות בלי שכר שעה - לא נכללו בסכום.');
     }
 
+    // WHAT HE OWED BEFORE THIS FORTNIGHT BEGAN. Without it the deduction below looks
+    // like it came from nowhere, and the man checking his own message has no way to get
+    // from the advance he remembers to the number he is handed.
+    if (account && account.carriedIn > 0) {
+        lines.push('');
+        lines.push(`${LEDGER_KIND_LABELS.given} מחשבון קודם: ${moneyText(account.carriedIn)}`);
+    }
+
     if (advances.length > 0) {
         lines.push('');
         // The same three words the screen draws over the same record. The man is the one
@@ -1420,10 +1464,29 @@ function workerStatementText(workerId) {
             + `${minusAmount(item.amount)}`));
     }
 
+    // Cash he handed back, and money already taken off his wage - his own copy has to
+    // name both, or the two of them are the difference he cannot account for.
+    if (account && account.repaid > 0) {
+        lines.push(`${LEDGER_KIND_LABELS.repaid}: ${moneyText(account.repaid)}`);
+    }
+    if (account && account.reversed > 0) {
+        lines.push(`${LEDGER_KIND_LABELS.reversed}: ${moneyText(account.reversed)}`);
+    }
+    if (account && account.deducted > 0) {
+        lines.push(`${LEDGER_KIND_LABELS.deducted}: ${moneyText(account.deducted)}`);
+    }
+
     if (priced) {
         lines.push('');
         lines.push(`נותר לתשלום: `
             + `${bidiAmount(moneyText(agora(agora(earned) - agora(taken))))}`);
+        // And what is still on the books afterwards, in the words the two labels never
+        // swap: a closed period reports its יתרת סגירה, an open one its חוב פתוח.
+        if (account && account.closed && account.carriedOut > 0) {
+            lines.push(`יתרת סגירה: ${moneyText(account.carriedOut)}`);
+        } else if (account && account.carriedForward > 0) {
+            lines.push(`חוב פתוח: ${moneyText(account.carriedForward)}`);
+        }
     }
 
     return lines.join('\n');
