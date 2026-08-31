@@ -262,7 +262,15 @@ function advanceHistory(schedule, advanceId) {
 // below.
 function advanceOutstanding(schedule, advanceId) {
     const id = String(advanceId);
-    const folded = foldLedger(schedule)[id];
+    // FEATURE-DETECTED, and it is not ceremony. This is on the render path of the worker
+    // screen, and that screen has to open on a build where the ledger file is not loaded
+    // at all - a half-fetched install, a file taken out to bisect something. Without the
+    // reader the honest answer is what the OLD field says and nothing settled against it,
+    // which is exactly what a build with no ledger knows. Caught by tests/smoke.mjs,
+    // which nulls the reader and asks the modal to open anyway.
+    const readable = typeof foldLedger === 'function'
+        && typeof advanceHistory === 'function';
+    const folded = readable ? foldLedger(schedule)[id] : null;
     const legacy = ((schedule && schedule.advances) || {})[id];
     // The ledger's answer where there is one; the old field otherwise, because until all
     // three phones are past v79 it is the only place an advance recorded this evening on
@@ -273,7 +281,7 @@ function advanceOutstanding(schedule, advanceId) {
     let repaid = 0;
     let reversed = 0;
     let deducted = 0;
-    advanceHistory(schedule, id).forEach(entry => {
+    (readable ? advanceHistory(schedule, id) : []).forEach(entry => {
         const sum = Number(entry.amount) || 0;
         if (entry.kind === 'repaid') repaid += sum;
         else if (entry.kind === 'reversed') reversed += sum;
