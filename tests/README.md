@@ -47,7 +47,7 @@ test broke, not the app — fix the setup before reading anything into the run.
 
 MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no other:
 
-    npm test           31 suites   3531/3531
+    npm test           31 suites   3537/3537
     npm run test:all   + 8 suites  + 1779   (smoke 1032, print 70, mobile 510,
                                              update 30, recovery-browser 25,
                                              handover 26, swrestart 31, swidentity 55)
@@ -55,7 +55,7 @@ MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no ot
                                              rollout 17, bootstrap 23,
                                              money-concurrency 33)
     ------------------------------------------------------------------
-    the whole gate     45 suites   5506/5506
+    the whole gate     45 suites   5512/5512
 
 Those are re-measured on THIS branch, and this branch is not main: it is the one with
 both ledger gates open. `claude/farkad-v87-clean-repair` runs the same suites with them

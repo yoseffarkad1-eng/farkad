@@ -92,9 +92,9 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
                             #   cutover and two phones writing money at once (needs Java)
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). Measured at this commit, from one clean
-detached worktree and copied from no other: `npm test` is **3531/3531 across 31 suites**,
+detached worktree and copied from no other: `npm test` is **3537/3537 across 31 suites**,
 and `npm run test:release` — which adds the eight browser suites, `sendclaim` and the
-five emulator suites — is **5506/5506 across 45 suites**, and is the gate a build has to
+five emulator suites — is **5512/5512 across 45 suites**, and is the gate a build has to
 pass whole.
 
 **THIS BRANCH IS NOT MAIN.** `claude/farkad-ledger-enable-ready` is the build with
