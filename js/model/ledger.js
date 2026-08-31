@@ -41,8 +41,22 @@
 // ledger entries. Nothing but a person deciding all three phones have updated may flip it.
 const LEDGER_WRITES = false;
 
+// THE ONE SEAM, and it is the same seam every other gate in this app has.
+//
+// The const above is the shipped answer and stays where iron law 1 says it lives. What
+// this adds is the ability for a SUITE to open the gate and measure the build somebody
+// eventually ships - which was not possible before, so everything behind the gate was
+// unmeasured, which is a poor way to keep a feature safe until the day it matters.
+//
+// FARKAD_FLAG_OVERRIDES is read once, into a frozen object, and tests/build.test.mjs
+// fails if any file this app ships mentions it - the page included. So a browser cannot
+// reach this, and neither can a phone: opening it needs a file that is not in the shell.
+// That is a stronger gate than a bare const, which nothing enforces at all.
+//
+// The shipped default is unchanged and is still what every device runs. tests/smoke.mjs
+// asks a real browser whether the gate is shut, and tests/data.test.mjs asks the model.
 function ledgerWritesEnabled() {
-    return LEDGER_WRITES === true;
+    return LEDGER_WRITES === true || FARKAD_FLAGS.ledgerWrites === true;
 }
 
 function ledgerEntryId() {

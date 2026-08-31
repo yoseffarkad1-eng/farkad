@@ -31,6 +31,7 @@
 
 import { makeDevice, makeCloud, settle } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { makeNode } from './nodes.mjs';
 
 const TICK = 6;
 const SYNCED = () => settle(TICK * 40);
@@ -107,68 +108,7 @@ const offOn = (device, date) =>
 // browser: the browser suites measure pixels, and what is asked here is whether a column,
 // a tray or a panel exists at all - a question about the nodes the production function
 // appends, and those it builds anywhere.
-function makeNode(tag) {
-    const kids = [];
-    const node = {
-        tagName: String(tag).toUpperCase(), childNodes: kids, attrs: {}, style: {},
-        className: '', type: '', value: '', href: '', download: '', onerror: null,
-        parentNode: null, listeners: {}, _text: '',
-        get firstChild() { return kids[0] || null; },
-        appendChild(child) { child.parentNode = node; kids.push(child); return child; },
-        removeChild(child) {
-            const at = kids.indexOf(child);
-            if (at >= 0) kids.splice(at, 1);
-            child.parentNode = null;
-            return child;
-        },
-        setAttribute(key, value) { node.attrs[key] = String(value); },
-        getAttribute(key) { return node.attrs[key] === undefined ? null : node.attrs[key]; },
-        addEventListener(name, fn) { (node.listeners[name] = node.listeners[name] || []).push(fn); },
-        removeEventListener() {}, focus() {}, click() {},
-        // A retired list hides its panel by finding it FROM the list - not by an id in
-        // the shell - so a stub answering null would let that check pass without the
-        // panel ever having been reached.
-        closest(selector) {
-            const want = String(selector).replace(/^\./, '');
-            for (let up = node.parentNode; up; up = up.parentNode) {
-                if (String(up.className).split(/\s+/).indexOf(want) >= 0) return up;
-            }
-            return null;
-        },
-        querySelectorAll(selector) {
-            const want = String(selector).trim();
-            const hit = item => (want.charAt(0) === '.'
-                ? String(item.className).split(/\s+/).indexOf(want.slice(1)) >= 0
-                : item.tagName === want.toUpperCase());
-            const out = [];
-            const walk = item => item.childNodes.forEach(child => {
-                if (hit(child)) out.push(child);
-                walk(child);
-            });
-            walk(node);
-            return out;
-        },
-        querySelector(selector) { return node.querySelectorAll(selector)[0] || null; },
-        get textContent() {
-            return kids.length ? kids.map(child => child.textContent).join(' ') : node._text;
-        },
-        set textContent(value) {
-            kids.length = 0;
-            node._text = value === null || value === undefined ? '' : String(value);
-        },
-        get classList() {
-            const of = () => new Set(String(node.className).split(/\s+/).filter(Boolean));
-            return {
-                add(...names) { const set = of(); names.forEach(n => set.add(n)); node.className = [...set].join(' '); },
-                remove(...names) { const set = of(); names.forEach(n => set.delete(n)); node.className = [...set].join(' '); },
-                toggle(name, on) { if (on) this.add(name); else this.remove(name); },
-                contains(name) { return of().has(name); }
-            };
-        }
-    };
-    return node;
-}
-
+// The DOM stub lives in tests/nodes.mjs now - see the note at the top of it.
 // A device with the screens attached: the reports page, the roster's vehicle panel, and
 // the files the export button hands over.
 async function staged(options = {}) {

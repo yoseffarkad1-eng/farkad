@@ -28,6 +28,7 @@
 
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { makeNode } from './nodes.mjs';
 
 // Two consecutive accounts, either side of the anchor's fortnight.
 const A = { from: '2026-08-07', to: '2026-08-20' };
@@ -281,6 +282,69 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
             device.call('ledgerEntryProblems', 'le_x', entry).length > 0,
             JSON.stringify(device.call('ledgerEntryProblems', 'le_x', entry)));
     });
+}
+
+// ---------------------------------------------------- the control, and the gate on it
+{
+    suite('recording a repayment, and the gate the whole feature sits behind');
+
+    const vm = (await import('node:vm')).default;
+    const { readFileSync } = await import('node:fs');
+
+    // A worker screen, built by the real renderer, so what is asked is whether the app
+    // appends the control - not whether a paraphrase of it would have.
+    async function screenFor(options) {
+        const device = crew(options);
+        work(device, A_DAYS);
+        device.State.commit(device.call('addAdvance', device.State.schedule,
+            'w_01', '2026-08-10', 5000, ''));
+        device.setToday('2026-08-18');
+
+        // The worker modal's three nodes, which openWorkerDays writes into by id.
+        const reportsView = makeNode('div');
+        const workerDaysTitle = makeNode('h2');
+        const workerDaysMeta = makeNode('p');
+        const workerDaysBody = makeNode('div');
+        const workerDaysModal = makeNode('div');
+        const nodes = { reportsView, workerDaysTitle, workerDaysMeta, workerDaysBody,
+            workerDaysModal };
+        device.ctx.document = {
+            body: makeNode('body'),
+            head: { appendChild(tag) { if (tag.onerror) tag.onerror(); return tag; } },
+            getElementById: id => nodes[id] || null,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            addEventListener() {}, removeEventListener() {},
+            createElement: tag => makeNode(tag),
+            createElementNS: (ns, tag) => makeNode(tag)
+        };
+        const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
+        run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        run(`REPORT_RANGE.from = '${A.from}'; REPORT_RANGE.to = '${A.to}';`
+            + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+        run(`openWorkerDays('w_01')`);
+        return { device, run, reportsView: workerDaysBody };
+    }
+
+    // THE SHIPPED BUILD. The ledger's writer gate is shut - iron law 1 - and a control
+    // that writes an entry no other phone can read is not a control, it is a way to lose
+    // a repayment. Nothing anywhere may reach one.
+    const shipped = await screenFor({ deviceId: 'd_ui_off' });
+    check('with the writer gated off there is no way to record a repayment at all',
+        shipped.reportsView.textContent.indexOf('החזר') === -1,
+        shipped.reportsView.textContent.slice(0, 200));
+    check('and nothing on the screen writes a ledger entry behind the gate',
+        Object.keys(((shipped.device.State.schedule.ledger || {}).advances) || {})
+            .filter(id => (shipped.device.State.schedule.ledger.advances[id] || {})
+                .kind === 'repaid').length === 0);
+
+    // AND WITH IT OPEN, which is the build somebody eventually ships.
+    const open = await screenFor({ deviceId: 'd_ui_on',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    check('the control is there, on the advance it settles',
+        open.reportsView.textContent.indexOf('החזר') !== -1,
+        open.reportsView.textContent.slice(0, 300));
 }
 
 report();
