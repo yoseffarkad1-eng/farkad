@@ -390,4 +390,50 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         [5000, 1800, 3200, 0]);
 }
 
+// ------------------------------------------ the two gates only make sense together
+{
+    suite('a repayment nobody deducts is worse than no repayment at all');
+
+    // Found while preparing the branch that would open the writer gate, which is the
+    // moment this becomes real rather than theoretical.
+    //
+    // The control was gated on the WRITER alone. With the writer open and the carry shut,
+    // a person hands back 200, the row says so - "200 ₪ הוחזרו · נותרו 300" - and the pay
+    // column goes on deducting the whole 500, because moneyOf reads the deduction off
+    // row.carry and there is no row.carry with the carry off.
+    //
+    // That is the failure this whole area exists to prevent, arrived at from the other
+    // side: money that changed hands, recorded, visible on the screen, and absent from
+    // the sum somebody is paid from. A repayment nobody deducts is worse than no
+    // repayment at all - it reads as settled and is not.
+    const device = crew({ deviceId: 'd_half_gate', flags: { ledgerWrites: true } });
+    work(device, A_DAYS);
+    device.State.commit(device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-10', 500, ''));
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+
+    given('the writer is open and the carry is not',
+        device.call('ledgerWritesEnabled') === true
+        && device.call('advanceCarryEnabled') === false,
+        JSON.stringify([device.call('ledgerWritesEnabled'),
+            device.call('advanceCarryEnabled')]));
+
+    const paid = device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 200, '2026-08-18', '', '2026-08-18T09:00:00.000Z', 'd_half_gate', 'cash');
+    device.State.commit(paid);
+
+    const row = device.call('payrollReport', device.State.schedule, A.from, A.to)
+        .find(item => item.workerId === 'w_01');
+    given('and the record holds the repayment',
+        Object.keys(device.State.schedule.ledger.advances)
+            .some(id => device.State.schedule.ledger.advances[id].kind === 'repaid'),
+        JSON.stringify(row.advances));
+
+    // The check. Either the deduction reflects what he handed back, or this build must
+    // not offer a way to record one - those are the only two honest states.
+    const deducted = row.advances;
+    check('a build that lets somebody record a repayment also deducts it',
+        deducted === 300, `${deducted} deducted against 500 given and 200 handed back`);
+}
+
 report();
