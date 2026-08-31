@@ -6430,8 +6430,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     fold.entries[0].includes('הועתק מהרישום הקיים'), JSON.stringify(fold.entries));
   check('read-only means read only: no control of any kind inside the fold',
     fold.controls === 0, String(fold.controls));
-  check('because the gate itself is still closed',
-    (await page.evaluate(() => ledgerWritesEnabled())) === false);
+  // INVERTED ON THIS BRANCH. On main this reads `=== false`;
+  // claude/farkad-ledger-enable-ready is the branch that opens it, and this is one of two
+  // checks in the whole gate that had to move for that. Left loud rather than deleted.
+  check('the gate is open, because this branch is the one that opens it',
+    (await page.evaluate(() => ledgerWritesEnabled())) === true);
 
   await page.evaluate(() => openWorkerDays('w_02'));
   await page.waitForTimeout(200);

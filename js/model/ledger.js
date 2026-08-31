@@ -39,7 +39,13 @@
 
 // The compatibility gate. False while any device may still be on a build that cannot read
 // ledger entries. Nothing but a person deciding all three phones have updated may flip it.
-const LEDGER_WRITES = false;
+//
+// ON THIS BRANCH IT IS TRUE, and this branch is not main and has not been merged.
+// claude/farkad-ledger-enable-ready exists so that the build somebody eventually ships
+// can be run end to end before anybody commits to it - see the commit that flipped it.
+// Merging this is the decision iron law 1 reserves for a person, and it is only theirs to
+// make once all three phones are known to be past v79.
+const LEDGER_WRITES = true;
 
 // THE ONE SEAM, and it is the same seam every other gate in this app has.
 //

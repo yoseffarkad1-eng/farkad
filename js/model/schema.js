@@ -55,7 +55,12 @@ const FARKAD_SHIPPED_FLAGS = {
     // owner ruled out. So the switch belongs to a person who knows, and planAdvanceCarry
     // tells them exactly which accounts and which men it would move before they touch it
     // - the same courtesy planRateStamping gives before stamping old days.
-    carryAdvances: false
+    // TRUE ON THIS BRANCH ONLY. It has to move with the writer: the repayment control
+    // needs both gates, because with the carry shut nothing reads a repayment and a man
+    // who hands back 200 is still deducted 500. Turning it on RESTATES accounts that may
+    // already have been paid - run planAdvanceCarry and read every row of it before
+    // merging this anywhere.
+    carryAdvances: true
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set
