@@ -28,8 +28,11 @@ different from what was done.
   `sync/sync.js`, which reads its outbox the moment it loads; `model/schema.js` must
   precede `state.js`, which calls `emptySchedule()` at definition time; the UI files
   come after the data layer. The order in `index.html` is the order.
-- **Nothing off this origin sits between a person and their data.** The Firebase SDK
-  and SheetJS are fetched after boot, never before the first render; both fail soft.
+- **Nothing off this origin sits between a person and their data.** The Firebase SDK is
+  fetched after boot, never before the first render, and fails soft. SheetJS is not
+  fetched at all any more: `vendor/xlsx-0.18.5.min.js` is in the service worker's shell,
+  so the export works in a tunnel. Reaching the CSV fallback now means the build on that
+  phone is incomplete, not that the signal is weak, and it says so.
 - **The service worker (`sw.js`) serves everything cache-first**, the page included:
   a session runs one build, end to end. Data lives in `localStorage`, always through
   `Store`; sync is optional and off until `js/sync/firebase-config.js` is filled in.
@@ -85,9 +88,12 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
     npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover
     npm run test:rules      # firestore.rules against the local emulator (needs Java)
 
-Node 20 or 22 (`engines` says `>=20.11 <23`). At this commit `npm test` is **2638/2638**
-and `npm run test:all` adds **1547/1547** — anything less than every check passing is a
-stop, not a warning. The browser suites need Playwright's Chromium once
+Node 20 or 22 (`engines` says `>=20.11 <23`). At this commit `npm test` is **3104/3104**
+across 28 suites, and `npm run test:release` — which adds the browser suites and
+`sendclaim` — is the gate a build has to pass whole. Anything less than every check
+passing is a stop, not a warning. `npm test` and `npm run test:release` are different
+gates and are reported separately; neither is wrapped in anything that turns a nonzero
+exit into a success. The browser suites need Playwright's Chromium once
 (`npm run browsers`), or point `CHROME_PATH` at a browser that is already installed —
 see `tests/README.md` before downloading anything.
 
@@ -152,7 +158,10 @@ written down so it cannot happen twice.
     tests/restore.test.mjs     a device holding only part of a restore is caught
     tests/upgrade.test.mjs     a v86 disk opened by this build
     tests/vehicles.test.mjs    the retired feature, from both sides of its flag
-    tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx
+    tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx, built by the shipped library
+    tests/money.display.test.mjs one day has one price on every surface: screen, WhatsApp, sheet
+    tests/cas.test.mjs         the client half of the ordering protocol: revision, receipt, rebase, hold
+    vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
     tests/recovery.browser.mjs the rescue export through the real button
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
