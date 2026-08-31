@@ -47,7 +47,9 @@ function renderWeek() {
 
     const head = el('thead');
     const headRow = el('tr');
-    headRow.appendChild(el('th', 'corner', 'עובדים / ימים'));
+    const corner = el('th', 'corner');
+    corner.appendChild(el('span', 'name-clip', 'עובדים / ימים'));
+    headRow.appendChild(corner);
     dates.forEach(date => {
         const parsed = parseLocalDate(date);
         const th = el('th');
@@ -66,7 +68,25 @@ function renderWeek() {
     const body = el('tbody');
     workers.forEach(worker => {
         const row = el('tr');
-        const name = el('td', 'name-cell', worker.name);
+        // THE NAME, IN A BOX OF ITS OWN.
+        //
+        // Not text straight in the cell. The week table is laid out `auto` so that the day
+        // columns can hold their 44px floor, and auto layout sizes a column to its widest
+        // CONTENT - so one long name pushed the pinned first column to 305px inside a
+        // 296px box and left zero of seven days on the screen. overflow and text-overflow
+        // on the cell did nothing about it: they clip what is drawn, they do not tell the
+        // column how wide to be.
+        //
+        // A block inside the cell with a max-width does. The column is then bounded by
+        // this element, the name is ellipsised, and the days get the rest of the screen.
+        const name = el('td', 'name-cell');
+        const clip = el('span', 'name-clip', worker.name);
+        // The whole name is still available - to a finger that holds it, and to a screen
+        // reader, which must never be handed "מוחמד עבד אל…". Ellipsis is a drawing
+        // decision and it may not become a data one.
+        clip.title = worker.name;
+        name.setAttribute('aria-label', worker.name);
+        name.appendChild(clip);
         // Said plainly, because a name in a week they worked and a name on the current
         // roster are two different statements.
         if (worker.active === false) name.appendChild(el('span', 'badge', 'לא פעיל'));
@@ -126,7 +146,9 @@ function weekWorkers(dates) {
 function renderWeekTotals(dates, workers) {
     const foot = el('tfoot');
     const row = el('tr');
-    row.appendChild(el('td', 'name-cell', 'סה"כ עובדים'));
+    const total = el('td', 'name-cell');
+    total.appendChild(el('span', 'name-clip', 'סה"כ עובדים'));
+    row.appendChild(total);
 
     dates.forEach(date => {
         const count = workers.filter(worker =>

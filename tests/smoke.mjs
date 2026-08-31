@@ -5844,8 +5844,17 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     FarkadSync.receive({ days: { '2026-08-12': { actual: {} } }, updatedAt: '2026-08-12T10:00:00Z' });
     return { status: FarkadSync.status, queued: FarkadSync.pendingPaths() };
   });
+  // NOT A FAILURE, and not finished either - which is the whole of what changed here.
+  //
+  // This read `fresh.status === 'synced'` and it was the reproduction of the defect it
+  // sat next to: ten roster operations queued and the line saying everything was on the
+  // other two phones. The check's point was that an unfinished document must not lock the
+  // status on "sync error" while writes are in fact landing, and that point is intact -
+  // 'sending' is not an error. It is the state the line had no word for.
   check('a server document with no roster yet is not treated as a failure',
-    fresh.status === 'synced', JSON.stringify(fresh));
+    fresh.status !== 'error' && fresh.status !== 'contested', JSON.stringify(fresh));
+  check('and it does not claim to be finished with ten roster paths still queued',
+    fresh.status === 'sending' && fresh.queued.length > 0, JSON.stringify(fresh));
   check('and this device seeds it with the roster it has',
     fresh.queued.includes('workers'), JSON.stringify(fresh));
 

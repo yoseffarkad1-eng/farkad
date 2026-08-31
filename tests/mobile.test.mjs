@@ -1248,6 +1248,158 @@ for (const width of [320, 390]) {
     await page.context().close();
 }
 
+
+// ---------------------------------------------------------------- a name that ate the week
+//
+// The 44x44 floor holds for an ordinary roster. Reproduced with a real one:
+//
+//   viewport 320   scroll box 296   name column 305   day cells visible 0 of 7
+//   375 / 390 / 430                                            2 / 2 / 3 of 7
+//
+// with a name a crew on this site actually has. The week table is laid out `auto` so the
+// day columns can hold their floor, and auto layout sizes a column to its widest content
+// - so one long name took the pinned first column wider than the box it lives in, and the
+// grid had nothing left to show. overflow and text-overflow on the cell do not help:
+// they clip what is drawn, after the column has been made wide enough not to clip.
+//
+// Both scripts, because this crew writes in both.
+const LONG_NAMES = [
+    ['Hebrew', 'מוחמד עבד אל רחמן מחאמיד שם ארוך מאוד'],
+    ['Arabic', 'محمد عبد الرحمن محاميد اسم طويل جدا']
+];
+
+for (const [script, longName] of LONG_NAMES) {
+    for (const width of WIDTHS) {
+        suite(`${width}px: the week with a very long ${script} name`);
+
+        const page = await open({ width, height: HEIGHTS[width] });
+        await setInset(page, 34);
+        await page.evaluate(name => {
+            State.schedule.workers[0].name = name;
+            State.schedule.workers[1].name = name + ' 2';
+            State.save();
+        }, longName);
+        await page.click('#tab-week');
+        await page.waitForTimeout(400);
+
+        const box = await page.evaluate(() => {
+            const wrap = document.querySelector('#weekView .table-scroll');
+            const edge = wrap.getBoundingClientRect();
+            const nameCell = document.querySelector('.week-table tbody .name-cell');
+            const cells = [...document.querySelectorAll('.week-table tbody tr:first-child .week-cell')];
+            // A day cell is VISIBLE when the whole of it is inside the box - a 44px target
+            // half under the pinned names is not a target.
+            const visible = cells.filter(cell => {
+                const at = cell.getBoundingClientRect();
+                return at.width >= 44 && at.height >= 44
+                    && at.left >= edge.left - 0.5 && at.right <= edge.right + 0.5;
+            });
+            return {
+                boxWidth: Math.round(edge.width),
+                nameWidth: Math.round(nameCell.getBoundingClientRect().width),
+                cells: cells.length,
+                visible: visible.length,
+                narrowest: Math.round(Math.min(...cells.map(c => c.getBoundingClientRect().width))),
+                title: nameCell.querySelector('.name-clip').getAttribute('title'),
+                label: nameCell.getAttribute('aria-label'),
+                page: document.documentElement.scrollWidth,
+                client: document.documentElement.clientWidth
+            };
+        });
+
+        check(`${width}px: the name column does not take the whole box`,
+            box.nameWidth < box.boxWidth / 2, JSON.stringify(box));
+        check(`${width}px: at least one whole day is on the screen before any scrolling`,
+            box.visible >= 1, JSON.stringify(box));
+        check(`${width}px: and every day is still a 44px target`,
+            box.narrowest >= 44 && box.cells === 7, JSON.stringify(box));
+        check(`${width}px: the page itself still does not scroll sideways`,
+            box.page <= box.client + 1, JSON.stringify(box));
+        check(`${width}px: the whole name is still there for a reader`,
+            box.title === longName && box.label === longName,
+            JSON.stringify({ title: box.title, label: box.label }));
+
+        // AND SCROLLING REACHES ALL SEVEN. A day that cannot be reached at all is a day
+        // that is not in the week, however wide its cell is.
+        const reached = await page.evaluate(async () => {
+            const wrap = document.querySelector('#weekView .table-scroll');
+            const cells = [...document.querySelectorAll('.week-table tbody tr:first-child .week-cell')];
+            const seen = new Set();
+            const look = () => {
+                const edge = wrap.getBoundingClientRect();
+                cells.forEach((cell, at) => {
+                    const rect = cell.getBoundingClientRect();
+                    if (rect.left >= edge.left - 0.5 && rect.right <= edge.right + 0.5) seen.add(at);
+                });
+            };
+            look();
+            // RTL scrolls negative in this engine; push to both ends and look on the way.
+            for (const to of [-wrap.scrollWidth, wrap.scrollWidth, 0]) {
+                wrap.scrollLeft = to;
+                await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+                look();
+            }
+            return { seen: seen.size, of: cells.length };
+        });
+        check(`${width}px: scrolling reaches every one of the seven days`,
+            reached.seen === reached.of, JSON.stringify(reached));
+
+        // The name still belongs to its row, which is the whole reason the column is
+        // pinned in the first place.
+        const rowed = await page.evaluate(() => {
+            const row = document.querySelector('.week-table tbody tr');
+            const nameCell = row.querySelector('.name-cell');
+            const dayCell = row.querySelector('.week-cell');
+            const a = nameCell.getBoundingClientRect();
+            const b = dayCell.getBoundingClientRect();
+            return { sameRow: Math.abs(a.top - b.top) < 2, parent: nameCell.parentElement === row };
+        });
+        check(`${width}px: the name is still on the same row as its days`,
+            rowed.sameRow && rowed.parent, JSON.stringify(rowed));
+
+        await page.context().close();
+    }
+}
+
+// ---------------------------------------------------------------- long names, big text
+{
+    suite('320px: a long name at doubled text still leaves a day on the screen');
+
+    const page = await open({ width: 320, height: 568 });
+    await setInset(page, 34);
+    await page.evaluate(() => {
+        State.schedule.workers.forEach((worker, at) => {
+            worker.name = 'מוחמד עבד אל רחמן מחאמיד ' + (at + 1);
+        });
+        State.save();
+        document.documentElement.style.fontSize = '32px';
+    });
+    await page.click('#tab-week');
+    await page.waitForTimeout(400);
+
+    const box = await page.evaluate(() => {
+        const wrap = document.querySelector('#weekView .table-scroll');
+        const edge = wrap.getBoundingClientRect();
+        const cells = [...document.querySelectorAll('.week-table tbody tr:first-child .week-cell')];
+        const visible = cells.filter(cell => {
+            const at = cell.getBoundingClientRect();
+            return at.width >= 44 && at.left >= edge.left - 0.5 && at.right <= edge.right + 0.5;
+        });
+        return {
+            rows: document.querySelectorAll('.week-table tbody tr').length,
+            visible: visible.length,
+            page: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth
+        };
+    });
+    check('the whole crew is still drawn', box.rows === CREW, JSON.stringify(box));
+    check('a day is still reachable without scrolling', box.visible >= 1, JSON.stringify(box));
+    check('and the page still does not scroll sideways',
+        box.page <= box.client + 1, JSON.stringify(box));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();

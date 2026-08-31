@@ -1721,7 +1721,34 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
        and by 430px all of it is. Nothing here shrinks below 44 to make a number work.
        tests/mobile.test.mjs measures both dimensions at every width, with no exemption -
        it used to carry one, which is how the wrong conclusion survived here. */
-    .week-table .corner { font-size: 0; width: 70px; min-width: 70px; }
+    /* THE WIDTH OF THE NAME COLUMN, in one place, because two numbers that must agree
+       are one number written twice. Responsive rather than fixed: 70px is what a 320px
+       screen can spare and a 430px screen can spare more, so a name that would be cut on
+       the small phone is whole on the big one. */
+    #weekView { --week-name-w: clamp(66px, 21vw, 104px); }
+    .week-table .corner {
+        width: var(--week-name-w);
+        min-width: var(--week-name-w);
+        max-width: var(--week-name-w);
+    }
+    .week-table .corner .name-clip { font-size: 0; }
+    /* WHAT BOUNDS THE COLUMN. `auto` table layout sizes a column to its widest content,
+       and overflow on the cell does not change what that content wants to be - it clips
+       what is drawn, after the column has already been made wide enough to avoid the
+       clipping. Measured before this: one long name took the pinned column to 305px
+       inside a 296px box, and zero of seven days were on the screen at 320px; 2 of 7 at
+       375 and 390, 3 of 7 at 430.
+
+       A block with a max-width inside the cell is what the column actually measures. The
+       full name stays on the element's title and on the cell's aria-label - an ellipsis
+       is a drawing decision and may not become a data one. */
+    .week-table .name-clip {
+        display: block;
+        max-width: var(--week-name-w);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
     /* 44 in both dimensions, on every phone, with no exemption. The height comes from
        .week-cell { height: 44px } in the coarse-pointer block; this is the other half,
        and it is a floor rather than a share of the width - see the note on table-layout
@@ -1730,9 +1757,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .week-table .name-cell {
         font-size: 14px;
         padding: 4px 6px;
+        max-width: var(--week-name-w);
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
         text-align: start;
     }
     .week-table .name-cell .badge { display: none; }
