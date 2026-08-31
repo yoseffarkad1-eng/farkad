@@ -668,7 +668,7 @@ function noticeOn(device) {
 // Nothing here asks for a particular remedy. It asks whether the device says ANYTHING a
 // person could act on.
 {
-    suite('T10: what a person sees on a device that can never take the claim again');
+    suite('T10: a device that can never take the claim again, and the evening on it');
 
     const cloud = makeCloud();
     const device = makeDevice({ deviceId: 'd_stuck' });
@@ -729,23 +729,42 @@ function noticeOn(device) {
         pending + (cloud.writes.length - mark) >= 6,
         JSON.stringify({ pending, sinceTheDamage: cloud.writes.length - mark }));
 
+    // THE ASK ITSELF, restated - and three checks retired with it.
+    //
+    // This scenario was written around a device that could not send. Everything it asked
+    // for followed from that: report the failure somewhere, stop the status line
+    // impersonating a weak signal, point the person at it rather than leave them with a
+    // spinner. Every one of those is a demand that the app RAISE AN ALARM.
+    //
+    // There is no longer anything to raise one about. The six edits went to the cloud, the
+    // other two phones can see the evening, and the status line reads "מסונכרן בין
+    // המכשירים" - which is not a weak signal impersonating success, it is success. The
+    // three checks would now be satisfied only by inventing a warning: telling a man on a
+    // building site that sending is stuck and he should go and close windows on two other
+    // phones, over a send that is working. A false alarm on the pay screen is not a
+    // smaller fault than a missing one; it is the fault that teaches people to ignore the
+    // banner that matters.
+    //
+    // So what was underneath them is asked directly instead, of the cloud rather than of a
+    // banner - and the same guarantee is proved for every damaged shape at once in
+    // tests/cas.test.mjs, "a send claim that is damaged, in every way it can be".
+    //
+    //   RETIRED: 'the failure is reported as a failure somewhere the app can read it'
+    //   RETIRED: 'the status line says something a weak signal would not also say'
+    //   RETIRED: 'the person is pointed at the thing that is wrong, not left with a
+    //             spinner'
+    //
+    // What is NOT retired, and is stronger than all three: the days are IN THE CLOUD.
+    // Those checks could all have passed on a device that lost the evening loudly.
+    const landed = Object.keys(((cloud.doc || {}).days) || {})
+        .filter(date => date >= '2026-08-10' && date <= '2026-08-15');
+    check('the evening the other two phones need is actually in the cloud',
+        landed.length === 6,
+        JSON.stringify({ landed, pending, status: device.Sync.status, line }));
+
     check('a device with a claim it cannot read does not go on saying it is connecting',
         device.Sync.status !== 'connecting',
         JSON.stringify({ status: device.Sync.status, line }));
-    check('the failure is reported as a failure somewhere the app can read it',
-        device.Sync.status === 'error' || device.Sync.lastError !== null
-        || device.global('Recovery').blocked() === true
-        || device.global('Recovery').problems.length > 0,
-        JSON.stringify({ status: device.Sync.status, lastError: String(device.Sync.lastError),
-            recoveryProblems: device.global('Recovery').problems.length }));
-    check('the status line says something a weak signal would not also say',
-        line !== healthy && line.indexOf('מתחבר לענן') === -1,
-        JSON.stringify(line));
-    check('the person is pointed at the thing that is wrong, not left with a spinner',
-        notice.told(),
-        JSON.stringify({ storage: notice.banner.textContent,
-            recovery: notice.recovery.textContent.slice(0, 80),
-            problems: device.global('Recovery').problems.length }));
 
     // And it survives the one thing a person in trouble actually does.
     const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_stuck2' });

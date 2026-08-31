@@ -847,7 +847,7 @@ function openAdvanceForm(worker, actions) {
 async function removeAdvanceRow(item) {
     const ok = await askConfirm({
         title: 'למחוק את המקדמה?',
-        message: `${Math.round(item.amount)} ₪ מ-${formatFullDate(parseLocalDate(item.date))}.`,
+        message: `${moneyText(item.amount)} ₪ מ-${formatFullDate(parseLocalDate(item.date))}.`,
         ok: 'מחק'
     });
     if (!ok) return;
@@ -912,7 +912,7 @@ function renderLedgerEntry(entry) {
     // amount cell is filled only when the entry actually states one.
     const amount = Number(entry.amount);
     row.appendChild(el('div', 'ledger-amount',
-        entry.amount !== undefined && isFinite(amount) ? bidiAmount(Math.round(amount)) : ''));
+        entry.amount !== undefined && isFinite(amount) ? bidiAmount(moneyText(amount)) : ''));
 
     if (entry.note) row.appendChild(el('div', 'ledger-note', entry.note));
     if (entry.origin === 'migration') {
@@ -957,7 +957,7 @@ function workerStatementText(workerId) {
             return name;
         }).join(' + ');
 
-        lines.push(`• ${when} - ${where}${priced && day.amount !== null ? ` - ${Math.round(day.amount)}` : ''}`);
+        lines.push(`• ${when} - ${where}${priced && day.amount !== null ? ` - ${moneyText(day.amount)}` : ''}`);
     });
 
     lines.push('');
@@ -1050,7 +1050,7 @@ function renderWorkerDayRow(day, worker) {
 
     const money = el('div', 'wday-money');
     if (!day.absent) {
-        money.textContent = day.amount === null ? '—' : String(Math.round(day.amount));
+        money.textContent = day.amount === null ? '—' : moneyText(day.amount);
         if (day.amount !== null && day.extraHours > 0 && !(Number(worker.hourlyRate) > 0)) {
             money.textContent += ' *';
         }
@@ -1099,7 +1099,7 @@ function renderWorkerDaysTotal(days, worker) {
     // that prints the equation while refusing the sum reads as an argument with itself.
     const knowsMoney = summary.amount !== null || total > 0;
     row.appendChild(el('div', 'wday-money',
-        knowsMoney ? String(Math.round(total)) : '—'));
+        knowsMoney ? moneyText(total) : '—'));
     return row;
 }
 
@@ -1134,7 +1134,7 @@ function singleRateLine(days, summary, total) {
     if (!(rate > 0)) return null;
 
     const product = summary.payUnits * rate;
-    if (Math.round(total) !== product) return null;
+    if (agora(total) !== agora(product)) return null;
     return countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר') +
         ` × ${rate.toLocaleString('en-US')} = ${product.toLocaleString('en-US')}`;
 }
@@ -1429,7 +1429,7 @@ function detailRows() {
                         placeLabelFrom(labels, entry.placeId),
                         RATE_LABELS[entryRate(entry)],
                         entryExtraHours(entry) || '',
-                        index === 0 ? (day.amount === null ? '' : Math.round(day.amount)) : ''
+                        index === 0 ? (day.amount === null ? '' : agora(day.amount)) : ''
                     ]);
                 });
             });
