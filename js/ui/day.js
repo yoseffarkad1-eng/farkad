@@ -520,9 +520,13 @@ function renderDayHeader() {
     // to it. The row above is now only the date and the two ways to move it.
     const steps = el('div', 'day-steps');
 
-    const undoBtn = button('↶ בטל', 'btn-secondary step-btn', runUndo, 'אין מה לבטל');
+    // The arrows are drawn (stepIcon in dom.js), not the characters ↶ ↷: those keep
+    // their left/right heads regardless of direction, so the undo arrow pointed the way
+    // redo goes on this right-to-left calendar. The WORDS stay beside them.
+    const undoBtn = button('בטל', 'btn-secondary step-btn', runUndo, 'אין מה לבטל');
     undoBtn.id = 'undoBtn';
     undoBtn.disabled = true;
+    undoBtn.insertBefore(stepIcon('undo'), undoBtn.firstChild);
     steps.appendChild(undoBtn);
 
     // A thin wall between them: undo and redo are opposites, and a redo mis-tap right
@@ -532,9 +536,10 @@ function renderDayHeader() {
     wall.setAttribute('aria-hidden', 'true');
     steps.appendChild(wall);
 
-    const redoBtn = button('↷ שוב', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
+    const redoBtn = button('שוב', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
     redoBtn.id = 'redoBtn';
     redoBtn.disabled = true;
+    redoBtn.insertBefore(stepIcon('redo'), redoBtn.firstChild);
     steps.appendChild(redoBtn);
 
     // "היום" joins them rather than standing alone: on a phone the mode toggle takes the

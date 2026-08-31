@@ -254,6 +254,27 @@ async function seedRoster(page) {
   check('an absent worker counts as handled, not outstanding',
     (await page.textContent('.progress-line')).includes('1 מתוך 3'));
   // The headers say how deep each tray is without a chip-by-chip count...
+  // The undo and redo arrows, same reasoning as the chevrons, opposite failure: the
+  // characters ↶ and ↷ are NOT Bidi_Mirrored, so the renderer left ↶'s head pointing
+  // left on a calendar where back in time is right - the undo arrow pointed the way redo
+  // goes. Drawn paths now (stepIcon in dom.js): undo's head lands at (20,9) riding right,
+  // redo's at (4,9) riding left, and the words stay on the buttons beside them.
+  const steps = await page.evaluate(() => ({
+    undo: document.querySelector('#undoBtn svg path')?.getAttribute('d'),
+    redo: document.querySelector('#redoBtn svg path')?.getAttribute('d'),
+    undoWord: (document.getElementById('undoBtn')?.textContent || '').trim(),
+    redoWord: (document.getElementById('redoBtn')?.textContent || '').trim()
+  }));
+  check('the undo arrow is drawn curling back to the right',
+    steps.undo === 'M15 14l5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13',
+    String(steps.undo));
+  check('and the redo arrow curling forward to the left',
+    steps.redo === 'M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11',
+    String(steps.redo));
+  check('with the words still on the buttons, not an arrow alone',
+    steps.undoWord === 'בטל' && steps.redoWord === 'שוב',
+    JSON.stringify([steps.undoWord, steps.redoWord]));
+
   check('the tray headers carry their counts',
     (await page.locator('.tray h4').allTextContents()).join(' | ')
       === 'לא נרשמו (2) | נעדרים (1)');

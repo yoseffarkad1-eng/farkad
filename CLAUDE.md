@@ -123,7 +123,7 @@ written down so it cannot happen twice.
     js/ui/dom.js               el()/clear()/button(); textContent only — names are never markup; todayStr
     js/ui/bars.js              measures the fixed bars and the keyboard; publishes --nav-h, --day-actions-h, --topbar-h, --kb-h
     js/ui/ask.js               askText/askConfirm/askTell/askChoice — the app's own dialogs
-    js/ui/undo.js              one step back; the ↶ holds the last step until the day is left
+    js/ui/undo.js              one step back; the undo button holds the last step until the day is left
     js/ui/modal.js             keyboard behavior for every dialog: Escape, focus trap, focus return
     js/ui/sitecolor.js         a fixed color per site, never reassigned
     js/ui/day.js               draws the day screen — the read half

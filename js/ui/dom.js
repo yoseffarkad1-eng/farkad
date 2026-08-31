@@ -95,6 +95,32 @@ function chevronIcon(direction) {
     return svg;
 }
 
+// The undo and redo arrows, as SVG, for the same reason as the chevrons above. The
+// characters ↶ and ↷ are not Bidi_Mirrored, which here is the OPPOSITE problem: the
+// renderer leaves them alone, so ↶ keeps its left-pointing head inside a calendar where
+// back in time is RIGHT - the arrow on the undo button pointed the way the redo goes.
+// And being emoji-adjacent codepoints, some platforms paint them as coloured glyphs that
+// ignore the button's text colour entirely. A drawn path does neither.
+// Undo curls back to the RIGHT, redo curls forward to the LEFT.
+function stepIcon(direction) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2.4');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    // Two subpaths: the arrowhead, then the arc it rides on. The head sits at the END of
+    // the time direction the button moves in - right for undo, left for redo.
+    path.setAttribute('d', direction === 'undo'
+        ? 'M15 14l5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13'
+        : 'M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11');
+    svg.appendChild(path);
+    return svg;
+}
+
 // The traditional one-letter weekday marks, for where a whole name cannot fit. NOT the
 // first letter of the name - ראשון, שני, שלישי and רביעי would collapse into two
 // indistinguishable letters. יום א׳ through שבת is how a Hebrew calendar abbreviates.

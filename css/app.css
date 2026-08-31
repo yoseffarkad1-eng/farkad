@@ -2047,7 +2047,15 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
        tapping the one beside it. */
     min-height: 44px;
     white-space: nowrap;
+    /* The arrow is an inline SVG child of the button (stepIcon in dom.js) - the old ↶ ↷
+       glyphs kept their left/right heads in RTL and pointed the wrong way. Sized like the
+       nav chevrons, tight to its word. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
 }
+.step-btn svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .step-btn:disabled { opacity: .35; }
 @media print { .day-drawer, .drawer-backdrop { display: none !important; } }
 
