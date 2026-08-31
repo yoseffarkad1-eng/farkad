@@ -787,4 +787,44 @@ function noticeOn(device) {
         device.raw(DAMAGED) !== null, JSON.stringify(device.raw(DAMAGED)));
 }
 
+// ================================================================ the queue, in words
+//
+// "1 ממתינים לשליחה" is not Hebrew. The count is right and the sentence around it is
+// wrong, on the line somebody reads to decide whether the other two phones can see
+// tonight's work - which is the kind of thing that makes a person doubt the number.
+//
+// Driven to EXACTLY one owed edit rather than read off whatever a longer scenario
+// happens to leave behind: a check that only fires when the queue lands on one by luck
+// is a check that quietly stops running.
+{
+    suite('the queue line agrees with its own number');
+
+    const cloud = makeCloud();
+    const device = makeDevice({ deviceId: 'd_words' });
+    const notice = noticeOn(device);
+    seed(device);
+    await connected(device, cloud);
+    await settle(TICK * 40);
+
+    // Offline, so nothing drains and the count is what this test put there.
+    cloud.online = false;
+
+    put(device, 'days.2026-08-11.actual.w_01', 'p_01');
+    await settle(TICK * 20);
+    given('exactly one edit is owed', device.Sync.pendingCount() === 1,
+        String(device.Sync.pendingCount()));
+    const one = notice.read();
+    check('one waits in the singular',
+        one.indexOf('רישום אחד ממתין לשליחה') !== -1 && one.indexOf('1 ממתינים') === -1,
+        JSON.stringify(one));
+
+    put(device, 'days.2026-08-12.actual.w_02', 'p_01');
+    await settle(TICK * 20);
+    given('and now two are', device.Sync.pendingCount() === 2,
+        String(device.Sync.pendingCount()));
+    const two = notice.read();
+    check('and more than one keeps the plural it always had',
+        two.indexOf('(2 ממתינים לשליחה)') !== -1, JSON.stringify(two));
+}
+
 report();

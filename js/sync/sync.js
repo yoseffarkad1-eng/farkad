@@ -4831,8 +4831,20 @@ function updateSyncNotice() {
     // because "synced" while a day is still sitting in the queue is the same lie as a
     // green tick over a failed save - and this is the number that tells the difference
     // between "the other two can see it" and "only this phone can".
+    //
+    // One waits in the singular. "1 ממתינים לשליחה" is not Hebrew, and it appears on the
+    // line a person reads to decide whether the other two phones can see tonight's work -
+    // the number is right and the sentence around it is wrong, which is the kind of thing
+    // that makes somebody doubt the number.
+    //
+    // The design's handoff suggested "מקדמה אחת ממתינה" here. That word is not right for
+    // this line: it counts EDITS - a day assigned, a name changed, a rate set - and
+    // almost none of them are advances. The app's own word for one of those is רישום, so
+    // the agreement is fixed and the noun is the one this line has always been about.
     const waiting = FarkadSync.pendingCount();
-    if (waiting > 0) {
+    if (waiting === 1) {
+        text += ' (רישום אחד ממתין לשליחה)';
+    } else if (waiting > 1) {
         text += ` (${waiting} ממתינים לשליחה)`;
     }
 
