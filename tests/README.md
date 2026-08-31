@@ -47,14 +47,20 @@ test broke, not the app — fix the setup before reading anything into the run.
 
 MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no other:
 
-    npm test           30 suites   3188/3188
+    npm test           30 suites   3243/3243
     npm run test:all   + 8 suites  + 1688   (smoke 1029, print 65, mobile 427,
                                              update 30, recovery-browser 25,
                                              handover 26, swrestart 31, swidentity 55)
     test:release       + 4 suites  + 128    (sendclaim 43, rules 49,
                                              cas-emulator 19, rollout 17)
     ------------------------------------------------------------------
-    the whole gate     42 suites   5004/5004
+    the whole gate     42 suites   5059/5059
+
+Those are THIS branch's numbers, and this branch is not main: it is the one with both
+ledger gates open. `claude/farkad-v87-clean-repair` runs the same 42 suites with them
+shut and comes out at 3188 and 5004 — the difference is the D-suites that only have
+something to measure once the writer is open, plus the two checks that are inverted here
+on purpose (`tests/data.test.mjs` and `tests/smoke.mjs`, both marked in place).
 
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers
