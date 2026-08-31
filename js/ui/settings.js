@@ -167,6 +167,17 @@ function renderCarryMigration() {
         () => approveCarryMigration(plan), 'אישור העברת המקדמות לחשבון נמשך'));
 }
 
+// Every number the review screen showed, in one comparable string. The rows come out of
+// planAdvanceCarry in worker order with a fixed shape, so two plans drawn from the same
+// record produce the same text and any difference at all is a difference the person has
+// not seen.
+function carryPlanFingerprint(plan) {
+    return JSON.stringify((plan && plan.rows ? plan.rows : []).map(row => [
+        row.workerId, row.from, row.to, row.now, row.deducted,
+        row.carriedIn, row.carriedOut, row.closureRecorded
+    ]));
+}
+
 async function approveCarryMigration(plan) {
     const ok = await askConfirm({
         title: 'לאשר את המעבר?',
@@ -182,7 +193,11 @@ async function approveCarryMigration(plan) {
     // while the dialog was open. Approving a plan somebody is no longer looking at is
     // approving numbers they never saw.
     const live = planCarryMigration(State.schedule);
-    if (live.id !== plan.id) {
+    // The ROWS, not the id: the id names one decision and never moves, so comparing it
+    // compares nothing. What moves while a dialog is open is what the decision is ABOUT -
+    // and not only how many rows there are: another phone recording a repayment leaves the
+    // same row carrying a different number, which is the case a count would wave through.
+    if (carryPlanFingerprint(live) !== carryPlanFingerprint(plan)) {
         renderCarryMigration();
         if (typeof askTell === 'function') {
             await askTell('הרישום השתנה בזמן שהחלון היה פתוח. בדוק את הרשימה שוב ואשר.');

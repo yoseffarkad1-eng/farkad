@@ -1580,6 +1580,150 @@ function omer(flags) {
 }
 
 {
+    suite('L3: an approval survives the read that follows it');
+
+    // FOUND BY L6, on the emulator, and it is not a concurrency bug at all.
+    //
+    // Two phones, one approving the migration while the other recorded a day. The
+    // approval reached the cloud - it is in the document - and the phone that WROTE it
+    // was asked to approve again the moment it adopted the next snapshot.
+    //
+    // normaliseSchedule rebuilt `schedule.ledger` out of `advances` and `unreadable` and
+    // nothing else. `migrations` was never copied across, so every read - boot, snapshot,
+    // backup import, restore - dropped it. Every route in this app goes through that
+    // function, which means the approval was durable in localStorage and invisible
+    // everywhere after, and the financial gate shut itself again on the next render.
+    //
+    // The same hole ate an approval made on another phone entirely, which is exactly what
+    // recordCarryApproval's comment promises cannot happen: "the approval is saved in the
+    // record and reaches the other devices - they will not be asked to approve again".
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    given('there is something to approve', plan.needed === true);
+    device.State.commit(device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer'));
+    check('the approval is on this phone',
+        device.call('carryMigrationSettled', device.State.schedule) === true);
+
+    const reopened = makeDevice({ deviceId: 'd_omer', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    reopened.State.load();
+    check('and it is still there after a close and reopen',
+        reopened.call('carryMigrationSettled', reopened.State.schedule) === true,
+        JSON.stringify((reopened.State.schedule.ledger || {}).migrations || {}));
+    check('so the gate does not shut itself on the next boot',
+        reopened.call('financialWritingEnabled', reopened.State.schedule) === true);
+
+    // AND ARRIVING FROM ANOTHER PHONE. A snapshot is the same read, and it is the one
+    // that made the promise: the other devices are not asked to approve it again.
+    const other = omer({ carryAdvances: true, ledgerWrites: true });
+    // updatedAt and updatedBy, because receive() reads a document with neither as one
+    // nobody has ever written to - it seeds the cloud from the device instead of adopting
+    // it, and a snapshot that was never adopted proves nothing about what adoption keeps.
+    const fromA = Object.assign(JSON.parse(JSON.stringify(device.State.schedule)),
+        { updatedAt: '2026-08-26T09:00:00.000Z', updatedBy: 'd_omer_a' });
+    other.Sync.receive(fromA);
+    check('a phone that never pressed the button reads the approval off the record',
+        other.call('carryMigrationSettled', other.State.schedule) === true,
+        JSON.stringify((other.State.schedule.ledger || {}).migrations || {}));
+    const otherAgain = makeDevice({ deviceId: 'd_omer2', storage: other.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    otherAgain.State.load();
+    check('and it survives that phone being closed and reopened too',
+        otherAgain.call('carryMigrationSettled', otherAgain.State.schedule) === true,
+        JSON.stringify((otherAgain.State.schedule.ledger || {}).migrations || {}));
+
+    // AN APPROVAL THAT IS NOT ONE is held aside like anything else this build cannot
+    // read - never coerced into a decision nobody made, and never dropped either.
+    const source = omer({ carryAdvances: true, ledgerWrites: true });
+    const raw = JSON.parse(source.dump()['scheduleData:v2']);
+    raw.ledger.migrations = { cm_carry: { id: 'cm_carry', kind: 'carry', rows: 'לא מספר' } };
+    const bad = makeDevice({ deviceId: 'd_bad_approval',
+        flags: { carryAdvances: true, ledgerWrites: true },
+        storage: Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) }) });
+    bad.State.load();
+    check('a malformed approval does not open the gate',
+        bad.call('carryMigrationSettled', bad.State.schedule) === false,
+        JSON.stringify((bad.State.schedule.ledger || {}).migrations || {}));
+    check('and its bytes are held, not thrown away',
+        JSON.stringify((bad.State.schedule.ledger || {}).unreadableMigrations || {})
+            .indexOf('לא מספר') !== -1,
+        JSON.stringify((bad.State.schedule.ledger || {}).unreadableMigrations || {}));
+    check('and the person is told before anything else is written',
+        bad.global('Recovery').problems.length > 0
+        && bad.call('farkadWritesBlocked') === true,
+        JSON.stringify(bad.global('Recovery').problems.map(problem => problem.key)));
+    check('and the rescue export still carries it out',
+        JSON.stringify(bad.global('Recovery').rawRecords()).indexOf('לא מספר') !== -1,
+        JSON.stringify(Object.keys(bad.global('Recovery').rawRecords())));
+
+    // THROUGH THE CLOUD DOOR the same bytes are refused rather than adopted, which is
+    // what every other unreadable thing does at that door: the local record is left
+    // exactly as it was and the person is told before anything overwrites it.
+    const arriving = omer({ carryAdvances: true, ledgerWrites: true });
+    const before = JSON.stringify(arriving.State.schedule);
+    arriving.Sync.receive(Object.assign(JSON.parse(JSON.stringify(arriving.State.schedule)), {
+        updatedAt: '2026-08-26T09:00:00.000Z', updatedBy: 'd_other',
+        ledger: Object.assign({}, arriving.State.schedule.ledger,
+            { migrations: { cm_carry: { id: 'cm_carry', kind: 'carry', rows: 'לא מספר' } } })
+    }));
+    check('the snapshot is not adopted', arriving.Sync.status !== 'synced',
+        arriving.Sync.status);
+    check('the gate stays shut',
+        arriving.call('carryMigrationSettled', arriving.State.schedule) === false);
+    check('and this phone\'s own record is untouched',
+        JSON.stringify(arriving.State.schedule) === before);
+}
+
+{
+    suite('L3: an approval waiting in the queue survives a snapshot landing on top of it');
+
+    // The other half of the same hole. A queued edit is re-applied onto an adopted
+    // snapshot by path, and the re-application knew `ledger.advances.<id>` and nothing
+    // else - so an approval still on its way out was dropped by the arrival of an
+    // ordinary day from another phone, and the person was asked to approve again while
+    // their own approval was sitting in the outbox.
+    //
+    // The same gap made the queue unable to say the approval had landed, which is what
+    // clears it: an edit nothing can see as held is retried against a document that
+    // already has it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    device.State.commit(device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer'));
+    const queued = device.Sync.pendingCount();
+    given('the approval is in the queue', queued > 0, String(queued));
+
+    // Another phone's document, one day newer, knowing nothing of the approval.
+    const elsewhere = JSON.parse(JSON.stringify(device.State.schedule));
+    delete elsewhere.ledger.migrations;
+    elsewhere.days['2026-08-17'] = { plan: {}, actual: {} };
+    elsewhere.updatedAt = '2026-08-26T09:00:05.000Z';
+    elsewhere.updatedBy = 'd_other';
+    device.Sync.receive(elsewhere);
+
+    check('the day from the other phone landed',
+        Boolean(device.State.schedule.days['2026-08-17']));
+    check('and the approval this phone has not finished sending is still here',
+        device.call('carryMigrationSettled', device.State.schedule) === true,
+        JSON.stringify((device.State.schedule.ledger || {}).migrations || {}));
+
+    // AND THE QUEUE CAN SEE IT LAND. Pruning a sent edit asks the stored schedule whether
+    // it holds what was written; an approval nothing could recognise stayed in the queue
+    // against a document that already had it, and the device retried it for as long as it
+    // was open. Asked of scheduleHoldsEntry directly, which is the function that decides.
+    const path = 'ledger.migrations.cm_carry';
+    const value = device.State.schedule.ledger.migrations.cm_carry;
+    check('the record holds the approval that is in it',
+        device.call('scheduleHoldsEntry', device.State.schedule, path, value) === true);
+    const without = JSON.parse(JSON.stringify(device.State.schedule));
+    delete without.ledger.migrations;
+    check('and does not hold one it has never been given',
+        device.call('scheduleHoldsEntry', without, path, value) === false);
+}
+
+{
     suite('L3: the screen exists, and it is the only thing that approves');
 
     const settings = readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8');
@@ -1588,8 +1732,16 @@ function omer(flags) {
         && settings.indexOf('renderCarryMigration') !== -1);
     check('and it asks before it writes',
         /approveCarryMigration[\s\S]{0,600}askConfirm/.test(settings));
+    // The id no longer moves - it names ONE decision, so that two phones approving the
+    // same migration write the same path and the second is the first. That makes it
+    // useless as a staleness test, and the guard compares the rows themselves instead.
     check('it re-plans against the record as it is, not the plan it was drawn from',
-        /askConfirm[\s\S]{0,900}planCarryMigration\(State\.schedule\)[\s\S]{0,400}live\.id !== plan\.id/
+        /askConfirm[\s\S]{0,900}planCarryMigration\(State\.schedule\)[\s\S]{0,600}carryPlanFingerprint\(live\) !== carryPlanFingerprint\(plan\)/
+            .test(settings));
+    // A count would wave through the case that matters most: the same men, the same
+    // periods, different money.
+    check('and the comparison is of the numbers, not of how many rows there are',
+        /function carryPlanFingerprint[\s\S]{0,600}row\.deducted[\s\S]{0,200}row\.carriedOut/
             .test(settings));
     check('recordCarryApproval is called from exactly one place in the app',
         ((readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8')
@@ -1866,6 +2018,78 @@ function omer(flags) {
         JSON.stringify(again.global('Recovery').rawRecords()).indexOf('le_close_lie') !== -1
         || JSON.stringify(again.global('Recovery').rawRecords()).indexOf('4000') !== -1,
         JSON.stringify(Object.keys(again.global('Recovery').rawRecords())));
+}
+
+{
+    suite('L5: a late repayment does not turn an honest closure into a lie');
+
+    // FOUND BY L6, on the emulator, and it cost a phone its whole record.
+    //
+    // One phone closes the fortnight; the other, at the same moment, records 400 handed
+    // back on the 18th - a day INSIDE the fortnight that just closed. Both are ordinary,
+    // both land, and the whole of advanceWalk's two-balance design exists for exactly
+    // this: the payslip is frozen at 1,950 and the live balance moves to 1,550.
+    //
+    // closureProblems judged the closure against every entry DATED in the period, whenever
+    // it was recorded. So the repayment that arrived second made the closure's 1,950 look
+    // like arithmetic that does not add up, the closure was held aside as impossible, the
+    // device was put into recovery, and it then refused the snapshot carrying the
+    // repayment - leaving the two phones holding different records with no way back.
+    //
+    // A closure freezes what the record said WHEN IT WAS WRITTEN. An entry recorded after
+    // it cannot make it false; that is what lateSinceClose is for.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    device.State.commitMany(device.call('closePeriodChanges', device.State.schedule,
+        'w_01', OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_close'));
+    const closure = Object.values(device.State.schedule.ledger.advances)
+        .find(entry => entry.kind === 'deducted');
+    given('the closure is there and honest', Boolean(closure)
+        && device.call('closureProblems', device.State.schedule, closure).length === 0);
+
+    // Dated into the closed fortnight, recorded after it closed.
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 400, '2026-08-18', '', '2026-08-20T19:30:00.000Z', 'd_pay', 'cash'));
+
+    check('the closure is still true',
+        device.call('closureProblems', device.State.schedule, closure).length === 0,
+        JSON.stringify(device.call('closureProblems', device.State.schedule, closure)));
+    check('and nothing is held aside',
+        device.call('impossibleClosures', device.State.schedule).length === 0,
+        JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    same('the payslip is what it was closed on, and the money still moved',
+        [walk.closed, walk.carriedOut, walk.carriedForward, walk.lateSinceClose],
+        [true, 1950, 1550, -400]);
+
+    // Reopened from the disk, because a boot is where the hold-aside runs.
+    const again = makeDevice({ deviceId: 'd_late', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    check('and a reopen folds it rather than quarantining the device',
+        again.State.schedule.ledger.advances[closure.id] !== undefined
+        && again.call('farkadWritesBlocked') === false,
+        JSON.stringify(Object.keys(again.State.schedule.ledger.unreadable || {})));
+
+    // AND THE LIE IS STILL A LIE. The entries a closure is judged against are the ones
+    // that were on the record before it - not fewer, or a phone could send any figure it
+    // liked by dating its own repayment a second later.
+    const liar = omer({ carryAdvances: true, ledgerWrites: true });
+    const liarAdvance = Object.keys(liar.State.schedule.advances)[0];
+    liar.State.commit(liar.call('recordAdvanceRepaid', liar.State.schedule,
+        liarAdvance, 400, '2026-08-18', '', '2026-08-19T09:00:00.000Z', 'd_pay', 'cash'));
+    liar.State.schedule.ledger.advances.le_close_lie = {
+        id: 'le_close_lie', advanceId: liarAdvance, kind: 'deducted', workerId: 'w_01',
+        date: '2026-08-20', periodFrom: OMER_A.from, periodTo: OMER_A.to,
+        amount: 3050, balanceAfter: 1950, at: '2026-08-20T18:00:00.000Z', by: 'd_other'
+    };
+    check('a closure ignoring a repayment already on the record is still refused',
+        liar.call('closureProblems', liar.State.schedule,
+            liar.State.schedule.ledger.advances.le_close_lie).length > 0,
+        JSON.stringify(liar.call('closureProblems', liar.State.schedule,
+            liar.State.schedule.ledger.advances.le_close_lie)));
 }
 
 {

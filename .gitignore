@@ -19,3 +19,5 @@ js/sync/_adapter-under-test.mjs
 js/sync/_adapter-test-config.mjs
 js/sync/_adapter-bootstrap-test.mjs
 js/sync/_bootstrap-test-config.mjs
+js/sync/_adapter-money-test.mjs
+js/sync/_money-test-config.mjs

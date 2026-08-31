@@ -362,6 +362,14 @@ function ledgerContainerProblem(raw) {
         && !isPlainObject(ledger.unreadable)) {
         return 'the held-aside part of the advances history is not a record';
     }
+    // The approvals are the third map under this container, and they decide whether this
+    // device may write money at all. A `migrations` that is a string or an array read as
+    // no approvals - which is not the same statement as "nobody approved" and would put a
+    // migration screen in front of a person who has already answered it.
+    if (ledger.migrations !== undefined && ledger.migrations !== null
+        && !isPlainObject(ledger.migrations)) {
+        return 'the approvals of the advances history are not a record';
+    }
     return null;
 }
 

@@ -4833,6 +4833,20 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 return;
             }
 
+            // ledger.migrations.<approval id>. The same rule, for the same reason, and
+            // it was missing: an approval still in the outbox was dropped by the first
+            // snapshot to arrive from another phone, and the person was asked to approve
+            // the migration again while their own approval was on its way out. An
+            // approval is never removed either - recordCarryApproval refuses to overwrite
+            // one, so a snapshot that has not heard of it has not disagreed with it.
+            if (parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'migrations') {
+                if (value === null) return;
+                schedule.ledger = schedule.ledger || { advances: {} };
+                schedule.ledger.migrations = schedule.ledger.migrations || {};
+                schedule.ledger.migrations[parts[2]] = value;
+                return;
+            }
+
             // One person, queued by id. A worker added seconds ago must not be dropped by
             // the snapshot that arrives before the send completes.
             if (parts.length === 3 && parts[0] === 'roster'
@@ -4931,6 +4945,16 @@ function scheduleHoldsEntry(schedule, path, value) {
         const entries = (schedule.ledger || {}).advances || {};
         return Object.prototype.hasOwnProperty.call(entries, parts[2])
             && same(entries[parts[2]], value);
+    }
+
+    // Nor is an approval, and without this the queue could never see one land: the edit
+    // stayed pending against a document that already held it, and the device went on
+    // retrying it for as long as it was open.
+    if (parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'migrations') {
+        if (value === null) return true;
+        const approvals = (schedule.ledger || {}).migrations || {};
+        return Object.prototype.hasOwnProperty.call(approvals, parts[2])
+            && same(approvals[parts[2]], value);
     }
 
     if (parts.length === 3 && parts[0] === 'roster'

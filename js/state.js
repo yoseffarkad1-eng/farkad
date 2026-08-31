@@ -765,11 +765,53 @@ function normaliseSchedule(raw, hints) {
         });
     }
 
+    // THE APPROVALS, which this function used to drop on the floor.
+    //
+    // Found by the emulator suite, and it was never a concurrency bug: `schedule.ledger`
+    // is rebuilt here out of `advances` and `unreadable`, and `migrations` was simply not
+    // copied across. Every route into this app goes through this function, so an approval
+    // was durable on the disk and invisible to everything that read it back - the gate
+    // shut itself on the next boot, and an approval made on another phone never arrived
+    // at all, which is the one thing recordCarryApproval promises.
+    //
+    // Checked the same way an entry is, and held aside rather than coerced: an approval
+    // this build cannot read is not an approval, and it is not an absence either. It goes
+    // into a map of its own because its ids and an entry's ids share no namespace and
+    // putting them in one map would make a collision decide which record survives.
+    // emptySchedule() carries the two maps every build has always had. These two are
+    // newer than some of the records this function will be handed, so they are made here
+    // rather than assumed - a schedule read off an older disk has neither.
+    schedule.ledger.migrations = schedule.ledger.migrations || {};
+    schedule.ledger.unreadableMigrations = schedule.ledger.unreadableMigrations || {};
+    const approvals = isPlainObject(ledger.migrations) ? ledger.migrations : {};
+    Object.keys(approvals).forEach(id => {
+        const approval = approvals[id];
+        const readable = typeof migrationApprovalProblems !== 'function'
+            || migrationApprovalProblems(String(id),
+                isPlainObject(approval) ? Object.assign({}, approval, { id: String(id) })
+                    : approval).length === 0;
+        if (!readable) {
+            schedule.ledger.unreadableMigrations[id] = approval;
+            return;
+        }
+        schedule.ledger.migrations[id] = Object.assign({}, approval, { id: String(id) });
+    });
+
     // Anything an older or newer build left under ledger.unreadable stays there too.
     const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {
         if (schedule.ledger.unreadable[id] === undefined) {
             schedule.ledger.unreadable[id] = held[id];
+        }
+    });
+    // And the approvals held aside on an earlier read: they were kept because nothing may
+    // decide on this device's behalf what they meant, and a second read is not a licence
+    // to drop them either.
+    const heldApprovals = isPlainObject(ledger.unreadableMigrations)
+        ? ledger.unreadableMigrations : {};
+    Object.keys(heldApprovals).forEach(id => {
+        if (schedule.ledger.unreadableMigrations[id] === undefined) {
+            schedule.ledger.unreadableMigrations[id] = heldApprovals[id];
         }
     });
 
@@ -787,7 +829,8 @@ function normaliseSchedule(raw, hints) {
     // new day on top of financial history it cannot read. Recovery.damaged is keyed, so
     // arriving here twice with the same trouble says it once.
     if (typeof Recovery !== 'undefined'
-        && Object.keys(schedule.ledger.unreadable).length > 0) {
+        && (Object.keys(schedule.ledger.unreadable).length > 0
+            || Object.keys(schedule.ledger.unreadableMigrations).length > 0)) {
         Recovery.damaged('scheduleData:v2:ledger',
             JSON.stringify(schedule.ledger.unreadable),
             'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '

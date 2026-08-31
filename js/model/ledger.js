@@ -357,13 +357,47 @@ function advanceOutstanding(schedule, advanceId) {
 
 // What an advance stands at, ignoring ONE entry - which is how a closure is judged
 // against the debt as it was before that closure.
-function outstandingWithout(schedule, advanceId, ignoreId) {
+// WHAT AN ADVANCE STOOD AT, as of a given day, ignoring ONE entry.
+//
+// Both halves matter and the second one was learned the hard way. Ignoring the closure
+// itself is obvious: a closure is judged against the debt as it was BEFORE it. The date
+// is the half that is not obvious, and without it the check was wrong in a way that only
+// showed up under a race.
+//
+// A closure freezes a figure. Entries dated AFTER the period it closed go on arriving -
+// a repayment from a phone that was offline, an import - and they move the LIVE balance,
+// never the frozen one; that is the whole two-balance design in advanceWalk. Judging a
+// closure's balanceAfter against everything on the record therefore condemned a perfectly
+// honest closure the moment a later repayment landed: the arithmetic it was written from
+// no longer existed. Measured with two phones, one closing while the other recorded cash.
+function outstandingWithout(schedule, advanceId, ignoreId, onOrBefore, recordedBy) {
     const copy = { advances: (schedule && schedule.advances) || {},
         ledger: { advances: {} } };
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     Object.keys(held).forEach(id => {
         if (String(id) === String(ignoreId)) return;
-        copy.ledger.advances[id] = held[id];
+        const entry = held[id];
+        // The origin always counts: it is what the advance IS, not something that happened
+        // to it, and a 'given' carries the advance's own date rather than an event's.
+        if (onOrBefore && entry && String(entry.kind) !== 'given'
+            && String(entry.date || '') > String(onOrBefore)) return;
+        // AND RECORDED BEFORE. Two dates matter and they are different questions: `date`
+        // is the day money moved, `at` is the moment somebody wrote it down.
+        //
+        // A closure freezes the arithmetic as it stood when it was written. A repayment
+        // dated INTO the fortnight but recorded after it closed is an ordinary event -
+        // advanceWalk carries it into the next period and names it lateSinceClose - and
+        // judging the closure against it made a true closure look like a lie, held it
+        // aside on every device, and put the phone that wrote it into recovery.
+        //
+        // Both conditions, not either: dropping the date test would let a phone justify
+        // any figure by dating its own repayment after the period, and dropping this one
+        // is the bug above. An entry with no `at` at all is counted - it predates the
+        // stamp and there is nothing to order it by.
+        if (recordedBy && entry && String(entry.kind) !== 'given'
+            && String(entry.at || '') !== ''
+            && String(entry.at) > String(recordedBy)) return;
+        copy.ledger.advances[id] = entry;
     });
     return advanceOutstanding(copy, advanceId);
 }
@@ -385,7 +419,7 @@ function closureProblems(schedule, entry) {
     }
 
     const off = Number(entry.amount) || 0;
-    const before = outstandingWithout(schedule, entry.advanceId, entry.id);
+    const before = outstandingWithout(schedule, entry.advanceId, entry.id, to, entry.at);
 
     // MORE THAN WAS OWED. The man is recorded as having had money taken off his wage
     // against a debt that was not there.
@@ -973,14 +1007,21 @@ function recordAdvanceCancelled(schedule, advanceId, note, at, by) {
 // migration write the same field path and the union keeps one; and financial writing stays
 // shut until it is there and matches.
 
-// A stable name for one migration, derived from the rows it would move and from nothing
-// else. Two phones holding the same record compute the same id; a record that changes
-// underneath produces a different one, and the old approval no longer matches - which is
-// the right answer, because it approved different numbers.
-function carryMigrationId(rows) {
-    const parts = (rows || []).map(row =>
-        `${row.workerId}#${row.from}#${row.to}#${row.now}#${row.deducted}#${row.carriedOut}`);
-    return 'cm_' + digestOf(parts.sort().join('|'));
+// ONE NAME, FOR ONE DECISION.
+//
+// This was derived from the rows the migration would move, on the reasoning that a record
+// which changed underneath should produce a different id and stop matching the old
+// approval. That reasoning is wrong in the only way that matters: the rows move whenever
+// anybody records a DAY, so an ordinary evening's work would have re-locked every
+// financial control on all three phones, over and over, for a decision that had already
+// been taken. Measured with one phone approving while the other recorded a day.
+//
+// What is being approved is not a snapshot of numbers. It is the answer to one question -
+// does this record carry advances forward - and it is asked once. The rows are what the
+// person reads before answering; the dialog re-reads them at the moment of the answer so
+// nobody approves a screen they are no longer looking at.
+function carryMigrationId() {
+    return 'cm_carry';
 }
 
 // WHAT SWITCHING THE CARRY ON WOULD DO, per row, with both numbers side by side.
@@ -999,7 +1040,7 @@ function planCarryMigration(schedule) {
             closureRecorded: Object.keys(closedPeriods(schedule, row.workerId) || {})
                 .indexOf(String(row.from)) !== -1
         }));
-    return { id: carryMigrationId(rows), rows, needed: rows.length > 0 };
+    return { id: carryMigrationId(), rows, needed: rows.length > 0 };
 }
 
 function migrationPath(id) {
