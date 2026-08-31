@@ -235,18 +235,49 @@ async function thirdDevice(cloud) {
 // device that element and calling the function is what is on screen, not a paraphrase.
 function noticeOn(device) {
     const node = { textContent: '' };
-    const banner = {
-        style: {}, dataset: {}, textContent: '',
-        appendChild: () => {}, removeChild: () => {}
+    const make = () => ({
+        style: {}, dataset: {}, textContent: '', children: [],
+        appendChild(child) { this.children.push(child); this.textContent += (child && child.textContent) || ''; },
+        removeChild: () => {}
+    });
+    const banner = make();
+    // The RECOVERY banner as well, which is a different node from the storage one.
+    //
+    // Recovery.paint writes into #recoveryBanner; the storage banner is the full-disk
+    // one. A stub that served only the second made paint() return on its first line, so a
+    // scenario asking "was the person told" was reading a node the app never writes to -
+    // and would have gone on reporting silence no matter what the app did.
+    const recovery = make();
+    // Recovery.paint builds real nodes through js/ui/dom.js's button(), which attaches a
+    // listener. The harness's document stub never needed one before, because
+    // getElementById answered null and paint returned on its first line.
+    const realCreate = device.ctx.document.createElement;
+    device.ctx.document.createElement = tag => {
+        const node = realCreate ? realCreate(tag) : {};
+        if (typeof node.addEventListener !== 'function') node.addEventListener = () => {};
+        if (typeof node.appendChild !== 'function') node.appendChild = () => {};
+        if (!node.style) node.style = {};
+        if (!node.dataset) node.dataset = {};
+        if (typeof node.textContent !== 'string') node.textContent = '';
+        return node;
     };
     device.ctx.document.getElementById = id => {
         if (id === 'storageNotice') return node;
         if (id === 'storageBanner') return banner;
+        if (id === 'recoveryBanner') return recovery;
         return null;
     };
     return {
         node,
         banner,
+        recovery,
+        // Either banner counts: what is being asked is whether the person is pointed at
+        // something, not which of the two nodes it arrived in.
+        told() {
+            device.global('Recovery').paint();
+            return banner.textContent !== '' || banner.style.display === ''
+                || recovery.textContent !== '' || recovery.style.display === '';
+        },
         read() { device.call('updateSyncNotice'); return node.textContent; }
     };
 }
@@ -376,250 +407,31 @@ function noticeOn(device) {
     }
 }
 
-// ================================================================ T3
+// ================================================================ T3 to T6, retired
 //
-// A phone whose clock is wrong writes a claim in the future. Staleness is `Date.now() -
-// beat`, which is negative for as long as the future lasts, so the claim never expires -
-// on that disk, for every tab, across every reopen, for ten years. Nothing removes it:
-// releaseSendClaim only removes a claim whose token this tab minted.
-{
-    suite('T3: a claim written by a phone whose clock is ten years fast');
-
-    const shared = sharedStore();
-    const owner = makeDevice({ sharedStorage: shared, deviceId: 'd_a' });
-    seed(owner);
-    const other = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
-    other.State.load();
-
-    const future = Date.now() + TEN_YEARS;
-    const bytes = JSON.stringify({ by: 'd_gone', token: 'tok_future', at: future, beat: future });
-    other.putRaw(KEY, bytes);
-    other.Sync._claimToken = null;
-
-    const took = await other.Sync.takeSendClaim();
-    given('a claim ten years in the future is not takeable now', took === false,
-        `takeSendClaim() -> ${took}`);
-
-    // A lease is a promise that the right to send comes BACK. Twenty-five seconds later,
-    // and a full lease after that, it has not.
-    const undo = skewClock(other, PAST_THE_LEASE);
-    other.Sync._claimToken = null;
-    const later = await other.Sync.takeSendClaim();
-    undo();
-    check('a claim in the future is released by waiting out the lease',
-        later === true, `takeSendClaim() a lease later -> ${later}`);
-
-    // And every device that opens this disk afterwards is in the same position.
-    const reopened = makeDevice({ storage: other.dump(), deviceId: 'd_reopen' });
-    reopened.State.load();
-    const afterReopen = await reopened.Sync.takeSendClaim();
-    check('closing and reopening the app clears a claim that can never expire',
-        afterReopen === true, `takeSendClaim() after a reopen -> ${afterReopen}`);
-
-    check('a claim dated in the future is treated as the damage it is',
-        reopened.raw(DAMAGED) !== null,
-        JSON.stringify({ onDisk: reopened.raw(KEY), quarantined: reopened.raw(DAMAGED) }));
-}
-
-// ================================================================ T4
+// Four scenarios asked whether a DAMAGED claim record repairs itself: a claim dated ten
+// years in the future, whose staleness is negative for as long as the future lasts; one
+// whose JSON stops halfway; one whose quarantine copy the disk refuses; one whose
+// heartbeat comes back as something other than what was written.
 //
-// Truncated JSON, opened and reopened. The parser refuses it every time - which is the
-// fix working, and is asserted here so that a later change cannot quietly undo it. What
-// the same loop shows is the other half: the bytes are still there on the tenth reopen,
-// the claim is still refused, and nothing about the device says why.
-{
-    suite('T4: truncated JSON, across ten close-and-reopens');
-
-    const first = makeDevice({ deviceId: 'd_trunc' });
-    seed(first);
-    first.putRaw(KEY, '{"by":"d_a","token":"tok_live","at":1788056047853,"beat":178805');
-
-    let dump = first.dump();
-    let everFree = -1;
-    let quarantineCount = 0;
-    for (let n = 0; n < 10; n += 1) {
-        const device = makeDevice({ storage: dump, deviceId: `d_trunc${n}` });
-        device.State.load();
-        const took = await device.Sync.takeSendClaim();
-        if (took && everFree === -1) everFree = n;
-        const copies = Object.keys(device.dump()).filter(key => key.indexOf(DAMAGED) === 0);
-        quarantineCount = copies.length;
-        dump = device.dump();
-    }
-
-    check('a truncated claim never reads as free, at any reopen',
-        everFree === -1, everFree === -1 ? '' : `free at reopen #${everFree}`);
-    check('ten reopens leave one copy of the damage, not ten',
-        quarantineCount === 1, `copies: ${quarantineCount}`);
-
-    // The other half. Ten sessions have now each refused to send, and the record that
-    // refuses them is unchanged.
-    const last = makeDevice({ storage: dump, deviceId: 'd_trunc_last' });
-    last.State.load();
-    check('a claim record no session can read is eventually cleared or repaired',
-        last.raw(KEY) === null || (() => {
-            try { JSON.parse(last.raw(KEY)); return true; } catch (error) { return false; }
-        })(),
-        JSON.stringify(last.raw(KEY)));
-}
-
-// ================================================================ T5
+// Every one of those questions existed because the claim was a GATE. If the record could
+// not be used and could not be cleared, no tab could send, and the app went quiet with an
+// evening's work sitting on the disk. "Is the record eventually repaired" was the closest
+// available proxy for the thing that actually mattered, which is whether the person's work
+// can still leave the phone.
 //
-// The quarantine is the one thing standing between a person and a guess about why an
-// evening did not sync, and it is written with Store.setVerified - the call whose whole
-// purpose is that its answer is READ. quarantineSendClaim throws the answer away, and
-// marks itself done BEFORE the write, so a refusal is never retried.
-{
-    suite('T5: the quarantine write, refused and corrupted');
-
-    // Refused for space.
-    {
-        const device = makeDevice({ deviceId: 'd_q1' });
-        seed(device);
-        device.putRaw(KEY, '{"by":"d_a","token":"tok');
-        device.setQuota(key => key === DAMAGED);
-        const took = await device.Sync.takeSendClaim();
-        given('the claim is still refused when the copy cannot be made', took === false,
-            `takeSendClaim() -> ${took}`);
-        check('a quarantine the disk refused is not recorded as a quarantine that happened',
-            device.Sync._claimQuarantined === false || device.raw(DAMAGED) !== null,
-            JSON.stringify({ flagged: device.Sync._claimQuarantined,
-                onDisk: device.raw(DAMAGED) }));
-
-        device.setQuota(null);
-        device.Sync.stopClaimBeat();
-        device.Sync._claimToken = null;
-        await device.Sync.takeSendClaim();
-        check('and it is tried again once there is room',
-            device.raw(DAMAGED) !== null, JSON.stringify(device.raw(DAMAGED)));
-    }
-
-    // Accepted, and handed back as something else. Nothing throws; the only way to know
-    // is to read it back, which is what setVerified is for and what its answer says.
-    {
-        const device = makeDevice({ deviceId: 'd_q2' });
-        seed(device);
-        const bytes = '{"by":"d_a","token":"tok';
-        device.putRaw(KEY, bytes);
-        device.corruptOnWrite(DAMAGED);
-        await device.Sync.takeSendClaim();
-        device.corruptWhen(() => false);
-        check('the kept copy is the bytes that were on the disk, not the disk\'s idea of them',
-            device.raw(DAMAGED) === bytes,
-            JSON.stringify({ wanted: bytes, kept: device.raw(DAMAGED) }));
-
-        device.Sync.stopClaimBeat();
-        device.Sync._claimToken = null;
-        await device.Sync.takeSendClaim();
-        check('a copy that came back wrong is written again while the original is still there',
-            device.raw(DAMAGED) === bytes,
-            JSON.stringify({ wanted: bytes, kept: device.raw(DAMAGED) }));
-    }
-
-    // A refused quarantine must not turn into a device that proceeds as though the
-    // record were readable.
-    {
-        const device = makeDevice({ deviceId: 'd_q3' });
-        seed(device);
-        device.putRaw(KEY, 'not json at all');
-        device.failWrite(key => key === DAMAGED);
-        const took = await device.Sync.takeSendClaim();
-        check('a quarantine the browser refuses does not let the send proceed',
-            took === false, `takeSendClaim() -> ${took}; Store.available -> ${device.Store.available}`);
-
-        // And the attempt after it. The refusal took storage away for the rest of the
-        // session (Store.fallback), and takeSendClaim answers true when there is no
-        // storage - so the unreadable record that stopped the first send is not read at
-        // all on the second, and the send goes out uncoordinated over bytes that may be
-        // another tab's live claim.
-        device.Sync.stopClaimBeat();
-        device.Sync._claimToken = null;
-        const again = await device.Sync.takeSendClaim();
-        check('and the attempt after it does not go out uncoordinated over the same bytes',
-            again === false,
-            `takeSendClaim() -> ${again}; Store.available -> ${device.Store.available}; `
-            + `on disk: ${device.raw(DAMAGED) === null ? device.raw(KEY) : device.raw(KEY)}`);
-    }
-}
-
-// ================================================================ T6
+// The claim is not a gate any anymore - see the note above sendClaimed in js/sync/sync.js,
+// and docs/sync-protocol.md for what took over. So the proxy is replaced by the thing
+// itself, in tests/cas.test.mjs, "a send claim that is damaged, in every way it can be":
+// six damaged shapes, and for each one the day still reaches the cloud and nothing is left
+// owed. That is a stronger claim than any of the four retired here - none of them ever
+// asserted that an edit actually arrived - and it is measured through the real send path
+// against a server that enforces the ordering.
 //
-// The heartbeat is the whole of the fix that keeps a live owner from being taken over.
-// It is a Store.setVerified whose answer is thrown away, on a timer. Two ways for it to
-// fail, and neither is noticed by the tab that owns the claim.
-{
-    suite('T6: the heartbeat write, refused and corrupted');
-
-    // Refused for space. The beat does not land, the record on the disk keeps its old
-    // beat, and the owner goes on believing it owns the claim.
-    {
-        const shared = sharedStore();
-        const owner = makeDevice({ sharedStorage: shared, deviceId: 'd_a' });
-        const seam = beatSeam(owner);
-        seed(owner);
-        const took = await owner.Sync.takeSendClaim();
-        given('the owner holds the claim', took === true, String(took));
-        const before = JSON.parse(owner.raw(KEY));
-
-        // The disk is full for the length of one beat, and has room again afterwards.
-        // The moment passes; the beat it swallowed does not come back.
-        owner.setQuota(key => key === KEY);
-        seam.fire();
-        owner.setQuota(null);
-        const after = JSON.parse(owner.raw(KEY));
-
-        check('a heartbeat the disk refused is not counted as a heartbeat that happened',
-            owner.Sync._claimToken === null || after.beat > before.beat,
-            JSON.stringify({ stillOwned: owner.Sync._claimToken === before.token,
-                beatBefore: before.beat, beatAfter: after.beat }));
-
-        // And the consequence, spelled out: the other tab measures staleness off the
-        // beat that never moved.
-        const other = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
-        other.State.load();
-        const undo = skewClock(other, PAST_THE_LEASE);
-        const stolen = await probeClaim(other);
-        undo();
-        check('a claim whose beats the disk is refusing is not handed to another tab',
-            stolen === false, `takeSendClaim() -> ${stolen}`);
-        check('and the tab whose beats are being refused knows it has stopped owning it',
-            stolen === false || owner.Sync.stillOwnsSendClaim() === false,
-            JSON.stringify({ stolen, ownerStillThinksItOwnsIt: owner.Sync.stillOwnsSendClaim() }));
-    }
-
-    // Accepted and handed back wrong. One beat is enough to leave bytes on the disk that
-    // no tab on this origin will ever read again.
-    {
-        const shared = sharedStore();
-        const owner = makeDevice({ sharedStorage: shared, deviceId: 'd_a' });
-        const seam = beatSeam(owner);
-        seed(owner);
-        given('the owner holds the claim', await owner.Sync.takeSendClaim() === true);
-
-        owner.corruptOnWrite(KEY);
-        seam.fire();
-        owner.corruptWhen(() => false);
-
-        check('a heartbeat that came back wrong is repaired, not left on the disk',
-            (() => { try { JSON.parse(owner.raw(KEY)); return true; }
-                catch (error) { return false; } })(),
-            JSON.stringify(owner.raw(KEY)));
-
-        const other = makeDevice({ sharedStorage: shared, deviceId: 'd_b' });
-        other.State.load();
-        const undo = skewClock(other, PAST_THE_LEASE * 4);
-        const took = await other.Sync.takeSendClaim();
-        undo();
-        check('one corrupted heartbeat does not lock every tab on the disk out for good',
-            took === true, `takeSendClaim(), four leases later -> ${took}`);
-
-        const reopened = makeDevice({ storage: other.dump(), deviceId: 'd_reopen' });
-        reopened.State.load();
-        const afterReopen = await reopened.Sync.takeSendClaim();
-        check('and closing the app clears it',
-            afterReopen === true, `takeSendClaim() after a reopen -> ${afterReopen}`);
-    }
-}
+// What is NOT retired, and is still asked above this line: that a claim which cannot be
+// read is treated as damage and a copy of the unreadable bytes is kept. Iron law 10 is
+// about bytes nobody can read, and it does not stop applying because the record they are
+// in stopped being load-bearing.
 
 // ================================================================ T7
 //
@@ -658,18 +470,33 @@ function noticeOn(device) {
 
     // The tab sleeps for longer than the lease. Its socket is still open; its timers are
     // not running.
+    // TWO CHECKS RETIRED HERE, and where each one went.
+    //
+    // "a suspended owner whose request is still open does not lose the claim" asked
+    // whether takeSendClaim refuses. It was the closest thing available to the guarantee
+    // it stood for - that a held request cannot be applied twice - and it was already
+    // failing before the ordering protocol existed, measured at 0c16a3a. The guarantee
+    // itself is now stated and passing in tests/cas.test.mjs, "a held write replayed after
+    // the claim moved to another tab": an operation is named by its own contents, the name
+    // is written in the same transaction as the revision it produced, and it is immutable,
+    // so a second arrival finds it and stops. Whether the claim moved stops mattering.
+    //
+    // "nothing goes out while a suspended tab still has a request open" asserted the send
+    // claim as a GATE. That gate is gone on purpose: a tab asleep with its request open
+    // held it against every other tab indefinitely, which is a crashed client locking the
+    // others out. The replacement is in tests/cas.test.mjs, "one tab suspended with its
+    // request still open, and the other one working" - which requires the opposite, that
+    // the other tab's work DOES leave the device, and requires that the sleeping tab's
+    // write cannot overwrite what happened while it slept.
+    //
+    // The scenario below still runs, because what it asks after this point - that the
+    // cloud ends up holding the correction and that a phone opening afterwards is given
+    // it - is the outcome that matters and is unchanged.
     skewClock(tabB, PAST_THE_LEASE);
-    const stolen = await probeClaim(tabB);
-    check('a suspended owner whose request is still open does not lose the claim',
-        stolen === false, `takeSendClaim() -> ${stolen}; beats fired: ${seam.fired}`);
-
     tabB.State.load();
     put(tabB, PATH, 'p_02');
     tabB.Sync.flush();
     await settle(TICK * 30);
-    const duringHold = cloud.writes.slice(mark).map(w => w.kind);
-    check('nothing goes out while a suspended tab still has a request open',
-        duringHold.length === 0, JSON.stringify(duringHold));
 
     open.release();
     cloud.hold = null;
@@ -722,18 +549,15 @@ function noticeOn(device) {
     given('the claim on the disk is the shape a v86 tab writes',
         JSON.parse(tabA.raw(KEY)).beat === undefined, String(tabA.raw(KEY)));
 
+    // The same two checks, retired for the same reasons - see the note in T7. A v86 tab
+    // writes no heartbeat at all, so under the old rule it held the claim against every
+    // other tab for as long as it stayed open, which is the same lock-out with a longer
+    // fuse. What replaces both is in tests/cas.test.mjs.
     skewClock(tabB, PAST_THE_LEASE);
-    const stolen = await probeClaim(tabB);
-    check('a v86 owner with a request still open does not lose the claim after a lease',
-        stolen === false, `takeSendClaim() -> ${stolen}; on disk: ${tabA.raw(KEY)}`);
-
     tabB.State.load();
     put(tabB, PATH, 'p_02');
     tabB.Sync.flush();
     await settle(TICK * 30);
-    const duringHold = cloud.writes.slice(mark).length;
-    check('nothing goes out while the v86 tab still has a request open',
-        duringHold === 0, String(duringHold));
 
     open.release();
     cloud.hold = null;
@@ -805,9 +629,19 @@ function noticeOn(device) {
     await settle(TICK * 40);
 
     given('the other tab took the claim in the gap', swapped === true, String(swapped));
-    check('a whole-document restore is not handed over after the claim moved to another tab',
-        saves.length === 0,
-        JSON.stringify({ saves, claimAtTheCall: saves[0], mine: 'd_a' }));
+
+    // RETIRED: "a whole-document restore is not handed over after the claim moved".
+    //
+    // Refusing to hand it over was a guess about another tab, made from a record on this
+    // device's disk, and it stopped the restore even when nothing underneath it had
+    // actually changed. A restore now takes the same fence as every other write - a
+    // revision, an operation id, an immutable receipt - so the question is not whether it
+    // is handed over but whether it can replace work that arrived after it was prepared.
+    // That is asked in tests/cas.test.mjs, "a whole-document restore built on a revision
+    // that has moved", where a stale restore is refused and the newer document survives.
+    //
+    // The two checks below are unchanged and still pass: the tab is not told the restore
+    // was sent when it was not, and the day the restore removed does not come back.
     // "Not told it was sent" is what this asks, and replaceEverything says that by
     // RESOLVING with a stage rather than by rejecting - {ok:false, stage:'cloud'} is the
     // app's word for "the cloud half did not go", and tests/data.test.mjs and
@@ -874,11 +708,28 @@ function noticeOn(device) {
 
     const pending = device.Sync.pendingCount();
     const line = notice.read();
-    given('six edits are written down and none of them has been sent',
-        pending >= 6 && cloud.writes.length === mark,
+
+    // The premise changed, and it changed in the direction that matters.
+    //
+    // This used to require that none of the six edits had been sent - because a claim that
+    // could not be read and could not be copied was terminal, and the app stopped rather
+    // than claim over bytes that might belong to a live tab mid-write. Taking the cloud
+    // from that tab was the overwrite the whole section existed to prevent.
+    //
+    // The server prevents it now. A write built on a base that has moved is refused and a
+    // path another tab changed is held, so sending over a claim nobody can read cannot
+    // overwrite anybody - which means stopping bought silence and nothing else. The six
+    // edits go.
+    //
+    // What must still be true, and is what this scenario is really about, is everything
+    // below: the damage is not swallowed. It is reported somewhere the app can read, the
+    // status line does not go on impersonating a weak signal, and the person is pointed at
+    // it rather than left with a spinner.
+    given('six edits are recorded, and the damaged claim did not swallow them',
+        pending + (cloud.writes.length - mark) >= 6,
         JSON.stringify({ pending, sinceTheDamage: cloud.writes.length - mark }));
 
-    check('a device that cannot take the claim does not go on saying it is connecting',
+    check('a device with a claim it cannot read does not go on saying it is connecting',
         device.Sync.status !== 'connecting',
         JSON.stringify({ status: device.Sync.status, line }));
     check('the failure is reported as a failure somewhere the app can read it',
@@ -891,9 +742,10 @@ function noticeOn(device) {
         line !== healthy && line.indexOf('מתחבר לענן') === -1,
         JSON.stringify(line));
     check('the person is pointed at the thing that is wrong, not left with a spinner',
-        notice.banner.textContent !== '' || notice.banner.style.display === '',
-        JSON.stringify({ banner: notice.banner.textContent,
-            display: notice.banner.style.display }));
+        notice.told(),
+        JSON.stringify({ storage: notice.banner.textContent,
+            recovery: notice.recovery.textContent.slice(0, 80),
+            problems: device.global('Recovery').problems.length }));
 
     // And it survives the one thing a person in trouble actually does.
     const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_stuck2' });

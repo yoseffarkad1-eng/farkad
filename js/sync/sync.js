@@ -2870,21 +2870,34 @@ const FarkadSync = {
         if (held.unreadable) {
             const kept = this.quarantineSendClaim();
             this._claimDamage = (this._claimDamage || 0) + 1;
+
+            // BYTES NOBODY CAN READ, AND NOBODY WAS TOLD.
+            //
+            // This used to say so through the sync status, and it could: the damage
+            // stopped the device sending, so "stuck" was both the report and the state.
+            // Sending no longer stops - the server refuses a stale write and holds a
+            // contested path, so claiming over a record that may belong to a live tab
+            // cannot overwrite anybody, and stopping bought silence and nothing else.
+            //
+            // Which left the damage itself unreported. The next successful send set the
+            // status back to synced and the unreadable bytes sat there with nothing on
+            // screen: measured as status "synced", zero recovery problems, no banner,
+            // over a claim record that could not be read AND could not be copied.
+            //
+            // So it is reported where damage belongs. A record this app wrote and cannot
+            // read is Recovery's business - iron law 10 is about the bytes, not about
+            // whether the record they are in still gates anything - and Recovery keeps
+            // the copy, names the key, and puts it in the rescue file. The device goes on
+            // recording and goes on sending, which is the difference between telling
+            // somebody and stopping them.
+            if (!kept && !this._claimReported) {
+                this._claimReported = true;
+                Recovery.damaged(SEND_CLAIM_KEY, Store.durableGet(SEND_CLAIM_KEY),
+                    'הרשומה שמתאמת את השליחה בין החלונות פגומה, ולא הצלחנו לשמור העתק שלה. '
+                    + 'הרישום נשמר והשליחה ממשיכה - אבל כדאי לייצא גיבוי.');
+            }
+
             if (this._claimDamage >= CLAIM_DAMAGE_LIMIT) {
-                // Still not free - and now said out loud.
-                //
-                // Bytes nobody can read do not repair themselves and no owner is coming
-                // back to release them, so this device cannot send until somebody acts.
-                // The tempting fix is to claim over them once a copy is kept; it is
-                // refused. What is on the other side of those bytes may be a live tab
-                // mid-write, and taking the cloud from it is the overwrite this whole
-                // section exists to prevent - the failure that costs somebody's day rather
-                // than an evening's delay.
-                //
-                // So the app stops sending and SAYS so. The queue is untouched, every edit
-                // is on the disk, and the way out is on the screen. The silence this
-                // replaces was the real fault: a retry loop with no end, wearing the same
-                // line a tunnel produces, that nobody could see was happening.
                 this.noteClaimTrouble(kept
                     ? 'the record that coordinates sending cannot be read'
                     : 'the record that coordinates sending cannot be read or copied');

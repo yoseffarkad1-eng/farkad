@@ -358,4 +358,180 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
         `${two.Sync.pendingCount()} owed, status ${two.Sync.status}`);
 }
 
+// ============================================================ the claim moving is harmless
+{
+    suite('a held write replayed after the claim moved to another tab');
+
+    // Why the send claim moving is no longer a correctness question.
+    //
+    // The old rule was that a tab suspended with its request still open keeps the claim,
+    // because the request may yet land and another tab taking over could send the same
+    // edit twice. That reasoning was sound while the server had no memory: two arrivals of
+    // one edit were two writes, and the second one applied.
+    //
+    // The receipt is that memory. An operation is named by its own contents, the name is
+    // written in the same transaction as the revision it produced, and the name is
+    // immutable - so a second arrival finds it and stops. Whether the claim moved, whether
+    // the tab that made the edit is still awake, and whether the request landed the first
+    // time all stop mattering. What is left is the guarantee: the edit applies once.
+    //
+    // tests/sendclaim.test.mjs T7 and T8 ask this as "a suspended owner does not lose the
+    // claim". That was the closest thing to the guarantee available before, and it was
+    // already failing at the commit before this protocol existed. This is the guarantee
+    // itself.
+
+    const cloud = makeCloud();
+    const a = phone(cloud, 'd_a');
+    await settle(TICK * 10);
+
+    a.State.commit(a.call('assignPlace', a.State.schedule, DAY, 'w_01', 'actual', 'p_01'));
+    await settle(TICK * 30);
+
+    const landed = cloud.writes.filter(write => !write.replayed);
+    const last = landed[landed.length - 1];
+    given('an edit landed, with its operation named',
+        Boolean(last) && typeof (last.patch || last.data || {}).lastOpId === 'string',
+        JSON.stringify(landed.map(write => (write.patch || write.data || {}).lastOpId)));
+
+    const before = JSON.parse(JSON.stringify(cloud.doc));
+    const acceptedBefore = cloud.writes.filter(write => !write.replayed).length;
+
+    // The same request, arriving again - a retry, a socket that recovered, a tab that woke
+    // up and finished what it started. Sent three times over, which is more than any real
+    // sequence produces.
+    let refusals = 0;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        await Promise.resolve(cloud.adapter.update(last.patch || last.data))
+            .catch(() => { refusals += 1; });
+    }
+
+    check('a replay is not refused - the operation already succeeded',
+        refusals === 0, `${refusals} of 3 refused`);
+    check('and it applies nothing: the document is what it was',
+        JSON.stringify(cloud.doc) === JSON.stringify(before),
+        `revision ${cloud.doc.revision} (was ${before.revision})`);
+    check('the revision did not move for a write that had already been counted',
+        cloud.doc.revision === before.revision,
+        `${before.revision} -> ${cloud.doc.revision}`);
+    check('and no second write was recorded against it',
+        cloud.writes.filter(write => !write.replayed).length === acceptedBefore,
+        `${cloud.writes.filter(write => !write.replayed).length} accepted, was ${acceptedBefore}`);
+}
+
+// ============================================================ a claim nobody can use
+{
+    suite('a send claim that is damaged, in every way it can be');
+
+    // What the claim record's own robustness was ever FOR.
+    //
+    // tests/sendclaim.test.mjs T3 to T6 ask whether a damaged claim is repaired, cleared,
+    // quarantined, or eventually released: a claim dated ten years in the future, one
+    // whose JSON is truncated, one whose quarantine copy the disk refuses, one whose
+    // heartbeat comes back as something else. Every one of those questions exists because
+    // the claim was a GATE - if the record could not be used and could not be cleared,
+    // no tab could send, and the app went quiet with an evening's work on the disk.
+    //
+    // It is not a gate any more. So the question is no longer "is the record repaired"
+    // but the thing that was always underneath it: can the person's work still leave the
+    // phone. That is asked here, of every damaged shape at once, and it is a stronger
+    // claim than any of the four it replaces - none of them asserted that an edit
+    // actually reached the cloud.
+    const SHAPES = [
+        ['a claim dated ten years from now',
+            () => JSON.stringify({ by: 'd_other', token: 'tok', at: Date.now() + 3.15e11,
+                beat: Date.now() + 3.15e11 })],
+        ['a claim whose JSON stops halfway', () => '{"by":"d_other","token":"tok'],
+        ['a claim that is not JSON at all', () => 'not a record'],
+        ['a claim that is an empty string', () => ''],
+        ['a claim holding a null', () => 'null'],
+        ['a claim holding an array', () => '[]']
+    ];
+
+    for (const [label, make] of SHAPES) {
+        const cloud = makeCloud();
+        const device = phone(cloud, 'd_hurt');
+        await settle(TICK * 10);
+        // Something already in the cloud, so the document exists and the next edit is an
+        // ordinary update rather than the first write.
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            '2026-08-01', 'w_01', 'actual', 'p_01'));
+        await settle(TICK * 25);
+
+        device.putRaw('farkad:sendClaim', make());
+        device.Store.forget('farkad:sendClaim');
+
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            DAY, 'w_01', 'actual', 'p_01'));
+        device.Sync.flush();
+        await settle(TICK * 40);
+
+        check(`${label}: the day still reaches the cloud`,
+            Boolean(((cloud.doc || {}).days || {})[DAY]),
+            `days ${JSON.stringify(Object.keys((cloud.doc || {}).days || {}))}, `
+            + `${device.Sync.pendingCount()} owed, status ${device.Sync.status}`);
+        check(`${label}: and nothing is left owed`,
+            device.Sync.pendingCount() === 0,
+            `${device.Sync.pendingCount()} owed, status ${device.Sync.status}`);
+    }
+}
+
+// ============================================================ a restore under the fence
+{
+    suite('a whole-document restore built on a revision that has moved');
+
+    // A restore replaces the whole document for all three phones at once, so it is the
+    // write where being wrong costs the most. It used to be guarded by the send claim -
+    // "do not hand it over if the claim moved" - which is a guess about another tab made
+    // from a record on this device's disk, and which stopped the restore even when nothing
+    // had actually changed underneath it.
+    //
+    // It takes the same fence as every other write now: a revision, an operation id, and a
+    // receipt. tests/sendclaim.test.mjs T9 asked whether the hand-over is refused; this
+    // asks the thing that matters, which is whether a restore built on a stale base can
+    // replace work that arrived after it was prepared.
+    const cloud = makeCloud();
+    const one = phone(cloud, 'd_one');
+    await settle(TICK * 10);
+    one.State.commit(one.call('assignPlace', one.State.schedule,
+        DAY, 'w_01', 'actual', 'p_01'));
+    await settle(TICK * 30);
+    given('the document exists with a day in it',
+        Boolean(((cloud.doc || {}).days || {})[DAY]),
+        JSON.stringify(Object.keys((cloud.doc || {}).days || {})));
+
+    // Another phone records a different day. The restoring device has not seen it.
+    const two = phone(cloud, 'd_two');
+    await settle(TICK * 10);
+    two.State.commit(two.call('assignPlace', two.State.schedule,
+        '2026-08-14', 'w_01', 'actual', 'p_01'));
+    await settle(TICK * 30);
+    const revisionNow = (cloud.doc || {}).revision;
+    given('the other phone\'s day is in the cloud too',
+        Boolean(((cloud.doc || {}).days || {})['2026-08-14']),
+        JSON.stringify(Object.keys((cloud.doc || {}).days || {})));
+
+    // The restoring device is put back to the base it had BEFORE that arrived, which is
+    // what a restore prepared a moment earlier is built on.
+    one.Sync._revision = revisionNow - 1;
+    const restored = JSON.parse(JSON.stringify(one.State.schedule));
+    delete restored.days['2026-08-14'];
+
+    const answer = await one.Sync.replaceEverything(restored).then(
+        value => ({ ok: true, value }),
+        error => ({ ok: false, error: String(error && error.message) }));
+    await settle(TICK * 50);
+
+    check('a restore built on a stale revision does not replace the newer document',
+        Boolean(((cloud.doc || {}).days || {})['2026-08-14'])
+        || (answer.value && answer.value.ok === false),
+        `cloud days ${JSON.stringify(Object.keys((cloud.doc || {}).days || {}))}, `
+        + `answer ${JSON.stringify(answer)}`);
+    check('and the device is not told the restore is done when it is not',
+        answer.ok === false
+        || !answer.value
+        || answer.value.ok === false
+        || Boolean(((cloud.doc || {}).days || {})['2026-08-14']) === false,
+        JSON.stringify(answer));
+}
+
 report();
