@@ -23,7 +23,7 @@
 // are kept, the fold never sees them, the person is told, and the device stops WRITING
 // while its financial history is uncertain. Reading, exporting and rescuing all go on.
 
-import { makeDevice } from './harness.mjs';
+import { makeDevice, makeCloud } from './harness.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
 const WORKERS = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
@@ -297,6 +297,195 @@ function documentWith(device, entry) {
         JSON.stringify(rescue).indexOf('FIRST') !== -1
         && JSON.stringify(rescue).indexOf('SECOND') !== -1,
         JSON.stringify(Object.keys(rescue)));
+}
+
+
+// ------------------------------------------------ the CONTAINER, not just what is in it
+//
+// The suites above protect a bad ENTRY inside a valid map. Reproduced at 359a244, with
+// the map itself unreadable:
+//
+//   ledger = "abc"                  ledgerProblems: non-empty
+//   ledger = []                     storedScheduleProblems: []
+//   ledger = { advances: "abc" }    fullScheduleProblems: []
+//   ledger = { advances: [] }       writes blocked: false
+//   ledger = { unreadable: "abc" }  normalised ledger: EMPTY
+//
+// normaliseSchedule read `raw.ledger && typeof raw.ledger === 'object'` and fell back to
+// {} for anything else - so a string was dropped on the floor, an array was read as a
+// record with no advances, and either way the schedule that came out carried an empty
+// ledger. The first ordinary save then wrote that empty ledger over the only copy of
+// somebody's financial history, with load() reporting clean and nothing blocked.
+//
+// The entry checks could not catch this: there were no entries to check. A container this
+// build cannot read is not an absent container, and the difference is a man's advances.
+const BAD_CONTAINERS = [
+    ['the whole history is a string', 'abc'],
+    ['the whole history is a list', []],
+    ['the entries are a string', { advances: 'abc' }],
+    ['the entries are a list', { advances: [] }],
+    ['what was held aside is a string', { unreadable: 'abc' }],
+    ['the whole history is a number', 7],
+    ['the entries are a number', { advances: 3 }]
+];
+
+function documentWithLedger(device, ledger) {
+    const raw = JSON.parse(JSON.stringify(device.State.schedule));
+    raw.ledger = ledger;
+    return raw;
+}
+
+{
+    suite('an unreadable history CONTAINER is named by the check');
+
+    const device = crew({ deviceId: 'd_container' });
+    BAD_CONTAINERS.forEach(([label, ledger]) => {
+        const raw = documentWithLedger(device, ledger);
+        check(`refused: ${label}`,
+            device.call('ledgerContainerProblem', raw) !== null,
+            JSON.stringify(device.call('ledgerContainerProblem', raw)));
+    });
+    const good = documentWithLedger(device, { advances: {}, unreadable: {} });
+    check('and an ordinary empty history is not refused',
+        device.call('ledgerContainerProblem', good) === null,
+        JSON.stringify(device.call('ledgerContainerProblem', good)));
+    const absent = JSON.parse(JSON.stringify(device.State.schedule));
+    delete absent.ledger;
+    check('nor is one that is simply not there',
+        device.call('ledgerContainerProblem', absent) === null);
+}
+
+{
+    suite('an unreadable container is kept, and the device stops writing');
+
+    BAD_CONTAINERS.forEach(([label, ledger]) => {
+        const source = crew({ deviceId: 'd_cs' });
+        const raw = documentWithLedger(source, ledger);
+        const stamp = JSON.stringify(ledger);
+        const disk = Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) });
+
+        const device = makeDevice({ deviceId: 'd_c2', storage: disk });
+        device.State.load();
+
+        check(`${label}: the record still opens`,
+            device.State.schedule.workers.length === 1,
+            String(device.State.schedule.workers.length));
+        check(`${label}: the bytes are kept, not turned into an empty history`,
+            JSON.stringify(device.State.schedule.ledger.unreadableContainer) === stamp,
+            JSON.stringify(device.State.schedule.ledger.unreadableContainer));
+        check(`${label}: the person is told, under a key of its own`,
+            device.global('Recovery').problems
+                .some(item => item.key === 'scheduleData:v2:ledger:container'),
+            JSON.stringify(device.global('Recovery').problems.map(p => p.key)));
+        check(`${label}: and the device will not write`,
+            device.call('farkadWritesBlocked') === true,
+            String(device.call('farkadWritesBlocked')));
+        check(`${label}: the original record on the disk is untouched`,
+            device.raw('scheduleData:v2') === disk['scheduleData:v2']);
+        check(`${label}: and the rescue export still carries it out`,
+            JSON.stringify(device.global('Recovery').rawRecords()).indexOf(stamp.slice(1, 12)) !== -1
+            || JSON.stringify(device.global('Recovery').rawRecords())
+                .indexOf('scheduleData:v2') !== -1,
+            JSON.stringify(Object.keys(device.global('Recovery').rawRecords())));
+    });
+}
+
+{
+    suite('an unreadable container arriving through every other door');
+
+    const shape = { advances: 'abc' };
+    const stamp = JSON.stringify(shape);
+
+    // A CLOUD SNAPSHOT. The commonest way a bad document reaches a phone that never had
+    // one: another build, or a partial write, and this device adopts it.
+    {
+        const device = crew({ deviceId: 'd_door_cloud' });
+        const cloud = makeCloud();
+        device.Sync.connect(cloud.adapter);
+        const raw = documentWithLedger(device, shape);
+        raw.updatedAt = '2026-09-01T10:00:00.000Z';
+        device.Sync.receive(raw);
+        check('cloud snapshot: the bytes are held aside',
+            JSON.stringify(device.State.schedule.ledger.unreadableContainer) === stamp
+            || device.call('farkadWritesBlocked') === true,
+            JSON.stringify(device.State.schedule.ledger.unreadableContainer));
+        check('cloud snapshot: and the device stops writing',
+            device.call('farkadWritesBlocked') === true);
+    }
+
+    // A WHOLE-DOCUMENT REPLACEMENT - a restore, or a backup import. The gate that decides
+    // whether a replacement may be adopted at all.
+    {
+        const device = crew({ deviceId: 'd_door_replace' });
+        const raw = documentWithLedger(device, shape);
+        const refused = device.call('fullScheduleProblems', raw);
+        check('a replacement carrying an unreadable history is refused at the door',
+            refused.length > 0, JSON.stringify(refused));
+    }
+
+    // AND CLOSE AND REOPEN. A device that forgot on the next boot would write over the
+    // only copy at the first tap.
+    {
+        const source = crew({ deviceId: 'd_door_boot' });
+        const raw = documentWithLedger(source, shape);
+        const disk = Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) });
+        const first = makeDevice({ deviceId: 'd_door_boot2', storage: disk });
+        first.State.load();
+        given('the first boot found it', first.call('farkadWritesBlocked') === true);
+
+        const again = makeDevice({ deviceId: 'd_door_boot3', storage: first.dump() });
+        again.State.load();
+        check('close and reopen: it is found again',
+            again.call('farkadWritesBlocked') === true,
+            JSON.stringify(again.global('Recovery').problems.map(p => p.key)));
+        check('close and reopen: and the record on the disk is still the original',
+            again.raw('scheduleData:v2') === disk['scheduleData:v2']);
+    }
+}
+
+{
+    suite('an unreadable container when the quarantine itself cannot land');
+
+    const FAULTS = [
+        ['the disk is full', device => device.setQuota(
+            key => String(key).indexOf(':damaged') !== -1)],
+        ['the browser refuses the write outright', device => device.failWrite(
+            key => String(key).indexOf(':damaged') !== -1)],
+        ['the disk takes the write and hands back something else',
+            device => device.corruptWhen(key => String(key).indexOf(':damaged') !== -1)]
+    ];
+
+    FAULTS.forEach(([label, breakIt]) => {
+        const source = crew({ deviceId: 'd_cf' });
+        const raw = documentWithLedger(source, { advances: 'abc' });
+        const disk = Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) });
+
+        const device = makeDevice({ deviceId: 'd_cf2', storage: disk });
+        breakIt(device);
+        device.State.load();
+
+        const problem = device.global('Recovery').problems
+            .find(item => item.key === 'scheduleData:v2:ledger:container');
+        check(`${label}: the person is told`, Boolean(problem),
+            JSON.stringify(device.global('Recovery').problems.map(p => p.key)));
+        check(`${label}: and told there is no verified copy`,
+            Boolean(problem) && problem.copy === null && problem.mustHold === true,
+            JSON.stringify(problem && { copy: problem.copy, mustHold: problem.mustHold }));
+        check(`${label}: acknowledging does not release it`,
+            (device.global('Recovery').acknowledge('scheduleData:v2:ledger:container'),
+                device.call('farkadWritesBlocked')) === true);
+        check(`${label}: the original is untouched`,
+            device.raw('scheduleData:v2') === disk['scheduleData:v2']);
+
+        const again = makeDevice({ deviceId: 'd_cf3', storage: device.dump() });
+        breakIt(again);
+        again.State.load();
+        check(`${label}: and it is still blocked after a close and reopen`,
+            again.call('farkadWritesBlocked') === true);
+    });
 }
 
 report();

@@ -13,7 +13,7 @@
 // a browser charges them: two per UTF-16 unit, key as well as value. Nothing estimates,
 // and nothing reads the app's source to decide what the app should say.
 
-import { makeDevice, makeCloud, settle } from './harness.mjs';
+import { makeDevice, makeCloud, settle, settleUntil } from './harness.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
 const TICK = 6;
@@ -127,7 +127,14 @@ let seasonDump = null;
     site.Sync.pushDelayMs = TICK;
     site.Sync.stuckMs = 200;
     site.Sync.connect(cloud.adapter);
-    await settle(TICK * 80);
+    // WAITED FOR, not counted out in ticks. `settle(TICK * 80)` was a guess at how long
+    // two writes of three hundred paths take, and it was a guess that had been right for
+    // a while - so when the cutover write joined the sequence the suite went red one run
+    // in three, on timing rather than on behaviour. The condition is what the checks are
+    // about, so it is the condition that is waited for.
+    await settleUntil(() => cloud.writes.filter(write => write.kind === 'update').length >= 2
+        || site.Sync.pendingCount() === 0, 8000, 10);
+    await settle(TICK * 20);
 
     const synced = site.dump();
     // Two FULL writes, whatever a full write holds. It was spelled 600 here, which was
