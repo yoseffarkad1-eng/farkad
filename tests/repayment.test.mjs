@@ -239,4 +239,48 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         [2800, 0, 2800]);
 }
 
+// -------------------------------------------------- the entry has to survive the wire
+{
+    suite('a repayment is a record like any other, and is checked like one');
+
+    const device = crew({ deviceId: 'd_valid', flags: { carryAdvances: true } });
+    work(device, A_DAYS);
+    device.State.commit(device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-10', 5000, ''));
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+
+    const paid = device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 1800, '2026-08-18', '', '2026-08-18T09:00:00.000Z', 'd_valid', 'cash');
+    device.State.commit(paid);
+
+    // THE PATH VALIDATOR. Every edit goes through it on its way to the queue, and an
+    // entry it refuses is quarantined - which on this device means writes are held and
+    // nobody can record a day. A kind the writer produces and the validator has never
+    // heard of is that fault exactly, and it is silent until somebody uses the feature.
+    check('the entry the writer produced is one the queue accepts',
+        device.call('ledgerEntryProblems', paid.value.id, paid.value).length === 0,
+        JSON.stringify(device.call('ledgerEntryProblems', paid.value.id, paid.value)));
+    check('and the whole record still reads',
+        device.call('storedScheduleProblems',
+            JSON.parse(JSON.stringify(device.State.schedule))).length === 0,
+        JSON.stringify(device.call('storedScheduleProblems',
+            JSON.parse(JSON.stringify(device.State.schedule)))));
+
+    // The shapes that must NOT be accepted. Each is money, and each would be believed.
+    const bad = [
+        ['no date at all', { kind: 'repaid', amount: 100 }],
+        ['a date that is not a date', { kind: 'repaid', amount: 100, date: 'ראשון' }],
+        ['an amount that is not a number', { kind: 'repaid', amount: 'הרבה', date: '2026-08-18' }],
+        // A negative repayment is a second advance wearing the wrong name: it would ADD
+        // to what the man owes through a form whose whole meaning is that he paid.
+        ['a repayment of less than nothing', { kind: 'repaid', amount: -100, date: '2026-08-18' }]
+    ];
+    bad.forEach(([label, shape]) => {
+        const entry = Object.assign({ id: 'le_x', advanceId }, shape);
+        check(`refused: ${label}`,
+            device.call('ledgerEntryProblems', 'le_x', entry).length > 0,
+            JSON.stringify(device.call('ledgerEntryProblems', 'le_x', entry)));
+    });
+}
+
 report();
