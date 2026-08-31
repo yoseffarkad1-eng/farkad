@@ -1287,7 +1287,8 @@ function ledgerEntryProblems(id, value) {
     if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
         return ['a ledger entry with no advance behind it'];
     }
-    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted'].includes(String(value.kind))) {
+    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted', 'reversed']
+        .includes(String(value.kind))) {
         return ['a ledger entry of a kind nobody wrote'];
     }
     if (value.kind === 'given') {
@@ -1323,6 +1324,25 @@ function ledgerEntryProblems(id, value) {
         const agorot = off * 100;
         if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
             return ['a deduction finer than an agora'];
+        }
+    }
+    // A CORRECTION, and the reason it was made. An unexplained adjustment to money is
+    // the thing an append-only ledger exists to refuse, so the reason is not optional -
+    // "somebody changed a number and nobody wrote down why" is the state this prevents.
+    if (String(value.kind) === 'reversed') {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
+            return ['a reversal on no date'];
+        }
+        if (typeof value.reason !== 'string' || value.reason.trim() === '') {
+            return ['a reversal with no reason'];
+        }
+        const back = Number(value.amount);
+        if (!Number.isFinite(back)) return ['a reversal of no amount'];
+        if (back <= 0) return ['a reversal of nothing, or of less than nothing'];
+        if (back > ADVANCE_MAX) return ['a reversal beyond any wage'];
+        const agorot = back * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            return ['a reversal finer than an agora'];
         }
     }
     if (String(value.kind) === 'repaid') {
@@ -1422,18 +1442,27 @@ function agoraRound(value) {
 // Read off the LEDGER, because that is where a repayment lives - schedule.advances has
 // one number per advance and no room for a second event about it. A build whose ledger
 // is empty answers zero, which is the truth for every device that has never recorded one.
+// Money that never left the tin: an advance recorded in error and compensated. Netted
+// exactly as a repayment is, and counted apart from it so a statement never tells a man
+// he handed back money he never touched.
+function advanceReversalsFor(schedule, workerId, fromDate, toDate) {
+    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'reversed');
+}
+
 function advanceRepaymentsFor(schedule, workerId, fromDate, toDate) {
+    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'repaid');
+}
+
+// The one walk over the ledger both of the above use. Whose entry it is comes from the
+// ADVANCE, not from the entry: a correction that moved the advance to another man would
+// otherwise leave its repayments behind, crediting one person for another's money.
+function advanceLedgerSum(schedule, workerId, fromDate, toDate, kind) {
     const advances = (schedule && schedule.advances) || {};
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     return Object.keys(held)
         .map(id => held[id])
-        .filter(entry => entry && entry.kind === 'repaid' && entry.advanceId)
+        .filter(entry => entry && entry.kind === kind && entry.advanceId)
         .filter(entry => {
-            // Whose repayment it is comes from the ADVANCE, not from the entry: a
-            // repayment is an event about one advance, and the advance already says
-            // which man it belongs to. Reading a workerId off the entry would let a
-            // correction that moved the advance to another man leave its repayments
-            // behind, crediting one person for money another handed back.
             const of = advances[entry.advanceId] || foldLedger(schedule)[entry.advanceId];
             return Boolean(of) && of.workerId === workerId;
         })
@@ -1485,6 +1514,9 @@ function advanceCarryInto(schedule, workerId, fromDate) {
 function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     const given = advancesTotal(schedule, workerId, fromDate, toDate);
     const repaid = advanceRepaymentsFor(schedule, workerId, fromDate, toDate);
+    // Reversals net exactly as repayments do - the money is not owed either way - and are
+    // counted apart so a statement never calls a clerical correction "הוחזר במזומן".
+    const reversed = advanceReversalsFor(schedule, workerId, fromDate, toDate);
 
     // A CLOSED PERIOD REPORTS ITS RECORD, and does not do the sum again.
     //
@@ -1510,7 +1542,7 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // this app cannot price.
     const gross = row && row.amount !== null ? Number(row.amount) : null;
 
-    let balance = agoraRound((Number(carriedIn) || 0) + given - repaid);
+    let balance = agoraRound((Number(carriedIn) || 0) + given - repaid - reversed);
     // Never below zero: a man who hands back more than he owes has overpaid, and turning
     // that into a negative balance would quietly ADD it to his next wage as though the
     // firm owed him for it. It is his money and he should have it back, but that is a
@@ -1547,6 +1579,7 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
         carriedIn: agoraRound(Number(carriedIn) || 0),
         given: agoraRound(given),
         repaid: agoraRound(repaid),
+        reversed: agoraRound(reversed),
         gross,
         deducted,
         // What the payslip says, forever.

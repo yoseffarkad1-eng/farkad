@@ -669,12 +669,20 @@ function omer(flags) {
         OMER_B.from, OMER_B.to).carriedForward;
     check('the balance comes back to 1,750', after === 1750, String(after));
 
-    // BOTH ROWS. A reversal that hides the row it reverses is a deletion with extra steps.
+    // BOTH ROWS. A reversal that hides the row it reverses is a deletion with extra
+    // steps. The two live in different places on this build - the advance itself is
+    // still in schedule.advances, which is the field every phone reads, and the reversal
+    // is the ledger entry beside it - so the check asks both, which is what a person
+    // reading the history would see.
     const entries = device.State.schedule.ledger.advances;
     const rows = Object.keys(entries).map(id => entries[id])
         .filter(entry => String(entry.advanceId) === String(wrong.value.id));
-    check('and both lines are still in the ledger, the mistake and its reversal',
-        rows.length === 2 && rows.some(r => r.kind === 'reversed'),
+    check('the advance that was wrong is still on the record, not removed',
+        Boolean(device.State.schedule.advances[wrong.value.id])
+        && device.State.schedule.advances[wrong.value.id].amount === 300,
+        JSON.stringify(device.State.schedule.advances[wrong.value.id]));
+    check('and the reversal stands beside it rather than in place of it',
+        rows.length === 1 && rows[0].kind === 'reversed' && rows[0].amount === 300,
         JSON.stringify(rows.map(r => [r.kind, r.amount])));
     check('the reversal carries the reason it was made for',
         rows.filter(r => r.kind === 'reversed')[0].reason === 'נרשם פעמיים בטעות',

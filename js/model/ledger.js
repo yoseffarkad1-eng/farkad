@@ -104,6 +104,7 @@ function foldAdvance(entries) {
             // the same money, and every reader downstream would otherwise have to
             // remember which one it is looking at.
             state.repaid = 0;
+            state.reversed = 0;
             return;
         }
         if (!state) return;
@@ -118,6 +119,16 @@ function foldAdvance(entries) {
         // happened and never changes; what is still outstanding is the difference, and
         // keeping them apart is what lets a statement say "500 given, 200 back, 300 to
         // settle" instead of quietly reporting an advance of 300 nobody ever handed over.
+        // Reversed money never left the tin. It reduces what is owed exactly as a
+        // repayment does, and is kept apart from `repaid` because a statement that
+        // called a clerical correction "הוחזר במזומן" would be telling a man he handed
+        // back money he never touched.
+        if (entry.kind === 'reversed') {
+            state = Object.assign({}, state, {
+                reversed: (Number(state.reversed) || 0) + (Number(entry.amount) || 0)
+            });
+            return;
+        }
         if (entry.kind === 'repaid') {
             state = Object.assign({}, state, {
                 repaid: (Number(state.repaid) || 0) + (Number(entry.amount) || 0)
@@ -145,6 +156,7 @@ function foldAdvance(entries) {
             // amount still owed, on the one operation somebody reaches for when the
             // record is already wrong.
             corrected.repaid = Number(state.repaid) || 0;
+            corrected.reversed = Number(state.reversed) || 0;
             state = corrected;
         }
     });
@@ -352,6 +364,31 @@ function recordAdvanceCorrected(schedule, advanceId, changes, at, by) {
     });
     if (changes && changes.amount !== undefined) entry.amount = Number(changes.amount) || 0;
     return appendLedgerEntry(schedule, entry);
+}
+
+// A MISTAKE, COMPENSATED - never removed.
+//
+// The kind below this one, 'cancelled', drops the advance out of the fold entirely. That
+// is a deletion wearing another word, and it is the one thing an append-only ledger
+// exists to refuse: the row a person is looking for when they ask "what happened here"
+// is the row that stopped being true, and a fold that hides it answers a different
+// question than the one asked.
+//
+// So a correction is its own entry, of the opposite sign, and both lines stay on the
+// screen. The reason is MANDATORY - an unexplained adjustment to money is the thing this
+// whole file was written against - and the amount is bounded by what was given, because
+// a reversal larger than its advance is not a correction, it is a second transaction
+// nobody described.
+function recordAdvanceReversed(schedule, advanceId, amount, date, reason, at, by) {
+    return appendLedgerEntry(schedule, {
+        advanceId: String(advanceId),
+        kind: 'reversed',
+        date: String(date),
+        amount: Number(amount) || 0,
+        reason: String(reason || ''),
+        at: String(at || ''),
+        by: String(by || '')
+    });
 }
 
 function recordAdvanceCancelled(schedule, advanceId, note, at, by) {
