@@ -5735,8 +5735,21 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('the export carries the same money columns as the screen',
     head.includes('נצבר') && head.includes('מקדמות') && head.includes('לתשלום'),
     JSON.stringify(head));
-  check('and its לתשלום is net of advances, like the screen',
-    w1[head.indexOf('לתשלום')] === 1600 && w1[head.indexOf('מקדמות')] === 0,
+  // MOVED ON THIS BRANCH, and it is the second row the gates change - see the commit
+  // that opened them.
+  //
+  // On main an advance from another account is not deducted from this one, so w_01's
+  // column is 0 and he is paid the whole 1,600. That guarantee is exactly what the carry
+  // is built to overturn: this man took 900 in accounts where he worked nothing, so
+  // nothing could come off it there, and it comes off here. 1,600 earned, 900 deducted,
+  // 700 to pay, with the note saying where the 900 came from.
+  //
+  // The check directly above it - "an advance from another account is not deducted from
+  // this one" - still passes, because row.advances is the legacy in-range total and the
+  // carry does not touch it. That is worth knowing rather than tidying away: the two
+  // numbers answer different questions, and only the column is what somebody is paid on.
+  check('and its לתשלום is net of the carry, which is what the gate turns on',
+    w1[head.indexOf('לתשלום')] === 700 && w1[head.indexOf('מקדמות')] === -900,
     JSON.stringify(w1));
 
   // The minus sign in Hebrew text lays out on the wrong side of the digits without a
