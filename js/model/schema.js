@@ -1287,7 +1287,7 @@ function ledgerEntryProblems(id, value) {
     if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
         return ['a ledger entry with no advance behind it'];
     }
-    if (!['given', 'corrected', 'cancelled'].includes(String(value.kind))) {
+    if (!['given', 'corrected', 'cancelled', 'repaid'].includes(String(value.kind))) {
         return ['a ledger entry of a kind nobody wrote'];
     }
     if (value.kind === 'given') {
@@ -1298,6 +1298,29 @@ function ledgerEntryProblems(id, value) {
             return ['an advance given on no date'];
         }
         if (!Number.isFinite(Number(value.amount))) return ['an advance of no amount'];
+    }
+    // CASH HANDED BACK, which is money and is checked like money.
+    //
+    // A repayment with no date lands in no account, so it reduces nothing and is
+    // invisible - and the balance it should have cleared goes on being deducted from
+    // somebody's wage. A NEGATIVE one is worse than invisible: it is a second advance
+    // wearing the wrong name, adding to what the man owes through a form whose whole
+    // meaning is that he paid.
+    if (String(value.kind) === 'repaid') {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
+            return ['money handed back on no date'];
+        }
+        const back = Number(value.amount);
+        if (!Number.isFinite(back)) return ['money handed back of no amount'];
+        if (back < 0) return ['money handed back of less than nothing'];
+        if (back > ADVANCE_MAX) return ['money handed back beyond any wage'];
+        // The agora, like every other amount this app holds - see advanceProblems. A
+        // value the surfaces cannot all represent is a value they will disagree about,
+        // and this one is subtracted from somebody's pay.
+        const agorot = back * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            return ['money handed back that is finer than an agora'];
+        }
     }
     if (value.amount !== undefined && !Number.isFinite(Number(value.amount))) {
         return ['a ledger entry with an amount that is not a number'];
