@@ -234,20 +234,55 @@ function shelfUsable(name) {
         if (!there) return { ok: false, why: 'missing' };
         return caches.open(name).then(cache =>
             readManifest(name)
-                .then(manifest => Promise.all(SHELL.map(url =>
-                    cache.match(url).then(hit => {
-                        if (!hit) return url;
-                        if (!manifest || !manifest[url]) return null;
-                        return hit.clone().arrayBuffer()
-                            .then(bytes => crypto.subtle.digest('SHA-256', bytes))
-                            .then(digest => (hex(digest) === manifest[url] ? null : url));
-                    })
-                )).then(bad => {
+                .then(manifest => {
+                    // A SHELF IS JUDGED BY ITS OWN SHELL, NEVER BY THIS BUILD'S.
+                    //
+                    // This iterated SHELL - the list the running worker was compiled with
+                    // - over whatever shelf it was handed, including a shelf some earlier
+                    // build installed. That is a comparison between two different builds
+                    // dressed up as a completeness check, and it answers 'incomplete' for
+                    // a shelf that is complete, the moment a build ADDS a file. Every
+                    // window still running the older build is then fail-closed with a
+                    // 503: on rollout day, a white page on every phone that had the app
+                    // open, which is the exact failure iron law 7 exists to prevent.
+                    //
+                    // It stayed hidden because no build had ever added a shell entry -
+                    // files were edited, renamed and removed, and none of those trips it.
+                    // Vendoring the spreadsheet library added the first one.
+                    //
+                    // The manifest is the answer, and it was already being written: the
+                    // worker that installs a shelf records ITS OWN SHELL there, with a
+                    // hash per file. So the question asked of a shelf is the one it can
+                    // actually answer - is it still everything its own build put in it.
+                    const expected = manifest ? Object.keys(manifest) : null;
+                    if (expected !== null) {
+                        return Promise.all(expected.map(url =>
+                            cache.match(url).then(hit => {
+                                if (!hit) return url;
+                                return hit.clone().arrayBuffer()
+                                    .then(bytes => crypto.subtle.digest('SHA-256', bytes))
+                                    .then(digest => (hex(digest) === manifest[url] ? null : url));
+                            })
+                        ));
+                    }
+                    // NO MANIFEST: a shelf from a build that predates them. There is no
+                    // record of what that build's shell was, and this build's list is not
+                    // a substitute for one - it is the very thing that got this wrong.
+                    //
+                    // What can be checked is that the shelf can still serve the app: the
+                    // page is the entry to everything else, and the build that wrote this
+                    // shelf installed all-or-none under its own rules, so a shelf that
+                    // exists and holds its page is as complete as anything here can
+                    // establish. Claiming more would be inventing the missing record.
+                    return cache.match('./index.html')
+                        .then(hit => (hit ? [] : ['./index.html']));
+                })
+                .then(bad => {
                     const missing = bad.filter(Boolean);
                     return missing.length === 0
                         ? { ok: true, why: null }
                         : { ok: false, why: 'incomplete', missing };
-                }))
+                })
         );
     }).catch(() => ({ ok: false, why: 'unreadable' }));
     SHELF_OK.set(name, answer);
