@@ -116,7 +116,8 @@ written down so it cannot happen twice.
     js/state.js                the one live schedule; journal-first commits; save vs persist; the ledger mirror at boot
     js/model/schema.js         the v2 model, validators, field paths, payroll and invoice arithmetic; pure functions
     js/model/migrate.js        v1→v2; never guesses; ambiguous cells become decisions, not data
-    js/model/ledger.js         the v80 advances ledger: entries, fold, closed gate, mirror migration, parity check
+    js/model/ledger.js         the v80 advances ledger: entries, fold, closed gate, mirror migration, parity check;
+                               the repayment and period-closure kinds, both behind the writer gate
     js/sync/sync.js            outbox/journal, flush, snapshot adoption, provenance, the restore transaction, the status line
     js/sync/firebase-adapter.js  the only file that knows Firebase exists; the one ES module
     js/sync/firebase-config.js   project config; empty means local-only
@@ -161,6 +162,7 @@ written down so it cannot happen twice.
     tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx, built by the shipped library
     tests/money.display.test.mjs one day has one price on every surface: screen, WhatsApp, sheet
     tests/cas.test.mjs         the client half of the ordering protocol: revision, receipt, rebase, hold
+    tests/repayment.test.mjs   the advance that outlives its fortnight: carry, repayment, closure, the two labels
     vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
     tests/recovery.browser.mjs the rescue export through the real button
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin

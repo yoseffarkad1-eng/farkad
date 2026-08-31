@@ -138,6 +138,35 @@ and of nothing else. That is the whole shape, and it comes from one rule the own
 set: **a settled account never changes.** A repayment recorded in September cannot
 move a number on a fortnight somebody was paid from in August.
 
+### The fifth kind, and why a payslip is a record
+
+`deducted` (`recordPeriodClosed`) is the deduction WRITTEN DOWN at the moment a period
+closes, carrying `periodFrom`/`periodTo` and the `balanceAfter` the ledger screen prints
+beside it. Until it existed the deduction was computed on every read — correct arithmetic
+over the entries dated on or before the period's last day, and correct only while that
+set never changed. It changes: the advance form clamps a repayment into the current
+account, but the wire does not, and a phone offline for three weeks, an import or a
+restore all deliver entries dated inside a fortnight that was printed and paid. Measured:
+a back-dated repayment of 400 moved a closed period's closing balance from 1,950 to 1,550.
+
+So `advanceWalk` returns **two balances**, and the difference between them is the point.
+`carriedOut` is what the payslip says and says forever — read from the closure record.
+`carriedForward` is what the next period opens owing, and includes anything dated into
+this period after it shut. Each single-number answer fails in a different direction:
+recompute both and a paid payslip is rewritten; freeze both and a repayment a man
+actually made reduces nothing anywhere, which is money out of the sum. `lateSinceClose`
+names the gap so a screen can say a transaction arrived after the close rather than
+leaving two numbers unexplained.
+
+The worked example is the only one, and every money surface carries it: 0 → 5,000 →
+1,950 → 1,750.
+
+**Two labels that never trade places.** `יתרת סגירה` is historical and fixed;
+`חוב פתוח` is live. A screen using one word for both has somebody reading a settled
+fortnight's figure as what is still owed. A carried balance also keeps a row alive in
+`payrollRows` — a man who owes 1,950 and worked no days this fortnight had no row to owe
+it on, and dropped off the sheet with the debt.
+
 **Two gates, both shut.** `FARKAD_FLAGS.carryAdvances` is off because turning the
 carry on RESTATES accounts that may already have been paid — both of them, in the
 worked case: the fortnight the 5,000 was taken in stops deducting 5,000 and starts
