@@ -330,7 +330,7 @@ function renderPayrollTable() {
 
     const table = buildTable(headers, rows.map(row => {
         const cells = [row.name].concat(columns.map(column => column.value(row)));
-        if (anyVehicle) cells.push(row.vehicleDays || 0, Math.round(row.vehicleAmount || 0));
+        if (anyVehicle) cells.push(row.vehicleDays || 0, agora(row.vehicleAmount || 0));
         if (anyRate) {
             cells.push(row.dailyRate);
             // null, not 0: a worker whose rate was never entered owes an unknown amount,
@@ -1279,7 +1279,7 @@ function payrollSheetRows() {
         row.name, row.attendanceDays, row.payUnits, row.doubleDays,
         row.extraHours, row.absent
     ].concat(withVehicles
-        ? [row.vehicleDays || 0, Math.round(row.vehicleAmount || 0)]
+        ? [row.vehicleDays || 0, agora(row.vehicleAmount || 0)]
         : []
     ).concat(moneyCells(row))));
 }
