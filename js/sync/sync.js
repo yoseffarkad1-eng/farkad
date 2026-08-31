@@ -2892,16 +2892,37 @@ const FarkadSync = {
     // unable to record costs the evening. The bytes are preserved under the same
     // :damaged suffix everything else uses, so the rescue file carries them and whoever
     // eventually asks what happened has the evidence rather than a guess.
+    // Answers whether the bytes are safe somewhere other than the record they are in.
+    // Every path used to answer nothing at all, so the caller's `kept` was always
+    // undefined and the app recorded "cannot be read OR COPIED" over a copy it had just
+    // made and verified. Telling somebody their bytes were lost when they were not is the
+    // same untruth as a green tick over a failed save, pointed the other way.
     quarantineSendClaim() {
-        if (this._claimQuarantined) return;
+        const key = SEND_CLAIM_KEY + ':damaged';
+        // Already done, or already there from an earlier session: the copy exists either
+        // way, which is what the caller is asking about.
+        if (this._claimQuarantined) return this._claimKept;
         this._claimQuarantined = true;
         const raw = Store.durableGet(SEND_CLAIM_KEY);
-        if (raw === null) return;
-        const key = SEND_CLAIM_KEY + ':damaged';
-        if (Store.durableGet(key) !== null) return;
-        Store.setVerified(key, raw);
+        // Nothing to copy is not a failure to copy. There is no record here to lose.
+        if (raw === null) return (this._claimKept = true);
+        if (Store.durableGet(key) !== null) return (this._claimKept = true);
+        return (this._claimKept = Store.setVerified(key, raw) === true);
     },
     _claimQuarantined: false,
+    _claimKept: false,
+
+    // The raw bytes of the send claim, but only when nobody can read them.
+    //
+    // For the rescue export, which cannot ask readSendClaim itself: that function is not
+    // exported and answering "unreadable" is the whole of the question. A claim that
+    // parses is this session's lock and is deliberately NOT handed back - see the block
+    // in js/recovery.js that calls this.
+    unreadableSendClaim() {
+        const held = readSendClaim();
+        if (!held || !held.unreadable) return null;
+        return Store.durableGet(SEND_CLAIM_KEY);
+    },
 
     // Takes the right to send, or answers false. See SEND_CLAIM_KEY.
     takeSendClaim() {

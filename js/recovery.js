@@ -140,6 +140,23 @@ const Recovery = {
             });
         }
 
+        // The record that coordinates sending between windows, when it is unreadable.
+        //
+        // Ordinarily it needs no naming: a claim nobody can read is quarantined under the
+        // :damaged suffix the sweep above already carries, and the live one is a lock
+        // token of no interest to anybody. But the copy can fail, and the disk that
+        // refuses it is the same disk whose full write left the record half finished in
+        // the first place - so the shape where quarantine fails is the LIKELY one, and
+        // there these bytes are the only copy in existence.
+        //
+        // Named, not swept, and only while unreadable: a readable claim is this session's
+        // own lock and putting it in a file somebody sends over WhatsApp says nothing
+        // about anybody's work.
+        if (typeof FarkadSync !== 'undefined' && FarkadSync.unreadableSendClaim) {
+            const claim = FarkadSync.unreadableSendClaim();
+            if (claim !== null) out['farkad:sendClaim'] = claim;
+        }
+
         // A restore that was asked for and has not finished, and the frozen upgrade of an
         // old one beside it. Neither is derivable from anything else in the file: they
         // describe work somebody was TOLD had happened, and a device held up by one of
