@@ -241,7 +241,8 @@ function csvRows(text) {
         device.downloads.map(item => item.name),
         [`שכר_${STAMP}.csv`, `חיוב_${STAMP}.csv`, `פירוט_${STAMP}.csv`]);
     same('and the person is told why they are CSV and not a workbook',
-        device.ctx.told, 'ספריית Excel לא נטענה, ולכן הקבצים יוצאו כ-CSV.');
+        device.ctx.told, 'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
+        + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
 
     const payroll = fileNamed(device, `שכר_${STAMP}.csv`);
     given('the pay sheet is one of the files handed over', typeof payroll === 'string');
@@ -393,7 +394,8 @@ function csvRows(text) {
     same('one file goes out, not three',
         device.downloads.map(item => item.name), [`חיוב_${STAMP}.csv`]);
     same('and the person is told it is the billing file alone that fell back',
-        device.ctx.told, 'ספריית Excel לא נטענה, ולכן קובץ החיוב יוצא כ-CSV.');
+        device.ctx.told, 'חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
+        + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
 
     const bill = fileNamed(device, `חיוב_${STAMP}.csv`);
     same('the grid is his site, his dates and his totals',
