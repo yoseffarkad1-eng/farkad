@@ -39,6 +39,7 @@ function renderDay() {
     // day screen, and no way to tell whether the app is broken or simply not set up.
     if (State.activeWorkers().length === 0) {
         const card = renderSetupCard(
+            '👷',
             'ברוך הבא לפרקד',
             'הדבק את רשימת העובדים ואת רשימת האתרים - והאפליקציה מוכנה תוך חצי דקה.',
             '🚀 התחלה מהירה',
@@ -52,6 +53,7 @@ function renderDay() {
     }
     if (State.activePlaces().length === 0) {
         root.appendChild(renderSetupCard(
+            '🏗️',
             'עוד אין אתרי עבודה',
             'העובדים כבר קיימים. חסרים האתרים - בלעדיהם אין לאן לשבץ אותם.',
             '+ הוסף אתר',
@@ -82,8 +84,14 @@ function renderDay() {
     if (vehicles) root.appendChild(vehicles);
 }
 
-function renderSetupCard(title, text, label, onClick) {
+function renderSetupCard(glyph, title, text, label, onClick) {
     const card = el('div', 'setup-card');
+    // A glyph the size of an icon, not an illustration: the card is a doorway with one
+    // sentence and one button, and anything bigger upstages the button. Hidden from a
+    // screen reader - the title says the same thing in words.
+    const mark = el('div', 'setup-glyph', glyph);
+    mark.setAttribute('aria-hidden', 'true');
+    card.appendChild(mark);
     card.appendChild(el('h3', null, title));
     card.appendChild(el('p', null, text));
     card.appendChild(button(label, 'btn-add', onClick));
@@ -693,7 +701,11 @@ function renderRateControl(placeId, workerId, entry) {
 // against the failure that costs real money: forgetting someone entirely.
 function renderUnassignedTray(unrecorded) {
     const tray = el('div', 'tray');
-    tray.appendChild(el('h4', null, 'לא נרשמו'));
+    // The count rides on the header: this tray is the day's debt, and how deep it is
+    // should not take a chip-by-chip count to know. An empty tray keeps the bare word -
+    // the line under it already says "nobody" in words, and (0) next to that is noise.
+    tray.appendChild(el('h4', null,
+        unrecorded.length > 0 ? `לא נרשמו (${unrecorded.length})` : 'לא נרשמו'));
 
     if (unrecorded.length === 0) {
         tray.appendChild(el('p', 'tray-empty', '✔️ כל העובדים טופלו.'));
@@ -769,7 +781,9 @@ function renderVehicleTray() {
 function renderAbsentTray() {
     const absent = State.absentToday();
     const tray = el('div', 'tray');
-    tray.appendChild(el('h4', null, 'נעדרים'));
+    // Same rule as the tray above: a count when there is anyone to count.
+    tray.appendChild(el('h4', null,
+        absent.length > 0 ? `נעדרים (${absent.length})` : 'נעדרים'));
 
     if (absent.length === 0) {
         tray.appendChild(el('p', 'tray-empty', 'אין נעדרים.'));

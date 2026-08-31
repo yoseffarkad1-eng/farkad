@@ -1927,17 +1927,21 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     * { animation: none !important; transition: none !important; }
 }
 
-/* The empty state, with the button that resolves it inside the card. */
+/* The empty state, with the button that resolves it inside the card: a glyph the size of
+   an icon, one sentence, one primary action, all on one centre line. */
 .setup-card {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: 20px;
+    padding: 28px 20px;
     text-align: center;
     box-shadow: var(--shadow);
 }
+.setup-glyph { font-size: 32px; line-height: 1; margin-bottom: 8px; }
 .setup-card h3 { margin-bottom: 6px; }
-.setup-card p { color: var(--ink-2); margin: 0 0 14px; }
+/* A short measure keeps the explanation a caption under the title, not a column of
+   prose - the same words, folded where a centred line reads best. */
+.setup-card p { color: var(--ink-2); margin: 0 auto 14px; max-width: 36ch; }
 .setup-card button { font-size: 17px; padding: 14px 24px; }
 .setup-card .setup-alt { display: block; margin: 10px auto 0; font-size: 14.5px; padding: 9px 16px; }
 

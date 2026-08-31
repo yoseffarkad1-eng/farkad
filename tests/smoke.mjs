@@ -105,6 +105,11 @@ async function seedRoster(page) {
       .every(v => document.getElementById(v + 'View').style.display === 'none'))));
   check('with no data the app welcomes rather than rendering an empty grid',
     (await page.textContent('#dayView')).includes('ברוך הבא'));
+  check('and the welcome wears its glyph, out of a screen reader\'s way',
+    (await page.evaluate(() => {
+      const glyph = document.querySelector('.setup-card .setup-glyph');
+      return Boolean(glyph) && glyph.getAttribute('aria-hidden') === 'true';
+    })));
 
   // The ☰ must be findable on the very first visit - it lives in the header, which
   // renders with or without data, not on the progress bar that needs workers to exist.
@@ -248,6 +253,19 @@ async function seedRoster(page) {
     (await page.locator('.chip-absent').count()) === 1);
   check('an absent worker counts as handled, not outstanding',
     (await page.textContent('.progress-line')).includes('1 מתוך 3'));
+  // The headers say how deep each tray is without a chip-by-chip count...
+  check('the tray headers carry their counts',
+    (await page.locator('.tray h4').allTextContents()).join(' | ')
+      === 'לא נרשמו (2) | נעדרים (1)');
+  // ...and an empty tray keeps the bare word: its line below already says "nobody" in
+  // words, and (0) next to that is noise.
+  await page.evaluate(() => {
+    State.commit(clearWorkerDay(State.schedule, State.date, 'w_01', 'actual'));
+  });
+  await page.waitForTimeout(300);
+  check('an emptied tray drops the count rather than saying (0)',
+    (await page.locator('.tray h4').allTextContents()).join(' | ')
+      === 'לא נרשמו (3) | נעדרים');
   await page.context().close();
 }
 
