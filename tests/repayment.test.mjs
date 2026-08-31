@@ -469,4 +469,91 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         JSON.stringify(both));
 }
 
+// ============================================ the accounting example, exactly as agreed
+//
+// עומר סעד, the one worked example the design carries on every frame that shows money.
+// There is no second example anywhere, so there is no second one here.
+//
+//   תקופה א׳ (07/08-20/08, closed)  0 → +5,000 cash on 10/08 → gross 3,050
+//                                    → deducted 3,050 = min(5,000, 3,050)
+//                                    → net 0 → closing balance 1,950
+//   תקופה ב׳ (21/08-03/09, open)     opening 1,950 → −200 repaid on 24/08
+//                                    → open debt today 1,750
+//
+//   the debt line: 0 ← 5,000 ← 1,950 ← 1,750
+const OMER_A = { from: '2026-08-07', to: '2026-08-20' };
+const OMER_B = { from: '2026-08-21', to: '2026-09-03' };
+
+function omer(flags) {
+    const device = makeDevice({ deviceId: 'd_omer', flags });
+    device.setToday('2026-08-26');
+    // 500 a day and 50 an hour: six pay-days and one hour is 3,050.
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'עומר סעד', active: true, dailyRate: 500, hourlyRate: 50 }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+
+    ['2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13'].forEach(date =>
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            date, 'w_01', 'actual', 'p_01')));
+    // The sixth day carries the single extra hour.
+    device.State.commit(device.call('assignPlace', device.State.schedule,
+        '2026-08-14', 'w_01', 'actual', 'p_01', 'extra', 1));
+
+    device.State.commit(device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-10', 5000, ''));
+    return device;
+}
+
+{
+    suite('עומר סעד: the debt line 0 - 5,000 - 1,950 - 1,750');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+
+    const gross = device.call('payrollReport', device.State.schedule,
+        OMER_A.from, OMER_A.to).find(row => row.workerId === 'w_01').amount;
+    given('six pay-days and one hour come to 3,050', gross === 3050, String(gross));
+
+    const a = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    same('תקופה א׳: 5,000 taken, 3,050 deducted at the cap, nothing to pay, 1,950 carried',
+        [a.carriedIn, a.given, a.deducted, a.net, a.carriedOut],
+        [0, 5000, 3050, 0, 1950]);
+
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 200, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash'));
+
+    const b = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to);
+    same('תקופה ב׳: opening 1,950, 200 handed back, 1,750 still owed',
+        [b.carriedIn, b.repaid, b.carriedOut], [1950, 200, 1750]);
+
+    // THE INVARIANT THE OWNER SET, and the one thing that can break it: an entry dated
+    // INSIDE a period that was already closed and paid. The form clamps a repayment to
+    // the current account, but the wire does not - a phone that was offline for three
+    // weeks, an import, a restore, all deliver back-dated entries. A closed payslip that
+    // moves is a man handed one number in August and shown another in September.
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 400, '2026-08-15', 'הגיע מטלפון אחר', '2026-08-30T09:00:00.000Z',
+        'd_other', 'cash'));
+
+    const reprinted = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    // THE WHOLE CLOSING ROW, not the two figures that happen to survive.
+    //
+    // Written first as `deducted === 3050 && net === 0`, and it passed - because the wage
+    // was the binding half of min(5,000, 3,050), so a fourth of the balance could
+    // disappear underneath it without either number moving. The one that moved was the
+    // closing balance: 1,950 became 1,550, which is the number תקופה ב׳ opens on and the
+    // number a man is told he still owes.
+    //
+    // A check that passes for the wrong reason is worse than no check, so this asks for
+    // the row a reprint has to produce, whole.
+    same('a back-dated entry does not move the closed payslip of תקופה א׳',
+        [reprinted.carriedIn, reprinted.given, reprinted.repaid,
+            reprinted.deducted, reprinted.net, reprinted.carriedOut],
+        [0, 5000, 0, 3050, 0, 1950]);
+}
+
 report();
