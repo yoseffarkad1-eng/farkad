@@ -983,6 +983,22 @@ function workerFootprint(schedule, workerId) {
         if (item && String(item.workerId) === id) advances.push(advance);
     });
 
+    // AND THE LEDGER'S OWN ADVANCES, which are not always the same set.
+    //
+    // schedule.advances is what a v79 phone writes and it is still the field every device
+    // reads. It is not the whole record: a correction can move an advance to another man,
+    // and the fold - not the old field - is who it belongs to afterwards. A footprint
+    // taken from the old field alone would say a man has no advances while the ledger
+    // says he owes for one, and this footprint is what stands between him and permanent
+    // deletion. Feature-detected, because the ledger file may not be loaded.
+    if (typeof foldLedger === 'function') {
+        const folded = foldLedger(schedule);
+        Object.keys(folded).forEach(advance => {
+            if (String(folded[advance].workerId) !== id) return;
+            if (advances.indexOf(advance) === -1) advances.push(advance);
+        });
+    }
+
     return { days, advances };
 }
 

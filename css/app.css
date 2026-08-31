@@ -1512,6 +1512,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wday-date span { color: var(--ink-3); font-size: 13px; }
 .wday-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wday-note { color: var(--ink-3); font-size: 12px; }
+/* Sealing an account is the last thing on this screen and the only irreversible one
+   on it, so it is set apart above the line rather than sitting among the rows. */
+.period-closure { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.period-closure button { min-height: 44px; width: 100%; }
 /* An account that does not add up is not a quiet note. It is the reason nothing was
    deducted from this man's wage, and somebody has to read it before payday. */
 .wday-note.wday-review { color: var(--warn); font-weight: 700; }

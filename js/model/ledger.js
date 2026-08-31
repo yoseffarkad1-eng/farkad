@@ -425,9 +425,40 @@ function recordAdvanceGiven(schedule, advanceId, workerId, date, amount, note, a
 //
 // `periodFrom` and `periodTo` name the account it closes, so the record can be found
 // again without trusting a date range somebody passed in.
+//
+// ITS IDENTITY IS THE THING IT CLOSES, not a random id and not the moment somebody
+// pressed a button. `le_close_<advanceId>_<periodFrom>` and nothing else.
+//
+// That is the whole of the double-close defence, and it is the only one that works across
+// three phones with no coordination. Measured before this: two phones each closed the
+// same account, each wrote a closure of 100 with a balanceAfter of 400, the union kept
+// both entries because their random ids differed, and closedPeriods added them up - 200
+// off his wage and a carried balance of 800, from one closure pressed twice. With the id
+// derived from the period, the second write lands on the SAME field path with the same
+// money in it, so the union holds one entry and the fold reads one closure.
+//
+// The two entries would still differ in `at` and `by` - the device and the moment - and
+// last-write-wins on those is the right answer: they say who recorded it, not what came
+// off. Every figure a person is paid from is a function of the period, not of the device.
+function closureId(advanceId, periodFrom) {
+    return `le_close_${String(advanceId)}_${String(periodFrom).replace(/-/g, '')}`;
+}
+
+// Whether this exact account has already been closed against this exact advance.
+function periodClosureFor(schedule, advanceId, periodFrom) {
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    return held[closureId(advanceId, periodFrom)] || null;
+}
+
 function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at, by,
     balanceAfter) {
+    // ALREADY CLOSED IS CLOSED. Returning null rather than a second write is what makes
+    // the flow idempotent on ONE phone; the deterministic id above is what makes it
+    // idempotent across three. A closed period is a record and iron law 1 says a record
+    // is never rewritten, so this refuses rather than restating.
+    if (periodClosureFor(schedule, advanceId, from)) return null;
     return appendLedgerEntry(schedule, {
+        id: closureId(advanceId, from),
         advanceId: String(advanceId),
         kind: 'deducted',
         workerId: String(workerId),
@@ -445,6 +476,69 @@ function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at,
         at: String(at || ''),
         by: String(by || '')
     });
+}
+
+// CLOSING AN ACCOUNT, spelled out before anything is written.
+//
+// One row per advance this close would touch, with what comes off it and what is left on
+// it afterwards. Nothing is committed here - the same courtesy planRateStamping and
+// planAdvanceCarry give, and for the same reason: this freezes a number a man is paid
+// from, and a person should be able to read it first.
+//
+// The split is oldest advance first. A period's deduction is one number for the man and
+// the ledger records it per advance, so it has to be apportioned somehow; oldest first is
+// the order money is settled in everywhere else in this app, and it is the order the
+// history reads in.
+function planPeriodClosure(schedule, workerId, from, to) {
+    const walk = advanceAccount(schedule, workerId, from, to);
+    const reasons = [];
+    if (walk.closed) reasons.push('closed');
+    if (walk.review) reasons.push('overpaid');
+    if (walk.gross === null) reasons.push('unpriced');
+
+    const advances = (schedule && schedule.advances) || {};
+    const folded = foldLedger(schedule);
+    const ids = Object.keys(advances).concat(Object.keys(folded))
+        .filter((id, at, all) => all.indexOf(id) === at)
+        .filter(id => {
+            const of = folded[id] || advances[id];
+            return Boolean(of) && String(of.workerId) === String(workerId);
+        })
+        .map(id => ({ id, state: advanceOutstanding(schedule, id),
+            date: String((folded[id] || advances[id]).date || '') }))
+        .filter(row => row.state.left > 0)
+        .sort((a, b) => (a.date < b.date ? -1 : (a.date > b.date ? 1 : (a.id < b.id ? -1 : 1))));
+
+    let room = walk.deducted;
+    const rows = [];
+    ids.forEach(row => {
+        if (room <= 0) return;
+        const off = agoraRound(Math.min(room, row.state.left));
+        if (off <= 0) return;
+        room = agoraRound(room - off);
+        rows.push({
+            advanceId: row.id,
+            amount: off,
+            balanceAfter: agoraRound(row.state.left - off),
+            alreadyClosed: Boolean(periodClosureFor(schedule, row.id, from))
+        });
+    });
+
+    return { from, to, workerId, deducted: walk.deducted, gross: walk.gross,
+        carriedForward: walk.carriedForward, rows, reasons,
+        canClose: reasons.length === 0 && rows.length > 0 };
+}
+
+// The changes that close it. An empty list means nothing to do - which is what a second
+// press must produce, and what a second PHONE must produce once the first has landed.
+function closePeriodChanges(schedule, workerId, from, to, at, by) {
+    const plan = planPeriodClosure(schedule, workerId, from, to);
+    if (!plan.canClose) return [];
+    return plan.rows
+        .filter(row => !row.alreadyClosed)
+        .map(row => recordPeriodClosed(schedule, row.advanceId, workerId, from, to,
+            row.amount, at, by, row.balanceAfter))
+        .filter(Boolean);
 }
 
 // Every closure recorded against this man, by the period they closed.

@@ -912,4 +912,134 @@ function omer(flags) {
         reports.indexOf(word) !== -1));
 }
 
+
+// ------------------------------------------------- closing an account, exactly once
+{
+    suite('D4: a closure is identified by what it closes, not by when it was pressed');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+
+    const plan = device.call('planPeriodClosure', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('the plan says what would come off, before anything is written',
+        plan.canClose === true && plan.deducted === 3050 && plan.rows.length === 1
+        && plan.rows[0].advanceId === id && plan.rows[0].amount === 3050
+        && plan.rows[0].balanceAfter === 1950, JSON.stringify(plan));
+    check('and nothing has been written by planning it',
+        device.call('ledgerEntries', device.State.schedule)
+            .filter(e => e.kind === 'deducted').length === 0);
+
+    const first = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_a');
+    device.State.commitMany(first);
+    const closures = () => device.call('ledgerEntries', device.State.schedule)
+        .filter(e => e.kind === 'deducted');
+    check('closing it writes exactly one closure', closures().length === 1,
+        JSON.stringify(closures()));
+    check('whose id names the advance and the period it closed',
+        closures()[0].id === device.call('closureId', id, OMER_A.from),
+        closures()[0].id);
+
+    // THE DOUBLE-CLOSE, ON ONE PHONE. A second press writes nothing.
+    const second = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:05:00.000Z', 'd_a');
+    check('a second press produces no changes at all', second.length === 0,
+        JSON.stringify(second));
+    device.State.commitMany(second);
+    check('and the ledger still holds one closure', closures().length === 1,
+        JSON.stringify(closures()));
+
+    const folded = device.call('closedPeriods', device.State.schedule, 'w_01')[OMER_A.from];
+    same('the fold reads one closure, not two', folded,
+        { deducted: 3050, balanceAfter: 1950 });
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('and the payslip says 3,050 off and 1,950 left, once',
+        walk.deducted === 3050 && walk.carriedOut === 1950 && walk.closed === true,
+        JSON.stringify(walk));
+}
+
+{
+    suite('D4: two phones cannot close the same account twice');
+
+    // Both are offline, both press סגור, both write. This is the case a random entry id
+    // could not survive: two entries, both real, and closedPeriods adding them up - 6,100
+    // off a wage of 3,050 and a carried balance of 3,900, from one closure pressed twice.
+    //
+    // ONE schedule, copied before either write, because the two phones are two copies of
+    // the same record - which is the whole situation. Two freshly built devices would
+    // have minted two different advance ids and measured nothing.
+    const a = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(a.State.schedule.advances)[0];
+    const asPhoneB = JSON.parse(JSON.stringify(a.State.schedule));
+
+    const fromA = a.call('closePeriodChanges', a.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_a');
+    // Phone B is asked against ITS copy, which has not seen A's closure - so it is not
+    // being helped by knowing the answer.
+    const fromB = a.call('closePeriodChanges', asPhoneB, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:03.000Z', 'd_b');
+    check('each phone, alone, believed it was closing the account',
+        fromA.length === 1 && fromB.length === 1,
+        JSON.stringify([fromA.length, fromB.length]));
+    check('and both wrote to the same field path',
+        fromA[0].path === fromB[0].path, `${fromA[0].path} | ${fromB[0].path}`);
+
+    // The union, which is what Firestore does with two writes to one field path: the
+    // later one stands, and there is ONE entry either way.
+    a.State.commitMany(fromA);
+    a.State.schedule.ledger.advances[fromB[0].value.id] = fromB[0].value;
+    const closures = a.call('ledgerEntries', a.State.schedule)
+        .filter(e => e.kind === 'deducted');
+    check('the record holds one closure after both landed', closures.length === 1,
+        JSON.stringify(closures));
+    check('carrying the same money whichever phone wrote it',
+        closures[0].amount === 3050 && closures[0].balanceAfter === 1950,
+        JSON.stringify(closures[0]));
+
+    const walk = a.call('advanceAccount', a.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('so the payslip is 3,050 off and 1,950 left, not 6,100 and 3,900',
+        walk.deducted === 3050 && walk.carriedOut === 1950, JSON.stringify(walk));
+}
+
+{
+    suite('D4: a closure is a decision, not a side effect of looking');
+
+    // Reading an account must never seal it. Every one of these is a person LOOKING at
+    // a number - a preview, a print, a workbook, a message - and a closure cannot be
+    // taken back, so none of them may write one.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    const share = readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8');
+    const callers = (reports + share).split('closePeriodChanges').length - 1;
+    check('closePeriodChanges is called from exactly one place in the whole app',
+        callers === 1, String(callers));
+    check('and that place is the account-closing button, behind a confirmation',
+        /closeAccountFor[\s\S]{0,900}askConfirm/.test(reports));
+    check('nothing that prints, previews or exports closes anything',
+        share.indexOf('closePeriodChanges') === -1
+        && share.indexOf('recordPeriodClosed') === -1);
+    check('and the button is behind both gates',
+        /renderPeriodClosure[\s\S]{0,400}ledgerWritesEnabled\(\)[\s\S]{0,80}advanceCarryEnabled\(\)/
+            .test(reports));
+
+    // An account that does not add up cannot be sealed. Freezing a wrong number is
+    // exactly the thing a closure makes permanent.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 5000, '2026-08-12', '', '2026-08-12T09:00:00.000Z', 'd_a', 'cash'));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 5000, '2026-08-12', '', '2026-08-12T09:00:01.000Z', 'd_b', 'cash'));
+    const blocked = device.call('planPeriodClosure', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('a period with an unexplained surplus refuses to close',
+        blocked.canClose === false && blocked.reasons.indexOf('overpaid') !== -1,
+        JSON.stringify(blocked.reasons));
+    check('and closing it produces no changes',
+        device.call('closePeriodChanges', device.State.schedule, 'w_01',
+            OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_a').length === 0);
+}
+
 report();

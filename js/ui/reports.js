@@ -655,6 +655,11 @@ function openWorkerDays(workerId) {
         }
     }
 
+    // Closing the account is a deliberate act with its own button, and it is the ONLY
+    // thing in this app that writes a closure - see renderPeriodClosure.
+    const closure = renderPeriodClosure(worker);
+    if (closure) body.appendChild(closure);
+
     // After the period's advances: the whole record of them, folded shut. Read-only by
     // construction - see renderWorkerLedger.
     const ledger = renderWorkerLedger(worker.id);
@@ -662,6 +667,80 @@ function openWorkerDays(workerId) {
 
     body.appendChild(renderAdvanceAdd(worker));
     document.getElementById('workerDaysModal').style.display = 'flex';
+}
+
+// SEALING THE ACCOUNT, and the only place in this app that does it.
+//
+// recordPeriodClosed existed for a release with nothing calling it, which meant every
+// figure it was written to freeze was still being recomputed on every read - correct
+// arithmetic, and correct only for as long as the entries never moved. They move: a phone
+// offline for three weeks, an import and a restore all deliver entries dated inside a
+// fortnight that was printed and paid, and the closing balance shifts underneath a
+// payslip somebody was handed.
+//
+// It is a BUTTON and not a side effect. Printing a sheet, opening a preview, exporting a
+// workbook and sending a statement all read this account and none of them may close it:
+// a person looking at a number is not the same as a person deciding it is final, and a
+// closure cannot be taken back. tests/repayment.test.mjs holds the shipped source to
+// that - this identifier appears in exactly one place.
+//
+// Behind both gates, like every other writer here: a closure the other two phones cannot
+// read is money off a wage they will go on deducting.
+function renderPeriodClosure(worker) {
+    if (typeof planPeriodClosure !== 'function') return null;
+    if (!ledgerWritesEnabled() || !advanceCarryEnabled()) return null;
+    if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)) return null;
+
+    const plan = planPeriodClosure(State.schedule, worker.id,
+        REPORT_RANGE.from, REPORT_RANGE.to);
+
+    const box = el('div', 'period-closure');
+    if (plan.reasons.indexOf('closed') !== -1) {
+        // Said in the ledger's own words, and said before anything else on this block.
+        box.appendChild(el('p', 'hint', `${LEDGER_KIND_LABELS.closed} ולא ישתנה.`));
+        return box;
+    }
+    if (plan.reasons.indexOf('overpaid') !== -1) {
+        box.appendChild(el('p', 'hint hint-warn',
+            'יש עודף בהחזרי המקדמות של העובד הזה. אי אפשר לסגור חשבון שלא מסתדר - '
+            + 'תקן קודם, ואז סגור.'));
+        return box;
+    }
+    if (!plan.canClose) return null;
+
+    box.appendChild(el('p', 'hint',
+        `סגירת החשבון תרשום ${moneyText(plan.deducted)} ₪ כ"${LEDGER_KIND_LABELS.deducted}" `
+        + `ותשאיר חוב פתוח ${moneyText(plan.carriedForward)} ₪. `
+        + 'אחרי הסגירה המספרים האלה לא ישתנו.'));
+    box.appendChild(button('סגור את החשבון', 'btn-secondary',
+        () => closeAccountFor(worker, plan), 'סגירת חשבון התקופה'));
+    return box;
+}
+
+async function closeAccountFor(worker, plan) {
+    const ok = await askConfirm({
+        title: 'לסגור את החשבון?',
+        message: `${isolate(worker.name)}: ${moneyText(plan.deducted)} ₪ ינוכו מהשכר `
+            + `ויישאר חוב פתוח ${moneyText(plan.carriedForward)} ₪. `
+            + 'סגירה היא סופית - אי אפשר לבטל אותה, רק לרשום תיקון לצידה.',
+        ok: 'סגור'
+    });
+    if (!ok) return;
+
+    // Re-planned against the record as it is NOW, not against the plan this screen was
+    // drawn from: the other phone may have closed it while this dialog was open. An empty
+    // list is the right answer to that, not an error - the account is closed either way.
+    const changes = closePeriodChanges(State.schedule, worker.id,
+        REPORT_RANGE.from, REPORT_RANGE.to, new Date().toISOString(), syncDeviceId());
+    if (changes.length === 0) {
+        if (typeof askTell === 'function') {
+            await askTell(`${LEDGER_KIND_LABELS.closed} כבר. לא נרשם דבר נוסף.`);
+        }
+        openWorkerDays(worker.id);
+        return;
+    }
+    if (!State.commitMany(changes)) return;
+    openWorkerDays(worker.id);
 }
 
 // The attendance dates in one line above the day rows: a chip per date the man was on a
