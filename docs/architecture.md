@@ -107,6 +107,55 @@ at boot with a `corrected` entry, or treat the red line as a signal to investiga
 hand) are laid out in `docs/notes-for-the-v79-session.md`; widening the migration's
 writes is a decision for the branch that owns the schema, not a drive-by fix.
 
+### The fourth kind, and the fortnight that forgets
+
+`repaid` is cash handed BACK against one advance, on its own date
+(`recordAdvanceRepaid`, `js/model/ledger.js`). It accumulates rather than replacing —
+a man who pays back 200 twice has paid back 400 — and it does not touch `amount`:
+what he was given is a fact about the day it happened, so a statement can say "500
+given, 200 back, 300 to settle" instead of reporting an advance nobody handed over.
+A `corrected` entry carries the repayments across; dropping them there would
+resurrect a repayment as a debt on the one operation somebody reaches for when the
+record is already wrong.
+
+It exists because of a fault the legacy field cannot express. A man who takes 5,000
+against 3,200 earned is shown a net of nothing, and the next account starts from
+zero: the 1,800 he still owes is on no screen, in no file and in nobody's
+arithmetic. It is not lost from the RECORD — the advance is still there — it is lost
+from the SUM, which is worse, because the sum is what somebody is paid from.
+
+`advanceAccount` (`js/model/schema.js`) walks it. An account takes what it was
+carrying, adds what was given inside it, subtracts what was handed back inside it,
+and deducts from the wage only what is left — never more than the man earned. The
+order is load-bearing: repayments come off before the wage is asked to cover the
+rest, or a man who settled in cash is deducted for it a second time out of his pay.
+A man with no rate is owed an unknown amount, not zero, so the balance passes
+through him untouched. An overpayment does not become a negative balance, which
+would quietly add itself to his next wage as though the firm owed him for it.
+
+Every figure is a function of what is dated on or before its own account's last day,
+and of nothing else. That is the whole shape, and it comes from one rule the owner
+set: **a settled account never changes.** A repayment recorded in September cannot
+move a number on a fortnight somebody was paid from in August.
+
+**Two gates, both shut.** `FARKAD_FLAGS.carryAdvances` is off because turning the
+carry on RESTATES accounts that may already have been paid — both of them, in the
+worked case: the fortnight the 5,000 was taken in stops deducting 5,000 and starts
+deducting the 3,200 he earned, and the next one deducts the rest. This app does not
+know which fortnights have been handed over, so `planAdvanceCarry` reports every
+account and man it would move, with both answers side by side, and changes nothing —
+the same refusal `planRateStamping` makes about stamping old days. And the writer
+gate stays shut, because a repayment IS a ledger entry: recording one with the gate
+closed writes something the other two phones cannot read, which is the failure the
+gate exists to prevent, pointed the other way.
+
+`ledgerWritesEnabled()` now also honours `FARKAD_FLAGS.ledgerWrites`. The const
+stays where iron law 1 puts it and its shipped value is unchanged; what it gains is
+the seam every other gate has, so a suite can measure the build somebody eventually
+ships. `tests/build.test.mjs` fails if any shipped file mentions
+`FARKAD_FLAG_OVERRIDES`, the page included — a browser cannot reach it and neither
+can a phone. That is a stronger gate than a bare const, which nothing enforces.
+
 ## Sync
 
 `js/sync/sync.js` is the largest file in the app and nearly all of it is the residue
