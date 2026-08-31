@@ -196,7 +196,13 @@ function abaDuringSnapshot(shared, tabA, tabB, key) {
     device.call('takeDailySnapshot');
     device.call('pushUndoState', device.State.schedule);
     device.Store.set('farkadMessageStyle', 'plain');
-    device.putRaw('farkad:sendClaim', '{"by":"d_test1","token":"t","at":1}');
+    // A claim this build can actually READ. "at":1 is a millisecond after 1970, which
+    // readSendClaim rejects as not-a-moment - so the old fixture was an unreadable claim
+    // wearing a readable one's name, and the check below said nothing about the case it
+    // is written for. An unreadable claim IS carried, deliberately, and is pinned as such
+    // straight after this block.
+    device.putRaw('farkad:sendClaim',
+        JSON.stringify({ by: 'd_test1', token: 't', at: Date.now(), beat: Date.now() }));
 
     const carried = device.global('Recovery').rawRecords();
     const OUTSIDE = [
@@ -214,6 +220,23 @@ function abaDuringSnapshot(shared, tabA, tabB, key) {
             device.raw(key) !== null && !Object.prototype.hasOwnProperty.call(carried, key),
             `on disk ${device.raw(key) !== null}, carried ${key in carried}`);
     });
+
+    // AND THE OTHER SIDE OF THAT LINE, so the exclusion cannot quietly widen.
+    //
+    // The send claim is left out because a lock somebody currently holds says nothing
+    // about anybody's work. That reason stops applying the moment nobody can read it: an
+    // unreadable claim is a record this app wrote and cannot parse, and the copy of it
+    // can fail on exactly the full disk that produced it - which leaves the original as
+    // the only copy there is. Excluding by KEY would have dropped it; the app excludes by
+    // whether it parses.
+    const BROKEN = '{"by":"d_test1","token":"t';
+    device.putRaw('farkad:sendClaim', BROKEN);
+    device.Store.forget('farkad:sendClaim');
+    const afterDamage = device.global('Recovery').rawRecords();
+    check('but a send claim nobody can read is carried, because it may be the only copy',
+        afterDamage['farkad:sendClaim'] === BROKEN,
+        JSON.stringify(afterDamage['farkad:sendClaim'] === undefined
+            ? null : afterDamage['farkad:sendClaim']));
 }
 
 // ---------------------------------------------------------------- the ABA fence
