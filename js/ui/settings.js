@@ -82,6 +82,119 @@ function renderSettings() {
     if (typeof renderAppVersion === 'function') renderAppVersion();
     renderInstallState();
     renderLedgerParity();
+    renderCarryMigration();
+}
+
+// THE MIGRATION REVIEW, and the only screen in this app built to be READ before a button
+// is pressed.
+//
+// Switching the carry on restates accounts. planAdvanceCarry has always been able to say
+// which ones and by how much, and nothing called it - so the switch was a constant in a
+// file, and flipping it would have moved fortnights that had already been printed and
+// paid, silently, on every phone, at the next open.
+//
+// v88 wrote no closure records, which is the whole difficulty: this app cannot tell a
+// fortnight that was settled and paid from one that merely has no closure entry, because
+// before v89 nothing wrote one either way. It must not guess. So every row that would move
+// is laid out with the number as it reads TODAY beside the number it would read
+// AFTERWARDS, each row says whether a closure was actually recorded for it, and a person
+// decides.
+//
+// Nothing here writes until the confirmation is answered, and financial writing stays shut
+// until the approval is on the record - see financialWritingEnabled in js/model/ledger.js.
+function renderCarryMigration() {
+    const box = document.getElementById('carryMigrationBox');
+    if (!box) return;
+    const lead = document.getElementById('carryMigrationLead');
+    const rows = document.getElementById('carryMigrationRows');
+    const actions = document.getElementById('carryMigrationActions');
+
+    const quiet = () => { box.style.display = 'none'; };
+    if (typeof planCarryMigration !== 'function' || typeof State === 'undefined'
+        || !State.schedule) { quiet(); return; }
+    // Only where the build could actually write. With the gates shut there is nothing to
+    // approve FOR, and a screen asking somebody to sign off on a change that cannot happen
+    // is a screen that teaches them to sign without reading.
+    if (typeof ledgerWritesEnabled !== 'function' || !ledgerWritesEnabled()
+        || typeof advanceCarryEnabled !== 'function' || !advanceCarryEnabled()) {
+        quiet(); return;
+    }
+
+    const plan = planCarryMigration(State.schedule);
+    if (!plan.needed) { quiet(); return; }
+
+    box.style.display = '';
+    clear(rows);
+    clear(actions);
+
+    const approved = carryMigrationApproved(State.schedule, plan);
+    if (approved) {
+        lead.textContent = 'ההעברה אושרה. המספרים למטה הם מה שהשתנה, והם לא ישתנו שוב.';
+    } else {
+        lead.textContent = 'לפני שאפשר לרשום החזרים, תיקונים או סגירת חשבון, צריך לאשר '
+            + 'את המעבר. הרשימה למטה היא כל שורה שתזוז: מה שכתוב היום, ומה שיהיה כתוב '
+            + 'אחרי. שום דבר לא ישתנה עד שתלחץ אשר.';
+    }
+
+    plan.rows.forEach(row => {
+        const worker = State.worker(row.workerId);
+        const line = el('div', 'wday');
+        line.appendChild(el('div', 'wday-date',
+            `${formatFullDate(parseLocalDate(row.from))} - ${formatFullDate(parseLocalDate(row.to))}`));
+        const what = el('div', 'wday-what');
+        what.appendChild(el('span', null, worker ? worker.name : row.workerId));
+        what.appendChild(el('span', 'wday-note',
+            `היום ${moneyText(row.now)} ₪ · אחרי ${moneyText(row.after)} ₪`));
+        if (row.carriedOut > 0) {
+            what.appendChild(el('span', 'wday-note',
+                `${moneyText(row.carriedOut)} ₪ יעברו לחשבון הבא`));
+        }
+        // SAID OUT LOUD, per row. A period with no closure entry is not a period nobody
+        // paid - v88 recorded none either way - and the person reading this is the only
+        // one who knows which it was.
+        if (!row.closureRecorded) {
+            what.appendChild(el('span', 'wday-note wday-review',
+                'אין רישום סגירה לתקופה הזו. אם היא כבר שולמה, המספר על הנייר לא ישתנה - '
+                + 'אבל המסך יראה אחרת.'));
+        }
+        line.appendChild(what);
+        line.appendChild(el('div', 'wday-money', bidiAmount(moneyText(row.after))));
+        rows.appendChild(line);
+    });
+
+    if (approved) return;
+    actions.appendChild(button('אשר את המעבר', 'btn-secondary',
+        () => approveCarryMigration(plan), 'אישור העברת המקדמות לחשבון נמשך'));
+}
+
+async function approveCarryMigration(plan) {
+    const ok = await askConfirm({
+        title: 'לאשר את המעבר?',
+        message: `${plan.rows.length} שורות ישתנו. אחרי האישור המסכים יראו את המספרים `
+            + 'החדשים, ואפשר יהיה לרשום החזרים ותיקונים. האישור נשמר ברישום ומגיע לשאר '
+            + 'המכשירים - הם לא יתבקשו לאשר שוב.',
+        ok: 'אשר'
+    });
+    if (!ok) return;
+
+    // Re-planned against the record as it is NOW, not against the plan this screen was
+    // drawn from: another phone may have approved it, or a day may have been recorded,
+    // while the dialog was open. Approving a plan somebody is no longer looking at is
+    // approving numbers they never saw.
+    const live = planCarryMigration(State.schedule);
+    if (live.id !== plan.id) {
+        renderCarryMigration();
+        if (typeof askTell === 'function') {
+            await askTell('הרישום השתנה בזמן שהחלון היה פתוח. בדוק את הרשימה שוב ואשר.');
+        }
+        return;
+    }
+    const change = recordCarryApproval(State.schedule, live,
+        new Date().toISOString(), syncDeviceId());
+    // A refused write leaves the review exactly as it was: nothing approved, the rows
+    // still on the screen, and the button still there to press again.
+    if (!State.commit(change)) { renderCarryMigration(); return; }
+    renderCarryMigration();
 }
 
 // The sync state, inside the ענן וסנכרון group. updateSyncNotice (js/sync/sync.js) owns

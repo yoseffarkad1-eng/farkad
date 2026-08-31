@@ -688,7 +688,7 @@ function openWorkerDays(workerId) {
 // read is money off a wage they will go on deducting.
 function renderPeriodClosure(worker) {
     if (typeof planPeriodClosure !== 'function') return null;
-    if (!ledgerWritesEnabled() || !advanceCarryEnabled()) return null;
+    if (!financialWritingEnabled(State.schedule)) return null;
     if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)) return null;
 
     const plan = planPeriodClosure(State.schedule, worker.id,
@@ -808,7 +808,11 @@ function renderAdvanceRow(item) {
     //
     // Either a build deducts what it lets somebody record, or it does not offer a way to
     // record one. There is no third state worth shipping.
-    const settled = ledgerWritesEnabled() && advanceCarryEnabled()
+    // BOTH GATES AND THE RECORD'S OWN READINESS. financialWritingEnabled adds the third
+    // condition: a device whose accounts would be restated by the carry has money on the
+    // line nobody has looked at yet, and no button here may write against it until
+    // somebody has - see the migration review in js/ui/settings.js.
+    const settled = financialWritingEnabled(State.schedule)
         ? advanceSettled(State.schedule, item.id) : null;
     // THE TWO LABELS THAT NEVER SWAP.
     //
@@ -865,7 +869,7 @@ function renderAdvanceRow(item) {
     // both rows stay on the screen. Behind the same two gates as the repayment, and for
     // the same argument: a build that has no way to record a correction the other phones
     // can read must not offer one.
-    if (settled && settled.given > 0 && ledgerWritesEnabled() && advanceCarryEnabled()) {
+    if (settled && settled.given > 0 && financialWritingEnabled(State.schedule)) {
         what.appendChild(button('תיקון', 'btn-secondary',
             () => openReversalForm(item, settled, row), 'תיקון-היפוך של מקדמה שנרשמה בטעות'));
     }

@@ -235,6 +235,17 @@
                  the check is not there to ask. -->
             <p class="hint" id="ledgerParity" style="display:none"></p>
         </section>
+
+        <!-- THE CARRY MIGRATION, and the one screen in this app whose whole purpose is to
+             be read before a button is pressed. Hidden unless there is something to
+             approve; renderCarryMigration feature-detects the plan and claims nothing when
+             it cannot be computed. See js/ui/settings.js. -->
+        <section id="carryMigrationBox" style="display:none">
+            <h3>העברת מקדמות לחשבון נמשך</h3>
+            <p class="hint" id="carryMigrationLead"></p>
+            <div id="carryMigrationRows"></div>
+            <div id="carryMigrationActions"></div>
+        </section>
     </div>
 </div>
 

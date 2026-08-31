@@ -884,11 +884,18 @@ function journalEntryProblems(path, value) {
     // entry may be created and nothing else, so a null here - a deletion in flight - is
     // refused rather than applied. The ledger's whole value is that nothing leaves it.
     if (parts[0] === 'ledger') {
-        if (parts.length !== 3 || parts[1] !== 'advances') {
-            return ['a ledger path nobody wrote'];
-        }
+        if (parts.length !== 3) return ['a ledger path nobody wrote'];
         if (!isSafeSegment(parts[2])) return ['a ledger path with an unusable id'];
-        return ledgerEntryProblems(parts[2], value);
+        if (parts[1] === 'advances') return ledgerEntryProblems(parts[2], value);
+        // ledger.migrations.<plan id> - somebody's approval of the carry migration.
+        //
+        // Not an entry, and not money: it is a person saying they read the rows and
+        // accepted what would move. It travels because the other two phones must not be
+        // asked to approve the same numbers again - and it is append-only for the same
+        // reason an entry is, because an approval that could be taken back is a decision
+        // nobody made. See planCarryMigration in js/model/ledger.js.
+        if (parts[1] === 'migrations') return migrationApprovalProblems(parts[2], value);
+        return ['a ledger path nobody wrote'];
     }
 
     // advances.<id> - or a deletion of one, which travels as null.
@@ -1370,6 +1377,20 @@ function reinstateReferenced(schedule, remembered) {
 // What is wrong with a ledger entry, said in sentences. Strict on purpose: this is the
 // record that outlives every correction, and an entry nobody can read is an entry that
 // makes the fold below it wrong for ever.
+// An approval of the carry migration, checked at the door like everything else.
+function migrationApprovalProblems(id, value) {
+    if (value === null) return ['an approval cannot be deleted'];
+    if (!isPlainObject(value)) return ['an approval that is not a record'];
+    if (String(value.id || '') !== String(id)) {
+        return ['an approval whose id does not match its path'];
+    }
+    if (String(value.kind) !== 'carry') return ['an approval of a kind nobody wrote'];
+    if (!Number.isInteger(value.rows) || value.rows < 0) {
+        return ['an approval that does not say how much it approved'];
+    }
+    return [];
+}
+
 function ledgerEntryProblems(id, value) {
     if (value === null) return ['a ledger entry cannot be deleted'];
     if (!isPlainObject(value)) return ['a ledger entry that is not a record'];

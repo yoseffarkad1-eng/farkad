@@ -723,6 +723,102 @@ function recordAdvanceCancelled(schedule, advanceId, note, at, by) {
     });
 }
 
+// ---------------------------------------------- the carry migration, and who approves it
+//
+// WHY THERE IS A SCREEN FOR THIS AT ALL.
+//
+// planAdvanceCarry has always been able to say exactly which accounts and which men would
+// move if the carry were switched on. Nothing called it. So the switch was a constant in a
+// file, and flipping it would have restated fortnights that had already been printed and
+// paid - silently, on every phone, at the next open.
+//
+// v88 wrote no closure records. That is the whole difficulty: this app cannot tell a
+// fortnight that was settled and paid from one that merely has no closure entry, because
+// before v89 nothing wrote one either way. It must not guess. So it does the only honest
+// thing - it lays out every row that would move, with the number as it reads today beside
+// the number it would read afterwards, and asks.
+//
+// The approval is a record, not a preference. It lives in the schedule, so it reaches the
+// other two phones; its id is derived from the PLAN, so two phones that compute the same
+// migration write the same field path and the union keeps one; and financial writing stays
+// shut until it is there and matches.
+
+// A stable name for one migration, derived from the rows it would move and from nothing
+// else. Two phones holding the same record compute the same id; a record that changes
+// underneath produces a different one, and the old approval no longer matches - which is
+// the right answer, because it approved different numbers.
+function carryMigrationId(rows) {
+    const parts = (rows || []).map(row =>
+        `${row.workerId}#${row.from}#${row.to}#${row.now}#${row.deducted}#${row.carriedOut}`);
+    return 'cm_' + digestOf(parts.sort().join('|'));
+}
+
+// WHAT SWITCHING THE CARRY ON WOULD DO, per row, with both numbers side by side.
+//
+// `now` is what the sheet prints today; `after` is what it would print. `closureRecorded`
+// says whether this period carries a closure entry - and it is reported rather than
+// assumed, because a period with no entry is not a period that was never paid. That is
+// exactly the thing this app cannot know and the person can.
+function planCarryMigration(schedule) {
+    const rows = (typeof planAdvanceCarry === 'function' ? planAdvanceCarry(schedule) : [])
+        .map(row => Object.assign({}, row, {
+            after: row.deducted,
+            // REPORTED, NEVER ASSUMED. A period with no closure entry is not a period
+            // that was never paid - v88 wrote no closure records at all, so absence says
+            // nothing. This is exactly the fact the app cannot know and the person can.
+            closureRecorded: Object.keys(closedPeriods(schedule, row.workerId) || {})
+                .indexOf(String(row.from)) !== -1
+        }));
+    return { id: carryMigrationId(rows), rows, needed: rows.length > 0 };
+}
+
+function migrationPath(id) {
+    return `ledger.migrations.${id}`;
+}
+
+// The approval itself. One field path, named for the plan it approves.
+function recordCarryApproval(schedule, plan, at, by) {
+    const record = {
+        id: String(plan.id),
+        kind: 'carry',
+        rows: plan.rows.length,
+        at: String(at || ''),
+        by: String(by || '')
+    };
+    schedule.ledger = schedule.ledger || { advances: {} };
+    schedule.ledger.migrations = schedule.ledger.migrations || {};
+    // NEVER OVERWRITTEN. Two phones approving the same plan write the same path with the
+    // same numbers in it; the second is the first, not a second approval. A phone that
+    // approved it first keeps its own `at` and `by`, because that is who actually decided.
+    if (schedule.ledger.migrations[record.id]) {
+        return { path: migrationPath(record.id),
+            value: schedule.ledger.migrations[record.id], already: true };
+    }
+    schedule.ledger.migrations[record.id] = record;
+    return { path: migrationPath(record.id), value: record };
+}
+
+function carryMigrationApproved(schedule, plan) {
+    const held = (schedule && schedule.ledger && schedule.ledger.migrations) || {};
+    return Boolean(held[String(plan.id)]);
+}
+
+// Nothing to restate, or somebody has approved restating it. Either is settled.
+function carryMigrationSettled(schedule) {
+    const plan = planCarryMigration(schedule);
+    if (!plan.needed) return true;
+    return carryMigrationApproved(schedule, plan);
+}
+
+// THE GATE EVERY FINANCIAL CONTROL ASKS, and the reason it is not just the two flags.
+//
+// The flags say what this BUILD does. This says whether this RECORD is ready for it: a
+// device whose accounts would be restated by the carry has money on the line that nobody
+// has looked at, and no button here may write against it until somebody has.
+function financialWritingEnabled(schedule) {
+    return ledgerWritesEnabled() && advanceCarryEnabled() && carryMigrationSettled(schedule);
+}
+
 // ---------------------------------------------------------------- migration
 //
 // Every advance already on the device becomes a 'given' entry, once. Non-destructive in

@@ -345,10 +345,30 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
             .filter(id => (shipped.device.State.schedule.ledger.advances[id] || {})
                 .kind === 'repaid').length === 0);
 
-    // AND WITH IT OPEN, which is the build somebody eventually ships.
+    // AND WITH IT OPEN - which is NOT yet enough, and that is the L3 gate.
+    //
+    // A device whose accounts the carry would restate has money on the line nobody has
+    // looked at. Both flags open and the migration unapproved, there is still no control:
+    // financialWritingEnabled refuses, and the review screen in the ⋯ panel is what a
+    // person answers first.
+    const pending = await screenFor({ deviceId: 'd_ui_pending',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    given('this record has accounts the carry would restate',
+        pending.device.call('planCarryMigration', pending.device.State.schedule).needed === true,
+        JSON.stringify(pending.device.call('planCarryMigration',
+            pending.device.State.schedule).rows.length));
+    check('both flags open and the migration unapproved, there is still no control',
+        pending.reportsView.textContent.indexOf('החזר') === -1,
+        pending.reportsView.textContent.slice(0, 200));
+
+    // APPROVED, and only now.
     const open = await screenFor({ deviceId: 'd_ui_on',
         flags: { carryAdvances: true, ledgerWrites: true } });
-    check('the control is there, on the advance it settles',
+    const approvalPlan = open.device.call('planCarryMigration', open.device.State.schedule);
+    open.device.State.commit(open.device.call('recordCarryApproval',
+        open.device.State.schedule, approvalPlan, '2026-08-26T09:00:00.000Z', 'd_ui_on'));
+    open.run('openWorkerDays("w_01")');
+    check('once the migration is approved the control is there, on the advance it settles',
         open.reportsView.textContent.indexOf('החזר') !== -1,
         open.reportsView.textContent.slice(0, 300));
 
@@ -440,6 +460,17 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
             createElement: tag => makeNode(tag),
             createElementNS: (ns, tag) => makeNode(tag)
         };
+        // The carry migration approved where the build could write at all, because this
+        // suite is about the two GATES and not about the review screen - see the L3
+        // block, which measures the refusal before approval on its own.
+        if (flags.ledgerWrites && flags.carryAdvances) {
+            const plan = device.call('planCarryMigration', device.State.schedule);
+            if (plan.needed) {
+                device.State.commit(device.call('recordCarryApproval', device.State.schedule,
+                    plan, '2026-08-18T08:00:00.000Z', deviceId));
+            }
+        }
+
         const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
         run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
         run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
@@ -1020,9 +1051,12 @@ function omer(flags) {
     check('nothing that prints, previews or exports closes anything',
         share.indexOf('closePeriodChanges') === -1
         && share.indexOf('recordPeriodClosed') === -1);
-    check('and the button is behind both gates',
-        /renderPeriodClosure[\s\S]{0,400}ledgerWritesEnabled\(\)[\s\S]{0,80}advanceCarryEnabled\(\)/
-            .test(reports));
+    // THREE conditions now, not two: the two flags and the record's own readiness. A
+    // device whose accounts the carry would restate has money nobody has looked at, and
+    // financialWritingEnabled is what refuses to write against it - see the migration
+    // review in js/ui/settings.js.
+    check('and the button is behind the writing gate, which is all three',
+        /renderPeriodClosure[\s\S]{0,400}financialWritingEnabled\(/.test(reports));
 
     // An account that does not add up cannot be sealed. Freezing a wrong number is
     // exactly the thing a closure makes permanent.
@@ -1381,6 +1415,175 @@ function omer(flags) {
     check('and so does the statement',
         shut.statement.indexOf('5,000') !== -1 || shut.statement.indexOf('5000') !== -1,
         JSON.stringify(shut.statement.split('\n').filter(l => l.indexOf('5') !== -1).slice(0, 3)));
+}
+
+
+// ------------------------------------------------- the migration nobody had to approve
+{
+    suite('L3: switching the carry on is a decision, laid out before it is taken');
+
+    // planAdvanceCarry has always been able to say which accounts and which men would
+    // move. Nothing called it. So the switch was a constant in a file, and flipping it
+    // would have restated fortnights that had already been printed and paid - silently,
+    // on every phone, at the next open.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const plan = device.call('planCarryMigration', device.State.schedule);
+
+    check('the plan names every row that would move', plan.needed === true
+        && plan.rows.length > 0, JSON.stringify(plan.rows.length));
+    check('and each row carries both numbers, not just the new one',
+        plan.rows.every(row => Number.isFinite(row.now) && Number.isFinite(row.after)),
+        JSON.stringify(plan.rows.map(r => [r.now, r.after])));
+    check('the numbers actually differ, or there would be nothing to approve',
+        plan.rows.some(row => row.now !== row.after),
+        JSON.stringify(plan.rows.map(r => [r.now, r.after])));
+
+    // WHAT THIS APP CANNOT KNOW, reported instead of guessed. v88 wrote no closure
+    // records, so a period with no closure entry is not a period that was never paid -
+    // absence says nothing at all, and only a person knows which it was.
+    check('every row says whether a closure was actually recorded for it',
+        plan.rows.every(row => typeof row.closureRecorded === 'boolean'),
+        JSON.stringify(plan.rows.map(r => r.closureRecorded)));
+    check('and on this record none of them was, which is the honest answer',
+        plan.rows.every(row => row.closureRecorded === false),
+        JSON.stringify(plan.rows.map(r => r.closureRecorded)));
+
+    // NOTHING IS WRITTEN BY PLANNING IT.
+    check('planning writes nothing',
+        Object.keys((device.State.schedule.ledger || {}).migrations || {}).length === 0);
+
+    // AND NOTHING MAY BE WRITTEN UNTIL IT IS ANSWERED.
+    check('financial writing is shut while the migration is unapproved',
+        device.call('financialWritingEnabled', device.State.schedule) === false);
+    check('even though both flags are open',
+        device.call('ledgerWritesEnabled') === true
+        && device.call('advanceCarryEnabled') === true);
+
+    device.State.commit(device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer'));
+    check('once approved, financial writing opens',
+        device.call('financialWritingEnabled', device.State.schedule) === true);
+    check('and the approval is on the record, where the other phones will read it',
+        Boolean(device.State.schedule.ledger.migrations[plan.id]),
+        JSON.stringify(Object.keys(device.State.schedule.ledger.migrations)));
+}
+
+{
+    suite('L3: cancel changes nothing, and a refused save keeps the draft');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const before = JSON.stringify(device.State.schedule);
+    const plan = device.call('planCarryMigration', device.State.schedule);
+
+    // CANCEL. The screen computes the plan every time it draws; not approving is simply
+    // not committing, and the record must be untouched byte for byte.
+    check('planning and walking away leaves the record exactly as it was',
+        JSON.stringify(device.State.schedule) === before);
+    check('and the migration is still waiting',
+        device.call('carryMigrationSettled', device.State.schedule) === false);
+
+    // A REFUSED SAVE. The approval is a write like any other and the disk can refuse it.
+    // What must not happen is a device that believes it approved something it did not.
+    device.setQuota(() => true);
+    const change = device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer');
+    const ok = device.State.commit(change);
+    check('the commit reports the refusal', ok === false, String(ok));
+
+    const reopened = makeDevice({ deviceId: 'd_draft', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    reopened.State.load();
+    check('nothing was approved on the disk',
+        Object.keys((reopened.State.schedule.ledger || {}).migrations || {}).length === 0,
+        JSON.stringify((reopened.State.schedule.ledger || {}).migrations));
+    check('so financial writing is still shut',
+        reopened.call('financialWritingEnabled', reopened.State.schedule) === false);
+    // AND THE REVIEW IS STILL THERE TO ANSWER. A failed save that lost the rows would
+    // leave a person with a gate they cannot open and no screen explaining why.
+    const again = reopened.call('planCarryMigration', reopened.State.schedule);
+    check('and the review still has the same rows to show',
+        again.needed === true && again.id === plan.id,
+        JSON.stringify({ needed: again.needed, same: again.id === plan.id }));
+}
+
+{
+    suite('L3: two phones cannot approve the same migration twice');
+
+    // One schedule, copied before either approves - which is what two phones are.
+    const a = omer({ carryAdvances: true, ledgerWrites: true });
+    const asPhoneB = JSON.parse(JSON.stringify(a.State.schedule));
+
+    const planA = a.call('planCarryMigration', a.State.schedule);
+    const planB = a.call('planCarryMigration', asPhoneB);
+    check('both phones compute the same plan, because the record is the same',
+        planA.id === planB.id, `${planA.id} / ${planB.id}`);
+
+    const fromA = a.call('recordCarryApproval', a.State.schedule, planA,
+        '2026-08-26T09:00:00.000Z', 'd_a');
+    const fromB = a.call('recordCarryApproval', asPhoneB, planB,
+        '2026-08-26T09:00:05.000Z', 'd_b');
+    check('and they write to the same field path',
+        fromA.path === fromB.path, `${fromA.path} | ${fromB.path}`);
+
+    a.State.commitMany([fromA]);
+    // The union, which is what Firestore does with two writes to one field path.
+    a.State.schedule.ledger.migrations[fromB.value.id] = fromB.value;
+    check('the record holds one approval, not two',
+        Object.keys(a.State.schedule.ledger.migrations).length === 1,
+        JSON.stringify(Object.keys(a.State.schedule.ledger.migrations)));
+    check('and the other phone is not asked to approve it again',
+        a.call('carryMigrationSettled', a.State.schedule) === true);
+
+    // APPROVING AGAIN ON ONE PHONE IS NOT A SECOND APPROVAL EITHER. The first decision
+    // keeps its own `at` and `by`, because that is who actually decided.
+    const third = a.call('recordCarryApproval', a.State.schedule, planA,
+        '2026-08-27T09:00:00.000Z', 'd_a');
+    check('a second press returns the approval that is already there',
+        third.already === true && third.value.by === fromB.value.by,
+        JSON.stringify({ already: third.already, by: third.value.by }));
+}
+
+{
+    suite('L3: a record with nothing to restate needs no approval at all');
+
+    // A device that has never had an advance the carry would move must not be shown a
+    // screen asking it to approve nothing - and must not be held shut by one.
+    const device = makeDevice({ deviceId: 'd_nothing',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    device.setToday('2026-08-26');
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    check('there is nothing to approve', plan.needed === false,
+        JSON.stringify(plan.rows));
+    check('so the migration is settled',
+        device.call('carryMigrationSettled', device.State.schedule) === true);
+    check('and financial writing is open on the flags alone',
+        device.call('financialWritingEnabled', device.State.schedule) === true);
+}
+
+{
+    suite('L3: the screen exists, and it is the only thing that approves');
+
+    const settings = readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8');
+    check('the review screen is drawn from the plan',
+        settings.indexOf('planCarryMigration(') !== -1
+        && settings.indexOf('renderCarryMigration') !== -1);
+    check('and it asks before it writes',
+        /approveCarryMigration[\s\S]{0,600}askConfirm/.test(settings));
+    check('it re-plans against the record as it is, not the plan it was drawn from',
+        /askConfirm[\s\S]{0,900}planCarryMigration\(State\.schedule\)[\s\S]{0,400}live\.id !== plan\.id/
+            .test(settings));
+    check('recordCarryApproval is called from exactly one place in the app',
+        ((readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8')
+            + readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8')
+            + readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8'))
+            .split('recordCarryApproval(').length - 1) === 1);
+    check('and the row that has no recorded closure says so on the screen',
+        settings.indexOf('אין רישום סגירה לתקופה הזו') !== -1);
 }
 
 report();
