@@ -10,9 +10,12 @@
 // without a home indicator, in portrait and landscape, and at twice the text size.
 //
 // A word on what this is not. Playwright drives a desktop Chromium with a phone-sized
-// viewport. That is the right tool for layout arithmetic and it is NOT an iPhone: Safari's
-// dynamic toolbars, its rubber-band scrolling and its own idea of a safe area are not
-// emulated here, and nothing in this file should be read as coverage of a real device.
+// viewport. That is the right tool for layout arithmetic and it is NOT an iPhone: WebKit's
+// dynamic toolbars, its rubber-band scrolling, its own idea of a safe area and iOS Dynamic
+// Type are not emulated here, and nothing in this file should be read as coverage of a
+// real device. The 200% pass below forces every computed font-size to twice its value,
+// which genuinely changes what is rendered and is genuinely not Dynamic Type. See
+// docs/iphone-acceptance.md, which lists what each suite in this repository runs on.
 
 import { serve } from './serve.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
@@ -422,20 +425,73 @@ for (const width of WIDTHS) {
 }
 
 // ---------------------------------------------------------------- text at 200%
+//
+// WHAT THIS DOES, AND WHAT IT IS NOT.
+//
+// It used to set document.documentElement.style.fontSize = '32px' and call that 200%.
+// Measured before and after that line, on this app:
+//
+//   day header 17px -> 17px      tab 14px -> 14px
+//   button     14px -> 14px      body 17px -> 17px
+//
+// Nothing moved. This stylesheet is written in fixed pixels - deliberately, and there are
+// seven `rem` in the whole file - so the root font size is a number almost nothing reads.
+// The suite was therefore drawing the app at its ordinary size and reporting it as
+// doubled text: not a weak test, a test of nothing, printing four green lines a person
+// would have relied on.
+//
+// So the size is forced where the app actually reads it. Every element's COMPUTED
+// font-size is read and set back at twice the value, which changes what is rendered - and
+// the suite asserts that it changed, because a scaling mechanism that silently stops
+// working is how the last one survived.
+//
+// It is still not iOS Dynamic Type. Chromium cannot model that: AX2 changes text metrics
+// through the system, interacts with -apple-system font faces and with Safari's own
+// minimum sizes, and reflows some controls the way no stylesheet here can be made to.
+// What this proves is that the layout survives text at twice the size. Dynamic Type at
+// AX2 on a real phone stays a physical check, and docs/iphone-acceptance.md says so.
+const doubleEveryFontSize = page => page.evaluate(() => {
+    const sizes = new Map();
+    document.querySelectorAll('*').forEach(node => {
+        const px = parseFloat(getComputedStyle(node).fontSize);
+        if (Number.isFinite(px)) sizes.set(node, px);
+    });
+    sizes.forEach((px, node) => { node.style.fontSize = (px * 2) + 'px'; });
+    return sizes.size;
+});
+
+const sampleSizes = page => page.evaluate(() => {
+    const at = selector => {
+        const node = document.querySelector(selector);
+        return node ? parseFloat(getComputedStyle(node).fontSize) : null;
+    };
+    return { header: at('.day-header'), tab: at('.tab'), body: at('body'),
+        button: at('.day-actions button') };
+});
 
 for (const width of WIDTHS) {
     const label = `${width}px at 200% text`;
     suite(label);
 
     const page = await open({ width, height: HEIGHTS[width] });
-    await page.evaluate(() => { document.documentElement.style.fontSize = '32px'; });
+    const before = await sampleSizes(page);
+    const touched = await doubleEveryFontSize(page);
     await page.waitForTimeout(300);
+    const after = await sampleSizes(page);
+
+    // THE MECHANISM ITSELF, asserted first. Everything below is worthless if the text did
+    // not actually grow, and that is exactly the state this suite was in.
+    const grew = Object.keys(before).filter(key =>
+        before[key] !== null && after[key] !== null && after[key] >= before[key] * 2 - 0.5);
+    check(`${label}: the text really is twice the size, measured`,
+        touched > 0 && grew.length === Object.keys(before).filter(k => before[k] !== null).length,
+        JSON.stringify({ touched, before, after }));
 
     const views = await page.evaluate(async () => {
         const out = {};
         for (const view of ['day', 'week', 'roster', 'reports']) {
             showView(view);
-            await new Promise(done => setTimeout(done, 200));
+            await new Promise(done => setTimeout(done, 250));
             out[view] = {
                 doc: document.documentElement.scrollWidth,
                 inner: document.documentElement.clientWidth
@@ -452,6 +508,66 @@ for (const width of WIDTHS) {
     const date = await page.evaluate(() =>
         document.querySelector('.day-header').textContent.includes('12/08/2026'));
     check(`${label}: the date is still on the header`, date === true);
+
+    // NOTHING ESSENTIAL DISAPPEARS. Text at twice the size that pushes a control out of
+    // the layout, or clips a number to nothing, is the failure this is for - a screen
+    // that fits across while having lost the button is not a screen that survived.
+    const alive = await page.evaluate(() => {
+        const shown = selector => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const box = node.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility !== 'hidden';
+        };
+        return {
+            tabs: [...document.querySelectorAll('.tab')].filter(node => {
+                const box = node.getBoundingClientRect();
+                return box.width > 0 && box.height > 0;
+            }).length,
+            dock: shown('.day-actions'),
+            whatsapp: shown('.day-actions .btn-success'),
+            settings: shown('#settingsBtn') !== false,
+            rows: document.querySelectorAll('.worker-row, .wrow').length
+        };
+    });
+    check(`${label}: every tab is still on the bar`, alive.tabs >= 4, JSON.stringify(alive));
+    check(`${label}: the day's dock and its send button are still there`,
+        alive.dock === true && alive.whatsapp === true, JSON.stringify(alive));
+    check(`${label}: and the crew is still listed`, alive.rows > 0, JSON.stringify(alive));
+
+    // The bottom bars still clear each other, which is what decides whether the last
+    // worker in the list can be reached at all.
+    const bars = await page.evaluate(() => {
+        const dock = document.querySelector('.day-actions');
+        const nav = document.querySelector('.tabbar');
+        if (!dock || !nav) return null;
+        return {
+            dock: Math.round(dock.getBoundingClientRect().bottom),
+            nav: Math.round(nav.getBoundingClientRect().top),
+            viewport: Math.round(window.innerHeight)
+        };
+    });
+    check(`${label}: the dock still sits above the nav bar rather than under it`,
+        bars === null || bars.dock <= bars.nav + 2, JSON.stringify(bars));
+
+    // AND A SHEET, which is the control most likely to be pushed off a short screen.
+    const sheet = await page.evaluate(async () => {
+        openAssignSheet('w_01');
+        await new Promise(done => setTimeout(done, 350));
+        const content = document.querySelector('#assignSheet .sheet-content');
+        const foot = document.querySelector('#assignSheet .sheet-foot');
+        if (!content || !foot) return null;
+        const box = content.getBoundingClientRect();
+        const footBox = foot.getBoundingClientRect();
+        return {
+            shown: box.width > 0 && box.height > 0,
+            footInside: footBox.bottom <= window.innerHeight + 2,
+            height: Math.round(box.height),
+            viewport: Math.round(window.innerHeight)
+        };
+    });
+    check(`${label}: the assign sheet opens and its buttons are on the screen`,
+        sheet !== null && sheet.shown && sheet.footInside, JSON.stringify(sheet));
 
     await page.context().close();
 }

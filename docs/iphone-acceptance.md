@@ -1,10 +1,23 @@
 # בדיקת קבלה במכשיר אמיתי — רשימה ליוסף
 
 > **NOT YET PHYSICALLY VERIFIED.** Nothing in this list has been performed on a real
-> iPhone for the current build. Every automated suite in this repository runs headless
-> Chromium against a local server; that is layout arithmetic and behaviour, and it is
-> NOT an iPhone. No result anywhere may be reported as physical-device coverage until a
-> person works through the table below on the actual phone.
+> iPhone for the current build.
+>
+> **What the automated suites actually run on, exactly:**
+>
+> | suite | runs on |
+> |---|---|
+> | smoke, print, mobile, update, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
+> | every other suite in `npm test` | **Node**, with V8 contexts and a fake localStorage - no browser at all |
+> | rules, cas-emulator, rollout, bootstrap | **Node** against the local **Firestore emulator** |
+>
+> None of them is Safari and none of them is a phone. Where a suite sets an iPhone
+> user-agent string it is still Chromium: that proves the app's own branch runs, not that
+> WebKit does anything. Where the mobile suite doubles every computed font-size, that is a
+> real change to what is rendered and it is not iOS Dynamic Type - AX2 goes through the
+> system, touches the `-apple-system` faces and Safari's own minimum sizes, and reflows
+> controls in ways no stylesheet here can be made to. No result from any of the above may
+> be reported as physical-device coverage. This table is what physical coverage is.
 
 מה זה: אף בדיקה אוטומטית לא יכולה להעיד על אייפון אמיתי. כל מה שנבדק עד עכשיו רץ
 בדפדפן על שרת, לא על טלפון. הרשימה הזאת היא מה שצריך לראות **בעיניים**, על הטלפון,
@@ -44,10 +57,10 @@
 
 | # | מה לעשות | מה צריך לקרות |
 |---|---|---|
-| 9 | מצב טיסה, ואז פתח את האפליקציה מהאייקון | **נפתחת**. לא מסך לבן, לא "אין חיבור" |
+| 9 | מצב טיסה, ואז פתח את האפליקציה מהאייקון | **נפתחת**, והשורה למטה אומרת "אין חיבור - השינויים יישלחו כשהחיבור יחזור". לא מסך לבן, ולא עמוד שגיאה של הדפדפן |
 | 10 | רשום יום עבודה במצב טיסה | נשמר, ורואים שיש משהו ממתין לשליחה |
 | 11 | סגור לגמרי (החלק למעלה) ופתח שוב, עדיין בטיסה | היום שרשמת עדיין שם |
-| 12 | כבה מצב טיסה | תוך כמה שניות עובר ל"מסונכרן" |
+| 12 | כבה מצב טיסה | עובר ל"מחובר. יש רישומים שעדיין נשלחים", ורק כשהכל נשלח ל"מסונכרן" |
 | 13 | אזור עם קליטה חלשה (לא מנותק — חלש) | לא נתקע על "מתחבר" לנצח |
 
 ## ד. המסך — לפי הסדר הזה
@@ -58,7 +71,7 @@
 | 15 | פתח את גיליון השיבוץ, בחר אתר | הבא זז לעובד הבא לבד, פעם אחת |
 | 16 | פתח מקלדת בתוך הגיליון | הכפתורים למטה לא מתכסים |
 | 17 | סובב לרוחב | האזהרות למעלה עדיין נראות במלואן |
-| 18 | הגדרות iOS → תצוגה → גודל טקסט → **הכי גדול** | שום טקסט לא נחתך, שום כפתור לא נעלם |
+| 18 | הגדרות iOS → תצוגה → גודל טקסט → **הכי גדול** (AX2) | שום טקסט לא נחתך, שום כפתור לא נעלם, והגיליון נפתח עם הכפתורים שלו על המסך. **זה הבדיקה היחידה של Dynamic Type — שום סוויטה לא מכסה אותה** |
 | 19 | מצב כהה ומצב בהיר | קריא בשניהם |
 | 20 | מצב סידור מחדש: הזז עובד מהסוף להתחלה | זז, ונשמר |
 | 20א | מסך שבוע: החלק את הטבלה הצידה | הימים זזים, **עמודת השמות נשארת במקום**, והדף עצמו לא זז |
