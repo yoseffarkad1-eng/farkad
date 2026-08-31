@@ -475,6 +475,73 @@ async function editProtocolReplace(db, path, data) {
 }
 
 {
+    suite('a receipt is never creatable on its own');
+
+    // WHAT THIS SUITE EXISTS FOR, reproduced before it was closed:
+    //
+    //   schedules/current/receipts/op_never_applied   { revision: 999 }
+    //
+    // created by anybody on the list, with no schedule write anywhere near it, and
+    // accepted - the rule asked only that the revision be an integer of one or more.
+    //
+    // The client treats an existing receipt as proof that its operation landed. That is
+    // the whole point of a receipt and it is what makes a retry safe. So a receipt for an
+    // operation nothing applied is a lie this client is built to believe: it finds it,
+    // answers success, acknowledges, and prunes the queue. An evening off somebody's
+    // phone on the strength of a record that nothing wrote.
+    const db = as(ALLOWED);
+    const P = 'schedules/orphan';
+    const receipt = opId => doc(db, `${P}/receipts/${opId}`);
+
+    await denied('a receipt for a document that does not exist is refused',
+        setDoc(receipt('op_never_applied'), { revision: 999, at: 'x', by: 'd_a' }));
+
+    // A real document, so the rest of the refusals are about the receipt and not about
+    // the document being missing.
+    await passes('a first write lands with its receipt',
+        runTransaction(db, async transaction => {
+            transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_1' }));
+            transaction.set(receipt('op_1'), { revision: 1, at: 'x', by: 'd_a' });
+        }));
+
+    await denied('a receipt beside a document that is not moving is refused',
+        setDoc(receipt('op_never_applied'), { revision: 999, at: 'x', by: 'd_a' }));
+    await denied('and one claiming the revision the document already holds is refused too',
+        setDoc(receipt('op_alone'), { revision: 1, at: 'x', by: 'd_a' }));
+
+    // NAMING SOMEBODY ELSE'S WRITE. The schedule moves, and the receipt created beside it
+    // carries a different operation id - so a retry of op_wrong would find a receipt and
+    // stop, for a write that applied op_right.
+    await denied('a receipt whose operation id is not the one the document applied is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 2, lastOpId: 'op_right',
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt('op_wrong'), { revision: 2, at: 'x', by: 'd_a' });
+        }));
+
+    await denied('a receipt whose revision is not the one the document reached is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 2, lastOpId: 'op_two',
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt('op_two'), { revision: 7, at: 'x', by: 'd_a' });
+        }));
+
+    await passes('the pair that agrees with itself lands',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 2, lastOpId: 'op_two',
+                'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt('op_two'), { revision: 2, at: 'x', by: 'd_a' });
+        }));
+}
+
+{
     suite('receipts are immutable, which is what makes a retry safe');
 
     const db = as(ALLOWED);

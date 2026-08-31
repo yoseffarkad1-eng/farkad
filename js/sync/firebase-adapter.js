@@ -68,12 +68,37 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
     // One write, one receipt, one transaction. `apply` does the schedule half.
     function withReceipt(payload, apply) {
         return runTransaction(db, transaction =>
-            transaction.get(receiptRef(payload.lastOpId)).then(receipt => {
-                // Already applied. Answering success is not optimism: the receipt is
-                // immutable and was written in the same transaction as the revision it
-                // names, so its existence IS the proof that this operation landed.
-                if (receipt.exists()) return;
-                return transaction.get(scheduleRef).then(snapshot => {
+            transaction.get(receiptRef(payload.lastOpId)).then(receipt =>
+                transaction.get(scheduleRef).then(snapshot => {
+                // ALREADY APPLIED - CHECKED AGAINST THE DOCUMENT, not taken on trust.
+                //
+                // The receipt's existence was the whole proof, and the rules used to let
+                // anybody on the list create one alone: a receipt naming revision 999
+                // with no schedule write anywhere near it. This client is built to
+                // believe a receipt - that is what makes a retry safe - so it would have
+                // found that one, answered success, acknowledged, and pruned the queue.
+                // An evening off the phone on the strength of a record nothing wrote.
+                //
+                // The rules refuse to create such a receipt now (receiptMatchesSchedule),
+                // and this is the same question asked from the client's side, because a
+                // receipt already on the disk from before those rules were published is
+                // not covered by them. A receipt is proof only if the document it names
+                // has actually reached that revision.
+                if (receipt.exists()) {
+                    const claimed = receipt.data().revision;
+                    const held = snapshot.exists() ? snapshot.data().revision : null;
+                    if (!snapshot.exists() || !Number.isInteger(held)
+                        || !Number.isInteger(claimed) || held < claimed) {
+                        const error = new Error('a receipt claims a revision the schedule '
+                            + 'never reached');
+                        error.code = 'receipt-mismatch';
+                        error.claimed = Number.isInteger(claimed) ? claimed : null;
+                        error.revision = Number.isInteger(held) ? held : null;
+                        throw error;
+                    }
+                    return;
+                }
+                return Promise.resolve().then(() => {
                     if (!snapshot.exists()) {
                         const error = new Error('No document to update');
                         error.code = 'not-found';
@@ -110,7 +135,7 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                         by: payload.updatedBy || null
                     });
                 });
-            }));
+            })));
     }
 
     return {
@@ -140,9 +165,25 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
         // touched merges. See bootstrapCutover in js/sync/sync.js.
         bootstrap(payload) {
             return runTransaction(db, transaction =>
-                transaction.get(receiptRef(payload.lastOpId)).then(receipt => {
-                    if (receipt.exists()) return;
-                    return transaction.get(scheduleRef).then(snapshot => {
+                transaction.get(receiptRef(payload.lastOpId)).then(receipt =>
+                    transaction.get(scheduleRef).then(snapshot => {
+                        // The same question as withReceipt asks, and it matters more here:
+                        // a device that skipped its bootstrap on the strength of a receipt
+                        // nothing wrote would go straight on to send business data against
+                        // a document that still has no revision - which is the defect the
+                        // bootstrap exists to prevent, reached through the receipt.
+                        if (receipt.exists()) {
+                            const claimed = receipt.data().revision;
+                            const held = snapshot.exists() ? snapshot.data().revision : null;
+                            if (!snapshot.exists() || !Number.isInteger(held)
+                                || !Number.isInteger(claimed) || held < claimed) {
+                                const error = new Error('a receipt claims a revision the '
+                                    + 'schedule never reached');
+                                error.code = 'receipt-mismatch';
+                                throw error;
+                            }
+                            return JSON.parse(JSON.stringify(snapshot.data()));
+                        }
                         if (!snapshot.exists()) {
                             const error = new Error('No document to bootstrap');
                             error.code = 'not-found';
@@ -185,8 +226,7 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                                 updatedAt: payload.updatedAt,
                                 updatedBy: payload.updatedBy || null
                             });
-                    });
-                }));
+                    })));
         },
         // The authoritative document, read outside any transaction. What the client calls
         // straight after a bootstrap: the write it is about to replay has to be judged
