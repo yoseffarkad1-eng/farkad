@@ -650,4 +650,48 @@ async function staged(options = {}) {
         Object.keys(device.dump()).filter(key => key.indexOf(':damaged') !== -1).join(','));
 }
 
+// ------------------------------------------- the money rule does not stop at the gate
+{
+    suite('behind the flag, a vehicle is priced by the same rule as a man');
+
+    // E6 moved every surface that prices a DAY off Math.round and onto the agora, because
+    // showing 313 for 312.5 is a different number from the one the record holds. The two
+    // vehicle cells were not moved with them: they sit inside vehiclesEnabled() and so
+    // could not be measured by a suite running with the feature off.
+    //
+    // A hole behind a flag is still a hole. Whoever opens this gate opens it onto an
+    // export whose vehicle column disagrees with every other column in the same file,
+    // and they will be looking for a vehicle bug rather than a rounding one. Nothing
+    // about a van makes its price more whole than a man's.
+    const device = loaded({ flags: { vehicles: true }, deviceId: 'd_half' });
+    device.State.schedule.vehicles = [
+        { id: 'v_h', name: 'טנדר', ownerId: 'w_01', active: true,
+            rates: [{ from: '2026-06-01', amount: 312.5 }] }
+    ];
+    device.State.save({ silent: true });
+
+    const rows = device.call('payrollReport', device.State.schedule, '2026-08-01', '2026-08-31');
+    const david = rows.find(row => row.workerId === 'w_01');
+    given('the van went out on the two worked days, at 312.50 each',
+        david.vehicleDays === 2 && david.vehicleAmount === 625,
+        JSON.stringify([david.vehicleDays, david.vehicleAmount]));
+
+    // One day, so the total itself carries the half.
+    const one = device.call('payrollReport', device.State.schedule, '2026-08-13', '2026-08-13');
+    const oneDay = one.find(row => row.workerId === 'w_01');
+    given('and one day on its own is worth 312.5',
+        oneDay.vehicleAmount === 312.5, String(oneDay.vehicleAmount));
+
+    const staged1 = await staged({ flags: { vehicles: true }, deviceId: 'd_half_ui' });
+    staged1.device.State.schedule.vehicles = device.State.schedule.vehicles;
+    staged1.device.State.save({ silent: true });
+    staged1.run(`REPORT_RANGE.from = '2026-08-13'; REPORT_RANGE.to = '2026-08-13';`);
+    const sheet = staged1.run('payrollSheetRows()');
+    const at = sheet[0].indexOf('שכר רכב');
+    const row = sheet.find(line => line[0] === 'דוד');
+    check('the exported vehicle cell carries the agora, like every cell beside it',
+        row && Number(row[at]) === 312.5,
+        JSON.stringify({ cell: row ? row[at] : null, headers: sheet[0] }));
+}
+
 report();
