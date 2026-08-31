@@ -3466,6 +3466,22 @@ async function seedRoster(page) {
   await page.waitForTimeout(300);
   check('the restore point is offered where the backups are',
     (await page.locator('#restorePoints button').count()) === 1);
+  // AND IT IS ON THE SCREEN, not merely in the document.
+  //
+  // The restore points sit in a <details> so the panel reads as counted rows rather than
+  // a wall of dates. Shut by default, that fold put a closed door between somebody who
+  // has just lost a fortnight and the way back - and the accidental tap it would guard
+  // against is already guarded, because restoreSnapshot goes through askConfirm and
+  // names the date before anything is replaced.
+  //
+  // A count check alone cannot see this: a button inside a shut <details> is still in the
+  // DOM and still counts. It was a click timing out against an invisible element that
+  // said so, which is a failure that reads as the app being broken.
+  check('and it is visible without anybody opening a fold first',
+    await page.locator('#restorePoints button').first().isVisible());
+  check('with the summary saying how many ways back there are',
+    (await page.textContent('#restorePoints summary')).includes('(1'),
+    await page.textContent('#restorePoints summary'));
 
   await page.locator('#restorePoints button').first().click();
   await page.waitForTimeout(300);

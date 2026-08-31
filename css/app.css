@@ -237,7 +237,11 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
     .topbar {
         position: static;
         border-bottom: none;
-        padding: 6px 0 2px;
+        /* The same 6px above and below the ⋯: an uneven pair floats the one glyph on
+           this strip off its centre line. NOT the notch inset - that is paid ONCE, by
+           the day header, the element actually against the edge (see the phone block
+           near the end of this file). */
+        padding: 6px 0;
         margin-bottom: 6px;
         gap: 8px;
     }
@@ -1180,6 +1184,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .roster-off { opacity: .55; }
 .roster-actions { display: flex; gap: 2px; }
 .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* An equal share of the row each, and when the row cannot hold both - a 320 screen -
+   each takes a full row of its own. What this replaces is shrink-to-fit wrapping: two
+   restore doors at two ragged widths, which read as one mattering more than the other. */
+.backup-actions button { flex: 1 1 160px; }
 
 /* ---------------------------------------------------------------- reports */
 
@@ -1385,13 +1393,31 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .report-section-toggle button { flex: 1; min-height: 44px; }
 @media print { .report-section-toggle { display: none !important; } }
 
-/* Restore points: dated, and few enough to read as a sentence rather than a list. */
-.restore-points {
+/* Restore points: dated, and folded shut under a counted summary - the board's collapsed
+   row. Every date behind the fold replaces the record, so the list is opened on purpose
+   rather than sitting unfolded beside the file picker. */
+.restore-points { margin-top: 10px; }
+.restore-fold summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+/* Flex removes the native marker on most engines; say open/shut ourselves, both ways. */
+.restore-fold summary::before { content: '▸'; font-size: 12px; color: var(--ink-3); }
+.restore-fold[open] summary::before { content: '▾'; }
+.restore-fold summary::-webkit-details-marker { display: none; }
+/* The dated buttons themselves, unchanged: few enough to read as a sentence. */
+.restore-list {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
-    margin-top: 10px;
+    padding-bottom: 6px;
 }
 .restore-label { color: var(--ink-2); font-size: 13px; }
 .restore-points button { font-size: 13px; padding: 5px 10px; }
@@ -2601,10 +2627,11 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 .app-version {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    flex-wrap: wrap;
 }
-.app-version button { font-size: 14px; padding: 6px 12px; }
+.app-version span { text-align: start; }
+.app-version button { font-size: 14px; padding: 6px 12px; flex: 0 0 auto; white-space: nowrap; }
 
 /* ================================================================ print, fail-safe
 
@@ -2799,7 +2826,6 @@ body.reorder-dragging .reorder-list::after {
        pinned against the edge once the page scrolls; this static strip paying it too
        cost 78 raw pixels on a notched phone. */
     .topbar .brand { display: none; }
-    .topbar { padding: 6px 0; }
     /* top: 0, spelled honestly: the phone top bar is STATIC (the phone block above
        overrides the base sticky), it scrolls away, and stickyHeight() measures a
        static bar as 0 - so the var resolves to 0 here and the header is the thing at

@@ -328,20 +328,48 @@ function takeDailySnapshot() {
     snapshotDates().slice(SNAPSHOT_KEEP).forEach(date => Store.remove(SNAPSHOT_PREFIX + date));
 }
 
+// A counted, collapsible row instead of a bare wall of dates - but OPEN by default.
+//
+// The design this comes from folded it shut, on the reasoning that every date behind it
+// replaces the record and should be opened on purpose. That reasoning is sound about
+// destructive controls and wrong about this one, and the smoke suite said so before any
+// argument did: its restore scenario loses the day the way an accident does, opens
+// settings, and reaches for the restore point - and the click timed out against an
+// element that was in the DOM and not on the screen.
+//
+// The accidental tap that fold guards against is already guarded. restoreSnapshot goes
+// through askConfirm, and a person has to read a dialog naming the date before anything
+// is replaced. So the fold bought no safety and cost the one thing this row is for:
+// being found by somebody who has just lost a fortnight of work and is not in a mood to
+// go looking.
+//
+// What it keeps is the shape - a summary that counts, so "do I have a way back" is
+// answered at a glance - and the ability to shut it, which is then remembered across the
+// redraws this panel does while it is open (a sync tick, a backup taken). Only a
+// FIRST draw defaults to open; after that the person's own choice wins.
 function renderRestorePoints() {
     const box = document.getElementById('restorePoints');
     if (!box) return;
+    const drawn = box.querySelector('details');
+    const wasOpen = drawn ? drawn.open : true;
     clear(box);
 
     const dates = snapshotDates();
     if (dates.length === 0) return;
 
-    box.appendChild(el('span', 'restore-label', 'חזרה למצב של:'));
+    const fold = el('details', 'restore-fold');
+    if (wasOpen) fold.open = true;
+    fold.appendChild(el('summary', null, `נקודות שחזור (${dates.length} במכשיר)`));
+
+    const list = el('div', 'restore-list');
+    list.appendChild(el('span', 'restore-label', 'חזרה למצב של:'));
     dates.forEach(date => {
         const parsed = parseLocalDate(date);
-        box.appendChild(button(formatFullDate(parsed), 'btn-secondary',
+        list.appendChild(button(formatFullDate(parsed), 'btn-secondary',
             () => restoreSnapshot(date), `שחזר את המצב מתחילת ${formatFullDate(parsed)}`));
     });
+    fold.appendChild(list);
+    box.appendChild(fold);
 }
 
 // The cloud copies. Unlike everything else on this screen these do not live on this
@@ -350,6 +378,11 @@ function renderRestorePoints() {
 function renderCloudRestorePoints() {
     const box = document.getElementById('cloudRestorePoints');
     if (!box) return;
+    // Captured before the clears: the answer arrives on a promise, and by then the fold
+    // that was open is already gone from the DOM. Open on a first draw, for the reason
+    // written over renderRestorePoints - these are doors out of a bad day.
+    const drawn = box.querySelector('details');
+    const wasOpen = drawn ? drawn.open : true;
     clear(box);
 
     if (typeof FarkadSync === 'undefined' || FarkadSync.status !== 'synced') return;
@@ -357,16 +390,29 @@ function renderCloudRestorePoints() {
     FarkadSync.archiveDates().then(dates => {
         if (!dates || dates.length === 0) return;
         clear(box);
-        box.appendChild(el('span', 'restore-label', '☁️ מהענן:'));
         // Ten is a fortnight and a bit - far enough back to cover a mistake noticed at
         // the end of an account, without turning this into a wall of dates.
-        dates.slice(0, 10).forEach(date => {
+        //
+        // Counted from what will actually be DRAWN, not from what came back: a date the
+        // calendar cannot parse is dropped below, and a summary promising ten doors over
+        // a list of eight is a lie about how far back somebody can go.
+        const shown = dates.slice(0, 10).filter(date => parseLocalDate(date));
+        if (shown.length === 0) return;
+
+        const fold = el('details', 'restore-fold');
+        if (wasOpen) fold.open = true;
+        fold.appendChild(el('summary', null, `עותקי ענן (${shown.length})`));
+
+        const list = el('div', 'restore-list');
+        list.appendChild(el('span', 'restore-label', '☁️ מהענן:'));
+        shown.forEach(date => {
             const parsed = parseLocalDate(date);
-            if (!parsed) return;
-            box.appendChild(button(formatFullDate(parsed), 'btn-secondary',
+            list.appendChild(button(formatFullDate(parsed), 'btn-secondary',
                 () => restoreFromCloud(date),
                 `שחזר את המצב מתחילת ${formatFullDate(parsed)} מהענן`));
         });
+        fold.appendChild(list);
+        box.appendChild(fold);
     });
 }
 
