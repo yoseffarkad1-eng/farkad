@@ -815,6 +815,24 @@ function normaliseSchedule(raw, hints) {
         }
     });
 
+    // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns four of
+    // them and the record is not four of them.
+    //
+    // The general form of the fault the approvals above are one instance of: the object
+    // built here IS State.schedule and save() serialises exactly that, so a part of
+    // `ledger` this build does not name is read off the disk, left out, and written over
+    // by the next ordinary save. Naming `migrations` fixed the case that exists today and
+    // left the next one open.
+    //
+    // Carried, not quarantined and not a reason to stop: "this build has no opinion about
+    // it" is not "it cannot be read", and a device that went into recovery over a field a
+    // later build added is a device nobody can record a day on.
+    Object.keys(ledger).forEach(key => {
+        if (['advances', 'unreadable', 'migrations', 'unreadableMigrations']
+            .indexOf(key) !== -1) return;
+        if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
+    });
+
     // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.
     //
     // A schedule reaches this function from boot, from a cloud snapshot, from a restore,

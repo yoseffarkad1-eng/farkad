@@ -102,8 +102,10 @@ pass whole.
 be run end to end before anybody commits to it. Merging it is the decision iron law 1
 reserves for a person, and it is only theirs to make once all three phones are known to
 be past v79 AND they have read every row of `planAdvanceCarry`. It carries its own build
-stamp — v89 — because it is not the same bytes as v88 and two builds sharing a cache name
-serve a mixture. The counts above are re-measured on THIS branch; the core branch runs
+stamp — v90 — because it is not the same bytes as the core branch's v89 and two builds
+sharing a cache name serve a mixture. It was v89 while core was v88; core took v89 when a
+change landed in its own shell, and this branch moved up rather than sideways, because it
+is built from that line and supersedes it. The counts above are re-measured on THIS branch; the core branch runs
 the same suites with the gates shut and comes out lower.
 
 Anything less than every check passing is a stop, not a warning. `npm test`
