@@ -41,7 +41,21 @@ const FARKAD_SHIPPED_FLAGS = {
     // assumed that every active vehicle went out on every worked day - so one day with no
     // vehicle state recorded quietly added the daily vehicle charge to somebody's pay.
     // The stored vehicle records are NOT removed by this; see the retirement below.
-    vehicles: false
+    vehicles: false,
+
+    // Carrying an unsettled advance from one account to the next. OFF, and not because
+    // the arithmetic is in doubt - it is in advanceAccount below, and tested - but
+    // because switching it on RESTATES fortnights that have already been paid. A man who
+    // took 5,000 against 3,200 earned is currently shown a net of -1,800 and a next
+    // account that starts from nothing; with the carry, the first account deducts 3,200
+    // and the second deducts the rest, so both change what they say.
+    //
+    // This app does not know which fortnights have been handed over, and a report that
+    // reprints differently from the copy somebody was paid against is the one thing the
+    // owner ruled out. So the switch belongs to a person who knows, and planAdvanceCarry
+    // tells them exactly which accounts and which men it would move before they touch it
+    // - the same courtesy planRateStamping gives before stamping old days.
+    carryAdvances: false
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set
@@ -1332,6 +1346,181 @@ function advancesFor(schedule, workerId, fromDate, toDate) {
 function advancesTotal(schedule, workerId, fromDate, toDate) {
     return advancesFor(schedule, workerId, fromDate, toDate)
         .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+}
+
+// ------------------------------------------------- an advance bigger than its fortnight
+
+function advanceCarryEnabled() {
+    return FARKAD_FLAGS.carryAdvances === true;
+}
+
+// Local, on purpose, both of them.
+//
+// js/model/migrate.js has an addDays and it loads AFTER this file; borrowing a name
+// across that seam works right up until somebody reorders index.html, and then it fails
+// at boot with a message about a function nobody was reading. The same rule that keeps
+// canonicalJson out of this file.
+//
+// The rounding is the agora, which is the precision the record can hold - see the block
+// over `agora` in js/ui/reports.js. A walk that carries binary float error from one
+// account into the next turns 1,800 into 1,799.9999999999998 and prints it.
+function advanceDayStep(dateStr, days) {
+    const at = parseLocalDate(dateStr);
+    at.setDate(at.getDate() + days);
+    at.setHours(12, 0, 0, 0);
+    return toLocalDateStr(at);
+}
+
+function agoraRound(value) {
+    return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+// Every repayment recorded against this man, dated inside [fromDate, toDate].
+//
+// Read off the LEDGER, because that is where a repayment lives - schedule.advances has
+// one number per advance and no room for a second event about it. A build whose ledger
+// is empty answers zero, which is the truth for every device that has never recorded one.
+function advanceRepaymentsFor(schedule, workerId, fromDate, toDate) {
+    const advances = (schedule && schedule.advances) || {};
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    return Object.keys(held)
+        .map(id => held[id])
+        .filter(entry => entry && entry.kind === 'repaid' && entry.advanceId)
+        .filter(entry => {
+            // Whose repayment it is comes from the ADVANCE, not from the entry: a
+            // repayment is an event about one advance, and the advance already says
+            // which man it belongs to. Reading a workerId off the entry would let a
+            // correction that moved the advance to another man leave its repayments
+            // behind, crediting one person for money another handed back.
+            const of = advances[entry.advanceId] || foldLedger(schedule)[entry.advanceId];
+            return Boolean(of) && of.workerId === workerId;
+        })
+        .filter(entry => entry.date >= fromDate && entry.date <= toDate)
+        .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+}
+
+// The account [fromDate, toDate] runs from a Friday and lasts a fortnight - see
+// js/dates.js. This walks the accounts that came BEFORE it, so it can say what this one
+// starts out owing.
+function accountsBefore(schedule, workerId, fromDate) {
+    const advances = advancesFor(schedule, workerId, '0000-01-01', '9999-12-31');
+    if (advances.length === 0) return [];
+
+    const first = toLocalDateStr(accountStart(parseLocalDate(advances[0].date)));
+    const out = [];
+    let at = first;
+    // Bounded by the target, and by a ceiling that cannot be reached in a working life:
+    // a walk driven by dates on a record is a walk a damaged date could send forever.
+    for (let n = 0; at < fromDate && n < 4000; n += 1) {
+        const end = advanceDayStep(at, 13);
+        out.push({ from: at, to: end });
+        at = advanceDayStep(at, 14);
+    }
+    return out;
+}
+
+// What this man owes at the MOMENT the account beginning `fromDate` opens.
+//
+// Derived by walking every account before it, never stored. That is the property the
+// whole feature rests on: the answer for a given account depends only on what is dated
+// on or before its own last day, so an entry made in September cannot move a number on a
+// fortnight somebody was already paid from in August.
+function advanceCarryInto(schedule, workerId, fromDate) {
+    let balance = 0;
+    accountsBefore(schedule, workerId, fromDate).forEach(account => {
+        balance = advanceWalk(schedule, workerId, account.from, account.to, balance).carriedOut;
+    });
+    return agoraRound(balance);
+}
+
+// One account, given what it started out owing. Split out so the walk above and the
+// report below cannot disagree about the order of operations - and the order matters:
+// money handed back reduces what is owed BEFORE the wage is asked to cover the rest, or a
+// man who settled in cash is deducted for it a second time out of his pay.
+function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
+    const given = advancesTotal(schedule, workerId, fromDate, toDate);
+    const repaid = advanceRepaymentsFor(schedule, workerId, fromDate, toDate);
+
+    const row = payrollReport(schedule, fromDate, toDate)
+        .find(item => item.workerId === workerId);
+    // A man with no rate is owed an UNKNOWN amount, which is not zero - see moneyOf in
+    // js/ui/reports.js. Nothing can be deducted from a number nobody knows, so the
+    // balance passes through him untouched rather than being written off against a wage
+    // this app cannot price.
+    const gross = row && row.amount !== null ? Number(row.amount) : null;
+
+    let balance = agoraRound((Number(carriedIn) || 0) + given - repaid);
+    // Never below zero: a man who hands back more than he owes has overpaid, and turning
+    // that into a negative balance would quietly ADD it to his next wage as though the
+    // firm owed him for it. It is his money and he should have it back, but that is a
+    // conversation, not an arithmetic result this app may reach on its own.
+    if (balance < 0) balance = 0;
+
+    const deducted = gross === null ? 0 : agoraRound(Math.min(balance, Math.max(gross, 0)));
+    return {
+        from: fromDate,
+        to: toDate,
+        carriedIn: agoraRound(Number(carriedIn) || 0),
+        given: agoraRound(given),
+        repaid: agoraRound(repaid),
+        gross,
+        deducted,
+        carriedOut: agoraRound(balance - deducted),
+        net: gross === null ? null : agoraRound(gross - deducted)
+    };
+}
+
+// The account, start to finish, with what came before it already walked.
+function advanceAccount(schedule, workerId, fromDate, toDate) {
+    return advanceWalk(schedule, workerId, fromDate, toDate,
+        advanceCarryInto(schedule, workerId, fromDate));
+}
+
+// WHAT SWITCHING THE CARRY ON WOULD DO, without doing any of it.
+//
+// One row per account and man whose numbers would move, with both answers side by side.
+// The same shape and the same refusal as planRateStamping: this app cannot know which
+// fortnights have been paid, so it will not silently restate one - it reports, and a
+// person decides.
+function planAdvanceCarry(schedule) {
+    const out = [];
+    const workers = (schedule.workers || []).map(worker => worker.id);
+
+    workers.forEach(workerId => {
+        const advances = advancesFor(schedule, workerId, '0000-01-01', '9999-12-31');
+        if (advances.length === 0) return;
+
+        const first = toLocalDateStr(accountStart(parseLocalDate(advances[0].date)));
+        const lastDated = advances[advances.length - 1].date;
+        let at = first;
+        let balance = 0;
+        for (let n = 0; n < 4000; n += 1) {
+            const to = advanceDayStep(at, 13);
+            const walked = advanceWalk(schedule, workerId, at, to, balance);
+            // What the report says TODAY, with the carry off: every advance dated in the
+            // account is deducted in it, and nothing is remembered afterwards.
+            const now = walked.given;
+            if (agoraRound(now) !== walked.deducted) {
+                out.push({
+                    workerId,
+                    from: at,
+                    to,
+                    now: agoraRound(now),
+                    deducted: walked.deducted,
+                    carriedIn: walked.carriedIn,
+                    carriedOut: walked.carriedOut
+                });
+            }
+            balance = walked.carriedOut;
+            at = advanceDayStep(at, 14);
+            // Stop once nothing is left owed and no advance remains to be reached. A
+            // balance that never clears - a man with no rate - is why the date is a
+            // condition too.
+            if (balance === 0 && at > lastDated) break;
+        }
+    });
+
+    return out;
 }
 
 // ---------------------------------------------------------------- vehicles

@@ -155,11 +155,19 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         JSON.stringify([rowB.amount, rowB.advances]));
 
     // And the app says what flipping it would do, without doing any of it.
+    //
+    // BOTH accounts, not just the later one. Written expecting one, which was wrong: the
+    // fortnight the advance was TAKEN in changes too. It currently deducts the whole
+    // 5,000 and reports a net of -1,800; under the carry it deducts the 3,200 he earned
+    // and reports nothing owed to him, with 1,800 carried. That is a different number on
+    // a pay sheet somebody may already have been handed, which is exactly the thing this
+    // report exists to put in front of a person before they decide.
     const plan = off.call('planAdvanceCarry', off.State.schedule);
-    check('but it reports the account it would change, the man, and by how much',
-        plan.length === 1 && plan[0].workerId === 'w_01'
-        && plan[0].from === B.from && plan[0].deducted === 1800,
-        JSON.stringify(plan));
+    const shape = plan.map(row => [row.from, row.now, row.deducted, row.carriedOut]);
+    same('it reports every account it would move, with both answers side by side', shape,
+        [[A.from, 5000, 3200, 1800], [B.from, 0, 1800, 0]]);
+    check('and names the man on each of them',
+        plan.every(row => row.workerId === 'w_01'), JSON.stringify(plan));
     check('and reporting it changed nothing on the disk',
         off.call('payrollReport', off.State.schedule, B.from, B.to)
             .find(row => row.workerId === 'w_01').advances === 0);

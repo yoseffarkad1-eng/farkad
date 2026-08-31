@@ -86,10 +86,30 @@ function foldAdvance(entries) {
             // nothing at all, and inventing a default here would put a word on the
             // statement the person handing the money over never chose.
             if (typeof entry.method === 'string' && entry.method) state.method = entry.method;
+            // Explicit, not absent. A `repaid` that is missing and a `repaid` of zero are
+            // the same money, and every reader downstream would otherwise have to
+            // remember which one it is looking at.
+            state.repaid = 0;
             return;
         }
         if (!state) return;
         if (entry.kind === 'cancelled') { state = null; return; }
+        // CASH HANDED BACK, against an advance that still stands.
+        //
+        // It accumulates rather than replacing: a man who pays back 200 twice has paid
+        // back 400, and a fold that read the last entry would say 200 and hand him a
+        // second deduction for money he no longer owes.
+        //
+        // It does not touch `amount`. What he was given is a fact about the day it
+        // happened and never changes; what is still outstanding is the difference, and
+        // keeping them apart is what lets a statement say "500 given, 200 back, 300 to
+        // settle" instead of quietly reporting an advance of 300 nobody ever handed over.
+        if (entry.kind === 'repaid') {
+            state = Object.assign({}, state, {
+                repaid: (Number(state.repaid) || 0) + (Number(entry.amount) || 0)
+            });
+            return;
+        }
         if (entry.kind === 'corrected') {
             const corrected = {
                 id: state.id,
@@ -106,6 +126,11 @@ function foldAdvance(entries) {
             // fact nobody touched.
             const method = entry.method === undefined ? state.method : entry.method;
             if (typeof method === 'string' && method) corrected.method = method;
+            // A correction to the amount, the man or the date says nothing about money
+            // that was handed back. Dropping it here would resurrect a repayment as an
+            // amount still owed, on the one operation somebody reaches for when the
+            // record is already wrong.
+            corrected.repaid = Number(state.repaid) || 0;
             state = corrected;
         }
     });
@@ -212,6 +237,23 @@ function recordAdvanceGiven(schedule, advanceId, workerId, date, amount, note, a
         advanceId: String(advanceId),
         kind: 'given',
         workerId: String(workerId),
+        date: String(date),
+        amount: Number(amount) || 0,
+        note: String(note || ''),
+        method: typeof method === 'string' && method ? method : undefined,
+        at: String(at || ''),
+        by: String(by || '')
+    });
+}
+
+// Cash handed BACK against an advance. Its own entry, on its own date - which is the
+// whole point: an account deducts what is dated inside it and nothing else, so a
+// repayment in September cannot move a number on a fortnight somebody was paid from in
+// August. See advanceAccount in js/model/schema.js for the arithmetic that rests on it.
+function recordAdvanceRepaid(schedule, advanceId, amount, date, note, at, by, method) {
+    return appendLedgerEntry(schedule, {
+        advanceId: String(advanceId),
+        kind: 'repaid',
         date: String(date),
         amount: Number(amount) || 0,
         note: String(note || ''),
