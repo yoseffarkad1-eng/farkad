@@ -236,19 +236,46 @@ function renderProgress() {
 // site's chip writes every unrecorded worker into it at once. It never touches anyone
 // already recorded, and the undo bar takes the whole thing back in one press, so a
 // mis-tap costs nothing. Hidden when it could not help (fewer than two people left).
+// On a phone the chips fold behind one 44px row. Eight sites of chips stood 268px tall on
+// a 320px screen - the third-largest thing on it, above a list it pushed entirely below
+// the dock - for a shortcut most evenings never touch.
+//
+// Open or closed is remembered for the session in a variable, not in storage: it is a
+// posture, not a setting, and a fresh open starts compact.
+let bulkOpen = false;
+
 function renderBulkRow() {
     const remaining = State.unrecorded();
     if (remaining.length < 2) return el('span');
 
-    const row = el('div', 'bulk-row');
-    row.appendChild(el('span', 'bulk-label', `כל ה-${remaining.length} שנותרו ב:`));
+    const row = el('div', bulkOpen ? 'bulk-row' : 'bulk-row bulk-closed');
+
+    // The disclosure row. Only the class changes on tap - no render() - so the list under
+    // it does not rebuild and the scroll position stays where the thumb left it.
+    const toggle = button(`פעולות מרוכזות (${remaining.length})`, 'bulk-toggle', () => {
+        bulkOpen = !bulkOpen;
+        row.classList.toggle('bulk-closed', !bulkOpen);
+        toggle.setAttribute('aria-expanded', String(bulkOpen));
+    });
+    toggle.setAttribute('aria-expanded', String(bulkOpen));
+    // The shared back chevron, turned by CSS: down when closed, up when open.
+    toggle.appendChild(chevronIcon('back'));
+    row.appendChild(toggle);
+
+    // Closed is display:none, never out of the DOM. The chips' behaviour is pinned by
+    // tests that drive them with element.click(), and a hidden button still clicks - only
+    // the layout cost is gone. Above 700px the toggle is what hides instead, and the row
+    // reads exactly as it always has.
+    const body = el('div', 'bulk-body');
+    body.appendChild(el('span', 'bulk-label', `כל ה-${remaining.length} שנותרו ב:`));
 
     State.activePlaces().forEach(place => {
         const chip = button('', 'bulk-chip', () => bulkAssign(place));
         appendSiteName(chip, place.id, place.name);
         paintSite(chip, place.id);
-        row.appendChild(chip);
+        body.appendChild(chip);
     });
+    row.appendChild(body);
 
     return row;
 }

@@ -1084,6 +1084,100 @@ for (const width of [320, 390]) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- the folded bulk row
+//
+// The bulk chips were 268px of convenience on a 320px screen - the third-largest thing
+// on it - and the price was the screen's whole point: at 320×667 the first worker's
+// name started BELOW the dock, so an evening began with a scroll past a shortcut. On a
+// phone the chips now fold behind one 44px disclosure row; this suite is the receipt.
+{
+    suite('320×667: the folded bulk row buys the list back');
+
+    const page = await open({ width: 320, height: 667 });
+
+    // The account banner is the one block above the header that follows the real
+    // clock, not the seeded day - dismiss it the way a person would, so the numbers
+    // below measure the day chrome and nothing else.
+    await page.evaluate(async () => {
+        const banner = document.getElementById('accountBanner');
+        const dismiss = banner && [...banner.querySelectorAll('button')]
+            .find(b => b.textContent === '✕');
+        if (dismiss) dismiss.click();
+        window.scrollTo(0, 0);
+        await new Promise(done => setTimeout(done, 200));
+    });
+
+    // Asked before anything is measured. Without it, a build where the fold is missing
+    // does not FAIL this suite - it throws out of page.evaluate on a null, stopping the
+    // run and naming neither the control nor the reason. A test that crashes instead of
+    // failing is the one kind that teaches nobody anything.
+    given('the day screen has a bulk row with a disclosure control on it',
+        await page.evaluate(() => Boolean(document.querySelector('.bulk-toggle')
+            && document.querySelector('.bulk-chip'))));
+
+    const folded = await page.evaluate(() => {
+        const box = sel => {
+            const node = document.querySelector(sel);
+            if (!node) return null;
+            const b = node.getBoundingClientRect();
+            return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) };
+        };
+        return {
+            row: box('.bulk-row'),
+            toggle: box('.bulk-toggle'),
+            firstRow: box('.wrow'),
+            dock: box('.day-actions'),
+            chipShown: document.querySelector('.bulk-chip').offsetParent !== null,
+            expanded: document.querySelector('.bulk-toggle').getAttribute('aria-expanded'),
+            label: document.querySelector('.bulk-toggle').textContent
+        };
+    });
+    check('the collapsed row is still a finger target', folded.toggle.h >= 44,
+        JSON.stringify(folded.toggle));
+    check('and no taller than the one row it is', folded.row.h <= 60,
+        JSON.stringify(folded.row));
+    check('it says what it is holding, and how many',
+        folded.label.includes('פעולות מרוכזות') && folded.label.includes(String(CREW - 8)),
+        folded.label);
+    check('the chips are folded away, and say so to a screen reader',
+        folded.chipShown === false && folded.expanded === 'false', JSON.stringify(folded));
+    // The point of the whole exercise: a worker's name, whole, above the dock,
+    // before anybody scrolls.
+    check('the first worker row now fits above the dock unscrolled',
+        folded.firstRow.bottom <= folded.dock.top,
+        `first row ${JSON.stringify(folded.firstRow)} vs dock ${JSON.stringify(folded.dock)}`);
+
+    // One tap opens it, and everything that was always there is there.
+    await page.locator('.bulk-toggle').click();
+    await page.waitForTimeout(150);
+    const open1 = await page.evaluate(() => ({
+        chipShown: document.querySelector('.bulk-chip').offsetParent !== null,
+        expanded: document.querySelector('.bulk-toggle').getAttribute('aria-expanded'),
+        label: document.querySelector('.bulk-label').textContent,
+        chips: document.querySelectorAll('.bulk-row .bulk-chip').length
+    }));
+    check('one tap unfolds the chips',
+        open1.chipShown === true && open1.expanded === 'true', JSON.stringify(open1));
+    check('with the exact row that was always there',
+        open1.label === `כל ה-${CREW - 8} שנותרו ב:` && open1.chips === 12,
+        JSON.stringify(open1));
+
+    // And the choice is a session posture: a re-render keeps it, a second tap ends it.
+    await page.evaluate(async () => {
+        render();
+        await new Promise(done => setTimeout(done, 200));
+    });
+    check('a re-render remembers the open state', await page.evaluate(() =>
+        document.querySelector('.bulk-chip').offsetParent !== null));
+    await page.locator('.bulk-toggle').click();
+    await page.waitForTimeout(150);
+    check('and a second tap folds it back', await page.evaluate(() =>
+        document.querySelector('.bulk-chip').offsetParent === null &&
+        document.querySelector('.bulk-toggle').getAttribute('aria-expanded') === 'false'));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();

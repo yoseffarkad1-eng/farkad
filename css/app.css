@@ -2079,15 +2079,51 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 
 /* One tap for the day everyone worked in one place. */
 .bulk-row {
+    margin-bottom: 10px;
+    background: var(--surface);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+}
+.bulk-body {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 7px;
-    margin-bottom: 10px;
     padding: 9px 14px;
-    background: var(--surface);
-    border: 1px dashed var(--line);
+}
+/* The phone-only disclosure row; on a desktop the chips are always out, so this button
+   never shows there and the row reads exactly as it always has. */
+.bulk-toggle {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 14px;
+    border: none;
+    background: none;
+    color: var(--ink-2);
+    font-size: 14.5px;
+    font-weight: 600;
+    text-align: start;
     border-radius: var(--radius);
+}
+.bulk-toggle svg {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    /* the shared back chevron points right; a quarter turn points it down (closed) */
+    transform: rotate(90deg);
+}
+.bulk-row:not(.bulk-closed) .bulk-toggle svg { transform: rotate(-90deg); }
+@media (max-width: 700px) {
+    .bulk-toggle { display: flex; }
+    /* Folded is display:none, not removed: the chips keep their place in the DOM so the
+       tests that press them programmatically still can - see renderBulkRow. */
+    .bulk-closed .bulk-body { display: none; }
+    /* the toggle row already holds the top edge open */
+    .bulk-body { padding-top: 2px; }
 }
 .bulk-label { color: var(--ink-2); font-size: 14px; }
 .bulk-chip {
