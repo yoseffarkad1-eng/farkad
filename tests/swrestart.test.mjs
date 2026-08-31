@@ -49,6 +49,7 @@ import { fileURLToPath } from 'node:url';
 import { suite, check, given, report } from './runner.mjs';
 import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 import { settle } from './harness.mjs';
+import { deployedFromSync, deployedFromSource } from './shell.mjs';
 
 // The caches that are not build shelves. farkad-clients holds which window is running
 // which build; farkad-shelves holds each shelf's lifecycle state, which build is active,
@@ -74,7 +75,11 @@ const REPO = REPO_ENV.root;
 const V85_COMMIT = '03bf814';
 const V86_COMMIT = '880d7bb';
 
-const DEPLOYED = ['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 'icons'];
+// Read off each tree's OWN sw.js, not listed here - see tests/shell.mjs. A shell entry
+// nobody deployed makes the worker refuse to install at all, which looks exactly like the
+// app being broken: no worker activates, no page is controlled, and the failure names
+// neither the file nor the reason.
+const DEPLOYED = deployedFromSync(REPO);
 
 const work = mkdtempSync(join(tmpdir(), 'farkad-swrestart-'));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -87,7 +92,10 @@ function git(args, asText) {
 // A released tree out of git's object store. Never a checkout: this suite is read-only
 // on the repository it measures.
 function materialiseCommit(commit, dest) {
-    const names = git(['ls-tree', '-r', '--name-only', commit, '--', ...DEPLOYED], true)
+    // That commit's OWN shell, out of its own sw.js - see the note over DEPLOYED.
+    const shell = deployedFromSource(
+        git(['show', `${commit}:sw.js`], true), `${commit}:sw.js`);
+    const names = git(['ls-tree', '-r', '--name-only', commit, '--', ...shell], true)
         .split('\n').filter(Boolean);
     for (const name of names) {
         mkdirSync(join(dest, dirname(name)), { recursive: true });

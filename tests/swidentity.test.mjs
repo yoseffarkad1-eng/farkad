@@ -70,6 +70,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { deployedFromSync, deployedFromSource } from './shell.mjs';
 
 // ---------------------------------------------------------------- where the tree is
 //
@@ -119,7 +120,11 @@ const EXEC = process.env.CHROME_PATH || undefined;
 
 const settle = ms => new Promise(resolve => setTimeout(resolve, ms));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const DEPLOYED = ['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 'icons'];
+// Read off each tree's OWN sw.js, not listed here - see tests/shell.mjs. A shell entry
+// nobody deployed makes the worker refuse to install at all, which looks exactly like the
+// app being broken: no worker activates, no page is controlled, and the failure names
+// neither the file nor the reason.
+const DEPLOYED = deployedFromSync(REPO);
 const CLIENTS = 'farkad-clients';
 
 const work = mkdtempSync(join(tmpdir(), 'farkad-failclosed-'));

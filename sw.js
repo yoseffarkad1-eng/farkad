@@ -66,6 +66,13 @@ const SHELL = [
     // bookkeeper a workbook from a tunnel. It is 860K, which is most of this cache: that
     // is what one offline export costs, paid once per build rather than once per press.
     './vendor/xlsx-0.18.5.min.js',
+    // The licence travels with the library. Apache-2.0 asks for it wherever the code is
+    // distributed, and every phone that installs this app is a distribution. It is also
+    // what keeps vendor/ honest: every other shell directory holds shell files only, and
+    // tests/swrestart.test.mjs builds what it expects a cache to hold out of what the
+    // deploy shipped - so one deployed file the worker did not cache reads there as a
+    // build that installed incomplete.
+    './vendor/xlsx-0.18.5.LICENSE',
     './manifest.webmanifest',
     './icons/icon-192.png',
     './icons/icon-512.png'

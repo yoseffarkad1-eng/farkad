@@ -28,6 +28,7 @@ import { cp, readFile, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from './serve.mjs';
+import { deployedFrom } from './shell.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const EXEC = process.env.CHROME_PATH || undefined;
@@ -49,7 +50,11 @@ const given = (what, ok) => {
 // ---------------------------------------------------------------- a deployable copy
 
 const dir = await mkdtemp(join(tmpdir(), 'farkad-deploy-'));
-for (const item of ['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 'icons']) {
+
+// What to copy is read off the shell rather than listed - see tests/shell.mjs for the
+// stale list that made this suite fail on a timeout naming neither the file nor the
+// reason.
+for (const item of await deployedFrom(ROOT)) {
     await cp(join(ROOT, item), join(dir, item), { recursive: true });
 }
 

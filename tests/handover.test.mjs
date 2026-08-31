@@ -53,6 +53,7 @@ import { fileURLToPath } from 'node:url';
 import { suite, check, same, given, report } from './runner.mjs';
 import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 import { settle } from './harness.mjs';
+import { deployedFromSync, deployedFromSource } from './shell.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const EXEC = process.env.CHROME_PATH || undefined;
@@ -79,7 +80,11 @@ const OLD_COMMIT = '880d7bb3ce58affd5fb285095c73c54435e5c7e7';
 
 // Exactly what a deploy puts on the origin. sw.js is in the list and is deliberately NOT
 // in any cache - a worker that cached itself could never be replaced.
-const DEPLOYED = ['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 'icons'];
+// Read off each tree's OWN sw.js, not listed here - see tests/shell.mjs. A shell entry
+// nobody deployed makes the worker refuse to install at all, which looks exactly like the
+// app being broken: no worker activates, no page is controlled, and the failure names
+// neither the file nor the reason.
+const DEPLOYED = deployedFromSync(REPO);
 
 const work = mkdtempSync(join(tmpdir(), 'farkad-handover-'));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -93,7 +98,12 @@ function git(args, asText) {
 // on the repository it is measuring, and a suite that moved HEAD to look at an old build
 // would be a suite that could lose somebody's work in progress.
 function materialiseOld(dest) {
-    const names = git(['ls-tree', '-r', '--name-only', OLD_COMMIT, '--', ...DEPLOYED], true)
+    // That build's OWN shell, out of its own sw.js. Using this checkout's list would ask
+    // the old commit for directories it never had - harmless - and, the direction that
+    // matters, would miss one it had and this build dropped.
+    const oldShell = deployedFromSource(
+        git(['show', `${OLD_COMMIT}:sw.js`], true), `${OLD_COMMIT}:sw.js`);
+    const names = git(['ls-tree', '-r', '--name-only', OLD_COMMIT, '--', ...oldShell], true)
         .split('\n').filter(Boolean);
     for (const name of names) {
         mkdirSync(join(dest, dirname(name)), { recursive: true });
