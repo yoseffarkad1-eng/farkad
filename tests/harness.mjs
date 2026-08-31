@@ -647,6 +647,37 @@ export function makeCloud(options = {}) {
                 publish();
             });
         },
+        // THE CUTOVER WRITE, modelled here for the same reason everything else is: a
+        // contract the harness does not speak is a contract the node suites cannot catch a
+        // regression in. Protocol fields only, its own receipt, and a refusal that carries
+        // the authoritative document.
+        bootstrap(payload) {
+            const problem = guard('bootstrap', payload);
+            if (problem) return Promise.reject(problem);
+            return landing('bootstrap', payload, () => {
+                if (!cloud.doc) throw refuse('not-found', 'No document to bootstrap');
+                if (cloud.protocol && receiptFor(payload.lastOpId)) return cloud.doc;
+                if (Number.isInteger(cloud.doc.revision)) {
+                    const said = refuse('conflict', 'the document is already in the protocol');
+                    said.revision = cloud.doc.revision;
+                    said.document = JSON.parse(JSON.stringify(cloud.doc));
+                    throw said;
+                }
+                cloud.doc.protocol = payload.protocol;
+                cloud.doc.revision = 1;
+                cloud.doc.lastOpId = payload.lastOpId;
+                cloud.doc.updatedAt = payload.updatedAt;
+                cloud.doc.updatedBy = payload.updatedBy || null;
+                landReceipt({ lastOpId: payload.lastOpId, revision: 1 });
+                cloud.writes.push({ kind: 'bootstrap', payload });
+                publish();
+                return JSON.parse(JSON.stringify(cloud.doc));
+            });
+        },
+        // The authoritative document, outside any transaction.
+        read() {
+            return Promise.resolve(cloud.doc ? JSON.parse(JSON.stringify(cloud.doc)) : null);
+        },
         create(data) {
             const problem = guard('create', data);
             if (problem) return Promise.reject(problem);

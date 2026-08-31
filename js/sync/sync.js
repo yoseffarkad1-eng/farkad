@@ -2782,14 +2782,67 @@ const FarkadSync = {
         // cannot land before it. createDocument is inside the same slot on purpose - it
         // is this write, taking the other branch, not a second one.
         return this.cloudWrite(() => {
-            // The claim is not consulted here either - see the note above sendClaimed.
-            // The write carries its own base and the server decides; the claim only ever
-            // said who went first.
-            return Promise.resolve(this.adapter.update(patch)).catch(error => {
+            // CUTOVER FIRST, when this device has never been told a revision.
+            //
+            // _revision is null in exactly two situations, and both are handled by asking
+            // the server rather than guessing: the document does not exist yet, or it
+            // exists and predates the protocol. In the second, the compare-and-set is
+            // asleep - a document with no revision refuses nothing, so a patch built
+            // months ago lands whole, business paths and all, over whatever another phone
+            // corrected this evening.
+            //
+            // So nothing a person recorded goes out until there is a revision to send it
+            // against. bootstrapCutover moves the document into the protocol without
+            // touching a single business field, rereads it, and hands back the
+            // authoritative document; the patch is then judged against that, and only
+            // then sent. See bootstrap() in js/sync/firebase-adapter.js.
+            const first = this._revision === null && this.adapter
+                && typeof this.adapter.bootstrap === 'function'
+                ? this.bootstrapCutover()
+                : Promise.resolve();
+
+            // Named, because it calls itself. A refusal that turns out to be a race is
+            // re-entered here as the conflict it actually was, rather than left to the
+            // retry ladder two seconds later.
+            const onFailure = error => {
                 // Not an edge case: this is the first write of every new project. Inside
                 // the same slot on purpose - this write taking the other branch, not a
                 // second one.
                 if (error && error.code === 'not-found') return this.createDocument(patch);
+
+                // A REFUSAL THAT IS REALLY A RACE, told apart by looking.
+                //
+                // The adapter's transaction reads the document, checks the revision, and
+                // throws a conflict when it has moved. Between that read and the commit
+                // another phone can land - and then the RULES refuse, at commit, as
+                // permission-denied. Same situation, different word, and the difference
+                // was the whole of the outcome: a conflict is rebased and merges, while
+                // permission-denied went to the error status and sat on the retry ladder
+                // showing "sync error" for what was an ordinary two-people-one-evening
+                // merge. Measured with two phones racing the cutover.
+                //
+                // So the refusal is checked against the document rather than taken at its
+                // word. If the revision has moved, this is the conflict the transaction
+                // would have thrown a moment earlier, and it goes through the same
+                // machinery - contested paths held, disjoint paths rebased, and the same
+                // ceiling. If it has not moved, the refusal is about something else -
+                // an address that is not on the list, a shape the rules reject - and it
+                // stays exactly what it was.
+                if (error && error.code === 'permission-denied'
+                    && this.adapter && typeof this.adapter.read === 'function'
+                    && Number.isInteger(patch.revision)) {
+                    return Promise.resolve(this.adapter.read()).then(fresh => {
+                        const held = fresh && fresh.revision;
+                        if (!Number.isInteger(held) || held !== patch.revision - 1) {
+                            const moved = new Error('the document moved while this write was in flight');
+                            moved.code = 'conflict';
+                            moved.revision = Number.isInteger(held) ? held : 0;
+                            moved.document = fresh || null;
+                            return onFailure(moved);
+                        }
+                        throw error;
+                    }, () => { throw error; });
+                }
 
                 // THE DOCUMENT MOVED. Somebody else wrote between the base this write was
                 // built on and the moment it arrived.
@@ -2828,10 +2881,15 @@ const FarkadSync = {
                     // lets a stale listener decide costs somebody's correction.
                     const contested = this.contestedPaths(patch, error.document);
                     if (contested.length === 0) {
-                        this._rebases += 1;
+                        if (!error.cutover) this._rebases += 1;
                         if (Number.isInteger(error.revision)) this._revision = error.revision;
                         this.stampProtocol(patch, this._sendOpId);
-                        return this.adapter.update(patch);
+                        // Through the same handler, because a rebase can lose too. Two
+                        // phones coming back at once take several passes to settle, and a
+                        // second refusal used to escape to the retry ladder - correct, and
+                        // two seconds of "sync error" for a merge that was one call away.
+                        // Bounded by the same ceiling: _rebases is not reset here.
+                        return Promise.resolve(this.adapter.update(patch)).catch(onFailure);
                     }
                     error.contested = contested;
                     // SAID AS ITSELF, not as "something went wrong".
@@ -2851,7 +2909,11 @@ const FarkadSync = {
                     // what to do.
                 }
                 throw error;
-            });
+            };
+
+            return first
+                .then(() => Promise.resolve(this.adapter.update(patch)))
+                .catch(onFailure);
         })
             .then(() => {
                 // Only now. Up to this point the edits were on disk and would have been
@@ -4049,6 +4111,85 @@ const FarkadSync = {
         // that guessed would simply be refused, which is the right failure.
         patch.revision = (this._revision === null ? 0 : this._revision) + 1;
         return patch;
+    },
+
+    // THE CUTOVER, and what it deliberately does NOT send.
+    //
+    // Called only when this device has never been told a revision. It moves the document
+    // into the protocol with a write that carries protocol, revision, lastOpId and the
+    // stamp - and not one field a person recorded - then hands the authoritative document
+    // back to the caller as a CONFLICT.
+    //
+    // A conflict, on a write that succeeded, is the right shape and not a trick. What has
+    // just happened is precisely what a conflict means here: the base this patch was built
+    // on is not the base it is going to land against, and the machinery that already
+    // exists knows what to do about that. contestedPaths compares the frozen base - which
+    // for a device that had never seen the document is `undefined` at every path - against
+    // the document as it actually is. A path that holds something is a path somebody else
+    // wrote while this device was away: contested, held, and the person is told. A path
+    // that holds nothing is disjoint: rebased onto revision 1 and merged, which is the
+    // ordinary two-people-one-evening case and must keep working.
+    //
+    // Its operation id is its own, and that matters. Sharing the batch's id would write
+    // the batch's receipt here, and the business write that followed would be answered
+    // "already applied" from a receipt that applied nothing - the evening swallowed by
+    // the very record that exists to stop it being sent twice. Stable per device, so a
+    // retry of the bootstrap finds its own receipt and stops.
+    bootstrapCutover() {
+        const opId = 'boot' + digestOf(String(syncDeviceId()));
+        return Promise.resolve(this.adapter.bootstrap({
+            protocol: this.PROTOCOL,
+            lastOpId: opId,
+            updatedAt: new Date().toISOString(),
+            updatedBy: syncDeviceId()
+        })).catch(error => {
+            // TWO PHONES BOOTSTRAPPING AT ONCE, and the loser is not told nicely.
+            //
+            // Both read a document with no revision and both prepare a write claiming
+            // revision 1. The winner commits; the loser's transaction is then evaluated
+            // against a document that HAS a revision, and the rules refuse it - as
+            // permission-denied, not as a conflict, because from the server's side a
+            // write claiming revision 1 over a document at revision 1 is simply not
+            // allowed. Measured: the loser went to the error status and its evening sat
+            // on the retry ladder behind a refusal that was never going to change.
+            //
+            // A refusal that means "somebody else already did this" is answered by
+            // looking. If the document now carries a revision, the cutover happened and
+            // this device has what it needs; if it does not, the refusal was about
+            // something else and belongs to the caller.
+            if (error && (error.code === 'not-found' || error.code === 'conflict')) throw error;
+            if (!this.adapter || typeof this.adapter.read !== 'function') throw error;
+            return Promise.resolve(this.adapter.read()).then(fresh => {
+                if (fresh && Number.isInteger(fresh.revision)) return fresh;
+                throw error;
+            }, () => { throw error; });
+        }).then(written => {
+            // Reread where the adapter can. The bootstrap's own answer is the document as
+            // its transaction left it, which is authoritative for that instant; a fresh
+            // read is authoritative for this one, and between them a third phone may have
+            // written. Prefer the newer.
+            const reread = this.adapter && typeof this.adapter.read === 'function'
+                ? Promise.resolve(this.adapter.read()).catch(() => null)
+                : Promise.resolve(null);
+            return reread.then(fresh => {
+                const authoritative = fresh || written || null;
+                const error = new Error('the document has just entered the protocol');
+                error.code = 'conflict';
+                // NOT A REBASE, and it must not spend the rebase budget.
+                //
+                // CAS_REBASE_LIMIT exists to stop a device chasing a document that keeps
+                // moving under it. This refusal is not that: it happens exactly once per
+                // device, on the one write that finds the document without a revision, and
+                // it is this client's own doing. Charging it to the budget left a phone
+                // that also lost a genuine race one rebase short, and its evening was held
+                // for a conflict that was not one.
+                error.cutover = true;
+                error.revision = authoritative && Number.isInteger(authoritative.revision)
+                    ? authoritative.revision : 1;
+                error.document = authoritative;
+                throw error;
+            });
+        });
     },
 
     // A stable name for one batch of operations.

@@ -115,6 +115,86 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
 
     return {
         withReceipt,
+        // THE CUTOVER WRITE, and it carries no business data at all.
+        //
+        // The live document was written by builds that had never heard of a revision, so
+        // it has none - and against a document with no revision the compare-and-set
+        // cannot refuse anything. `payload.revision === 0 + 1` is true for every write
+        // ever prepared, whatever it was built on and however long it has been queued.
+        //
+        // Which is exactly what went wrong. A phone that updated while offline, holding
+        // an edit for a day another phone had since corrected, came back and sent it as
+        // its first protocol write: accepted at revision 1, business paths and all, and
+        // the correction was gone. Nothing was refused, nothing was held, nobody was
+        // told, and the document then claimed revision 1 as though the ordering had been
+        // in force the whole time. Cutover was the one moment the protocol did not cover.
+        //
+        // So the first protocol write is its own operation and writes FIVE fields:
+        // protocol, revision, lastOpId, and the stamp the rules require. No days, no
+        // workers, no places, no advances, no ledger, no roster - nothing a person
+        // recorded. It moves the document into the protocol and changes not one number.
+        //
+        // Afterwards the client has an authoritative revision and an authoritative
+        // document, and every queued edit goes out through the ordinary CAS against them
+        // - where a path somebody corrected is a contest and is held, and a path nobody
+        // touched merges. See bootstrapCutover in js/sync/sync.js.
+        bootstrap(payload) {
+            return runTransaction(db, transaction =>
+                transaction.get(receiptRef(payload.lastOpId)).then(receipt => {
+                    if (receipt.exists()) return;
+                    return transaction.get(scheduleRef).then(snapshot => {
+                        if (!snapshot.exists()) {
+                            const error = new Error('No document to bootstrap');
+                            error.code = 'not-found';
+                            throw error;
+                        }
+                        const held = snapshot.data().revision;
+                        // ALREADY IN THE PROTOCOL. Another phone got there first, or this
+                        // one has been away longer than it thought. Not an error the
+                        // person needs to see: it is a conflict carrying the authoritative
+                        // document, which is precisely what the client needs to rebuild
+                        // its queued writes against.
+                        if (Number.isInteger(held)) {
+                            const error = new Error('the document is already in the protocol');
+                            error.code = 'conflict';
+                            error.revision = held;
+                            error.document = JSON.parse(JSON.stringify(snapshot.data()));
+                            throw error;
+                        }
+                        transaction.update(scheduleRef,
+                            'protocol', payload.protocol,
+                            'revision', 1,
+                            'lastOpId', payload.lastOpId,
+                            'updatedAt', payload.updatedAt,
+                            'updatedBy', payload.updatedBy || null);
+                        transaction.set(receiptRef(payload.lastOpId), {
+                            revision: 1,
+                            at: new Date().toISOString(),
+                            by: payload.updatedBy || null
+                        });
+                        // The document as this transaction leaves it: what it read, plus
+                        // the five fields it wrote and nothing else. Handed back so the
+                        // caller has an authoritative base without a second round trip -
+                        // it still rereads when it can, and this is what it falls back on.
+                        return Object.assign(
+                            JSON.parse(JSON.stringify(snapshot.data())),
+                            {
+                                protocol: payload.protocol,
+                                revision: 1,
+                                lastOpId: payload.lastOpId,
+                                updatedAt: payload.updatedAt,
+                                updatedBy: payload.updatedBy || null
+                            });
+                    });
+                }));
+        },
+        // The authoritative document, read outside any transaction. What the client calls
+        // straight after a bootstrap: the write it is about to replay has to be judged
+        // against the document as it IS, not against a snapshot that may not have arrived.
+        read() {
+            return getDoc(scheduleRef).then(snapshot =>
+                (snapshot.exists() ? JSON.parse(JSON.stringify(snapshot.data())) : null));
+        },
         update(patch) {
             return withReceipt(patch, transaction => {
                 transaction.update(scheduleRef, ...patchToUpdateArgs(patch));
