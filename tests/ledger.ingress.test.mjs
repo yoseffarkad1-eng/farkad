@@ -488,4 +488,80 @@ function documentWithLedger(device, ledger) {
     });
 }
 
+{
+    suite('a part of the ledger this build has never heard of is carried, not dropped');
+
+    // FOUND ON THE LEDGER BRANCH, and it is a fault of THIS one.
+    //
+    // normaliseSchedule rebuilds schedule.ledger out of the two maps this build owns -
+    // `advances` and `unreadable` - and writes nothing else into it. save() then
+    // serialises exactly that object. So any OTHER part of the ledger container is read
+    // off the disk, left out of the schedule, and written over by the next ordinary save.
+    //
+    // That is not hypothetical. The next build adds `ledger.migrations`, a person's
+    // approval of a financial migration, and three phones do not update together: a phone
+    // still on this build, sharing the record, would delete it on every save - the
+    // approval, and anything else a later build ever puts there. Silently, with the load
+    // reporting clean, nothing quarantined, and the parity check blessing the result.
+    //
+    // The rule this file already states for an ENTRY it cannot fold is the rule: the
+    // bytes survive and the fold ignores them. It has to hold for the container's parts
+    // too, because "this build does not understand it" and "it is not there" are
+    // different statements about somebody's money.
+    const device = makeDevice({ deviceId: 'd_future' });
+    device.State.schedule.workers = WORKERS.map(worker => Object.assign({}, worker));
+    device.State.schedule.places = PLACES.map(place => Object.assign({}, place));
+    device.State.save({ silent: true });
+    const disk = JSON.parse(device.raw('scheduleData:v2'));
+    disk.ledger = disk.ledger || { advances: {}, unreadable: {} };
+    disk.ledger.migrations = {
+        cm_carry: { id: 'cm_carry', kind: 'carry', rows: 1,
+            at: '2026-08-26T09:00:00.000Z', by: 'd_v89' }
+    };
+    disk.ledger.somethingLater = { note: 'a build after this one' };
+
+    const opened = makeDevice({ deviceId: 'd_future2',
+        storage: Object.assign({}, device.dump(),
+            { 'scheduleData:v2': JSON.stringify(disk) }) });
+    opened.State.load();
+    check('the record still opens', opened.State.schedule.workers.length === 1);
+    check('and the part this build never heard of is on the schedule, unchanged',
+        JSON.stringify(opened.State.schedule.ledger.migrations)
+            === JSON.stringify(disk.ledger.migrations),
+        JSON.stringify(opened.State.schedule.ledger));
+    check('every part of it, not the one somebody thought of',
+        JSON.stringify(opened.State.schedule.ledger.somethingLater)
+            === JSON.stringify(disk.ledger.somethingLater),
+        JSON.stringify(opened.State.schedule.ledger));
+
+    // NOT QUARANTINED AND NOT A REASON TO STOP. It is not unreadable - this build has no
+    // opinion about it at all - and a device that went into recovery over a field a later
+    // build added would be one nobody could record a day on.
+    check('nothing is held aside and nothing is blocked',
+        Object.keys(opened.State.schedule.ledger.unreadable).length === 0
+        && opened.call('farkadWritesBlocked') === false,
+        JSON.stringify(opened.State.schedule.ledger.unreadable));
+
+    // THE SAVE IS THE WHOLE POINT. Reading it into memory and writing it away again is
+    // the same deletion one commit later.
+    opened.State.commit(opened.call('assignPlace', opened.State.schedule,
+        '2026-08-10', 'w_01', 'actual', 'p_01'));
+    const written = JSON.parse(opened.raw('scheduleData:v2'));
+    check('and an ordinary edit writes it back to the disk rather than over it',
+        JSON.stringify(written.ledger.migrations)
+            === JSON.stringify(disk.ledger.migrations),
+        JSON.stringify(written.ledger));
+
+    // And through the cloud door, which is the one it would actually arrive by.
+    const other = makeDevice({ deviceId: 'd_future3' });
+    other.State.schedule.workers = WORKERS.map(worker => Object.assign({}, worker));
+    other.State.save({ silent: true });
+    other.Sync.receive(Object.assign({}, disk,
+        { updatedAt: '2026-08-26T10:00:00.000Z', updatedBy: 'd_v89' }));
+    check('a snapshot from a later build keeps its own part of the ledger',
+        JSON.stringify((other.State.schedule.ledger || {}).migrations)
+            === JSON.stringify(disk.ledger.migrations),
+        JSON.stringify(other.State.schedule.ledger));
+}
+
 report();

@@ -754,6 +754,30 @@ function normaliseSchedule(raw, hints) {
         }
     });
 
+    // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns two of
+    // them and the record is not two of them.
+    //
+    // The object being built here IS State.schedule and save() serialises exactly that,
+    // so a part of `ledger` this build does not name was read off the disk, left out, and
+    // written over by the next ordinary save. That is the same deletion-by-reading the
+    // block above this one exists to have stopped, one level up: it was fixed for an
+    // ENTRY and left in place for the container's own fields.
+    //
+    // It is not hypothetical. The next build adds `ledger.migrations` - a person's
+    // approval of a financial migration, which decides whether their phones may write
+    // money at all - and three phones do not update together. A phone on this build,
+    // sharing the record, would have deleted that approval on every save: silently, with
+    // the load reporting clean, nothing quarantined, and the parity check blessing it.
+    //
+    // Carried, not quarantined and not a reason to stop. "This build has no opinion about
+    // it" is not "it cannot be read": a device that went into recovery over a field a
+    // later build added is a device nobody can record a day on, and that is the failure
+    // this app trades everything else to avoid.
+    Object.keys(ledger).forEach(key => {
+        if (key === 'advances' || key === 'unreadable') return;
+        if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
+    });
+
     // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.
     //
     // A schedule reaches this function from boot, from a cloud snapshot, from a restore,
