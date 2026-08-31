@@ -162,4 +162,141 @@ function documentWith(device, entry) {
         JSON.stringify(Object.keys(rescue)));
 }
 
+
+// ------------------------------------------------ when the quarantine itself cannot land
+//
+// The suites above all assume the copy gets written. It does not always: the disk can be
+// full, the browser can refuse writes outright (Safari in a private tab takes localStorage
+// away wholesale), and rarest and worst, it can ACCEPT the write and hand back something
+// else - nothing throws, and the only way to find out is to read back.
+//
+// A quarantine that failed is not a smaller problem than the damage it was for. It is a
+// bigger one: the original bytes are now the ONLY copy that exists, and this is the
+// financial history. So every one of these has to end in the same place - the original
+// still on the disk untouched, the person told, writing stopped, and the raw rescue export
+// still carrying the bytes out. And it has to survive the app being closed and reopened,
+// because a device that forgot on the next boot would resume writing over the only copy.
+{
+    const FAULTS = [
+        ['the disk is full', device => device.setQuota(
+            key => String(key).indexOf(':damaged') !== -1)],
+        ['the browser refuses the write outright', device => device.failWrite(
+            key => String(key).indexOf(':damaged') !== -1)],
+        ['the disk takes the write and hands back something else',
+            device => device.corruptWhen(key => String(key).indexOf(':damaged') !== -1)]
+    ];
+
+    FAULTS.forEach(([label, breakIt]) => {
+        suite(`the copy cannot be made: ${label}`);
+
+        const source = crew({ deviceId: 'd_fault_src' });
+        const advanceId = Object.keys(source.State.schedule.advances)[0];
+        const raw = documentWith(source,
+            { advanceId, kind: 'repaid', date: '2026-08-18', amount: 'abc' });
+        const disk = Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) });
+
+        const device = makeDevice({ deviceId: 'd_fault', storage: disk });
+        breakIt(device);
+        device.State.load();
+
+        const problem = device.global('Recovery').problems
+            .find(item => item.key === 'scheduleData:v2:ledger');
+        check('the person is told, by name', Boolean(problem),
+            JSON.stringify(device.global('Recovery').problems.map(p => p.key)));
+        // THE DIFFERENCE THIS FAULT MAKES. An ordinary quarantine can be acknowledged -
+        // the bytes are safe in a copy, and carrying on is a fair trade. Here there is no
+        // copy, so it cannot be waved away by anybody.
+        check('and it says there is no copy, so it cannot be acknowledged away',
+            Boolean(problem) && problem.copy === null && problem.mustHold === true,
+            JSON.stringify(problem && { copy: problem.copy, mustHold: problem.mustHold }));
+        check('the device will not write', device.call('farkadWritesBlocked') === true,
+            String(device.call('farkadWritesBlocked')));
+        check('acknowledging does not release it',
+            (device.global('Recovery').acknowledge('scheduleData:v2:ledger'),
+                device.call('farkadWritesBlocked')) === true);
+
+        // THE ORIGINAL. Whatever happened to the copy, the bytes that were there are
+        // still there - untouched, unparsed and unaltered.
+        check('the original record is untouched on the disk',
+            device.raw('scheduleData:v2') === disk['scheduleData:v2'],
+            String(device.raw('scheduleData:v2') === disk['scheduleData:v2']));
+        check('and it still contains the unreadable amount',
+            String(device.raw('scheduleData:v2')).indexOf('"abc"') !== -1);
+        check('the entry was held aside rather than folded',
+            JSON.stringify(device.State.schedule.ledger.unreadable.le_bad || null)
+                .indexOf('abc') !== -1,
+            JSON.stringify(device.State.schedule.ledger.unreadable.le_bad || null));
+        check('and no fold reads it as a number',
+            device.call('foldLedger', device.State.schedule)[advanceId] === undefined
+            || device.call('foldLedger', device.State.schedule)[advanceId].repaid === 0,
+            JSON.stringify(device.call('foldLedger', device.State.schedule)[advanceId]));
+
+        // The one door that must still open with the copy gone.
+        const rescue = device.global('Recovery').rawRecords();
+        check('the raw rescue export still carries the bytes out',
+            JSON.stringify(rescue).indexOf('abc') !== -1,
+            JSON.stringify(Object.keys(rescue)));
+
+        // CLOSE AND REOPEN, with the fault still in place. A device that forgot here
+        // would resume writing over the only copy of somebody's advances.
+        const again = makeDevice({ deviceId: 'd_fault2', storage: device.dump() });
+        breakIt(again);
+        again.State.load();
+        check('after a close and reopen it is found again',
+            again.global('Recovery').problems
+                .some(item => item.key === 'scheduleData:v2:ledger'),
+            JSON.stringify(again.global('Recovery').problems.map(p => p.key)));
+        check('the reopened device still refuses to write',
+            again.call('farkadWritesBlocked') === true,
+            String(again.call('farkadWritesBlocked')));
+        check('and the record it reopened onto is still the original bytes',
+            again.raw('scheduleData:v2') === disk['scheduleData:v2']);
+        check('with the roster and the days still readable',
+            again.State.schedule.workers.length === 1
+            && Object.keys(again.State.schedule.advances).length === 1,
+            JSON.stringify({ workers: again.State.schedule.workers.length,
+                advances: Object.keys(again.State.schedule.advances).length }));
+    });
+}
+
+// ---------------------------------------------- and when the copy CAN be made, once
+{
+    suite('a second damaged ledger never overwrites the first quarantine');
+
+    // The mistake this whole file exists to prevent, one level up: two damaged records
+    // under one key, the second recovery destroying the evidence from the first.
+    const source = crew({ deviceId: 'd_twice_src' });
+    const advanceId = Object.keys(source.State.schedule.advances)[0];
+    const first = documentWith(source,
+        { advanceId, kind: 'repaid', date: '2026-08-18', amount: 'FIRST-abc' });
+    const one = makeDevice({ deviceId: 'd_twice',
+        storage: Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(first) }) });
+    one.State.load();
+    given('the first copy landed',
+        one.raw('scheduleData:v2:ledger:damaged') !== null
+        && String(one.raw('scheduleData:v2:ledger:damaged')).indexOf('FIRST') !== -1,
+        String(one.raw('scheduleData:v2:ledger:damaged')));
+
+    const second = documentWith(source,
+        { advanceId, kind: 'repaid', date: '2026-08-18', amount: 'SECOND-abc' });
+    const two = makeDevice({ deviceId: 'd_twice2',
+        storage: Object.assign({}, one.dump(),
+            { 'scheduleData:v2': JSON.stringify(second) }) });
+    two.State.load();
+
+    check('the first quarantine is still exactly what it was',
+        String(two.raw('scheduleData:v2:ledger:damaged')).indexOf('FIRST') !== -1,
+        String(two.raw('scheduleData:v2:ledger:damaged')).slice(0, 60));
+    check('and the second went to a slot of its own',
+        String(two.raw('scheduleData:v2:ledger:damaged:2')).indexOf('SECOND') !== -1,
+        String(two.raw('scheduleData:v2:ledger:damaged:2')).slice(0, 60));
+    const rescue = two.global('Recovery').rawRecords();
+    check('the rescue export carries both wrecks',
+        JSON.stringify(rescue).indexOf('FIRST') !== -1
+        && JSON.stringify(rescue).indexOf('SECOND') !== -1,
+        JSON.stringify(Object.keys(rescue)));
+}
+
 report();

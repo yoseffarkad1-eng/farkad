@@ -686,4 +686,75 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
         JSON.stringify(answer));
 }
 
+
+// ============================================================ the rebase ceiling
+{
+    suite('a document that moves under every attempt is held, not chased forever');
+
+    // Rebasing is what keeps two people filling in one evening from blocking each other:
+    // the second write is refused for a stale base, nothing it touches has moved, so it
+    // is rebuilt against the new revision and sent again. It is also the shape of an
+    // infinite loop - a server that always answers "moved" against a client that always
+    // rebuilds - and the only thing between those two readings is a bound.
+    //
+    // CAS_REBASE_LIMIT is that bound, and until this suite nothing measured it. A device
+    // that cannot get a word in after several tries has to say so rather than spin: a
+    // phone burning its battery on a write it will never land is a phone whose owner is
+    // told nothing while the evening's work sits in a queue.
+    const cloud = makeCloud();
+    const a = phone(cloud, 'd_a');
+    await settle(TICK * 10);
+    record(a, DAY, 'w_01');
+    await settle(TICK * 20);
+    given('one write landed, so there is a document to move under the next one',
+        Boolean(cloud.doc) && cloud.doc.revision >= 1,
+        `revision ${cloud.doc && cloud.doc.revision}`);
+
+    // A server that refuses every attempt, and refuses it in the way that INVITES a
+    // rebase: the document it hands back is the current one with a higher revision, so
+    // nothing this write touches has moved and contestedPaths answers empty every time.
+    let attempts = 0;
+    cloud.adapter.update = (patch) => {
+        attempts += 1;
+        const moved = JSON.parse(JSON.stringify(cloud.doc));
+        moved.revision = (Number(moved.revision) || 0) + attempts;
+        const error = new Error('the document moved again');
+        error.code = 'conflict';
+        error.revision = moved.revision;
+        error.document = moved;
+        return Promise.reject(error);
+    };
+
+    // The bound itself, read out of the build rather than written down here twice - a
+    // second copy of a constant is a second place for it to be wrong.
+    const limit = a.global('CAS_REBASE_LIMIT');
+    given('the build states a rebase ceiling', Number.isInteger(limit) && limit > 0,
+        String(limit));
+
+    record(a, '2026-08-14', 'w_02');
+    await settle(TICK * 30);
+    const firstFlush = attempts;
+    // At MOST limit + 1: the first send plus the rebases. It may stop sooner - a rebase
+    // is only taken while nothing the write touches has moved - and stopping sooner is
+    // the same guarantee reached earlier, so the assertion is the ceiling, not a count.
+    check('one flush tries a bounded number of times and then stops',
+        firstFlush >= 2 && firstFlush <= limit + 1,
+        `${firstFlush} attempts against a ceiling of ${limit} rebases`);
+
+    // And it does not spin. The retry timer will come back - that is correct, a tunnel
+    // ends - but each visit is bounded the same way, and the count does not run away.
+    // This is the check that fails on an unbounded rebase.
+    await settle(TICK * 400);
+    check('and waiting a long time is more retries, never a loop',
+        attempts <= (limit + 1) * 4, `${attempts} attempts after a long wait`);
+
+    check('the work is still held on this device, not acknowledged',
+        a.Sync.pendingCount() > 0, `${a.Sync.pendingCount()} pending`);
+    check('and nothing on the screen says synced', a.Sync.status !== 'synced',
+        a.Sync.status);
+    check('the day is still on this phone\'s own record',
+        Boolean(a.State.schedule.days['2026-08-14']),
+        JSON.stringify(Object.keys(a.State.schedule.days)));
+}
+
 report();
