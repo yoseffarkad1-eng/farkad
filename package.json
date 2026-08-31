@@ -49,7 +49,8 @@
     "test:recovery-browser": "node tests/recovery.browser.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.mjs\"",
     "test:cas-emulator": "firebase emulators:exec --only firestore \"node tests/cas.emulator.test.mjs\"",
-    "test:emulator": "npm run test:rules && npm run test:cas-emulator",
+    "test:rollout": "firebase emulators:exec --only firestore \"node tests/rollout.test.mjs\"",
+    "test:emulator": "npm run test:rules && npm run test:cas-emulator && npm run test:rollout",
     "serve": "python3 -m http.server 8802",
     "shot": "node tests/shot.mjs",
     "browsers": "playwright install chromium"
