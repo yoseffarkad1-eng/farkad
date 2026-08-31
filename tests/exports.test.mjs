@@ -329,6 +329,17 @@ function csvRows(text) {
         riskyPay[1][0] === "'-חדש", JSON.stringify(riskyPay[1][0]));
     check('and a site that begins with an equals sign is too',
         riskyBill[0][1] === "'=תל אביב", JSON.stringify(riskyBill[0][1]));
+    // UNCHANGED, on the branch where both gates are open - and that is the point.
+    //
+    // This expectation briefly read -400 here, when the carry was applied to whatever
+    // range somebody had picked. This range is a MONTH, and a month is not an account:
+    // the walk stepped back through fourteen-day accounts from the first advance and then
+    // counted an advance inside the displayed range as carried in from before it. The
+    // same 500, deducted twice, on a pay sheet.
+    //
+    // The carry now only applies over a whole account - a Friday and the thirteen days
+    // after it - so a month-wide report reads exactly as it does on main, gates open or
+    // shut. Left as a check rather than deleted: it is the one that noticed.
     check('while the advance stays a number the bookkeeper can total',
         riskyPay[1][8] === '-500', JSON.stringify(riskyPay[1][8]));
 }

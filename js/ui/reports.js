@@ -266,9 +266,21 @@ function payrollRows() {
         // walk goes back over every account this man has ever had, and two callers doing
         // that separately is both slow and a second place for the answer to differ.
         //
-        // Only when the carry is on. With it off `carry` is absent and every reader falls
-        // back to the arithmetic this build has always done - see moneyOf.
+        // ONLY OVER A WHOLE ACCOUNT, which is the condition the arithmetic needs and the
+        // one this first got wrong. An account is a Friday and the thirteen days after
+        // it; the report range is whatever somebody picked, and "החודש" is a month. Handed
+        // a month, the walk stepped back through fourteen-day accounts from the first
+        // advance and then counted an advance that is INSIDE the displayed range as
+        // carried in from before it - the same 500 deducted twice, on a pay sheet.
+        //
+        // A range that is not an account gets no carry and the arithmetic this build has
+        // always done. That is not a lesser answer for a month: a month is not a payday,
+        // and the carry is a statement about what one payday left owed to the next.
+        //
+        // With the gate off, `carry` is absent everywhere and every reader falls through
+        // the same way - see moneyOf.
         .map(row => (advanceCarryEnabled()
+            && wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)
             ? Object.assign({}, row, {
                 carry: advanceAccount(State.schedule, row.workerId,
                     REPORT_RANGE.from, REPORT_RANGE.to)
@@ -1491,7 +1503,21 @@ function moneyOf(row) {
     // the DEDUCTION - and moneyCells says so in the note, because a column quietly
     // showing less than was handed over, with nothing explaining where the remainder
     // went, is a worse sheet than the one it replaces.
-    const netted = row.carry
+    //
+    // EXCEPT for a man with no rate, who keeps the arithmetic he always had.
+    //
+    // The walk is right about him - nothing can be deducted from a wage this app cannot
+    // price, so his balance passes through untouched and carries. The COLUMN is a
+    // different question, and taking the walk's answer there emptied his row: 300 handed
+    // over in cash came out as a blank נצבר, a 0 in מקדמות and a blank לתשלום, with the
+    // only trace of it a note. A bookkeeper totalling that column would be 300 short of
+    // the cash that actually left the tin.
+    //
+    // So an unpriced row still says what he was handed. It is the one row where the
+    // reconciliation cannot balance anyway - an unknown wage is not a number - and the
+    // sheet's job there is to report the fact, not to tidy it away.
+    const priceless = row.carry && row.carry.gross === null;
+    const netted = row.carry && !priceless
         ? -agora(row.carry.deducted)
         : (taken > 0 ? -agora(taken) : 0);
     const priced = row.amount !== null;
@@ -1516,7 +1542,10 @@ function moneyCells(row) {
     if (row.carry && row.carry.carriedIn > 0) {
         notes.push(`${moneyText(row.carry.carriedIn)} ₪ מקדמה מחשבון קודם`);
     }
-    if (row.carry && row.carry.carriedOut > 0) {
+    // Not on an unpriced row: that row shows the whole amount in its own column, so a
+    // note saying the same shekels are ALSO going to the next account would have the
+    // sheet counting one advance twice.
+    if (row.carry && row.carry.gross !== null && row.carry.carriedOut > 0) {
         notes.push(`${moneyText(row.carry.carriedOut)} ₪ מקדמה עוברים לחשבון הבא`);
     }
     if (row.carry && row.carry.repaid > 0) {

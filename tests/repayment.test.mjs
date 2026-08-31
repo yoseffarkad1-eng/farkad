@@ -230,7 +230,11 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         [b.gross, b.advances, b.net], [2800, -1800, 1000]);
 
     // And with the switch off, which is how it ships, nothing about the sheet moves.
-    const off = crew({ deviceId: 'd_sheet_off' });
+    // The gates are SET, not inherited. A check named "with the carry off" that reads
+    // the shipped default measures whatever branch it happens to be run on - and on
+    // claude/farkad-ledger-enable-ready, where the default is open, it measured the
+    // opposite of its own name and passed for a while doing it.
+    const off = crew({ deviceId: 'd_sheet_off', flags: { carryAdvances: false } });
     work(off, A_DAYS);
     work(off, B_DAYS);
     off.State.commit(off.call('addAdvance', off.State.schedule,
@@ -330,7 +334,8 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     // THE SHIPPED BUILD. The ledger's writer gate is shut - iron law 1 - and a control
     // that writes an entry no other phone can read is not a control, it is a way to lose
     // a repayment. Nothing anywhere may reach one.
-    const shipped = await screenFor({ deviceId: 'd_ui_off' });
+    const shipped = await screenFor({ deviceId: 'd_ui_off',
+        flags: { ledgerWrites: false, carryAdvances: false } });
     check('with the writer gated off there is no way to record a repayment at all',
         shipped.reportsView.textContent.indexOf('החזר') === -1,
         shipped.reportsView.textContent.slice(0, 200));
@@ -451,7 +456,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
 
     // The half-open build: the writer says a repayment may be written, the carry says
     // nothing will read it. It must not offer the control.
-    const half = await screen({ ledgerWrites: true }, 'd_half_gate');
+    const half = await screen({ ledgerWrites: true, carryAdvances: false }, 'd_half_gate');
     check('with nothing to deduct it, no build offers a way to record a repayment',
         half.offers === false,
         JSON.stringify(half));
