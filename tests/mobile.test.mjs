@@ -107,8 +107,12 @@ async function setInset(page, pixels) {
 
 // Everything a finger is meant to land on, and how big it is. The week grid is the one
 // documented exception and only across: seven days plus the names have to fit the
-// narrowest phone, so a column is 42px rather than 44 - full height, and a mis-tap opens
-// the wrong day's picker, which names the day before anything is recorded.
+// narrowest phone, so a column came out 42px rather than 44 - full height, and a mis-tap
+// opens the wrong day's picker, which names the day before anything is recorded.
+//
+// There is no per-class floor here any more. This helper carried one for .week-cell, and a
+// floor with an exemption in it is not a floor: it is a list of the controls that were
+// allowed to be too small, written in the place a reader would look for the guarantee.
 async function undersized(page) {
     return page.evaluate(() => {
         const out = [];
@@ -118,8 +122,7 @@ async function undersized(page) {
                 if (node.getAttribute('aria-hidden') === 'true') return;
                 const box = node.getBoundingClientRect();
                 if (box.width === 0 || box.height === 0) return;
-                const floor = node.classList.contains('week-cell') ? 40 : 44;
-                if (box.width >= floor && box.height >= 44) return;
+                if (box.width >= 44 && box.height >= 44) return;
                 out.push({
                     cls: String(node.className).slice(0, 26),
                     text: (node.textContent || node.value || '').trim().slice(0, 12),
@@ -910,45 +913,112 @@ for (const width of WIDTHS) {
     check('nothing in the grid is too small to read', faint.length === 0,
         JSON.stringify(faint.slice(0, 5)));
 
-    // What a cell can actually be, rather than a floor that cannot be met.
+    // 44 x 44, at every width, with nothing exempted.
     //
-    // Seven columns at 44px is 308px on its own, and a 320px screen offers 296 once the
-    // page's own padding is out - so on the smallest phone this app runs on, a week with a
-    // column of names beside it CANNOT have thumb-sized cells. The app's answer is to show
-    // the whole week anyway, because a screen that shows Thursday is not a week; the cell
-    // is a shortcut to that day and the day screen has its own arrows and picker. A cell
-    // hit by mistake opens a day and changes nothing.
-    //
-    // So the assertion is the truth at each width: from 375 up a cell is a target, at 320
-    // it is a thing to read, and either way nothing may be narrower than the grid it is in.
+    // Seven columns at 44px is 308px on its own and a 320px screen offers 296, so the week
+    // and the names cannot BOTH be on screen at once on the smallest phone. That was read
+    // for a long time as "then the cells are 32px there", and this check was written to
+    // expect 32 - which is a test agreeing with the defect it exists to find. What does not
+    // fit on the screen fits in a box that scrolls; the cells are 44 everywhere and the
+    // week is reached by pushing it, with the names pinned so the row stays legible.
     const cells = await page.evaluate(() => {
         const boxes = [...document.querySelectorAll('.week-cell')]
             .map(node => node.getBoundingClientRect());
         return { min: Math.round(Math.min(...boxes.map(b => b.width))),
             height: Math.round(Math.min(...boxes.map(b => b.height))) };
     });
-    // The arithmetic, per width, measured rather than assumed: the name column is 70px and
-    // whatever the page's padding leaves is divided by seven. 320 gives 32, 375 and 390
-    // give about 42, and only 430 clears 44. Two pixels could be taken from the names to
-    // buy the middle sizes their 44th - and are not: on this screen the name is what a
-    // person is looking for, the cell is a shortcut to a day, and a cell hit by mistake
-    // opens a day and changes nothing.
-    const floor = width >= 430 ? 44 : (width >= 375 ? 40 : 30);
-    check(`a cell on a ${width}px screen is at least ${floor}px across`,
-        cells.min >= floor && cells.height >= 44, JSON.stringify({ ...cells, floor }));
+    check(`a cell on a ${width}px screen is 44px in both directions`,
+        cells.min >= 44 && cells.height >= 44, JSON.stringify(cells));
 
+    // Widths, not just a minimum: a floor met by one column and missed by six would pass
+    // the check above if the minimum were taken per-column. It is taken across every cell
+    // in the grid, so this is the count that proves the whole week is tappable.
+    const grid = await page.evaluate(() => {
+        const boxes = [...document.querySelectorAll('.week-cell')]
+            .map(node => node.getBoundingClientRect());
+        return { total: boxes.length,
+            ok: boxes.filter(b => b.width >= 44 && b.height >= 44).length };
+    });
+    check('and so is every other cell in the grid', grid.total > 0 && grid.ok === grid.total,
+        JSON.stringify(grid));
+
+    // No exemption on this side either: .week-cell is in the helper's selector and no
+    // longer filtered out of its answer.
     const small = await undersized(page);
-    check('every OTHER control on the screen is big enough to tap',
-        small.filter(item => !item.cls.includes('week-cell')).length === 0,
-        JSON.stringify(small.filter(item => !item.cls.includes('week-cell')).slice(0, 4)));
+    check('every control on the screen is big enough to tap', small.length === 0,
+        JSON.stringify(small.slice(0, 4)));
 
-    const wide = await page.evaluate(() => ({
-        scroll: document.documentElement.scrollWidth,
-        client: document.documentElement.clientWidth,
-        table: Math.round(document.querySelector('.week-table').getBoundingClientRect().width)
-    }));
-    check('and seven days plus the names fit across the phone',
-        wide.scroll <= wide.client + 1, JSON.stringify(wide));
+    // Two adjacent cells in a row must not overlap, or a 44px target is 44px of somebody
+    // else's day. Measured on the first body row, in the order the DOM has them.
+    const overlap = await page.evaluate(() => {
+        const row = document.querySelector('.week-table tbody tr');
+        if (!row) return { rows: 0, bad: [] };
+        const boxes = [...row.querySelectorAll('.week-cell')]
+            .map(node => node.getBoundingClientRect());
+        const bad = [];
+        for (let i = 1; i < boxes.length; i += 1) {
+            const a = boxes[i - 1], b = boxes[i];
+            // RTL: the later cell sits to the LEFT of the earlier one, so the test is on
+            // the gap between them whichever way round they are drawn.
+            const gap = Math.min(a.left, b.left) + Math.min(a.width, b.width)
+                <= Math.max(a.left, b.left) + 0.5;
+            if (!gap) bad.push({ i, a: Math.round(a.left), b: Math.round(b.left) });
+        }
+        return { rows: boxes.length, bad };
+    });
+    check('and no two days in a row overlap each other',
+        overlap.rows === 7 && overlap.bad.length === 0, JSON.stringify(overlap));
+
+    // The RTL order, on the screen and in the DOM: the first day of the week is the
+    // RIGHTMOST cell, because that is what "first" means in Hebrew. A grid that reads
+    // left-to-right names the wrong day under every finger.
+    const rtl = await page.evaluate(() => {
+        const row = document.querySelector('.week-table tbody tr');
+        const boxes = [...row.querySelectorAll('.week-cell')]
+            .map(node => node.getBoundingClientRect().left);
+        let descending = true;
+        for (let i = 1; i < boxes.length; i += 1) if (boxes[i] >= boxes[i - 1]) descending = false;
+        return { descending, first: Math.round(boxes[0]), last: Math.round(boxes[boxes.length - 1]) };
+    });
+    check('the first day of the week is the rightmost cell', rtl.descending, JSON.stringify(rtl));
+
+    // The page does not scroll sideways - the box does. That distinction is the whole of
+    // the fix: a page wider than the screen pushes the ⋯ and the nav bar off the edge.
+    const wide = await page.evaluate(() => {
+        const box = document.querySelector('#weekView .table-scroll');
+        return {
+            scroll: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth,
+            bodyScroll: document.body.scrollWidth,
+            boxScroll: box.scrollWidth,
+            boxClient: box.clientWidth
+        };
+    });
+    check('the page itself does not scroll sideways',
+        wide.scroll <= wide.client + 1 && wide.bodyScroll <= wide.client + 1,
+        JSON.stringify(wide));
+    check('the week scrolls inside its own box instead',
+        wide.boxScroll >= wide.boxClient, JSON.stringify(wide));
+
+    // The names stay put while the days move under them. Pushed to the end of the strip,
+    // the name column must still be at the reading edge of the box.
+    const pinned = await page.evaluate(async () => {
+        const box = document.querySelector('#weekView .table-scroll');
+        const name = document.querySelector('.week-table tbody .name-cell');
+        const before = name.getBoundingClientRect();
+        box.scrollLeft = -box.scrollWidth;          // RTL scrolls negative in this engine
+        box.scrollLeft = box.scrollLeft || box.scrollWidth;
+        await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+        const after = name.getBoundingClientRect();
+        const edge = box.getBoundingClientRect();
+        return {
+            moved: Math.round(Math.abs(after.left - before.left)),
+            visible: after.right > edge.left + 1 && after.left < edge.right - 1,
+            width: Math.round(after.width)
+        };
+    });
+    check('the names stay pinned while the week scrolls under them',
+        pinned.visible && pinned.width > 0, JSON.stringify(pinned));
 
     await page.context().close();
 }
