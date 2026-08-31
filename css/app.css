@@ -1981,6 +1981,13 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
    `.hint.hint-warn` is two classes and wins wherever it sits, so reordering this file
    cannot quietly take the warning off somebody's pay sheet again. */
 @media print { .hint.hint-warn { display: block !important; color: #000; } }
+/* A hint that is MONEY, and money belongs on the paper. .hint is hidden in print
+   because most of them explain the screen; these two - the advance that was not fully
+   deducted and the correction that moved shekels inside a column - are statements about
+   somebody's pay, and the printed sheet is the document the argument happens over. Kept
+   apart from hint-warn because neither is a warning: nothing is wrong, and a red line
+   saying so on every carried advance would train the reader to skip it. */
+@media print { .hint.hint-money { display: block !important; color: #000; } }
 .empty-hint { color: var(--ink-3); font-size: 15px; padding: 14px 0; margin: 0; }
 
 @media (max-width: 700px) {

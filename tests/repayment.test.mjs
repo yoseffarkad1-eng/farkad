@@ -2021,6 +2021,69 @@ function omer(flags) {
 }
 
 {
+    suite('L4: a correction moves the money in the direction its target did');
+
+    // FOUND BY THE EXPORT SUITE, and it is the L2 question - one authoritative account -
+    // asked of the two folds that actually exist.
+    //
+    // L4 changed a correction from something aimed at the ADVANCE to something aimed at a
+    // TRANSACTION, because a reversal aimed at the advance cannot correct a repayment that
+    // never happened. advanceOutstanding was taught to read the target's kind: undoing a
+    // repayment puts the debt back up, undoing the money handed over takes it down.
+    //
+    // advanceWalk - which is what every SCREEN, the statement, the pay sheet and the
+    // workbook read - was not. It subtracted every correction from the balance whatever it
+    // corrected, so a repayment of 400 written down against the wrong man and then
+    // corrected took 800 off his debt: 400 for the repayment that did not happen, and 400
+    // again for saying so. Two folds of one record, disagreeing by twice the money.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    const repay = device.call('recordAdvanceRepaid', device.State.schedule, advanceId,
+        400, '2026-08-16', '', '2026-08-16T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commit(repay);
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        repay.value.id, 400, '2026-08-17', 'נרשם על האדם הלא נכון',
+        '2026-08-17T09:00:00.000Z', 'd_omer'));
+
+    const owed = device.call('advanceOutstanding', device.State.schedule, advanceId);
+    same('the ledger fold: the repayment was undone, so the whole advance is owed',
+        [owed.repaid, owed.left], [0, 5000]);
+
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    same('and the walk every screen reads says the same thing',
+        [walk.deducted, walk.carriedForward], [3050, 1950], JSON.stringify(walk));
+    // BOTH EVENTS ARE STILL NAMED. He did hand back 400 and it was corrected away; a
+    // statement that showed neither would leave him unable to follow his own account.
+    same('with both events still reported, apart, in their own words',
+        [walk.repaid, walk.reversed], [400, 400], JSON.stringify(walk));
+
+    // THE OTHER DIRECTION. Correcting the money handed over is money that never left the
+    // tin, and it reduces the debt - which is what a correction meant before L4 and still
+    // means when that is what it points at.
+    // Reopened, because the boot mirror is what writes the origin entry for an advance
+    // recorded by the legacy form - and a correction needs a transaction to point at.
+    const source = omer({ carryAdvances: true, ledgerWrites: true });
+    const back = makeDevice({ deviceId: 'd_undo', storage: source.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    back.State.load();
+    back.setToday('2026-08-26');
+    const backId = Object.keys(back.State.schedule.advances)[0];
+    const origin = back.call('originEntryId', backId);
+    given('the origin entry is there to correct',
+        Boolean(back.State.schedule.ledger.advances[origin]),
+        JSON.stringify(Object.keys(back.State.schedule.ledger.advances)));
+    back.State.commit(back.call('recordEventReversed', back.State.schedule,
+        origin, 1000, '2026-08-17', 'נרשם פעמיים', '2026-08-17T09:00:00.000Z', 'd_omer'));
+    const undone = back.call('advanceOutstanding', back.State.schedule, backId);
+    const undoneWalk = back.call('advanceAccount', back.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    same('correcting the advance itself takes it off, on both folds',
+        [undone.left, undoneWalk.carriedForward], [4000, 950],
+        JSON.stringify([undone, undoneWalk]));
+}
+
+{
     suite('L5: a late repayment does not turn an honest closure into a lie');
 
     // FOUND BY L6, on the emulator, and it cost a phone its whole record.

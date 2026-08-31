@@ -545,4 +545,162 @@ function csvRows(text) {
         csvRows(detail).map(row => row[3]).join(','));
 }
 
+// ------------------------------------------- the debt that carries, and the correction
+{
+    suite('a carried debt and a correction, on the far side of every file');
+
+    // The three files this app hands to somebody who cannot open it, over the one record
+    // the ledger branch exists for: an advance larger than the fortnight's wage, so part
+    // of it CARRIES, and a repayment that was written down wrongly and corrected.
+    //
+    // Every other suite here seeds an advance smaller than the wage, where the deduction
+    // and the advance are the same number and a file can print either one and look right.
+    // These two - a deduction that is not what was handed over, and money returned by a
+    // correction rather than by a man handing cash back - are exactly the numbers that
+    // differ between what the record holds and what a naive file prints.
+    //
+    // עומר סעד, the worked example: 500 a day and 50 an hour, six pay-days and one hour
+    // is 3,050, against an advance of 5,000. So 3,050 comes off and 1,950 carries.
+    const A_FROM = '2026-08-07';
+    const A_TO = '2026-08-20';
+    const A_STAMP = `${A_FROM}_${A_TO}`;
+
+    function carried(options = {}) {
+        const device = phone(Object.assign({
+            flags: { carryAdvances: true, ledgerWrites: true } }, options));
+        return device;
+    }
+
+    function seedCarried(device) {
+        device.State.schedule.workers = [
+            { id: 'w_01', name: 'עומר סעד', active: true, dailyRate: 500, hourlyRate: 50 }];
+        device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+        device.State.save({ silent: true });
+        ['2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13']
+            .forEach(date => device.State.commit(device.call('assignPlace',
+                device.State.schedule, date, 'w_01', 'actual', 'p_01')));
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            '2026-08-14', 'w_01', 'actual', 'p_01', 'extra', 1));
+
+        // Through recordNewAdvance, which is what the form calls: the legacy record and
+        // its immutable origin entry, committed as one operation.
+        const change = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+            '2026-08-10', 5000, '', '2026-08-10T09:00:00.000Z', 'd_one', 'cash');
+        device.State.commitMany(change);
+        const advanceId = change[0].value.id;
+
+        // The approval the financial gate needs, then a repayment written down wrongly
+        // and corrected - both of them real events, and both of them staying on the file.
+        const plan = device.call('planCarryMigration', device.State.schedule);
+        if (plan.needed) {
+            device.State.commit(device.call('recordCarryApproval', device.State.schedule,
+                plan, '2026-08-15T08:00:00.000Z', 'd_one'));
+        }
+        const repay = device.call('recordAdvanceRepaid', device.State.schedule, advanceId,
+            400, '2026-08-16', '', '2026-08-16T09:00:00.000Z', 'd_one', 'cash');
+        device.State.commit(repay);
+        device.State.commit(device.call('recordEventReversed', device.State.schedule,
+            repay.value.id, 400, '2026-08-17', 'נרשם על האדם הלא נכון',
+            '2026-08-17T09:00:00.000Z', 'd_one'));
+
+        run(device, `REPORT_RANGE.from='${A_FROM}'; REPORT_RANGE.to='${A_TO}';`
+            + ` REPORT_SECTION='workers'; INVOICE_PLACE=null;`);
+        return { advanceId, repayId: repay.value.id };
+    }
+
+    const device = carried({ deviceId: 'd_carry' });
+    const ids = seedCarried(device);
+
+    const account = device.call('advanceAccount', device.State.schedule, 'w_01',
+        A_FROM, A_TO);
+    given('the record itself: 3,050 off, 1,950 carried, 400 corrected back',
+        [account.gross, account.deducted, account.carriedForward, account.reversed]
+            .join('|') === '3050|3050|1950|400',
+        JSON.stringify(account));
+
+    // ---------------------------------------------------------- the message he receives
+    const statement = run(device, `workerStatementText('w_01')`);
+    check('his own copy prices the fortnight at what he earned',
+        statement.indexOf('נצבר: 3050') !== -1, statement);
+    // BOTH LINES, in their own words. He did hand back 400 and it was corrected away;
+    // printing only the correction would leave a movement he remembers unexplained, and
+    // printing only the repayment would tell him he settled money he did not. The one
+    // thing that may not happen is the correction wearing the repayment's words.
+    check('and names the correction beside the repayment it corrects',
+        statement.indexOf('הוחזר במזומן: 400\nתיקון-היפוך: 400') !== -1, statement);
+    check('it deducts the wage, not the advance',
+        statement.indexOf('נוכה מהשכר: 3050') !== -1, statement);
+    check('leaves him nothing to be paid this fortnight',
+        statement.indexOf('נותר לתשלום: 0') !== -1, statement);
+    // THE NUMBER THAT WOULD OTHERWISE VANISH. 1,950 of an advance he was handed is still
+    // owed, and the fortnight it was handed over in is the last document that mentions
+    // it - so a file that stops at "nothing to pay" loses it.
+    check('and says what is still on the books, in the open-account words',
+        statement.indexOf('חוב פתוח: 1950') !== -1
+        && statement.indexOf('יתרת סגירה') === -1, statement);
+
+    // ------------------------------------------------------------ the bookkeeper's file
+    await run(device, 'exportReports()');
+    const payroll = fileNamed(device, `שכר_${A_STAMP}.csv`);
+    given('the pay sheet came out', typeof payroll === 'string');
+    const row = csvRows(payroll).find(cells => cells[0] === 'עומר סעד');
+    given('his row is in it', Array.isArray(row), JSON.stringify(csvRows(payroll)[0]));
+
+    const head = csvRows(payroll)[0];
+    const cell = name => row[head.indexOf(name)];
+    same('נצבר, מקדמות and לתשלום are the deduction and they add up',
+        [cell('נצבר'), cell('מקדמות'), cell('לתשלום')], ['3050', '-3050', '0']);
+    // The column says מקדמות and holds a DEDUCTION, which are the same number only when
+    // the advance is smaller than the wage. The note is the only place in the file that
+    // can say so, and without it the bookkeeper reads 3,050 as the money handed over.
+    check('and the file says the column is a deduction, not the money handed over',
+        String(row[row.length - 1]).indexOf('5000') !== -1
+        || String(row[row.length - 1]).indexOf('1950') !== -1,
+        JSON.stringify(row));
+
+    // ----------------------------------------------------------------- the backup file
+    run(device, 'exportBackup()');
+    const backup = JSON.parse(fileNamed(device, `farkad-${TODAY}.json`));
+    const entries = Object.keys(backup.ledger.advances)
+        .map(id => backup.ledger.advances[id])
+        .filter(entry => entry.advanceId === ids.advanceId);
+    same('every immutable event is in the file, none of them folded away',
+        entries.map(entry => `${entry.kind}:${entry.amount}`).sort(),
+        ['given:5000', 'repaid:400', 'reversed:400']);
+    const fix = entries.find(entry => entry.kind === 'reversed');
+    check('the correction names the transaction it corrects and why',
+        fix.targetId === ids.repayId && fix.targetKind === 'repaid'
+        && fix.reason === 'נרשם על האדם הלא נכון', JSON.stringify(fix));
+    check('and the approval that opened the gate travels with it',
+        Object.keys((backup.ledger.migrations) || {}).length === 1,
+        JSON.stringify((backup.ledger.migrations) || {}));
+
+    // The phone on the other end of the file, driven through the real change event.
+    const other = carried({ deviceId: 'd_two' });
+    other.ctx.importBackup(other.fileEvent(`farkad-${TODAY}.json`,
+        fileNamed(device, `farkad-${TODAY}.json`)));
+    await settle(30);
+    run(other, `REPORT_RANGE.from='${A_FROM}'; REPORT_RANGE.to='${A_TO}';`
+        + ` REPORT_SECTION='workers'; INVOICE_PLACE=null;`);
+    same('the second phone reads the same account off the file',
+        JSON.stringify(other.call('advanceAccount', other.State.schedule, 'w_01',
+            A_FROM, A_TO)), JSON.stringify(account));
+    same('and sends him word for word the same statement',
+        run(other, `workerStatementText('w_01')`), statement);
+    check('with the gate still open, because the approval came across',
+        other.call('financialWritingEnabled', other.State.schedule) === true);
+
+    // --------------------------------------------------------- the export of last resort
+    //
+    // The rescue file is what a person is left with when the record will not open. It
+    // reads the DISK, so what it carries is whatever was durably written - and a
+    // correction that is only in memory is a correction that was never made.
+    const raw = JSON.stringify(device.global('Recovery').rawRecords());
+    check('the rescue export carries the correction off the disk',
+        raw.indexOf(ids.repayId) !== -1 && raw.indexOf('נרשם על האדם הלא נכון') !== -1,
+        JSON.stringify(Object.keys(device.global('Recovery').rawRecords())));
+    check('and the advance it corrects, with the approval beside them',
+        raw.indexOf(ids.advanceId) !== -1 && raw.indexOf('cm_carry') !== -1);
+}
+
 report();

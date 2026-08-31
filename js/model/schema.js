@@ -1588,11 +1588,22 @@ function agoraRound(value) {
 // Read off the LEDGER, because that is where a repayment lives - schedule.advances has
 // one number per advance and no room for a second event about it. A build whose ledger
 // is empty answers zero, which is the truth for every device that has never recorded one.
-// Money that never left the tin: an advance recorded in error and compensated. Netted
-// exactly as a repayment is, and counted apart from it so a statement never tells a man
-// he handed back money he never touched.
-function advanceReversalsFor(schedule, workerId, fromDate, toDate) {
-    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'reversed');
+// Corrections, and WHICH WAY THEY MOVE THE MONEY.
+//
+// This used to be one number that was always subtracted, because a correction used to be
+// aimed at the advance: money recorded in error and never handed over, which is money not
+// owed. Corrections now name the TRANSACTION they correct - a repayment written against
+// the wrong man is the case the whole of L4 exists for - and a correction runs against its
+// target's own direction, not against a fixed sign.
+//
+// Undoing money handed over reduces the debt. Undoing a repayment puts it back: the cash
+// was never handed back, so it is still owed. Undoing a deduction is the same statement
+// about a wage - it did not come off, so the man still owes it.
+//
+// Called with no target kind it answers the total, which is what the statement prints
+// under תיקון-היפוך: both halves of what happened stay on his copy.
+function advanceReversalsFor(schedule, workerId, fromDate, toDate, targetKind) {
+    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'reversed', targetKind);
 }
 
 function advanceRepaymentsFor(schedule, workerId, fromDate, toDate) {
@@ -1602,12 +1613,25 @@ function advanceRepaymentsFor(schedule, workerId, fromDate, toDate) {
 // The one walk over the ledger both of the above use. Whose entry it is comes from the
 // ADVANCE, not from the entry: a correction that moved the advance to another man would
 // otherwise leave its repayments behind, crediting one person for another's money.
-function advanceLedgerSum(schedule, workerId, fromDate, toDate, kind) {
+function advanceLedgerSum(schedule, workerId, fromDate, toDate, kind, targetKind) {
     const advances = (schedule && schedule.advances) || {};
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     return Object.keys(held)
         .map(id => held[id])
         .filter(entry => entry && entry.kind === kind && entry.advanceId)
+        // A correction is read by WHAT IT CORRECTS - see advanceReversalsFor. The target
+        // is resolved from the record, exactly as advanceOutstanding resolves it, rather
+        // than trusted from the correction's own denormalised copy: the two have to agree
+        // or the screens and the ledger fold part company again. A correction carrying no
+        // target at all was written before L4, when the only thing one could mean was
+        // "this advance was recorded in error", and it goes on meaning that.
+        .filter(entry => {
+            if (!targetKind) return true;
+            const target = entry.targetId ? held[String(entry.targetId)] : null;
+            const of = target ? String(target.kind)
+                : String(entry.targetKind || 'given');
+            return of === String(targetKind);
+        })
         .filter(entry => {
             const of = advances[entry.advanceId] || foldLedger(schedule)[entry.advanceId];
             return Boolean(of) && of.workerId === workerId;
@@ -1660,9 +1684,13 @@ function advanceCarryInto(schedule, workerId, fromDate) {
 function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     const given = advancesTotal(schedule, workerId, fromDate, toDate);
     const repaid = advanceRepaymentsFor(schedule, workerId, fromDate, toDate);
-    // Reversals net exactly as repayments do - the money is not owed either way - and are
-    // counted apart so a statement never calls a clerical correction "הוחזר במזומן".
+    // Reported whole, so a statement can name the corrections without calling any of them
+    // "הוחזר במזומן" - and applied below by what each of them corrects.
     const reversed = advanceReversalsFor(schedule, workerId, fromDate, toDate);
+    const undoneGiven = advanceReversalsFor(schedule, workerId, fromDate, toDate, 'given');
+    const undoneRepaid = advanceReversalsFor(schedule, workerId, fromDate, toDate, 'repaid');
+    const undoneDeducted = advanceReversalsFor(schedule, workerId, fromDate, toDate,
+        'deducted');
 
     // A CLOSED PERIOD REPORTS ITS RECORD, and does not do the sum again.
     //
@@ -1688,7 +1716,14 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // this app cannot price.
     const gross = row && row.amount !== null ? Number(row.amount) : null;
 
-    let balance = agoraRound((Number(carriedIn) || 0) + given - repaid - reversed);
+    // ONE fold, and it agrees with advanceOutstanding in js/model/ledger.js entry for
+    // entry. Measured before this: a repayment of 400 recorded against the wrong man and
+    // then corrected took 800 off his debt here - 400 for the repayment that did not
+    // happen and 400 again for saying so - while the ledger fold said the whole advance
+    // was still owed. Two folds of one record, disagreeing by twice the money, on the
+    // screens and the files somebody is paid from.
+    let balance = agoraRound((Number(carriedIn) || 0) + given
+        - agoraRound(repaid - undoneRepaid) - undoneGiven + undoneDeducted);
     // Never below zero: a man who hands back more than he owes has overpaid, and turning
     // that into a negative balance would quietly ADD it to his next wage as though the
     // firm owed him for it. It is his money and he should have it back, but that is a

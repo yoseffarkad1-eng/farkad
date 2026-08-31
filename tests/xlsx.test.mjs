@@ -184,7 +184,7 @@ function workbookOf(bytes) {
 // reports.js is a classic script, so it is loaded into a device's scope and its functions
 // are called there - the seam tests/data.test.mjs already uses for reportSheets().
 function phone(seed, options = {}) {
-    const device = makeDevice();
+    const device = makeDevice(options.flags ? { flags: options.flags } : undefined);
     // Installed BEFORE reports.js runs. A library fetch added at the top of that file, or
     // inside reportSheets(), would be recorded here rather than throwing on a missing
     // document.head - which would read as a broken test rather than an eager fetch.
@@ -216,8 +216,9 @@ function phone(seed, options = {}) {
 
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
     run(REPORTS);
-    run(`REPORT_RANGE.from = '2026-08-01'; REPORT_RANGE.to = '2026-08-31';
-         REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+    run(`REPORT_RANGE.from = '${options.from || '2026-08-01'}';`
+        + ` REPORT_RANGE.to = '${options.to || '2026-08-31'}';`
+        + ` REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
     run(seed);
 
     const caught = [];
@@ -583,6 +584,74 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
     check('and the service worker precaches it, so an offline phone can still export',
         named && sw.indexOf(`'./${named[1]}'`) !== -1,
         String(named && named[1]));
+}
+
+// ------------------------------------------- a carried debt and a correction, in a file
+{
+    suite('the workbook a bookkeeper opens, over a debt that carries and a correction');
+
+    // Every other fixture in this file gives an advance smaller than the fortnight's
+    // wage, where what was handed over and what comes off are the same number - so a file
+    // can print either and look right. These are the two numbers that differ: a deduction
+    // capped at the wage, with the rest carrying to the next account, and money returned
+    // by a CORRECTION rather than by a man handing cash back.
+    //
+    // עומר סעד, the worked example: 500 a day and 50 an hour, six pay-days and one hour
+    // is 3,050 against an advance of 5,000. A repayment of 400 is recorded against the
+    // wrong man and corrected. So 3,050 comes off, 1,950 carries, and the 400 nets to
+    // nothing - through the real library, into real bytes, read back by a zip reader.
+    const carried = phone(`
+        State.commitMany(recordNewAdvance(State.schedule, 'w_01', '2026-08-10', 5000, '',
+            '2026-08-10T09:00:00.000Z', 'd_one', 'cash'));
+        ['2026-08-07','2026-08-10','2026-08-11','2026-08-12','2026-08-13'].forEach(
+            date => State.commit(assignPlace(State.schedule, date, 'w_01', 'actual', 'p_01')));
+        State.commit(assignPlace(State.schedule, '2026-08-14', 'w_01', 'actual', 'p_01',
+            RATE_EXTRA, 1));
+        var plan = planCarryMigration(State.schedule);
+        if (plan.needed) State.commit(recordCarryApproval(State.schedule, plan,
+            '2026-08-15T08:00:00.000Z', 'd_one'));
+        var repay = recordAdvanceRepaid(State.schedule, Object.keys(State.schedule.advances)[0],
+            400, '2026-08-16', '', '2026-08-16T09:00:00.000Z', 'd_one', 'cash');
+        State.commit(repay);
+        State.commit(recordEventReversed(State.schedule, repay.value.id, 400, '2026-08-17',
+            'נרשם על האדם הלא נכון', '2026-08-17T09:00:00.000Z', 'd_one'));
+        State.save({ silent: true });`,
+    { flags: { carryAdvances: true, ledgerWrites: true },
+      from: '2026-08-07', to: '2026-08-20',
+      workers: [{ id: 'w_01', name: 'עומר סעד', active: true,
+          dailyRate: 500, hourlyRate: 50 }],
+      places: [{ id: 'p_01', name: 'הרצליה', active: true }] });
+
+    const workbook = await carried.exportOnce();
+    const at = heading => column(workbook, heading);
+    const row = workbook.sheets['שכר'].values.slice(1)
+        .find(cells => cells[0] === 'עומר סעד');
+    given('his row is in the workbook', Array.isArray(row),
+        JSON.stringify(workbook.sheets['שכר'].values));
+
+    same('the three money cells are the deduction, and they add up in the file',
+        [row[at('נצבר')], row[at('מקדמות')], row[at('לתשלום')]], [3050, -3050, 0]);
+    // NUMBERS, not text. A bookkeeper sums the column; a cell SheetJS wrote as a string
+    // sums to nothing and the total is quietly short by whatever that row held.
+    check('and they are numbers in the cells, not text that looks like numbers',
+        [row[at('נצבר')], row[at('מקדמות')], row[at('לתשלום')]]
+            .every(cell => typeof cell === 'number'),
+        JSON.stringify([row[at('נצבר')], row[at('מקדמות')], row[at('לתשלום')]]
+            .map(cell => typeof cell)));
+
+    // THE 1,950 THAT WOULD OTHERWISE VANISH. The column says מקדמות and holds a
+    // DEDUCTION; without the note this file reports 3,050 as the money handed over and
+    // the remaining 1,950 of a real advance appears in no document at all.
+    const note = String(row[at('הערה')]);
+    check('the note carries the debt going to the next account',
+        note.indexOf('1950') !== -1, note);
+    // AND THE CORRECTION BESIDE IT. The row's own money columns are net-correct, so the
+    // only place this file can say the 400 came back is the note - and it printed
+    // "400 ₪ הוחזר במזומן" alone, which tells the bookkeeper a man settled money he did
+    // not. The statement he is sent has carried both lines since L2; the file the
+    // bookkeeper opens is the surface that had one of them.
+    check('and the correction that undid it is named beside it',
+        note.indexOf(`400 ₪ ${'תיקון-היפוך'}`) !== -1, note);
 }
 
 report();

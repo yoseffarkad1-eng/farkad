@@ -372,13 +372,26 @@ function renderPayrollTable() {
             const money = moneyOf(row);
             cells.push(money.gross === null ? '—'
                 : moneyText(money.gross) + (row.hoursUnpriced ? ' *' : ''));
-            if (anyAdvance) cells.push(money.advances === 0 ? 0 : minusAmount(-money.advances));
+            // THE DEDUCTION, which is what the net is computed from and what the exported
+            // file has always printed here.
+            //
+            // This cell showed `advances` - the money handed over - beside a net computed
+            // from `netted`, the part of it the wage could cover. For an advance of 5,000
+            // against a fortnight of 3,050 the row read 3050, -5000, 0, which does not
+            // reconcile, and the band under it totalled -1,950 as לתשלום: a negative wage
+            // on the sheet a man is paid from, for a fortnight in which he was owed
+            // nothing and paid nothing. The workbook and the CSV printed -3,050 on the
+            // same row of the same fortnight. Two surfaces, one record, two answers.
+            //
+            // The remainder is not lost by this: the hint under the sheet names it and
+            // says whose it is, which is the same sentence the file carries in its note.
+            if (anyAdvance) cells.push(money.netted === 0 ? 0 : minusAmount(-money.netted));
             // The * follows the money onto the number actually paid.
             cells.push(money.net === null ? '—'
                 : bidiAmount(moneyText(money.net)) + (row.hoursUnpriced ? ' *' : ''));
         } else if (anyAdvance) {
             const money = moneyOf(row);
-            cells.push(money.advances === 0 ? 0 : minusAmount(-money.advances));
+            cells.push(money.netted === 0 ? 0 : minusAmount(-money.netted));
         }
         return cells;
     }));
@@ -386,9 +399,12 @@ function renderPayrollTable() {
     // The three money columns must reconcile: נצבר − מקדמות = לתשלום, on the same rows.
     // Summing per-row nets instead used to let an unpriced worker's advance into one
     // column and not the other, and the footer contradicted itself.
+    // Summed off the SAME number each row printed - see moneyOf. Summing row.advances
+    // while the rows printed the deduction is how a band comes to contradict every line
+    // above it.
     const totals = rows.reduce((sum, row) => ({
         amount: sum.amount + (row.amount || 0),
-        advances: sum.advances + (row.advances || 0)
+        advances: sum.advances - moneyOf(row).netted
     }), { amount: 0, advances: 0 });
 
     // The band names what it totals and over how many people. Thirty rows of cards end
@@ -445,6 +461,33 @@ function renderPayrollTable() {
     if (rows.some(row => row.hoursUnpriced)) {
         section.appendChild(el('p', 'hint hint-warn',
             '* שעות נוספות בלי שכר שעה - לא נכללו בסכום.'));
+    }
+
+    // WHAT THE מקדמות COLUMN NO LONGER SHOWS, said in shekels and named to a person.
+    //
+    // The column is the deduction, so an advance larger than the fortnight's wage is
+    // partly not in it, and the part that is not in it is still owed. Without this the
+    // sheet is arithmetically honest and silent about a real debt - and this fortnight's
+    // sheet is the last document that mentions the advance at all. The exported file says
+    // the same thing in its note column; this is the screen's and the paper's copy of it.
+    const carrying = rows.filter(row => row.carry && row.carry.gross !== null
+        && row.carry.carriedOut > 0);
+    if (carrying.length > 0) {
+        section.appendChild(el('p', 'hint hint-money',
+            'מקדמות שלא נוכו במלואן בתקופה הזו ועוברות לחשבון הבא: '
+            + carrying.map(row => `${isolate(row.name)} ${moneyText(row.carry.carriedOut)} ₪`)
+                .join(' · ') + '.'));
+    }
+
+    // And the corrections, in their own words. A correction nets against the deduction
+    // above, so its shekels are inside the column with nothing naming them - and a
+    // correction that goes unnamed is the one a person cannot check.
+    const corrected = rows.filter(row => row.carry && row.carry.reversed > 0);
+    if (corrected.length > 0) {
+        section.appendChild(el('p', 'hint hint-money',
+            `${LEDGER_KIND_LABELS.reversed} בתקופה הזו: `
+            + corrected.map(row => `${isolate(row.name)} ${moneyText(row.carry.reversed)} ₪`)
+                .join(' · ') + '.'));
     }
 
     // A day is paid at the rate it was RECORDED at, so after a raise mid-period the total
@@ -2020,6 +2063,16 @@ function moneyCells(row) {
     }
     if (row.carry && row.carry.repaid > 0) {
         notes.push(`${moneyText(row.carry.repaid)} ₪ ${LEDGER_KIND_LABELS.repaid}`);
+    }
+    // AND WHAT WAS CORRECTED AWAY, beside it, in its own words.
+    //
+    // The money columns are already net of it, so a note that named only the repayment
+    // told the bookkeeper a man settled 400 in cash when the record says that repayment
+    // was written against the wrong man and undone. The statement the worker himself is
+    // sent has carried both lines since the account became one; this file is the surface
+    // that carried one, and it is the one the argument about the money happens over.
+    if (row.carry && row.carry.reversed > 0) {
+        notes.push(`${moneyText(row.carry.reversed)} ₪ ${LEDGER_KIND_LABELS.reversed}`);
     }
     // THE ACCOUNT DOES NOT ADD UP, and the sheet says so where the number would have been.
     //
