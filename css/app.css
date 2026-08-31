@@ -1673,25 +1673,59 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 700px) {
     .week-legend { display: flex; }
 
-    #weekView .table-scroll { overflow: visible; border: none; background: none; }
-    .week-table { min-width: 0; width: 100%; table-layout: fixed; border-radius: var(--radius-sm); overflow: hidden; }
+    /* The week scrolls sideways INSIDE this box, and the page does not scroll at all.
+       Those are two different things and the difference is the whole fix: a page that
+       overflows hides the ⋯ button and the nav bar off the edge of the screen, while a
+       strip that scrolls inside its own border is an ordinary phone control with its
+       first column pinned. */
+    #weekView .table-scroll {
+        overflow-x: auto;
+        overflow-y: visible;
+        border: none;
+        background: none;
+        border-radius: var(--radius-sm);
+        /* Room for the momentum bar iOS draws over the last row. */
+        padding-bottom: 2px;
+    }
+    /* NOT table-layout: fixed. Fixed layout divides the container's width between the
+       columns and ignores min-width entirely - which is how `min-width: 44px` sat two
+       lines below here for a year as a rule that did nothing, and how the columns came
+       out 32px wide on the narrowest phone while the test that was meant to catch it had
+       been taught to expect 32. Auto layout honours the floor and makes the table wider
+       than its box, which is what the scroll is for. */
+    .week-table { min-width: 100%; width: 100%; table-layout: auto; }
     .week-table th, .week-table td { padding: 3px 1px; }
+
+    /* The names stay put while the days move under them. A colour block in row four
+       means nothing once you cannot see whose row four is. */
+    .week-table .corner,
+    .week-table .name-cell {
+        position: sticky;
+        inset-inline-start: 0;
+        z-index: 2;
+        background: var(--surface-2);
+    }
+    .week-table thead .corner { z-index: 3; }
 
     /* The corner label has no room; the column keeps its width for the names.
        70px rather than 78, which buys the day columns 8px each and ellipsizes no name
        that was not already being ellipsized.
 
-       An earlier version of this comment said 70 + 7x44 is what fits across the narrowest
-       phone. It is not: that is 378px, and a 320px screen offers 296. Seven columns wide
-       enough for a thumb do not fit beside a column of names on the smallest phone this
-       app runs on, and no arrangement of these numbers makes them - 7 x 44 is 308 on its
-       own. So the columns are 32px there and the week is a screen for READING on a phone
-       that size. Tapping a cell is a shortcut to that day, not the only way to it: the day
-       screen has its own date arrows and its own picker, and a cell hit by mistake opens a
-       day and changes nothing. From 375px up the columns clear 44 and the question does
-       not arise. tests/mobile.test.mjs measures this at every width rather than trusting
-       the arithmetic in a comment, which is how the wrong one survived here. */
-    .week-table .corner { font-size: 0; width: 70px; }
+       70 + 7 x 44 is 378px and a 320px screen offers 296, so the seven days and the names
+       do NOT fit across the narrowest phone. That arithmetic was used twice to argue for
+       32px columns - a target a thumb misses, on a grid where a mis-tap opens the wrong
+       day. The arithmetic is right and the conclusion was wrong: what does not fit on the
+       screen fits in the box, and the box scrolls. Six and a bit days are visible at 320px
+       and the seventh is one short push away, with the names pinned to the edge so the row
+       is still legible while it moves. From 375px up more of the week is on screen at once
+       and by 430px all of it is. Nothing here shrinks below 44 to make a number work.
+       tests/mobile.test.mjs measures both dimensions at every width, with no exemption -
+       it used to carry one, which is how the wrong conclusion survived here. */
+    .week-table .corner { font-size: 0; width: 70px; min-width: 70px; }
+    /* 44 in both dimensions, on every phone, with no exemption. The height comes from
+       .week-cell { height: 44px } in the coarse-pointer block; this is the other half,
+       and it is a floor rather than a share of the width - see the note on table-layout
+       above for why it used to be neither. */
     .week-table td.week-cell, .week-table th:not(.corner) { min-width: 44px; }
     .week-table .name-cell {
         font-size: 14px;
@@ -1949,6 +1983,14 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     body { background: #fff; color: #000; }
     .table-scroll { border: none; overflow: visible; }
     .week-table { min-width: 0; }
+    /* Paper has no thumbs and does not scroll. The phone's week strip scrolls sideways
+       inside its box and pins the names to the edge of it; carried onto a page, that box
+       would CLIP the last days off the sheet and stack the names over Thursday. So the
+       three rules that make it a strip are undone here, at the same specificity that set
+       them, and the week prints as a table again. */
+    #weekView .table-scroll { overflow: visible; padding-bottom: 0; }
+    .week-table td.week-cell, .week-table th:not(.corner) { min-width: 0; }
+    .week-table .corner, .week-table .name-cell { position: static; }
     .week-table th, .week-table td { border-color: #999; }
     .cell-filled { background: #fff !important; }
 

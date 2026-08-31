@@ -61,15 +61,17 @@ service cloud.firestore {
     // Three fields carry it, and none of them is a clock. updatedAt stays exactly what it
     // was - a phone's own time, informational, never load-bearing.
 
-    // The version of the protocol the writer speaks. A write without one is refused.
+    // The version of the protocol the writer speaks.
     //
     // This is the backward-compatibility decision, stated rather than finessed: a build
     // that predates the protocol writes no such field, and there is no rule that both
-    // accepts those writes and orders them - accepting them IS the hole. So it is refused,
-    // the old build shows a visible sync error, and it cannot diverge quietly. Which is
-    // why these rules are published only once every phone is on the new build; there is no
-    // permissive transition, because such a transition is the defect wearing a rollout
-    // plan. See docs/sync-protocol.md.
+    // accepts those writes and orders them - accepting them once the document is ordered
+    // IS the hole. So after cutover it is refused, the old build shows a visible sync
+    // error, keeps its queue, does not say synced, and cannot diverge quietly.
+    //
+    // Cutover is not a date somebody picks. It is the first protocol write landing on the
+    // document; until then legacyWrite() below keeps the un-updated phone working. That is
+    // what makes the rollout executable rather than a sentence. See docs/sync-protocol.md.
     function versioned() {
       return request.resource.data.protocol is int
         && request.resource.data.protocol >= 1;
@@ -89,6 +91,43 @@ service cloud.firestore {
     function firstRevision() {
       return request.resource.data.revision is int
         && request.resource.data.revision == 1;
+    }
+
+    // THE DOCUMENT THAT IS ALREADY THERE, and has never spoken the protocol.
+    //
+    // The live schedule was written by builds that had never heard of a revision. It has
+    // a roster, days and advances and no `revision` field at all - so nextRevision()
+    // asks it for `null + 1` and refuses, for ever. Without an exception the existing
+    // document could never take its first protocol write, and the rollout is a paragraph
+    // that cannot be executed.
+    function noRevisionYet() {
+      return !('revision' in resource.data);
+    }
+
+    // The exception is exactly one write wide. It applies only while the document has no
+    // revision; the moment one lands, noRevisionYet() is false and nextRevision() governs
+    // everything after. A later write claiming revision 1 over a document already at 7 is
+    // refused by both halves, so this cannot be reused to reset the count.
+    function bootstrapRevision() {
+      return request.resource.data.revision is int
+        && request.resource.data.revision == 1;
+    }
+
+    // A WRITE FROM A PHONE THAT HAS NOT UPDATED YET.
+    //
+    // This is what makes the rollout executable rather than a sequencing puzzle with no
+    // valid order. Publishing rules that demand a protocol breaks every phone in the
+    // field the same minute; waiting until every phone has updated means the updated ones
+    // cannot write in the meantime, because the published rules have no receipts
+    // subcollection. Neither order works.
+    //
+    // So during the transition both shapes are allowed - and only until the document is
+    // bootstrapped. Once it carries a revision, a write with no protocol is refused, so
+    // an old phone cannot flatten the ordering fields after cutover. That is the whole
+    // rollout: publish this, let the phones update, and the first protocol-capable write
+    // closes the door behind itself.
+    function legacyWrite() {
+      return noRevisionYet() && !('protocol' in request.resource.data);
     }
 
     // The operation this write carries, and its receipt - which must exist AFTER this
@@ -120,9 +159,15 @@ service cloud.firestore {
 
       allow update: if allowed()
         && stamped()
-        && versioned()
-        && nextRevision()
-        && carriesReceipt(docId)
+        && (
+          // A protocol write: the ordinary next revision, or the one bootstrap that
+          // brings a legacy document into the protocol. Either way it carries its
+          // receipt, so a revision never exists without the operation that explains it.
+          (versioned() && (nextRevision() || (noRevisionYet() && bootstrapRevision()))
+            && carriesReceipt(docId))
+          // Or a phone that has not updated yet, while the document is still legacy.
+          || legacyWrite()
+        )
         && (!isFullReplacement() || fullDocumentOk());
 
       // Nothing deletes the schedule. It is the record of who worked where.

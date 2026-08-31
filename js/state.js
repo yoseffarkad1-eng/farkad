@@ -687,15 +687,34 @@ function normaliseSchedule(raw, hints) {
     //
     // Now nothing is left out. An entry this build can fold goes where it always went; an
     // entry it cannot goes into `unreadable`, which the writer round-trips untouched and
-    // nothing reads for arithmetic. The bytes survive; the fold ignores them; and the door
-    // that should have refused the record in the first place (storedScheduleProblems) now
-    // does, so this path is the second line rather than the only one.
+    // nothing reads for arithmetic. The bytes survive and the fold ignores them.
+    //
+    // This comment used to say storedScheduleProblems refused such a record "in the first
+    // place", so that this path was the second line rather than the only one. It did not,
+    // and that sentence is why nobody went looking: a repayment whose amount was the
+    // string "abc" passed every document gate in the app. The document is still not
+    // refused - the rescue file has to be able to open it, which is the reasoning written
+    // into storedScheduleProblems and it is right - but this path is now the real line,
+    // and js/app.js stops the device WRITING while any of it is unreadable.
     const ledger = (raw.ledger && typeof raw.ledger === 'object') ? raw.ledger : {};
     const entries = (ledger.advances && typeof ledger.advances === 'object')
         ? ledger.advances : {};
     Object.keys(entries).forEach(id => {
         const entry = entries[id];
-        if (!entry || typeof entry !== 'object' || !entry.advanceId || !entry.kind) {
+        // THE WHOLE CHECK, not a shape test.
+        //
+        // This asked only whether the entry had an advanceId and a kind. An entry that
+        // had both and carried the string "abc" as its amount was therefore READABLE, and
+        // went into the fold - where the arithmetic read it as nothing. A number nobody
+        // can read, silently reinterpreted as zero, on a man's outstanding debt.
+        //
+        // ledgerEntryProblems is the same check the queue applies to an edit on its way
+        // out. Applying it here means an entry that could never have been written by this
+        // build cannot be READ by it either, whatever door it arrived through.
+        const readable = entry && typeof entry === 'object'
+            && ledgerEntryProblems(String(id), Object.assign({}, entry, { id: String(id) }))
+                .length === 0;
+        if (!readable) {
             schedule.ledger.unreadable[id] = entry;
             return;
         }
@@ -709,6 +728,27 @@ function normaliseSchedule(raw, hints) {
             schedule.ledger.unreadable[id] = held[id];
         }
     });
+
+    // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.
+    //
+    // A schedule reaches this function from boot, from a cloud snapshot, from a restore,
+    // from a backup import, from the raw rescue import, from the migration and from a
+    // whole-document replacement. Reporting at each of those is seven chances to forget
+    // one; reporting here is none.
+    //
+    // Recovery is the right home and not an overreach: it quarantines rather than
+    // deletes, it blocks WRITING rather than reading, and it leaves the rescue export
+    // working - which is exactly the shape this needs. The document still opens, the
+    // bytes are still there, the fold cannot see them, and the device will not record a
+    // new day on top of financial history it cannot read. Recovery.damaged is keyed, so
+    // arriving here twice with the same trouble says it once.
+    if (typeof Recovery !== 'undefined'
+        && Object.keys(schedule.ledger.unreadable).length > 0) {
+        Recovery.damaged('scheduleData:v2:ledger',
+            JSON.stringify(schedule.ledger.unreadable),
+            'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
+            + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
+    }
 
     // The invariant, enforced here because here is where every route in meets: a
     // snapshot, a boot from disk, an imported file, a restored backup. Anything with a

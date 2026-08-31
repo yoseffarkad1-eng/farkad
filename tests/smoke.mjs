@@ -4152,23 +4152,37 @@ async function seedRoster(page) {
       width.page <= width.viewport + 1, JSON.stringify(width));
   }
 
-  // on a phone the week is a colour map: seven days on one screen, no sideways scroll
+  // On a phone the week is a colour map of seven days, and it scrolls inside its own box.
+  //
+  // This check used to read `week.inner <= week.box + 1` - the whole week on the screen
+  // with nothing to push. It was changed deliberately, and the reason is the one thing
+  // worth reading here: showing all seven columns beside a column of names on a 390px
+  // screen meant columns of 42px, and 320px meant 32px. Those are not tap targets, and a
+  // mis-tap on this grid opens a day with somebody else's name on it. The floor won; the
+  // strip scrolls. What must NOT change is the line above it - the PAGE still never
+  // scrolls sideways, on any view, which is the defect this whole block was written for.
   await page.evaluate(() => showView('week'));
   await page.waitForTimeout(250);
   const week = await page.evaluate(() => {
     const wrap = document.querySelector('#weekView .table-scroll');
     const name = document.querySelector('.week-cell .cell-line .site-name');
     const legend = document.querySelector('.week-legend');
+    const cells = [...document.querySelectorAll('.week-cell')]
+      .map(node => node.getBoundingClientRect());
     return {
       inner: wrap.scrollWidth,
       box: wrap.clientWidth,
       cols: document.querySelectorAll('.week-table thead th').length,
+      narrowest: Math.round(Math.min(...cells.map(b => b.width))),
+      shortest: Math.round(Math.min(...cells.map(b => b.height))),
       nameHidden: name ? getComputedStyle(name).display === 'none' : false,
       legendShown: legend ? getComputedStyle(legend).display !== 'none' : false
     };
   });
-  check('the whole week fits on one phone screen, all seven days',
-    week.inner <= week.box + 1 && week.cols === 8, JSON.stringify(week));
+  check('all seven days are in the week, and the box is what scrolls',
+    week.cols === 8 && week.inner >= week.box, JSON.stringify(week));
+  check('and every one of them is a 44px target',
+    week.narrowest >= 44 && week.shortest >= 44, JSON.stringify(week));
   check('cells shrink to the site colour alone', week.nameHidden, JSON.stringify(week));
 
   // the shrunk headers use the calendar letters א׳-ש׳, not first letters - four of the

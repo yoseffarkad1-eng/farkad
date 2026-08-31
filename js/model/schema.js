@@ -1300,10 +1300,29 @@ function ledgerEntryProblems(id, value) {
         if (!value.workerId || !isSafeSegment(String(value.workerId))) {
             return ['an advance given to nobody'];
         }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
-            return ['an advance given on no date'];
-        }
-        if (!Number.isFinite(Number(value.amount))) return ['an advance of no amount'];
+        if (!isRealDate(String(value.date))) return ['an advance given on no date'];
+        const out = Number(value.amount);
+        if (!Number.isFinite(out)) return ['an advance of no amount'];
+        // Money handed over is not negative. A negative "given" is a repayment wearing
+        // the wrong kind, and folding it as an advance credits a man for cash nobody
+        // gave him.
+        if (out < 0) return ['an advance given of less than nothing'];
+        if (out > ADVANCE_MAX) return ['an advance beyond any wage'];
+    }
+    // A correction restates the record, so what it restates has to be readable money.
+    if (value.kind === 'corrected' && value.amount !== undefined) {
+        const fixed = Number(value.amount);
+        if (!Number.isFinite(fixed)) return ['a correction to no amount'];
+        if (fixed < 0) return ['a correction to less than nothing'];
+        if (fixed > ADVANCE_MAX) return ['a correction beyond any wage'];
+    }
+    // A closure's carried balance is the number the NEXT period opens on. Unreadable, it
+    // is the whole debt gone or invented.
+    if (value.balanceAfter !== undefined) {
+        const left = Number(value.balanceAfter);
+        if (!Number.isFinite(left)) return ['a closure whose carried balance is not a number'];
+        if (left < 0) return ['a closure carrying less than nothing'];
+        if (left > ADVANCE_MAX) return ['a closure carrying beyond any wage'];
     }
     // CASH HANDED BACK, which is money and is checked like money.
     //
@@ -1315,8 +1334,7 @@ function ledgerEntryProblems(id, value) {
     // A CLOSURE is money coming off a wage, and is checked like money. It also has to
     // name the period it closes, or it cannot be found again and cannot freeze anything.
     if (String(value.kind) === 'deducted') {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.periodFrom))
-            || !/^\d{4}-\d{2}-\d{2}$/.test(String(value.periodTo))) {
+        if (!isRealDate(String(value.periodFrom)) || !isRealDate(String(value.periodTo))) {
             return ['a period closed over no period'];
         }
         if (String(value.periodTo) < String(value.periodFrom)) {
@@ -1335,9 +1353,7 @@ function ledgerEntryProblems(id, value) {
     // the thing an append-only ledger exists to refuse, so the reason is not optional -
     // "somebody changed a number and nobody wrote down why" is the state this prevents.
     if (String(value.kind) === 'reversed') {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
-            return ['a reversal on no date'];
-        }
+        if (!isRealDate(String(value.date))) return ['a reversal on no date'];
         if (typeof value.reason !== 'string' || value.reason.trim() === '') {
             return ['a reversal with no reason'];
         }
@@ -1351,9 +1367,7 @@ function ledgerEntryProblems(id, value) {
         }
     }
     if (String(value.kind) === 'repaid') {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
-            return ['money handed back on no date'];
-        }
+        if (!isRealDate(String(value.date))) return ['money handed back on no date'];
         const back = Number(value.amount);
         if (!Number.isFinite(back)) return ['money handed back of no amount'];
         if (back < 0) return ['money handed back of less than nothing'];
@@ -1369,7 +1383,10 @@ function ledgerEntryProblems(id, value) {
     if (value.amount !== undefined && !Number.isFinite(Number(value.amount))) {
         return ['a ledger entry with an amount that is not a number'];
     }
-    if (value.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
+    // isRealDate, not the regex: 2026-02-30 is well shaped and is not a day. A
+    // transaction filed on a date that never happened lands in no account, so it reduces
+    // nothing and is invisible.
+    if (value.date !== undefined && !isRealDate(String(value.date))) {
         return ['a ledger entry with a date that is not a date'];
     }
     return [];
