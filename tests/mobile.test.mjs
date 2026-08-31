@@ -381,6 +381,40 @@ for (const width of WIDTHS) {
     check(`${label}: the last man in the crew is still reachable`,
         last.found && last.hit, JSON.stringify(last));
 
+    // AND THE DATE IS STILL THERE, at the bottom of the list.
+    //
+    // The check above and this one pull against each other, which is the whole reason
+    // this block is worth measuring. A pinned header keeps the date and can hold the last
+    // row underneath it; an unpinned one frees the row and lets the date scroll away. The
+    // second is the trade this app used to make, and it is the wrong one: the entry that
+    // costs real money is a day recorded against the wrong date, and halfway down a list
+    // of names nothing else says what day this is.
+    //
+    // So both are asked, in the same scrolled-to-the-bottom state, and the header
+    // collapses to one row rather than choosing between them.
+    const dateSeen = await page.evaluate(() => {
+        const header = document.querySelector('.day-header');
+        if (!header) return { found: false };
+        const box = header.getBoundingClientRect();
+        return {
+            found: true,
+            text: header.textContent.indexOf('12/08/2026') !== -1,
+            top: Math.round(box.top),
+            height: Math.round(box.height),
+            onScreen: box.bottom > 0 && box.top < window.innerHeight
+        };
+    });
+    check(`${label}: the date is still on screen at the bottom of the list`,
+        dateSeen.found && dateSeen.text && dateSeen.onScreen,
+        JSON.stringify(dateSeen));
+
+    // What it costs, stated as a number rather than as "short". A header that creeps back
+    // up is how the last row ends up underneath it again, and that regression is silent -
+    // the row is still THERE, it is just not tappable.
+    check(`${label}: and the pinned bar stays out of the crew's way`,
+        dateSeen.height > 0 && dateSeen.height <= 80,
+        `${dateSeen.height}px`);
+
     await page.context().close();
 }
 

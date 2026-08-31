@@ -699,22 +699,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     }
 }
 
-/* Except on a screen too short to give it away.
-
-   A phone held sideways is about 320 pixels tall. The day header is most of that, the tab
-   bar and the dock take the rest, and a sticky header then holds the last man in the crew
-   underneath itself: scrolled to the bottom of the list, his row is on screen and a tap on
-   it lands on the header instead. Below 500px of height the header goes back to scrolling
-   with the page - the date is one flick away rather than always visible, which is the
-   right trade when the alternative is a list that cannot be used at all.
-
-   The progress bar goes with it, for the same reason and by the same measurement: it is
-   the second thing pinned to the top of that screen, and between them they were holding
-   the last man in the crew underneath - his row on screen, and a tap on it landing on the
-   bar above. */
-@media (max-height: 500px) {
-    .day-header, .progress { position: static !important; }
-}
+/* Except on a screen too short to give it a FULL header - a phone held sideways. There
+   the header stays pinned but collapses to one short bar: the story and the rules are at
+   the END of this file, because that block undoes refinements written between here and
+   there and the cascade only lets it win from below them. */
 
 .day-nav {
     display: flex;
@@ -2793,4 +2781,98 @@ body.reorder-dragging .reorder-list::after {
    names the crew or the money. */
 @media print {
     body.client-scoped .report-payroll { display: none !important; }
+}
+
+/* The landscape bar: on a screen too short for the full header, one pinned row.
+
+   Last in the file on purpose - this block collapses the header that everything above
+   refines, so it must come after all of it or lose to the cascade in silence.
+
+   A phone held sideways is about 320 pixels tall. Pinned in full - nav row, tools row,
+   progress line - the header was most of that, the tab bar and the dock took the rest,
+   and together they held the last man in the crew underneath: scrolled to the bottom of
+   the list, his row was on screen and a tap on it landed on the header instead. The
+   first answer was position: static below 500px of height - the whole header scrolled
+   away, the list got its room back, and the date went off the screen with the first
+   flick. That traded away the one thing this screen must never lose: the entry that
+   costs real money is a day recorded against the wrong date, and halfway down a list of
+   names nothing else says what day this is.
+
+   So the trade is remade smaller: one pinned row instead of none. The nav row stays -
+   chevrons, day name and date on a single line - and undo and redo are absorbed into it
+   at reduced padding, because undo is the button somebody reaches for having just
+   realised the mistake, and a control that must be scrolled to is not there when it
+   matters. The tools row's own line and the progress line's text go; the bare 4px track
+   stays under the bar, still saying how much of the day is done without a word. 62px in
+   all, measured at 568x320 - short enough that the last man's row clears it, held by
+   the landscape checks in tests/mobile.test.mjs. */
+@media (max-height: 500px) {
+    /* The header becomes the row: nav and tools side by side, the track on a full-width
+       line of its own below them. */
+    .day-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        column-gap: 4px;
+        padding: 3px 8px;
+    }
+    /* flex-basis 0: the nav asks for nothing, so the tools are never wrapped onto a
+       second line - the day name is what shrinks, by ellipsis, never the buttons. */
+    .day-nav { flex: 1 1 0; min-width: 0; gap: 4px; }
+    .day-tools { margin-top: 0; flex: 0 0 auto; }
+    .day-steps { gap: 4px; }
+    .step-btn { padding: 8px 5px; }
+    .btn-today { margin-inline-start: 0; padding: 6px 8px; }
+    .btn-nav { padding-inline: 6px; gap: 3px; }
+    .btn-nav svg { width: 10px; height: 10px; }
+
+    /* The title's two lines become one: name beside date. The name is the half that
+       gives way - the date stays whole, or the bar has no reason to be pinned. */
+    .day-label {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+    }
+    .day-label strong { display: inline; font-size: 17px; flex: 0 1 auto; min-width: 0; }
+    .day-date { flex: 0 0 auto; white-space: nowrap; }
+
+    /* The progress row slims to the bare track. */
+    .day-header .progress {
+        flex-basis: 100%;
+        margin: 3px -8px -3px;
+        padding: 0 12px 5px;
+        gap: 0;
+    }
+    /* The track's 4 real pixels. The base rule says flex: 1, whose 0% basis is what a
+       column container actually sizes by - the height: 4px beside it never wins, and a
+       track the line's text used to sit over is a track nobody missed. Here the text is
+       gone and the track IS the progress, so it gets its height back as a basis. */
+    .day-header .progress .progress-bar { flex: 0 0 4px; }
+    /* Its text goes the way of .now-editing above: off the eyes, kept for the live
+       region - the climbing count is still worth hearing. */
+    .day-header .progress .progress-line {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    /* The bar's price, paid back below the list. Pinned again, the header takes its
+       height out of the scrolled-to-bottom position of the last row - and with a home
+       indicator under the bottom bars, the device notice's line under the list was
+       exactly the difference between that row clearing the bar and its centre sitting
+       under it. Same treatment as the line above: the words stay for the live region
+       that reads them, the pixels go back to the crew. */
+    .storage-notice {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        margin: 0;
+    }
 }
