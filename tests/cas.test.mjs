@@ -356,6 +356,28 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
     check('and the second phone is not told it is synced over work it is holding',
         two.Sync.pendingCount() === 0 || two.Sync.status !== 'synced',
         `${two.Sync.pendingCount()} owed, status ${two.Sync.status}`);
+
+    // AND IT IS TOLD WHICH SILENCE THIS IS.
+    //
+    // A held path is not a failure - the server is doing exactly what it was built to do,
+    // refusing to let an older write put back a value somebody else corrected - and the
+    // edit is safe on this disk. It reported as 'error', the same line a tunnel produces,
+    // so the one situation a person can actually resolve looked like the one they cannot.
+    check('the second phone says the record moved, not that something went wrong',
+        two.Sync.status === 'contested', two.Sync.status);
+
+    two.ctx.document.getElementById = id => (id === 'storageNotice'
+        ? two.__notice : null);
+    two.__notice = { textContent: '' };
+    two.call('updateSyncNotice');
+    check('in words that say what happened, that nothing was lost, and what to do',
+        two.__notice.textContent.indexOf('הנתונים השתנו במכשיר אחר') !== -1
+        && two.__notice.textContent.indexOf('לא אבדה') !== -1
+        && two.__notice.textContent.indexOf('רענן') !== -1,
+        JSON.stringify(two.__notice.textContent));
+    check('and never the line a tunnel produces',
+        two.__notice.textContent.indexOf('שגיאת סנכרון') === -1,
+        JSON.stringify(two.__notice.textContent));
 }
 
 // ============================================================ the claim moving is harmless

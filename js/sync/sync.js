@@ -2415,7 +2415,19 @@ const FarkadSync = {
 
     fail(error) {
         console.error('Sync error:', error);
-        this.setStatus('error', error);
+        // A HELD PATH IS NOT A FAILURE, and gets its own line.
+        //
+        // The server refusing to let an older write put back a value somebody else
+        // corrected is the protocol working, and the edit is safe on this disk. Reported
+        // as 'error' it wore the same sentence a tunnel produces - so the one situation a
+        // person can actually resolve looked like the one they cannot.
+        //
+        // Decided HERE rather than at the throw site because a conflict reaches this
+        // function by more than one route - the rebase ceiling, a second conflict on the
+        // retry - and a status set on only one of them is a status that appears
+        // sometimes.
+        this.setStatus(error && error.contested && error.contested.length > 0
+            ? 'contested' : 'error', error);
     },
 
     // The right to send is stuck, and a person can see it. See claimIsFree.
@@ -2807,6 +2819,21 @@ const FarkadSync = {
                         return this.adapter.update(patch);
                     }
                     error.contested = contested;
+                    // SAID AS ITSELF, not as "something went wrong".
+                    //
+                    // A held path is not a failure - the server is doing exactly what it
+                    // was built to do, refusing to let an older write put back a value
+                    // somebody else corrected - and the edit is safe on this disk. But it
+                    // reported as 'שגיאת סנכרון', the same line a tunnel produces, so the
+                    // one situation a person can actually resolve looked like the one they
+                    // cannot.
+                    //
+                    // A LINE, not the modal the design drew. A dialog raised from a
+                    // background flush lands on whoever is mid-way through recording a
+                    // day, and this app does not take the keyboard away from somebody to
+                    // tell them something that can wait for them to look up. The words are
+                    // the design's, and they say what happened, that nothing was lost, and
+                    // what to do.
                 }
                 throw error;
             });
@@ -4798,7 +4825,9 @@ function updateSyncNotice() {
             + 'ואם זה נמשך ייצא גיבוי ופתח מחדש.',
         synced: 'מסונכרן בין המכשירים.',
         offline: 'אין חיבור - השינויים יישלחו כשהחיבור יחזור.',
-        error: 'שגיאת סנכרון - הנתונים שמורים במכשיר הזה.'
+        error: 'שגיאת סנכרון - הנתונים שמורים במכשיר הזה.',
+        contested: 'הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - '
+            + 'רענן, בדוק את המסך, ואשר שוב.'
     };
 
     // The browser knows the signal is gone before the write watchdog does, and a line
