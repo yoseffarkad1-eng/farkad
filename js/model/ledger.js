@@ -237,6 +237,138 @@ function advanceHistory(schedule, advanceId) {
     return ledgerEntries(schedule).filter(entry => String(entry.advanceId) === String(advanceId));
 }
 
+// ---------------------------------------------------------------- what is still owed
+//
+// THE ONE ANSWER. Every surface that prints a number for one advance reads this and
+// nothing else: the worker screen, the repayment form, the payroll row, the ledger
+// overview, the exports, the printed sheet and the WhatsApp message.
+//
+// It exists because there were two answers and they disagreed. The screen computed
+// `given - repaid` - cash in, cash back - and stopped there. Three kinds of entry reduce
+// what a man owes and only one of them was counted:
+//
+//   repaid    cash handed back
+//   reversed  an advance recorded in error and compensated; the money never left the tin
+//   deducted  money that came off his WAGE when a period closed
+//
+// So a 500 advance with 400 already taken off his pay showed "חוב פתוח 500", the
+// repayment form offered a ceiling of 500, and a man could hand back 500 in cash against
+// a debt of 100. That is not a rounding disagreement between two screens; it is the app
+// collecting money twice.
+//
+// `left` never goes below zero and `overpaid` carries the remainder instead. A negative
+// debt read as a number would be ADDED to his next wage as though the firm owed him for
+// it, which is a decision this app may not reach on its own - see the overpayment block
+// below.
+function advanceOutstanding(schedule, advanceId) {
+    const id = String(advanceId);
+    const folded = foldLedger(schedule)[id];
+    const legacy = ((schedule && schedule.advances) || {})[id];
+    // The ledger's answer where there is one; the old field otherwise, because until all
+    // three phones are past v79 it is the only place an advance recorded this evening on
+    // another phone exists at all.
+    const given = folded ? Number(folded.amount) || 0
+        : Number((legacy || {}).amount) || 0;
+
+    let repaid = 0;
+    let reversed = 0;
+    let deducted = 0;
+    advanceHistory(schedule, id).forEach(entry => {
+        const sum = Number(entry.amount) || 0;
+        if (entry.kind === 'repaid') repaid += sum;
+        else if (entry.kind === 'reversed') reversed += sum;
+        else if (entry.kind === 'deducted') deducted += sum;
+    });
+
+    const settled = agoraRound(repaid + reversed + deducted);
+    return {
+        id,
+        given: agoraRound(given),
+        repaid: agoraRound(repaid),
+        reversed: agoraRound(reversed),
+        deducted: agoraRound(deducted),
+        settled,
+        left: agoraRound(Math.max(0, given - settled)),
+        // More has come off this advance than was ever put on it. Kept as its own number
+        // rather than a negative `left`, so no screen can print it as a debt of the
+        // opposite sign and no wage can be quietly increased by it.
+        overpaid: agoraRound(Math.max(0, settled - given))
+    };
+}
+
+// EVERY ADVANCE OF THIS MAN'S THAT HAS BEEN OVER-SETTLED, and it is not a rounding error.
+//
+// Two phones, one advance of 500, both offline. Each records a repayment of 500 against
+// it. Both land - and both are RIGHT to land, because an append-only ledger that dropped
+// one of them would be losing the record of money somebody actually handed over. The
+// fold then says 1,000 settled against 500 given.
+//
+// What must not happen is the app deciding on its own what that means. It is one of at
+// least three different real events - the same cash entered twice, two men paying for
+// each other, or a genuine overpayment the firm owes back - and they are settled by
+// asking, not by arithmetic. So both entries stay, the state is named on the screen, the
+// automatic deduction stops until somebody looks, and the correction is a deliberate act
+// with a reason attached.
+// WHAT REFUSES A REVERSAL, before one is written.
+//
+// ledgerEntryProblems checks the SHAPE of an entry - it is handed one record and knows
+// nothing about the advance behind it, so it cannot tell a reversal of 301 against an
+// advance of 300 from a reversal of 301 against an advance of 5,000. Both are well-formed
+// and one of them is money invented out of nothing. This is the other half, and it needs
+// the schedule.
+//
+// English, like every other *Problems in the model: these are diagnostics, and the screen
+// that refuses says so in Hebrew in its own words - see openReversalForm.
+function reversalProblems(schedule, advanceId, amount, reason) {
+    const out = [];
+    const id = String(advanceId);
+    const known = ((schedule && schedule.advances) || {})[id] || foldLedger(schedule)[id];
+    if (!known) return ['a reversal of an advance that is not there'];
+
+    const state = advanceOutstanding(schedule, id);
+    const back = Number(amount);
+    if (!Number.isFinite(back) || back <= 0) {
+        out.push('a reversal of nothing, or of less than nothing');
+    } else {
+        const agorot = back * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            out.push('a reversal finer than an agora');
+        }
+        // ALREADY REVERSED IS ALREADY GONE. A second reversal of the same advance strikes
+        // the same money off twice, and after it the man is credited with a debt that was
+        // never his. The ceiling is what is left UNREVERSED, so reversing 300 of a 300
+        // leaves a ceiling of zero and the next attempt is refused rather than folded.
+        const room = agoraRound(state.given - state.reversed);
+        if (room <= 0) out.push('a second reversal of an advance already reversed in full');
+        else if (back > room + 1e-6) out.push('a reversal larger than the advance it corrects');
+    }
+
+    if (typeof reason !== 'string' || reason.trim() === '') {
+        out.push('a reversal with no reason');
+    }
+    return out;
+}
+
+// What is still open to reversal on this advance, for the form that offers a ceiling.
+function reversalRoom(schedule, advanceId) {
+    const state = advanceOutstanding(schedule, advanceId);
+    return agoraRound(Math.max(0, state.given - state.reversed));
+}
+
+function overpaidAdvances(schedule, workerId) {
+    const advances = (schedule && schedule.advances) || {};
+    const folded = foldLedger(schedule);
+    const ids = Object.keys(advances).concat(Object.keys(folded))
+        .filter((id, at, all) => all.indexOf(id) === at);
+    return ids
+        .filter(id => {
+            const of = folded[id] || advances[id];
+            return Boolean(of) && String(of.workerId) === String(workerId);
+        })
+        .map(id => advanceOutstanding(schedule, id))
+        .filter(state => state.overpaid > 0);
+}
+
 // ---------------------------------------------------------------- writing
 //
 // All three take a schedule, append one entry, and hand back the field path so the caller

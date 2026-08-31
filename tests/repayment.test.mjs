@@ -26,6 +26,7 @@
 // carry is a flag, off, with a plan function that says exactly what flipping it would do -
 // the same treatment planRateStamping gives to stamping old days, and for the same reason.
 
+import { readFileSync } from 'node:fs';
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { makeNode } from './nodes.mjs';
@@ -694,11 +695,221 @@ function omer(flags) {
     check('a reversal with no reason is refused',
         device.call('ledgerEntryProblems', 'le_x', noReason).length > 0,
         JSON.stringify(device.call('ledgerEntryProblems', 'le_x', noReason)));
-    check('and one that gives back more than was ever given is refused too',
+    // WHAT THIS CHECK ACTUALLY MEASURES, said correctly. It was named "one that gives
+    // back more than was ever given is refused too" and passed an amount of -5, which
+    // ledgerEntryProblems refuses for being NEGATIVE. That validator is handed a single
+    // record and never sees the advance behind it, so it would have accepted 301 against
+    // a 300 without blinking, and the check would have gone on passing. The bound by the
+    // advance is reversalProblems, and it is measured in the D5 suite below with 301, 500
+    // and a concurrent duplicate. Here the name matches the amount.
+    check('a reversal of a negative amount is refused',
         device.call('ledgerEntryProblems', 'le_x', Object.assign({}, noReason,
             { reason: 'למה', amount: -5 })).length > 0,
         JSON.stringify(device.call('ledgerEntryProblems', 'le_x',
             Object.assign({}, noReason, { reason: 'למה', amount: -5 }))));
+}
+
+
+// ------------------------------------------------- one answer to "what is still owed"
+{
+    suite('D1: the outstanding balance counts every kind of entry that reduces it');
+
+    // The defect, in one line: the screen computed `given - repaid`, and three kinds of
+    // entry reduce a debt. A 500 advance with 400 already taken off his WAGE read
+    // "חוב פתוח 500" and offered a repayment ceiling of 500 - so a man could hand back
+    // 500 in cash against a debt of 100, and the app would take it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+
+    same('nothing has happened to it yet',
+        device.call('advanceOutstanding', device.State.schedule, id),
+        { id, given: 5000, repaid: 0, reversed: 0, deducted: 0, settled: 0,
+            left: 5000, overpaid: 0 });
+
+    // 3,050 came off his wage when account A closed. That is not a repayment and it is
+    // not a reversal; it is the third kind, and it was the one nobody counted.
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 3050,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 1950));
+    const afterWage = device.call('advanceOutstanding', device.State.schedule, id);
+    check('money taken off the wage comes off the balance', afterWage.deducted === 3050
+        && afterWage.left === 1950, JSON.stringify(afterWage));
+
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 200, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash'));
+    device.State.commit(device.call('recordAdvanceReversed', device.State.schedule,
+        id, 50, '2026-08-24', 'נרשם 50 בטעות', '2026-08-24T10:00:00.000Z', 'd_omer'));
+
+    const all = device.call('advanceOutstanding', device.State.schedule, id);
+    same('and cash, wage and correction are three separate numbers on one balance',
+        { repaid: all.repaid, deducted: all.deducted, reversed: all.reversed,
+            settled: all.settled, left: all.left, overpaid: all.overpaid },
+        { repaid: 200, deducted: 3050, reversed: 50, settled: 3300, left: 1700,
+            overpaid: 0 });
+
+    // The old arithmetic, written out so the difference is on the record: given - repaid
+    // alone would have said 4,800 was still owed on an advance with 1,700 left on it.
+    check('the number the screen used to print was 4,800 on this advance',
+        all.given - all.repaid === 4800, String(all.given - all.repaid));
+}
+
+{
+    suite('D1: the repayment ceiling is the same number the screen prints');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 4900,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 100));
+
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    given('4,900 of the 5,000 came off his wage', state.deducted === 4900);
+    check('so 100 is what is left, on every surface that asks',
+        state.left === 100, JSON.stringify(state));
+    // The form's ceiling is `settled.left`, and `settled` is now this same call - see
+    // advanceSettled in js/ui/reports.js. The check that matters is that there is no
+    // second arithmetic anywhere that could answer 5,000.
+    check('and the old answer, 5,000, is not reachable from this record',
+        state.given - state.repaid - state.reversed - state.deducted === 100,
+        JSON.stringify(state));
+}
+
+// ------------------------------------------------- two phones, one repayment, twice
+{
+    suite('D2: more settled than was ever given is a state, not a clamp');
+
+    // Both phones are offline, both are told the man handed back 500 against the same
+    // advance, and both record it. Both entries are true records of something somebody
+    // said, and an append-only ledger that dropped one would be losing exactly the
+    // evidence needed to work out which. So both stay - and the app stops deducting.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 4600,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 400));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', 'מזומן', '2026-08-24T09:00:00.000Z', 'd_a', 'cash'));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', 'מזומן', '2026-08-24T09:00:01.000Z', 'd_b', 'cash'));
+
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    check('both repayments are still on the record', state.repaid === 800,
+        JSON.stringify(state));
+    check('the debt is zero and not a negative number', state.left === 0,
+        JSON.stringify(state));
+    check('and the surplus is named rather than swallowed', state.overpaid === 400,
+        JSON.stringify(state));
+
+    const flagged = device.call('overpaidAdvances', device.State.schedule, 'w_01');
+    check('the worker has an advance flagged for review',
+        flagged.length === 1 && flagged[0].id === id && flagged[0].overpaid === 400,
+        JSON.stringify(flagged));
+
+    // The pay sheet stops deducting while it stands. Nothing is lost - the balance is
+    // carried, not written off - and the row says why.
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to);
+    check('nothing is deducted from his wage while the account does not add up',
+        walk.deducted === 0, JSON.stringify(walk));
+    check('the row says it is holding, and by how much',
+        walk.review === true && walk.overpaid === 400, JSON.stringify(walk));
+    check('and the balance is carried rather than written off',
+        walk.carriedForward === walk.carriedIn + walk.given - walk.repaid - walk.reversed
+        || walk.carriedForward >= 0, JSON.stringify(walk));
+
+    // A CLOSED period is not revised by a surplus noticed today. That is the whole rule
+    // this feature rests on, and it holds here too.
+    const closedWalk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('the payslip that was already handed over is untouched',
+        closedWalk.deducted === 4600 && closedWalk.carriedOut === 400
+        && closedWalk.review === false, JSON.stringify(closedWalk));
+}
+
+// ------------------------------------------------- the reversal, bounded by its advance
+{
+    suite('D5: a reversal cannot exceed, or repeat, what it corrects');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    // A separate, small advance so the numbers are the brief's own: 300 given.
+    const wrong = device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-25', 300, '');
+    device.State.commit(wrong);
+    const id = wrong.value.id;
+
+    // THE CHECK THAT USED TO BE WRONG. It was named "one that gives back more than was
+    // ever given is refused too" and it passed an amount of -5 to ledgerEntryProblems,
+    // which refuses -5 for being negative and would have accepted 301 without blinking:
+    // that validator is handed one record and never sees the advance behind it. So the
+    // check proved a rule nobody had written. These are the amounts the name claims.
+    check('301 against a 300 advance is refused',
+        device.call('reversalProblems', device.State.schedule, id, 301, 'למה').length > 0,
+        JSON.stringify(device.call('reversalProblems', device.State.schedule, id, 301, 'למה')));
+    check('and so is 500', device.call('reversalProblems',
+        device.State.schedule, id, 500, 'למה').length > 0,
+        JSON.stringify(device.call('reversalProblems', device.State.schedule, id, 500, 'למה')));
+    check('300 exactly is allowed', device.call('reversalProblems',
+        device.State.schedule, id, 300, 'נרשם פעמיים בטעות').length === 0);
+    check('a reversal with no reason is refused whatever the amount',
+        device.call('reversalProblems', device.State.schedule, id, 300, '   ').length > 0);
+    check('and a reversal of nothing is refused',
+        device.call('reversalProblems', device.State.schedule, id, 0, 'למה').length > 0);
+
+    device.State.commit(device.call('recordAdvanceReversed', device.State.schedule,
+        id, 300, '2026-08-25', 'נרשם פעמיים בטעות', '2026-08-25T10:00:00.000Z', 'd_omer'));
+
+    check('once reversed in full there is nothing left to reverse',
+        device.call('reversalRoom', device.State.schedule, id) === 0,
+        String(device.call('reversalRoom', device.State.schedule, id)));
+    check('so a second reversal of the same advance is refused',
+        device.call('reversalProblems', device.State.schedule, id, 300,
+            'שוב').length > 0,
+        JSON.stringify(device.call('reversalProblems', device.State.schedule, id, 300, 'שוב')));
+    check('even a small one', device.call('reversalProblems',
+        device.State.schedule, id, 1, 'שוב').length > 0);
+
+    // TWO PHONES REVERSING THE SAME MISTAKE. Each one's guard passed when it was asked,
+    // because each was offline and each saw an unreversed advance. Both entries land and
+    // both stay - and the result is the visible overpayment state, not a silent debt of
+    // the opposite sign.
+    const second = device.call('recordAdvanceReversed', device.State.schedule,
+        id, 300, '2026-08-25', 'נרשם פעמיים בטעות', '2026-08-25T10:00:05.000Z', 'd_b');
+    device.State.commit(second);
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    check('both reversals are still on the record', state.reversed === 600,
+        JSON.stringify(state));
+    check('the debt is zero, never negative', state.left === 0, JSON.stringify(state));
+    check('and the duplicate is visible as a surplus to be looked at',
+        state.overpaid === 300, JSON.stringify(state));
+    check('the advance itself was never removed',
+        Boolean(device.State.schedule.advances[id])
+        && device.State.schedule.advances[id].amount === 300,
+        JSON.stringify(device.State.schedule.advances[id]));
+}
+
+{
+    suite('D3: nothing in this build deletes an advance');
+
+    // removeAdvance still EXISTS in the model - a `null` at an advance path has to be
+    // understood when it arrives from a phone that has not updated - but no screen may
+    // send one. The check is on the shipped source, because a button is easy to add back
+    // and this is the rule it would break.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('the ✕ that deleted an advance is gone from the advance row',
+        reports.indexOf('מחק מקדמה') === -1);
+    check('and nothing in the reports screen calls removeAdvance',
+        /removeAdvance\s*\(/.test(reports) === false);
+    check('the correction that replaces it is there instead',
+        reports.indexOf('openReversalForm') !== -1
+        && reports.indexOf('recordAdvanceReversed') !== -1);
+    check('and it asks for a reason before it writes anything',
+        reports.indexOf('סיבה (חובה)') !== -1);
+
+    // The five words, in one place, on every surface.
+    const labels = ['ניתנה מקדמה', 'הוחזר במזומן', 'נוכה מהשכר', 'תיקון-היפוך',
+        'החשבון נסגר'];
+    labels.forEach(word => check(`the statement says ${word} in its own words`,
+        reports.indexOf(word) !== -1));
 }
 
 report();

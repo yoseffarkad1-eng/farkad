@@ -1512,6 +1512,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wday-date span { color: var(--ink-3); font-size: 13px; }
 .wday-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wday-note { color: var(--ink-3); font-size: 12px; }
+/* An account that does not add up is not a quiet note. It is the reason nothing was
+   deducted from this man's wage, and somebody has to read it before payday. */
+.wday-note.wday-review { color: var(--warn); font-weight: 700; }
 .wday-money { text-align: start; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wday-absent .wday-date strong { color: var(--ink-3); }
 .wday-total {

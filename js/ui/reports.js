@@ -741,33 +741,81 @@ function renderAdvanceRow(item) {
     //
     // Taken from the design's HistoryVsToday frame, where the whole point of the frame is
     // that these two never trade places.
+    // Each way the debt came down gets its own words, because they are different events
+    // and a man asked to sign for one of them may not have done the other. Cash he handed
+    // back, money that came off his wage, and a clerical correction that never involved
+    // him at all are three sentences, not one number.
     if (settled && settled.repaid > 0) {
         what.appendChild(el('span', 'wday-note',
-            `${moneyText(settled.repaid)} ₪ הוחזרו במזומן · `
-            + `חוב פתוח ${moneyText(settled.left)} ₪`));
+            `${moneyText(settled.repaid)} ₪ ${LEDGER_KIND_LABELS.repaid}`));
     }
-    if (settled && settled.left > 0) {
+    if (settled && settled.deducted > 0) {
+        what.appendChild(el('span', 'wday-note',
+            `${moneyText(settled.deducted)} ₪ ${LEDGER_KIND_LABELS.deducted}`));
+    }
+    if (settled && settled.reversed > 0) {
+        what.appendChild(el('span', 'wday-note',
+            `${moneyText(settled.reversed)} ₪ ${LEDGER_KIND_LABELS.reversed}`));
+    }
+    if (settled && settled.settled > 0) {
+        what.appendChild(el('span', 'wday-note',
+            `חוב פתוח ${moneyText(settled.left)} ₪`));
+    }
+    // MORE HAS COME OFF THIS ADVANCE THAN WAS EVER PUT ON IT, said out loud rather than
+    // clamped to zero and forgotten. Two phones each recorded the same 500 back; both
+    // entries are real records of something and neither may be dropped, but until a
+    // person says which story is true this app records nothing further against it and
+    // deducts nothing from the wage. See overpaidAdvances in js/model/ledger.js.
+    if (settled && settled.overpaid > 0) {
+        what.appendChild(el('span', 'wday-note wday-review',
+            `הוחזר ${moneyText(settled.settled)} ₪ מתוך ${moneyText(settled.given)} ₪ - `
+            + `עודף ${moneyText(settled.overpaid)} ₪ טעון בדיקה`));
+    } else if (settled && settled.left > 0) {
         what.appendChild(button('החזר', 'btn-secondary',
             () => openRepaymentForm(item, settled, row), 'רישום החזר מזומן'));
     }
 
-    what.appendChild(button('✕', 'btn-icon', () => removeAdvanceRow(item), 'מחק מקדמה'));
+    // A MISTAKE IS CORRECTED, NEVER DELETED - and this button is where the ✕ used to be.
+    //
+    // The ✕ called removeAdvance, which sends `advances.<id> = null`: the row is gone from
+    // every phone, and the pay sheet simply grows by that much with nothing anywhere
+    // saying whether that was a correction or a loss. On the one operation somebody
+    // reaches for when the record is already wrong, that is the worst possible answer.
+    //
+    // So the correction is an entry of the opposite sign, with a mandatory reason, and
+    // both rows stay on the screen. Behind the same two gates as the repayment, and for
+    // the same argument: a build that has no way to record a correction the other phones
+    // can read must not offer one.
+    if (settled && settled.given > 0 && ledgerWritesEnabled() && advanceCarryEnabled()) {
+        what.appendChild(button('תיקון', 'btn-secondary',
+            () => openReversalForm(item, settled, row), 'תיקון-היפוך של מקדמה שנרשמה בטעות'));
+    }
+
     row.appendChild(what);
 
     row.appendChild(el('div', 'wday-money', minusAmount(item.amount)));
     return row;
 }
 
-// How much of this advance is still owed, from the ledger's own entries.
+// How much of this advance is still owed - ONE call, to the one fold.
 //
-// `amount` is what was handed over and never changes - see foldAdvance. What a person
-// asks on this screen is the other number, and it is the difference.
+// This used to be its own arithmetic: `given - repaid`, cash in and cash back. It counted
+// one of the three kinds of entry that reduce a debt and silently ignored the other two,
+// so an advance of 500 with 400 already taken off a man's wage read "חוב פתוח 500" here
+// and offered him a repayment ceiling of 500. He could hand back 500 in cash against a
+// debt of 100, and the app would take it.
+//
+// A second answer to a money question is not a convenience, it is a disagreement waiting
+// for a payday. advanceOutstanding in js/model/ledger.js is the answer; this is a name
+// for it on this screen and nothing more, and it is feature-detected only because the
+// ledger file may not be loaded in a build that is being taken apart.
 function advanceSettled(schedule, advanceId) {
-    const folded = foldLedger(schedule)[String(advanceId)];
-    const given = folded ? Number(folded.amount) || 0
-        : Number(((schedule.advances || {})[advanceId] || {}).amount) || 0;
-    const repaid = folded ? Number(folded.repaid) || 0 : 0;
-    return { given: agora(given), repaid: agora(repaid), left: agora(given - repaid) };
+    if (typeof advanceOutstanding !== 'function') {
+        const given = Number(((schedule.advances || {})[advanceId] || {}).amount) || 0;
+        return { id: String(advanceId), given: agora(given), repaid: 0, reversed: 0,
+            deducted: 0, settled: 0, left: agora(given), overpaid: 0 };
+    }
+    return advanceOutstanding(schedule, advanceId);
 }
 
 // Cash handed back, recorded against the advance it settles.
@@ -855,6 +903,111 @@ function openRepaymentForm(item, settled, row) {
 
     const buttons = el('div', 'modal-actions');
     buttons.appendChild(button('שמור', 'btn-primary', save));
+    buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
+    form.appendChild(buttons);
+    host.insertBefore(form, row.nextSibling);
+}
+
+// TIKUN-HIPUKH: an advance that should not have been recorded, corrected in place.
+//
+// The same shape as the repayment form beside it, because it is the same gesture, and
+// three things about it are different on purpose:
+//
+//   the reason      MANDATORY. A repayment explains itself - a man handed cash over. A
+//                   correction explains nothing on its own, and "somebody changed a
+//                   number and nobody wrote down why" is the state this whole ledger was
+//                   written against.
+//   the ceiling     what is left UNREVERSED, not what is left owed. Reversing 300 of a
+//                   300 leaves nothing to reverse, and the second attempt is refused
+//                   rather than folded into a debt the man never had.
+//   the words       "הוחזר במזומן" is not said here. He handed nothing back; the money
+//                   never left the tin, and a statement that called this a repayment
+//                   would be telling him he did something he did not do.
+function openReversalForm(item, settled, row) {
+    const host = row.parentNode;
+    if (!host || host.querySelector('.advance-form')) return;
+
+    const room = typeof reversalRoom === 'function'
+        ? reversalRoom(State.schedule, item.id) : settled.given;
+
+    const form = el('div', 'advance-form');
+    form.appendChild(el('div', 'advance-form-title',
+        `${LEDGER_KIND_LABELS.reversed} · אפשר לתקן עד ${moneyText(room)} ₪`));
+
+    const field = (labelText, input) => {
+        form.appendChild(el('label', 'field-label', labelText));
+        form.appendChild(input);
+        return input;
+    };
+
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.setAttribute('inputmode', 'decimal');
+    amountInput.dir = 'ltr';
+    amountInput.value = String(room);
+    field('סכום לתיקון', amountInput);
+
+    // Dated on the advance's own day, not today: this entry says the advance was never
+    // handed over, so it belongs in the account the advance is in. Dating it today would
+    // move money between two fortnights to undo something that happened in one of them.
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = item.date;
+    field('תאריך', dateInput);
+
+    const reasonInput = document.createElement('input');
+    reasonInput.type = 'text';
+    reasonInput.maxLength = 120;
+    field('סיבה (חובה)', reasonInput);
+
+    const error = el('p', 'field-error');
+    form.appendChild(error);
+
+    const save = () => {
+        const typed = amountInput.value.trim()
+            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+        const amount = Number(typed);
+        const reason = reasonInput.value.trim();
+        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0) {
+            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
+            amountInput.focus();
+            return;
+        }
+        if (reason === '') {
+            error.textContent = 'צריך לכתוב למה - תיקון בלי סיבה הוא שינוי בכסף '
+                + 'שאיש לא הסביר.';
+            reasonInput.focus();
+            return;
+        }
+        // The model has the last word, and it is asked about the exact advance rather
+        // than about a number a form carried: `room` was read when this form opened, and
+        // between then and now the other phone may have reversed it.
+        const problems = typeof reversalProblems === 'function'
+            ? reversalProblems(State.schedule, item.id, amount, reason) : [];
+        if (problems.length > 0) {
+            const left = typeof reversalRoom === 'function'
+                ? reversalRoom(State.schedule, item.id) : room;
+            error.textContent = left <= 0
+                ? 'המקדמה הזו כבר תוקנה במלואה. תיקון נוסף יבטל כסף שכבר בוטל.'
+                : `אפשר לתקן עד ${moneyText(left)} ₪ מהמקדמה הזו.`;
+            amountInput.focus();
+            return;
+        }
+        const date = dateInput.value;
+        if (!isRealDate(date)) {
+            error.textContent = 'בחר תאריך.';
+            return;
+        }
+
+        const change = recordAdvanceReversed(State.schedule, item.id, amount, date,
+            reason, new Date().toISOString(), syncDeviceId());
+        if (!State.commit(change)) return;
+        openWorkerDays(item.workerId);
+    };
+
+    const buttons = el('div', 'modal-actions');
+    buttons.appendChild(button('שמור תיקון', 'btn-primary', save));
     buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
     form.appendChild(buttons);
     host.insertBefore(form, row.nextSibling);
@@ -1022,20 +1175,34 @@ function openAdvanceForm(worker, actions) {
     amountInput.focus();
 }
 
-async function removeAdvanceRow(item) {
-    const ok = await askConfirm({
-        title: 'למחוק את המקדמה?',
-        message: `${moneyText(item.amount)} ₪ מ-${formatFullDate(parseLocalDate(item.date))}.`,
-        ok: 'מחק'
-    });
-    if (!ok) return;
-    State.commit(removeAdvance(State.schedule, item.id));
-    openWorkerDays(item.workerId);
-}
+// removeAdvanceRow WAS HERE, and it is gone on purpose.
+//
+// It asked "למחוק את המקדמה?" and, on a yes, sent `advances.<id> = null`. The record was
+// then gone from all three phones, the pay sheet grew by that much, and nothing anywhere
+// said whether that was a correction or a loss. Money that leaves a ledger without a row
+// explaining it is the one thing this file may not do.
+//
+// The replacement is openReversalForm above: an entry of the opposite sign, with a
+// mandatory reason, and both rows still on the screen afterwards. removeAdvance itself
+// stays in js/model/schema.js - a `null` at an advance path still has to be UNDERSTOOD
+// when it arrives from a phone that has not updated, and the validator that reads it is
+// the reason it is there. Nothing in this build calls it.
 
 // What a ledger entry IS, in the ledger's own three words. Not the method labels above:
 // a kind says what happened to the record, not how money moved.
-const LEDGER_KIND_LABELS = { given: 'מקדמה', corrected: 'תיקון', cancelled: 'בוטל' };
+// The five words the design settled on, and they are the words on every surface: the
+// history list, the advance row, the pay sheet and the statement. Each names an EVENT, so
+// no two of them can be read as the same thing - which is the point of writing them down
+// here rather than at each call site.
+const LEDGER_KIND_LABELS = {
+    given: 'ניתנה מקדמה',
+    repaid: 'הוחזר במזומן',
+    deducted: 'נוכה מהשכר',
+    reversed: 'תיקון-היפוך',
+    closed: 'החשבון נסגר',
+    corrected: 'תיקון',
+    cancelled: 'בוטל'
+};
 
 // היסטוריה מלאה: every ledger entry that concerns this worker, oldest first, folded
 // shut under the advances. Strictly a reading of the v80 record - the writer is gated
@@ -1583,7 +1750,17 @@ function moneyCells(row) {
             + `חוב פתוח ${moneyText(row.carry.carriedForward)} ₪`);
     }
     if (row.carry && row.carry.repaid > 0) {
-        notes.push(`${moneyText(row.carry.repaid)} ₪ הוחזרו במזומן`);
+        notes.push(`${moneyText(row.carry.repaid)} ₪ ${LEDGER_KIND_LABELS.repaid}`);
+    }
+    // THE ACCOUNT DOES NOT ADD UP, and the sheet says so where the number would have been.
+    //
+    // More has been settled against this man's advances than was ever handed to him -
+    // two phones recording the same repayment is the way it happens. Nothing is deducted
+    // while that stands (see advanceWalk), so this note is the difference between a clean
+    // net somebody would pay out and a net with a reason to stop and ask.
+    if (row.carry && row.carry.review) {
+        notes.push(`עודף ${moneyText(row.carry.overpaid)} ₪ בהחזרי מקדמה - `
+            + 'לא נוכה דבר עד לבדיקה');
     }
     if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
     if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');

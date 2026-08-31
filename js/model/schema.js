@@ -1571,11 +1571,32 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // conversation, not an arithmetic result this app may reach on its own.
     if (balance < 0) balance = 0;
 
+    // MORE SETTLED THAN WAS EVER GIVEN, on at least one of this man's advances.
+    //
+    // Two phones, both offline, each recording the same 500 handed back. Both entries
+    // land and both are real records of something; the fold then reads 1,000 settled
+    // against 500 given. Before this, `balance` clamped at zero, the deduction came out
+    // as zero, the pay sheet printed a clean net and nothing on any screen said a word.
+    //
+    // A number that is wrong and silent is worse than one that is wrong and loud, and
+    // this one is somebody's pay. So the automatic deduction STOPS while it stands: the
+    // balance is carried rather than taken, both entries are kept, and the screen says
+    // the account needs looking at. Correcting it is a deliberate act with a reason
+    // attached - see reversalProblems in js/model/ledger.js - not an average this app
+    // takes on its own.
+    const overpaid = typeof overpaidAdvances === 'function'
+        ? agoraRound(overpaidAdvances(schedule, workerId)
+            .reduce((sum, state) => sum + (Number(state.overpaid) || 0), 0))
+        : 0;
+
     // The record wins where there is one. It is what came off that man's wage on the day
-    // the period closed, and no later entry gets to revise it.
+    // the period closed, and no later entry gets to revise it - an overpayment noticed
+    // today does not reach back into a payslip somebody was already handed.
     const deducted = closed !== undefined
         ? agoraRound(closed.deducted)
-        : (gross === null ? 0 : agoraRound(Math.min(balance, Math.max(gross, 0))));
+        : (gross === null || overpaid > 0
+            ? 0
+            : agoraRound(Math.min(balance, Math.max(gross, 0))));
 
     // TWO BALANCES OUT OF A CLOSED PERIOD, and the difference between them is the whole
     // point.
@@ -1612,6 +1633,12 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
         // Named so a screen can say "הגיעה תנועה אחרי סגירת התקופה" rather than leaving
         // two numbers on the page with nothing explaining why they differ.
         lateSinceClose: agoraRound(live - frozen),
+        // More has been settled against this man's advances than was ever handed to him.
+        // Named so the screen can say so instead of printing a quiet zero.
+        overpaid,
+        // Whether this row's deduction was HELD rather than computed. Only ever true on
+        // an open period: a closed one reports its record and is not revised.
+        review: overpaid > 0 && closed === undefined,
         net: gross === null ? null : agoraRound(gross - deducted),
         // Whether this row is a record or a reckoning, said out loud - the screen shows
         // "החשבון נסגר ולא ישתנה" only where it is true.
