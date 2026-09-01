@@ -297,7 +297,8 @@ async function bothSettled(a, b) {
     // moment. Neither knows about the other.
     const changes = a.call('closePeriodChanges', a.State.schedule, 'w_01', A.from, A.to,
         '2026-08-20T18:00:00.000Z', 'd_race_close');
-    given('there is a closure to write', changes.length === 1, String(changes.length));
+    // Two entries: the fortnight itself and the deduction against the advance.
+    given('there is a closure to write', changes.length === 2, String(changes.length));
     a.State.commitMany(changes);
     // DATED INTO THE CLOSED FORTNIGHT, which is the case worth racing: money handed back
     // on the 18th, recorded while the other phone is closing the period it falls in. A
@@ -346,6 +347,19 @@ async function bothSettled(a, b) {
     check('carrying the money it was closed on whichever phone wrote it',
         closures[0].amount === 3050 && closures[0].balanceAfter === 1950,
         JSON.stringify(closures[0]));
+
+    // AND ONE FORTNIGHT. The artifact - the payslip itself, which exists whether or not
+    // anybody borrowed - is written by both phones too, and its id is derived from the
+    // man and the day the period opens so the two writes are one field path.
+    const fortnights = entriesOf(cloud).filter(e => e.kind === 'closed');
+    check('and ONE fortnight, not two', fortnights.length === 1,
+        JSON.stringify(fortnights.map(one => [one.id, one.gross, one.by])));
+    check('saying the same wage whichever phone wrote it',
+        fortnights[0].gross === 3050 && fortnights[0].carriedIn === 0,
+        JSON.stringify(fortnights[0]));
+    check('and carrying the days that wage was made of',
+        Array.isArray(fortnights[0].days) && fortnights[0].days.length === 6,
+        JSON.stringify((fortnights[0].days || []).map(one => one.date)));
 
     const walk = a.call('advanceAccount', a.State.schedule, 'w_01', A.from, A.to);
     check('so the payslip is 3,050 off and 1,950 left, not 6,100 and 3,900',
