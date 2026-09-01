@@ -692,27 +692,37 @@ for (const scenario of [
     });
     const number = text => Number(String(text).replace(/[^0-9.-]/g, '')) || 0;
     const at = name => table.head.indexOf(name);
+    // THE COLUMN IS NAMED AFTER WHAT IS IN IT, which is C6's decision and is why this
+    // no longer looks for מקדמות. This fixture approves the carry migration - the given
+    // above it reads 3,050 deducted, which only happens once somebody has - so the cell
+    // holds the DEDUCTION and the heading says so. Before approval it would be the
+    // advances and would be called מקדמות; see deductionColumnName in js/ui/reports.js
+    // and tests/wording.test.mjs for the rule, and tests/smoke.mjs for both sides of it.
+    const DEDUCTED = 'נוכה מהשכר';
     given('the sheet drew its three money columns',
-        at('נצבר') !== -1 && at('מקדמות') !== -1 && at('לתשלום') !== -1,
+        at('נצבר') !== -1 && at(DEDUCTED) !== -1 && at('לתשלום') !== -1,
         JSON.stringify(table.head));
+    given('and named the money column after the deduction it holds, not the advance',
+        at('מקדמות') === -1, JSON.stringify(table.head));
 
     const worker = table.body.find(cells => cells[0].indexOf('Worker 01') !== -1);
     given('his row is on the sheet', Array.isArray(worker), JSON.stringify(table.body));
-    // The column says מקדמות and holds a DEDUCTION, which are the same number only while
-    // an advance is smaller than the wage. Printed as the 5,000 handed over, beside a net
-    // of 0 computed from the 3,050 actually taken, the row said 3050 − 5000 = 0 - and the
-    // band under it then totalled -1,950 as לתשלום: a negative wage, on the sheet the man
-    // is paid from, for a fortnight in which he was owed nothing and paid nothing.
-    same('the row reconciles: נצבר less מקדמות is לתשלום',
-        number(worker[at('נצבר')]) + number(worker[at('מקדמות')]),
+    // The column holds a DEDUCTION, and the deduction and the advance are the same
+    // number only while an advance is smaller than the wage. Printed as the 5,000 handed
+    // over, beside a net of 0 computed from the 3,050 actually taken, the row said
+    // 3050 − 5000 = 0 - and the band under it then totalled -1,950 as לתשלום: a negative
+    // wage, on the sheet the man is paid from, for a fortnight in which he was owed
+    // nothing and paid nothing.
+    same('the row reconciles: נצבר less the deduction is לתשלום',
+        number(worker[at('נצבר')]) + number(worker[at(DEDUCTED)]),
         number(worker[at('לתשלום')]),
         JSON.stringify(worker));
     same('and it is the deduction in the column, as it is in the exported file',
-        [number(worker[at('נצבר')]), number(worker[at('מקדמות')]),
+        [number(worker[at('נצבר')]), number(worker[at(DEDUCTED)]),
             number(worker[at('לתשלום')])], [3050, -3050, 0]);
     const band = table.foot[table.foot.length - 1];
     same('the band under it adds up the same way',
-        number(band[at('נצבר')]) + number(band[at('מקדמות')]),
+        number(band[at('נצבר')]) + number(band[at(DEDUCTED)]),
         number(band[at('לתשלום')]), JSON.stringify(band));
 
     const buffer = await page.pdf({ format: 'A4', printBackground: true });
