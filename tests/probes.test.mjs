@@ -294,23 +294,24 @@ const connected = async (device, cloud) => {
     cloud.hold = null;
     await settle(TICK * 120);
 
-    // MOVED, DELIBERATELY, and the guarantee it was protecting is kept.
+    // MOVED BACK, DELIBERATELY, to the guarantee this suite was written for.
     //
-    // This used to require that B's value ended up in the document: the older request
-    // answering first was overtaken by the newer one on the retry. That overtaking is
-    // exactly the auto-send tests/contested.test.mjs was written to stop - the losing
-    // write returning after the winner's snapshot and putting its own value back - and
-    // there is no way to have it here and not have it between two phones, because the
-    // client cannot tell the two situations apart from inside a refusal.
+    // This required that B's value ended up in the document. It was then moved to a
+    // hold - the document keeps what landed, B owes its value and says contested, a
+    // person confirms - because the client could not tell the newer tab of one device
+    // from a second phone from inside a refusal, and the overtaking it takes to let B win
+    // here is exactly the auto-send tests/contested.test.mjs stops between two phones.
     //
-    // What the suite was protecting is that the older request must not SILENTLY win and
-    // the newer value must not be lost. Both still hold, and are asserted below: the
-    // document keeps what actually landed, B keeps its own value on its own disk, it says
-    // out loud that it is contested rather than synced, and one confirmation from the
-    // person settles it. That is a person deciding between two values instead of a timer
-    // deciding, which for a day's work on somebody's pay sheet is the right trade.
-    check('the document keeps what actually landed',
-        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_01',
+    // It can tell now. The operation B queued records what this disk held when B made
+    // it - A's value, put there by A's own commit - and its refusal is compared against
+    // that record: the document holds a value this device has seen and produced, nothing
+    // moved under B, and the ordinary rebase merges it. What the suite was protecting is
+    // unchanged - the older request must not SILENTLY win and the newer value must not
+    // be lost - and the newer value is now the document, without a person having to
+    // confirm their own later decision to a timer. Two PHONES on one path are still held
+    // and told; tests/contested.test.mjs and tests/cas.test.mjs measure that.
+    check('the newer value is the document',
+        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02',
         JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01));
 
     const third = makeDevice({ deviceId: 'd_third' });
@@ -318,7 +319,7 @@ const connected = async (device, cloud) => {
     await settle(TICK * 40);
     check('and a third phone agrees with the document',
         third.call('entriesFor', third.State.schedule, '2026-08-10', 'w_01',
-            'actual')[0].placeId === 'p_01',
+            'actual')[0].placeId === 'p_02',
         JSON.stringify(third.call('entriesFor', third.State.schedule, '2026-08-10',
             'w_01', 'actual')));
 
@@ -328,16 +329,18 @@ const connected = async (device, cloud) => {
             'actual')[0].placeId === 'p_02',
         JSON.stringify(b.call('entriesFor', b.State.schedule, '2026-08-10', 'w_01',
             'actual')));
-    check('it is still owed, and the tab says so rather than saying synced',
-        b.Sync.pendingCount() > 0 && b.Sync.status !== 'synced',
+    check('and nothing is owed, so the tab may say synced',
+        b.Sync.pendingCount() === 0 && b.Sync.status === 'synced',
         `${b.Sync.pendingCount()} pending, ${b.Sync.status}`);
 
-    // And the way out is one deliberate act, not a timer.
+    // A confirmation from the person is a new operation with the same value; it goes,
+    // and changes nothing.
     put(b, PATH, 'p_02');
     await settle(TICK * 120);
-    check('a fresh confirmation from the person lands it',
-        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02',
-        JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01));
+    check('a fresh confirmation from the person leaves it exactly there',
+        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02'
+        && b.Sync.pendingCount() === 0,
+        `${JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01)}, ${b.Sync.pendingCount()} pending`);
 }
 
 // ================================================================ Q4

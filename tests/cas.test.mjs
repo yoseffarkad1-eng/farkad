@@ -24,7 +24,7 @@
 //      its own receipt and succeeds without applying anything twice.
 //   5. A whole-document restore is a write like any other and takes the same fence.
 
-import { makeDevice, makeCloud, sharedStore, settle } from './harness.mjs';
+import { makeDevice, makeCloud, sharedStore, settle, settleUntil } from './harness.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
 const TICK = 6;
@@ -46,6 +46,39 @@ function phone(cloud, id) {
 
 const record = (device, date, workerId) => device.State.commit(device.call('assignPlace',
     device.State.schedule, date, workerId, 'actual', 'p_01'));
+
+// A phone in a stairwell. `close()` withholds the snapshots - it can still write; `jam()`
+// takes the signal both ways, so a write fails on the network rather than on the
+// protocol; `release()` restores both and delivers what was withheld, in order, BEFORE
+// anything the phone does next - which is the ordinary way back into signal.
+function tunnel(cloud) {
+    const gate = { open: true, jammed: false, waiting: [], adapter: {} };
+    const noSignal = () => {
+        const error = new Error('client is offline');
+        error.code = 'unavailable';
+        return error;
+    };
+    Object.keys(cloud.adapter).forEach(name => {
+        gate.adapter[name] = (...args) => (gate.jammed
+            ? Promise.reject(noSignal())
+            : cloud.adapter[name](...args));
+    });
+    gate.adapter.subscribe = (onNext, onError) => cloud.adapter.subscribe(
+        snapshot => {
+            if (gate.open) onNext(snapshot);
+            else gate.waiting.push([onNext, snapshot]);
+        }, onError);
+    gate.close = () => { gate.open = false; };
+    gate.jam = () => { gate.open = false; gate.jammed = true; };
+    gate.release = () => {
+        gate.open = true;
+        gate.jammed = false;
+        const waiting = gate.waiting.slice();
+        gate.waiting = [];
+        waiting.forEach(([onNext, snapshot]) => onNext(snapshot));
+    };
+    return gate;
+}
 
 // ============================================================ the envelope
 {
@@ -324,11 +357,27 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
     // and neither has seen the other's. The value at days.<date>.actual.<worker> is the
     // whole entries array, so this is one field path with two different answers, which is
     // the case the revision exists for.
+    //
+    // "Never seen it" is arranged by WITHHOLDING the snapshot, not by nulling the base
+    // in memory. This used to connect the second phone, let it adopt the first phone's
+    // day onto its own disk, and then null _revision and _baseDoc by hand - and a phone
+    // whose disk holds the day HAS seen it: its edit adds a second site beside the one
+    // it was looking at, and that merges. The record an operation carries now says what
+    // the device held when the edit was made, so a phone can no longer be made to forget
+    // by clearing a variable; it has to genuinely not have heard.
     const cloud = makeCloud();
     const one = phone(null, 'd_one');
     const two = phone(null, 'd_two');
+    const wall = tunnel(cloud);
     one.Sync.connect(cloud.adapter);
     await settle(TICK * 10);
+    two.Sync.connect(wall.adapter);
+    await settle(TICK * 10);
+    given('the second phone has heard a document with nothing for this day',
+        two.Sync._revision === ((cloud.doc || {}).revision || null)
+        && ((cloud.doc || {}).days || {})[DAY] === undefined,
+        `${two.Sync._revision} of ${(cloud.doc || {}).revision}`);
+    wall.close();
 
     one.State.commit(one.call('assignPlace', one.State.schedule,
         DAY, 'w_01', 'actual', 'p_01'));
@@ -342,10 +391,6 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
         placesOf().join());
 
     // The second phone has never seen it, and writes its own answer for the same day.
-    two.Sync.connect(cloud.adapter);
-    await settle(TICK * 5);
-    two.Sync._revision = null;
-    two.Sync._baseDoc = null;
     two.State.commit(two.call('assignPlace', two.State.schedule,
         DAY, 'w_01', 'actual', 'p_02'));
     two.Sync.flush();
@@ -378,6 +423,82 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
     check('and never the line a tunnel produces',
         two.__notice.textContent.indexOf('שגיאת סנכרון') === -1,
         JSON.stringify(two.__notice.textContent));
+}
+
+// ============================================================ two phones, one path, later
+{
+    suite('two phones adding to the same worker\'s day, the second coming back later');
+
+    // The suite above drives the collision through the conflict branch: the second
+    // phone's write is in flight against a revision that has moved, the server refuses
+    // it, and the path is held. The same collision on the other timing met nothing. The
+    // second phone HEARS the winner's document first - the ordinary way back into signal
+    // - and only then flushes: its revision is current, so the server has no reason to
+    // refuse, and its queued value carried `base: null` because the path did not exist
+    // when the edit was made, which the pre-send hold exempted outright. The write went
+    // out whole, the entries array with it, the first phone's day was replaced, and the
+    // first phone then adopted the replacement. Both said synced. A worker split across
+    // two sites in one day, each half recorded by a different phone, is exactly this -
+    // and half a day of pay disappeared with nothing said.
+    //
+    // "The server held nothing here" is not a licence. When the server now holds a value
+    // at that path, somebody put it there since, and this device never saw it.
+    const cloud = makeCloud();
+    const one = phone(null, 'd_one_later');
+    const two = phone(null, 'd_two_later');
+    const wall = tunnel(cloud);
+    one.Sync.connect(cloud.adapter);
+    await settle(TICK * 10);
+    two.Sync.connect(wall.adapter);
+    await settle(TICK * 10);
+
+    // A document both have heard, holding nothing for this day.
+    record(one, '2026-08-11', 'w_02');
+    await settleUntil(() => Boolean(((cloud.doc || {}).days || {})['2026-08-11'])
+        && two.Sync._revision === cloud.doc.revision, 5000);
+    given('both phones read the same document, with nothing for this day',
+        two.Sync._revision === cloud.doc.revision
+        && (cloud.doc.days || {})[DAY] === undefined,
+        `${two.Sync._revision} of ${cloud.doc.revision}`);
+
+    const placesOf = () => {
+        const day = ((cloud.doc || {}).days || {})[DAY];
+        const held = day && day.actual && day.actual.w_01;
+        return ((held && held.entries) || []).map(entry => entry.placeId).sort();
+    };
+
+    // The second phone loses its signal and records the day; the first records it too.
+    wall.jam();
+    two.State.commit(two.call('assignPlace', two.State.schedule,
+        DAY, 'w_01', 'actual', 'p_02'));
+    await settleUntil(() => two.Sync.status === 'error' || two.Sync.status === 'offline',
+        5000);
+    given('the second phone\'s write failed on the network',
+        two.Sync.status === 'error' || two.Sync.status === 'offline', two.Sync.status);
+    record(one, DAY, 'w_01');
+    await settleUntil(() => placesOf().join() === 'p_01', 5000);
+    given('the first phone\'s day is in the cloud', placesOf().join() === 'p_01',
+        placesOf().join());
+    const writes = cloud.writes.filter(write => !write.replayed).length;
+
+    // Back in signal: the winner's document arrives, and the flush follows it.
+    wall.release();
+    await settle(TICK * 80);
+
+    check('the first phone\'s day is not silently replaced',
+        placesOf().indexOf('p_01') !== -1, placesOf().join());
+    check('and nothing left the second phone',
+        cloud.writes.filter(write => !write.replayed).length === writes,
+        `${writes} -> ${cloud.writes.filter(write => !write.replayed).length}`);
+    check('the second phone still owes its own half', two.Sync.pendingCount() > 0,
+        `${two.Sync.pendingCount()} owed`);
+    check('and says the record moved, not that it is synced',
+        two.Sync.status === 'contested', two.Sync.status);
+    await settle(TICK * 20);
+    check('and the first phone still shows the day it recorded',
+        one.call('entriesFor', one.State.schedule, DAY, 'w_01', 'actual')
+            .map(entry => entry.placeId).join() === 'p_01',
+        JSON.stringify(one.call('entriesFor', one.State.schedule, DAY, 'w_01', 'actual')));
 }
 
 // ============================================================ the claim moving is harmless
