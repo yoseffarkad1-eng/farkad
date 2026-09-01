@@ -79,6 +79,21 @@ const cases = [
     ['the approvals', 'prototype', (raw, poison) => {
         raw.ledger = JSON.parse(`{"advances":{},"unreadable":{},"migrations":{"${poison}":`
             + `{"id":"${MARKER}","kind":"carry","rows":1,"at":"","by":"d_x"}}}`);
+    }],
+    // THE DAYS MAP ITSELF, one level up from the layer cases above. poisonedContainers
+    // looked inside every day and never at the map holding them, and normaliseSchedule
+    // drops any key that is not YYYY-MM-DD without a word - so a whole day arrived,
+    // vanished, and the status said synced. Measured before the check existed:
+    // problems [], writes not blocked, the marker nowhere on the device.
+    ['the days map', '__proto__', (raw, poison) => {
+        raw.days = JSON.parse(`{"${poison}":{"actual":{"w_01":`
+            + `{"entries":[{"placeId":"${MARKER}"}],"rates":{"daily":400,"hourly":0}}}}}`);
+    }],
+    // And not only the three poison names: ANY key this app cannot read as a date was
+    // dropped the same way, and a day nobody can find is somebody's pay either way.
+    ['the days map, under a name that is not a date', 'not-a-date', (raw, poison) => {
+        raw.days = JSON.parse(`{"${poison}":{"actual":{"w_01":`
+            + `{"entries":[{"placeId":"${MARKER}"}],"rates":{"daily":400,"hourly":0}}}}}`);
     }]
 ];
 
