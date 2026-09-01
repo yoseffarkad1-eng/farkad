@@ -809,6 +809,19 @@ function normaliseSchedule(raw, hints) {
     // bytes are still there, the fold cannot see them, and the device will not record a
     // new day on top of financial history it cannot read. Recovery.damaged is keyed, so
     // arriving here twice with the same trouble says it once.
+    // AND A DISPUTED ID, re-reported on every read for the same reason the unreadable
+    // entries are: Recovery's hold lives for one session and is re-derived from what the
+    // record says, so a device that boots onto two bodies under one id has to be told
+    // again rather than carrying on because the last session already said it.
+    if (typeof Recovery !== 'undefined'
+        && isPlainObject(schedule.ledger.conflicted)
+        && Object.keys(schedule.ledger.conflicted).length > 0) {
+        Recovery.damaged('scheduleData:v2:ledger:conflict',
+            JSON.stringify(schedule.ledger.conflicted),
+            'יש רשומת מקדמה עם אותו מזהה ותוכן אחר. שתי הגרסאות נשמרו כמו שהן ולא נמחק '
+            + 'דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי ותבדוק איזו מהן נכונה.');
+    }
+
     if (typeof Recovery !== 'undefined'
         && Object.keys(schedule.ledger.unreadable).length > 0) {
         Recovery.damaged('scheduleData:v2:ledger',

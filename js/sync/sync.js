@@ -4430,8 +4430,24 @@ const FarkadSync = {
         const previous = State.schedule;
         // Ledger entries are append-only against the other phones too: a device that has
         // never heard of one has not disagreed with it. See mergeLedgerInto.
+        const ledgerClash = [];
         State.schedule = (typeof mergeLedgerInto === 'function')
-            ? mergeLedgerInto(remote, previous) : remote;
+            ? mergeLedgerInto(remote, previous, ledgerClash) : remote;
+        // ONE IMMUTABLE ID, TWO DIFFERENT BODIES, and nothing here decides which is true.
+        //
+        // Both are kept - the arriving copy where it landed, this phone's beside it under
+        // a name nothing folds - the bytes go to Recovery so the rescue file carries them,
+        // and the device stops writing until a person has looked. Adopting one of the two
+        // and reporting synced is how the other one leaves the record for good.
+        if (ledgerClash.length > 0) {
+            State.schedule.ledger.conflicted = State.schedule.ledger.conflicted || {};
+            ledgerClash.forEach(clash => {
+                State.schedule.ledger.conflicted[clash.id] = {
+                    id: clash.id, family: clash.family,
+                    here: clash.mine, arrived: clash.theirs
+                };
+            });
+        }
         // And the vehicles, on the same rule and for the same reason - see
         // mergeVehiclesInto. They are dormant in this build, which means nothing writes
         // them and therefore nothing can be said to have deleted them.
@@ -4471,6 +4487,20 @@ const FarkadSync = {
         }
 
         if (typeof render === 'function') render();
+        // AFTER THE DISK HAS IT, because Recovery blocks writing the moment it is told -
+        // and telling it first would have refused the very persist that puts the two
+        // disputed bodies somewhere a person can still reach them.
+        if (ledgerClash.length > 0) {
+            if (typeof Recovery !== 'undefined') {
+                Recovery.damaged('scheduleData:v2:ledger:conflict',
+                    JSON.stringify(State.schedule.ledger.conflicted),
+                    'הגיעה רשומת מקדמה עם אותו מזהה ותוכן אחר. שתי הגרסאות נשמרו כמו שהן '
+                    + 'ולא נמחק דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי ותבדוק איזו '
+                    + 'מהן נכונה.');
+            }
+            this.fail(new Error('two ledger entries share one id and differ; both are held'));
+            return;
+        }
         this.setStatus('synced');
 
         // A day or an advance in that snapshot named somebody the snapshot's own roster
