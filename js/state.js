@@ -710,6 +710,53 @@ function normaliseSchedule(raw, hints) {
     // nothing reads for arithmetic, and Recovery is told under a key of its own - the
     // trouble is a different trouble from an unreadable entry and deserves its own
     // sentence and its own quarantine slot.
+    // A NAME NOBODY CAN USE AS A KEY, in any map this app reads by id.
+    //
+    // Checked here because here is where every door meets, and BEFORE anything is copied
+    // out of `raw`: assigning an own `__proto__` into an ordinary object either reparents
+    // it or silently does nothing, and the silent nothing is what used to happen - the key
+    // vanished, no problem was raised, the device went on writing, and the next save put
+    // the emptied record over the one that had it.
+    //
+    // The map's own bytes are handed to Recovery, so the evidence is quarantined exactly
+    // as it arrived rather than described. Writing is blocked for the same reason it is
+    // blocked for an unreadable entry: what could not be read is somebody's day or
+    // somebody's money, and this device must not write over it.
+    const poisoned = typeof poisonedContainers === 'function'
+        ? poisonedContainers(raw) : [];
+    // CARRIED ON THE SCHEDULE, under a name nothing reads for arithmetic, exactly as the
+    // unreadable ledger entries are. The quarantined copy is on the disk either way, but
+    // Recovery's problems live in one session's memory: without this the next boot found a
+    // record with the poisoned key already gone, had nothing to report, and let the device
+    // write again. The evidence has to be part of the record to outlive the session that
+    // found it.
+    //
+    // Anything an earlier read held aside stays held: a second reading is not a licence to
+    // drop it.
+    const POISON_KEY = 'scheduleData:v2:poison:';
+    const POISON_SAID = 'הגיע רישום עם שם שאי אפשר להשתמש בו כמפתח. שום דבר לא נמחק - '
+        + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי.';
+    if (typeof Recovery !== 'undefined') {
+        poisoned.forEach(found => {
+            Recovery.damaged(POISON_KEY + found.at, found.json, POISON_SAID);
+        });
+        // AND WHATEVER AN EARLIER SESSION ALREADY HELD ASIDE.
+        //
+        // The evidence cannot ride back on the schedule: Recovery.damaged blocks writing
+        // the moment it is called, so the record carrying the marker is never saved - the
+        // same ordering trap the ledger clash hit. What IS durable is the quarantined
+        // copy, written by Recovery itself, so the next boot re-derives the hold from
+        // that rather than from a field it was never allowed to store. Without this the
+        // reopened device found a record whose poisoned key was already gone, had nothing
+        // to report, and started writing again.
+        const kept = typeof Store !== 'undefined' && typeof Store.keys === 'function'
+            ? Store.keys().filter(key => String(key).indexOf(POISON_KEY) === 0) : [];
+        kept.forEach(key => {
+            const at = String(key).slice(POISON_KEY.length).replace(/:damaged.*$/, '');
+            Recovery.damaged(POISON_KEY + at, Store.get(key), POISON_SAID);
+        });
+    }
+
     const containerProblem = typeof ledgerContainerProblem === 'function'
         ? ledgerContainerProblem(raw) : null;
     if (containerProblem) {
