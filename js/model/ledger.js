@@ -473,6 +473,21 @@ function ownsKey(object, key) {
     return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
 
+// AND NEVER A BARE ASSIGNMENT EITHER.
+//
+// `map[id] = value` for an id of `__proto__` creates no own property: it writes the
+// prototype. So the one map whose job is to keep what could not be read - ledger.unreadable
+// - lost its evidence on the next merge AND came back reparented, with `unreadable.amount`
+// reading a number nobody put there, while the device reported synced.
+//
+// defineProperty creates the own property whatever the name is. The descriptor is the one
+// an ordinary assignment would have produced, so nothing else about the map changes.
+function putKey(object, key, value) {
+    Object.defineProperty(object, key, {
+        value, writable: true, enumerable: true, configurable: true
+    });
+}
+
 // Two bodies compared as bodies, not as objects. Local, because js/sync/sync.js loads
 // after this file and borrowing canonicalJson across that seam works right up until
 // somebody reorders index.html.
@@ -516,7 +531,7 @@ function mergeLedgerInto(target, source, conflicts) {
             }
             Object.keys(held).forEach(id => {
                 if (!ownsKey(target.ledger[key], id)) {
-                    target.ledger[key][id] = held[id];
+                    putKey(target.ledger[key], id, held[id]);
                     return;
                 }
                 if (sameLedgerBytes(target.ledger[key][id], held[id])) return;

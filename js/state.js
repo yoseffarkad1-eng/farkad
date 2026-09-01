@@ -811,11 +811,21 @@ function normaliseSchedule(raw, hints) {
         }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
     });
+    // An own property, whatever the name is. `map[id] = value` for an id of `__proto__`
+    // writes the PROTOTYPE and creates nothing - which is how the map that keeps
+    // unreadable evidence lost it and came back reparented. See putKey in
+    // js/model/ledger.js, which is the same rule for the merge.
+    const keepUnder = (map, id, value) => {
+        Object.defineProperty(map, id, {
+            value, writable: true, enumerable: true, configurable: true
+        });
+    };
+
     // Anything an older or newer build left under ledger.unreadable stays there too.
     const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {
         if (schedule.ledger.unreadable[id] === undefined) {
-            schedule.ledger.unreadable[id] = held[id];
+            keepUnder(schedule.ledger.unreadable, id, held[id]);
         }
     });
 

@@ -4827,6 +4827,34 @@ const FarkadSync = {
             this.fail(new Error('two ledger entries share one id and differ; both are held'));
             return;
         }
+
+        // AND THE EVIDENCE THIS PHONE WAS ALREADY HOLDING, for the same reason and in the
+        // same place.
+        //
+        // normaliseSchedule reports what the SNAPSHOT carries, and it runs before the
+        // merge - so an entry this device had held aside, which the arriving document
+        // knows nothing about, was carried back by mergeLedgerInto and then never
+        // mentioned. The device adopted a document, said synced, and went on writing with
+        // unreadable financial bytes on its own disk that nothing had reported since the
+        // session that found them.
+        //
+        // Told after the persist, like the clash above: Recovery blocks writing the
+        // moment it is told, and telling it first would refuse the write that puts the
+        // evidence somewhere a person can reach it.
+        const heldAside = Object.keys((State.schedule.ledger || {}).unreadable || {})
+            .length + Object.keys((State.schedule.ledger || {}).unreadableMigrations || {})
+            .length;
+        if (heldAside > 0 && typeof Recovery !== 'undefined') {
+            Recovery.damaged('scheduleData:v2:ledger',
+                JSON.stringify({
+                    unreadable: State.schedule.ledger.unreadable,
+                    unreadableMigrations: State.schedule.ledger.unreadableMigrations
+                }),
+                'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
+                + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
+            this.fail(new Error('part of the advances history could not be read'));
+            return;
+        }
         this.setStatus('synced');
 
         // A day or an advance in that snapshot named somebody the snapshot's own roster
