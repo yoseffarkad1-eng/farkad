@@ -1750,8 +1750,21 @@ function workerStatementText(workerId) {
             + `${bidiAmount(moneyText(agora(agora(earned) - agora(taken))))}`);
         // And what is still on the books afterwards, in the words the two labels never
         // swap: a closed period reports its יתרת סגירה, an open one its חוב פתוח.
+        // BOTH FIGURES WHEN THERE ARE TWO, because there are two and he is entitled to
+        // the second one. The sheet has printed both since C4; this document printed only
+        // the frozen one, so a man who handed back 400 after his fortnight shut was told
+        // he still owed 1,950 when he owed 1,550 - and the office's copy said so. The one
+        // number he can check was the one that left out the money he paid.
+        //
+        // `חוב פתוח כולל` rather than `חוב פתוח`: on an open period that label means the
+        // whole balance and nothing was frozen beside it. Here it stands next to a closing
+        // balance and means what is left after everything that has happened since, which
+        // is a different sentence and takes a different word.
         if (account && account.closed && account.carriedOut > 0) {
             lines.push(`יתרת סגירה: ${moneyText(account.carriedOut)}`);
+            if (account.lateSinceClose !== 0) {
+                lines.push(`חוב פתוח כולל: ${moneyText(account.carriedForward)}`);
+            }
         } else if (account && account.carriedForward > 0) {
             lines.push(`חוב פתוח: ${moneyText(account.carriedForward)}`);
         }
