@@ -230,4 +230,95 @@ const repaymentIn = device => Object.keys(device.State.schedule.ledger.advances)
             advanceId, 6000, 'יותר מדי').length > 0);
 }
 
+// ---------------------------------------------------------- the date is not a question
+{
+    suite('a correction is dated on the transaction it corrects, and on nothing else');
+
+    // WHERE A CORRECTION LANDS IS NOT A CHOICE. The entry says a transaction did not
+    // happen, so it belongs where that transaction is. Both forms' comments say exactly
+    // this - "Dating it today would move money between two fortnights to undo something
+    // that happened in one of them" - above an editable date input whose value goes
+    // straight into the record.
+    //
+    // recordEventReversed writes `date: String(date)` and never asks. Measured on the
+    // commit this was written against, correcting a 400 repayment dated 2026-08-18:
+    //
+    //   ''             -> written {"date":""}            ledgerEntryProblems: a reversal on no date
+    //   'not-a-date'   -> written {"date":"not-a-date"}  ledgerEntryProblems: a reversal on no date
+    //   '2026-11-30'   -> written, readable, in November - three months from the money
+    //   '2020-01-01'   -> written, readable, six years before the advance
+    //
+    // The first two are the worse pair: the recorder writes an entry its OWN reader
+    // refuses, so the next boot holds that correction aside as unreadable and blocks the
+    // phone - the man's 400 never comes back, and the person who pressed Save caused it.
+    // The last two are quieter and just as wrong: money moved out of the fortnight it
+    // belongs to, into one that has already been paid or has not happened yet.
+    let made = 0;
+    const target = () => {
+        made += 1;
+        const device = withRepayment('d_date' + made);
+        return { device, entry: repaymentIn(device) };
+    };
+
+    for (const [what, given_] of [['no date at all', ''], ['a date nobody can read', 'not-a-date'],
+        ['another fortnight', '2026-11-30'], ['before the advance existed', '2020-01-01']]) {
+        const { device, entry } = target();
+        const change = device.call('recordEventReversed', device.State.schedule,
+            entry.id, TARGET, given_, 'נרשם על האדם הלא נכון',
+            '2026-08-26T00:00:00.000Z', device.id);
+        const written = change ? change.value : null;
+        check(`${what}: the correction is dated on the transaction`,
+            written !== null && written.date === entry.date,
+            JSON.stringify([given_, written && written.date, entry.date]));
+        check(`${what}: and what is written is readable by the model that wrote it`,
+            written !== null
+            && device.call('ledgerEntryProblems', written.id, written).length === 0,
+            JSON.stringify(written
+                ? device.call('ledgerEntryProblems', written.id, written) : 'nothing written'));
+    }
+
+    // AND A TARGET WITH NO READABLE DATE IS NOT CORRECTABLE. There is no day to put the
+    // correction on, and inventing one puts money in a fortnight nobody chose.
+    {
+        const { device, entry } = target();
+        // Written straight onto the record, the way a snapshot from a build that did not
+        // date its repayments would arrive.
+        device.State.schedule.ledger.advances[entry.id].date = '';
+        check('a transaction with no readable date cannot be corrected',
+            device.call('eventReversalProblems', device.State.schedule, entry.id,
+                TARGET, 'סיבה').length > 0,
+            JSON.stringify(device.call('eventReversalProblems', device.State.schedule,
+                entry.id, TARGET, 'סיבה')));
+        const change = device.call('recordEventReversed', device.State.schedule,
+            entry.id, TARGET, '2026-08-18', 'סיבה', '2026-08-26T00:00:00.000Z', device.id);
+        check('and nothing is written for it', change === null, JSON.stringify(change));
+    }
+
+    // THE OTHER FORM, which corrects an ADVANCE rather than a transaction, takes the same
+    // rule from the same reason - and recordAdvanceReversed asks nothing at all.
+    {
+        const device = withRepayment('d_date_adv');
+        const advanceId = Object.keys(device.State.schedule.advances)[0];
+        const when = device.State.schedule.advances[advanceId].date;
+        const change = device.call('recordAdvanceReversed', device.State.schedule,
+            advanceId, 100, '2020-01-01', 'לא נמסר', '2026-08-26T00:00:00.000Z', device.id);
+        const written = change ? change.value : null;
+        check('a correction of an advance is dated on the advance',
+            written !== null && written.date === when,
+            JSON.stringify([written && written.date, when]));
+        check('and it too is readable by the model that wrote it',
+            written !== null
+            && device.call('ledgerEntryProblems', written.id, written).length === 0,
+            JSON.stringify(written
+                ? device.call('ledgerEntryProblems', written.id, written) : 'nothing written'));
+
+        // A rule the recorder does not apply is a document, not a guard: the amount is
+        // asked here for the same reason the date is.
+        const bad = device.call('recordAdvanceReversed', device.State.schedule,
+            advanceId, -50, when, 'שלילי', '2026-08-26T00:00:00.000Z', device.id);
+        check('and a correction of less than nothing is refused before anything moves',
+            bad === null, JSON.stringify(bad));
+    }
+}
+
 report();
