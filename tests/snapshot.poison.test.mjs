@@ -151,4 +151,98 @@ for (const [what, poison, build] of cases) {
         device.call('farkadWritesBlocked') === false);
 }
 
+// ------------------------------------------------- and the twenty-first open still opens
+{
+    suite('a phone that once heard a poisoned snapshot is still released after many reopens');
+
+    // The hold is re-derived at every boot from the quarantine copy, which is right: the
+    // record carrying the marker was never saved, so the copy is the only durable thing.
+    // But re-deriving it called Recovery.damaged again, and Recovery never writes over
+    // an existing quarantine, so every boot minted one more copy - :damaged:2, :3 ... -
+    // until the ladder ran out at twenty. From then on quarantineRecord answered null,
+    // the problem was pushed with mustHold, acknowledge() answered false, and the
+    // banner said there was no room for a copy. Twenty identical copies were on the
+    // disk. Freeing space changed nothing, and every later boot did the same.
+    //
+    // A phone that ever heard one such document stopped being able to record after
+    // about twenty app opens, and was told the wrong reason.
+    const first = phone('d_many');
+    first.Sync.receive(arriving(first, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+    }));
+    await settle(40);
+    given('the first sighting holds the device', first.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        first.global('Recovery').acknowledge() === true);
+
+    const copiesOn = device => Object.keys(device.dump())
+        .filter(key => key.indexOf('scheduleData:v2:poison:') === 0);
+
+    let storage = first.dump();
+    const boots = [];
+    for (let n = 1; n <= 22; n += 1) {
+        const again = phone(`d_many_${n}`, storage);
+        const heldAtBoot = again.call('farkadWritesBlocked') === true;
+        const released = again.global('Recovery').acknowledge() === true;
+        boots.push({ n, heldAtBoot, released, copies: copiesOn(again).length,
+            problems: again.global('Recovery').problems.map(problem =>
+                ({ key: problem.key, copy: problem.copy, mustHold: problem.mustHold })) });
+        storage = again.dump();
+    }
+
+    check('every reopen is held at boot until the person is told',
+        boots.every(boot => boot.heldAtBoot),
+        JSON.stringify(boots.filter(boot => !boot.heldAtBoot).map(boot => boot.n)));
+    check('and every one of them, the twenty-second included, is released by acknowledging',
+        boots.every(boot => boot.released),
+        JSON.stringify(boots.filter(boot => !boot.released)
+            .map(boot => [boot.n, boot.problems])));
+    check('the bytes were kept once, not once per boot',
+        boots[boots.length - 1].copies === 1,
+        JSON.stringify(boots.map(boot => boot.copies)));
+    check('and the one copy still carries them',
+        JSON.stringify(storage).indexOf(MARKER) !== -1);
+    check('no boot ever claimed a copy could not be kept',
+        boots.every(boot => boot.problems.every(problem => problem.copy !== null
+            && problem.mustHold === false)),
+        JSON.stringify(boots.filter(boot => boot.problems.some(problem =>
+            problem.copy === null)).map(boot => boot.n)));
+}
+
+{
+    suite('and so is a phone whose own record carries the poisoned name');
+
+    // The other road to the same ladder. Here the evidence IS on the record - held under
+    // ledger.unreadable, which the writer round-trips - so every boot reads it off the
+    // disk, reports it, and quarantined one more copy of the very same bytes.
+    const first = phone('d_own');
+    first.State.schedule.ledger = JSON.parse('{"advances":{},"unreadable":'
+        + `{"__proto__":{"id":"${MARKER}","amount":500}},`
+        + '"migrations":{},"unreadableMigrations":{}}');
+    first.State.save({ silent: true });
+
+    let storage = first.dump();
+    const boots = [];
+    for (let n = 1; n <= 22; n += 1) {
+        const again = phone(`d_own_${n}`, storage);
+        boots.push({ n,
+            heldAtBoot: again.call('farkadWritesBlocked') === true,
+            released: again.global('Recovery').acknowledge() === true,
+            copies: Object.keys(again.dump()).filter(key =>
+                key.indexOf(':damaged') !== -1).length });
+        storage = again.dump();
+    }
+    check('every reopen is held at boot', boots.every(boot => boot.heldAtBoot),
+        JSON.stringify(boots.filter(boot => !boot.heldAtBoot).map(boot => boot.n)));
+    check('and every one is released by acknowledging',
+        boots.every(boot => boot.released),
+        JSON.stringify(boots.filter(boot => !boot.released).map(boot => boot.n)));
+    check('identical bytes are quarantined once per record they were held under',
+        boots[boots.length - 1].copies <= 2,
+        JSON.stringify(boots.map(boot => boot.copies)));
+    check('and the evidence is still on the record itself',
+        String(storage['scheduleData:v2']).indexOf(MARKER) !== -1);
+}
+
 report();
