@@ -200,7 +200,11 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         const row = rows.find(line => line[0] === 'דוד');
         return {
             gross: row[head.indexOf('נצבר')],
-            advances: row[head.indexOf('מקדמות')],
+            // Headed by what is in it: with the account being read this cell is the
+            // deduction and the column says so. See deductionColumnName in
+            // js/ui/reports.js and tests/wording.test.mjs.
+            advances: row[head.indexOf(head.indexOf('נוכה מהשכר') !== -1
+                ? 'נוכה מהשכר' : 'מקדמות')],
             net: row[head.indexOf('לתשלום')],
             note: row[head.indexOf('הערה')]
         };
@@ -1385,7 +1389,8 @@ function omer(flags) {
         return {
             account: workerAccountFor(worker.id),
             sheetNet: row[head.indexOf('לתשלום')],
-            sheetAdvances: row[head.indexOf('מקדמות')],
+            sheetAdvances: row[head.indexOf(head.indexOf('נוכה מהשכר') !== -1
+                ? 'נוכה מהשכר' : 'מקדמות')],
             statement: workerStatementText(worker.id),
             openBalance: openAdvanceBalance(State.schedule, worker.id)
         };

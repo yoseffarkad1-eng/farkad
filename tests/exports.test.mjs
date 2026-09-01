@@ -200,7 +200,11 @@ function csvRows(text) {
         + '• שלישי 11/08 - הרצליה (‎+2 ש׳) - 500\n'
         + '• רביעי 12/08 - נעדר\n\n'
         + 'סה״כ 2 ימי נוכחות\n3 ימי שכר · מתוכם יום כפול אחד · 2 שעות נוספות\n'
-        + 'נצבר: 1300\n\nמקדמה בהעברה 12/08: ‎-500\n\nנותר לתשלום: 800');
+        // מקדמות חדשות totals what was handed over in the period before the individual
+        // lines, so the man reads one account rather than a list he has to add up
+        // himself. See tests/wording.test.mjs.
+        + 'נצבר: 1300\n\nמקדמות חדשות: 500\nמקדמה בהעברה 12/08: ‎-500\n\n'
+        + 'נותר לתשלום: 800');
 
     // A name that is not plain Hebrew is a left-to-right run inside a right-to-left
     // sentence and slides to wherever the bidi algorithm puts it - so the isolate travels
@@ -648,11 +652,17 @@ function csvRows(text) {
 
     const head = csvRows(payroll)[0];
     const cell = name => row[head.indexOf(name)];
-    same('נצבר, מקדמות and לתשלום are the deduction and they add up',
-        [cell('נצבר'), cell('מקדמות'), cell('לתשלום')], ['3050', '-3050', '0']);
-    // The column says מקדמות and holds a DEDUCTION, which are the same number only when
-    // the advance is smaller than the wage. The note is the only place in the file that
-    // can say so, and without it the bookkeeper reads 3,050 as the money handed over.
+    // The column is headed by what is IN it: with the account being read this cell is
+    // the deduction, and it is called נוכה מהשכר. See deductionColumnName in
+    // js/ui/reports.js, and tests/wording.test.mjs for the rule.
+    check('the deduction column is named after the deduction',
+        head.indexOf('נוכה מהשכר') !== -1 && head.indexOf('מקדמות') === -1,
+        JSON.stringify(head));
+    same('נצבר, נוכה מהשכר and לתשלום are the deduction and they add up',
+        [cell('נצבר'), cell('נוכה מהשכר'), cell('לתשלום')], ['3050', '-3050', '0']);
+    // The column now SAYS deduction, and the note still carries what was handed over -
+    // 3,050 came off a 5,000 advance, and a heading alone cannot say where the other
+    // 1,950 went.
     check('and the file says the column is a deduction, not the money handed over',
         String(row[row.length - 1]).indexOf('5000') !== -1
         || String(row[row.length - 1]).indexOf('1950') !== -1,

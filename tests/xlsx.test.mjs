@@ -629,19 +629,26 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
     given('his row is in the workbook', Array.isArray(row),
         JSON.stringify(workbook.sheets['שכר'].values));
 
+    // The middle column is headed by what is in it - נוכה מהשכר while the account is
+    // being read. See deductionColumnName in js/ui/reports.js.
+    const DEDUCTED = at('נוכה מהשכר') !== -1 ? at('נוכה מהשכר') : at('מקדמות');
+    check('the workbook names the deduction column after the deduction',
+        at('נוכה מהשכר') !== -1 && at('מקדמות') === -1,
+        JSON.stringify(workbook.sheets['שכר'].values[0]));
     same('the three money cells are the deduction, and they add up in the file',
-        [row[at('נצבר')], row[at('מקדמות')], row[at('לתשלום')]], [3050, -3050, 0]);
+        [row[at('נצבר')], row[DEDUCTED], row[at('לתשלום')]], [3050, -3050, 0]);
     // NUMBERS, not text. A bookkeeper sums the column; a cell SheetJS wrote as a string
     // sums to nothing and the total is quietly short by whatever that row held.
     check('and they are numbers in the cells, not text that looks like numbers',
-        [row[at('נצבר')], row[at('מקדמות')], row[at('לתשלום')]]
+        [row[at('נצבר')], row[DEDUCTED], row[at('לתשלום')]]
             .every(cell => typeof cell === 'number'),
-        JSON.stringify([row[at('נצבר')], row[at('מקדמות')], row[at('לתשלום')]]
+        JSON.stringify([row[at('נצבר')], row[DEDUCTED], row[at('לתשלום')]]
             .map(cell => typeof cell)));
 
-    // THE 1,950 THAT WOULD OTHERWISE VANISH. The column says מקדמות and holds a
-    // DEDUCTION; without the note this file reports 3,050 as the money handed over and
-    // the remaining 1,950 of a real advance appears in no document at all.
+    // THE 1,950 THAT WOULD OTHERWISE VANISH. The heading now says the column is a
+    // deduction, but a heading cannot say where the rest went: without the note this
+    // file shows 3,050 coming off and the remaining 1,950 of a real advance appears in
+    // no document at all.
     const note = String(row[at('הערה')]);
     check('the note carries the debt going to the next account',
         note.indexOf('1950') !== -1, note);
