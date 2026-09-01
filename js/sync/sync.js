@@ -2921,6 +2921,24 @@ const FarkadSync = {
             if (!wrote.durable) {
                 movedUnder.forEach(path => this._heldNow.add(String(path)));
             }
+            // SAID AS ITSELF, and said HERE.
+            //
+            // The conflict branch reports a hold by throwing an error that carries the
+            // held paths, and fail() turns that into 'contested' and its line. This
+            // branch has nothing to throw - it decided before anything left - and it used
+            // to set nothing at all. The holding branch below schedules no retry for a
+            // contested hold, deliberately, and re-asks the status only when it currently
+            // reads 'synced'; at this moment it reads 'sending', because the snapshot
+            // that has just been adopted found the queue not empty. So the line said
+            // "still sending" for the rest of the evening, over a queue nothing was
+            // sending and nothing would retry - and the one person who could resolve a
+            // hold was not told there was anything to resolve. Measured in
+            // tests/contested.test.mjs: a hold on an idle phone, polled past the first
+            // rung of the ladder.
+            const held = new Error('a queued edit was built on a value another device '
+                + 'has since corrected; it is held until a person looks');
+            held.contested = movedUnder.slice();
+            this.fail(held);
         }
 
         const heldBatches = new Set();
