@@ -519,6 +519,24 @@ function fullScheduleProblems(raw) {
     if (typeof ledgerContainerProblem === 'function' && ledgerContainerProblem(raw) !== null) {
         problems.push('היסטוריית המקדמות בקובץ אינה בצורה שאפשר לקרוא.');
     }
+    // AND A NAME NOBODY CAN USE AS A KEY, refused here for the same reason.
+    //
+    // This gate said nothing about one, so a restore point carrying a poisoned map
+    // passed it. The door then ran normaliseSchedule on the file, which - correctly, for
+    // a document that is being READ - handed the map to Recovery: a quarantine copy was
+    // written and writing was blocked on the phone, before replaceEverything had run.
+    // replaceEverything then refused because writing was blocked, and the door reported
+    // THAT as no room on the device to record the restore. The device was not full,
+    // freeing space changed nothing, and the phone somebody was recording on stayed
+    // held, across a reopen, by a file they had only tried to restore.
+    //
+    // A replacement is refused at the door with its own sentence. The rescue file is
+    // still opened and held - that is storedScheduleProblems, which does not ask this.
+    if (typeof poisonedContainers === 'function') {
+        poisonedContainers(raw).forEach(found => {
+            problems.push('ברישום יש שם שאי אפשר להשתמש בו כמפתח (' + found.at + ').');
+        });
+    }
     return problems;
 }
 
