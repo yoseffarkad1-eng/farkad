@@ -21,7 +21,7 @@ import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makeDevice, settle, settleUntil } from './harness.mjs';
-import { suite, check, given, report } from './runner.mjs';
+import { suite, check, same, given, report } from './runner.mjs';
 
 const ADAPTER = fileURLToPath(new URL('../js/sync/firebase-adapter.js', import.meta.url));
 const SHIM = fileURLToPath(new URL('../js/sync/_adapter-money-test.mjs', import.meta.url));
@@ -478,6 +478,156 @@ async function bothSettled(a, b) {
         && a.call('impossibleClosures', a.State.schedule).length === 0);
     check('and no second edit was needed to get there',
         again.Sync.pendingCount() === 0, String(again.Sync.pendingCount()));
+}
+
+// ================================================== every kind of write, interleaved, once
+{
+    suite('an interleaved storm leaves two phones and the cloud on one record');
+
+    // C8. Everything above races ONE kind of write at a time, which is how a fault is
+    // isolated and is not how an evening goes. This is all of them at once, on two phones
+    // that cannot see each other until they land - a repayment, a correction of it, a day
+    // recorded, an advance created, and the fortnight closed - and then the whole record
+    // is compared, not a summary of it.
+    //
+    // CANONICAL, not `JSON.stringify` of two objects: key order in a document that came
+    // back off the wire is not key order in one this device built, and comparing those
+    // directly reports a difference in a record that is identical. Two phones agreeing is
+    // the whole claim of this file, and it has to be a claim about the RECORD.
+    const canonical = value => {
+        if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+        if (value && typeof value === 'object') {
+            return '{' + Object.keys(value).sort()
+                .map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}';
+        }
+        return JSON.stringify(value === undefined ? null : value);
+    };
+    // The RECORD, and not the envelope: revision, lastOpId, the fingerprint and the two
+    // stamps are facts about which write landed last, not about what anybody is owed.
+    const bodyOf = raw => canonical({
+        days: (raw || {}).days || {},
+        advances: (raw || {}).advances || {},
+        workers: (raw || {}).workers || [],
+        places: (raw || {}).places || [],
+        ledger: (raw || {}).ledger || {}
+    });
+
+    await reseed();
+    const a = phone('d_storm_a');
+    const b = phone('d_storm_b');
+    await settle(700);
+
+    // Neither phone has seen the other's move when it makes its own.
+    // ONE COHERENT EVENING, and the timestamps are part of the record rather than
+    // decoration: `at` is when somebody wrote a thing down, and a closure freezes the
+    // arithmetic as it stood at ITS `at`. The repayment is written before the close and
+    // is inside the frozen figure; the correction is written after it and is late
+    // movement, which is the case being raced.
+    const repay = a.call('recordAdvanceRepaid', a.State.schedule, ADVANCE, 400,
+        '2026-08-18', '', '2026-08-20T09:00:00.000Z', 'd_storm_a', 'cash');
+    a.State.commit(repay);
+    b.State.commit(b.call('assignPlace', b.State.schedule, '2026-08-18', 'w_01',
+        'actual', 'p_01'));
+    const fresh = b.call('addAdvance', b.State.schedule, 'w_01', '2026-08-19', 700, '');
+    b.State.commit(fresh);
+    await bothSettled(a, b);
+
+    // Now the correction, from the phone that did NOT write the repayment, while the
+    // other one closes the fortnight.
+    given('the second phone can see the repayment it is about to correct',
+        Boolean(b.State.schedule.ledger.advances[repay.value.id]),
+        JSON.stringify(kindsOf(b.State.schedule)));
+    b.State.commit(b.call('recordEventReversed', b.State.schedule, repay.value.id, 400,
+        '2026-08-18', 'נרשם על האדם הלא נכון', '2026-08-21T09:00:00.000Z', 'd_storm_b'));
+    a.State.commitMany(a.call('closePeriodChanges', a.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-20T18:00:00.000Z', 'd_storm_a'));
+    await bothSettled(a, b);
+
+    const cloud = await readDoc();
+    check('neither phone is holding work',
+        a.Sync.pendingCount() === 0 && b.Sync.pendingCount() === 0,
+        `A ${a.Sync.pendingCount()} / B ${b.Sync.pendingCount()}`);
+    check('and both say so',
+        a.Sync.status === 'synced' && b.Sync.status === 'synced',
+        `${a.Sync.status} / ${b.Sync.status}`);
+    check('nothing was held aside on either of them',
+        Object.keys(a.State.schedule.ledger.unreadable || {}).length === 0
+        && Object.keys(b.State.schedule.ledger.unreadable || {}).length === 0,
+        JSON.stringify([Object.keys(a.State.schedule.ledger.unreadable || {}),
+            Object.keys(b.State.schedule.ledger.unreadable || {})]));
+    check('and neither is refusing to write',
+        a.call('farkadWritesBlocked') === false && b.call('farkadWritesBlocked') === false);
+
+    check('the two phones hold the same record, field for field',
+        bodyOf(a.State.schedule) === bodyOf(b.State.schedule),
+        JSON.stringify([kindsOf(a.State.schedule), kindsOf(b.State.schedule)]));
+
+    // AND THE CLOUD HOLDS THE SAME RECORD - read through the app's own reader rather
+    // than compared as bytes. The document on the server is a PROJECTION of a schedule
+    // (cloudDocument), so comparing it field for field against a live State.schedule
+    // reports a difference in a record that is identical. normaliseSchedule is what every
+    // phone actually reads it with, and what it produces is the thing that has to agree.
+    const readBack = a.call('normaliseSchedule', JSON.parse(JSON.stringify(cloud)));
+    check('and it is the record the cloud holds',
+        bodyOf(readBack) === bodyOf(a.State.schedule),
+        JSON.stringify([bodyOf(readBack).slice(0, 300), bodyOf(a.State.schedule).slice(0, 300)]));
+
+    // EVERY EVENT IS THERE, ONCE. A convergence that agreed by losing something would
+    // pass the three checks above.
+    const kinds = entriesOf(cloud).map(one => String(one.kind)).sort();
+    check('every event of the evening is on the record, once',
+        kinds.filter(one => one === 'repaid').length === 1
+        && kinds.filter(one => one === 'reversed').length === 1
+        && kinds.filter(one => one === 'deducted').length === 1
+        && kinds.filter(one => one === 'closed').length === 1
+        // ONE origin so far: the advance created during the storm gets its own when the
+        // boot mirror next runs, which is the reopen below - it is the one write in this
+        // app nobody asks for, and it is checked there rather than assumed here.
+        && kinds.filter(one => one === 'given').length === 1,
+        JSON.stringify(kinds));
+    check('the day one phone recorded is there',
+        Boolean((cloud.days || {})['2026-08-18']),
+        JSON.stringify(Object.keys(cloud.days || {}).sort()));
+    check('and the advance the other one created',
+        Boolean((cloud.advances || {})[fresh.value.id]),
+        JSON.stringify(Object.keys(cloud.advances || {}).sort()));
+
+    // THE MONEY, read the same way on both, and once more after each is closed and
+    // reopened - which is the only reading that proves the disk agrees with the screen.
+    const moneyOn = who => JSON.stringify([
+        who.call('advanceOutstanding', who.State.schedule, ADVANCE),
+        who.call('advanceAccount', who.State.schedule, 'w_01', A.from, A.to)]);
+    check('both phones read the same money out of it', moneyOn(a) === moneyOn(b),
+        JSON.stringify([moneyOn(a), moneyOn(b)]));
+
+    const reopenOf = (device, id) => {
+        const made = makeDevice({ deviceId: id, storage: device.dump(),
+            flags: { carryAdvances: true, ledgerWrites: true } });
+        made.setToday('2026-08-26');
+        made.ctx.askTell = () => Promise.resolve();
+        made.State.load();
+        return made;
+    };
+    const againA = reopenOf(a, 'd_storm_a2');
+    const againB = reopenOf(b, 'd_storm_b2');
+    check('a reopen of each reads the same money again',
+        moneyOn(againA) === moneyOn(a) && moneyOn(againB) === moneyOn(a),
+        JSON.stringify([moneyOn(againA), moneyOn(againB), moneyOn(a)]));
+    check('and neither reopened phone is held',
+        againA.call('farkadWritesBlocked') === false
+        && againB.call('farkadWritesBlocked') === false);
+    // AND WHAT EACH ONE OWES IS THE ONE WRITE NOBODY ASKED FOR: the boot mirror, giving
+    // the advance created during the storm its immutable origin entry. Both phones owe
+    // exactly that, both derive the SAME id for it, and there is nothing else pending -
+    // a reopen that owed anything else would mean the disk and the cloud had drifted.
+    const owed = who => who.Sync.physicalOperations().map(one => one.path).sort();
+    const mirror = `ledger.advances.le_mig_${fresh.value.id}`;
+    same('and what each owes is the origin the boot mirror writes, and nothing else',
+        [owed(againA), owed(againB)], [[mirror], [mirror]]);
+    check('so the reopened record holds both advances\' origins once the mirror lands',
+        Object.keys(againA.State.schedule.ledger.advances)
+            .filter(id => String(id).indexOf('le_mig_') === 0).length === 2,
+        JSON.stringify(Object.keys(againA.State.schedule.ledger.advances)));
 }
 
 await env.cleanup();
