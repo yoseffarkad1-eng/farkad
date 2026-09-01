@@ -60,6 +60,17 @@ function phone(id) {
 const site = (device, placeId) => device.State.commit(device.call('assignPlace',
     device.State.schedule, DAY, 'w_01', 'actual', placeId));
 
+// The same phone, opened again from what its disk holds. No adapter until the test hands
+// it one - which is what an open with no signal looks like.
+function reopen(id, storage) {
+    const device = makeDevice({ deviceId: id, storage });
+    device.Sync.pushDelayMs = TICK;
+    device.setToday('2026-08-20');
+    device.ctx.askTell = () => Promise.resolve();
+    device.State.load();
+    return device;
+}
+
 // A phone that can still WRITE but cannot HEAR. Withholding the snapshot is how the race
 // actually happens - two people recording the same evening, one of them in a stairwell -
 // and it is the difference between this suite and the one that missed the defect.
@@ -390,6 +401,178 @@ const wonCount = accepted();
         check(`${what}: and does not say synced`, again.Sync.status !== 'synced',
             again.Sync.status);
     }
+}
+
+// ----------------------------------- an edit made before this session heard the cloud
+{
+    suite('an edit made before the session has heard the cloud');
+
+    // The base an edit is compared against lived in memory and was set only by a
+    // snapshot. Open the app with no signal - on a building site, the ordinary open -
+    // and there is no snapshot for the whole session, so every edit recorded
+    // `base: null`, and null meant "the server had nothing here", which every hold
+    // exempts. The phone then came back, heard the other phone's correction, flushed,
+    // and its stale value went out at the current revision: accepted, acknowledged,
+    // both phones synced, the correction gone from the cloud and then from the phone
+    // that made it. Measured: cloud p_00,p_02 where the winner was p_00,p_01.
+    //
+    // What the phone HELD at the path is on its own disk, and that is what the edit was
+    // built on. Written down with the edit, in the same verified write, it is what lets
+    // the send say "this moved under me" after any number of reopens.
+    const sky = makeCloud();
+    const won = phone('d_open_a');
+    const lost = phone('d_open_b');
+    won.Sync.connect(sky.adapter);
+    await settle(TICK * 10);
+    lost.Sync.connect(sky.adapter);
+    await settle(TICK * 10);
+    const landed = () => sky.writes.filter(write => !write.replayed).length;
+    const set = (device, placeId) => device.State.commit(device.call('assignPlace',
+        device.State.schedule, DAY, 'w_01', 'actual', placeId));
+
+    set(won, 'p_00');
+    await settleUntil(() => Boolean((sky.doc.days || {})[DAY])
+        && lost.Sync._revision === sky.doc.revision
+        && lost.Sync.pendingCount() === 0, 5000);
+    given('both phones hold the same day at the same revision',
+        lost.Sync._revision === sky.doc.revision && lost.Sync.pendingCount() === 0,
+        `${lost.Sync._revision} of ${sky.doc.revision}, ${lost.Sync.pendingCount()} pending`);
+    // Closed for the night.
+    const asleep = lost.dump();
+
+    set(won, 'p_01');
+    await settleUntil(() => JSON.stringify(sky.doc.days[DAY]).indexOf('p_01') !== -1, 5000);
+    const winner = JSON.stringify(sky.doc.days[DAY]);
+    const writes = landed();
+
+    // Opened where there is no signal: no adapter and no snapshot, the whole session.
+    // The person records over the same day, and closes it again.
+    const noSignal = reopen('d_open_b', asleep);
+    given('the reopened phone has heard nothing this session',
+        noSignal.Sync._baseDoc === null && noSignal.Sync._revision === null,
+        `revision ${noSignal.Sync._revision}`);
+    set(noSignal, 'p_02');
+    given('the edit is queued on the disk', noSignal.Sync.pendingCount() === 1,
+        String(noSignal.Sync.pendingCount()));
+
+    // Opened where there IS signal: it hears the winner first, and only then flushes.
+    const later = reopen('d_open_b', noSignal.dump());
+    later.Sync.connect(sky.adapter);
+    await settleUntil(() => later.Sync._revision === sky.doc.revision, 5000);
+    given('and has now heard the winner', later.Sync._revision === sky.doc.revision,
+        `${later.Sync._revision} of ${sky.doc.revision}`);
+    later.Sync.flush();
+    await settle(TICK * 80);
+
+    check('the winner\'s correction is still the winner\'s',
+        JSON.stringify(sky.doc.days[DAY]) === winner,
+        `${JSON.stringify(sky.doc.days[DAY])} (was ${winner})`);
+    check('and the reopened phone sent nothing', landed() === writes,
+        `${writes} -> ${landed()}`);
+    check('it still owes its edit', later.Sync.pendingCount() > 0,
+        String(later.Sync.pendingCount()));
+    check('and says the record moved, not that it is synced',
+        later.Sync.status === 'contested', later.Sync.status);
+    await settle(TICK * 20);
+    check('the winner still shows its own correction',
+        JSON.stringify(won.State.schedule.days[DAY]).indexOf('p_02') === -1
+        && JSON.stringify(won.State.schedule.days[DAY]).indexOf('p_01') !== -1,
+        JSON.stringify(won.State.schedule.days[DAY]));
+
+    // The way out is the same person, looking at the day as it now is.
+    set(later, 'p_02');
+    await settleUntil(() => landed() > writes, 8000);
+    check('a fresh explicit edit of the same path still lands', landed() === writes + 1,
+        `${writes} -> ${landed()}`);
+    check('and it is the value the person just chose',
+        JSON.stringify(sky.doc.days[DAY]).indexOf('p_02') !== -1,
+        JSON.stringify(sky.doc.days[DAY]));
+}
+
+// ------------------------------------------ the document's last writer is not the path's
+{
+    suite('the document\'s last writer is not the path\'s');
+
+    // "Somebody else wrote it" was decided on the whole document's updatedBy. One
+    // unrelated write of this device's own - another day, in its own batch, which an
+    // earlier suite here REQUIRES to go - makes this device the document's last writer,
+    // and the whole pre-send pass was then skipped for every path. With the hold marker
+    // refused by the disk (the fault the suite above uses) and the session closed,
+    // nothing else remembered the hold: the reopened phone heard the winner, found the
+    // document signed with its own name, and sent the contested edit over the other
+    // phone's correction. The base recorded with the edit was on the disk the whole
+    // time and was never consulted. Measured: cloud p_00,p_02, winner p_00,p_01, synced.
+    //
+    // The question is about the PATH - is what the server holds there something this
+    // device has seen or produced? - and the document's signature cannot answer it.
+    const sky = makeCloud();
+    const won = phone('d_last_a');
+    const lost = phone('d_last_b');
+    const wall = tunnel(sky);
+    won.Sync.connect(sky.adapter);
+    await settle(TICK * 10);
+    lost.Sync.connect(wall.adapter);
+    await settle(TICK * 10);
+    const landed = () => sky.writes.filter(write => !write.replayed).length;
+    const set = (device, placeId) => device.State.commit(device.call('assignPlace',
+        device.State.schedule, DAY, 'w_01', 'actual', placeId));
+
+    set(won, 'p_00');
+    await settleUntil(() => Boolean((sky.doc.days || {})[DAY])
+        && lost.Sync._revision === sky.doc.revision, 5000);
+    given('both phones start from the same document',
+        lost.Sync._revision === sky.doc.revision,
+        `${lost.Sync._revision} of ${sky.doc.revision}`);
+
+    wall.close();
+    set(won, 'p_01');
+    await settleUntil(() => JSON.stringify(sky.doc.days[DAY]).indexOf('p_01') !== -1, 5000);
+    const winner = JSON.stringify(sky.doc.days[DAY]);
+
+    lost.setQuota(key => key.indexOf(':hold:') !== -1);
+    set(lost, 'p_02');
+    lost.Sync.flush();
+    await settleUntil(() => lost.Sync.status === 'contested', 5000);
+    given('the loser is told, in this session', lost.Sync.status === 'contested',
+        lost.Sync.status);
+    given('and the disk did not record the hold',
+        Object.keys(lost.dump()).every(key =>
+            key.indexOf(':hold:') === -1 || lost.dump()[key] !== '1'),
+        JSON.stringify(Object.keys(lost.dump()).filter(key => key.indexOf(':hold:') !== -1)));
+
+    // The winner's snapshot, then an unrelated day of the loser's own - which goes, as
+    // it must, and signs the document with the loser's name.
+    wall.release();
+    await settle(TICK * 20);
+    const before = landed();
+    lost.State.commit(lost.call('assignPlace', lost.State.schedule,
+        '2026-08-13', 'w_01', 'actual', 'p_01'));
+    await settleUntil(() => landed() > before, 6000);
+    given('the unrelated day landed and the document now names this device',
+        landed() === before + 1 && sky.doc.updatedBy === lost.id
+        && JSON.stringify(sky.doc.days[DAY]) === winner,
+        `${before} -> ${landed()}, updatedBy ${sky.doc.updatedBy}`);
+    const writes = landed();
+
+    // Closed and reopened. The memory that held the path is gone; the disk never had it.
+    const again = reopen(lost.id, lost.dump());
+    again.Sync.connect(sky.adapter);
+    await settleUntil(() => again.Sync._revision === sky.doc.revision, 5000);
+    given('the reopened phone has heard the document',
+        again.Sync._revision === sky.doc.revision,
+        `${again.Sync._revision} of ${sky.doc.revision}`);
+    again.Sync.flush();
+    await settle(TICK * 80);
+
+    check('the winner\'s correction is still the winner\'s',
+        JSON.stringify(sky.doc.days[DAY]) === winner,
+        `${JSON.stringify(sky.doc.days[DAY])} (was ${winner})`);
+    check('and the reopened phone sent nothing', landed() === writes,
+        `${writes} -> ${landed()}`);
+    check('it still owes the contested edit', again.Sync.pendingCount() > 0,
+        String(again.Sync.pendingCount()));
+    check('and says the record moved, not that it is synced',
+        again.Sync.status === 'contested', again.Sync.status);
 }
 
 // --------------------------------------------- a hold decided before the send says so
