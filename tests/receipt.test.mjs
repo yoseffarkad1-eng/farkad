@@ -285,6 +285,106 @@ const site = (device, date, placeId) => device.State.commit(device.call('assignP
         JSON.stringify([(cloud.doc.days || {})[DAY], b.State.schedule.days[DAY]]));
 }
 
+// ---------------------------------------------- a replay is not the last word on the day
+{
+    suite('a retry answered from its receipt still takes the correction made meanwhile');
+
+    // The receipt makes a lost answer safe to retry: the server finds the operation's
+    // receipt, performs no write, and says "already applied". That answer is about the
+    // OPERATION. It says nothing about what the path holds now - and between the write
+    // that landed and the retry that asked about it, another phone can have corrected
+    // the very same day.
+    //
+    // Measured on this tree: this phone's day landed, its answer was lost, and while the
+    // retry was open on the wire the other phone corrected the day. The correction's
+    // snapshot arrived here and was adopted, and reapplyPending put the still-owed value
+    // back on top of it - correctly, since the write was still owed. Then the replay was
+    // acknowledged, the queue was pruned, and nothing looked at the snapshot again. The
+    // cloud and the other phone showed the correction; this phone showed its own older
+    // value, said synced, and priced the day at a different site until the next write
+    // from anyone.
+    //
+    // No snapshot follows a replay - it performed no write - so the only thing that can
+    // put the correction back on this screen is the acknowledgement itself.
+    const cloud = makeCloud();
+    const a = phone('d_a', cloud);
+    await settle(TICK * 10);
+    const b = phone('d_b', cloud);
+    await settleUntil(() => a.Sync.status === 'synced' && b.Sync.status === 'synced', 5000);
+    given('both phones are on the same document',
+        a.Sync.status === 'synced' && b.Sync.status === 'synced',
+        `${a.Sync.status} / ${b.Sync.status}`);
+
+    const placesAt = schedule => (((((schedule || {}).days || {})[DAY] || {}).actual || {})
+        .w_01 || {}).entries;
+    const spell = entries => JSON.stringify((entries || []).map(entry => entry.placeId));
+    const own = (patch, path) => Object.prototype.hasOwnProperty.call(patch, path);
+
+    // 1. This phone's first recording of the day lands, and its answer is lost.
+    const landed = cloud.adapter.update.bind(cloud.adapter);
+    let lost = 0;
+    cloud.adapter.update = patch => landed(patch).then(result => {
+        if (lost === 0 && patch.updatedBy === 'd_a' && own(patch, PATH)) {
+            lost += 1;
+            const dropped = new Error('client is offline');
+            dropped.code = 'unavailable';
+            throw dropped;
+        }
+        return result;
+    });
+    site(a, DAY, 'p_01');
+    await settleUntil(() => lost === 1 && a.Sync.status === 'error', 5000);
+    given('the write landed and its answer was lost',
+        lost === 1 && spell(placesAt(cloud.doc)) === '["p_01"]' && a.Sync.pendingCount() === 1,
+        `${lost} lost, cloud ${spell(placesAt(cloud.doc))}, ${a.Sync.pendingCount()} owed`);
+
+    // 2. The retry goes out, and is held open on the wire.
+    let releaseRetry = null;
+    cloud.hold = (kind, payload) => (kind === 'update' && payload.updatedBy === 'd_a'
+        && own(payload, PATH))
+        ? new Promise(resolve => { releaseRetry = resolve; })
+        : null;
+    a.Sync._retryAt = 0;
+    a.Sync.flush();
+    await settleUntil(() => releaseRetry !== null, 5000);
+    given('the retry is open on the wire', releaseRetry !== null);
+
+    // 3. While it is open, the other phone corrects the day - a different site - and
+    //    this phone hears about it.
+    b.State.commit(b.call('unassignPlace', b.State.schedule, DAY, 'w_01', 'actual', 'p_01'));
+    site(b, DAY, 'p_02');
+    const before = cloud.doc.revision;
+    await settleUntil(() => cloud.doc.revision > before && spell(placesAt(cloud.doc)) === '["p_02"]'
+        && Boolean(a.Sync._latestRaw) && a.Sync._latestRaw.revision === cloud.doc.revision, 5000);
+    given('the correction reached the cloud and this phone heard it',
+        spell(placesAt(cloud.doc)) === '["p_02"]'
+        && a.Sync._latestRaw.revision === cloud.doc.revision,
+        `cloud ${spell(placesAt(cloud.doc))}, heard revision ${a.Sync._latestRaw.revision} `
+        + `of ${cloud.doc.revision}`);
+
+    // 4. The retry is answered - from the receipt, because the operation already landed.
+    releaseRetry();
+    cloud.hold = null;
+    await settleUntil(() => a.Sync.pendingCount() === 0, 5000);
+    await settle(TICK * 20);
+
+    check('the retry was answered from its receipt, and applied nothing',
+        cloud.writes.some(write => write.replayed && (write.patch || {}).updatedBy === 'd_a')
+        && spell(placesAt(cloud.doc)) === '["p_02"]',
+        `cloud ${spell(placesAt(cloud.doc))}, replayed: `
+        + JSON.stringify(cloud.writes.filter(write => write.replayed).length));
+    check('the phone shows the day as the cloud holds it',
+        spell(placesAt(a.State.schedule)) === spell(placesAt(cloud.doc)),
+        `screen ${spell(placesAt(a.State.schedule))}, cloud ${spell(placesAt(cloud.doc))}`);
+    const disk = JSON.parse(a.dump()['scheduleData:v2'] || 'null');
+    check('and so does its disk',
+        spell(placesAt(disk)) === spell(placesAt(cloud.doc)),
+        `disk ${spell(placesAt(disk))}, cloud ${spell(placesAt(cloud.doc))}`);
+    check('and only then does it say synced',
+        a.Sync.status === 'synced' && a.Sync.pendingCount() === 0,
+        `${a.Sync.status}, ${a.Sync.pendingCount()} owed`);
+}
+
 // ------------------------------------------------------------- and the name covers the value
 {
     suite('two different values do not share one operation name');
