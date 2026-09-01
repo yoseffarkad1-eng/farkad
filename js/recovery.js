@@ -61,6 +61,37 @@ const Recovery = {
         return copy;
     },
 
+    // The same trouble under the same key, where the BYTES are the identity.
+    //
+    // damaged() above is keyed: the second report of one trouble in one session says
+    // nothing, which is right when two callers describe the same record in different
+    // words. It is wrong for a map quarantined as it arrived - a poisoned layer from
+    // the cloud - because there the bytes ARE the evidence. Measured: the person
+    // acknowledged the first sighting, the same document arrived again with different
+    // bytes under the poisoned name, damaged() answered from the first entry, and the
+    // new bytes were never copied, never reported and never in the rescue file.
+    //
+    // Identical bytes are the same sighting and are answered from it. Different bytes
+    // are a new problem: quarantined beside the earlier copy, never over it, and told -
+    // an acknowledgement covers the problems the person was shown, not this one.
+    evidence(key, raw, message) {
+        const same = this.problems.find(problem => problem.key === key && problem.raw === raw);
+        if (same) return same.copy;
+
+        const copy = quarantineRecord(key, raw);
+        this.problems.push({
+            key,
+            raw,
+            copy,
+            message: message || `הרישום "\u2068${key}\u2069" לא נקרא.`,
+            mustHold: !copy
+        });
+        this.acknowledged = false;
+        this.paint();
+        if (typeof render === 'function') render();
+        return copy;
+    },
+
     // A reason to stop writing that is not a damaged record - a build mismatch, where the
     // page and the scripts disagree. Not acknowledgeable: a reload is the fix.
     halt(id, message) {

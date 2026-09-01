@@ -652,6 +652,10 @@ function normaliseSchedule(raw, hints) {
     Object.keys(advances).forEach(id => {
         const item = advances[id];
         if (!item || typeof item !== 'object') return;
+        // Never assigned under a poison name: `schedule.advances.__proto__ = advance`
+        // reparents the map rather than adding to it. The map's bytes were reported and
+        // quarantined above; here the name is simply not written.
+        if (POISON_SEGMENTS.indexOf(String(id)) !== -1) return;
         if (!item.workerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) return;
         const advance = {
             id: String(id),
@@ -741,9 +745,15 @@ function normaliseSchedule(raw, hints) {
     const POISON_KEY = 'scheduleData:v2:poison:';
     const POISON_SAID = 'הגיע רישום עם שם שאי אפשר להשתמש בו כמפתח. שום דבר לא נמחק - '
         + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי.';
+    // Through Recovery.evidence, not Recovery.damaged: damaged is keyed and says one
+    // trouble once per session, which for a map quarantined as it arrived meant that
+    // DIFFERENT bytes under the same poisoned name, arriving after the person had
+    // acknowledged the first sighting, were never copied and never mentioned. Here the
+    // bytes are the evidence, so identical bytes are the same sighting and anything
+    // else is a new one.
     if (typeof Recovery !== 'undefined') {
         poisoned.forEach(found => {
-            Recovery.damaged(POISON_KEY + found.at, found.json, POISON_SAID);
+            Recovery.evidence(POISON_KEY + found.at, found.json, POISON_SAID);
         });
         // AND WHATEVER AN EARLIER SESSION ALREADY HELD ASIDE.
         //
@@ -758,7 +768,7 @@ function normaliseSchedule(raw, hints) {
             ? Store.keys().filter(key => String(key).indexOf(POISON_KEY) === 0) : [];
         kept.forEach(key => {
             const at = String(key).slice(POISON_KEY.length).replace(/:damaged.*$/, '');
-            Recovery.damaged(POISON_KEY + at, Store.get(key), POISON_SAID);
+            Recovery.evidence(POISON_KEY + at, Store.get(key), POISON_SAID);
         });
     }
 
@@ -862,6 +872,9 @@ function normaliseSchedule(raw, hints) {
     // this app trades everything else to avoid.
     Object.keys(ledger).forEach(key => {
         if (key === 'advances' || key === 'unreadable') return;
+        // See normaliseLayer: a bare assignment under a poison name reparents the
+        // container instead of carrying a field.
+        if (POISON_SEGMENTS.indexOf(key) !== -1) return;
         if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
     });
 
@@ -953,6 +966,14 @@ function normaliseLayer(side) {
     Object.keys(side).forEach(workerId => {
         const record = side[workerId];
         if (!record || typeof record !== 'object') return;
+        // NOT COPIED under a poison name. `out.__proto__ = kept` is not a copy - it
+        // makes the poisoned record the layer's prototype, so `layer.entries` answers
+        // that worker's entries and the row itself is nowhere. It did not show at the
+        // first sighting, which Recovery holds before adoption; it showed when the
+        // person acknowledged and the same document arrived again. The map's bytes are
+        // reported and quarantined by poisonedContainers; this only refuses to write
+        // the name into an ordinary object.
+        if (POISON_SEGMENTS.indexOf(String(workerId)) !== -1) return;
 
         const entries = (Array.isArray(record.entries) ? record.entries : [])
             .filter(entry => entry && entry.placeId)
