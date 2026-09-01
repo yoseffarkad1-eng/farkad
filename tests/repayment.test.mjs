@@ -944,9 +944,29 @@ function omer(flags) {
     // because each was offline and each saw an unreversed advance. Both entries land and
     // both stay - and the result is the visible overpayment state, not a silent debt of
     // the opposite sign.
-    const second = device.call('recordAdvanceReversed', device.State.schedule,
-        id, 300, '2026-08-25', 'נרשם פעמיים בטעות', '2026-08-25T10:00:05.000Z', 'd_b');
-    device.State.commit(second);
+    //
+    // THE SECOND ONE IS MINTED ON A SECOND PHONE, and it has to be: this device can see
+    // the first reversal, and recordAdvanceReversed now refuses to write a second - which
+    // is the rule three lines above this one, asked of the recorder instead of only of
+    // the validator. Asking THIS device for it would be asking it to do the thing the
+    // suite has just proved it must not. So the other phone is a real other phone: it
+    // never saw the first reversal, its guard passes, and its entry arrives here the way
+    // one does - at its own field path, under its own id.
+    const other = omer({ carryAdvances: true, ledgerWrites: true });
+    other.State.commit(other.call('addAdvance', other.State.schedule,
+        'w_01', '2026-08-25', 300, ''));
+    const theirs = Object.keys(other.State.schedule.advances)
+        .find(key => other.State.schedule.advances[key].date === '2026-08-25');
+    const second = other.call('recordAdvanceReversed', other.State.schedule,
+        theirs, 300, '2026-08-25', 'נרשם פעמיים בטעות', '2026-08-25T10:00:05.000Z', 'd_b');
+    given('the other phone, which saw no reversal, wrote one', second !== null,
+        JSON.stringify(second));
+
+    // Arriving on this phone: the entry as the other device minted it, pointed at the
+    // advance this device knows, under its own id - which is why the union keeps both.
+    const arriving = Object.assign({}, second.value, { advanceId: id });
+    device.State.commit({ path: `ledger.advances.${arriving.id}`, value: arriving });
+    device.State.schedule.ledger.advances[arriving.id] = arriving;
     const state = device.call('advanceOutstanding', device.State.schedule, id);
     check('both reversals are still on the record', state.reversed === 600,
         JSON.stringify(state));
