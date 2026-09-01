@@ -92,9 +92,12 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
                             #   CAS, the rollout, the cutover and two phones writing
                             #   money at once (needs Java)
 
-Node 20 or 22 (`engines` says `>=20.11 <23`). The counts here are RE-MEASURED on this
-branch and are not the core branch's: this build runs the same suites with both money
-gates open, so several of them assert more.
+Node 20 or 22 (`engines` says `>=20.11 <23`). NO COUNT IS WRITTEN HERE, deliberately. A
+count belongs to a commit and to nothing else, and one left in a file goes stale the
+moment the next suite lands - at which point it is worse than no count, because it reads
+as a fact. Run the gate on the commit you are asking about and say which commit you ran
+it on. This branch's numbers are not the core branch's either: it runs the same suites
+with both money gates open, so several of them assert more.
 
 **THIS BRANCH IS NOT MAIN.** `claude/farkad-ledger-enable-ready` is the build with
 `LEDGER_WRITES` and `carryAdvances` both OPEN, so that what somebody eventually ships can
