@@ -273,7 +273,11 @@ function updatedPhone(id) {
     const after = await readDoc();
     // Field by field, against the document as it was. Only the five the bootstrap is
     // allowed to write may differ; the ones a person recorded must be identical.
-    const PROTOCOL_FIELDS = ['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy'];
+    const PROTOCOL_FIELDS = ['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy',
+        // The operation's fingerprint: what a write DID, carried so a receipt cannot be
+        // re-pointed at different semantics. Ordering, not work - the bootstrap writes
+        // none, because its five fields are the whole of what it does.
+        'opFingerprint'];
     const businessBefore = {};
     const businessAfter = {};
     Object.keys(before).forEach(key => {

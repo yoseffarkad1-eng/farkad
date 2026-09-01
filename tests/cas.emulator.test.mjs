@@ -117,6 +117,7 @@ const base = (extra = {}) => ({
     protocol: 1,
     revision: 1,
     lastOpId: 'op_seed',
+    opFingerprint: 'f_op_seed',
     ...extra
 });
 
@@ -150,12 +151,12 @@ const conflictOf = async promise => {
 
     // A lands a change to one field.
     await a.update({ 'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
-        protocol: 1, revision: 2, lastOpId: 'op_a', updatedBy: 'd_a' });
+        protocol: 1, revision: 2, lastOpId: 'op_a', opFingerprint: 'f_op_a', updatedBy: 'd_a' });
 
     // B was built against revision 1 and writes the SAME field.
     const error = await conflictOf(b.update({
         'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_02' }] },
-        protocol: 1, revision: 2, lastOpId: 'op_b', updatedBy: 'd_b' }));
+        protocol: 1, revision: 2, lastOpId: 'op_b', opFingerprint: 'f_op_b', updatedBy: 'd_b' }));
 
     given('B was refused', Boolean(error), String(error && error.message));
     check('the refusal is a conflict', error && error.code === 'conflict',
@@ -196,10 +197,10 @@ const conflictOf = async promise => {
     const b = opsFor(as(ALLOWED));
 
     await a.update({ 'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
-        protocol: 1, revision: 2, lastOpId: 'op_a2', updatedBy: 'd_a' });
+        protocol: 1, revision: 2, lastOpId: 'op_a2', opFingerprint: 'f_op_a2', updatedBy: 'd_a' });
     const error = await conflictOf(b.update({
         'days.2026-08-13.actual.w_01': { entries: [{ placeId: 'p_01' }] },
-        protocol: 1, revision: 2, lastOpId: 'op_b2', updatedBy: 'd_b' }));
+        protocol: 1, revision: 2, lastOpId: 'op_b2', opFingerprint: 'f_op_b2', updatedBy: 'd_b' }));
 
     given('B is still refused - the revision moved, whatever the field',
         Boolean(error) && error.code === 'conflict', String(error && error.code));
@@ -209,7 +210,7 @@ const conflictOf = async promise => {
 
     // Which is what lets the client rebase. Replayed at the revision it was told.
     await b.update({ 'days.2026-08-13.actual.w_01': { entries: [{ placeId: 'p_01' }] },
-        protocol: 1, revision: 3, lastOpId: 'op_b3', updatedBy: 'd_b' });
+        protocol: 1, revision: 3, lastOpId: 'op_b3', opFingerprint: 'f_op_b3', updatedBy: 'd_b' });
 
     const held = await readDoc();
     check('and both days are in the document',
@@ -225,7 +226,7 @@ const conflictOf = async promise => {
     const a = opsFor(as(ALLOWED));
 
     await a.update({ 'days.2026-08-14.actual.w_01': { entries: [{ placeId: 'p_01' }] },
-        protocol: 1, revision: 2, lastOpId: 'op_once', updatedBy: 'd_a' });
+        protocol: 1, revision: 2, lastOpId: 'op_once', opFingerprint: 'f_op_once', updatedBy: 'd_a' });
 
     let receipt = null;
     await env.withSecurityRulesDisabled(async ctx => {
@@ -239,7 +240,7 @@ const conflictOf = async promise => {
     // request landed. It must be answered as success and must not apply twice.
     const again = await conflictOf(a.update({
         'days.2026-08-14.actual.w_01': { entries: [{ placeId: 'p_01' }] },
-        protocol: 1, revision: 2, lastOpId: 'op_once', updatedBy: 'd_a' }));
+        protocol: 1, revision: 2, lastOpId: 'op_once', opFingerprint: 'f_op_once', updatedBy: 'd_a' }));
     check('replaying it is answered as success, not as a conflict',
         again === null, String(again && again.code));
 
@@ -256,15 +257,15 @@ const conflictOf = async promise => {
     const cloud = makeCloud();
     await cloud.adapter.create(base());
     await cloud.adapter.update({ 'days.2026-08-12.actual.w_01': { entries: [] },
-        protocol: 1, revision: 2, lastOpId: 'op_h1', updatedBy: 'd_a' });
+        protocol: 1, revision: 2, lastOpId: 'op_h1', opFingerprint: 'f_op_h1', updatedBy: 'd_a' });
     const fake = await conflictOf(cloud.adapter.update({
         'days.2026-08-12.actual.w_01': { entries: [] },
-        protocol: 1, revision: 2, lastOpId: 'op_h2', updatedBy: 'd_b' }));
+        protocol: 1, revision: 2, lastOpId: 'op_h2', opFingerprint: 'f_op_h2', updatedBy: 'd_b' }));
 
     await reset();
     const real = await conflictOf(opsFor(as(ALLOWED)).update({
         'days.2026-08-12.actual.w_01': { entries: [] },
-        protocol: 1, revision: 5, lastOpId: 'op_r1', updatedBy: 'd_b' }));
+        protocol: 1, revision: 5, lastOpId: 'op_r1', opFingerprint: 'f_op_r1', updatedBy: 'd_b' }));
 
     given('both refused', Boolean(fake) && Boolean(real),
         JSON.stringify([fake && fake.code, real && real.code]));
@@ -316,7 +317,8 @@ const conflictOf = async promise => {
         updatedBy: 'd_a',
         protocol: 1,
         revision: 2,
-        lastOpId: 'op_never_applied'
+        lastOpId: 'op_never_applied',
+        opFingerprint: 'f_op_never_applied'
     }));
     check('the write is refused rather than answered as already applied',
         Boolean(refused), refused ? refused.code : 'accepted');
@@ -339,7 +341,8 @@ const conflictOf = async promise => {
         updatedBy: 'd_a',
         protocol: 1,
         revision: 2,
-        lastOpId: opId
+        lastOpId: opId,
+        opFingerprint: 'f_' + opId
     });
     const landed = await readDoc();
     given('a real write landed at revision 2', landed.revision === 2, String(landed.revision));
@@ -350,7 +353,8 @@ const conflictOf = async promise => {
         updatedBy: 'd_a',
         protocol: 1,
         revision: 2,
-        lastOpId: opId
+        lastOpId: opId,
+        opFingerprint: 'f_' + opId
     }));
     check('replaying it is still answered as success', replay === null,
         replay ? `${replay.code}: ${replay.message}` : 'accepted');

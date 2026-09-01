@@ -686,6 +686,34 @@ function readPath(root, path) {
     return node;
 }
 
+// The ordering fields, which are about WHEN a write lands rather than what it does. The
+// fingerprint is deliberately independent of every one of them: a retry legitimately
+// carries a different clock, and the revision is the number the fingerprint has to be able
+// to outlive.
+const ENVELOPE_FIELDS = ['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy',
+    'opFingerprint'];
+
+// WHAT THIS OPERATION DOES, in one comparable string.
+//
+// A receipt used to carry a revision and nothing else, so the pair {schedule, receipt}
+// proved that SOME write wearing this name reached this revision - not what that write
+// was. A second arrival carrying the same name and a different path and value was answered
+// "already applied": the queue acknowledged and pruned, the status synced, the phone
+// holding one value and the cloud another, and nothing anywhere recording it.
+//
+// So the name is bound to the semantics. `kind` separates a field merge from a
+// whole-document replacement, which used to share an id; the paths and values are sorted
+// so two devices computing it agree; and a restore adds the transaction it belongs to,
+// because two restores that replace the same document are still two different decisions.
+function operationFingerprint(kind, payload, extra) {
+    const parts = Object.keys(payload || {})
+        .filter(key => ENVELOPE_FIELDS.indexOf(key) === -1)
+        .sort()
+        .map(key => key + '=' + canonicalJson(payload[key]));
+    return 'f' + digestOf([String(kind)].concat(String(extra || ''))
+        .concat(parts).join('|'));
+}
+
 function canonicalJson(value) {
     if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
     if (value && typeof value === 'object') {
@@ -3401,7 +3429,10 @@ const FarkadSync = {
         // 'already-exists', the update below goes out against a document another device
         // has just created, so its base is whatever that device left - which the snapshot
         // that create published has by then told us.
-        this.stampProtocol(seed, this._sendOpId || this.operationIdFor(this._sending));
+        // 'create' rather than 'update': the two used to share one id, so a receipt could
+        // not tell a field merge from a whole-document replacement.
+        this.stampProtocol(seed, this._sendOpId || this.operationIdFor(this._sending),
+            'create');
         return Promise.resolve(this.adapter.create(seed))
             .catch(error => {
                 if (error && error.code === 'already-exists') {
@@ -3767,8 +3798,13 @@ const FarkadSync = {
                     // retried after a request that may still have landed is recognised by
                     // its receipt rather than applied a second time over work that
                     // happened in between.
+                    // And the transaction it belongs to, inside the fingerprint: two
+                    // restores that replace the same document with the same bytes are
+                    // still two different decisions, and a receipt for one must not answer
+                    // the other.
                     this.stampProtocol(document,
-                        'r' + digestOf(String(envelope && envelope.transactionId)));
+                        'r' + digestOf(String(envelope && envelope.transactionId)),
+                        'restore', String((envelope && envelope.transactionId) || ''));
                     return Promise.resolve(this.adapter.save(document)).then(value => {
                         // And AGAIN, on the far side of the request. Reading the disk and
                         // then acting on what it said is two steps, and the other tab
@@ -4266,8 +4302,11 @@ const FarkadSync = {
         const read = readPath;
         const base = this._sendBase || {};
         return Object.keys(patch).filter(path => {
-            if (path === 'protocol' || path === 'revision' || path === 'lastOpId') return false;
-            if (path === 'updatedAt' || path === 'updatedBy') return false;
+            // The envelope, by the one list. This used to name the fields inline, so the
+            // fingerprint - added later, and by construction different on every write -
+            // read as a path somebody else had corrected, and EVERY write came back
+            // contested. Kept as one constant so a sixth ordering field cannot do it again.
+            if (ENVELOPE_FIELDS.indexOf(path) !== -1) return false;
             // Against the base this write FROZE, not against whatever the base has become
             // since. See stampProtocol.
             return canonicalJson(read(current, path)) !== base[path];
@@ -4277,7 +4316,7 @@ const FarkadSync = {
     // The envelope this write travels in, stamped onto the patch itself - which is how it
     // reaches the rules, since Firestore evaluates them against the document as it would
     // be after the merge.
-    stampProtocol(patch, opId) {
+    stampProtocol(patch, opId, kind, extra) {
         // THE BASE THIS WRITE WAS BUILT ON, frozen here, path by path.
         //
         // It cannot be read live at conflict time. Snapshots keep arriving while a request
@@ -4299,6 +4338,10 @@ const FarkadSync = {
         }
         patch.protocol = this.PROTOCOL;
         patch.lastOpId = String(opId);
+        // Computed BEFORE the ordering fields are read back out of the patch - they are
+        // excluded by name, so the order does not matter, and computing it here means every
+        // door that stamps a write stamps its fingerprint too.
+        patch.opFingerprint = operationFingerprint(kind || 'update', patch, extra);
         // No snapshot yet means no base. One is the only revision a document that does
         // not exist can be created at, and the rules refuse anything else - so a device
         // that guessed would simply be refused, which is the right failure.
@@ -4391,9 +4434,18 @@ const FarkadSync = {
     // ids - so the same batch sent twice carries the same name, which is what lets the
     // server recognise the second attempt as a replay of the first rather than as a
     // second edit. A fresh id per attempt would turn one edit into two.
+    // AND THE VALUE, which it did not carry.
+    //
+    // legacyOpId two hundred lines up already digests the value, with a comment explaining
+    // that a value-blind name once wore the name of the value it replaced and suppressed a
+    // correction. The batch name never got the same treatment: two different values for one
+    // path at one sequence produced the identical name, so a disk handing a batch record
+    // back with a different value, a rescue-file rebuild, or the create/update aliasing
+    // could all present one name for two different operations.
     operationIdFor(sent) {
         const parts = [...sent.entries()]
-            .map(([path, item]) => `${path}#${item && item.seq}#${item && item.opId}`)
+            .map(([path, item]) => `${path}#${item && item.seq}#${item && item.opId}`
+                + '#' + digestOf(canonicalJson(item && item.value)))
             .sort();
         return 'b' + digestOf(parts.join('|'));
     },

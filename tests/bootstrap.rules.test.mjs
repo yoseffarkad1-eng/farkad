@@ -72,7 +72,11 @@ const LEGACY = {
 
 // The five fields the production bootstrap actually writes - see the transaction.update
 // in js/sync/firebase-adapter.js. Everything else in the document is business data.
-const PROTOCOL_FIELDS = ['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy'];
+const PROTOCOL_FIELDS = ['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy',
+    // The operation's fingerprint: what a write DID, carried so a receipt cannot be
+    // re-pointed at different semantics. Ordering, not work - the bootstrap writes
+    // none, because its five fields are the whole of what it does.
+    'opFingerprint'];
 
 // What a document says about WORK, with the ordering fields taken out. Compared deeply
 // before and after, because "the bootstrap changed nothing" is a claim about this and
@@ -220,8 +224,12 @@ function bootstrapWrite(db, opId, extra = {}, options = {}) {
 
     // The receipt alone, with nothing moving the schedule. It is the oldest shape of this
     // fault: a record that says an operation landed, written by nobody landing it.
+    //
+    // ONE instance: as() mints a fresh Firestore for every call, and a document reference
+    // from one cannot be used with another.
     await seedLegacy();
-    const alone = await refused(setDoc(doc(as(ALLOWED), ...PATH, 'receipts', 'op_never'),
+    const lone = as(ALLOWED);
+    const alone = await refused(setDoc(doc(lone, ...PATH, 'receipts', 'op_never'),
         { revision: 1, at: new Date().toISOString(), by: 'd_new' }));
     check('a standalone receipt is refused',
         alone && (await readDoc()).revision === undefined);
@@ -252,25 +260,37 @@ function bootstrapWrite(db, opId, extra = {}, options = {}) {
         afterCutover && (await readDoc()).days['2026-08-13'] === undefined);
 
     // An ordinary revision N -> N+1, which the bootstrap clause must not have narrowed.
+    // It carries a fingerprint, because an ordinary write does: only the bootstrap is
+    // exempt, and only because its five fields are the whole of what it does.
     const opId = 'op_next';
-    const batch = writeBatch(as(ALLOWED));
-    batch.update(doc(as(ALLOWED), ...PATH), {
+    const next = as(ALLOWED);
+    const batch = writeBatch(next);
+    batch.update(doc(next, ...PATH), {
         'days.2026-08-14': { actual: { w_01: { entries: [{ placeId: 'p_01' }] } } },
-        protocol: 1, revision: 2, lastOpId: opId,
+        protocol: 1, revision: 2, lastOpId: opId, opFingerprint: 'f_' + opId,
         updatedAt: new Date().toISOString(), updatedBy: 'd_new'
     });
-    batch.set(doc(as(ALLOWED), ...PATH, 'receipts', opId),
-        { revision: 2, at: new Date().toISOString(), by: 'd_new' });
+    batch.set(doc(next, ...PATH, 'receipts', opId),
+        { revision: 2, opFingerprint: 'f_' + opId,
+            at: new Date().toISOString(), by: 'd_new' });
     await assertSucceeds(batch.commit());
     check('an ordinary next-revision write still carries business data',
         Boolean((await readDoc()).days['2026-08-14']));
 
     // And the first write of an empty project is its own path, untouched by any of this.
+    // The first write of an empty project is a CREATE, and it carries its receipt in the
+    // same commit like every other protocol write.
     await env.clearFirestore();
-    await assertSucceeds(setDoc(doc(as(ALLOWED), ...PATH), Object.assign({}, LEGACY, {
-        protocol: 1, revision: 1, lastOpId: 'op_first',
+    const fresh = as(ALLOWED);
+    const first = writeBatch(fresh);
+    first.set(doc(fresh, ...PATH), Object.assign({}, LEGACY, {
+        protocol: 1, revision: 1, lastOpId: 'op_first', opFingerprint: 'f_op_first',
         updatedAt: new Date().toISOString(), updatedBy: 'd_new'
-    })));
+    }));
+    first.set(doc(fresh, ...PATH, 'receipts', 'op_first'),
+        { revision: 1, opFingerprint: 'f_op_first',
+            at: new Date().toISOString(), by: 'd_new' });
+    await assertSucceeds(first.commit());
     check('a project created for the first time still starts at revision 1',
         (await readDoc()).revision === 1);
 }
