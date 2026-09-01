@@ -36,7 +36,7 @@
 // holds, and the marker BAD-MIGRATION-APPROVAL is followed from the disk all the way to a
 // second phone's screen.
 
-import { makeDevice } from './harness.mjs';
+import { makeDevice, makeCloud, settle } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 const MARKER = 'BAD-MIGRATION-APPROVAL';
@@ -48,6 +48,9 @@ function seeded(deviceId) {
     const device = makeDevice({ deviceId });
     device.setToday('2026-08-26');
     device.ctx.askTell = () => Promise.resolve();
+    // The import door asks before it replaces anything, and the harness sandbox has no
+    // dialogs of its own. Answering yes is what a person does at that prompt.
+    device.ctx.askConfirm = () => Promise.resolve(true);
     device.State.schedule.workers = [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
     device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
@@ -384,6 +387,100 @@ const BAD_APPROVAL = JSON.stringify({
         again.State.load();
         check(`${what}: and a reopen is still held`,
             again.call('farkadWritesBlocked') === true, what);
+    }
+}
+
+// ------------------------------------------------------- every other door into a phone
+{
+    suite('held-aside approvals are reported through every door, not only at boot');
+
+    // BOOT IS ONE DOOR OF FOUR. The suites above prove the boot: a damaged approval on
+    // the disk is held aside, quarantined, reported, and carried into the rescue file.
+    // A record reaches this app from a cloud snapshot, from a backup file and from an
+    // ordinary save followed by a reopen as well, and a hold that only one of those
+    // raises is a device that goes on writing money on the other three.
+    //
+    // Nothing here is a repair - all four already hold on this commit. They were not
+    // being asked, and an invariant nobody asks about is an invariant that leaves.
+    const HELD = JSON.stringify({
+        cm_carry: { id: 'cm_carry', kind: 'carry', rows: MARKER, at: '', by: '' }
+    });
+
+    // ---- the cloud snapshot
+    {
+        const cloud = makeCloud();
+        const device = seeded('d_door_snap');
+        device.Sync.pushDelayMs = 6;
+        device.Sync.connect(cloud.adapter);
+        await settle(200);
+        given('the phone reached the cloud and is synced',
+            Boolean(cloud.doc) && device.Sync.status === 'synced', device.Sync.status);
+
+        const arriving = JSON.parse(JSON.stringify(cloud.doc));
+        arriving.ledger = Object.assign({}, arriving.ledger || {},
+            { advances: {}, unreadableMigrations: JSON.parse(HELD) });
+        device.Sync.receive(arriving);
+        await settle(60);
+
+        check('a snapshot carrying held-aside approvals is not adopted quietly',
+            device.Sync.status !== 'synced', device.Sync.status);
+        check('the device stops writing money on it',
+            device.call('farkadWritesBlocked') === true);
+        check('the person is told, under the ledger key',
+            findProblem(device, LEDGER_KEY) !== null,
+            JSON.stringify(problemsOf(device).map(one => one.key)));
+        check('and the bytes reach the rescue file',
+            rescueText(device).indexOf(MARKER) !== -1);
+    }
+
+    // ---- a backup file
+    {
+        const donor = seeded('d_door_donor');
+        const backup = JSON.parse(donor.dump()['scheduleData:v2']);
+        backup.ledger = Object.assign({}, backup.ledger || {},
+            { unreadableMigrations: JSON.parse(HELD) });
+        const text = JSON.stringify(backup);
+        given('the backup file really carries them', text.indexOf(MARKER) !== -1);
+
+        const device = seeded('d_door_import');
+        await Promise.resolve(device.global('importBackup')(
+            device.fileEvent('farkad-backup.json', text))).catch(() => {});
+        await settle(60);
+
+        check('an imported backup carrying them stops the device',
+            device.call('farkadWritesBlocked') === true);
+        check('and it is told, under the ledger key',
+            findProblem(device, LEDGER_KEY) !== null,
+            JSON.stringify(problemsOf(device).map(one => one.key)));
+        check('the record it already had is not replaced by one it cannot read',
+            device.State.schedule.workers.length > 0
+            && JSON.stringify(device.State.schedule.ledger.migrations || {}) === '{}',
+            JSON.stringify(device.State.schedule.ledger.migrations));
+    }
+
+    // ---- an ordinary save, and the phone opened again
+    {
+        const device = seeded('d_door_save');
+        device.State.schedule.ledger.unreadableMigrations = JSON.parse(HELD);
+        device.State.save({ silent: true });
+        check('a save keeps them on the disk rather than dropping them',
+            String(device.dump()['scheduleData:v2']).indexOf(MARKER) !== -1);
+
+        const again = makeDevice({ deviceId: 'd_door_save2', storage: device.dump() });
+        again.setToday('2026-08-26');
+        again.ctx.askTell = () => Promise.resolve();
+        again.State.load();
+        check('the reopened phone still holds the same bytes aside',
+            JSON.stringify(again.State.schedule.ledger.unreadableMigrations)
+                .indexOf(MARKER) !== -1,
+            JSON.stringify(again.State.schedule.ledger.unreadableMigrations));
+        check('it is still not writing',
+            again.call('farkadWritesBlocked') === true);
+        check('it is told again rather than carrying on',
+            findProblem(again, LEDGER_KEY) !== null,
+            JSON.stringify(problemsOf(again).map(one => one.key)));
+        check('and its rescue file carries them too',
+            rescueText(again).indexOf(MARKER) !== -1);
     }
 }
 
