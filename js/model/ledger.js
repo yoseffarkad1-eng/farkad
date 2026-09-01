@@ -591,6 +591,20 @@ function appendLedgerEntry(schedule, entry) {
         if (field === 'id' || entry[field] === undefined) return;
         record[field] = entry[field];
     });
+    // AND THE WHOLE PROPOSED ENTRY, READ BY THE READER THAT WILL HAVE TO READ IT BACK.
+    //
+    // ledgerEntryProblems is what every door applies to an entry ARRIVING - the disk, a
+    // snapshot, a backup, the rescue import - and nothing applied it on the way OUT. So a
+    // recorder could write an entry this build's own reader refuses, and did: a correction
+    // saved with an empty date went into the record as `{"date":""}`, was held aside as
+    // unreadable at the next boot, and blocked the phone - with the money it was undoing
+    // still gone and the person who pressed Save the cause of it.
+    //
+    // Judged with the id that is actually going to be used, so the path-and-body rule is
+    // the same one the reader will ask. `null` back means no change, no memory mutation,
+    // no disk write and no queued operation, which is what State.commit reads as a
+    // refusal - and it is the same answer an unsafe id already gets above.
+    if (ledgerEntryProblems(id, record).length > 0) return null;
     schedule.ledger = schedule.ledger || { advances: {} };
     schedule.ledger.advances = schedule.ledger.advances || {};
     schedule.ledger.advances[id] = record;
@@ -960,16 +974,32 @@ function recordAdvanceCorrected(schedule, advanceId, changes, at, by) {
 // whole file was written against - and the amount is bounded by what was given, because
 // a reversal larger than its advance is not a correction, it is a second transaction
 // nobody described.
+// THE DATE IS DERIVED, AND EVERY RULE IS ASKED HERE.
+//
+// `date` is still in the signature - every caller passes the advance's own day, which is
+// what it now becomes - and it is no longer what gets written. The entry says this advance
+// was never handed over, so it belongs in the account the advance is in; a date carried in
+// from a form was a fortnight somebody could type, and this function wrote whatever it was
+// handed. So did the amount and the reason: reversalProblems existed and only the form
+// consulted it, which makes it a document rather than a guard.
 function recordAdvanceReversed(schedule, advanceId, amount, date, reason, at, by) {
-    return appendLedgerEntry(schedule, {
+    const advance = ((schedule && schedule.advances) || {});
+    const known = ownsKey(advance, String(advanceId))
+        ? advance[String(advanceId)]
+        : foldLedger(schedule)[String(advanceId)];
+    if (!known || !isRealDate(String(known.date))) return null;
+    if (reversalProblems(schedule, advanceId, amount, reason).length > 0) return null;
+    const record = {
         advanceId: String(advanceId),
         kind: 'reversed',
-        date: String(date),
+        // The advance's own day. Not the caller's.
+        date: String(known.date),
         amount: Number(amount) || 0,
         reason: String(reason || ''),
         at: String(at || ''),
         by: String(by || '')
-    });
+    };
+    return appendLedgerEntry(schedule, record);
 }
 
 // ------------------------------------------------ correcting ONE transaction, by its id
@@ -1000,7 +1030,9 @@ function eventReversalId(targetId) {
 // The entry this correction is against, or null.
 function reversalTarget(schedule, targetId) {
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
-    return held[String(targetId)] || null;
+    // OWNED. A bare lookup answers from the prototype, and this is the function that
+    // decides whether there is a transaction to correct at all.
+    return ownsKey(held, String(targetId)) ? (held[String(targetId)] || null) : null;
 }
 
 // WHAT REFUSES A CORRECTION, before one is written.
@@ -1021,6 +1053,12 @@ function eventReversalProblems(schedule, targetId, amount, reason) {
     }
     if (['given', 'repaid', 'deducted'].indexOf(String(target.kind)) === -1) {
         return ['a correction of a kind of entry that carries no money'];
+    }
+    // AND IT HAS TO HAVE A DAY. The correction is dated on the transaction, so a
+    // transaction with no readable date leaves nowhere to put it - and inventing one puts
+    // money in a fortnight nobody chose.
+    if (!isRealDate(String(target.date))) {
+        return ['a correction of a transaction with no readable date'];
     }
     // ONCE. The same event cannot be corrected twice - after the second the record says
     // the money moved in a direction nobody chose.
@@ -1103,7 +1141,13 @@ function recordEventReversed(schedule, targetId, amount, date, reason, at, by) {
         // record somebody answers for.
         targetDate: String(target.date || ''),
         targetAmount: Number(target.amount) || 0,
-        date: String(date),
+        // THE TRANSACTION'S OWN DAY, derived rather than carried. `date` stays in the
+        // signature because every caller passes exactly this, and it is no longer what
+        // decides: a correction dated anywhere else moves money between two fortnights to
+        // undo something that happened in one of them, and a correction dated NOWHERE is
+        // an entry this build's own reader refuses - held aside at the next boot, with
+        // the money it was undoing still gone and the phone blocked.
+        date: String(target.date),
         amount: Number(amount) || 0,
         reason: String(reason || ''),
         at: String(at || ''),

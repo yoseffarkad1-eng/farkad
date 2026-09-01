@@ -1090,13 +1090,13 @@ function openReversalForm(item, settled, row) {
     amountInput.value = String(room);
     field('סכום לתיקון', amountInput);
 
-    // Dated on the advance's own day, not today: this entry says the advance was never
-    // handed over, so it belongs in the account the advance is in. Dating it today would
-    // move money between two fortnights to undo something that happened in one of them.
-    const dateInput = document.createElement('input');
-    dateInput.type = 'date';
-    dateInput.value = item.date;
-    field('תאריך', dateInput);
+    // Dated on the advance's own day, and not a question - the same rule as the form
+    // that corrects a transaction, from the same reason. This entry says the advance was
+    // never handed over, so it belongs in the account the advance is in, and a date
+    // somebody can type is a fortnight somebody can move money into.
+    form.appendChild(el('label', 'field-label', 'תאריך'));
+    form.appendChild(el('div', 'advance-form-amount',
+        formatFullDate(parseLocalDate(item.date)) + ' · לפי יום המקדמה'));
 
     const reasonInput = document.createElement('input');
     reasonInput.type = 'text';
@@ -1142,14 +1142,17 @@ function openReversalForm(item, settled, row) {
             amountInput.focus();
             return;
         }
-        const date = dateInput.value;
-        if (!isRealDate(date)) {
-            error.textContent = 'בחר תאריך.';
+        const change = recordAdvanceReversed(State.schedule, item.id, amount, item.date,
+            reason, new Date().toISOString(), syncDeviceId());
+        // A refusal from the model is not a screen that pretends to have saved. It reads
+        // the record as it is NOW, so the honest answer is that something moved under
+        // this form.
+        if (!change) {
+            error.textContent = 'אי אפשר לתקן את המקדמה הזו עכשיו. רענן ובדוק את '
+                + 'ההיסטוריה - ייתכן שכבר תוקנה ממכשיר אחר.';
+            amountInput.focus();
             return;
         }
-
-        const change = recordAdvanceReversed(State.schedule, item.id, amount, date,
-            reason, new Date().toISOString(), syncDeviceId());
         if (!State.commit(change)) return;
         openWorkerDays(item.workerId);
     };
@@ -1557,13 +1560,18 @@ function openEventReversalForm(entry, row) {
     form.appendChild(el('label', 'field-label', 'סכום לתיקון'));
     form.appendChild(amountLine);
 
-    // Dated on the transaction's own day: this entry says that transaction did not
-    // happen, so it belongs where the transaction is. Dating it today would move money
-    // between two fortnights to undo something that happened in one of them.
-    const dateInput = document.createElement('input');
-    dateInput.type = 'date';
-    dateInput.value = entry.date || todayStr();
-    field('תאריך', dateInput);
+    // THE DATE IS NOT A QUESTION EITHER, for the same reason the amount is not.
+    //
+    // This entry says that transaction did not happen, so it belongs where the transaction
+    // is. This was an editable date input, above a comment saying that dating it anywhere
+    // else "would move money between two fortnights to undo something that happened in one
+    // of them" - and the value went into the record unexamined. Blank, it wrote a
+    // correction this build's own reader refuses.
+    //
+    // Shown, because the person has to see where the correction is going. As text.
+    form.appendChild(el('label', 'field-label', 'תאריך'));
+    form.appendChild(el('div', 'advance-form-amount',
+        formatFullDate(parseLocalDate(entry.date)) + ' · לפי יום התנועה'));
 
     const reasonInput = document.createElement('input');
     reasonInput.type = 'text';
@@ -1602,8 +1610,11 @@ function openEventReversalForm(entry, row) {
             return;
         }
 
+        // The transaction's own day. recordEventReversed derives it from the validated
+        // target and ignores anything else; this passes the same value so the two
+        // never differ in a reading of the code either.
         const change = recordEventReversed(State.schedule, entry.id, amount,
-            dateInput.value, reason, new Date().toISOString(), syncDeviceId());
+            entry.date, reason, new Date().toISOString(), syncDeviceId());
         if (!change) { form.remove(); return; }
         if (!State.commit(change)) return;
         openWorkerDays(entry.workerId || (State.schedule.advances[entry.advanceId] || {}).workerId);
