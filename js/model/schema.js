@@ -1490,10 +1490,35 @@ function ledgerEntryProblems(id, value) {
     if (value === null) return ['a ledger entry cannot be deleted'];
     if (!isPlainObject(value)) return ['a ledger entry that is not a record'];
     if (String(value.id || '') !== String(id)) return ['a ledger entry whose id does not match its path'];
-    if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
+    // THE PERIOD ARTIFACT NAMES NO ADVANCE, and that is what it is for.
+    //
+    // A closed fortnight is a fact about a man and a window, not a movement against a
+    // debt - and most men have no debt. Hanging the record on an advance meant their
+    // payslips could never be frozen at all. So this one kind names a worker and a
+    // period instead, and carries no amount.
+    if (String(value.kind) === 'closed') {
+        if (!value.workerId || !isSafeSegment(String(value.workerId))) {
+            return ['a closed period belonging to nobody'];
+        }
+        if (!isRealDate(String(value.periodFrom)) || !isRealDate(String(value.periodTo))) {
+            return ['a closed period over no period'];
+        }
+        if (String(value.periodTo) < String(value.periodFrom)) {
+            return ['a period that closed before it opened'];
+        }
+        if (!isRealDate(String(value.date))) return ['a closed period on no date'];
+        // It moves no money. An amount here would be a deduction wearing the wrong kind,
+        // and the fold would never see it - which is money that leaves the sum.
+        if (value.amount !== undefined && Number(value.amount) !== 0) {
+            return ['a closed period carrying an amount'];
+        }
+        if (value.advanceId !== undefined && !isSafeSegment(String(value.advanceId))) {
+            return ['a closed period naming an advance id nobody could write'];
+        }
+    } else if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
         return ['a ledger entry with no advance behind it'];
     }
-    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted', 'reversed']
+    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted', 'reversed', 'closed']
         .includes(String(value.kind))) {
         return ['a ledger entry of a kind nobody wrote'];
     }
@@ -1548,6 +1573,61 @@ function ledgerEntryProblems(id, value) {
         const agorot = off * 100;
         if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
             return ['a deduction finer than an agora'];
+        }
+    }
+    // THE FROZEN FORTNIGHT, read as money and as counts rather than taken on trust.
+    //
+    // A closure carries the payslip it froze - the wage, what the period opened on, and
+    // what it was priced at. Every one of those numbers came off ANOTHER PHONE, and the
+    // fold read them with `Number(entry.gross)`: `Number("not-money")` is NaN, NaN is not
+    // undefined, so it won the "is it there" test and became the fortnight's wage. A
+    // payslip reading NaN, from a record this validator called clean - while it already
+    // refused an unreadable amount and an unreadable balanceAfter on the same entry.
+    //
+    // Not `|| 0`. A number nobody can read is not zero: zero is a statement about
+    // somebody's wage that no byte on the disk makes. The entry is unreadable, held
+    // aside like any other, and the account falls back to the live figure and says so.
+    const snapshot = ['gross', 'carriedIn', 'given', 'repaid', 'reversed', 'net'];
+    for (let at = 0; at < snapshot.length; at += 1) {
+        const field = snapshot[at];
+        if (value[field] === undefined || value[field] === null) continue;
+        const held = Number(value[field]);
+        if (!Number.isFinite(held)) {
+            return ['a closure whose ' + field + ' is not a number'];
+        }
+        if (Math.abs(held) > ADVANCE_MAX) {
+            return ['a closure whose ' + field + ' is beyond any wage'];
+        }
+    }
+    if (value.basis !== undefined && value.basis !== null) {
+        if (!isPlainObject(value.basis)) return ['a closure whose basis is not a record'];
+        const counts = ['dailyRate', 'hourlyRate', 'payUnits', 'attendanceDays'];
+        for (let at = 0; at < counts.length; at += 1) {
+            const field = counts[at];
+            if (value.basis[field] === undefined) continue;
+            const held = Number(value.basis[field]);
+            if (!Number.isFinite(held) || held < 0) {
+                return ['a closure whose ' + field + ' is not a count'];
+            }
+        }
+        if (value.basis.workerName !== undefined
+            && typeof value.basis.workerName !== 'string') {
+            return ['a closure naming a worker in something that is not a name'];
+        }
+    }
+    // AND THE DAYS IT WAS PAID FOR, when it carries them. The list is what the man was
+    // asked to agree with, so a list nobody can read is not a list to print beside a
+    // number he was paid.
+    if (value.days !== undefined && value.days !== null) {
+        if (!Array.isArray(value.days)) return ['a closure whose days are not a list'];
+        for (let at = 0; at < value.days.length; at += 1) {
+            const day = value.days[at];
+            if (!isPlainObject(day)) return ['a closure with a day that is not a record'];
+            if (!isRealDate(String(day.date))) return ['a closure with a day on no date'];
+            const paid = Number(day.amount);
+            if (!Number.isFinite(paid) || paid < 0 || paid > ADVANCE_MAX) {
+                return ['a closure with a day priced at nothing readable'];
+            }
         }
     }
     // A CORRECTION, and the reason it was made. An unexplained adjustment to money is
@@ -2543,6 +2623,33 @@ function payrollReport(schedule, fromDate, toDate) {
         const netted = row.advances > 0 ? row.advances : 0;
         row.netAmount = row.amount === null ? null : row.amount - netted;
 
+        // A CLOSED FORTNIGHT REPORTS THE ROW IT WAS CLOSED ON.
+        //
+        // C4 froze the three money columns and left the counts and the day list beside
+        // them live, so removing one historical day from a paid fortnight moved
+        // attendanceDays 5 -> 4, payUnits 5 -> 4 and this amount 3,050 -> 2,440 while the
+        // deduction column stayed 3,050 - a row that no longer adds up, on the sheet the
+        // crew is paid from. Half a frozen payslip is not a payslip.
+        //
+        // Only where the closure RECORDED them: a closure from before this carries no
+        // basis and nothing is invented for it. See closedPeriods, which never coerces.
+        const frozen = typeof closedPeriods === 'function'
+            ? closedPeriods(schedule, worker.id)[fromDate] : undefined;
+        if (frozen !== undefined) {
+            if (Number.isFinite(frozen.gross)) {
+                row.amount = frozen.gross;
+                row.netAmount = frozen.gross - netted;
+            }
+            if (isPlainObject(frozen.basis)) {
+                if (Number.isFinite(Number(frozen.basis.attendanceDays))) {
+                    row.attendanceDays = Number(frozen.basis.attendanceDays);
+                }
+                if (Number.isFinite(Number(frozen.basis.payUnits))) {
+                    row.payUnits = Number(frozen.basis.payUnits);
+                }
+            }
+        }
+
         return row;
     });
 }
@@ -2551,6 +2658,34 @@ function payrollReport(schedule, fromDate, toDate) {
 // question this answers is "why is my pay this number", and an answer computed a second
 // way is not an answer.
 function workerDaysReport(schedule, worker, fromDate, toDate) {
+    // THE DAYS A CLOSED FORTNIGHT WAS PAID FOR, as it recorded them.
+    //
+    // This list is what the man is handed and asked to agree with - it is the answer to
+    // "why is my pay this number" - and it was recomputed from the live schedule on every
+    // read, so a day corrected off a paid fortnight quietly disappeared from a statement
+    // whose total, by then, was frozen. The two halves of one document disagreeing.
+    //
+    // Only where the closure carries them: an older closure has no list and this behaves
+    // as it always did.
+    const frozen = typeof closedPeriods === 'function'
+        ? closedPeriods(schedule, worker.id)[fromDate] : undefined;
+    if (frozen !== undefined && Array.isArray(frozen.days)) {
+        return frozen.days.map(day => ({
+            date: String(day.date),
+            absent: Boolean(day.absent),
+            entries: Array.isArray(day.entries) ? day.entries.map(one => {
+                const entry = { placeId: String(one.placeId || '') };
+                if (one.rate !== undefined) entry.rate = one.rate;
+                if (one.hours !== undefined) entry.hours = one.hours;
+                return entry;
+            }) : [],
+            doubled: Array.isArray(day.entries)
+                && day.entries.some(one => String(one.rate) === String(RATE_DOUBLE)),
+            extraHours: Array.isArray(day.entries)
+                ? day.entries.reduce((sum, one) => sum + (Number(one.hours) || 0), 0) : 0,
+            amount: Number(day.amount) || 0
+        }));
+    }
     return Object.keys(schedule.days || {})
         .filter(date => date >= fromDate && date <= toDate)
         .sort()

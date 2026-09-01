@@ -390,11 +390,18 @@ const reopen = (device, id) => {
 
     // AND THE FOLD NEVER COERCES. Even if such an entry reaches a fold - from a build
     // that wrote it before this check existed - the answer must not be NaN.
+    //
+    // Delivered the way one really arrives: a snapshot from another phone. Editing this
+    // device's own memory and saving would leave the honest entry in the journal, which
+    // replays over it at the next load - correctly, and it measures nothing.
     {
         const device = closed('d_nan_fold');
         const entry = closureIn(device);
-        device.State.schedule.ledger.advances[entry.id] = Object.assign({}, entry,
-            { gross: 'not-money' });
+        const arriving = JSON.parse(JSON.stringify(device.State.schedule));
+        arriving.ledger.advances[entry.id].gross = 'not-money';
+        arriving.updatedAt = '2026-08-27T10:00:00.000Z';
+        arriving.updatedBy = 'd_other';
+        device.Sync.receive(arriving);
         const periods = device.call('closedPeriods', device.State.schedule, 'w_01');
         const held = periods[A.from] || {};
         check('a wage that is not money is not adopted as the fortnight\'s wage',
@@ -404,9 +411,34 @@ const reopen = (device, id) => {
             A.from, A.to);
         check('and no account anywhere reports a wage of NaN',
             Number.isFinite(account.gross), JSON.stringify(account));
-        check('the entry is held aside rather than folded',
-            device.call('impossibleClosures', device.State.schedule).length === 1,
-            JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+        // AND THE SNAPSHOT IS NOT ADOPTED. A document carrying a closure this build
+        // cannot read is not a reason to replace the honest one on this disk, and it is
+        // not a reason to say synced either.
+        check('the record this device holds is untouched',
+            device.State.schedule.ledger.advances[entry.id].gross === GROSS,
+            JSON.stringify(device.State.schedule.ledger.advances[entry.id]));
+        check('the device does not report itself synced on it',
+            device.Sync.status !== 'synced', device.Sync.status);
+        check('and it is stopped rather than paying from it',
+            device.call('farkadWritesBlocked') === true);
+
+        // AND HELD ASIDE, when the same bytes are what a phone actually opens on. This
+        // is the disk of somebody who was already holding it.
+        const carried = JSON.parse(JSON.stringify(arriving));
+        const cold = makeDevice({ deviceId: 'd_nan_cold',
+            flags: { carryAdvances: true, ledgerWrites: true },
+            storage: { 'scheduleData:v2': JSON.stringify(carried) } });
+        cold.setToday('2026-08-26');
+        cold.ctx.askTell = () => Promise.resolve();
+        cold.State.load();
+        check('a phone that opens on those bytes holds the closure aside',
+            Object.keys(cold.State.schedule.ledger.unreadable).indexOf(entry.id) !== -1,
+            JSON.stringify(Object.keys(cold.State.schedule.ledger.unreadable)));
+        check('it does not fold it as a wage',
+            cold.State.schedule.ledger.advances[entry.id] === undefined,
+            JSON.stringify(cold.State.schedule.ledger.advances[entry.id]));
+        check('and that phone is stopped too',
+            cold.call('farkadWritesBlocked') === true);
     }
 
     // The basis is counts rather than money, and it is read the same way - straight onto

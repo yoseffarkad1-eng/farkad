@@ -174,6 +174,10 @@ function foldAdvance(entries) {
 function foldLedger(schedule) {
     const byAdvance = new Map();
     ledgerEntries(schedule).forEach(entry => {
+        // A period artifact names no advance - it is the fortnight, not a movement
+        // against anybody's debt - so it must not fold into one, least of all into an
+        // advance called "undefined".
+        if (!entry.advanceId) return;
         const key = String(entry.advanceId);
         if (!byAdvance.has(key)) byAdvance.set(key, []);
         byAdvance.get(key).push(entry);
@@ -404,7 +408,9 @@ function outstandingWithout(schedule, advanceId, ignoreId, onOrBefore, recordedB
 
 function closureProblems(schedule, entry) {
     const out = [];
-    if (!entry || String(entry.kind) !== 'deducted') return out;
+    if (!entry) return out;
+    const artifact = String(entry.kind) === 'closed';
+    if (!artifact && String(entry.kind) !== 'deducted') return out;
 
     // THE PERIOD HAS TO BE AN ACCOUNT. A closure over a hand-picked window freezes a
     // figure for a fortnight nobody is paid on, and every later read of that period
@@ -417,6 +423,11 @@ function closureProblems(schedule, entry) {
     } else if (advanceDayStep(from, 13) !== to) {
         out.push('a closure whose last day is not its own account\'s');
     }
+
+    // The artifact moves no money, so the three money questions below are not asked of
+    // it. What it shares with a deduction is the period: a payslip frozen over a window
+    // that is not an account is wrong for ever, exactly as a deduction over one is.
+    if (artifact) return out;
 
     const off = Number(entry.amount) || 0;
     const before = outstandingWithout(schedule, entry.advanceId, entry.id, to, entry.at);
@@ -485,7 +496,8 @@ function closureProblems(schedule, entry) {
 function impossibleClosures(schedule) {
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     return Object.keys(held)
-        .filter(id => held[id] && String(held[id].kind) === 'deducted')
+        .filter(id => held[id] && (String(held[id].kind) === 'deducted'
+            || String(held[id].kind) === 'closed'))
         .filter(id => closureProblems(schedule, held[id]).length > 0)
         .sort();
 }
@@ -767,6 +779,27 @@ function closureFacts(schedule, workerId, from, to, carriedIn) {
         : null;
     const worker = ((schedule && schedule.workers) || [])
         .find(item => String(item.id) === String(workerId));
+    // AND THE DAYS THE WAGE WAS MADE OF.
+    //
+    // The counts and the day list beside the money were still recomputed from the live
+    // schedule: remove one historical day from a closed fortnight and attendanceDays went
+    // 5 -> 4, the detail rows 5 -> 4, and the worker's own statement printed a wage that
+    // did not match the sheet he was paid against. Money frozen, evidence live.
+    //
+    // Kept small on purpose - what the statement prints and nothing else - because this
+    // travels in the document to three phones and lives for ever.
+    const days = (typeof workerDaysReport === 'function' && worker)
+        ? workerDaysReport(schedule, worker, from, to).map(day => ({
+            date: String(day.date),
+            amount: Number(day.amount) || 0,
+            absent: Boolean(day.absent),
+            entries: (day.entries || []).map(one => ({
+                placeId: String(one.placeId || ''),
+                rate: one.rate === undefined ? undefined : String(one.rate),
+                hours: one.hours === undefined ? undefined : (Number(one.hours) || 0)
+            }))
+        }))
+        : undefined;
     return {
         gross: walk.gross,
         carriedIn: walk.carriedIn,
@@ -774,6 +807,7 @@ function closureFacts(schedule, workerId, from, to, carriedIn) {
         repaid: walk.repaid,
         reversed: walk.reversed,
         net: walk.net,
+        days,
         // What it was priced at, so the number can be explained without the schedule.
         basis: {
             dailyRate: worker ? Number(worker.dailyRate) || 0 : 0,
@@ -803,7 +837,8 @@ function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at,
         repaid: held.repaid,
         reversed: held.reversed,
         net: held.net,
-        basis: held.basis
+        basis: held.basis,
+        days: held.days
     }, {
         id: closureId(advanceId, from),
         advanceId: String(advanceId),
@@ -836,6 +871,58 @@ function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at,
 // the ledger records it per advance, so it has to be apportioned somehow; oldest first is
 // the order money is settled in everywhere else in this app, and it is the order the
 // history reads in.
+// THE FORTNIGHT ITSELF, CLOSED - which is not the same record as a deduction.
+//
+// A closure used to be a `deducted` entry hanging off an advance, one per advance the
+// close touched. Most men have no advance, so planPeriodClosure answered canClose: false
+// with no rows for them and closePeriodChanges answered [] - their fortnight could never
+// be frozen at all, and every payslip they were handed went on being recomputed from the
+// live schedule for ever. The freezing this whole area is about was available only to the
+// minority of the crew who happened to owe money.
+//
+// So the artifact is its own entry: it names the WORKER and the PERIOD, carries the
+// payslip that was frozen, and moves no money. The deductions stay exactly as they were -
+// they are movements against advances and they belong to those advances.
+//
+// Its id is derived from the man and the day the period opens, so two phones closing the
+// same fortnight write the same field path and the union keeps one.
+function periodArtifactId(workerId, periodFrom) {
+    return `le_period_${String(workerId)}_${String(periodFrom).replace(/-/g, '')}`;
+}
+
+function periodArtifactFor(schedule, workerId, periodFrom) {
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    const id = periodArtifactId(workerId, periodFrom);
+    return ownsKey(held, id) ? (held[id] || null) : null;
+}
+
+function recordPeriodArtifact(schedule, workerId, from, to, at, by, facts) {
+    if (periodArtifactFor(schedule, workerId, from)) return null;
+    const held = facts || closureFacts(schedule, workerId, from, to, undefined);
+    schedule.ledger = schedule.ledger || { advances: {} };
+    return appendLedgerEntry(schedule, Object.assign({}, held && {
+        gross: held.gross,
+        carriedIn: held.carriedIn,
+        given: held.given,
+        repaid: held.repaid,
+        reversed: held.reversed,
+        net: held.net,
+        basis: held.basis,
+        days: held.days
+    }, {
+        id: periodArtifactId(workerId, from),
+        kind: 'closed',
+        workerId: String(workerId),
+        // The period's last day, like the deduction's: it is the moment the fortnight
+        // shut, and dating it there puts it inside the period it describes.
+        date: String(to),
+        periodFrom: String(from),
+        periodTo: String(to),
+        at: String(at || ''),
+        by: String(by || '')
+    }));
+}
+
 function planPeriodClosure(schedule, workerId, from, to) {
     const walk = advanceAccount(schedule, workerId, from, to);
     const reasons = [];
@@ -871,9 +958,14 @@ function planPeriodClosure(schedule, workerId, from, to) {
         });
     });
 
+    // A FORTNIGHT WITH NOTHING TO DEDUCT IS STILL A FORTNIGHT. `rows.length > 0` meant
+    // the artifact could only be written for a man who owed money, so everybody else's
+    // payslip stayed live for ever. The rows decide what money MOVES; whether the period
+    // can be frozen is decided by the reasons alone.
     return { from, to, workerId, deducted: walk.deducted, gross: walk.gross,
         carriedForward: walk.carriedForward, rows, reasons,
-        canClose: reasons.length === 0 && rows.length > 0 };
+        alreadyClosed: Boolean(periodArtifactFor(schedule, workerId, from)),
+        canClose: reasons.length === 0 };
 }
 
 // The changes that close it. An empty list means nothing to do - which is what a second
@@ -881,11 +973,16 @@ function planPeriodClosure(schedule, workerId, from, to) {
 function closePeriodChanges(schedule, workerId, from, to, at, by) {
     const plan = planPeriodClosure(schedule, workerId, from, to);
     if (!plan.canClose) return [];
-    return plan.rows
+    // Worked out ONCE, from the record as it stands before any of these land, and handed
+    // to every entry: the artifact and the deductions describe one fortnight and must not
+    // describe it differently.
+    const facts = closureFacts(schedule, workerId, from, to, undefined);
+    const artifact = recordPeriodArtifact(schedule, workerId, from, to, at, by, facts);
+    return (artifact ? [artifact] : []).concat(plan.rows
         .filter(row => !row.alreadyClosed)
         .map(row => recordPeriodClosed(schedule, row.advanceId, workerId, from, to,
-            row.amount, at, by, row.balanceAfter))
-        .filter(Boolean);
+            row.amount, at, by, row.balanceAfter, facts))
+        .filter(Boolean));
 }
 
 // Every closure recorded against this man, by the period they closed.
@@ -894,7 +991,12 @@ function closedPeriods(schedule, workerId) {
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     const out = {};
     Object.keys(held).map(id => held[id])
-        .filter(entry => entry && entry.kind === 'deducted' && entry.periodFrom)
+        // The artifact and the deductions, both. The artifact says the fortnight is
+        // closed and what it was closed on; the deductions say what money moved. A
+        // fortnight in which nothing moved has only the first, and it is still closed.
+        .filter(entry => entry
+            && (entry.kind === 'deducted' || entry.kind === 'closed')
+            && entry.periodFrom)
         .filter(entry => {
             const of = advances[entry.advanceId];
             const who = of ? of.workerId : entry.workerId;
@@ -905,8 +1007,10 @@ function closedPeriods(schedule, workerId) {
             // Append, never replace: two advances can each be deducted at one close, and
             // a fold that kept the last would report half of what came off his wage.
             const at = out[key] || { deducted: 0, balanceAfter: undefined };
-            at.deducted += Number(entry.amount) || 0;
-            if (entry.balanceAfter !== undefined) {
+            // The artifact carries no amount and no balance - it is the payslip, not a
+            // movement - so only the deductions add up here.
+            if (entry.kind === 'deducted') at.deducted += Number(entry.amount) || 0;
+            if (entry.kind === 'deducted' && entry.balanceAfter !== undefined) {
                 at.balanceAfter = (at.balanceAfter || 0) + (Number(entry.balanceAfter) || 0);
             }
             // THE ACCOUNT-LEVEL FACTS, which are per PERIOD and not per advance.
@@ -918,13 +1022,28 @@ function closedPeriods(schedule, workerId) {
             // Taken from the first entry that carries them, and left undefined when none
             // does - a closure written before closures recorded their wage has nothing
             // here, and the walk falls back to the live figure rather than inventing one.
+            //
+            // AND READ AS NUMBERS, not coerced into them. `Number("not-money")` is NaN,
+            // and NaN is not undefined, so it used to win the "is it there" test and
+            // become the fortnight's wage - a payslip reading NaN from a snapshot another
+            // phone wrote. Not `|| 0` either: a number nobody can read is not zero, and
+            // leaving it undefined is what makes the walk fall back to the live figure
+            // and say so, which is the honest answer.
+            const numberOf = value => {
+                const held = Number(value);
+                return Number.isFinite(held) ? held : undefined;
+            };
             if (at.gross === undefined && entry.gross !== undefined && entry.gross !== null) {
-                at.gross = Number(entry.gross);
+                at.gross = numberOf(entry.gross);
             }
             if (at.carriedIn === undefined && entry.carriedIn !== undefined) {
-                at.carriedIn = Number(entry.carriedIn) || 0;
+                at.carriedIn = numberOf(entry.carriedIn);
             }
-            if (at.basis === undefined && entry.basis !== undefined) at.basis = entry.basis;
+            if (at.basis === undefined && isPlainObject(entry.basis)) at.basis = entry.basis;
+            // The days the wage was made of, frozen with it. The list is half of what the
+            // man was asked to agree with, and it moved with the live schedule while the
+            // total beside it did not.
+            if (at.days === undefined && Array.isArray(entry.days)) at.days = entry.days;
             out[key] = at;
         });
     return out;
