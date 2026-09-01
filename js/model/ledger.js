@@ -1334,6 +1334,54 @@ function sameLedgerBytes(one, two) {
     return stable(one) === stable(two);
 }
 
+// WHO WROTE IT DOWN, AND WHEN. Everything else on a ledger record is the record.
+const LEDGER_AUDIT_FIELDS = ['at', 'by'];
+
+// ONE FACT, TWO SIGNERS.
+//
+// Some ids in this app are deterministic on purpose. `cm_carry` names one decision;
+// `le_close_<advance>_<from>` names one closure; `le_rev_<target>` names one correction.
+// That is what stops two phones writing two approvals of the same plan - and it means two
+// phones legitimately write the SAME path with the same numbers and a different `at` and
+// `by`, because two people pressed the button at two moments.
+//
+// Compared as whole bytes, that is one id with two bodies, which everywhere else in this
+// file is a disagreement about money and is right to stop the device. Here it is not a
+// disagreement at all: both phones recorded the same fact, and the only difference is
+// whose hand and which second. The first writer's record stands - they did approve first -
+// and the second is a no-op.
+//
+// The comparison is on the FINANCIAL fields, never on the id, so this can never be used
+// to wave through two different amounts under one name: an approval of a different number
+// of rows, a closure of a different sum, a correction of a different transaction all still
+// differ here and are still held, quarantined and reported exactly as before.
+function sameLedgerFact(one, two) {
+    if (!one || typeof one !== 'object' || Array.isArray(one)) return false;
+    if (!two || typeof two !== 'object' || Array.isArray(two)) return false;
+    const facts = record => {
+        const out = {};
+        Object.keys(record).forEach(field => {
+            if (LEDGER_AUDIT_FIELDS.indexOf(field) !== -1) return;
+            out[field] = record[field];
+        });
+        return out;
+    };
+    return sameLedgerBytes(facts(one), facts(two));
+}
+
+// The same question asked of a WIRE PATH, for js/sync/sync.js - which must not learn what
+// a ledger family is, and must be able to ask whether a refused write is a disagreement or
+// a fact the server already holds.
+//
+// Only the two append-only maps whose ids are records, and only a leaf: a path naming a
+// whole family, or a day, or a roster entry, is never superseded by this rule.
+function ledgerPathSupersededBy(path, mine, theirs) {
+    const parts = String(path).split('.');
+    if (parts.length !== 3 || parts[0] !== 'ledger') return false;
+    if (parts[1] !== 'advances' && parts[1] !== 'migrations') return false;
+    return sameLedgerFact(mine, theirs);
+}
+
 // `conflicts`, when given, collects every id whose two sides disagree. The caller reports
 // them and holds; this function never resolves one, because there is no honest rule that
 // could.
@@ -1368,6 +1416,14 @@ function mergeLedgerInto(target, source, conflicts) {
                     return;
                 }
                 if (sameLedgerBytes(target.ledger[key][id], held[id])) return;
+                // ONE FACT, TWO SIGNERS: the arriving copy stands and nothing is asked.
+                // Two phones approving the same plan, closing the same period or
+                // correcting the same transaction write one deterministic id with the
+                // same numbers and a different hand on it. `target` is the document that
+                // got there first, so its copy is the record; keeping it is the whole
+                // rule, and it is not a choice between two answers because there is only
+                // one answer. See sameLedgerFact.
+                if (sameLedgerFact(target.ledger[key][id], held[id])) return;
                 // ONE ID, TWO BODIES. An entry is written once and never edited, so this
                 // is not a merge - it is a disagreement about what happened to somebody's
                 // money, and picking the copy that happened to arrive is picking at

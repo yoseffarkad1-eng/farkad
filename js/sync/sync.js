@@ -3041,7 +3041,47 @@ const FarkadSync = {
                     // adapter that does not carry the document costs a delay; one that
                     // lets a stale listener decide costs somebody's correction.
                     const contested = this.contestedPaths(patch, error.document);
-                    if (contested.length === 0) {
+
+                    // ALREADY DONE, BY SOMEBODY ELSE'S HAND.
+                    //
+                    // A few records in this app are named after WHAT THEY ARE rather than
+                    // by a random id - the carry approval, a period closure, a correction
+                    // of one transaction - precisely so that two phones cannot write two
+                    // of them. The consequence is that two phones legitimately send the
+                    // same path with the same numbers and a different `at` and `by`.
+                    //
+                    // To everything below this line that is one path with two bodies, and
+                    // it was held for ever: the loser's approval sat in the outbox, the
+                    // phone never said synced, and a person was told there was a conflict
+                    // about money when both phones had recorded the same fact. Measured
+                    // against the emulator, it took out twelve checks of
+                    // tests/money.concurrency.test.mjs at the v91 merge.
+                    //
+                    // So the model is asked - it owns what a ledger record is - and a path
+                    // whose value the server already holds as the SAME FACT is dropped
+                    // from this write. The server's copy stands, which is first-writer-
+                    // wins with the document as the arbiter. Any difference in a financial
+                    // field is not the same fact and falls straight through to the hold.
+                    const settled = (error.document && typeof error.document === 'object'
+                        && typeof ledgerPathSupersededBy === 'function')
+                        ? contested.filter(path => ledgerPathSupersededBy(
+                            path, patch[path], readPath(error.document, path)))
+                        : [];
+                    settled.forEach(path => { delete patch[path]; });
+                    const live = contested.filter(path => settled.indexOf(path) === -1);
+
+                    // Nothing of this operation is left to send. Resolving here takes it
+                    // through the ordinary success path, so the batch is acknowledged and
+                    // collected exactly as if it had landed - which is the truth: every
+                    // fact it carried is on the server. Sending it again would replace the
+                    // first writer's name with this one's.
+                    if (live.length === 0 && settled.length > 0
+                        && Object.keys(patch).every(key =>
+                            ENVELOPE_FIELDS.indexOf(key) !== -1)) {
+                        if (Number.isInteger(error.revision)) this._revision = error.revision;
+                        return;
+                    }
+                    if (live.length === 0) {
                         if (!error.cutover) this._rebases += 1;
                         if (Number.isInteger(error.revision)) this._revision = error.revision;
                         this.stampProtocol(patch, this._sendOpId);
@@ -3052,7 +3092,7 @@ const FarkadSync = {
                         // Bounded by the same ceiling: _rebases is not reset here.
                         return Promise.resolve(this.adapter.update(patch)).catch(onFailure);
                     }
-                    error.contested = contested;
+                    error.contested = live;
                     // HELD, DURABLY, BY ITS OWN ID - and this is the line the whole of
                     // tests/contested.test.mjs exists for.
                     //
@@ -3103,7 +3143,7 @@ const FarkadSync = {
                     const moved = (!error.cutover && someoneElse && error.document
                         && typeof error.document === 'object'
                         && base && typeof base === 'object')
-                        ? contested.filter(path =>
+                        ? live.filter(path =>
                             Object.prototype.hasOwnProperty.call(base, String(path)))
                         : [];
                     if (moved.length > 0) {

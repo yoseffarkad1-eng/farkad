@@ -60,6 +60,19 @@ function phone(id, storage) {
     return device;
 }
 
+// Through the real writer. State.commit persists a change the RECORDER has already
+// applied to memory - a raw { path, value } commit returns true and leaves the schedule
+// untouched, which is a fixture that measures nothing. recordCarryApproval is the
+// function the button calls.
+function approveOn(device, by, at) {
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    if (!plan.needed) return null;
+    const change = device.call('recordCarryApproval', device.State.schedule, plan,
+        at, by);
+    device.State.commit(change);
+    return change;
+}
+
 // A phone that can write but cannot hear, so the race is a real one - the same gate
 // tests/contested.test.mjs uses.
 function tunnel(cloud) {
@@ -138,7 +151,10 @@ function tunnel(cloud) {
     suite('the same approval from two phones is not a conflict');
 
     const device = phone('d_merge');
-    device.State.commit({ path: 'ledger.migrations.cm_carry', value: APPROVAL('d_a') });
+    approveOn(device, 'd_a', '2026-08-26T08:00:00.000Z');
+    given('the approval is on this phone',
+        Object.keys(device.State.schedule.ledger.migrations).length === 1,
+        JSON.stringify(device.State.schedule.ledger.migrations));
     const arriving = JSON.parse(JSON.stringify(device.State.schedule));
     arriving.ledger.migrations.cm_carry = APPROVAL('d_b');
     arriving.updatedAt = '2026-08-26T10:00:00.000Z';
@@ -153,9 +169,15 @@ function tunnel(cloud) {
     check('there is exactly one approval', Object.keys(
         device.State.schedule.ledger.migrations).length === 1,
         JSON.stringify(device.State.schedule.ledger.migrations));
-    check('and it is the one that got there first',
-        device.State.schedule.ledger.migrations.cm_carry.by === 'd_b',
-        JSON.stringify(device.State.schedule.ledger.migrations.cm_carry));
+    // WHICH COPY STANDS is the merge's own answer, asked of the merge. Through receive()
+    // the local write is still queued and unsent, and reapplyPending correctly puts it
+    // back on top - losing somebody's unsent edit to an arriving snapshot is a different
+    // fault entirely. The race suite below settles it end to end.
+    const merged = device.call('mergeLedgerInto',
+        JSON.parse(JSON.stringify(arriving)), device.State.schedule, []);
+    check('the merge keeps the copy that got there first',
+        merged.ledger.migrations.cm_carry.by === 'd_b',
+        JSON.stringify(merged.ledger.migrations.cm_carry));
     check('nothing was held aside',
         JSON.stringify(device.State.schedule.ledger.conflicted || {}) === '{}',
         JSON.stringify(device.State.schedule.ledger.conflicted));
@@ -173,7 +195,7 @@ function tunnel(cloud) {
     suite('an approval of a DIFFERENT plan is still a disagreement');
 
     const device = phone('d_clash');
-    device.State.commit({ path: 'ledger.migrations.cm_carry', value: APPROVAL('d_a') });
+    approveOn(device, 'd_a', '2026-08-26T08:00:00.000Z');
     const arriving = JSON.parse(JSON.stringify(device.State.schedule));
     arriving.ledger.migrations.cm_carry = Object.assign(APPROVAL('d_b'), { rows: 9 });
     arriving.updatedAt = '2026-08-26T10:00:00.000Z';
@@ -202,13 +224,13 @@ function tunnel(cloud) {
 
     // B cannot hear. Both approve the same plan; A lands first.
     gate.close();
-    a.State.commit({ path: 'ledger.migrations.cm_carry', value: APPROVAL('d_a') });
+    approveOn(a, 'd_a', '2026-08-26T08:00:00.000Z');
     await settleUntil(() => Boolean((((cloud.doc || {}).ledger || {}).migrations || {})
         .cm_carry), 5000);
     const landedAt = cloud.doc.revision;
     const writes = cloud.writes.filter(write => !write.replayed).length;
 
-    b.State.commit({ path: 'ledger.migrations.cm_carry', value: APPROVAL('d_b') });
+    approveOn(b, 'd_b', '2026-08-26T08:00:07.000Z');
     b.Sync.flush();
     await settle(600);
     gate.release();
@@ -240,11 +262,19 @@ function tunnel(cloud) {
     const again = phone('d_race_b', b.dump());
     again.Sync.connect(gate.adapter);
     await settle(600);
-    check('a reopened loser still owes nothing and sends nothing',
-        again.Sync.pendingCount() === 0
-        && cloud.writes.filter(write => !write.replayed).length === writes,
-        `${again.Sync.pendingCount()} owed, `
-        + `${cloud.writes.filter(write => !write.replayed).length} writes`);
+    // NOT a count of every write: a reopening device legitimately writes the boot-time
+    // ledger mirror, which is a different operation and has to go. What must never happen
+    // again is THIS path leaving the phone a second time and putting d_b's name over the
+    // approval d_a already made.
+    const approvalWrites = () => cloud.writes.filter(write => !write.replayed)
+        .filter(write => Object.prototype.hasOwnProperty.call(
+            write.patch || write.data || {}, 'ledger.migrations.cm_carry')).length;
+    check('a reopened loser owes nothing and never sends that approval again',
+        again.Sync.pendingCount() === 0 && approvalWrites() === 1,
+        `${again.Sync.pendingCount()} owed, ${approvalWrites()} writes of the approval`);
+    check('and the cloud still holds the first writer\'s approval',
+        cloud.doc.ledger.migrations.cm_carry.by === 'd_a',
+        JSON.stringify(cloud.doc.ledger.migrations.cm_carry));
 }
 
 // ------------------------------------------------ a genuinely contested path still holds
