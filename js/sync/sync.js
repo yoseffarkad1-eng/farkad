@@ -3570,10 +3570,30 @@ const FarkadSync = {
         // 'already-exists', the update below goes out against a document another device
         // has just created, so its base is whatever that device left - which the snapshot
         // that create published has by then told us.
-        // 'create' rather than 'update': the two used to share one id, so a receipt could
-        // not tell a field merge from a whole-document replacement.
+        //
+        // AND THE FINGERPRINT IS THE OPERATION'S, not the seed's.
+        //
+        // The id is the same on purpose - this is one operation, taking the branch the
+        // missing document forces on it - so the receipt it leaves is the receipt the
+        // retry will find. Stamped over the seed with kind 'create' it named something
+        // else: the seed is the whole local schedule, the patch is the person's edit, and
+        // the two digest differently by construction. The server committed the create,
+        // the answer was lost, and the retry - which by then finds the document there and
+        // so goes out as the update it always was - was told for ever that a receipt of
+        // this name describes a different operation. Eight paths owed, status error,
+        // unchanged by closing the app, with the day already safe in the cloud.
+        //
+        // The kinds it still has to separate are the ones that are genuinely different
+        // decisions: an ordinary merge and a whole-document restore, which carry different
+        // ids anyway. A create and the update it stands in for are not two decisions. The
+        // seed's extra fields are DERIVED - normaliseSchedule of what this device already
+        // holds - and there is nothing under them to overwrite, because the document does
+        // not exist.
+        const operation = typeof patch.opFingerprint === 'string' && patch.opFingerprint
+            ? patch.opFingerprint
+            : operationFingerprint('update', patch);
         this.stampProtocol(seed, this._sendOpId || this.operationIdFor(this._sending),
-            'create');
+            'create', '', operation);
         return Promise.resolve(this.adapter.create(seed))
             .catch(error => {
                 if (error && error.code === 'already-exists') {
@@ -4457,7 +4477,11 @@ const FarkadSync = {
     // The envelope this write travels in, stamped onto the patch itself - which is how it
     // reaches the rules, since Firestore evaluates them against the document as it would
     // be after the merge.
-    stampProtocol(patch, opId, kind, extra) {
+    // `fingerprint`, when it is given, is the operation's own - see createDocument, the
+    // one door where a single operation legitimately travels as two different sets of
+    // bytes. Everywhere else it is computed from what is being sent, which is the same
+    // thing said the short way.
+    stampProtocol(patch, opId, kind, extra, fingerprint) {
         // THE BASE THIS WRITE WAS BUILT ON, frozen here, path by path.
         //
         // It cannot be read live at conflict time. Snapshots keep arriving while a request
@@ -4500,7 +4524,9 @@ const FarkadSync = {
         // Computed BEFORE the ordering fields are read back out of the patch - they are
         // excluded by name, so the order does not matter, and computing it here means every
         // door that stamps a write stamps its fingerprint too.
-        patch.opFingerprint = operationFingerprint(kind || 'update', patch, extra);
+        patch.opFingerprint = typeof fingerprint === 'string' && fingerprint
+            ? fingerprint
+            : operationFingerprint(kind || 'update', patch, extra);
         // No snapshot yet means no base. One is the only revision a document that does
         // not exist can be created at, and the rules refuse anything else - so a device
         // that guessed would simply be refused, which is the right failure.
