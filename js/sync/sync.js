@@ -872,10 +872,12 @@ const RETRY_MAX_MS = 60000;
 //
 // The budget is about the WRITE, not about this number. Every write also carries
 // updatedAt, updatedBy, and the three ordering fields - protocol, revision, lastOpId -
-// so the cap on edits is the budget minus those five. It was 300 when there were two,
-// and lowering it to 297 keeps the write exactly the size it always was rather than
-// quietly spending the margin that number was chosen to leave.
-const MAX_PATHS_PER_WRITE = 297;
+// so the cap on edits is the budget minus those six. It was 300 when there were two, 297
+// when there were five, and 296 now that opFingerprint travels with them - each step keeps
+// the write exactly the size it always was rather than quietly spending the margin that
+// number was chosen to leave. A sixth envelope field is one fewer day per write, and that
+// is the honest price of it.
+const MAX_PATHS_PER_WRITE = 296;
 
 // How many times one batch may be rebuilt against a newer revision before the device
 // stops and says so. Three is enough for the ordinary case - two other phones writing the
