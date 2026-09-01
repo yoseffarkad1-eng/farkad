@@ -209,6 +209,11 @@ const canWrite = page => page.evaluate(() =>
         // THE AMOUNT IS NOT A FIELD on this form - a correction takes the whole
         // transaction - so the only thing to fill in is the reason.
         const inputs = [...form.querySelectorAll('input')];
+        // AND NEITHER IS THE DATE. A correction belongs on the day of the transaction it
+        // corrects; a date input is a fortnight somebody can type, and left blank it
+        // wrote an entry this build's own reader refuses.
+        const dates = inputs.filter(node => node.type === 'date').length;
+        const shown = form.textContent;
         const reason = inputs[inputs.length - 1];
         reason.value = 'נרשם על האדם הלא נכון';
         reason.dispatchEvent(new Event('input', { bubbles: true }));
@@ -222,7 +227,11 @@ const canWrite = page => page.evaluate(() =>
         return {
             row: true, button: true, form: true,
             amountFields: inputs.length,
+            dates,
+            shown,
             corrections: made.length,
+            date: (made[0] || {}).date,
+            targetDate: (made[0] || {}).targetDate,
             targetKind: (made[0] || {}).targetKind || null,
             amount: (made[0] || {}).amount,
             reason: (made[0] || {}).reason || null
@@ -239,6 +248,15 @@ const canWrite = page => page.evaluate(() =>
         JSON.stringify(done));
     check('and carries the reason the person typed',
         done.reason === 'נרשם על האדם הלא נכון', JSON.stringify(done.reason));
+    check('the form offers no date to type',
+        done.dates === 0, JSON.stringify(done.dates));
+    check('but shows the one the correction will carry',
+        typeof done.shown === 'string'
+        && done.shown.indexOf('\u05dc\u05e4\u05d9 \u05d9\u05d5\u05dd \u05d4\u05ea\u05e0\u05d5\u05e2\u05d4') !== -1,
+        JSON.stringify(String(done.shown || '').slice(0, 200)));
+    check('and the correction is dated on the transaction it corrects',
+        done.date === '2026-08-26' && done.date === done.targetDate,
+        JSON.stringify([done.date, done.targetDate]));
 
     await page.context().close();
 }
