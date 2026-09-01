@@ -225,4 +225,65 @@ function afterAdopting(device, ledger, label) {
         JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
 }
 
+// ------------------------------------------- and a name that cannot be assigned at all
+{
+    suite('evidence held under a poisoned name survives the merge');
+
+    // An id of `__proto__` under ledger.unreadable is exactly what an earlier read leaves
+    // behind: the entry could not be used as a key, so it was held aside as evidence. The
+    // merge then carries every family across with
+    //
+    //     target.ledger[key][id] = held[id];
+    //
+    // and for that id an ordinary assignment creates NO own property - it writes the
+    // prototype, or silently does nothing. So the one map whose whole job is to keep what
+    // could not be read loses the thing it was keeping, on the next snapshot from a phone
+    // that never had it.
+    //
+    // The quarantined copy on the disk is why this is not a total loss today, and it is
+    // not a reason to leave it: the copy is one storage failure or one collection away,
+    // and the record itself is supposed to carry its own evidence.
+    const device = phone('d_poison');
+    device.State.schedule.ledger = JSON.parse('{"advances":{},"unreadable":'
+        + '{"__proto__":{"id":"le_EVIDENCE_500","amount":500}},'
+        + '"migrations":{},"unreadableMigrations":{}}');
+    device.State.save({ silent: true });
+    given('the evidence really is an own key on this phone',
+        Object.prototype.hasOwnProperty.call(device.State.schedule.ledger.unreadable,
+            '__proto__'),
+        JSON.stringify(Object.keys(device.State.schedule.ledger.unreadable)));
+
+    const clean = JSON.parse(JSON.stringify(device.State.schedule));
+    clean.ledger = { advances: {}, unreadable: {}, migrations: {},
+        unreadableMigrations: {} };
+    clean.updatedAt = '2026-08-27T10:00:00.000Z';
+    clean.updatedBy = 'd_other';
+    device.Sync.receive(clean);
+    await settle(30);
+
+    check('the evidence is still an own key after the merge',
+        Object.prototype.hasOwnProperty.call(
+            device.State.schedule.ledger.unreadable || {}, '__proto__'),
+        JSON.stringify(Object.keys(device.State.schedule.ledger.unreadable || {})));
+    check('and it still carries the bytes it was holding',
+        JSON.stringify(device.State.schedule.ledger.unreadable)
+            .indexOf('le_EVIDENCE_500') !== -1,
+        JSON.stringify(device.State.schedule.ledger.unreadable));
+    check('nothing was reparented by writing it',
+        Object.getPrototypeOf(device.State.schedule.ledger.unreadable) !== null
+        && (device.State.schedule.ledger.unreadable || {}).amount === undefined,
+        JSON.stringify((device.State.schedule.ledger.unreadable || {}).amount));
+    check('the device is still held', device.call('farkadWritesBlocked') === true);
+    check('and never says synced', device.Sync.status !== 'synced', device.Sync.status);
+
+    const again = makeDevice({ deviceId: 'd_poison_r', storage: device.dump() });
+    again.setToday('2026-08-26');
+    again.ctx.askTell = () => Promise.resolve();
+    again.State.load();
+    check('a reopened phone still holds the evidence',
+        (JSON.stringify(again.State.schedule.ledger || {})
+            + JSON.stringify(again.dump())).indexOf('le_EVIDENCE_500') !== -1);
+    check('and is still held', again.call('farkadWritesBlocked') === true);
+}
+
 report();
