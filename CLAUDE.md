@@ -84,8 +84,8 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the thirty-five node suites; no browser, runs in a few minutes
-    npm run test:all        # adds smoke, print, mobile, update, recovery-browser,
+    npm test                # the forty-two node suites; no browser, runs in a few minutes
+    npm run test:all        # adds smoke, print, mobile, update, forms, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
     npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
@@ -181,8 +181,16 @@ written down so it cannot happen twice.
     tests/money.display.test.mjs one day has one price on every surface: screen, WhatsApp, sheet
     tests/cas.test.mjs         the client half of the ordering protocol: revision, receipt, rebase, hold
     tests/repayment.test.mjs   the advance that outlives its fortnight: carry, repayment, closure, the two labels
+    tests/approval.test.mjs    no surface may read the new arithmetic before somebody approves it
+    tests/quarantine.test.mjs  a damaged APPROVAL, through every door a record arrives by
+    tests/correction.test.mjs  a correction is all of a transaction, dated on the transaction
+    tests/closure.test.mjs     the frozen fortnight: what it records, what it refuses, who may have one
+    tests/wording.test.mjs     every figure called what it is, and an overpaid account stopped
+    tests/samefact.test.mjs    one fact written by two phones is one fact, not a conflict
+    tests/snapshot.poison.test.mjs a poisoned name arriving from the cloud, from every family
     vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
     tests/recovery.browser.mjs the rescue export through the real button
+    tests/forms.browser.mjs    the advance and correction forms, driven in real Chromium
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator
