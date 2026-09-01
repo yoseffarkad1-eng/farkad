@@ -207,10 +207,21 @@ function readOpBatch(raw, batchId) {
         // structurally sound entry naming a layer nobody wrote poisons the schedule in
         // memory, and the next ordinary save puts that on the disk.
         if (journalEntryProblems(String(op.path), op.value).length > 0) return null;
-        ops.push({
+        // WHAT THE EDIT WAS BUILT ON. A canonicalJson string, or null for "the server had
+        // nothing at this path" - the two are different statements and both are recorded.
+        // Validated and admitted by name like every other field: this function rebuilds
+        // each operation from an allowlist rather than copying it, which is why a field
+        // added to the writer without being added here is silently dropped on the way
+        // back in. That is what happened to `base` on its first attempt, and the hold it
+        // exists for went on failing open.
+        if (op.base !== undefined && op.base !== null
+            && typeof op.base !== 'string') return null;
+        const built = {
             opId: String(op.opId), path: String(op.path), value: op.value, seq: op.seq,
             after: Array.isArray(op.after) ? op.after.map(String) : []
-        });
+        };
+        if (Object.prototype.hasOwnProperty.call(op, 'base')) built.base = op.base;
+        ops.push(built);
     }
     return { batchId: String(batchId), ops };
 }
@@ -1369,11 +1380,27 @@ const FarkadSync = {
         entries.forEach(entry => {
             if (!entry || !entry.path) return;
             seq += 1;
+            // WHAT THIS EDIT WAS BUILT ON, written down with the edit itself.
+            //
+            // The conflict rule needs to know what the server held at this path when the
+            // person made this change. It used to be frozen in memory at send time, which
+            // is fine until the send loses and the marker recording that cannot be
+            // written: after a reopen there was nothing left to compare, the base was
+            // re-read from a document that by then already held the WINNER'S value,
+            // nothing looked contested, and the loser rebased over somebody's correction.
+            //
+            // Recorded here it is exactly as durable as the operation - one verified
+            // write, both or neither - so no disk failure can leave a queued edit whose
+            // provenance is gone. `null` means the server had nothing at this path, which
+            // is a different statement from "no base was recorded" and has to survive
+            // JSON to stay different.
+            const built = canonicalJson(this.baseValueAt(entry.path));
             ops.push({
                 opId: opIdNow(),
                 path: entry.path,
                 value: entry.value,
                 seq,
+                base: built === undefined ? null : built,
                 // Everything on the disk for this path, superseded by this one. Not only
                 // the projected winner: a loser left behind by a failed collection is
                 // still a record that could otherwise come back.
@@ -2838,10 +2865,45 @@ const FarkadSync = {
         //
         // Read off the in-memory queue, which is the same map the send below walks, so
         // this costs one pass over what is already there rather than a read of the disk.
+        // MOVED UNDER THIS EDIT, asked BEFORE the write goes out.
+        //
+        // The conflict branch cannot catch this one. A phone that comes back, hears the
+        // winner's document and only then flushes is not refused by anything: its
+        // revision is current, so its queued value is a perfectly valid next write and
+        // the server takes it - straight over the correction somebody else made. Nothing
+        // is contested because nothing collided; the collision already happened, while
+        // this phone was away.
+        //
+        // So the question is asked of the record instead: the operation wrote down what
+        // the server held at this path when the person made the edit, and if what the
+        // server holds now is something else, somebody corrected it in between. That is a
+        // decision, exactly as it is in the conflict branch, and it is held the same way.
+        //
+        // AND ONLY WHEN SOMEBODY ELSE PUT IT THERE - the same rule and for the same
+        // reason: two tabs of one app share a device id, and the person's own later
+        // correction must win rather than be held against them.
+        const wroteLast = String((this._baseDoc || {}).updatedBy || '');
+        const someoneElse = wroteLast !== '' && wroteLast !== String(syncDeviceId());
+        const movedUnder = [];
+        this._outbox.forEach((item, path) => {
+            if (item.sent || item.held || this._heldNow.has(String(path))) return;
+            if (!someoneElse || item.base === undefined) return;
+            const built = item.base === null ? undefined : item.base;
+            if (canonicalJson(this.baseValueAt(path)) === built) return;
+            movedUnder.push(String(path));
+        });
+        if (movedUnder.length > 0) {
+            const wrote = this.holdContested(movedUnder);
+            if (!wrote.durable) {
+                movedUnder.forEach(path => this._heldNow.add(String(path)));
+            }
+        }
+
         const heldBatches = new Set();
         this._outbox.forEach((item, path) => {
             if (item.sent) return;
-            if (item.held || this._heldNow.has(String(path))) {
+            if (item.held || this._heldNow.has(String(path))
+                || movedUnder.indexOf(String(path)) !== -1) {
                 heldBatches.add(item.batchKey);
             }
         });
@@ -2849,7 +2911,8 @@ const FarkadSync = {
             .filter(([, item]) => !item.sent)
             .filter(([path, item]) => {
                 if (!item.held && !heldBatches.has(item.batchKey)
-                    && !this._heldNow.has(String(path))) return true;
+                    && !this._heldNow.has(String(path))
+                    && movedUnder.indexOf(String(path)) === -1) return true;
                 holding = true;
                 return false;
             })
@@ -4387,6 +4450,19 @@ const FarkadSync = {
             Object.keys(patch).forEach(path => {
                 if (path === 'updatedAt' || path === 'updatedBy') return;
                 if (path === 'protocol' || path === 'revision' || path === 'lastOpId') return;
+                // THE QUEUE'S OWN BASE FIRST. The operation recorded what the server held
+                // when the person made the edit, in the same write that queued it, so it
+                // is still there after a reopen - which is the whole point: reading it
+                // live at that moment gives the winner's value and answers "nothing
+                // moved" to a question whose answer is "somebody corrected this".
+                //
+                // A queue written by an older build carries no base, and then the live
+                // read is the only answer there is and this behaves as it did.
+                const queued = this._outbox.get(path);
+                if (queued && queued.base !== undefined) {
+                    this._sendBase[path] = queued.base === null ? undefined : queued.base;
+                    return;
+                }
                 this._sendBase[path] = canonicalJson(this.baseValueAt(path));
             });
         }
