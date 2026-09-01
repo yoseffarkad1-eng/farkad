@@ -1078,16 +1078,19 @@ function omer(flags) {
     // being helped by knowing the answer.
     const fromB = a.call('closePeriodChanges', asPhoneB, 'w_01',
         OMER_A.from, OMER_A.to, '2026-08-20T18:00:03.000Z', 'd_b');
+    // TWO ENTRIES EACH: the fortnight, and the deduction against the advance. Both have
+    // to be idempotent across two phones, because both are written by both.
     check('each phone, alone, believed it was closing the account',
-        fromA.length === 1 && fromB.length === 1,
+        fromA.length === 2 && fromB.length === 2,
         JSON.stringify([fromA.length, fromB.length]));
-    check('and both wrote to the same field path',
-        fromA[0].path === fromB[0].path, `${fromA[0].path} | ${fromB[0].path}`);
+    const pathsOf = list => list.map(one => one.path).sort().join(' | ');
+    check('and both wrote to the same field paths',
+        pathsOf(fromA) === pathsOf(fromB), `${pathsOf(fromA)} || ${pathsOf(fromB)}`);
 
     // The union, which is what Firestore does with two writes to one field path: the
     // later one stands, and there is ONE entry either way.
     a.State.commitMany(fromA);
-    a.State.schedule.ledger.advances[fromB[0].value.id] = fromB[0].value;
+    fromB.forEach(one => { a.State.schedule.ledger.advances[one.value.id] = one.value; });
     const closures = a.call('ledgerEntries', a.State.schedule)
         .filter(e => e.kind === 'deducted');
     check('the record holds one closure after both landed', closures.length === 1,
@@ -1095,6 +1098,16 @@ function omer(flags) {
     check('carrying the same money whichever phone wrote it',
         closures[0].amount === 3050 && closures[0].balanceAfter === 1950,
         JSON.stringify(closures[0]));
+    // Read off the map rather than through ledgerEntries: that function's subject is
+    // entries ABOUT AN ADVANCE, and the artifact deliberately names none.
+    const artifacts = Object.keys(a.State.schedule.ledger.advances)
+        .map(id => a.State.schedule.ledger.advances[id])
+        .filter(e => e.kind === 'closed');
+    check('and one fortnight, not two', artifacts.length === 1,
+        JSON.stringify(artifacts.map(one => one.id)));
+    check('saying the same wage whichever phone wrote it',
+        artifacts[0].gross === 3050 && artifacts[0].carriedIn === 0,
+        JSON.stringify(artifacts[0]));
 
     const walk = a.call('advanceAccount', a.State.schedule, 'w_01',
         OMER_A.from, OMER_A.to);
@@ -2234,13 +2247,30 @@ function omer(flags) {
     const device = omer({ carryAdvances: true, ledgerWrites: true });
     const changes = device.call('closePeriodChanges', device.State.schedule, 'w_01',
         OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_omer');
-    given('there is a closure to write', changes.length === 1, String(changes.length));
+    // TWO ENTRIES NOW: the period artifact - the payslip, naming the man and the
+    // fortnight and moving no money - and the deduction against the advance. A man with
+    // no advance gets the first alone, which is the whole reason it exists.
+    given('there is a closure to write', changes.length === 2, String(changes.length));
     device.State.commitMany(changes);
 
-    const written = changes[0].value;
+    const written = changes.map(one => one.value)
+        .find(value => String(value.kind) === 'deducted');
+    const artifact = changes.map(one => one.value)
+        .find(value => String(value.kind) === 'closed');
+    given('one of them is the deduction and one is the fortnight',
+        Boolean(written) && Boolean(artifact),
+        JSON.stringify(changes.map(one => one.value.kind)));
     check('it passes the accounting check it will be judged by',
         device.call('closureProblems', device.State.schedule, written).length === 0,
         JSON.stringify(device.call('closureProblems', device.State.schedule, written)));
+    check('and so does the fortnight beside it',
+        device.call('closureProblems', device.State.schedule, artifact).length === 0,
+        JSON.stringify(device.call('closureProblems', device.State.schedule, artifact)));
+    check('both are readable by the validator every door applies',
+        device.call('ledgerEntryProblems', written.id, written).length === 0
+        && device.call('ledgerEntryProblems', artifact.id, artifact).length === 0,
+        JSON.stringify([device.call('ledgerEntryProblems', written.id, written),
+            device.call('ledgerEntryProblems', artifact.id, artifact)]));
     check('and nothing on this device is held aside',
         device.call('impossibleClosures', device.State.schedule).length === 0,
         JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
