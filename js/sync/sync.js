@@ -3068,7 +3068,9 @@ const FarkadSync = {
                 // Not an edge case: this is the first write of every new project. Inside
                 // the same slot on purpose - this write taking the other branch, not a
                 // second one.
-                if (error && error.code === 'not-found') return this.createDocument(patch);
+                if (error && error.code === 'not-found') {
+                    return this.createDocument(patch, onFailure);
+                }
 
                 // A REFUSAL THAT IS REALLY A RACE, told apart by looking.
                 //
@@ -3558,7 +3560,7 @@ const FarkadSync = {
     // first. The adapter does that with a transaction, and the loser is handed
     // 'already-exists' - at which point its edits are an ordinary field merge, which is
     // what they were always meant to be.
-    createDocument(patch) {
+    createDocument(patch, onFailure) {
         if (!this.adapter || typeof this.adapter.create !== 'function') {
             return Promise.reject(new Error('the cloud document does not exist and this adapter cannot create it'));
         }
@@ -3617,9 +3619,40 @@ const FarkadSync = {
         return Promise.resolve(this.adapter.create(seed))
             .catch(error => {
                 if (error && error.code === 'already-exists') {
-                    return this.adapter.update(
-                        this.stampProtocol(patch, this._sendOpId
-                            || this.operationIdFor(this._sending)));
+                    // THE WINNER'S REVISION, LEARNED BY LOOKING - not waited for.
+                    //
+                    // The comment above says the winner's snapshot "has by then told
+                    // us" the base. It has not, necessarily: the transaction's refusal
+                    // and the listener are two channels with no ordering between them,
+                    // and when the refusal arrives first this device has still been told
+                    // no revision at all. The update then went out claiming revision 1
+                    // against a document already at revision 1, the conflict was not
+                    // handed to the handler every other write gets, and it escaped to
+                    // the outer catch: «שגיאת סנכרון (N ממתינים לשליחה)» on the loser's
+                    // screen for as long as its listener took, over an ordinary
+                    // two-people-one-evening merge. Measured with the listener held
+                    // 150 ms behind the transaction, tests/cas.test.mjs.
+                    //
+                    // So the document is read, the same way bootstrapCutover rereads,
+                    // and its revision noted before the update is stamped. A read that
+                    // fails costs nothing: the stamp falls back to what this device
+                    // knows, exactly as before.
+                    const learn = this.adapter && typeof this.adapter.read === 'function'
+                        ? Promise.resolve(this.adapter.read()).then(fresh => {
+                            if (fresh && typeof fresh === 'object') this.noteRevision(fresh);
+                        }, () => undefined)
+                        : Promise.resolve();
+                    return learn.then(() => {
+                        const follow = Promise.resolve(this.adapter.update(
+                            this.stampProtocol(patch, this._sendOpId
+                                || this.operationIdFor(this._sending))));
+                        // AND THROUGH THE SAME HANDLER, because a third phone can land
+                        // between that read and this write. That is the in-flight
+                        // conflict every other write is rebased or held from, and this
+                        // one was left to the retry ladder.
+                        return typeof onFailure === 'function'
+                            ? follow.catch(onFailure) : follow;
+                    });
                 }
                 throw error;
             });
