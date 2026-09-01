@@ -319,13 +319,37 @@ const reopen = (device, id) => {
     check('and the device is not held',
         device.call('farkadWritesBlocked') === false);
 
-    // Even after the schedule moves under it - which is the case that condemned it.
+    // AND WHAT IT IS STILL JUDGED BY, said out loud rather than left as a surprise.
+    //
+    // A closure that records no wage is measured against the live one, because that is
+    // the only evidence there is. That has a cost - move a day out of the fortnight and
+    // this old closure is accused of deducting more than the wage it came off, which on
+    // the day it was written it did not - and the cost is accepted deliberately, because
+    // the same check is what holds aside a closure arriving from another phone claiming
+    // 4,000 off a wage of 3,050. See L5 in tests/repayment.test.mjs, which is that case.
+    //
+    // The drift is FIXED FORWARD rather than papered over: every closure this build
+    // writes carries the wage it was closed on and is judged against that, so the set of
+    // records that can be accused this way is closed and shrinking. Waving the check away
+    // for want of a snapshot would open exactly the hole L5 closed, on the one kind of
+    // record this app cannot re-derive.
     device.State.commit(device.call('clearWorkerDay', device.State.schedule,
         '2026-08-14', 'w_01', 'actual'));
-    check('still not impossible once the schedule moves under it',
-        device.call('impossibleClosures', device.State.schedule).length === 0,
+    check('it is still measured against the live wage, because nothing else is available',
+        device.call('closureProblems', device.State.schedule,
+            device.State.schedule.ledger.advances[entry.id]).length > 0,
         JSON.stringify(device.call('closureProblems',
             device.State.schedule, device.State.schedule.ledger.advances[entry.id])));
+
+    // While a closure that DOES record its wage, on the same edit, is left alone - which
+    // is the whole difference this workstream makes.
+    const modern = closed('d_modern');
+    modern.State.commit(modern.call('clearWorkerDay', modern.State.schedule,
+        '2026-08-14', 'w_01', 'actual'));
+    check('and a closure that recorded its wage is not accused by the same edit',
+        modern.call('impossibleClosures', modern.State.schedule).length === 0,
+        JSON.stringify(modern.call('closureProblems',
+            modern.State.schedule, closureIn(modern))));
 }
 
 // ------------------------------------------------- a closure that was wrong is still wrong

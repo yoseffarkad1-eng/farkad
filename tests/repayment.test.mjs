@@ -1019,7 +1019,13 @@ function omer(flags) {
         JSON.stringify(closures()));
 
     const folded = device.call('closedPeriods', device.State.schedule, 'w_01')[OMER_A.from];
-    same('the fold reads one closure, not two', folded,
+    // The two SUMMED figures, which is what this check is about - one close, one
+    // deduction, one balance, however many times the button was pressed. The fold also
+    // carries the fortnight's own facts now (see closureFacts in js/model/ledger.js);
+    // those are per-period rather than per-advance and are proved in
+    // tests/closure.test.mjs, so they are read past here rather than pinned twice.
+    same('the fold reads one closure, not two',
+        { deducted: folded.deducted, balanceAfter: folded.balanceAfter },
         { deducted: 3050, balanceAfter: 1950 });
     const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
         OMER_A.from, OMER_A.to);

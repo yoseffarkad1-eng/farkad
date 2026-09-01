@@ -439,14 +439,29 @@ function closureProblems(schedule, entry) {
     // are sound. A closure that was exactly right when it was written was accused because
     // the schedule moved underneath it.
     //
-    // A closure written before closures carried their wage has nothing to be judged
-    // against. It is left alone rather than measured against a number that may have
-    // nothing to do with the day it was written: condemning a record on evidence this
-    // build knows it cannot trust is the same fault in the other direction. The two
-    // checks below it - the advance it came off, and the balance it left - read the
-    // append-only ledger and still apply to every closure.
+    // A closure that records NO wage is judged against the live one, because that is the
+    // only evidence there is - and it is the case that matters most. A closure claiming
+    // 4,000 off a wage of 3,050 arriving from another phone carries no recorded wage
+    // either, and holding it aside at the door is what stops a number this device never
+    // computed being frozen onto somebody's pay. Dropping the check for want of a
+    // snapshot would open exactly the hole L5 closed.
+    //
+    // So the live wage is a fallback, not the rule: from this build on, every closure
+    // this app writes carries the wage it was closed on, and is judged against that. The
+    // drift - a day corrected off a paid fortnight turning an honest closure into an
+    // accusation - is fixed for every closure written from here. For the older ones the
+    // live wage is all anybody has, and protecting money on imperfect evidence beats
+    // silence on none.
     const gross = entry.gross !== undefined && entry.gross !== null
-        ? Number(entry.gross) : null;
+        ? Number(entry.gross)
+        : (function () {
+            const advance = ((schedule && schedule.advances) || {})[String(entry.advanceId)];
+            const who = String(entry.workerId || (advance || {}).workerId || '');
+            const row = who && typeof payrollReport === 'function'
+                ? payrollReport(schedule, from, to).find(item => item.workerId === who)
+                : null;
+            return row && row.amount !== null ? Number(row.amount) : null;
+        }());
     if (gross !== null && off > gross + 1e-6) {
         out.push('a closure deducting more than the wage it came off');
     }
