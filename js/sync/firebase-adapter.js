@@ -117,7 +117,19 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                         error.sent = payload.opFingerprint || null;
                         throw error;
                     }
-                    return;
+                    // SAID AS A REPLAY, and at the revision the operation reached.
+                    //
+                    // A replay performs no write, so no snapshot follows it - and the
+                    // client, answered with a bare success, acknowledged and pruned
+                    // without looking at the document again. Between the write that
+                    // landed and this retry another phone can have corrected the same
+                    // day; that snapshot arrived while the write was still owed, so the
+                    // owed value was put back on top of it, and the acknowledgement was
+                    // the last word. Screen and disk kept the older value, the cloud the
+                    // correction, and the line said synced. The revision lets the client
+                    // tell a snapshot that already includes this operation from one that
+                    // predates it - see readoptAfter in js/sync/sync.js.
+                    return { replayed: true, revision: claimed };
                 }
                 return Promise.resolve().then(() => {
                     if (!snapshot.exists()) {

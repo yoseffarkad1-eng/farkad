@@ -491,11 +491,17 @@ export function makeCloud(options = {}) {
     //
     // Called after guard(), so an attempt is still counted when the call is made rather
     // than when it lands - which is what the app sees.
+    //
+    // And it ANSWERS with whatever `apply` returned. The production adapter hands the
+    // client a value on two paths - the cutover's document, and a replay's `{ replayed,
+    // revision }` - and a fake that swallowed them proved the client right about a
+    // contract the client was never actually being told.
     function landing(kind, payload, apply) {
         const wait = cloud.hold ? cloud.hold(kind, payload) : null;
         if (!wait) {
-            try { apply(); } catch (error) { return Promise.reject(error); }
-            return Promise.resolve();
+            let answer;
+            try { answer = apply(); } catch (error) { return Promise.reject(error); }
+            return Promise.resolve(answer);
         }
         return Promise.resolve(wait).then(apply);
     }
@@ -638,7 +644,9 @@ export function makeCloud(options = {}) {
                     const disagrees = receiptDisagrees(patch);
                     if (disagrees) throw disagrees;
                     cloud.writes.push({ kind: 'update', patch, replayed: true });
-                    return;
+                    // As the production adapter answers it: a replay, and the revision
+                    // the operation reached - see withReceipt in firebase-adapter.js.
+                    return { replayed: true, revision: receiptFor(patch.lastOpId).revision };
                 }
                 const said = protocolProblem(patch, false);
                 if (said) throw said;
@@ -656,7 +664,7 @@ export function makeCloud(options = {}) {
                     const disagrees = receiptDisagrees(data);
                     if (disagrees) throw disagrees;
                     cloud.writes.push({ kind: 'save', data, replayed: true });
-                    return;
+                    return { replayed: true, revision: receiptFor(data.lastOpId).revision };
                 }
                 const said = protocolProblem(data, !cloud.doc);
                 if (said) throw said;
@@ -706,7 +714,7 @@ export function makeCloud(options = {}) {
                 }
                 if (cloud.protocol && receiptFor(data.lastOpId)) {
                     cloud.writes.push({ kind: 'create', data, replayed: true });
-                    return;
+                    return { replayed: true, revision: receiptFor(data.lastOpId).revision };
                 }
                 const said = protocolProblem(data, true);
                 if (said) throw said;

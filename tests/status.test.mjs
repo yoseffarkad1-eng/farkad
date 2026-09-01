@@ -220,4 +220,101 @@ const dishonest = seen => seen.filter(item =>
         `${again.Sync.status}, ${again.Sync.pendingCount()} pending`);
 }
 
+// ============================================================ acknowledged, and then a snapshot
+{
+    suite('a record it could not read, acknowledged, is not an error on every snapshot');
+
+    // The suite above is the pre-acknowledgement state: writes blocked, and 'synced'
+    // answered with 'blocked'. This is the state after. The person exported the rescue
+    // file and acknowledged; the entry is still held aside on the disk - by design, it
+    // is carried and never folded - and writes have resumed. Then the first snapshot
+    // arrives from another phone.
+    //
+    // Measured on this tree: the snapshot was adopted and persisted, and then the
+    // post-persist check counted the entry this device was ALREADY holding, reported it
+    // again (deduplicated, so nothing new was shown), called fail() and returned. Status
+    // 'error', «שגיאת סנכרון - הנתונים שמורים במכשיר הזה.», on every snapshot for the
+    // rest of the session - while the cloud provably had this phone's writes - and the
+    // return skipped archiveDaily, so this phone never took the daily restore point,
+    // and skipped the identity repairs and the post-snapshot flush with it.
+    const seed = makeDevice({ deviceId: 'd_seed' });
+    seed.setToday('2026-08-20');
+    seed.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+    seed.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    // An advance entry this build cannot fold: the amount is not a number.
+    seed.State.schedule.ledger = { advances: {}, unreadable: { le_bad: {
+        id: 'le_bad', advanceId: 'a_1', kind: 'repaid', workerId: 'w_01',
+        date: '2026-08-10', amount: 'abc', note: '',
+        at: '2026-08-10T09:00:00.000Z', by: 'd_x' } } };
+    seed.State.schedule.updatedAt = '2026-08-19T00:00:00.000Z';
+    seed.State.schedule.updatedBy = 'd_seed';
+    seed.State.save({ silent: true });
+
+    const device = makeDevice({ deviceId: 'd_acked', storage: seed.dump() });
+    device.Sync.pushDelayMs = TICK;
+    device.setToday('2026-08-20');
+    device.ctx.askTell = () => Promise.resolve();
+    device.State.load();
+    const recovery = device.global('Recovery');
+    given('the reopened phone is told about the entry and holds its writes',
+        recovery.problems.some(problem => problem.key === 'scheduleData:v2:ledger')
+        && device.call('farkadWritesBlocked') === true,
+        JSON.stringify(recovery.problems.map(problem => problem.key)));
+    given('acknowledging releases it', recovery.acknowledge() === true
+        && device.call('farkadWritesBlocked') === false,
+        String(device.call('farkadWritesBlocked')));
+
+    // Another phone's document, clean, newer.
+    const other = JSON.parse(JSON.stringify(device.State.schedule));
+    other.ledger = { advances: {}, unreadable: {}, migrations: {}, unreadableMigrations: {} };
+    other.updatedAt = '2026-08-20T10:00:00.000Z';
+    other.updatedBy = 'd_other';
+    const cloud = makeCloud({ doc: other });
+    const seen = watchStatus(device);
+    device.Sync.connect(cloud.adapter);
+    await settleUntil(() => seen.length > 1 && device.Sync.status !== 'connecting', 5000);
+    await settle(TICK * 20);
+
+    check('the snapshot leaves the line saying synced',
+        device.Sync.status === 'synced',
+        `${device.Sync.status}: ${String(device.Sync.lastError
+            && (device.Sync.lastError.message || device.Sync.lastError))}`);
+    check('and nothing on the way said error',
+        seen.every(item => item.said !== 'error'),
+        JSON.stringify(seen.map(i => `${i.asked}->${i.said}`)));
+    check('the daily restore point was taken',
+        cloud.history.size === 1 && Boolean(device.Sync._archivedOn),
+        `${cloud.history.size} archived, _archivedOn ${String(device.Sync._archivedOn)}`);
+    const disk = JSON.parse(device.dump()['scheduleData:v2'] || 'null') || {};
+    check('the entry is still held aside, on the screen and on the disk',
+        Object.keys((device.State.schedule.ledger || {}).unreadable || {}).indexOf('le_bad') !== -1
+        && Object.keys((disk.ledger || {}).unreadable || {}).indexOf('le_bad') !== -1,
+        JSON.stringify([Object.keys((device.State.schedule.ledger || {}).unreadable || {}),
+            Object.keys((disk.ledger || {}).unreadable || {})]));
+    check('and the person was told, once',
+        recovery.problems.filter(problem => problem.key === 'scheduleData:v2:ledger').length === 1
+        && device.call('farkadWritesBlocked') === false,
+        JSON.stringify(recovery.problems.map(problem => problem.key)));
+
+    // The evening goes on. A day is recorded, lands, and the line still tells the truth.
+    record(device, '2026-08-20', 'w_01');
+    await settleUntil(() => device.Sync.pendingCount() === 0, 5000);
+    await settle(TICK * 20);
+    check('a later write lands and the line says so',
+        Boolean(((cloud.doc || {}).days || {})['2026-08-20'])
+        && device.Sync.status === 'synced' && device.Sync.pendingCount() === 0,
+        `${device.Sync.status}, ${device.Sync.pendingCount()} owed, cloud has day: `
+        + `${Boolean(((cloud.doc || {}).days || {})['2026-08-20'])}`);
+
+    device.ctx.document.getElementById = id => (id === 'storageNotice'
+        ? device.__notice : null);
+    device.__notice = { textContent: '' };
+    device.call('updateSyncNotice');
+    check('in the words of a finished device, not a tunnel',
+        device.__notice.textContent.indexOf('מסונכרן') !== -1
+        && device.__notice.textContent.indexOf('שגיאת סנכרון') === -1,
+        JSON.stringify(device.__notice.textContent));
+}
+
 report();

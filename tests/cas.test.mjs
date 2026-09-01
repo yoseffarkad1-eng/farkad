@@ -878,4 +878,92 @@ function tunnel(cloud) {
         JSON.stringify(Object.keys(a.State.schedule.days)));
 }
 
+// ============================================================ the create race, heard late
+{
+    suite('the loser of a create race whose snapshot is late merges without an error');
+
+    // Both phones are told the project is empty, both record a day, and both send a
+    // create. Exactly one wins; the loser is handed 'already-exists' and sends its day
+    // as the update it always was. tests/data.test.mjs covers that - with a listener
+    // that has already delivered the winner's document by the time the refusal comes
+    // back, because the harness publishes synchronously. Firestore makes no such
+    // promise: the transaction's answer and the listener are two channels with no
+    // ordering between them, and the refusal can arrive first.
+    //
+    // Then the loser's update goes out at revision 1 against a document already at
+    // revision 1. A conflict - the same shape every other write gets rebased and
+    // merged from - except that the create's follow-up was not routed through the
+    // handler that does that, so it escaped to the outer catch: 'sync error (N pending)'
+    // on the loser's screen for as long as the listener took, and the day landed only
+    // when the late snapshot triggered another flush. No data was lost. The line said
+    // something had gone wrong about an ordinary two-people-one-evening merge.
+    const cloud = makeCloud();
+    const a = phone(null, 'd_a');
+    const b = phone(null, 'd_b');
+
+    // The loser's listener runs 150 ms behind the transaction. The first delivery - the
+    // state at subscribe, "the project is empty" - is prompt, as it is in Firestore;
+    // it is what the winner PUBLISHES that arrives late.
+    const late = Object.assign({}, cloud.adapter, {
+        subscribe: (onSnapshot, onError) => {
+            let first = true;
+            return cloud.adapter.subscribe(snapshot => {
+                if (first) { first = false; onSnapshot(snapshot); return; }
+                setTimeout(() => onSnapshot(snapshot), 150);
+            }, onError);
+        }
+    });
+    // Both creates are held open on the wire, so the race is decided by the test and
+    // not by the debounce.
+    const holds = [];
+    cloud.hold = (kind, payload) => (kind === 'create'
+        ? new Promise(resolve => { holds.push({ by: payload.updatedBy, resolve }); }) : null);
+
+    a.Sync.connect(cloud.adapter);
+    b.Sync.connect(late);
+    record(a, DAY, 'w_01');
+    record(b, '2026-08-13', 'w_02');
+    await settleUntil(() => holds.length === 2, 5000);
+    given('both phones sent a create', holds.length === 2, `${holds.length} creates open`);
+
+    // Every status the loser lands on from here, and every error it is handed.
+    const seen = [];
+    const errors = [];
+    const original = b.Sync.setStatus;
+    b.Sync.setStatus = function (status, error) {
+        original.call(this, status, error);
+        seen.push(this.status);
+        if (error) errors.push(String(error.message || error));
+    };
+
+    // The winner lands; the loser's create is refused a moment later, while its
+    // listener has still not delivered the winner's document.
+    const winner = holds.find(held => held.by === 'd_a');
+    const loser = holds.find(held => held.by === 'd_b');
+    given('one create from each phone', Boolean(winner) && Boolean(loser),
+        JSON.stringify(holds.map(held => held.by)));
+    winner.resolve();
+    await settle(TICK);
+    loser.resolve();
+    cloud.hold = null;
+    await settleUntil(() => a.Sync.pendingCount() === 0 && b.Sync.pendingCount() === 0
+        && a.Sync.status === 'synced' && b.Sync.status === 'synced', 5000);
+    await settle(TICK * 20);
+
+    const days = Object.keys((cloud.doc || {}).days || {}).sort();
+    check('exactly one create landed',
+        cloud.writes.filter(write => write.kind === 'create' && !write.replayed).length === 1,
+        JSON.stringify(cloud.writes.map(write => write.kind)));
+    check('and both days are in the cloud',
+        days.join() === `${DAY},2026-08-13`, days.join());
+    check('both phones are finished', a.Sync.status === 'synced' && b.Sync.status === 'synced'
+        && a.Sync.pendingCount() === 0 && b.Sync.pendingCount() === 0,
+        `${a.Sync.status} / ${b.Sync.status}`);
+    // THE PIN. The loser's conflict is the ordinary merge and is handled as one.
+    check('the loser never showed a sync error on the way',
+        seen.indexOf('error') === -1, JSON.stringify(seen));
+    check('and was never handed the document moving as a failure',
+        errors.every(message => !/moved/.test(message)), JSON.stringify(errors));
+}
+
 report();

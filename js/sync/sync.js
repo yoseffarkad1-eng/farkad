@@ -3177,7 +3177,9 @@ const FarkadSync = {
                 // Not an edge case: this is the first write of every new project. Inside
                 // the same slot on purpose - this write taking the other branch, not a
                 // second one.
-                if (error && error.code === 'not-found') return this.createDocument(patch);
+                if (error && error.code === 'not-found') {
+                    return this.createDocument(patch, onFailure);
+                }
 
                 // A REFUSAL THAT IS REALLY A RACE, told apart by looking.
                 //
@@ -3351,7 +3353,7 @@ const FarkadSync = {
                 .then(() => Promise.resolve(this.adapter.update(patch)))
                 .catch(onFailure);
         })
-            .then(() => {
+            .then(answer => {
                 // Only now. Up to this point the edits were on disk and would have been
                 // replayed by the next session; from here the cloud is holding them.
                 const acked = this.acknowledge(sent);
@@ -3378,7 +3380,26 @@ const FarkadSync = {
                     return;
                 }
 
-                if (this.status !== 'error') this.setStatus('synced');
+                // THE SNAPSHOT AGAIN, now that these paths are no longer owed.
+                //
+                // Answered from its receipt, a retry performs no write and no snapshot
+                // follows it. If another phone corrected one of these paths while the
+                // write was owed, that snapshot has already been adopted here with the
+                // owed value put back on top of it - and the acknowledgement was the
+                // last word: screen and disk kept the older value, the cloud the
+                // correction, and the line said synced. See readoptAfter.
+                if (this.readoptAfter(sent, patch, answer)) return;
+
+                // ASKED FOR, whatever the line said before. This read
+                // `if (this.status !== 'error')`, and the guard outlived its reason: a
+                // send that has just been answered is the recovery from whatever error
+                // the line was showing, and honestStatusFor is the one door that decides
+                // whether 'synced' may be said. A retry answered from its receipt was
+                // where it showed: the answer was lost (status 'error'), the ladder
+                // retried, the replay performed no write so no snapshot followed, the
+                // queue emptied - and the phone read «שגיאת סנכרון - הנתונים שמורים
+                // במכשיר הזה.» with nothing owed until the next real write from anyone.
+                this.setStatus('synced');
                 // Something was edited while the send was open.
                 if (this.pendingCount() > 0) this.scheduleFlush();
             })
@@ -3390,6 +3411,47 @@ const FarkadSync = {
                 this.fail(error);
                 this.scheduleRetry();
             });
+    },
+
+    // The paths reapplyPending last put back on top of an adopted snapshot - the queued
+    // values the screen is showing INSTEAD of what that snapshot held at them. Emptied
+    // as they are acknowledged, since an acknowledged path shows the snapshot's value at
+    // the next adoption anyway.
+    _reappliedOver: new Set(),
+
+    // After an acknowledgement: does the latest snapshot need adopting again?
+    //
+    // The answer is yes when both hold: the snapshot already INCLUDES the write that was
+    // just acknowledged - otherwise adopting it would take the write off this screen
+    // until its own echo arrives, which on a transaction is after the answer - and the
+    // snapshot was adopted with one of these paths' owed values reapplied over it, so
+    // what the screen shows at that path is not what the snapshot held.
+    //
+    // Which revision the write reached is the whole question, and it is not the same on
+    // the two answers a send can get. A write that landed reached the revision it
+    // claimed. A REPLAY - the operation had already landed and the server answered from
+    // its receipt - reached the receipt's revision, which is older, and the retry's
+    // claimed revision says nothing about it; that is why the adapter hands the receipt's
+    // revision back with the answer. Without it a replay acknowledged against a snapshot
+    // that already carried another phone's correction left the older value on this
+    // screen and on this disk, saying synced. Returns whether the snapshot was re-run,
+    // in which case receive() has set the status and scheduled anything still owed.
+    readoptAfter(sent, patch, answer) {
+        const replayed = Boolean(answer && typeof answer === 'object'
+            && answer.replayed === true);
+        const reached = replayed && Number.isInteger(answer.revision)
+            ? answer.revision : patch.revision;
+        const latest = this._latestRaw;
+        const over = this._reappliedOver;
+        let stale = false;
+        sent.forEach((item, path) => {
+            if (over.has(String(path))) { stale = true; over.delete(String(path)); }
+        });
+        if (!stale) return false;
+        if (!latest || typeof latest !== 'object' || !Number.isInteger(reached)
+            || !Number.isInteger(latest.revision) || latest.revision < reached) return false;
+        this.receive(latest);
+        return true;
     },
 
     // How long the claim is left to settle before it is read back. A property so the
@@ -3613,7 +3675,7 @@ const FarkadSync = {
     // first. The adapter does that with a transaction, and the loser is handed
     // 'already-exists' - at which point its edits are an ordinary field merge, which is
     // what they were always meant to be.
-    createDocument(patch) {
+    createDocument(patch, onFailure) {
         if (!this.adapter || typeof this.adapter.create !== 'function') {
             return Promise.reject(new Error('the cloud document does not exist and this adapter cannot create it'));
         }
@@ -3672,9 +3734,40 @@ const FarkadSync = {
         return Promise.resolve(this.adapter.create(seed))
             .catch(error => {
                 if (error && error.code === 'already-exists') {
-                    return this.adapter.update(
-                        this.stampProtocol(patch, this._sendOpId
-                            || this.operationIdFor(this._sending)));
+                    // THE WINNER'S REVISION, LEARNED BY LOOKING - not waited for.
+                    //
+                    // The comment above says the winner's snapshot "has by then told
+                    // us" the base. It has not, necessarily: the transaction's refusal
+                    // and the listener are two channels with no ordering between them,
+                    // and when the refusal arrives first this device has still been told
+                    // no revision at all. The update then went out claiming revision 1
+                    // against a document already at revision 1, the conflict was not
+                    // handed to the handler every other write gets, and it escaped to
+                    // the outer catch: «שגיאת סנכרון (N ממתינים לשליחה)» on the loser's
+                    // screen for as long as its listener took, over an ordinary
+                    // two-people-one-evening merge. Measured with the listener held
+                    // 150 ms behind the transaction, tests/cas.test.mjs.
+                    //
+                    // So the document is read, the same way bootstrapCutover rereads,
+                    // and its revision noted before the update is stamped. A read that
+                    // fails costs nothing: the stamp falls back to what this device
+                    // knows, exactly as before.
+                    const learn = this.adapter && typeof this.adapter.read === 'function'
+                        ? Promise.resolve(this.adapter.read()).then(fresh => {
+                            if (fresh && typeof fresh === 'object') this.noteRevision(fresh);
+                        }, () => undefined)
+                        : Promise.resolve();
+                    return learn.then(() => {
+                        const follow = Promise.resolve(this.adapter.update(
+                            this.stampProtocol(patch, this._sendOpId
+                                || this.operationIdFor(this._sending))));
+                        // AND THROUGH THE SAME HANDLER, because a third phone can land
+                        // between that read and this write. That is the in-flight
+                        // conflict every other write is rebased or held from, and this
+                        // one was left to the retry ladder.
+                        return typeof onFailure === 'function'
+                            ? follow.catch(onFailure) : follow;
+                    });
                 }
                 throw error;
             });
@@ -5019,7 +5112,7 @@ const FarkadSync = {
             mergeVehiclesInto(State.schedule, previous);
             mergeVehicleDaysInto(State.schedule, previous);
         }
-        this.reapplyPending(State.schedule, gone);
+        this._reappliedOver = new Set(this.reapplyPending(State.schedule, gone));
 
         // AGAIN, after the pending edits are back on top.
         //
@@ -5090,8 +5183,20 @@ const FarkadSync = {
                 }),
                 'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
                 + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
-            this.fail(new Error('part of the advances history could not be read'));
-            return;
+            // AND ONLY WHILE IT ACTUALLY BLOCKS. The entry is carried on this disk for
+            // ever, by design, so this count is above zero on every snapshot for the rest
+            // of the phone's life - including after the person has exported and
+            // acknowledged, when the report above is deduplicated and writes have
+            // resumed. Returning here regardless made every later snapshot an 'error'
+            // (the same line a tunnel produces, while the cloud provably held this
+            // phone's writes), and skipped the daily restore point, the identity repairs
+            // and the post-snapshot flush below it, every time. honestStatusFor already
+            // refuses 'synced' while writes are blocked; the return is for that case
+            // alone. Measured in tests/status.test.mjs.
+            if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+                this.fail(new Error('part of the advances history could not be read'));
+                return;
+            }
         }
         this.setStatus('synced');
 
@@ -5363,6 +5468,9 @@ const FarkadSync = {
         pending.forEach(([path, item]) => {
             applyJournalEntry(schedule, path, item.value, perEntity, tombstoned);
         });
+        // What was put back, so the acknowledgement that retires one of these can tell
+        // that the screen is showing the queue's value there and not the snapshot's.
+        return pending.map(([path]) => String(path));
     },
 
     scheduleFlush() {
