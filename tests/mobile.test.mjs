@@ -357,6 +357,62 @@ for (const width of WIDTHS) {
     }
 }
 
+// ---------------------------------------------------------------- the list starts high
+//
+// The compact day (v93). On first open, with the account warning folded and both bottom
+// bars in place, this many whole names are on the screen before anybody scrolls: six on
+// the big phone, five on the ordinary one, three on the smallest. Each piece of chrome is
+// held to the height the design promised it, so the count cannot drift back down one
+// pixel at a time - the way the screen this replaces got to four.
+// The heights are the design's own proof sizes, named here rather than taken from HEIGHTS:
+// that table opens 320 at the SE's 568, where three whole rows do not exist on any layout
+// (290px of chrome above the list leaves 141 under it). The SE is measured too, at the
+// floor it can actually hold - one whole name where v91 had none at all.
+for (const [width, height, atLeast] of [[430, 932, 6], [390, 844, 5], [320, 667, 3], [320, 568, 1]]) {
+    const label = `${width}×${height}: the list starts high`;
+    suite(label);
+
+    const page = await open({ width, height });
+    await setInset(page, 34);
+    const m = await page.evaluate(async () => {
+        window.scrollTo(0, 0);
+        await new Promise(done => setTimeout(done, 200));
+        const box = sel => {
+            const node = document.querySelector(sel);
+            return node ? Math.round(node.getBoundingClientRect().height) : null;
+        };
+        const banner = document.getElementById('accountBanner');
+        const sum = banner.querySelector('.banner-sum');
+        const dock = document.querySelector('.day-actions').getBoundingClientRect().top;
+        const rows = [...document.querySelectorAll('#dayView .worker-list .wrow')]
+            .map(node => node.getBoundingClientRect());
+        return {
+            bannerShown: banner.style.display !== 'none' && banner.getBoundingClientRect().height > 0,
+            folded: Boolean(sum) && sum.getAttribute('aria-expanded') === 'false',
+            topbar: box('.topbar'),
+            banner: box('#accountBanner'),
+            header: box('.day-header'),
+            mode: box('.day-mode-row'),
+            rows: rows.map(b => Math.round(b.height)),
+            complete: rows.filter(b => b.bottom <= dock + 0.5).length
+        };
+    });
+    // The warning is the block that follows the real clock rather than the seeded day;
+    // the count below is only worth anything if it is measured WITH the warning up.
+    given(`${label}: the account warning is on the screen, folded`,
+        m.bannerShown && m.folded === true);
+    check(`${label}: the strip above the day is 52px or less`, m.topbar <= 52, `${m.topbar}px`);
+    check(`${label}: the folded warning is 56-64px`, m.banner >= 56 && m.banner <= 64, `${m.banner}px`);
+    check(`${label}: the day header is 96-112px`, m.header >= 96 && m.header <= 112, `${m.header}px`);
+    check(`${label}: the switcher row is 44-48px`, m.mode >= 44 && m.mode <= 48, `${m.mode}px`);
+    check(`${label}: every worker row is 64-72px`,
+        m.rows.length > 0 && m.rows.every(h => h >= 64 && h <= 72), JSON.stringify(m.rows.slice(0, 8)));
+    check(`${label}: at least ${atLeast} whole names above the dock, unscrolled`,
+        m.complete >= atLeast, `${m.complete} whole rows`);
+
+    await page.context().close();
+}
+
 // ---------------------------------------------------------------- landscape
 
 for (const width of WIDTHS) {
@@ -1421,7 +1477,7 @@ for (const width of [320, 390]) {
             const node = document.querySelector(sel);
             if (!node) return null;
             const b = node.getBoundingClientRect();
-            return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) };
+            return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height), w: Math.round(b.width) };
         };
         return {
             row: box('.bulk-row'),
@@ -1430,12 +1486,16 @@ for (const width of [320, 390]) {
             dock: box('.day-actions'),
             chipShown: document.querySelector('.bulk-chip').offsetParent !== null,
             expanded: document.querySelector('.bulk-toggle').getAttribute('aria-expanded'),
-            label: document.querySelector('.bulk-toggle').textContent
+            // The button is a glyph and a number; its full name is what a screen reader
+            // gets, and what this reads.
+            label: document.querySelector('.bulk-toggle').getAttribute('aria-label')
         };
     });
-    check('the collapsed row is still a finger target', folded.toggle.h >= 44,
-        JSON.stringify(folded.toggle));
-    check('and no taller than the one row it is', folded.row.h <= 60,
+    check('the folded control is still a finger target, both ways',
+        folded.toggle.h >= 44 && folded.toggle.w >= 44, JSON.stringify(folded.toggle));
+    // v93: the control moved onto the switcher row, so the folded row is not on the page
+    // at all - the 44px it used to cost went to the list.
+    check('and the folded row itself costs the list nothing', folded.row.h === 0,
         JSON.stringify(folded.row));
     check('it says what it is holding, and how many',
         folded.label.includes('פעולות מרוכזות') && folded.label.includes(String(CREW - 8)),

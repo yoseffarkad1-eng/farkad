@@ -2407,7 +2407,7 @@ async function seedRoster(page) {
   check('progress starts at zero', (await page.textContent('.progress-line')).includes('0 מתוך 3'));
 
   // one tap per worker: the sheet advances by itself
-  await page.getByText('המשך (3)').click();
+  await page.locator('.now-count').click();
   await page.waitForTimeout(250);
   check('the continue button opens the first unfilled worker',
     (await page.textContent('#assignSheetTitle')) === 'דוד');
@@ -2455,7 +2455,7 @@ async function seedRoster(page) {
   await page.waitForTimeout(200);
 
   let taps = 0;
-  await page.getByText('המשך (12)').click(); taps++;
+  await page.locator('.now-count').click(); taps++;
   await page.waitForTimeout(200);
 
   for (let i = 0; i < 12; i++) {
@@ -2993,6 +2993,84 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('while a new warning is not silenced by yesterday\'s dismissal',
     await page.locator('#accountBanner').isVisible());
+
+  // The fold (v93): one strong line first, the whole warning one tap down - and never
+  // out of the DOM, because the checks above read the dates there.
+  const fold = await page.evaluate(() => {
+    const banner = document.getElementById('accountBanner');
+    const sum = banner.querySelector('.banner-sum');
+    const full = document.getElementById('accountBannerFull');
+    return {
+      expanded: sum && sum.getAttribute('aria-expanded'),
+      summary: (banner.querySelector('.banner-summary') || {}).textContent,
+      fullHidden: full ? getComputedStyle(full).display === 'none' : null,
+      height: Math.round(banner.getBoundingClientRect().height)
+    };
+  });
+  check('the warning opens folded to one line',
+    fold.expanded === 'false' && fold.fullHidden === true, JSON.stringify(fold));
+  check('and the line says what is still open',
+    typeof fold.summary === 'string' && fold.summary.includes('עדיין פתוח'), String(fold.summary));
+  await page.locator('#accountBanner .banner-sum').click();
+  await page.waitForTimeout(200);
+  const opened = await page.evaluate(() => {
+    const banner = document.getElementById('accountBanner');
+    const full = document.getElementById('accountBannerFull');
+    return {
+      expanded: banner.querySelector('.banner-sum').getAttribute('aria-expanded'),
+      shown: getComputedStyle(full).display !== 'none',
+      text: full.textContent,
+      doors: [...full.querySelectorAll('button')].map(b => b.textContent)
+    };
+  });
+  check('one tap opens the whole sentence, dates and all',
+    opened.expanded === 'true' && opened.shown && opened.text.includes('בלי אף רישום'),
+    JSON.stringify(opened).slice(0, 200));
+  check('with the report and the backup one tap away',
+    opened.doors.includes('לדוחות') && opened.doors.some(t => t.includes('שמירת גיבוי')),
+    JSON.stringify(opened.doors));
+  await page.evaluate(() => render());
+  await page.waitForTimeout(200);
+  check('a render keeps it open - a posture, not a per-render default',
+    (await page.evaluate(() => document.getElementById('accountBanner')
+      .querySelector('.banner-sum').getAttribute('aria-expanded'))) === 'true');
+  await page.locator('#accountBanner .banner-sum').click();
+  await page.waitForTimeout(150);
+  check('and a second tap folds it back',
+    (await page.evaluate(() => document.getElementById('accountBanner')
+      .querySelector('.banner-sum').getAttribute('aria-expanded'))) === 'false');
+
+  // The chip beside the name mirrors the status line and only recognises its words -
+  // it says less than the line, never something the line does not.
+  const chips = await page.evaluate(() => {
+    const notice = document.getElementById('storageNotice');
+    const chip = document.getElementById('syncChip');
+    const read = text => {
+      notice.textContent = text;
+      renderSyncChip();
+      return { hidden: chip.hidden, text: chip.textContent, cls: chip.className };
+    };
+    const out = {
+      local: read('הנתונים נשמרים במכשיר הזה בלבד.'),
+      synced: read('מסונכרן בין המכשירים. · עודכן: 19:42'),
+      waiting: read('מחובר. יש רישומים שעדיין נשלחים. (3 ממתינים לשליחה)'),
+      one: read('אין חיבור - השינויים יישלחו כשהחיבור יחזור. (רישום אחד ממתין לשליחה)'),
+      failed: read('⚠️ השינוי האחרון לא נשמר במכשיר. ייצא קובץ גיבוי עכשיו.')
+    };
+    updateSyncNotice();
+    renderSyncChip();
+    return out;
+  });
+  check('with no cloud there is no chip to read', chips.local.hidden === true, JSON.stringify(chips.local));
+  check('synced is one word on the chip',
+    chips.synced.hidden === false && chips.synced.text === 'מסונכרן' && chips.synced.cls.includes('chip-ok'),
+    JSON.stringify(chips.synced));
+  check('a queue is the chip, not "synced"',
+    chips.waiting.text === '3 ממתינים לשליחה' && chips.waiting.cls.includes('chip-warn'),
+    JSON.stringify(chips.waiting));
+  check('one waits in the singular there too', chips.one.text === 'ממתין לשליחה', JSON.stringify(chips.one));
+  check('a save that failed is never softened on the chip',
+    chips.failed.text === 'לא נשמר' && chips.failed.cls.includes('chip-danger'), JSON.stringify(chips.failed));
 
   // the crash banner: it names the error, and it closes
   await page.evaluate(() => {

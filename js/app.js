@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v91';
+const APP_VERSION = 'v93';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -103,6 +103,8 @@ function render() {
     renderCopyButton();
     renderAccountBanner();
     updateSyncNotice();
+    // After the line, because the chip is read from it.
+    renderSyncChip();
     // Only if it is open. Everything on it - the backup age, the restore points, the
     // cloud copies - is answered by state that changes while it is on screen.
     if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
@@ -111,6 +113,55 @@ function render() {
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
     // for a number somebody wrote down once.
     scheduleBarMeasure();
+}
+
+// The chip beside the app's name: the sync line, shortened. Read from #storageNotice
+// rather than composed again, so the two can never disagree - updateSyncNotice
+// (js/sync/sync.js) owns the words and this only recognises them. Anything it does not
+// recognise, including the local-only line, leaves the chip off: a chip that guesses is
+// worse than no chip.
+function renderSyncChip() {
+    const chip = document.getElementById('syncChip');
+    const notice = document.getElementById('storageNotice');
+    if (!chip || !notice) return;
+    const text = notice.textContent || '';
+    const waiting = text.match(/\((\d+) ממתינים לשליחה\)/);
+
+    let state = '';
+    let label = '';
+    if (text.startsWith('⚠️')) {
+        // A change that was NOT written down - the one state the chip must never soften.
+        state = 'chip-danger';
+        label = 'לא נשמר';
+    } else if (waiting) {
+        state = 'chip-warn';
+        label = `${waiting[1]} ממתינים לשליחה`;
+    } else if (text.includes('רישום אחד ממתין לשליחה')) {
+        state = 'chip-warn';
+        label = 'ממתין לשליחה';
+    } else if (text.startsWith('אין חיבור')) {
+        state = 'chip-warn';
+        label = 'אין חיבור';
+    } else if (text.startsWith('מסונכרן')) {
+        state = 'chip-ok';
+        label = 'מסונכרן';
+    } else if (text.startsWith('מחובר') || text.startsWith('מתחבר')) {
+        state = 'chip-warn';
+        label = 'שולח…';
+    } else if (text.startsWith('הנתונים השתנו במכשיר אחר')) {
+        state = 'chip-warn';
+        label = 'דורש הכרעה';
+    }
+    chip.textContent = label;
+    chip.className = 'sync-chip' + (state ? ' ' + state : '');
+    chip.hidden = label === '';
+}
+
+function watchSyncNotice() {
+    const notice = document.getElementById('storageNotice');
+    if (!notice || typeof MutationObserver !== 'function') return;
+    new MutationObserver(renderSyncChip)
+        .observe(notice, { childList: true, characterData: true, subtree: true });
 }
 
 // A crash on a phone looks like nothing: half a screen, no console, no clue whether what
@@ -226,6 +277,10 @@ function boot() {
     watchInstall();
     watchDayRollover();
     watchBottomBars();
+    // The status line is rewritten by sync.js on its own clock, between renders; the
+    // chip that mirrors it follows every rewrite, or it would sit on "3 ממתינים" after
+    // the three had gone.
+    watchSyncNotice();
 
     if (result.migrated) {
         const count = (result.issues || []).length;

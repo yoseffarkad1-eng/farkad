@@ -196,6 +196,27 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
 .brand strong { font-size: 19px; letter-spacing: -.01em; }
 .brand-sub { color: var(--ink-3); font-size: 14px; }
 
+/* The sync state, as a chip beside the name. A MIRROR of the line at the foot of the
+   screen (renderSyncChip in app.js reads that line's text): it says less, never
+   something different, and it is aria-hidden because the line is the live region. */
+.sync-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 12px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.sync-chip[hidden] { display: none; }
+.chip-ok { background: var(--ok-bg); color: var(--ok); }
+.chip-warn { background: var(--warn-bg); color: var(--warn); }
+.chip-danger { background: var(--danger-bg); color: var(--danger); }
+
 .tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 
 .tab {
@@ -237,11 +258,12 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
     .topbar {
         position: static;
         border-bottom: none;
-        /* The same 6px above and below the ⋯: an uneven pair floats the one glyph on
-           this strip off its centre line. NOT the notch inset - that is paid ONCE, by
-           the day header, the element actually against the edge (see the phone block
-           near the end of this file). */
-        padding: 6px 0;
+        /* The same 4px above and below the ⋯: an uneven pair floats the one glyph on
+           this strip off its centre line, and 4+44+4 is the 52px this strip is allowed
+           - it is the one thing above the day that is not the day. NOT the notch inset:
+           that is paid ONCE, by the day header, the element actually against the edge
+           (see the phone block near the end of this file). */
+        padding: 4px 0;
         margin-bottom: 6px;
         gap: 8px;
     }
@@ -675,6 +697,71 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    an icon button defaults to was never measured against these and fails on both. */
 .banner .btn-icon { color: inherit; }
 .banner .btn-icon:hover { color: inherit; background: rgba(127, 127, 127, .18); }
+
+/* The account warning, folded: one strong line, לדוחות, ✕ - a 60px row where four lines
+   of prose used to stand between the top of the screen and the day. The prose is one tap
+   down (.banner-full) and never leaves the DOM. See renderAccountBanner in day.js. */
+.banner-fold {
+    padding: 6px 6px 6px 10px;
+    margin-bottom: 6px;
+    gap: 2px;
+    flex-wrap: nowrap;
+    align-items: center;
+    min-height: 60px;
+}
+.banner-fold span { flex: none; min-width: 0; }
+.banner-sum {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 6px;
+    background: none;
+    border: none;
+    color: inherit;
+    text-align: start;
+    font: inherit;
+    border-radius: var(--radius-sm);
+}
+.banner-sum:hover { filter: none; background: rgba(127, 127, 127, .12); }
+.banner-summary {
+    font-size: 14px; /* the readable floor; the fold may take a third line instead */
+    font-weight: 700;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+/* The shared back chevron points right; a quarter turn points it down (folded), and the
+   other way up (open). */
+.banner-sum svg { width: 12px; height: 12px; flex: 0 0 auto; transform: rotate(90deg); }
+.banner-open .banner-sum svg { transform: rotate(-90deg); }
+.banner-go {
+    flex: none;
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+    color: inherit;
+    border-color: currentColor;
+}
+.banner-fold .btn-icon { min-width: 44px; min-height: 44px; }
+.banner-full { display: none; flex-basis: 100%; }
+.banner-open { flex-wrap: wrap; }
+.banner-open .banner-full { display: block; }
+.banner-text { margin: 0; padding: 0 6px 6px; font-size: 14px; line-height: 1.5; }
+.banner-acts { display: flex; gap: 8px; padding: 0 6px 4px; }
+.banner-acts button {
+    flex: 1;
+    min-height: 44px;
+    font-size: 14px;
+    color: inherit;
+    border-color: currentColor;
+}
 
 /* ---------------------------------------------------------------- day view */
 
@@ -2210,39 +2297,28 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     gap: 7px;
     padding: 9px 14px;
 }
-/* The phone-only disclosure row; on a desktop the chips are always out, so this button
-   never shows there and the row reads exactly as it always has. */
+/* The phone-only disclosure button, on the switcher row (see bulkToggle in day.js): a
+   checklist glyph and the count, 44px square. On a desktop the chips are always out, so
+   this button never shows there and the row reads exactly as it always has. */
 .bulk-toggle {
     display: none;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
+    justify-content: center;
+    gap: 4px;
+    min-width: 44px;
     min-height: 44px;
-    padding: 0 14px;
-    border: none;
-    background: none;
+    padding: 0 8px;
     color: var(--ink-2);
-    font-size: 14.5px;
-    font-weight: 600;
-    text-align: start;
-    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
 }
-.bulk-toggle svg {
-    width: 12px;
-    height: 12px;
-    flex: 0 0 auto;
-    /* the shared back chevron points right; a quarter turn points it down (closed) */
-    transform: rotate(90deg);
-}
-.bulk-row:not(.bulk-closed) .bulk-toggle svg { transform: rotate(-90deg); }
+.bulk-toggle svg { width: 20px; height: 20px; flex: 0 0 auto; }
+.bulk-toggle[aria-expanded="true"] { background: var(--surface-2); }
 @media (max-width: 700px) {
-    .bulk-toggle { display: flex; }
     /* Folded is display:none, not removed: the chips keep their place in the DOM so the
        tests that press them programmatically still can - see renderBulkRow. */
     .bulk-closed .bulk-body { display: none; }
-    /* the toggle row already holds the top edge open */
-    .bulk-body { padding-top: 2px; }
 }
 .bulk-label { color: var(--ink-2); font-size: 14px; }
 .bulk-chip {
@@ -2329,7 +2405,25 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
        things, and a long day name plus a big count must fold, not overflow */
     flex-wrap: wrap;
 }
-.progress-line .btn-add { padding: 6px 13px; font-size: 14px; }
+/* The count is the "continue" control (see renderProgress): a button dressed as the
+   number it shows, a finger tall, and it ellipsises rather than ever pushing the undo
+   pair off the row. */
+button.now-count {
+    background: none;
+    border: none;
+    color: var(--ink-2);
+    font-weight: 600;
+    font-size: 14px;
+    padding: 0 6px;
+    min-height: 44px;
+    min-width: 0;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: start;
+}
+button.now-count:hover { filter: none; background: var(--surface-2); }
 .progress-ok { color: var(--ok); font-weight: 600; }
 
 .worker-list {
@@ -2893,15 +2987,32 @@ body.reorder-dragging .reorder-list::after {
 }
 .reorder-changed { margin-inline-start: 6px; }
 
-/* The progress row as the day header's own last row: the card chrome comes off and a
-   hairline joins it to the rows above. One sticky box - nothing left to bury it. */
+/* The progress inside the day header: the card chrome comes off, the line sits on the
+   tools row beside undo and redo, and the track is the header's own bottom edge -
+   absolute, so it costs the header no row of its own. One sticky box - nothing left to
+   bury it. */
 .day-header .progress {
     position: static;
-    margin: 10px -12px -10px;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+    margin: 0;
+    padding: 0;
     border: none;
-    border-top: 1px solid var(--line-soft);
-    border-radius: 0 0 var(--radius) var(--radius);
+    border-radius: 0;
     box-shadow: none;
+    background: transparent;
+}
+.day-header .progress .progress-line { flex-wrap: nowrap; min-width: 0; gap: 6px; }
+.day-header .progress-bar {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 4px;
+    border-radius: 0;
+    flex: none;
 }
 @media (min-width: 701px) {
     .day-header .progress { top: auto; }
@@ -2927,13 +3038,34 @@ body.reorder-dragging .reorder-list::after {
        notch inset is paid ONCE, by the day header below, which is the element actually
        pinned against the edge once the page scrolls; this static strip paying it too
        cost 78 raw pixels on a notched phone. */
-    .topbar .brand { display: none; }
+    .topbar .brand { gap: 6px; }
+    .topbar .brand-mark { display: none; }
+    .topbar .brand strong { font-size: 15px; color: var(--ink-2); }
     /* top: 0, spelled honestly: the phone top bar is STATIC (the phone block above
        overrides the base sticky), it scrolls away, and stickyHeight() measures a
        static bar as 0 - so the var resolves to 0 here and the header is the thing at
        the edge. It carries the notch inset for that reason; env() is 0 in a browser
        tab, so the padding is just the padding. */
-    .day-header { top: var(--topbar-h, 0px); padding-top: max(10px, env(safe-area-inset-top)); }
+    .day-header {
+        top: var(--topbar-h, 0px);
+        /* Full-bleed: the card chrome is worth nothing on a strip that is pinned to the
+           screen's edge, and its side margins were pixels the day name did not have. The
+           -12px is .app's own phone padding-inline (above), undone - a header one pixel
+           wider than the screen is a page that scrolls sideways, which the mobile suite
+           measures. 4+44+2+44+8+1 = 103px, inside the 96-112 the list was promised. */
+        margin: 0 -12px 0;
+        border-radius: 0;
+        border-width: 0 0 1px;
+        box-shadow: none;
+        padding: 4px 8px 8px;
+        padding-top: max(4px, env(safe-area-inset-top));
+    }
+    /* The title's two lines fit the 44px row: 18px name over a 12px date. The 21px name
+       made the nav row 52 and the header 111 - inside the band, but eight pixels the
+       list was promised. */
+    .day-label { padding: 0; }
+    .day-label strong { font-size: 18px; line-height: 1.15; }
+    .day-date { font-size: 14px; line-height: 1.15; }
 }
 
 /* Inside the header the date on the progress line is a twin of the one on the nav row
@@ -2947,9 +3079,77 @@ body.reorder-dragging .reorder-list::after {
     white-space: nowrap;
 }
 .day-mode-row { margin: 0 0 10px; }
+/* ---------------------------------------------------------------- the compact day (v93)
+
+   The measured facts this block exists for, at 430/390/320 on first open with the account
+   warning folded and both bottom bars in place: at least 6 / 5 / 3 whole worker rows
+   above the dock. tests/mobile.test.mjs ("the list starts high") holds it to that. */
 @media (max-width: 700px) {
-    .day-header .progress { padding: 7px 12px 9px; }
-    .day-header { padding-bottom: 8px; }
+    .day-nav { min-height: 44px; }
+    /* wrap, not nowrap: at ordinary sizes the steps, "היום" and the count share the row
+       (measured at 320 with a two-digit count); at 200% text the count takes a line of
+       its own under them rather than losing its digits to an ellipsis. */
+    .day-tools { margin-top: 2px; gap: 3px; }
+    .day-steps { gap: 3px; }
+    .step-btn { padding: 8px 7px; gap: 4px; }
+    .btn-today { padding: 6px 7px; }
+    button.now-count { padding: 0 3px; }
+
+    /* The switcher: one 48px row (2+44+2), the fold's button at its end. */
+    .day-mode-row { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; }
+    .day-mode-row .layer-toggle {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+        padding: 2px;
+        gap: 2px;
+        background: var(--surface-2);
+        border-radius: 12px;
+    }
+    .day-mode-row .layer-toggle button {
+        flex: 1;
+        min-width: 0;
+        min-height: 44px;
+        font-size: 15px;
+        padding: 5px 6px;
+        border-radius: 10px;
+        white-space: nowrap;
+    }
+    .day-mode-row .mode-quiet .layer-on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+    .bulk-toggle { display: inline-flex; }
+    .bulk-row { margin: 6px 0 0; }
+    /* Folded, the row is not on the page at all - its button is on the switcher row. */
+    .bulk-row.bulk-closed { display: none; }
+
+    /* One list surface, full-bleed, dividers only: the card-in-a-card was two borders
+       and 32px of margin that the names paid for. */
+    .worker-list { margin: 6px -12px 0; border-radius: 0; border-inline: none; }
+    .wrow-main { padding: 6px 12px; min-height: 68px; gap: 8px; font-size: 16.5px; }
+    .wrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wrow .btn-icon { align-self: center; }
+}
+
+/* The narrowest phone - AFTER the compact block above, whose same-specificity rules would
+   otherwise win by being later in the file. The folded warning's line is 13px there and may take three lines
+   (60px grows to 64, the band's ceiling) rather than lose a word; and when "היום" joins the
+   undo pair the words come off the arrows so the count keeps its digits - only then, and
+   only there. */
+@media (max-width: 360px) {
+    /* 14px stays - it is the floor - so the line is tighter instead: three lines at 1.2
+       are 50px, and with the row's 12px of padding the fold is 62, inside the band. */
+    .banner-summary { line-height: 1.2; }
+    .banner-sum { padding: 0 2px 0 4px; gap: 5px; }
+    .banner-go { padding: 0 6px; }
+    .banner-fold { padding-inline: 4px 6px; margin-bottom: 4px; }
+    /* Two pixels of margin between three whole names and two is not a margin. On the
+       narrowest phone the rows sit at 66px (inside 64-72) and the three seams above the
+       list at 4px, and the third name clears the dock by a finger's worth rather than
+       by rounding. */
+    .day-mode-row { margin-top: 4px; }
+    .worker-list { margin-top: 4px; }
+    .wrow-main { min-height: 66px; }
+    .day-steps:has(.btn-today) .step-word { display: none; }
+    .day-steps:has(.btn-today) .step-btn { padding: 8px 0; justify-content: center; }
 }
 
 /* With one client's site chosen (body.client-scoped, set by renderReports), the printed
@@ -2990,7 +3190,8 @@ body.reorder-dragging .reorder-list::after {
         flex-wrap: wrap;
         align-items: center;
         column-gap: 4px;
-        padding: 3px 8px;
+        /* 7 below: the track lives in the bottom 4px, and the tools must clear it. */
+        padding: 3px 8px 7px;
     }
     /* flex-basis 0: the nav asks for nothing, so the tools are never wrapped onto a
        second line - the day name is what shrinks, by ellipsis, never the buttons. */
@@ -3013,18 +3214,13 @@ body.reorder-dragging .reorder-list::after {
     .day-label strong { display: inline; font-size: 17px; flex: 0 1 auto; min-width: 0; }
     .day-date { flex: 0 0 auto; white-space: nowrap; }
 
-    /* The progress row slims to the bare track. */
-    .day-header .progress {
-        flex-basis: 100%;
-        margin: 3px -8px -3px;
-        padding: 0 12px 5px;
-        gap: 0;
-    }
-    /* The track's 4 real pixels. The base rule says flex: 1, whose 0% basis is what a
-       column container actually sizes by - the height: 4px beside it never wins, and a
-       track the line's text used to sit over is a track nobody missed. Here the text is
-       gone and the track IS the progress, so it gets its height back as a basis. */
-    .day-header .progress .progress-bar { flex: 0 0 4px; }
+    /* The progress slims to the bare track, which already IS the header's bottom edge
+       (absolute - see .day-header .progress-bar above); the count's line goes below. */
+    .day-header .progress { flex: 0 0 auto; margin: 0; padding: 0; }
+    /* The count is a button on a portrait header. Clipped to the live region's 1px it
+       would still be a 6px-wide target the mobile suite rightly refuses; with no box of
+       its own it is text the region reads and nothing a finger is asked to hit. */
+    .day-header .progress-line .now-count { display: contents; }
     /* Its text goes the way of .now-editing above: off the eyes, kept for the live
        region - the climbing count is still worth hearing. */
     .day-header .progress .progress-line {
