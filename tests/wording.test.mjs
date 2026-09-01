@@ -279,13 +279,29 @@ const noteOf = ({ head, row }) => String(row[head.length - 1] || '');
     // A version number in a sentence a person reads is a promise about what they are
     // looking at, and v80 has not been the build for a long time. This is a check on the
     // shipped bytes rather than on a render, because the string must not exist at all.
-    const settings = readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8');
-    check('js/ui/settings.js does not mention v80',
-        settings.indexOf('v80') === -1,
-        JSON.stringify((settings.match(/.{0,40}v80.{0,40}/g) || []).slice(0, 3)));
-    check('nor calls anything a פנקס',
-        settings.indexOf('פנקס') === -1,
-        JSON.stringify((settings.match(/.{0,40}פנקס.{0,40}/g) || []).slice(0, 3)));
+    // EVERY shipped file, not the one that happened to be found first. Checking
+    // js/ui/settings.js alone let 'היסטוריה מלאה (פנקס v80)' stand in the worker's own
+    // history fold and a hint in the pay detail promising a change the build had already
+    // made - both of them sentences a person reads.
+    //
+    // Only STRINGS: a comment may name the build a thing arrived in, and several do,
+    // because that is how the file explains itself to whoever reads it next.
+    const shipped = ['js/ui/settings.js', 'js/ui/reports.js', 'js/ui/roster.js',
+        'js/ui/share.js', 'js/ui/day.js', 'js/ui/week.js', 'js/model/ledger.js',
+        'js/model/schema.js', 'js/state.js'];
+    const spoken = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8')
+        .split('\n')
+        .filter(line => line.trim().indexOf('//') !== 0)
+        .join('\n');
+    shipped.forEach(file => {
+        const text = spoken(file);
+        check(`${file} says no version number to a person`,
+            text.indexOf('v80') === -1,
+            JSON.stringify((text.match(/.{0,40}v80.{0,40}/g) || []).slice(0, 2)));
+        check(`${file} calls nothing a פנקס`,
+            text.indexOf('פנקס') === -1,
+            JSON.stringify((text.match(/.{0,40}פנקס.{0,40}/g) || []).slice(0, 2)));
+    });
 }
 
 report();

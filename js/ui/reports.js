@@ -699,11 +699,11 @@ function openWorkerDays(workerId) {
         advances.forEach(item => body.appendChild(renderAdvanceRow(item)));
         if (advances.length > 0) {
             body.appendChild(renderNetRow(days, worker, advances));
-            // Where this block is headed. The ledger model is written and gated off;
-            // when it opens, nothing about these numbers changes - only their record.
-            body.appendChild(el('p', 'hint wday-bridge',
-                'במודל v80 השורה "מקדמות" בפירוט השכר הופכת לתנועת "נוכה מהשכר" ' +
-                'בסגירת תקופה — אותם סכומים, היסטוריה מלאה.'));
+            // The sentence that used to sit here described what WOULD happen when the
+            // ledger opened: that the מקדמות row "becomes" a נוכה מהשכר movement. On this
+            // build it has happened - the column is headed נוכה מהשכר and the row reports
+            // the deduction - so the hint was telling a person to expect a change they
+            // were already looking at, and naming a build number to do it.
         }
     }
 
@@ -1075,20 +1075,20 @@ function openReversalForm(item, settled, row) {
         return input;
     };
 
-    // THE AMOUNT IS NOT A QUESTION, so it is not a field.
+    // AN AMOUNT IS A QUESTION HERE, and it stays a field.
     //
-    // This was an editable input pre-filled with the room, and the error under it read
-    // "אפשר לתקן עד X ₪" - correct up TO. Both of them invited a number smaller than the
-    // transaction, and the model now refuses every one of those: a correction is the
-    // whole transaction or it is nothing, because a partial strands the remainder where
-    // nothing can reach it. Offering a box somebody can type 100 into and then refusing
-    // 100 is a worse screen than not offering the box.
-    //
-    // It is still SHOWN - the person has to see what they are undoing - as text.
-    const amountLine = el('div', 'advance-form-amount',
-        `${moneyText(room)} ₪ · התיקון מבטל את התנועה במלואה`);
-    form.appendChild(el('label', 'field-label', 'סכום לתיקון'));
-    form.appendChild(amountLine);
+    // This form says "this advance was never handed over", and money can be handed over
+    // in part: reversalProblems has always accepted a partial against an advance and the
+    // fold reads it that way. The all-or-nothing rule added in C5 belongs to a correction
+    // that names a TRANSACTION - openEventReversalForm - where a partial would strand the
+    // remainder where nothing can reach it. The two forms are not the same question and
+    // must not be given the same answer.
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.setAttribute('inputmode', 'decimal');
+    amountInput.dir = 'ltr';
+    amountInput.value = String(room);
+    field('סכום לתיקון', amountInput);
 
     // Dated on the advance's own day, not today: this entry says the advance was never
     // handed over, so it belongs in the account the advance is in. Dating it today would
@@ -1107,13 +1107,19 @@ function openReversalForm(item, settled, row) {
     form.appendChild(error);
 
     const save = () => {
-        // Re-read, not remembered: the other phone may have corrected this transaction
-        // while the form was open, and `room` is then 0 and this button must not write.
-        const amount = eventReversalRoom(State.schedule, entry.id);
+        // THIS FORM CORRECTS AN ADVANCE - "this was never handed over" - and a partial is
+        // legitimate here, because money can be handed over in part. The all-or-nothing
+        // rule belongs to a correction that names a TRANSACTION: see
+        // openEventReversalForm and tests/correction.test.mjs. So the amount is a field,
+        // and it is read back out of the field.
+        const typed = amountInput.value.trim()
+            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+        const amount = Number(typed);
         const reason = reasonInput.value.trim();
-        if (!(amount > 0)) {
-            error.textContent = 'התנועה הזו כבר תוקנה. תיקון נוסף יזיז את הכסף פעמיים.';
-            reasonInput.focus();
+        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0) {
+            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
+            amountInput.focus();
             return;
         }
         if (reason === '') {
@@ -1457,7 +1463,10 @@ function renderWorkerLedger(workerId) {
     });
 
     const fold = el('details', 'wday-ledger');
-    fold.appendChild(el('summary', null, 'היסטוריה מלאה (פנקס v80)'));
+    // No version number in a sentence somebody reads. It named the build the ledger
+    // arrived in, which stopped being this build several releases ago, and a person
+    // opening their own history has no use for it.
+    fold.appendChild(el('summary', null, 'היסטוריה מלאה'));
     entries.forEach(entry => fold.appendChild(renderLedgerEntry(entry)));
     return fold;
 }
