@@ -260,4 +260,98 @@ for (const [what, poison, build] of cases) {
         String(storage['scheduleData:v2']).indexOf(MARKER) !== -1);
 }
 
+// ----------------------------------------------- and the second time it arrives
+{
+    suite('after an acknowledgement, the same poison arriving again reparents nothing');
+
+    // The first sighting is held and reported - the case table above proves it. Then
+    // the person exports, acknowledges, and the same cloud document arrives again,
+    // because nobody has repaired the cloud. Recovery.damaged is keyed, so nothing is
+    // said the second time, and this time the document is ADOPTED - which is fine for
+    // every readable part of it and was not fine for the poisoned layer: normaliseLayer
+    // copied it with a bare `out[workerId] = kept`, and for `__proto__` that is not a
+    // copy, it is a reparenting. The in-memory layer's prototype became the poisoned
+    // record: `layer.entries` answered that worker's entries, a for-in over the layer
+    // walked into them, and the record was persisted with the row missing.
+    const device = phone('d_again');
+    const document = arriving(device, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+    });
+    device.Sync.receive(document);
+    await settle(40);
+    given('the first sighting holds the device', device.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        device.global('Recovery').acknowledge() === true);
+
+    const again = JSON.parse(JSON.stringify(document));
+    again.updatedAt = '2026-08-26T11:00:00.000Z';
+    device.Sync.receive(again);
+    await settle(40);
+
+    const day = (device.State.schedule.days || {})['2026-08-12'];
+    given('the readable part of the document was adopted this time',
+        Boolean(day && day.actual && day.actual.w_01), JSON.stringify(day));
+    const actual = day.actual;
+    // Against a plain object from the same realm: the harness runs the app in its own
+    // V8 context, whose Object.prototype is not this file's.
+    check('the adopted layer is an ordinary map, not a child of the poisoned record',
+        Object.getPrototypeOf(actual) === Object.getPrototypeOf(day.plan),
+        String(Object.getPrototypeOf(actual) === Object.getPrototypeOf(day.plan)));
+    check('so it answers nothing for entries or rates of its own',
+        actual.entries === undefined && actual.rates === undefined,
+        JSON.stringify([actual.entries, actual.rates]));
+    check('and no ordinary map answers to the poisoned name',
+        Object.prototype.hasOwnProperty.call(actual, '__proto__') === false,
+        JSON.stringify(Object.keys(actual)));
+    check('the record on the disk is an ordinary record',
+        JSON.parse(device.raw('scheduleData:v2')).days['2026-08-12'].actual.entries
+            === undefined);
+}
+
+{
+    suite('and different bytes under the poisoned name are new evidence, told again');
+
+    // The sharper case. The name is the same, the bytes are not: whoever or whatever
+    // is writing the poisoned row has written something else under it. Recovery.damaged
+    // answered from the first sighting's entry, so the new bytes were never quarantined,
+    // never reported, never in the rescue file - dropped after one acknowledgement,
+    // which is iron law 9 inverted for everything that arrives after the first time.
+    const device = phone('d_again2');
+    const document = arriving(device, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+    });
+    device.Sync.receive(document);
+    await settle(40);
+    given('the first sighting holds the device', device.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        device.global('Recovery').acknowledge() === true);
+
+    const SECOND = 'p_POISONED_EVIDENCE_V2';
+    const changed = JSON.parse(JSON.stringify(document).split(MARKER).join(SECOND));
+    changed.updatedAt = '2026-08-26T12:00:00.000Z';
+    given('the second document carries different bytes under the same name',
+        JSON.stringify(changed).indexOf(SECOND) !== -1
+        && JSON.stringify(changed).indexOf('"__proto__"') !== -1);
+    device.Sync.receive(changed);
+    await settle(40);
+
+    const held = JSON.stringify(device.dump())
+        + JSON.stringify(device.global('Recovery').problems)
+        + JSON.stringify(device.global('Recovery').rawRecords());
+    check('the new bytes are recoverable', held.indexOf(SECOND) !== -1,
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('poison') !== -1)));
+    check('and the first bytes still are', held.indexOf(MARKER) !== -1);
+    check('the person is told again', device.call('farkadWritesBlocked') === true);
+    check('and never hears synced over it', device.Sync.status !== 'synced',
+        device.Sync.status);
+    check('the second sighting has a copy of its own, beside the first',
+        Object.keys(device.dump()).filter(key =>
+            key.indexOf('scheduleData:v2:poison:days.2026-08-12.actual') === 0).length === 2,
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('poison') !== -1)));
+    check('and acknowledging the second releases the device again',
+        device.global('Recovery').acknowledge() === true);
+}
+
 report();
