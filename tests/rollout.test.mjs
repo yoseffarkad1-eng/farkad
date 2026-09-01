@@ -74,6 +74,14 @@ const readDoc = async () => {
 
 // The bootstrap, written the way the client writes it: the whole document it already
 // holds, plus the ordering fields, plus the receipt, in one transaction.
+//
+// A WHOLE-DOCUMENT SHAPE, and the rules judge the RESULT rather than the shape - the
+// bootstrap clause asks diff().affectedKeys(), so writing every unchanged byte back is
+// accepted and writing one changed byte is not. That distinction is what this helper
+// cannot show, because it copies the document forward from the snapshot it just read: it
+// proves the rollout is executable and it proves nothing about what a bootstrap may
+// contain. tests/bootstrap.rules.test.mjs is the suite that asks that, from the outside,
+// with nineteen mutations a bootstrap must not be allowed to carry.
 function bootstrap(db, opId, extra = {}) {
     const ref = doc(db, ...PATH);
     return runTransaction(db, transaction =>
@@ -136,7 +144,7 @@ function bootstrap(db, opId, extra = {}) {
     await seedLegacy();
     const db = as(ALLOWED);
     await assertFails(updateDoc(doc(db, ...PATH), {
-        protocol: 1, revision: 1, lastOpId: 'op_naked',
+        protocol: 1, revision: 1, lastOpId: 'op_naked', opFingerprint: 'f_op_naked',
         updatedAt: new Date().toISOString(), updatedBy: 'd_new'
     }));
     const after = await readDoc();
@@ -174,10 +182,11 @@ function bootstrap(db, opId, extra = {}) {
                 new FieldPath('protocol'), 1,
                 new FieldPath('revision'), held.revision + 1,
                 new FieldPath('lastOpId'), 'op_race_after',
+                new FieldPath('opFingerprint'), 'f_op_race_after',
                 new FieldPath('updatedAt'), new Date().toISOString(),
                 new FieldPath('updatedBy'), 'd_two');
             transaction.set(doc(two, ...PATH, 'receipts', 'op_race_after'),
-                { revision: held.revision + 1, at: new Date().toISOString(), by: 'd_two' });
+                { opFingerprint: 'f_op_race_after', revision: held.revision + 1, at: new Date().toISOString(), by: 'd_two' });
         });
     }));
     const settled = await readDoc();
@@ -201,10 +210,11 @@ function bootstrap(db, opId, extra = {}) {
                 new FieldPath('protocol'), 1,
                 new FieldPath('revision'), 1,
                 new FieldPath('lastOpId'), 'op_again',
+                new FieldPath('opFingerprint'), 'f_op_again',
                 new FieldPath('updatedAt'), new Date().toISOString(),
                 new FieldPath('updatedBy'), 'd_bad');
             transaction.set(doc(db, ...PATH, 'receipts', 'op_again'),
-                { revision: 1, at: new Date().toISOString(), by: 'd_bad' });
+                { opFingerprint: 'f_op_again', revision: 1, at: new Date().toISOString(), by: 'd_bad' });
         });
     }));
     const after = await readDoc();
@@ -255,11 +265,11 @@ function bootstrap(db, opId, extra = {}) {
         const ref = doc(db, ...PATH);
         return transaction.get(ref).then(() => {
             transaction.set(ref, Object.assign({}, LEGACY, {
-                protocol: 1, revision: 1, lastOpId: 'op_create',
+                protocol: 1, revision: 1, lastOpId: 'op_create', opFingerprint: 'f_op_create',
                 updatedAt: new Date().toISOString(), updatedBy: 'd_new'
             }));
             transaction.set(doc(db, ...PATH, 'receipts', 'op_create'),
-                { revision: 1, at: new Date().toISOString(), by: 'd_new' });
+                { opFingerprint: 'f_op_create', revision: 1, at: new Date().toISOString(), by: 'd_new' });
         });
     }));
     const made = await readDoc();
@@ -270,7 +280,7 @@ function bootstrap(db, opId, extra = {}) {
     // And a create over an existing document is still refused, so the bootstrap road is
     // the only way an existing project enters the protocol.
     await assertFails(setDoc(doc(db, ...PATH), Object.assign({}, LEGACY, {
-        protocol: 1, revision: 1, lastOpId: 'op_clobber',
+        protocol: 1, revision: 1, lastOpId: 'op_clobber', opFingerprint: 'f_op_clobber',
         updatedAt: new Date().toISOString(), updatedBy: 'd_bad'
     })));
     const still = await readDoc();

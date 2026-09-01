@@ -114,6 +114,18 @@ So the rules carry a transition, and it is exactly two rules wide (`firestore.ru
 - **`bootstrapRevision()`** — a protocol write may claim `revision == 1` over a document
   that has no revision yet, provided it carries its receipt like any other. That is the
   first updated phone bringing the live document into the protocol.
+- **`bootstrapTouchesOnlyProtocol()`** — and it may touch NOTHING ELSE. The exception
+  exists to bring a legacy document into the protocol, and that is all it is allowed to
+  do, so the rule asks the request itself:
+
+      request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy'])
+
+  Without it, the one write that is exempt from `nextRevision()` was also the one write
+  that could carry a day, an advance, a whole ledger or a roster past every ordering
+  check — at revision 1, with a valid receipt, refused by nothing. It is a rule about
+  the AFFECTED KEYS rather than about the values, because a rule that lists what a
+  payload may not contain is a list somebody has to remember to extend.
 
 The moment a revision lands, `noRevisionYet()` is false: `nextRevision()` governs every
 later write, and a phone that does not speak the protocol is refused. **The first
@@ -161,6 +173,40 @@ a first-ever `create` must be a full protocol write at revision 1 with its recei
   document — roster, days and an advance, no `protocol`, no `revision`, no `lastOpId`,
   no receipt — and walks the five steps above.
 
+## The fingerprint, and what the server can actually enforce
+
+Every protocol write carries a sixth envelope field, `opFingerprint`: a canonical digest
+of the operation's KIND, every semantic path and value in it, and the restore's
+transaction id where there is one. Revision, `lastOpId`, the retry envelope and the two
+stamps are deliberately excluded — a retry legitimately carries a different clock, and
+the fingerprint is the thing the revision has to be independent of.
+
+The difference between what the server guarantees and what the client guarantees matters,
+and is stated here rather than implied:
+
+**Server-enforced** (`firestore.rules`, against the emulator):
+
+- A protocol write must CARRY a fingerprint.
+- The schedule and its receipt must carry the SAME fingerprint, written in one
+  transaction, checked with `getAfter()` — a revision never exists without the
+  operation that explains it.
+- A receipt is immutable: created once, never updated, never deleted. So a name can
+  never be re-pointed at different semantics after the fact.
+
+**Not server-enforced, and it cannot be:** the rules cannot RECOMPUTE the digest. There
+are no loops and no canonical serializer in the rules language, and on an update
+`request.resource.data` is the merged document rather than the patch. A client that
+computes its fingerprint wrongly, or lies about it deliberately, is not caught by the
+server — it is caught, if at all, by the next honest client that compares.
+
+**Client-enforced** (`js/sync/sync.js`, `js/sync/firebase-adapter.js`): the replay path.
+A replay performs no write, so the rules are never consulted for it; the client compares
+the receipt's fingerprint against the operation it is about to repeat, and a mismatch is
+`receipt-mismatch` — never acknowledged, never pruned from the queue, never reported as
+synced.
+
 **Nothing here has been published to the real project.** The rules in this repository are
 the tested artifact, not the live ones; publishing them is a human operation performed
-deliberately, and this file describes what will happen when someone does.
+deliberately, and this file describes what will happen when someone does. No rules were
+published from the session that wrote this paragraph, and none can be: every rules suite
+runs through `firebase emulators:exec` against a local emulator.

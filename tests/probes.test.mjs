@@ -294,18 +294,50 @@ const connected = async (device, cloud) => {
     cloud.hold = null;
     await settle(TICK * 120);
 
-    check('the document keeps the newer value',
-        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02',
+    // MOVED, DELIBERATELY, and the guarantee it was protecting is kept.
+    //
+    // This used to require that B's value ended up in the document: the older request
+    // answering first was overtaken by the newer one on the retry. That overtaking is
+    // exactly the auto-send tests/contested.test.mjs was written to stop - the losing
+    // write returning after the winner's snapshot and putting its own value back - and
+    // there is no way to have it here and not have it between two phones, because the
+    // client cannot tell the two situations apart from inside a refusal.
+    //
+    // What the suite was protecting is that the older request must not SILENTLY win and
+    // the newer value must not be lost. Both still hold, and are asserted below: the
+    // document keeps what actually landed, B keeps its own value on its own disk, it says
+    // out loud that it is contested rather than synced, and one confirmation from the
+    // person settles it. That is a person deciding between two values instead of a timer
+    // deciding, which for a day's work on somebody's pay sheet is the right trade.
+    check('the document keeps what actually landed',
+        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_01',
         JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01));
 
     const third = makeDevice({ deviceId: 'd_third' });
     await connected(third, cloud);
     await settle(TICK * 40);
-    check('and a third phone agrees',
+    check('and a third phone agrees with the document',
         third.call('entriesFor', third.State.schedule, '2026-08-10', 'w_01',
-            'actual')[0].placeId === 'p_02',
+            'actual')[0].placeId === 'p_01',
         JSON.stringify(third.call('entriesFor', third.State.schedule, '2026-08-10',
             'w_01', 'actual')));
+
+    // NOTHING IS LOST, which is the half that matters most.
+    check('the newer value is still on the tab that made it',
+        b.call('entriesFor', b.State.schedule, '2026-08-10', 'w_01',
+            'actual')[0].placeId === 'p_02',
+        JSON.stringify(b.call('entriesFor', b.State.schedule, '2026-08-10', 'w_01',
+            'actual')));
+    check('it is still owed, and the tab says so rather than saying synced',
+        b.Sync.pendingCount() > 0 && b.Sync.status !== 'synced',
+        `${b.Sync.pendingCount()} pending, ${b.Sync.status}`);
+
+    // And the way out is one deliberate act, not a timer.
+    put(b, PATH, 'p_02');
+    await settle(TICK * 120);
+    check('a fresh confirmation from the person lands it',
+        cloud.doc.days['2026-08-10'].actual.w_01.entries[0].placeId === 'p_02',
+        JSON.stringify(cloud.doc.days['2026-08-10'].actual.w_01));
 }
 
 // ================================================================ Q4

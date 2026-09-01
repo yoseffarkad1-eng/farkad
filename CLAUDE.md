@@ -84,29 +84,26 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the thirty node suites; no browser, runs in a few minutes
+    npm test                # the thirty-five node suites; no browser, runs in a few minutes
     npm run test:all        # adds smoke, print, mobile, update, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
-    npm run test:emulator   # rules, the production adapter's CAS, the rollout, the
-                            #   cutover and two phones writing money at once (needs Java)
+    npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
+                            #   CAS, the rollout, the cutover and two phones writing
+                            #   money at once (needs Java)
 
-Node 20 or 22 (`engines` says `>=20.11 <23`). Measured at this commit, from one clean
-detached worktree and copied from no other: `npm test` is **3537/3537 across 31 suites**,
-and `npm run test:release` — which adds the eight browser suites, `sendclaim` and the
-five emulator suites — is **5512/5512 across 45 suites**, and is the gate a build has to
-pass whole.
+Node 20 or 22 (`engines` says `>=20.11 <23`). The counts here are RE-MEASURED on this
+branch and are not the core branch's: this build runs the same suites with both money
+gates open, so several of them assert more.
 
 **THIS BRANCH IS NOT MAIN.** `claude/farkad-ledger-enable-ready` is the build with
 `LEDGER_WRITES` and `carryAdvances` both OPEN, so that what somebody eventually ships can
 be run end to end before anybody commits to it. Merging it is the decision iron law 1
 reserves for a person, and it is only theirs to make once all three phones are known to
 be past v79 AND they have read every row of `planAdvanceCarry`. It carries its own build
-stamp — v90 — because it is not the same bytes as the core branch's v89 and two builds
-sharing a cache name serve a mixture. It was v89 while core was v88; core took v89 when a
-change landed in its own shell, and this branch moved up rather than sideways, because it
-is built from that line and supersedes it. The counts above are re-measured on THIS branch; the core branch runs
-the same suites with the gates shut and comes out lower.
+stamp, because it is not the same bytes as the core branch's and two builds sharing a
+cache name serve a mixture. It has always moved UP rather than sideways when the core
+branch took a number, because it is built from that line and supersedes it.
 
 Anything less than every check passing is a stop, not a warning. `npm test`
 and `npm run test:release` are different gates and are reported separately; neither is
@@ -192,6 +189,11 @@ written down so it cannot happen twice.
     tests/rollout.test.mjs     publishing the rules over a genuine legacy document, and the cutover
     tests/ledger.ingress.test.mjs malformed ledger data through every door: held aside, never coerced
     tests/money.concurrency.test.mjs two phones writing MONEY at once, through the production adapter
+    tests/poison.test.mjs      a ledger id that would land on a prototype, through every writer
+    tests/merge.test.mjs       what adopting somebody else's document takes off this one
+    tests/contested.test.mjs   the write that lost a race, and every trigger that must not send it
+    tests/receipt.test.mjs     a receipt names the operation, not just the revision it reached
+    tests/bootstrap.rules.test.mjs the server's own answer to a bootstrap carrying business data
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe

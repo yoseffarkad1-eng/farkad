@@ -737,11 +737,29 @@ function normaliseSchedule(raw, hints) {
         // ledgerEntryProblems is the same check the queue applies to an edit on its way
         // out. Applying it here means an entry that could never have been written by this
         // build cannot be READ by it either, whatever door it arrived through.
-        const readable = entry && typeof entry === 'object'
-            && ledgerEntryProblems(String(id), Object.assign({}, entry, { id: String(id) }))
-                .length === 0;
+        // THE ENTRY AS IT ARRIVED, and the key it arrived under, asked separately.
+        //
+        // This used to validate `Object.assign({}, entry, { id: String(id) })` - the id
+        // forced to agree with the key BEFORE the check that they agree - so an entry
+        // stored under le_a claiming to be le_b was silently rewritten to le_a, folded as
+        // money, and the evidence of the mismatch destroyed. An immutable identity is the
+        // one field in this record nothing may invent: two phones that disagree about
+        // which entry this is have to be told, not averaged.
+        //
+        // And the KEY is checked at all, which it never was. A key this build cannot
+        // safely store - see isSafeId - would not have been stored: it would have
+        // re-parented the map and taken the entry out of every reader at once.
+        const readable = isSafeId(String(id))
+            && entry && typeof entry === 'object'
+            && ledgerEntryProblems(String(id), entry).length === 0;
         if (!readable) {
-            schedule.ledger.unreadable[id] = entry;
+            // Under a key the read can see. An unsafe id cannot be used as the key of the
+            // held-aside map either - it would vanish there for exactly the same reason -
+            // so it is defined as an own property instead, which stores the bytes without
+            // going through the prototype setter.
+            Object.defineProperty(schedule.ledger.unreadable, id, {
+                value: entry, writable: true, enumerable: true, configurable: true
+            });
             return;
         }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
@@ -833,6 +851,30 @@ function normaliseSchedule(raw, hints) {
         if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
     });
 
+    // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns two of
+    // them and the record is not two of them.
+    //
+    // The object being built here IS State.schedule and save() serialises exactly that,
+    // so a part of `ledger` this build does not name was read off the disk, left out, and
+    // written over by the next ordinary save. That is the same deletion-by-reading the
+    // block above this one exists to have stopped, one level up: it was fixed for an
+    // ENTRY and left in place for the container's own fields.
+    //
+    // It is not hypothetical. The next build adds `ledger.migrations` - a person's
+    // approval of a financial migration, which decides whether their phones may write
+    // money at all - and three phones do not update together. A phone on this build,
+    // sharing the record, would have deleted that approval on every save: silently, with
+    // the load reporting clean, nothing quarantined, and the parity check blessing it.
+    //
+    // Carried, not quarantined and not a reason to stop. "This build has no opinion about
+    // it" is not "it cannot be read": a device that went into recovery over a field a
+    // later build added is a device nobody can record a day on, and that is the failure
+    // this app trades everything else to avoid.
+    Object.keys(ledger).forEach(key => {
+        if (key === 'advances' || key === 'unreadable') return;
+        if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
+    });
+
     // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.
     //
     // A schedule reaches this function from boot, from a cloud snapshot, from a restore,
@@ -846,6 +888,19 @@ function normaliseSchedule(raw, hints) {
     // bytes are still there, the fold cannot see them, and the device will not record a
     // new day on top of financial history it cannot read. Recovery.damaged is keyed, so
     // arriving here twice with the same trouble says it once.
+    // AND A DISPUTED ID, re-reported on every read for the same reason the unreadable
+    // entries are: Recovery's hold lives for one session and is re-derived from what the
+    // record says, so a device that boots onto two bodies under one id has to be told
+    // again rather than carrying on because the last session already said it.
+    if (typeof Recovery !== 'undefined'
+        && isPlainObject(schedule.ledger.conflicted)
+        && Object.keys(schedule.ledger.conflicted).length > 0) {
+        Recovery.damaged('scheduleData:v2:ledger:conflict',
+            JSON.stringify(schedule.ledger.conflicted),
+            'יש רשומת מקדמה עם אותו מזהה ותוכן אחר. שתי הגרסאות נשמרו כמו שהן ולא נמחק '
+            + 'דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי ותבדוק איזו מהן נכונה.');
+    }
+
     if (typeof Recovery !== 'undefined'
         && (Object.keys(schedule.ledger.unreadable).length > 0
             || Object.keys(schedule.ledger.unreadableMigrations).length > 0)) {

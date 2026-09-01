@@ -548,6 +548,13 @@ function appendLedgerEntry(schedule, entry) {
     // advance have to mint the SAME key, or the union keeps both and the fold's winner
     // is decided by whichever random id sorts later.
     const id = entry.id ? String(entry.id) : ledgerEntryId();
+    // BEFORE ANYTHING IS TOUCHED. A caller-supplied id reaches this function from the
+    // migration, from a rescue import and from any build that ever writes an entry, and
+    // the line below it writes straight into the live schedule. An id this app cannot
+    // safely use as a map key is refused here rather than stored and discovered later:
+    // `null` back means no change, no memory mutation, no disk write and no queued
+    // operation, which is what State.commit reads as a refusal.
+    if (!isSafeId(id)) return null;
     // Undefined fields are dropped, never stored. `method: undefined` survives
     // Object.assign as an own property, and an entry that carries the KEY without a
     // value reads as an entry that was asked how the money moved and answered
@@ -1156,14 +1163,84 @@ function migrateAdvancesToLedger(schedule, deviceId) {
 // every correction ever made here. The two are unioned by id instead. Nothing here can
 // remove an entry, and an id that exists on both sides keeps the copy that is already on
 // this device - an entry is written once and never edited, so the two are the same entry.
-function mergeLedgerInto(target, source) {
+// The four maps this build knows are append-only. Every one of them is a record of
+// something that happened, and nothing in this app removes an entry from any of them.
+const LEDGER_FAMILIES = ['advances', 'migrations', 'unreadable', 'unreadableMigrations'];
+
+// hasOwnProperty.call, never a bare lookup. `map[id]` answers truthy for an id of
+// `toString` on an empty map, and toString is a legal id - so the bare form silently
+// dropped entries that were named after something on the prototype chain.
+function ownsKey(object, key) {
+    return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+// Two bodies compared as bodies, not as objects. Local, because js/sync/sync.js loads
+// after this file and borrowing canonicalJson across that seam works right up until
+// somebody reorders index.html.
+function sameLedgerBytes(one, two) {
+    const stable = value => {
+        if (value === null || typeof value !== 'object') return JSON.stringify(value);
+        if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+        return '{' + Object.keys(value).sort()
+            .map(key => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';
+    };
+    return stable(one) === stable(two);
+}
+
+// `conflicts`, when given, collects every id whose two sides disagree. The caller reports
+// them and holds; this function never resolves one, because there is no honest rule that
+// could.
+function mergeLedgerInto(target, source, conflicts) {
     if (!target || !source) return target;
-    const held = (source.ledger && source.ledger.advances) || {};
+    const mine = (source && source.ledger) || {};
+    if (!mine || typeof mine !== 'object' || Array.isArray(mine)) return target;
 
     target.ledger = target.ledger || { advances: {} };
-    target.ledger.advances = target.ledger.advances || {};
-    Object.keys(held).forEach(id => {
-        if (!target.ledger.advances[id]) target.ledger.advances[id] = held[id];
+
+    // EVERY PART OF THE CONTAINER, not the one map this used to copy.
+    //
+    // `target` is the ARRIVING document and `source` is this phone - the comment here
+    // used to say the opposite, which is how the direction went unnoticed. So everything
+    // this phone held and the snapshot did not was discarded with the object it lived on,
+    // and State.persist() then wrote that over the disk: a person's approval of the money
+    // migration, the entries this build had held aside, the approvals it had held aside,
+    // and any part of the container a later build adds. All four erased by a phone that
+    // had simply never heard of them, with the status reporting synced.
+    Object.keys(mine).forEach(key => {
+        const held = mine[key];
+        const isFamily = LEDGER_FAMILIES.indexOf(key) !== -1
+            && held && typeof held === 'object' && !Array.isArray(held);
+        if (isFamily) {
+            if (!target.ledger[key] || typeof target.ledger[key] !== 'object'
+                || Array.isArray(target.ledger[key])) {
+                target.ledger[key] = {};
+            }
+            Object.keys(held).forEach(id => {
+                if (!ownsKey(target.ledger[key], id)) {
+                    target.ledger[key][id] = held[id];
+                    return;
+                }
+                if (sameLedgerBytes(target.ledger[key][id], held[id])) return;
+                // ONE ID, TWO BODIES. An entry is written once and never edited, so this
+                // is not a merge - it is a disagreement about what happened to somebody's
+                // money, and picking the copy that happened to arrive is picking at
+                // random. Both are kept and a person is asked.
+                if (conflicts) {
+                    conflicts.push({ family: key, id: String(id),
+                        mine: held[id], theirs: target.ledger[key][id] });
+                }
+            });
+            return;
+        }
+        // A part of the container this build has no opinion about. Carried when the
+        // snapshot lacks it; never overwritten when it has it; and a difference is the
+        // same disagreement as above rather than a silent choice.
+        if (!ownsKey(target.ledger, key)) { target.ledger[key] = held; return; }
+        if (sameLedgerBytes(target.ledger[key], held)) return;
+        if (conflicts) {
+            conflicts.push({ family: null, id: String(key),
+                mine: held, theirs: target.ledger[key] });
+        }
     });
     return target;
 }

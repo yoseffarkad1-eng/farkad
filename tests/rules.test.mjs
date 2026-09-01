@@ -70,8 +70,16 @@ async function denied(name, promise) {
 let opSeq = 0;
 const nextOp = () => `op_${opSeq += 1}`;
 
+// The fingerprint the protocol gained: what the operation DID, carried on the schedule and
+// on its receipt so a name can never be re-pointed at different semantics. These suites are
+// about the RULES rather than about how the client computes it, so a stable stand-in keyed
+// on the operation id is the honest fixture - what the rules check is that the two halves
+// agree, not what the string means.
+const printOf = opId => `f_${opId}`;
+
 const envelope = (data, revision, opId) =>
-    Object.assign({}, data, { protocol: 1, revision, lastOpId: opId });
+    Object.assign({}, data,
+        { protocol: 1, revision, lastOpId: opId, opFingerprint: printOf(opId) });
 
 // A first write and its receipt, in one commit.
 function createProtocol(db, path, data) {
@@ -79,7 +87,7 @@ function createProtocol(db, path, data) {
     return runTransaction(db, async transaction => {
         transaction.set(doc(db, path), envelope(data || schedule(), 1, opId));
         transaction.set(doc(db, `${path}/receipts/${opId}`),
-            { revision: 1, at: new Date().toISOString(), by: 'd_test' });
+            { opFingerprint: printOf(opId), revision: 1, at: new Date().toISOString(), by: 'd_test' });
     });
 }
 
@@ -93,7 +101,7 @@ async function editProtocol(db, path, patch) {
     return runTransaction(db, async transaction => {
         transaction.update(doc(db, path), envelope(patch, revision, opId));
         transaction.set(doc(db, `${path}/receipts/${opId}`),
-            { revision, at: new Date().toISOString(), by: 'd_test' });
+            { opFingerprint: printOf(opId), revision, at: new Date().toISOString(), by: 'd_test' });
     });
 }
 
@@ -105,7 +113,7 @@ async function editProtocolReplace(db, path, data) {
     return runTransaction(db, async transaction => {
         transaction.set(doc(db, path), envelope(data, revision, opId));
         transaction.set(doc(db, `${path}/receipts/${opId}`),
-            { revision, at: new Date().toISOString(), by: 'd_test' });
+            { opFingerprint: printOf(opId), revision, at: new Date().toISOString(), by: 'd_test' });
     });
 }
 
@@ -205,7 +213,7 @@ async function editProtocolReplace(db, path, data) {
             transaction.set(doc(db, PATH), envelope(
                 schedule({ updatedBy: db === one ? 'd_one' : 'd_two' }), 1, opId));
             transaction.set(doc(db, `${PATH}/receipts/${opId}`),
-                { revision: 1, at: new Date().toISOString(), by: 'd_test' });
+            { opFingerprint: printOf(opId), revision: 1, at: new Date().toISOString(), by: 'd_test' });
         });
     };
 
@@ -345,9 +353,10 @@ async function editProtocolReplace(db, path, data) {
                 new FieldPath('updatedAt'), '2026-08-12T10:00:00.000Z',
                 new FieldPath('protocol'), 1,
                 new FieldPath('revision'), revision,
-                new FieldPath('lastOpId'), tombstoneOp);
+                new FieldPath('lastOpId'), tombstoneOp,
+                new FieldPath('opFingerprint'), printOf(tombstoneOp));
             transaction.set(doc(db, `${PATH}/receipts/${tombstoneOp}`),
-                { revision, at: new Date().toISOString(), by: 'd_test' });
+                { opFingerprint: printOf(tombstoneOp), revision, at: new Date().toISOString(), by: 'd_test' });
         }));
 
     const after = await getDoc(doc(db, PATH));
@@ -403,7 +412,7 @@ async function editProtocolReplace(db, path, data) {
     await denied('and one without a revision is refused too',
         setDoc(doc(db, P), schedule({ protocol: 1 })));
     await denied('a first write whose revision is not one is refused',
-        setDoc(doc(db, P), schedule({ protocol: 1, revision: 7, lastOpId: 'op_a' })));
+        setDoc(doc(db, P), schedule({ protocol: 1, revision: 7, lastOpId: 'op_a', opFingerprint: printOf('op_a') })));
 
     // A v86 phone writes neither field. It is refused, visibly, which is the requirement:
     // a legacy writer cannot bypass the protocol unnoticed.
@@ -423,8 +432,8 @@ async function editProtocolReplace(db, path, data) {
         (async () => {
             const batch = [];
             await runTransaction(db, async transaction => {
-                transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_1' }));
-                transaction.set(receipt(0, 'op_1'), { revision: 1, at: 'x', by: 'd_a' });
+                transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_1', opFingerprint: printOf('op_1') }));
+                transaction.set(receipt(0, 'op_1'), { opFingerprint: printOf('op_1'), revision: 1, at: 'x', by: 'd_a' });
             });
             return batch;
         })());
@@ -432,6 +441,7 @@ async function editProtocolReplace(db, path, data) {
     await denied('a write with no receipt beside it is refused',
         updateDoc(doc(db, P), {
             protocol: 1, revision: 2, lastOpId: 'op_2',
+            opFingerprint: printOf('op_2'),
             'days.2026-08-12.actual.w_01': { entries: [] },
             updatedAt: new Date().toISOString()
         }));
@@ -442,7 +452,7 @@ async function editProtocolReplace(db, path, data) {
                 protocol: 1, revision: 9, lastOpId: 'op_9',
                 updatedAt: new Date().toISOString()
             });
-            transaction.set(receipt(1, 'op_9'), { revision: 9, at: 'x', by: 'd_a' });
+            transaction.set(receipt(1, 'op_9'), { opFingerprint: printOf('op_9'), revision: 9, at: 'x', by: 'd_a' });
         }));
 
     await denied('a write that repeats the revision it read is refused',
@@ -451,17 +461,18 @@ async function editProtocolReplace(db, path, data) {
                 protocol: 1, revision: 1, lastOpId: 'op_1b',
                 updatedAt: new Date().toISOString()
             });
-            transaction.set(receipt(0, 'op_1b'), { revision: 1, at: 'x', by: 'd_a' });
+            transaction.set(receipt(0, 'op_1b'), { opFingerprint: printOf('op_1b'), revision: 1, at: 'x', by: 'd_a' });
         }));
 
     await passes('the next write in order lands',
         runTransaction(db, async transaction => {
             transaction.update(doc(db, P), {
                 protocol: 1, revision: 2, lastOpId: 'op_2',
+                opFingerprint: printOf('op_2'),
                 'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
                 updatedAt: new Date().toISOString()
             });
-            transaction.set(receipt(1, 'op_2'), { revision: 2, at: 'x', by: 'd_a' });
+            transaction.set(receipt(1, 'op_2'), { opFingerprint: printOf('op_2'), revision: 2, at: 'x', by: 'd_a' });
         }));
 
     await denied('a receipt whose revision disagrees with the document is refused',
@@ -470,7 +481,7 @@ async function editProtocolReplace(db, path, data) {
                 protocol: 1, revision: 3, lastOpId: 'op_3',
                 updatedAt: new Date().toISOString()
             });
-            transaction.set(receipt(2, 'op_3'), { revision: 99, at: 'x', by: 'd_a' });
+            transaction.set(receipt(2, 'op_3'), { opFingerprint: printOf('op_3'), revision: 99, at: 'x', by: 'd_a' });
         }));
 }
 
@@ -494,20 +505,20 @@ async function editProtocolReplace(db, path, data) {
     const receipt = opId => doc(db, `${P}/receipts/${opId}`);
 
     await denied('a receipt for a document that does not exist is refused',
-        setDoc(receipt('op_never_applied'), { revision: 999, at: 'x', by: 'd_a' }));
+        setDoc(receipt('op_never_applied'), { opFingerprint: printOf('op_never_applied'), revision: 999, at: 'x', by: 'd_a' }));
 
     // A real document, so the rest of the refusals are about the receipt and not about
     // the document being missing.
     await passes('a first write lands with its receipt',
         runTransaction(db, async transaction => {
-            transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_1' }));
-            transaction.set(receipt('op_1'), { revision: 1, at: 'x', by: 'd_a' });
+            transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_1', opFingerprint: printOf('op_1') }));
+            transaction.set(receipt('op_1'), { opFingerprint: printOf('op_1'), revision: 1, at: 'x', by: 'd_a' });
         }));
 
     await denied('a receipt beside a document that is not moving is refused',
-        setDoc(receipt('op_never_applied'), { revision: 999, at: 'x', by: 'd_a' }));
+        setDoc(receipt('op_never_applied'), { opFingerprint: printOf('op_never_applied'), revision: 999, at: 'x', by: 'd_a' }));
     await denied('and one claiming the revision the document already holds is refused too',
-        setDoc(receipt('op_alone'), { revision: 1, at: 'x', by: 'd_a' }));
+        setDoc(receipt('op_alone'), { opFingerprint: printOf('op_alone'), revision: 1, at: 'x', by: 'd_a' }));
 
     // NAMING SOMEBODY ELSE'S WRITE. The schedule moves, and the receipt created beside it
     // carries a different operation id - so a retry of op_wrong would find a receipt and
@@ -518,7 +529,7 @@ async function editProtocolReplace(db, path, data) {
                 protocol: 1, revision: 2, lastOpId: 'op_right',
                 updatedAt: new Date().toISOString()
             });
-            transaction.set(receipt('op_wrong'), { revision: 2, at: 'x', by: 'd_a' });
+            transaction.set(receipt('op_wrong'), { opFingerprint: printOf('op_wrong'), revision: 2, at: 'x', by: 'd_a' });
         }));
 
     await denied('a receipt whose revision is not the one the document reached is refused',
@@ -527,17 +538,60 @@ async function editProtocolReplace(db, path, data) {
                 protocol: 1, revision: 2, lastOpId: 'op_two',
                 updatedAt: new Date().toISOString()
             });
-            transaction.set(receipt('op_two'), { revision: 7, at: 'x', by: 'd_a' });
+            transaction.set(receipt('op_two'), { opFingerprint: printOf('op_two'), revision: 7, at: 'x', by: 'd_a' });
+        }));
+
+    // ------------------------------------------------- and the pair names the OPERATION
+    //
+    // A revision says a write wearing this name reached this point. It does not say what
+    // that write did, and the client is built to believe a receipt - so a name that could
+    // be paired with different semantics is a name that can swallow somebody's evening.
+    // The rules cannot recompute the fingerprint over nested data; what they CAN do, and
+    // now do, is require it to be there, require both halves to carry the same one, and -
+    // because receipts are immutable and getAfter makes the pair one commit - make that
+    // first pairing binding for ever.
+    await denied('a schedule write with no fingerprint at all is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 2, lastOpId: 'op_nofp',
+                'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt('op_nofp'), { revision: 2, at: 'x', by: 'd_a' });
+        }));
+
+    await denied('a receipt whose fingerprint disagrees with the document is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 2, lastOpId: 'op_fpx',
+                opFingerprint: printOf('op_fpx'),
+                'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt('op_fpx'),
+                { opFingerprint: 'f_something_else', revision: 2, at: 'x', by: 'd_a' });
+        }));
+
+    await denied('and a receipt with a fingerprint for a document without one is refused',
+        runTransaction(db, async transaction => {
+            transaction.update(doc(db, P), {
+                protocol: 1, revision: 2, lastOpId: 'op_half',
+                'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
+                updatedAt: new Date().toISOString()
+            });
+            transaction.set(receipt('op_half'),
+                { opFingerprint: printOf('op_half'), revision: 2, at: 'x', by: 'd_a' });
         }));
 
     await passes('the pair that agrees with itself lands',
         runTransaction(db, async transaction => {
             transaction.update(doc(db, P), {
                 protocol: 1, revision: 2, lastOpId: 'op_two',
+                opFingerprint: printOf('op_two'),
                 'days.2026-08-12.actual.w_01': { entries: [{ placeId: 'p_01' }] },
                 updatedAt: new Date().toISOString()
             });
-            transaction.set(receipt('op_two'), { revision: 2, at: 'x', by: 'd_a' });
+            transaction.set(receipt('op_two'), { opFingerprint: printOf('op_two'), revision: 2, at: 'x', by: 'd_a' });
         }));
 }
 
@@ -549,12 +603,12 @@ async function editProtocolReplace(db, path, data) {
 
     await passes('a receipt is created with its write',
         runTransaction(db, async transaction => {
-            transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_r' }));
-            transaction.set(doc(db, `${P}/receipts/op_r`), { revision: 1, at: 'x', by: 'd_a' });
+            transaction.set(doc(db, P), schedule({ protocol: 1, revision: 1, lastOpId: 'op_r', opFingerprint: printOf('op_r') }));
+            transaction.set(doc(db, `${P}/receipts/op_r`), { opFingerprint: printOf('op_r'), revision: 1, at: 'x', by: 'd_a' });
         }));
 
     await denied('and can never be changed afterwards',
-        updateDoc(doc(db, `${P}/receipts/op_r`), { revision: 2 }));
+        updateDoc(doc(db, `${P}/receipts/op_r`), { opFingerprint: printOf('op_r'), revision: 2 }));
     await denied('nor deleted',
         deleteDoc(doc(db, `${P}/receipts/op_r`)));
     await passes('but it can be read, which is how a retry knows it already succeeded',

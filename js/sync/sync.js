@@ -111,6 +111,22 @@ const ACK_MARK = ':ack:';
 // go of it while the loser is still readable is the whole of the fault.
 const BEAT_MARK = ':beat:';
 
+// AN OPERATION THAT LOST A RACE, written down.
+//
+// A same-field compare-and-set loser used to stay in the queue with a retry scheduled,
+// which made it a live write - and the WINNER'S SNAPSHOT was what set it off: adopting
+// the winner replaces the base this write is compared against, so the path it wanted no
+// longer looks contested, and the next flush puts the old value back over the correction
+// somebody else had just made. Both phones then reported synced.
+//
+// Losing is a decision about that operation, so it is written down the way a retirement
+// is: one small key per held operation, its own write, read back before it is believed. A
+// held operation is not sent by anything - not the timer, not a snapshot, not reconnect,
+// not a direct flush, not a new adapter, not the next session - and it stays on the disk
+// and stays owed. The way out is a person: a fresh explicit edit of the same path is a
+// later operation and wins the path on its own.
+const HOLD_MARK = ':hold:';
+
 // What an acknowledgement record says, exactly. Compared rather than merely found: a
 // disk that takes the write and hands back something else leaves a key that EXISTS and
 // says nothing, and reading its presence alone was enough to make collection throw the
@@ -230,10 +246,15 @@ function queueKeyKind(key) {
     if (beatAt > 0 && slotIndexOf(key.slice(0, beatAt)) !== -1
         && SAFE_ID.test(key.slice(beatAt + BEAT_MARK.length))) return 'beat';
 
+    const holdAt = key.lastIndexOf(HOLD_MARK);
+    if (holdAt > 0 && slotIndexOf(key.slice(0, holdAt)) !== -1
+        && SAFE_ID.test(key.slice(holdAt + HOLD_MARK.length))) return 'hold';
+
     return null;
 }
 
 function outboxBeatKey(slotKey, opId) { return slotKey + BEAT_MARK + opId; }
+function outboxHoldKey(slotKey, opId) { return slotKey + HOLD_MARK + opId; }
 
 // The identity of an item an older build left inside a slot record.
 //
@@ -311,6 +332,7 @@ function decodeQueue(records) {
     const unreadable = [];
     const acknowledged = new Set();
     const retired = new Set();
+    const holds = new Set();
     const batches = [];
 
     Object.keys(records).forEach(key => {
@@ -326,6 +348,7 @@ function decodeQueue(records) {
         }
         if (kind === 'ack' && records[key] === ACK_VALUE) acknowledged.add(key);
         if (kind === 'beat' && records[key] === ACK_VALUE) retired.add(key);
+        if (kind === 'hold' && records[key] === ACK_VALUE) holds.add(key);
     });
 
     batches.sort((one, two) => (slotIndexOf(one.slot) - slotIndexOf(two.slot))
@@ -347,7 +370,8 @@ function decodeQueue(records) {
             after: (op.after || []).slice(),
             slot, batchKey: key, batchId,
             sent: acknowledged.has(outboxAckKey(slot, op.opId)),
-            retired: retired.has(outboxBeatKey(slot, op.opId))
+            retired: retired.has(outboxBeatKey(slot, op.opId)),
+            held: holds.has(outboxHoldKey(slot, op.opId))
         })));
     });
 
@@ -422,12 +446,13 @@ function decodeQueue(records) {
                 // it is not the only answer, and it is not one this build has to rewrite
                 // a shared record to change.
                 sent: item.sent === true || acknowledged.has(outboxAckKey(slot, opId)),
-                retired: retired.has(outboxBeatKey(slot, opId))
+                retired: retired.has(outboxBeatKey(slot, opId)),
+                held: holds.has(outboxHoldKey(slot, opId))
             });
         });
     }
 
-    return { operations, unreadable, acknowledged, retired };
+    return { operations, unreadable, acknowledged, retired, holds };
 }
 
 // A value on its way out of the parse cache. Plain JSON, so this is all it takes - and
@@ -649,6 +674,46 @@ function replacementId() {
 // Key order is not part of what a schedule IS, and two paths that build the same schedule
 // can produce different orders. Comparing raw JSON would report a difference that is not
 // one - and this comparison decides whether a restore is allowed to reach the cloud.
+// One dotted path, read out of one document. Lifted out of contestedPaths so the conflict
+// branch can ask the same question of the same document without a second copy of it.
+function readPath(root, path) {
+    let node = root;
+    const parts = String(path).split('.');
+    for (let at = 0; at < parts.length; at += 1) {
+        if (!node || typeof node !== 'object') return undefined;
+        node = node[parts[at]];
+    }
+    return node;
+}
+
+// The ordering fields, which are about WHEN a write lands rather than what it does. The
+// fingerprint is deliberately independent of every one of them: a retry legitimately
+// carries a different clock, and the revision is the number the fingerprint has to be able
+// to outlive.
+const ENVELOPE_FIELDS = ['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy',
+    'opFingerprint'];
+
+// WHAT THIS OPERATION DOES, in one comparable string.
+//
+// A receipt used to carry a revision and nothing else, so the pair {schedule, receipt}
+// proved that SOME write wearing this name reached this revision - not what that write
+// was. A second arrival carrying the same name and a different path and value was answered
+// "already applied": the queue acknowledged and pruned, the status synced, the phone
+// holding one value and the cloud another, and nothing anywhere recording it.
+//
+// So the name is bound to the semantics. `kind` separates a field merge from a
+// whole-document replacement, which used to share an id; the paths and values are sorted
+// so two devices computing it agree; and a restore adds the transaction it belongs to,
+// because two restores that replace the same document are still two different decisions.
+function operationFingerprint(kind, payload, extra) {
+    const parts = Object.keys(payload || {})
+        .filter(key => ENVELOPE_FIELDS.indexOf(key) === -1)
+        .sort()
+        .map(key => key + '=' + canonicalJson(payload[key]));
+    return 'f' + digestOf([String(kind)].concat(String(extra || ''))
+        .concat(parts).join('|'));
+}
+
 function canonicalJson(value) {
     if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
     if (value && typeof value === 'object') {
@@ -807,10 +872,12 @@ const RETRY_MAX_MS = 60000;
 //
 // The budget is about the WRITE, not about this number. Every write also carries
 // updatedAt, updatedBy, and the three ordering fields - protocol, revision, lastOpId -
-// so the cap on edits is the budget minus those five. It was 300 when there were two,
-// and lowering it to 297 keeps the write exactly the size it always was rather than
-// quietly spending the margin that number was chosen to leave.
-const MAX_PATHS_PER_WRITE = 297;
+// so the cap on edits is the budget minus those six. It was 300 when there were two, 297
+// when there were five, and 296 now that opFingerprint travels with them - each step keeps
+// the write exactly the size it always was rather than quietly spending the margin that
+// number was chosen to leave. A sixth envelope field is one fewer day per write, and that
+// is the honest price of it.
+const MAX_PATHS_PER_WRITE = 296;
 
 // How many times one batch may be rebuilt against a newer revision before the device
 // stops and says so. Three is enough for the ordinary case - two other phones writing the
@@ -1049,6 +1116,12 @@ const FarkadSync = {
     _sending: new Map(),
     _retryAt: 0,
     _retryTimer: null,
+
+    // Paths held for THIS SESSION because the durable marker could not be written. Not a
+    // substitute for the marker - it dies with the tab - but the difference between a
+    // write that waits for the next open and a write that goes out over somebody's
+    // correction in the next two seconds.
+    _heldNow: new Set(),
     // Every write to the shared cloud document, in the order it was started. See
     // cloudWrite: two writes that overlap can land in either order, and one of them is
     // allowed to erase the whole document.
@@ -1719,6 +1792,41 @@ const FarkadSync = {
     //
     // Returns whether the disk holds the pruned queue.
 
+
+    // Is anything on this disk held because it lost a race?
+    //
+    // Asked of the physical set rather than of memory: the hold is a record on the disk,
+    // and a session that has just opened has to know about it before it sends anything.
+    holdingContested() {
+        this.loadOutbox();
+        if (this._heldNow.size > 0) {
+            const live = new Set([...this._outbox.keys()]);
+            if ([...this._heldNow].some(path => live.has(path))) return true;
+        }
+        return this.physicalOperations().some(op => op.held && !op.retired);
+    },
+
+    // Write the hold down, and read it back.
+    //
+    // Returns whether the disk holds it. A hold that cannot be made durable is the one
+    // case where memory has to be enough for this session - the alternative is sending a
+    // write the server has already refused once - so the caller keeps the operation out
+    // of the payload either way and says so.
+    holdContested(paths) {
+        this.loadOutbox();
+        const wanted = new Set((paths || []).map(String));
+        let allDurable = true;
+        let anyHeld = false;
+        this.physicalOperations().forEach(op => {
+            if (op.retired || op.held) return;
+            if (!wanted.has(op.path)) return;
+            anyHeld = true;
+            const key = outboxHoldKey(op.slot, op.opId);
+            if (Store.durableGet(key) === ACK_VALUE) return;
+            if (!Store.setVerified(key, ACK_VALUE)) allDurable = false;
+        });
+        return { held: anyHeld, durable: allDurable };
+    },
 
     // Waiting to be SENT. Not the journal's size: an entry the cloud already has is kept
     // until the local schedule holding it is written, and telling somebody it is waiting
@@ -2425,6 +2533,10 @@ const FarkadSync = {
         // A whole-document restore that has not reached the cloud. The most dangerous
         // thing this app queues, and the one a person is most likely to walk away from.
         if (this.pendingReplace()) return 'sending';
+        // A write the server refused and this device has stopped offering. It is owed,
+        // it is durable, and it is not going anywhere until a person looks at it - so it
+        // is neither 'synced' nor the 'sending' that says something is on its way.
+        if (this.holdingContested()) return 'contested';
         // Anything still owed, whatever went out beside it. A partial send is not a send.
         if (this.pendingCount() > 0) return 'sending';
         // And work the ladder is still going back for.
@@ -2712,8 +2824,23 @@ const FarkadSync = {
         const patch = {};
         const sent = new Map();
         let holding = false;
+        // A BATCH, not an operation. The hold names one operation, but a batch was written
+        // once and is atomic - sending the rest of it would be splitting it to get part of
+        // a write out, which is the one thing the batch record exists to prevent. A
+        // DIFFERENT batch is untouched: a held write is not a broken connection, and the
+        // rest of the evening still has to go.
+        // Computed only when something is actually held. The physical set is a fresh read
+        // of every queue record on the disk, and a send that does it every time pays for a
+        // hold that almost never exists.
+        const heldBatches = new Set();
         [...this._outbox.entries()]
             .filter(([, item]) => !item.sent)
+            .filter(([path, item]) => {
+                if (!item.held && !heldBatches.has(item.batchKey)
+                    && !this._heldNow.has(String(path))) return true;
+                holding = true;
+                return false;
+            })
             .sort((a, b) => a[1].seq - b[1].seq)
             .filter(([path]) => {
                 if (held && this.rosterShaped(path)) { holding = true; return false; }
@@ -2734,7 +2861,12 @@ const FarkadSync = {
             // Something is being kept back, so this device is not up to date whatever
             // else happens. The retry ladder comes round again, and the snapshot it is
             // waiting for usually arrives long before that.
-            this.scheduleRetry();
+            //
+            // EXCEPT for a contested hold, which is not waiting for anything. The roster
+            // barrier lifts when a snapshot arrives; a hold lifts when a person decides.
+            // A ladder ticking against it would be the app asking the same refused
+            // question every few seconds for the rest of the evening.
+            if (!this.holdingContested()) this.scheduleRetry();
             if (this.status === 'synced') this.setStatus('connecting');
         }
         if (Object.keys(patch).length === 0 && !this._stamp) return Promise.resolve();
@@ -2921,6 +3053,67 @@ const FarkadSync = {
                         return Promise.resolve(this.adapter.update(patch)).catch(onFailure);
                     }
                     error.contested = contested;
+                    // HELD, DURABLY, BY ITS OWN ID - and this is the line the whole of
+                    // tests/contested.test.mjs exists for.
+                    //
+                    // Attaching the paths to the error set the status and nothing else.
+                    // The operation stayed in the outbox with sent:false and a retry
+                    // scheduled, so it was still a live write, and the WINNER'S SNAPSHOT
+                    // was what set it off: adopting the winner replaces the base this
+                    // write is compared against, the path stops looking contested, and
+                    // the next flush puts the old value back over the correction somebody
+                    // else had just made. Both phones then said synced.
+                    //
+                    // A hold that cannot be written down is not a reason to send the
+                    // write. `_heldNow` keeps it out of the payload for this session even
+                    // when the disk refuses the marker, and the failure is reported as
+                    // itself - fail closed, because the alternative is offering the server
+                    // a write it has already refused once, over somebody's correction.
+                    // ONLY A PATH THIS DEVICE CAN SHOW HAS MOVED.
+                    //
+                    // contestedPaths deliberately answers "all of them" when it cannot
+                    // compare - a refusal that arrived without its document, or a write
+                    // whose frozen base was lost, or the cutover, where the base is `{}`
+                    // at every path because this device had never seen the document at
+                    // all. Refusing to send is the careful direction to be wrong in for
+                    // ONE attempt. As a permanent decision it is a different thing
+                    // entirely: it would hold the whole queue of a phone that has just
+                    // met the document, for ever, and the cutover would never complete.
+                    //
+                    // So a hold is written down only where the base RECORDED a value for
+                    // that path and the server's differs. That is somebody's correction,
+                    // and it is a decision. Everything else goes on down the retry ladder
+                    // exactly as it did, and the next attempt carries a real base and
+                    // settles it either way.
+                    //
+                    // AND ONLY WHEN SOMEBODY ELSE PUT IT THERE. Two tabs of one app are
+                    // one device sharing one disk and one device id: the older tab's write
+                    // lands, the newer tab's is refused, and the path HAS moved - but it
+                    // moved under this person's own earlier edit, and their correction has
+                    // to win. Holding there would throw away the correction the same
+                    // person just made, which is this defect inverted.
+                    //
+                    // The value's author is the only signal that survives: by the time the
+                    // refusal is handled, the operation that produced it has usually been
+                    // acknowledged and collected off this disk, so asking the queue whether
+                    // it ever held that value answers no even when it did.
+                    const base = this._sendBase;
+                    const wroteIt = String((error.document || {}).updatedBy || '');
+                    const someoneElse = wroteIt !== '' && wroteIt !== String(syncDeviceId());
+                    const moved = (!error.cutover && someoneElse && error.document
+                        && typeof error.document === 'object'
+                        && base && typeof base === 'object')
+                        ? contested.filter(path =>
+                            Object.prototype.hasOwnProperty.call(base, String(path)))
+                        : [];
+                    if (moved.length > 0) {
+                        const wrote = this.holdContested(moved);
+                        if (!wrote.durable) {
+                            moved.forEach(path => this._heldNow.add(String(path)));
+                            console.error('a contested write could not be held on the '
+                                + 'disk; it is held in memory for this session');
+                        }
+                    }
                     // SAID AS ITSELF, not as "something went wrong".
                     //
                     // A held path is not a failure - the server is doing exactly what it
@@ -3238,7 +3431,10 @@ const FarkadSync = {
         // 'already-exists', the update below goes out against a document another device
         // has just created, so its base is whatever that device left - which the snapshot
         // that create published has by then told us.
-        this.stampProtocol(seed, this._sendOpId || this.operationIdFor(this._sending));
+        // 'create' rather than 'update': the two used to share one id, so a receipt could
+        // not tell a field merge from a whole-document replacement.
+        this.stampProtocol(seed, this._sendOpId || this.operationIdFor(this._sending),
+            'create');
         return Promise.resolve(this.adapter.create(seed))
             .catch(error => {
                 if (error && error.code === 'already-exists') {
@@ -3604,8 +3800,13 @@ const FarkadSync = {
                     // retried after a request that may still have landed is recognised by
                     // its receipt rather than applied a second time over work that
                     // happened in between.
+                    // And the transaction it belongs to, inside the fingerprint: two
+                    // restores that replace the same document with the same bytes are
+                    // still two different decisions, and a receipt for one must not answer
+                    // the other.
                     this.stampProtocol(document,
-                        'r' + digestOf(String(envelope && envelope.transactionId)));
+                        'r' + digestOf(String(envelope && envelope.transactionId)),
+                        'restore', String((envelope && envelope.transactionId) || ''));
                     return Promise.resolve(this.adapter.save(document)).then(value => {
                         // And AGAIN, on the far side of the request. Reading the disk and
                         // then acting on what it said is two steps, and the other tab
@@ -4100,19 +4301,14 @@ const FarkadSync = {
     // held write resurrected the site another person had already fixed.
     contestedPaths(patch, current) {
         if (!current || typeof current !== 'object') return Object.keys(patch);
-        const read = (root, path) => {
-            let node = root;
-            const parts = String(path).split('.');
-            for (let at = 0; at < parts.length; at += 1) {
-                if (!node || typeof node !== 'object') return undefined;
-                node = node[parts[at]];
-            }
-            return node;
-        };
+        const read = readPath;
         const base = this._sendBase || {};
         return Object.keys(patch).filter(path => {
-            if (path === 'protocol' || path === 'revision' || path === 'lastOpId') return false;
-            if (path === 'updatedAt' || path === 'updatedBy') return false;
+            // The envelope, by the one list. This used to name the fields inline, so the
+            // fingerprint - added later, and by construction different on every write -
+            // read as a path somebody else had corrected, and EVERY write came back
+            // contested. Kept as one constant so a sixth ordering field cannot do it again.
+            if (ENVELOPE_FIELDS.indexOf(path) !== -1) return false;
             // Against the base this write FROZE, not against whatever the base has become
             // since. See stampProtocol.
             return canonicalJson(read(current, path)) !== base[path];
@@ -4122,7 +4318,7 @@ const FarkadSync = {
     // The envelope this write travels in, stamped onto the patch itself - which is how it
     // reaches the rules, since Firestore evaluates them against the document as it would
     // be after the merge.
-    stampProtocol(patch, opId) {
+    stampProtocol(patch, opId, kind, extra) {
         // THE BASE THIS WRITE WAS BUILT ON, frozen here, path by path.
         //
         // It cannot be read live at conflict time. Snapshots keep arriving while a request
@@ -4144,6 +4340,10 @@ const FarkadSync = {
         }
         patch.protocol = this.PROTOCOL;
         patch.lastOpId = String(opId);
+        // Computed BEFORE the ordering fields are read back out of the patch - they are
+        // excluded by name, so the order does not matter, and computing it here means every
+        // door that stamps a write stamps its fingerprint too.
+        patch.opFingerprint = operationFingerprint(kind || 'update', patch, extra);
         // No snapshot yet means no base. One is the only revision a document that does
         // not exist can be created at, and the rules refuse anything else - so a device
         // that guessed would simply be refused, which is the right failure.
@@ -4236,9 +4436,18 @@ const FarkadSync = {
     // ids - so the same batch sent twice carries the same name, which is what lets the
     // server recognise the second attempt as a replay of the first rather than as a
     // second edit. A fresh id per attempt would turn one edit into two.
+    // AND THE VALUE, which it did not carry.
+    //
+    // legacyOpId two hundred lines up already digests the value, with a comment explaining
+    // that a value-blind name once wore the name of the value it replaced and suppressed a
+    // correction. The batch name never got the same treatment: two different values for one
+    // path at one sequence produced the identical name, so a disk handing a batch record
+    // back with a different value, a rescue-file rebuild, or the create/update aliasing
+    // could all present one name for two different operations.
     operationIdFor(sent) {
         const parts = [...sent.entries()]
-            .map(([path, item]) => `${path}#${item && item.seq}#${item && item.opId}`)
+            .map(([path, item]) => `${path}#${item && item.seq}#${item && item.opId}`
+                + '#' + digestOf(canonicalJson(item && item.value)))
             .sort();
         return 'b' + digestOf(parts.join('|'));
     },
@@ -4430,8 +4639,24 @@ const FarkadSync = {
         const previous = State.schedule;
         // Ledger entries are append-only against the other phones too: a device that has
         // never heard of one has not disagreed with it. See mergeLedgerInto.
+        const ledgerClash = [];
         State.schedule = (typeof mergeLedgerInto === 'function')
-            ? mergeLedgerInto(remote, previous) : remote;
+            ? mergeLedgerInto(remote, previous, ledgerClash) : remote;
+        // ONE IMMUTABLE ID, TWO DIFFERENT BODIES, and nothing here decides which is true.
+        //
+        // Both are kept - the arriving copy where it landed, this phone's beside it under
+        // a name nothing folds - the bytes go to Recovery so the rescue file carries them,
+        // and the device stops writing until a person has looked. Adopting one of the two
+        // and reporting synced is how the other one leaves the record for good.
+        if (ledgerClash.length > 0) {
+            State.schedule.ledger.conflicted = State.schedule.ledger.conflicted || {};
+            ledgerClash.forEach(clash => {
+                State.schedule.ledger.conflicted[clash.id] = {
+                    id: clash.id, family: clash.family,
+                    here: clash.mine, arrived: clash.theirs
+                };
+            });
+        }
         // And the vehicles, on the same rule and for the same reason - see
         // mergeVehiclesInto. They are dormant in this build, which means nothing writes
         // them and therefore nothing can be said to have deleted them.
@@ -4471,6 +4696,20 @@ const FarkadSync = {
         }
 
         if (typeof render === 'function') render();
+        // AFTER THE DISK HAS IT, because Recovery blocks writing the moment it is told -
+        // and telling it first would have refused the very persist that puts the two
+        // disputed bodies somewhere a person can still reach them.
+        if (ledgerClash.length > 0) {
+            if (typeof Recovery !== 'undefined') {
+                Recovery.damaged('scheduleData:v2:ledger:conflict',
+                    JSON.stringify(State.schedule.ledger.conflicted),
+                    'הגיעה רשומת מקדמה עם אותו מזהה ותוכן אחר. שתי הגרסאות נשמרו כמו שהן '
+                    + 'ולא נמחק דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי ותבדוק איזו '
+                    + 'מהן נכונה.');
+            }
+            this.fail(new Error('two ledger entries share one id and differ; both are held'));
+            return;
+        }
         this.setStatus('synced');
 
         // A day or an advance in that snapshot named somebody the snapshot's own roster

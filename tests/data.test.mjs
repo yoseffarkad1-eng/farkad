@@ -3588,7 +3588,10 @@ const diskDays = device => {
     // No field paths - only the stamp, and the ordering envelope every write carries.
     // protocol, revision and lastOpId are not edits: they are how the server decides
     // whether this write may land at all. See docs/sync-protocol.md.
-    const ENVELOPE = ['updatedAt', 'updatedBy', 'protocol', 'lastOpId', 'revision'];
+    // opFingerprint joins them: it says what the operation DOES so a receipt cannot be
+    // re-pointed at different semantics, which is ordering rather than an edit.
+    const ENVELOPE = ['updatedAt', 'updatedBy', 'protocol', 'lastOpId', 'revision',
+        'opFingerprint'];
     given('and it carries no field paths',
         Object.keys(cloud.attempts[cloud.attempts.length - 1].payload)
             .every(key => ENVELOPE.indexOf(key) !== -1),

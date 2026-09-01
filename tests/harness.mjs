@@ -600,8 +600,23 @@ export function makeCloud(options = {}) {
         // Immutable: created once, never changed. The rules enforce this with
         // `allow update, delete: if false`.
         if (!cloud.receipts.has(data.lastOpId)) {
-            cloud.receipts.set(data.lastOpId, { revision: data.revision });
+            cloud.receipts.set(data.lastOpId, { revision: data.revision,
+                opFingerprint: data.opFingerprint || null });
         }
+    }
+
+    // A receipt of this name that describes a DIFFERENT operation.
+    //
+    // The production adapter refuses this in withReceipt; the fake cloud has to refuse it
+    // too, or every suite that runs against the harness proves the binding holds while
+    // measuring a cloud that does not have it. Returns the refusal, or null.
+    function receiptDisagrees(data) {
+        const receipt = receiptFor(data.lastOpId);
+        if (!receipt) return null;
+        const named = receipt.opFingerprint;
+        if (typeof named !== 'string' || named === (data.opFingerprint || null)) return null;
+        return refuse('receipt-mismatch',
+            'a receipt of this name describes a different operation');
     }
 
     cloud.adapter = {
@@ -620,6 +635,8 @@ export function makeCloud(options = {}) {
                 // retry of a request that did land - answering it with a conflict would
                 // make the caller hold work the cloud is already holding.
                 if (cloud.protocol && receiptFor(patch.lastOpId)) {
+                    const disagrees = receiptDisagrees(patch);
+                    if (disagrees) throw disagrees;
                     cloud.writes.push({ kind: 'update', patch, replayed: true });
                     return;
                 }
@@ -636,6 +653,8 @@ export function makeCloud(options = {}) {
             if (problem) return Promise.reject(problem);
             return landing('save', data, () => {
                 if (cloud.protocol && receiptFor(data.lastOpId)) {
+                    const disagrees = receiptDisagrees(data);
+                    if (disagrees) throw disagrees;
                     cloud.writes.push({ kind: 'save', data, replayed: true });
                     return;
                 }

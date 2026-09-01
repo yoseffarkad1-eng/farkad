@@ -96,6 +96,27 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                         error.revision = Number.isInteger(held) ? held : null;
                         throw error;
                     }
+                    // AND IT HAS TO BE THIS OPERATION'S RECEIPT.
+                    //
+                    // The revision check above says a write wearing this name reached this
+                    // revision. It does not say what that write did, and the client is
+                    // built to BELIEVE a receipt - that is what makes a retry safe - so a
+                    // second arrival carrying the same name and a different path and value
+                    // was answered "already applied", acknowledged, pruned and reported
+                    // synced, with the phone holding one value and the cloud another.
+                    //
+                    // A receipt written before this field existed carries none; that is an
+                    // older receipt rather than a lie, and the revision check is what it
+                    // gets. A receipt that HAS one must agree.
+                    const named = receipt.data().opFingerprint;
+                    if (typeof named === 'string' && named !== payload.opFingerprint) {
+                        const error = new Error('a receipt of this name describes a '
+                            + 'different operation');
+                        error.code = 'receipt-mismatch';
+                        error.expected = named;
+                        error.sent = payload.opFingerprint || null;
+                        throw error;
+                    }
                     return;
                 }
                 return Promise.resolve().then(() => {
@@ -131,6 +152,11 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                     apply(transaction);
                     transaction.set(receiptRef(payload.lastOpId), {
                         revision: payload.revision,
+                        // What the operation DID, carried on the receipt and on the
+                        // schedule in the same transaction, so the pair can never be
+                        // re-pointed at different semantics afterwards - receipts are
+                        // immutable, so the first pairing is binding for ever.
+                        opFingerprint: payload.opFingerprint || null,
                         at: new Date().toISOString(),
                         by: payload.updatedBy || null
                     });
@@ -262,6 +288,7 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                     transaction.set(scheduleRef, data);
                     transaction.set(receiptRef(data.lastOpId), {
                         revision: data.revision,
+                        opFingerprint: data.opFingerprint || null,
                         at: new Date().toISOString(),
                         by: data.updatedBy || null
                     });

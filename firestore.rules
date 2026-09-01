@@ -113,6 +113,32 @@ service cloud.firestore {
         && request.resource.data.revision == 1;
     }
 
+    // AND IT MAY NOT CARRY ONE BYTE OF WORK.
+    //
+    // The five fields the production bootstrap actually writes - see the
+    // transaction.update in js/sync/firebase-adapter.js - and nothing else. Measured
+    // before this line existed: an ordinary allowed user could take the legacy document
+    // to revision 1 and, in the same accepted write, delete every day worked, alter a
+    // stamped daily rate, delete the advances, forge a ledger entry, erase the roster,
+    // change schemaVersion, or add a field nobody has heard of. Seventeen of nineteen
+    // such writes were accepted. The two that were refused were refused by accident.
+    //
+    // This is the ONE accepted write with no compare-and-set behind it: there is no prior
+    // revision to check it against, so a stale bootstrap sent from a phone that has been
+    // away can carry its own idea of the document over another phone's newer legacy
+    // correction, and nothing else in this file would refuse it. The ordinary
+    // nextRevision() branch does not need this - a whole-document write there is the
+    // restore, it is guarded by fullDocumentOk(), and its revision has to be exactly one
+    // past what is on the server.
+    //
+    // affectedKeys() is the right question rather than listing the business fields: a
+    // build that adds a field this rule has never heard of must not thereby open a hole
+    // in it. Anything outside the five is business, whatever it is called.
+    function bootstrapTouchesOnlyProtocol() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy']);
+    }
+
     // A WRITE FROM A PHONE THAT HAS NOT UPDATED YET.
     //
     // This is what makes the rollout executable rather than a sequencing puzzle with no
@@ -159,18 +185,63 @@ service cloud.firestore {
     // getAfter alone is the whole test. If the schedule does not exist afterwards there is
     // nothing to read a field from, the rule errors, and the write is denied - which is
     // exactly the answer an orphan receipt deserves.
-    function receiptMatchesSchedule(docId, opId) {
-      let after = getAfter(/databases/$(database)/documents/schedules/$(docId)).data;
-      return after.lastOpId == opId
-        && after.revision == request.resource.data.revision;
-    }
-
-    function carriesReceipt(docId) {
+    // AND WHAT THE OPERATION DID, not only when it landed.
+    //
+    // A revision says a write wearing this name reached this point. It does not say what
+    // that write was, and the client is built to BELIEVE a receipt - that is what makes a
+    // retry safe - so a second arrival carrying the same name and a different path and
+    // value was answered "already applied", acknowledged, pruned and reported synced,
+    // with the phone holding one value and the cloud another.
+    //
+    // WHAT THESE RULES CAN AND CANNOT DO, said plainly because the difference matters.
+    // They can require the fingerprint to be present and well-formed, require the schedule
+    // and the receipt to carry the SAME one, and - because getAfter() makes the pair a
+    // single commit and receipts are immutable - make that first pairing binding for ever,
+    // so a name can never afterwards be re-pointed at different semantics. They cannot
+    // recompute it: there is no canonical serializer here, no loops, .keys() reaches only
+    // the top level, and on an update request.resource.data is the MERGED document, so the
+    // rules cannot even enumerate which nested paths this write touched. The fingerprint
+    // is therefore made trustworthy against loss and tampering by the server, and made to
+    // MEAN something by the client - which is also the only place the replay can be
+    // refused, because a replay performs no write and never reaches these rules.
+    // The bootstrap's own pairing: the same single commit, without the fingerprint the
+    // bootstrap has nothing to put in.
+    function bootstrapReceipt(docId) {
       return request.resource.data.lastOpId is string
         && request.resource.data.lastOpId.size() > 0
         && request.resource.data.lastOpId.size() < 128
         && getAfter(/databases/$(database)/documents/schedules/$(docId)/receipts/$(request.resource.data.lastOpId)).data.revision
              == request.resource.data.revision;
+    }
+
+    function boundFingerprint() {
+      return request.resource.data.opFingerprint is string
+        && request.resource.data.opFingerprint.size() > 0
+        && request.resource.data.opFingerprint.size() < 128;
+    }
+
+    function receiptMatchesSchedule(docId, opId) {
+      let after = getAfter(/databases/$(database)/documents/schedules/$(docId)).data;
+      return after.lastOpId == opId
+        && after.revision == request.resource.data.revision
+        // The bootstrap has no fingerprint on either side - its five protocol fields ARE
+        // the operation - so the pair is required to AGREE about that rather than to
+        // carry one. A receipt with a fingerprint for a schedule without one, or the
+        // reverse, is a mismatched pair and refused.
+        && (('opFingerprint' in after)
+            ? (('opFingerprint' in request.resource.data)
+                && after.opFingerprint == request.resource.data.opFingerprint)
+            : !('opFingerprint' in request.resource.data));
+    }
+
+    function carriesReceipt(docId) {
+      let receipt = getAfter(/databases/$(database)/documents/schedules/$(docId)/receipts/$(request.resource.data.lastOpId)).data;
+      return request.resource.data.lastOpId is string
+        && request.resource.data.lastOpId.size() > 0
+        && request.resource.data.lastOpId.size() < 128
+        && boundFingerprint()
+        && receipt.revision == request.resource.data.revision
+        && receipt.opFingerprint == request.resource.data.opFingerprint;
     }
 
     match /schedules/{docId} {
@@ -189,8 +260,12 @@ service cloud.firestore {
           // A protocol write: the ordinary next revision, or the one bootstrap that
           // brings a legacy document into the protocol. Either way it carries its
           // receipt, so a revision never exists without the operation that explains it.
-          (versioned() && (nextRevision() || (noRevisionYet() && bootstrapRevision()))
-            && carriesReceipt(docId))
+          (versioned() && nextRevision() && carriesReceipt(docId))
+          // The bootstrap carries no business semantics to fingerprint - its five fields
+          // ARE the whole operation, and adding a sixth would break the affected-key rule
+          // that keeps it protocol-only. Its receipt is bound by revision alone.
+          || (versioned() && noRevisionYet() && bootstrapRevision()
+            && bootstrapTouchesOnlyProtocol() && bootstrapReceipt(docId))
           // Or a phone that has not updated yet, while the document is still legacy.
           || legacyWrite()
         )

@@ -1,6 +1,6 @@
 # The suites
 
-Forty-four suites, thirty-one of which need no browser at all. From a clean clone:
+Fifty suites, thirty-five of which need no browser at all. From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
@@ -47,21 +47,14 @@ test broke, not the app — fix the setup before reading anything into the run.
 
 MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no other:
 
-    npm test           31 suites   3537/3537
-    npm run test:all   + 8 suites  + 1779   (smoke 1032, print 70, mobile 510,
-                                             update 30, recovery-browser 25,
-                                             handover 26, swrestart 31, swidentity 55)
-    test:release       + 6 suites  + 196    (sendclaim 43, rules 56, cas-emulator 24,
-                                             rollout 17, bootstrap 23,
-                                             money-concurrency 33)
-    ------------------------------------------------------------------
-    the whole gate     45 suites   5512/5512
+    NOT YET MEASURED ON THIS COMMIT.
 
-Those are re-measured on THIS branch, and this branch is not main: it is the one with
-both ledger gates open. `claude/farkad-v87-clean-repair` runs the same suites with them
-shut and comes out lower — the difference is the D- and L-suites, which have nothing to
-measure until the writer is open, plus the two checks that are inverted here on purpose
-(`tests/data.test.mjs` and `tests/smoke.mjs`, both marked in place).
+This branch has just taken the core candidate's repairs by merge, which brought five new
+suites with it and changed several existing ones. Both of the counts that used to stand
+here - this branch's 45/5512 and the core branch's 49/5516 - were measured on trees that
+no longer exist, and neither describes what is in this working tree. Copying either of
+them across would be exactly the fault the paragraph below warns about, so they are
+gone rather than adjusted, and the numbers are re-measured at this branch's final commit.
 
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers
@@ -102,6 +95,11 @@ several waves of tests and is stale.)
 | rollout | `rollout.test.mjs` | Publishing the rules, from a GENUINE legacy document — roster, days and an advance, no `protocol`, no `revision`, no receipt. The first protocol write preserves every legacy byte; a bootstrap without its receipt is refused; two phones racing produce exactly one bootstrap and the loser rebases; the exception is one write wide; an un-updated phone works before cutover and is refused after; and a missing document is a different road from a legacy one. |
 | ledger-ingress | `ledger.ingress.test.mjs` | Thirteen shapes of malformed ledger data through every door — boot, load, cloud snapshot, restore, JSON import, raw recovery, migration, full replacement. Each is named by the check that catches it, held aside rather than folded, never normalised or coerced to zero; the record still opens, the bytes are kept, the person is told, writes are blocked, and the rescue export still carries the bytes. |
 | repayment | `repayment.test.mjs` | The advance that outlives its fortnight: the carry, dated cash repayments, the two labels that never swap, the reversal that compensates instead of deleting, the surplus that is named rather than clamped, and the closure that is identified by the period it closes. |
+| poison | `poison.test.mjs` | A ledger id that would land on a prototype — `__proto__`, `prototype`, `constructor` — through every door and every writer. The fixtures are built with `JSON.parse` so the key is a real own property and not a setter; the entry is refused before memory, disk or outbox move; a raw entry is judged before it is normalised; an entry whose `id` disagrees with its map key is not silently re-pointed; and nothing reparents the map it was aimed at. |
+| merge | `merge.test.mjs` | What adopting somebody else's document takes off this one. All four append-only families survive a snapshot that has never heard of them, so do parts of the container this build does not name; existence is asked with an own-key check, so an entry legitimately named `toString` is not dropped; and one immutable id arriving with two different bodies is a disagreement a person is told about, not a winner picked at random. Driven through `Sync.receive()`, a commit and a reopen — not through the helper. |
+| contested | `contested.test.mjs` | The write that lost a race, and every trigger that must not resend it: the winner's snapshot, the retry timer, `scheduleFlush()`, `flush()`, coming back online, a recreated adapter, and a close-and-reopen. The losing bytes stay durable and still owed, the cloud keeps the winner's value, the line never says synced, an unrelated edit in its own batch still leaves the phone, and the way out is a fresh explicit edit by a person. |
+| receipt | `receipt.test.mjs` | A receipt names the OPERATION, not just the revision it reached. The schedule and its receipt carry the same fingerprint; an honest replay of identical bytes is still answered from the receipt; a request wearing a landed operation's name while doing something else is refused as `receipt-mismatch`, never acknowledged and never pruned; and a batch's own name changes when its value changes. |
+| bootstrap-rules | `bootstrap.rules.test.mjs` | The SERVER's answer to a bootstrap that carries business data. Nineteen smuggling attempts — days, advances, ledger entries, workers, places, roster, `schemaVersion`, unknown fields, each alone and in combination — against the local emulator, plus the acceptance list of what a bootstrap may legitimately touch. Every row reports: the helper returns a verdict rather than throwing, so one refusal does not hide the eighteen behind it. |
 
 `shot.mjs` is not a suite: it takes one screenshot and asserts nothing, for the
 question the suites cannot answer — whether the screen is worth looking at.

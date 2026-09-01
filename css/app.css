@@ -2465,6 +2465,14 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 }
 .sheet-body {
     flex: 1 1 auto;
+    /* THE MIDDLE HAS TO BE ABLE TO GET SMALL.
+       A flex item's default min-height is `auto`, which is its CONTENT - so this refused
+       to shrink below the full list of sites, the column grew past the sheet's max-height,
+       and the foot went with it. Measured at 320x568 with text at 200%: סגור, נעדר and the
+       forward button ended below the viewport, on the one screen size where the crew is
+       most likely to be using large text. This is the part that scrolls, and now it can.
+       It is not enough on its own - see .sheet-head. */
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
@@ -2493,7 +2501,20 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
    "where did THIS one work?" - answered thirty times an evening, and the only thing
    that changes between answers. The count sits under it, quiet. */
 .sheet-head {
-    flex: 0 0 auto;
+    /* AND SO DOES THE TOP, when the arithmetic leaves no other way out.
+       Measured at 320x568 with every font-size doubled: the head is 255px (a long name
+       wrapping at 54px) and the foot is 260px, which is 529 of the 520 the sheet is
+       allowed - the middle had already given up all of its height and the foot was 9px
+       below the screen. One of the two fixed parts has to yield, and it is this one: the
+       head is TEXT, still legible and still scrollable in what it keeps, and the whole
+       name stays on the row behind the sheet. The foot is the way OUT - סגור, נעדר, the
+       forward button - and a control that is off the screen is not a control. Shrinking
+       here costs nothing at ordinary text sizes: with room to spare there is nothing to
+       shrink. */
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
     align-items: center;
