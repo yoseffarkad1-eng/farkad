@@ -216,11 +216,17 @@ function readOpBatch(raw, batchId) {
         // exists for went on failing open.
         if (op.base !== undefined && op.base !== null
             && typeof op.base !== 'string') return null;
+        // EVERYTHING THE DEVICE HAD SEEN OR PRODUCED at the path when the edit was made,
+        // as marks - see seenMarksAt. Admitted by name for the reason `base` is, and held
+        // to the same standard: a list of words, or nothing at all.
+        if (op.seen !== undefined && !(Array.isArray(op.seen)
+            && op.seen.every(mark => typeof mark === 'string' && mark !== ''))) return null;
         const built = {
             opId: String(op.opId), path: String(op.path), value: op.value, seq: op.seq,
             after: Array.isArray(op.after) ? op.after.map(String) : []
         };
         if (Object.prototype.hasOwnProperty.call(op, 'base')) built.base = op.base;
+        if (Array.isArray(op.seen)) built.seen = op.seen.slice();
         ops.push(built);
     }
     return { batchId: String(batchId), ops };
@@ -733,6 +739,48 @@ function canonicalJson(value) {
             .join(',') + '}';
     }
     return JSON.stringify(value === undefined ? null : value);
+}
+
+// What a device HELD at a path, in one comparable word.
+//
+// canonicalJson of the value, and VALUE_ABSENT for nothing. A path the document does not
+// have and a null a deletion left behind are the same absence to the person looking at
+// the screen, and neither is a record anybody loses by writing over it. canonicalJson
+// never yields the word - its output is JSON, and the word is not - so a value and the
+// absence of one cannot be confused, which a recorded `null` could be: it was also what
+// a session that had heard nothing wrote down, and the two were read as one.
+const VALUE_ABSENT = 'absent';
+
+function valueMark(value) {
+    return value === undefined || value === null ? VALUE_ABSENT : canonicalJson(value);
+}
+
+// A base an older build recorded: canonicalJson, which spells undefined and null alike.
+function markOfRecorded(text) {
+    return text === 'null' ? VALUE_ABSENT : text;
+}
+
+// The marks a server value answers to at `path`: its own and, for a worker's day, the
+// form normaliseLayer rebuilds it in. The disk holds an adopted day as that rebuild left
+// it, and a day written by an older build can carry a field the rebuild drops; compared
+// on raw bytes alone, an edit would be held against a value nobody had changed.
+function marksOf(path, value) {
+    const marks = [valueMark(value)];
+    const parts = String(path).split('.');
+    if (parts.length === 4 && parts[0] === 'days' && value && typeof value === 'object'
+        && typeof normaliseLayer === 'function') {
+        try {
+            const mark = valueMark(normaliseLayer({ one: value }).one);
+            if (marks.indexOf(mark) === -1) marks.push(mark);
+        } catch (error) { /* a day the rebuild refuses answers only to its own bytes */ }
+    }
+    return marks;
+}
+
+// The families where a queued value REPLACES what is there: a day, or a ledger entry.
+// See the pre-send check in sendClaimed for why the roster is not one of them.
+function replacesWhole(path) {
+    return String(path).indexOf('days.') === 0 || String(path).indexOf('ledger.') === 0;
 }
 
 // What two schedules have to agree on for one to BE the other.
@@ -1377,6 +1425,10 @@ const FarkadSync = {
 
         let seq = this._seq;
         const ops = [];
+        // What this device holds on the disk, read once for the batch.
+        const stored = this.storedSchedule();
+        const heard = this._baseDoc !== null;
+        const inBatch = new Map();
         entries.forEach(entry => {
             if (!entry || !entry.path) return;
             seq += 1;
@@ -1391,17 +1443,43 @@ const FarkadSync = {
             //
             // Recorded here it is exactly as durable as the operation - one verified
             // write, both or neither - so no disk failure can leave a queued edit whose
-            // provenance is gone. `null` means the server had nothing at this path, which
-            // is a different statement from "no base was recorded" and has to survive
-            // JSON to stay different.
-            // Decided on the VALUE, not on its serialisation: canonicalJson(undefined)
-            // is the STRING "null", so testing the serialised form for absence never
-            // fires and every fresh path was recorded as though the server had held a
-            // literal null there. Measured: two phones reaching an empty project held
-            // each other's whole roster.
-            const seen = this.baseValueAt(entry.path);
-            const built = seen === undefined ? null : canonicalJson(seen);
-            ops.push({
+            // provenance is gone.
+            //
+            // AND WHAT THIS DEVICE HELD THERE, not only what the server was last heard
+            // to hold. The base was the base document's value alone, and the base
+            // document is memory, set only by a snapshot: an edit made before this
+            // session had heard the cloud - an open with no signal, which on a building
+            // site is the ordinary open - recorded null, null was read as "the server
+            // had nothing here", and nothing holds a path the server had nothing at. The
+            // phone came back, heard another phone's correction, flushed, and its stale
+            // value went out at the current revision; both phones said synced. Measured:
+            // cloud p_00,p_02 where the winner was p_00,p_01.
+            //
+            // So `seen` is every value this device has held or produced at the path -
+            // the disk's, the last snapshot's, and the chain of its own queued values
+            // this one supersedes - each as a mark, VALUE_ABSENT where there was
+            // nothing. A server value outside that list at send time is somebody else's
+            // correction, whatever the document's last writer says; a value inside it is
+            // this device's own, or one the person was looking at, and their later
+            // decision wins over it. Only the families a queued value replaces: the
+            // roster merges per id and has its own rules.
+            //
+            // `base` stays beside it, as it was, for a tab of an older build sharing
+            // this disk during a handover - what the server was last heard to hold, or
+            // failing that what the disk holds, and null for nothing. Decided on the
+            // VALUE, not on its serialisation: canonicalJson(undefined) is the STRING
+            // "null", so testing the serialised form for absence never fires and every
+            // fresh path was recorded as though the server had held a literal null
+            // there. Measured: two phones reaching an empty project held each other's
+            // whole roster.
+            const previous = live.get(entry.path) || inBatch.get(entry.path) || null;
+            const held = this.storedMarkAt(entry.path, stored);
+            const seen = replacesWhole(entry.path)
+                ? this.seenMarksAt(entry.path, held, previous) : null;
+            const lastHeard = this.baseValueAt(entry.path);
+            let built = lastHeard === undefined ? null : canonicalJson(lastHeard);
+            if (!heard && seen) built = held && held !== VALUE_ABSENT ? held : null;
+            const op = {
                 opId: opIdNow(),
                 path: entry.path,
                 value: entry.value,
@@ -1411,7 +1489,10 @@ const FarkadSync = {
                 // the projected winner: a loser left behind by a failed collection is
                 // still a record that could otherwise come back.
                 after: (bySameId.get(entry.path) || []).slice()
-            });
+            };
+            if (seen) op.seen = seen;
+            ops.push(op);
+            inBatch.set(entry.path, op);
             live.delete(entry.path);
         });
         if (ops.length === 0) return true;
@@ -1576,6 +1657,27 @@ const FarkadSync = {
 
     // ------------------------------------------------------------ what may be thrown away
 
+    // The schedule as the NEXT session would read it, parsed once and cached on its own
+    // bytes. Collection asks on every save and every acknowledgement, and queueing asks
+    // on every edit; a season's record is not something to re-parse per question.
+    //
+    // Two absences, kept apart: `raw` is null when there is no record at all, and
+    // `schedule` is null when there is one that will not parse. The one caller that reads
+    // a VALUE out of it needs the difference - no record means the path held nothing,
+    // an unreadable record means nothing is known, and nothing is not the same as
+    // unknown anywhere in this file.
+    storedSchedule() {
+        const raw = Store.durableGet(SCHEDULE_KEY);
+        if (raw === null) return { raw: null, schedule: null };
+        if (this._storedCache && this._storedCache.raw === raw) {
+            return { raw, schedule: this._storedCache.schedule };
+        }
+        let schedule = null;
+        try { schedule = JSON.parse(raw); } catch (error) { schedule = null; }
+        this._storedCache = { raw, schedule };
+        return { raw, schedule };
+    },
+
     // A separate pass, and it cannot change which value is current.
     //
     // Two rules, and the second is the one the old shape did not have:
@@ -1606,19 +1708,8 @@ const FarkadSync = {
         // the winner can go, or the loser becomes current the moment it does.
         const current = projectQueue(all);
 
-        // The schedule as the NEXT session would read it, parsed once. Cached on its own
-        // bytes: collection runs on every save and every acknowledgement, and a season's
-        // record is not something to re-parse per operation.
-        const raw = Store.durableGet(SCHEDULE_KEY);
-        let stored = null;
-        if (raw !== null) {
-            if (this._storedCache && this._storedCache.raw === raw) {
-                stored = this._storedCache.schedule;
-            } else {
-                try { stored = JSON.parse(raw); } catch (error) { stored = null; }
-                this._storedCache = { raw, schedule: stored };
-            }
-        }
+        // The schedule as the NEXT session would read it. See storedSchedule.
+        const stored = this.storedSchedule().schedule;
 
         const finished = op => {
             if (op.retired) return true;
@@ -2885,22 +2976,24 @@ const FarkadSync = {
         // server holds now is something else, somebody corrected it in between. That is a
         // decision, exactly as it is in the conflict branch, and it is held the same way.
         //
-        // AND ONLY WHEN SOMEBODY ELSE PUT IT THERE - the same rule and for the same
-        // reason: two tabs of one app share a device id, and the person's own later
-        // correction must win rather than be held against them.
-        const wroteLast = String((this._baseDoc || {}).updatedBy || '');
-        const someoneElse = wroteLast !== '' && wroteLast !== String(syncDeviceId());
+        // ASKED OF THE PATH, not of the document's signature.
+        //
+        // "Somebody else put it there" used to be decided on the whole document's
+        // updatedBy, and skipped the pass entirely when that was this device. One
+        // unrelated write of this device's own - another day, in its own batch, which
+        // must go - signed the document with its name; with the hold marker refused by
+        // the disk and the session closed, nothing else remembered the hold, and the
+        // reopened phone sent the contested edit over the other phone's correction. The
+        // base recorded with the edit was on the disk throughout and never consulted.
+        // Measured in tests/contested.test.mjs.
+        //
+        // The record answers the question the signature could not: whether what the
+        // server holds now is something this device has seen or produced there. Two tabs
+        // of one app share a disk, and the disk is in the record - so the person's own
+        // later correction still wins, and somebody else's still holds.
         const movedUnder = [];
         this._outbox.forEach((item, path) => {
             if (item.sent || item.held || this._heldNow.has(String(path))) return;
-            // ONLY A PATH THIS DEVICE CAN SHOW HAS MOVED - the same words as the
-            // conflict branch, and the same limit. `base: null` means the server had
-            // NOTHING at this path when the edit was made, and a path this device never
-            // saw a value on is not a path it can say somebody corrected. Two phones
-            // reaching an empty project are the ordinary case: both recorded null for
-            // everything, one creates the document, and holding the other's whole evening
-            // against it would stop a crew from recording their first day.
-            if (!someoneElse || item.base === undefined || item.base === null) return;
             // A DAY OR A LEDGER ENTRY, and nothing else.
             //
             // Those are the two families where a queued value REPLACES what is there, so
@@ -2911,10 +3004,8 @@ const FarkadSync = {
             // restore is its own transaction with its own rules (G12-G14). Holding roster
             // paths here would have stopped a worker added after a prepared restore from
             // ever reaching the cloud - a guarantee that already has a suite of its own.
-            if (String(path).indexOf('days.') !== 0
-                && String(path).indexOf('ledger.') !== 0) return;
-            if (canonicalJson(this.baseValueAt(path)) === item.base) return;
-            movedUnder.push(String(path));
+            if (!replacesWhole(path)) return;
+            if (this.movedUnder(item, path, this._baseDoc)) movedUnder.push(String(path));
         });
         if (movedUnder.length > 0) {
             const wrote = this.holdContested(movedUnder);
@@ -3210,18 +3301,24 @@ const FarkadSync = {
                     // to win. Holding there would throw away the correction the same
                     // person just made, which is this defect inverted.
                     //
-                    // The value's author is the only signal that survives: by the time the
-                    // refusal is handled, the operation that produced it has usually been
-                    // acknowledged and collected off this disk, so asking the queue whether
-                    // it ever held that value answers no even when it did.
+                    // The operation's own record answers that now: it carries every value
+                    // this device had seen or produced at the path, the older tab's
+                    // included, so a path that is contested against it moved under
+                    // somebody else, whoever signed the document. The document's author
+                    // decides only for a queue an older build wrote, where the record
+                    // carries no such values and, by the time the refusal is handled, the
+                    // operation that produced the older tab's value has usually been
+                    // acknowledged and collected off this disk.
                     const base = this._sendBase;
                     const wroteIt = String((error.document || {}).updatedBy || '');
                     const someoneElse = wroteIt !== '' && wroteIt !== String(syncDeviceId());
-                    const moved = (!error.cutover && someoneElse && error.document
+                    const moved = (!error.cutover && error.document
                         && typeof error.document === 'object'
                         && base && typeof base === 'object')
-                        ? contested.filter(path =>
-                            Object.prototype.hasOwnProperty.call(base, String(path)))
+                        ? contested.filter(path => {
+                            const frozen = base[String(path)];
+                            return Boolean(frozen) && (frozen.own || someoneElse);
+                        })
                         : [];
                     if (moved.length > 0) {
                         const wrote = this.holdContested(moved);
@@ -4395,6 +4492,87 @@ const FarkadSync = {
         return node;
     },
 
+    // What the disk holds at `path`, as a mark: VALUE_ABSENT for nothing, and null when
+    // the record will not read - which is not nothing, and contributes nothing.
+    storedMarkAt(path, stored) {
+        if (stored.raw === null) return VALUE_ABSENT;
+        if (!stored.schedule) return null;
+        return valueMark(readPath(stored.schedule, path));
+    },
+
+    // Every value this device has held or produced at `path`, as marks. Recorded with
+    // the operation - see queueOperations - and consulted by movedUnder and by the
+    // conflict branch, which ask the same question of two documents.
+    //
+    //   the disk: the adopted document plus every edit made on this device since, in
+    //   this tab or another - so a tab whose listener is behind the disk still knows the
+    //   value its sibling put there;
+    //   the last snapshot, when one was heard: a tab whose disk is AHEAD of its listener
+    //   - the sibling wrote - must not read the server's older value as a correction;
+    //   the operation this one supersedes: its own values, and everything it had seen.
+    //   A superseded write may be in flight and land, and the server then holds this
+    //   device's own value under a record that predates it.
+    //
+    // The disk is the device. Two contexts on one disk are one person, whatever they
+    // signed their writes with, and the value one of them put there is a value the other
+    // has held - which is why the person's later decision on one tab is never held
+    // against their earlier one on another. See tests/probes.test.mjs, Q2 and Q3.
+    seenMarksAt(path, held, previous) {
+        const marks = [];
+        const add = mark => {
+            if (typeof mark === 'string' && mark !== '' && marks.indexOf(mark) === -1) {
+                marks.push(mark);
+            }
+        };
+        add(held);
+        if (this._baseDoc !== null) add(valueMark(this.baseValueAt(path)));
+        if (previous) {
+            if (Array.isArray(previous.seen)) previous.seen.forEach(add);
+            else if (typeof previous.base === 'string') add(markOfRecorded(previous.base));
+            add(valueMark(previous.value));
+        }
+        return marks;
+    },
+
+    // Has somebody else changed what `document` holds at `path` since the values this
+    // operation was built on? The pre-send half of the conflict rule: the same question
+    // contestedPaths asks of a refusal's document, asked of the last snapshot BEFORE the
+    // write leaves, because a phone that comes back, hears the winner and only then
+    // flushes is refused by nothing - its revision is current - and the collision it is
+    // about to lose already happened while it was away.
+    movedUnder(item, path, document) {
+        // Nothing heard: nothing to compare against, and nothing to decide here. The
+        // write goes out against no revision, the server answers with its document, and
+        // the conflict branch asks this question of that answer.
+        if (!document || typeof document !== 'object') return false;
+        const marks = marksOf(path, readPath(document, path));
+        // A path the server holds nothing at is not a path anybody's record is lost on.
+        // Two phones reaching an empty project are the ordinary case: one creates the
+        // document, and the other's evening - on the days the first never wrote - goes.
+        if (marks[0] === VALUE_ABSENT) return false;
+        // Nor is a path the server already holds THIS VALUE at. An earlier attempt whose
+        // answer was lost landed it, and the retry is answered from its receipt; or
+        // another phone recorded the same thing. Either way, sending it changes nothing
+        // and loses nothing - and holding it left a phone owing a day the cloud had.
+        if (marks.indexOf(valueMark(item.value)) !== -1) return false;
+        if (Array.isArray(item.seen)) {
+            return !marks.some(mark => item.seen.indexOf(mark) !== -1);
+        }
+        // A QUEUE AN OLDER BUILD WROTE carries no record of what this device produced,
+        // so the document's last writer is the only signal there is, and it is read as
+        // that build read it: nothing this device signed is held against it. A recorded
+        // base is compared. No base at all - that build could not tell a session that
+        // had heard nothing from a path the server held nothing at, and wrote null for
+        // both - is read as unheard, and held whenever somebody else now holds a value
+        // there: it used to be read as nothing, and sent over the other phone's day.
+        const wroteLast = String(document.updatedBy || '');
+        if (wroteLast === '' || wroteLast === String(syncDeviceId())) return false;
+        if (typeof item.base === 'string') {
+            return canonicalJson(readPath(document, path)) !== item.base;
+        }
+        return true;
+    },
+
     noteRevision(raw) {
         const said = raw && raw.revision;
         if (!Number.isInteger(said) || said < 0) return;
@@ -4447,8 +4625,15 @@ const FarkadSync = {
             // contested. Kept as one constant so a sixth ordering field cannot do it again.
             if (ENVELOPE_FIELDS.indexOf(path) !== -1) return false;
             // Against the base this write FROZE, not against whatever the base has become
-            // since. See stampProtocol.
-            return canonicalJson(read(current, path)) !== base[path];
+            // since. See stampProtocol. A path with no frozen base is one this client
+            // cannot compare, and it is contested for that reason.
+            const frozen = base[path];
+            if (!frozen || !Array.isArray(frozen.seen)) return true;
+            const marks = marksOf(path, read(current, path));
+            // A path the document already holds this write's value at has not moved
+            // away from it - see movedUnder.
+            if (marks.indexOf(valueMark(patch[path])) !== -1) return false;
+            return !marks.some(mark => frozen.seen.indexOf(mark) !== -1);
         });
     },
 
@@ -4476,25 +4661,34 @@ const FarkadSync = {
             Object.keys(patch).forEach(path => {
                 if (path === 'updatedAt' || path === 'updatedBy') return;
                 if (path === 'protocol' || path === 'revision' || path === 'lastOpId') return;
-                // THE QUEUE'S OWN BASE FIRST. The operation recorded what the server held
-                // when the person made the edit, in the same write that queued it, so it
-                // is still there after a reopen - which is the whole point: reading it
-                // live at that moment gives the winner's value and answers "nothing
-                // moved" to a question whose answer is "somebody corrected this".
+                // THE QUEUE'S OWN RECORD FIRST. The operation wrote down what this device
+                // had seen and produced at the path when the person made the edit, in the
+                // same write that queued it, so it is still there after a reopen - which
+                // is the whole point: reading it live at that moment gives the winner's
+                // value and answers "nothing moved" to a question whose answer is
+                // "somebody corrected this". `own` says the record can tell this device's
+                // values from anybody else's, so the document's author is not needed.
                 //
-                // A queue written by an older build carries no base, and then the live
-                // read is the only answer there is and this behaves as it did.
-                // A recorded base is used only when it RECORDS something. `null` says the
-                // server held nothing at this path when the edit was made, which is not
-                // evidence that anybody corrected it - two phones reaching an empty
-                // project both record null for everything, and treating that as a moved
-                // path made the loser of the create race hold its whole roster.
+                // A queue written by an older build recorded the base alone, or nothing,
+                // and then the document's author is the only signal there is and the
+                // conflict branch reads it as it did. A recorded base is used only when
+                // it RECORDS something: that build's `null` said the server held nothing
+                // at this path when the edit was made, which is not evidence that
+                // anybody corrected it - two phones reaching an empty project both record
+                // null for everything, and treating that as a moved path made the loser
+                // of the create race hold its whole roster.
                 const queued = this._outbox.get(path);
-                if (queued && typeof queued.base === 'string') {
-                    this._sendBase[path] = queued.base;
+                if (queued && Array.isArray(queued.seen)) {
+                    this._sendBase[path] = { seen: queued.seen.slice(), own: true };
                     return;
                 }
-                this._sendBase[path] = canonicalJson(this.baseValueAt(path));
+                if (queued && typeof queued.base === 'string') {
+                    this._sendBase[path] = { seen: [markOfRecorded(queued.base)], own: false };
+                    return;
+                }
+                this._sendBase[path] = {
+                    seen: [valueMark(this.baseValueAt(path))], own: false
+                };
             });
         }
         patch.protocol = this.PROTOCOL;

@@ -357,11 +357,27 @@ function tunnel(cloud) {
     // and neither has seen the other's. The value at days.<date>.actual.<worker> is the
     // whole entries array, so this is one field path with two different answers, which is
     // the case the revision exists for.
+    //
+    // "Never seen it" is arranged by WITHHOLDING the snapshot, not by nulling the base
+    // in memory. This used to connect the second phone, let it adopt the first phone's
+    // day onto its own disk, and then null _revision and _baseDoc by hand - and a phone
+    // whose disk holds the day HAS seen it: its edit adds a second site beside the one
+    // it was looking at, and that merges. The record an operation carries now says what
+    // the device held when the edit was made, so a phone can no longer be made to forget
+    // by clearing a variable; it has to genuinely not have heard.
     const cloud = makeCloud();
     const one = phone(null, 'd_one');
     const two = phone(null, 'd_two');
+    const wall = tunnel(cloud);
     one.Sync.connect(cloud.adapter);
     await settle(TICK * 10);
+    two.Sync.connect(wall.adapter);
+    await settle(TICK * 10);
+    given('the second phone has heard a document with nothing for this day',
+        two.Sync._revision === ((cloud.doc || {}).revision || null)
+        && ((cloud.doc || {}).days || {})[DAY] === undefined,
+        `${two.Sync._revision} of ${(cloud.doc || {}).revision}`);
+    wall.close();
 
     one.State.commit(one.call('assignPlace', one.State.schedule,
         DAY, 'w_01', 'actual', 'p_01'));
@@ -375,10 +391,6 @@ function tunnel(cloud) {
         placesOf().join());
 
     // The second phone has never seen it, and writes its own answer for the same day.
-    two.Sync.connect(cloud.adapter);
-    await settle(TICK * 5);
-    two.Sync._revision = null;
-    two.Sync._baseDoc = null;
     two.State.commit(two.call('assignPlace', two.State.schedule,
         DAY, 'w_01', 'actual', 'p_02'));
     two.Sync.flush();
