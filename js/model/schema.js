@@ -1755,7 +1755,17 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // js/ui/reports.js. Nothing can be deducted from a number nobody knows, so the
     // balance passes through him untouched rather than being written off against a wage
     // this app cannot price.
-    const gross = row && row.amount !== null ? Number(row.amount) : null;
+    // A CLOSED PERIOD REPORTS THE WAGE IT WAS CLOSED ON, not the wage the schedule
+    // happens to price today. Recomputing it meant a day corrected off a paid fortnight,
+    // or a rate fixed, rewrote a payslip somebody was already handed - measured at
+    // 3,050 -> 2,440 on a row whose deduction stayed 3,050, so it stopped adding up.
+    // A closure written before this carries no gross, and then the live figure is the
+    // only answer there is; nothing is invented for it.
+    const liveGross = row && row.amount !== null ? Number(row.amount) : null;
+    const gross = (closed !== undefined && closed.gross !== undefined
+        && closed.gross !== null)
+        ? Number(closed.gross)
+        : liveGross;
 
     // ONE fold, and it agrees with advanceOutstanding in js/model/ledger.js entry for
     // entry. Measured before this: a repayment of 400 recorded against the wrong man and
@@ -1816,10 +1826,18 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     const frozen = closed !== undefined && closed.balanceAfter !== undefined
         ? agoraRound(closed.balanceAfter)
         : live;
+    // The opening balance is frozen with the wage, for the same reason: it is a figure
+    // the payslip states. `given`, `repaid` and `reversed` are deliberately NOT frozen -
+    // they are what the record holds for this window today, and the sheet's late-movement
+    // note is built from them. Freezing those would make a repayment that arrived after
+    // the close vanish off the page, which is the money-losing half of this same fault.
+    const openedOn = (closed !== undefined && closed.carriedIn !== undefined)
+        ? agoraRound(Number(closed.carriedIn) || 0)
+        : agoraRound(Number(carriedIn) || 0);
     return {
         from: fromDate,
         to: toDate,
-        carriedIn: agoraRound(Number(carriedIn) || 0),
+        carriedIn: openedOn,
         given: agoraRound(given),
         repaid: agoraRound(repaid),
         reversed: agoraRound(reversed),

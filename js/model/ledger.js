@@ -430,11 +430,23 @@ function closureProblems(schedule, entry) {
     // MORE THAN HE EARNED. A deduction is money coming off a wage; it cannot exceed the
     // wage, and it cannot leave one below zero - a man does not owe his employer his
     // labour back.
-    const advance = ((schedule && schedule.advances) || {})[String(entry.advanceId)];
-    const who = String(entry.workerId || (advance || {}).workerId || '');
-    const row = who && typeof payrollReport === 'function'
-        ? payrollReport(schedule, from, to).find(item => item.workerId === who) : null;
-    const gross = row && row.amount !== null ? Number(row.amount) : null;
+    //
+    // JUDGED AGAINST THE WAGE THE CLOSURE ITSELF RECORDS, not against the wage the
+    // schedule prices today. This asked payrollReport every time, so removing one
+    // historical day from a fortnight that had been closed correctly made this report
+    // "a closure deducting more than the wage it came off" and put the entry into
+    // impossibleClosures - the list a person is shown when they ask whether their books
+    // are sound. A closure that was exactly right when it was written was accused because
+    // the schedule moved underneath it.
+    //
+    // A closure written before closures carried their wage has nothing to be judged
+    // against. It is left alone rather than measured against a number that may have
+    // nothing to do with the day it was written: condemning a record on evidence this
+    // build knows it cannot trust is the same fault in the other direction. The two
+    // checks below it - the advance it came off, and the balance it left - read the
+    // append-only ledger and still apply to every closure.
+    const gross = entry.gross !== undefined && entry.gross !== null
+        ? Number(entry.gross) : null;
     if (gross !== null && off > gross + 1e-6) {
         out.push('a closure deducting more than the wage it came off');
     }
@@ -706,14 +718,64 @@ function periodClosureFor(schedule, advanceId, periodFrom) {
     return held[closureId(advanceId, periodFrom)] || null;
 }
 
+// EVERY FACT THE PAYSLIP WAS MADE OF, worked out once, at the moment of closing.
+//
+// A closure used to record what came off the wage and the balance it left, and nothing
+// else - so the wage itself, and therefore the net, were worked out again from the live
+// schedule on every later read. A day corrected off a fortnight that had been paid, a
+// rate fixed, an import from a phone that was in a tunnel: any of them rewrote a payslip
+// somebody had already been handed. Measured before this: removing one historical day
+// moved a closed row from 3,050/-3,050/0 to 2,440/-3,050/-610, a row that does not add
+// up, on the sheet the crew is paid from.
+//
+// The basis travels too - the rate and the days it was priced at - because a payslip that
+// cannot say how it reached its own number is a number without a reason.
+function closureFacts(schedule, workerId, from, to, carriedIn) {
+    if (typeof advanceWalk !== 'function') return null;
+    const walk = advanceWalk(schedule, workerId, from, to, carriedIn || 0);
+    const row = typeof payrollReport === 'function'
+        ? payrollReport(schedule, from, to).find(item => item.workerId === workerId)
+        : null;
+    const worker = ((schedule && schedule.workers) || [])
+        .find(item => String(item.id) === String(workerId));
+    return {
+        gross: walk.gross,
+        carriedIn: walk.carriedIn,
+        given: walk.given,
+        repaid: walk.repaid,
+        reversed: walk.reversed,
+        net: walk.net,
+        // What it was priced at, so the number can be explained without the schedule.
+        basis: {
+            dailyRate: worker ? Number(worker.dailyRate) || 0 : 0,
+            hourlyRate: worker ? Number(worker.hourlyRate) || 0 : 0,
+            payUnits: row ? Number(row.payUnits) || 0 : 0,
+            attendanceDays: row ? Number(row.attendanceDays) || 0 : 0,
+            workerName: worker ? String(worker.name || '') : ''
+        }
+    };
+}
+
 function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at, by,
-    balanceAfter) {
+    balanceAfter, facts) {
     // ALREADY CLOSED IS CLOSED. Returning null rather than a second write is what makes
     // the flow idempotent on ONE phone; the deterministic id above is what makes it
     // idempotent across three. A closed period is a record and iron law 1 says a record
     // is never rewritten, so this refuses rather than restating.
     if (periodClosureFor(schedule, advanceId, from)) return null;
-    return appendLedgerEntry(schedule, {
+    // Worked out HERE when the caller did not bring them, so a closure written by any
+    // route carries them. A caller that has already walked the account passes its own
+    // walk in rather than making this repeat it.
+    const held = facts || closureFacts(schedule, workerId, from, to, undefined);
+    return appendLedgerEntry(schedule, Object.assign({}, held && {
+        gross: held.gross,
+        carriedIn: held.carriedIn,
+        given: held.given,
+        repaid: held.repaid,
+        reversed: held.reversed,
+        net: held.net,
+        basis: held.basis
+    }, {
         id: closureId(advanceId, from),
         advanceId: String(advanceId),
         kind: 'deducted',
@@ -731,7 +793,7 @@ function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at,
         amount: Number(amount) || 0,
         at: String(at || ''),
         by: String(by || '')
-    });
+    }));
 }
 
 // CLOSING AN ACCOUNT, spelled out before anything is written.
@@ -818,6 +880,22 @@ function closedPeriods(schedule, workerId) {
             if (entry.balanceAfter !== undefined) {
                 at.balanceAfter = (at.balanceAfter || 0) + (Number(entry.balanceAfter) || 0);
             }
+            // THE ACCOUNT-LEVEL FACTS, which are per PERIOD and not per advance.
+            //
+            // deducted and balanceAfter are summed above because one close can touch
+            // several advances and each writes its own entry. The wage is not like that:
+            // every entry from one close records the SAME fortnight's gross, so summing
+            // would multiply a man's wage by the number of advances he happened to hold.
+            // Taken from the first entry that carries them, and left undefined when none
+            // does - a closure written before closures recorded their wage has nothing
+            // here, and the walk falls back to the live figure rather than inventing one.
+            if (at.gross === undefined && entry.gross !== undefined && entry.gross !== null) {
+                at.gross = Number(entry.gross);
+            }
+            if (at.carriedIn === undefined && entry.carriedIn !== undefined) {
+                at.carriedIn = Number(entry.carriedIn) || 0;
+            }
+            if (at.basis === undefined && entry.basis !== undefined) at.basis = entry.basis;
             out[key] = at;
         });
     return out;

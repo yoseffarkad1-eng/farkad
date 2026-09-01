@@ -2041,8 +2041,22 @@ function moneyOf(row) {
     const netted = row.carry && !priceless
         ? -agora(row.carry.deducted)
         : (taken > 0 ? -agora(taken) : 0);
-    const priced = row.amount !== null;
-    const gross = priced ? agora(row.amount) : null;
+    // A CLOSED FORTNIGHT PRINTS THE WAGE IT WAS CLOSED ON.
+    //
+    // row.amount is days times rates as the schedule prices them TODAY. For an open
+    // period that is exactly right. For a closed one it means a day corrected off a
+    // fortnight that was printed and paid, or a day added to it, rewrites a payslip
+    // somebody already has in their hand - measured at 3,050 becoming 2,440 while the
+    // deduction column stayed 3,050, so the row stopped adding up. The account carries
+    // the wage the closure recorded; where it does, that is the number.
+    //
+    // A closure written before closures recorded their wage has none, and then the live
+    // figure is the only answer there is. Nothing is invented for it.
+    const frozen = row.carry && row.carry.closed && !priceless
+        && row.carry.gross !== null && row.carry.gross !== undefined
+        ? agora(row.carry.gross) : null;
+    const priced = frozen !== null || row.amount !== null;
+    const gross = frozen !== null ? frozen : (row.amount !== null ? agora(row.amount) : null);
     return {
         gross,
         advances: taken === 0 ? 0 : -agora(taken),
