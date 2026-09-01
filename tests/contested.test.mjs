@@ -288,6 +288,97 @@ const wonCount = accepted();
         JSON.stringify(Object.keys(cloud2.doc.days || {})));
 }
 
+// -------------------------------------------- and a hold the disk refused survives anyway
+{
+    suite('a hold the disk would not take still holds after a reopen');
+
+    // The marker is written AFTER the refusal, and a disk that will not take it leaves
+    // only `_heldNow` - which is a Set in one session's memory. Close the app and the
+    // hold is gone: the operation is still in the outbox with sent:false, nothing on the
+    // disk says it lost, and the next flush puts the loser's value over the winner's
+    // correction. Fail-open, on the one path where this app has decided to fail closed.
+    //
+    // The fix cannot be another post-conflict write - the same disk refuses that too. The
+    // base each edit was built on is recorded WITH the operation, in the same verified
+    // write, so it is exactly as durable as the edit itself: if it cannot be written the
+    // edit is not queued at all, which is what State.commit already promises.
+    const faults = [
+        ['the marker write is refused', device =>
+            device.failWrite(key => key.indexOf(':hold:') !== -1)],
+        ['there is no room for it', device =>
+            device.setQuota(key => key.indexOf(':hold:') !== -1)],
+        ['it comes back altered', device =>
+            device.corruptWhen(key => key.indexOf(':hold:') !== -1)]
+    ];
+
+    for (const [what, breakIt] of faults) {
+        const sky = makeCloud();
+        const won = phone('d_fo_a_' + what.replace(/\W/g, '').slice(0, 8));
+        const lost = phone('d_fo_b_' + what.replace(/\W/g, '').slice(0, 8));
+        const wall = tunnel(sky);
+        won.Sync.connect(sky.adapter);
+        await settle(TICK * 10);
+        lost.Sync.connect(wall.adapter);
+        await settle(TICK * 10);
+
+        const set = (device, placeId) => device.State.commit(device.call('assignPlace',
+            device.State.schedule, DAY, 'w_01', 'actual', placeId));
+        set(won, 'p_00');
+        await settleUntil(() => Boolean((sky.doc.days || {})[DAY])
+            && lost.Sync._revision === sky.doc.revision, 5000);
+
+        wall.close();
+        set(won, 'p_01');
+        await settleUntil(() =>
+            JSON.stringify(sky.doc.days[DAY]).indexOf('p_01') !== -1, 5000);
+        const winner = JSON.stringify(sky.doc.days[DAY]);
+        const writes = sky.writes.filter(write => !write.replayed).length;
+
+        breakIt(lost);
+        set(lost, 'p_02');
+        lost.Sync.flush();
+        await settleUntil(() => lost.Sync.status === 'contested', 5000);
+        given(`${what}: the loser is told, in this session`,
+            lost.Sync.status === 'contested', lost.Sync.status);
+        // No READABLE marker: `corruptWhen` lets the write happen and gives back something
+        // else, which is why setVerified reads back rather than trusting the return.
+        const marker = Object.keys(lost.dump()).filter(key => key.indexOf(':hold:') !== -1);
+        given(`${what}: and the disk did not durably record the hold`,
+            marker.every(key => lost.dump()[key] !== '1'),
+            JSON.stringify(marker.map(key => [key.slice(-12), lost.dump()[key]])));
+
+        // THE REOPEN, in the order that is actually dangerous: the phone comes back, HEARS
+        // the winner's document first, and only then flushes. That is what empties the
+        // conflict of evidence - the base it would be compared against has already become
+        // the winner's value, so nothing looks contested and the loser rebases over it.
+        wall.release();
+        await settle(TICK * 20);
+        const again = makeDevice({ deviceId: lost.deviceId, storage: lost.dump() });
+        again.Sync.pushDelayMs = TICK;
+        again.setToday('2026-08-20');
+        again.ctx.askTell = () => Promise.resolve();
+        again.State.load();
+        again.Sync.connect(sky.adapter);
+        await settleUntil(() => again.Sync._revision === sky.doc.revision, 5000);
+        given(`${what}: the reopened phone has heard the winner`,
+            again.Sync._revision === sky.doc.revision,
+            `${again.Sync._revision} of ${sky.doc.revision}`);
+        again.Sync.flush();
+        await settle(TICK * 80);
+
+        check(`${what}: the winner's correction is still the winner's`,
+            JSON.stringify(sky.doc.days[DAY]) === winner,
+            `${JSON.stringify(sky.doc.days[DAY])} (was ${winner})`);
+        check(`${what}: and the reopened loser sent nothing`,
+            sky.writes.filter(write => !write.replayed).length === writes,
+            `${writes} -> ${sky.writes.filter(write => !write.replayed).length}`);
+        check(`${what}: it still owes its edit`, again.Sync.pendingCount() > 0,
+            String(again.Sync.pendingCount()));
+        check(`${what}: and does not say synced`, again.Sync.status !== 'synced',
+            again.Sync.status);
+    }
+}
+
 // ------------------------------------------------------------------ the way out is a person
 {
     suite('a fresh explicit edit of the same path supersedes the held one');
