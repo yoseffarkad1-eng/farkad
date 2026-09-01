@@ -1394,13 +1394,19 @@ const FarkadSync = {
             // provenance is gone. `null` means the server had nothing at this path, which
             // is a different statement from "no base was recorded" and has to survive
             // JSON to stay different.
-            const built = canonicalJson(this.baseValueAt(entry.path));
+            // Decided on the VALUE, not on its serialisation: canonicalJson(undefined)
+            // is the STRING "null", so testing the serialised form for absence never
+            // fires and every fresh path was recorded as though the server had held a
+            // literal null there. Measured: two phones reaching an empty project held
+            // each other's whole roster.
+            const seen = this.baseValueAt(entry.path);
+            const built = seen === undefined ? null : canonicalJson(seen);
             ops.push({
                 opId: opIdNow(),
                 path: entry.path,
                 value: entry.value,
                 seq,
-                base: built === undefined ? null : built,
+                base: built,
                 // Everything on the disk for this path, superseded by this one. Not only
                 // the projected winner: a loser left behind by a failed collection is
                 // still a record that could otherwise come back.
@@ -2887,9 +2893,27 @@ const FarkadSync = {
         const movedUnder = [];
         this._outbox.forEach((item, path) => {
             if (item.sent || item.held || this._heldNow.has(String(path))) return;
-            if (!someoneElse || item.base === undefined) return;
-            const built = item.base === null ? undefined : item.base;
-            if (canonicalJson(this.baseValueAt(path)) === built) return;
+            // ONLY A PATH THIS DEVICE CAN SHOW HAS MOVED - the same words as the
+            // conflict branch, and the same limit. `base: null` means the server had
+            // NOTHING at this path when the edit was made, and a path this device never
+            // saw a value on is not a path it can say somebody corrected. Two phones
+            // reaching an empty project are the ordinary case: both recorded null for
+            // everything, one creates the document, and holding the other's whole evening
+            // against it would stop a crew from recording their first day.
+            if (!someoneElse || item.base === undefined || item.base === null) return;
+            // A DAY OR A LEDGER ENTRY, and nothing else.
+            //
+            // Those are the two families where a queued value REPLACES what is there, so
+            // sending one over somebody's correction loses recorded work or money - which
+            // is the whole of what this hold is for. The roster is not like that: it
+            // merges per id, an added worker is additive rather than a correction of a
+            // value somebody was looking at, and the ordering of a roster change against a
+            // restore is its own transaction with its own rules (G12-G14). Holding roster
+            // paths here would have stopped a worker added after a prepared restore from
+            // ever reaching the cloud - a guarantee that already has a suite of its own.
+            if (String(path).indexOf('days.') !== 0
+                && String(path).indexOf('ledger.') !== 0) return;
+            if (canonicalJson(this.baseValueAt(path)) === item.base) return;
             movedUnder.push(String(path));
         });
         if (movedUnder.length > 0) {
@@ -4458,9 +4482,14 @@ const FarkadSync = {
                 //
                 // A queue written by an older build carries no base, and then the live
                 // read is the only answer there is and this behaves as it did.
+                // A recorded base is used only when it RECORDS something. `null` says the
+                // server held nothing at this path when the edit was made, which is not
+                // evidence that anybody corrected it - two phones reaching an empty
+                // project both record null for everything, and treating that as a moved
+                // path made the loser of the create race hold its whole roster.
                 const queued = this._outbox.get(path);
-                if (queued && queued.base !== undefined) {
-                    this._sendBase[path] = queued.base === null ? undefined : queued.base;
+                if (queued && typeof queued.base === 'string') {
+                    this._sendBase[path] = queued.base;
                     return;
                 }
                 this._sendBase[path] = canonicalJson(this.baseValueAt(path));
