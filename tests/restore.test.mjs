@@ -481,4 +481,80 @@ const bindingRecords = companionDocument => ({
     }
 }
 
+// ================================================================ R8
+{
+    suite('R8: a restore point carrying a poisoned map is refused at the door, and the phone is not held for it');
+
+    // Through the real door - restoreSnapshot in js/ui/share.js - and not through the
+    // gate function alone, because the failure was in the ORDER of the door. The gate,
+    // fullScheduleProblems, asked about the ledger container and nothing about a name
+    // that cannot be used as a key, so the file passed; the door then called
+    // normaliseSchedule on it, which handed the poisoned map to Recovery - quarantine
+    // written, writes blocked - BEFORE replaceEverything ran; and replaceEverything
+    // refused at its prepare stage because writes were blocked, which the door reports
+    // as "no room on the device to record the restore". The device is not full. Freeing
+    // space does nothing. And the phone somebody was recording on is now held, across a
+    // reopen, by a file they only tried to restore.
+    const device = makeDevice({ deviceId: 'd_door' });
+    device.setToday('2026-08-26');
+    device.State.load();
+    device.State.schedule.workers = [Object.assign({}, WORKERS[0])];
+    device.State.schedule.places = [Object.assign({}, PLACES[0])];
+    device.State.save({ silent: true });
+    given('a day is recorded on this phone',
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            '2026-08-12', 'w_01', 'actual', 'p_01')) === true);
+
+    const point = JSON.parse(JSON.stringify(device.State.schedule));
+    point.ledger = JSON.parse('{"advances":{},"unreadable":'
+        + '{"__proto__":{"id":"le_POISON_RESTORE","amount":500}}}');
+    const text = JSON.stringify(point);
+    given('the restore point really carries the name as an own key',
+        text.indexOf('"__proto__"') !== -1
+        && device.call('poisonedContainers', JSON.parse(text)).length === 1);
+    device.Store.set('scheduleData:snap:2026-08-01', text);
+
+    const said = [];
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    device.ctx.askTell = message => {
+        said.push(typeof message === 'string'
+            ? { title: '', message }
+            : { title: String(message.title || ''), message: String(message.message || '') });
+        return Promise.resolve();
+    };
+
+    const before = device.raw('scheduleData:v2');
+    await device.call('restoreSnapshot', '2026-08-01');
+
+    const last = said[said.length - 1] || { title: '', message: '' };
+    check('the door says the file is not a whole record, in its own words',
+        last.title === 'לא בוצע שחזור' && last.message.indexOf('אינו רישום שלם') !== -1,
+        JSON.stringify(last));
+    check('and names what is wrong with it, not a full disk',
+        last.message.indexOf('אין מקום') === -1
+        && last.message.indexOf('שאי אפשר להשתמש בו כמפתח') !== -1,
+        JSON.stringify(last));
+    check('nothing on the disk changed', device.raw('scheduleData:v2') === before);
+    check('the phone is not held for a file it only tried to restore',
+        device.call('farkadWritesBlocked') === false);
+    check('Recovery was told nothing, because nothing on this phone is damaged',
+        device.global('Recovery').problems.length === 0,
+        JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
+    check('and no quarantine copy was written for it',
+        Object.keys(device.dump()).every(key => key.indexOf(':poison:') === -1),
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('poison') !== -1)));
+    check('the next day can still be recorded',
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            '2026-08-13', 'w_01', 'actual', 'p_01')) === true);
+
+    const again = makeDevice({ deviceId: 'd_door_r', storage: device.dump() });
+    again.setToday('2026-08-26');
+    again.State.load();
+    check('and a reopened phone is not held either',
+        again.call('farkadWritesBlocked') === false,
+        JSON.stringify(again.global('Recovery').problems.map(problem => problem.key)));
+    check('the refused restore point is left where it was',
+        again.raw('scheduleData:snap:2026-08-01') === text);
+}
+
 report();
