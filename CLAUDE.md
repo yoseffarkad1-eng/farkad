@@ -84,17 +84,19 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the thirty node suites; no browser, runs in a few minutes
+    npm test                # the thirty-five node suites; no browser, runs in a few minutes
     npm run test:all        # adds smoke, print, mobile, update, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
-    npm run test:emulator   # rules, the production adapter's CAS, the rollout (needs Java)
+    npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
+                            #   CAS, the rollout and the cutover (needs Java)
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). Measured at this commit, from one clean
-detached worktree and copied from no other: `npm test` is **3326/3326 across 31 suites**,
+detached worktree and copied from no other: `npm test` is **3429/3429 across 35 suites**,
 and `npm run test:release` — which adds the eight browser suites, `sendclaim` and the
-four emulator suites — is **5261/5261 across 44 suites**, and is the gate a build has to
-pass whole. Anything less than every check passing is a stop, not a warning. `npm test`
+five emulator suites — is **5516/5516 across 49 suites**, and is the gate a build has to
+pass whole. `data.test.mjs` was re-run at seeds 1, 42, 2026 and 42 — 1943/1943 every
+time. Anything less than every check passing is a stop, not a warning. `npm test`
 and `npm run test:release` are different gates and are reported separately; neither is
 wrapped in anything that turns a nonzero exit into a success. A count carried over from
 another commit is worse than no count: re-measure, or say you did not.
@@ -177,6 +179,11 @@ written down so it cannot happen twice.
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator
     tests/rollout.test.mjs     publishing the rules over a genuine legacy document, and the cutover
     tests/ledger.ingress.test.mjs malformed ledger data through every door: held aside, never coerced
+    tests/poison.test.mjs      a ledger id that would land on a prototype, through every writer
+    tests/merge.test.mjs       what adopting somebody else's document takes off this one
+    tests/contested.test.mjs   the write that lost a race, and every trigger that must not send it
+    tests/receipt.test.mjs     a receipt names the operation, not just the revision it reached
+    tests/bootstrap.rules.test.mjs the server's own answer to a bootstrap carrying business data
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe

@@ -9,7 +9,7 @@
 > |---|---|
 > | smoke, print, mobile, update, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
 > | every other suite in `npm test` | **Node**, with V8 contexts and a fake localStorage - no browser at all |
-> | rules, cas-emulator, rollout, bootstrap | **Node** against the local **Firestore emulator** |
+> | rules, bootstrap-rules, cas-emulator, rollout, bootstrap | **Node** against the local **Firestore emulator** |
 >
 > None of them is Safari and none of them is a phone. Where a suite sets an iPhone
 > user-agent string it is still Chromium: that proves the app's own branch runs, not that
@@ -18,6 +18,19 @@
 > system, touches the `-apple-system` faces and Safari's own minimum sizes, and reflows
 > controls in ways no stylesheet here can be made to. No result from any of the above may
 > be reported as physical-device coverage. This table is what physical coverage is.
+>
+> HOW the mobile suite doubles the text, because the previous answer was not good enough
+> to cite. It used to set `documentElement.style.fontSize = '32px'` and sample four nodes.
+> Every font-size rule in `css/app.css` is in px, so the root size reached nothing that
+> had a rule of its own: measured, root went 16 -> 32 while `.name-cell` stayed 14,
+> `.week-cell` stayed 13 and the page's width did not move. Three of the four sampled
+> nodes were static elements of `index.html` carrying an inline style for the life of the
+> page. That pass could not have failed. It now REWRITES the cascade - every px
+> font-size in every stylesheet re-emitted at 2x with `!important` in one appended
+> `<style>` - and samples after four `showView()` calls and a `render()`, on nodes the
+> app rebuilt, at 320/375/390/430, with long Hebrew and Arabic names. It is still
+> Chromium and it is still not Dynamic Type; it is now at least a real measurement of a
+> real reflow. Line 18 below remains the only Dynamic Type coverage there is.
 
 מה זה: אף בדיקה אוטומטית לא יכולה להעיד על אייפון אמיתי. כל מה שנבדק עד עכשיו רץ
 בדפדפן על שרת, לא על טלפון. הרשימה הזאת היא מה שצריך לראות **בעיניים**, על הטלפון,
