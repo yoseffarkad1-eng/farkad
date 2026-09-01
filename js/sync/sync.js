@@ -4971,8 +4971,20 @@ const FarkadSync = {
                 }),
                 'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
                 + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
-            this.fail(new Error('part of the advances history could not be read'));
-            return;
+            // AND ONLY WHILE IT ACTUALLY BLOCKS. The entry is carried on this disk for
+            // ever, by design, so this count is above zero on every snapshot for the rest
+            // of the phone's life - including after the person has exported and
+            // acknowledged, when the report above is deduplicated and writes have
+            // resumed. Returning here regardless made every later snapshot an 'error'
+            // (the same line a tunnel produces, while the cloud provably held this
+            // phone's writes), and skipped the daily restore point, the identity repairs
+            // and the post-snapshot flush below it, every time. honestStatusFor already
+            // refuses 'synced' while writes are blocked; the return is for that case
+            // alone. Measured in tests/status.test.mjs.
+            if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+                this.fail(new Error('part of the advances history could not be read'));
+                return;
+            }
         }
         this.setStatus('synced');
 
