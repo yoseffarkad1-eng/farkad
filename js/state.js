@@ -861,10 +861,27 @@ function normaliseSchedule(raw, hints) {
     const approvals = isPlainObject(ledger.migrations) ? ledger.migrations : {};
     Object.keys(approvals).forEach(id => {
         const approval = approvals[id];
-        const readable = typeof migrationApprovalProblems !== 'function'
-            || migrationApprovalProblems(String(id),
-                isPlainObject(approval) ? Object.assign({}, approval, { id: String(id) })
-                    : approval).length === 0;
+        // THE APPROVAL AS IT ARRIVED, and the key it arrived under, asked separately -
+        // the same rule the entries above take, and for a worse reason.
+        //
+        // This handed the validator `Object.assign({}, approval, { id: String(id) })`:
+        // the body's id overwritten with the path's id BEFORE the check that the two
+        // agree, so migrationApprovalProblems' own `value.id !== id` could never be
+        // false. An approval stored under cm_carry with a body claiming cm_WRONG was
+        // read as an approval of cm_carry, written back under that name, and the
+        // disagreement destroyed.
+        //
+        // An approval is not a cosmetic id. carryMigrationApproved asks whether one
+        // exists under THIS plan's id, and that answer is what opens
+        // financialWritingEnabled - so an approval of something else, from a build that
+        // named its migrations differently or a byte that flipped, restated every
+        // account on three phones with nobody having approved anything.
+        //
+        // And the key is checked at all: an id this build cannot safely store would
+        // re-parent the map on the way in, exactly as it would for an entry.
+        const readable = isSafeId(String(id))
+            && (typeof migrationApprovalProblems !== 'function'
+                || migrationApprovalProblems(String(id), approval).length === 0);
         if (!readable) {
             keepUnder(schedule.ledger.unreadableMigrations, id, approval);
             return;

@@ -1195,7 +1195,12 @@ function recordCarryApproval(schedule, plan, at, by) {
     // NEVER OVERWRITTEN. Two phones approving the same plan write the same path with the
     // same numbers in it; the second is the first, not a second approval. A phone that
     // approved it first keeps its own `at` and `by`, because that is who actually decided.
-    if (schedule.ledger.migrations[record.id]) {
+    //
+    // OWNED, not merely reachable. A bare lookup answers from the prototype, so a name
+    // nothing in the record owns reported "already approved" and this returned without
+    // writing anything - the person presses the button, is told it is done, and no byte
+    // anywhere says so.
+    if (ownsKey(schedule.ledger.migrations, record.id)) {
         return { path: migrationPath(record.id),
             value: schedule.ledger.migrations[record.id], already: true };
     }
@@ -1205,7 +1210,10 @@ function recordCarryApproval(schedule, plan, at, by) {
 
 function carryMigrationApproved(schedule, plan) {
     const held = (schedule && schedule.ledger && schedule.ledger.migrations) || {};
-    return Boolean(held[String(plan.id)]);
+    // OWNED. This is the whole of the gate that decides whether three phones may write
+    // money, and `held[id]` answers from the prototype - so a value nothing in the record
+    // owns opened it.
+    return ownsKey(held, String(plan.id)) && Boolean(held[String(plan.id)]);
 }
 
 // Nothing to restate, or somebody has approved restating it. Either is settled.
