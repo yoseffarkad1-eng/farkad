@@ -214,6 +214,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     work(one, B_DAYS);
     one.State.commit(one.call('addAdvance', one.State.schedule,
         'w_01', '2026-08-10', 5000, ''));
+    approveCarry(one);
     const a = sheetFor(one, A);
     same('account A: 3,200 earned, 3,200 deducted, nothing to pay',
         [a.gross, a.advances, a.net], [3200, -3200, 0]);
@@ -226,6 +227,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     work(two, B_DAYS);
     two.State.commit(two.call('addAdvance', two.State.schedule,
         'w_01', '2026-08-10', 5000, ''));
+    approveCarry(two);
     const b = sheetFor(two, B);
     same('account B: 2,800 earned, the 1,800 it inherited deducted, 1,000 to pay',
         [b.gross, b.advances, b.net], [2800, -1800, 1000]);
@@ -516,6 +518,26 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
 const OMER_A = { from: '2026-08-07', to: '2026-08-20' };
 const OMER_B = { from: '2026-08-21', to: '2026-09-03' };
 
+// APPROVING THE MIGRATION, which is now a precondition for READING an account and not
+// only for writing to one.
+//
+// Until tests/approval.test.mjs landed, every surface in this app showed the carried
+// arithmetic the moment the build flag was open, whether or not anybody had approved
+// restating the fortnights already printed and paid. It does not any more:
+// carryReportingEnabled(schedule) is the flag AND this record's own migration being
+// settled, and payrollSheetRows, workerAccountFor and openAdvanceBalance all ask it.
+//
+// The fixtures below are about the ARITHMETIC of the carry, not about the gate in front
+// of it, so they approve the migration the way a person would and then measure. A fixture
+// that reads the model directly - advanceAccount and the rest - needs none of this: the
+// gate is on the surfaces, not on the fold.
+function approveCarry(device) {
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    if (!plan.needed) return true;
+    return device.State.commit(device.call('recordCarryApproval', device.State.schedule,
+        plan, '2026-08-06T09:00:00.000Z', 'd_person'));
+}
+
 function omer(flags) {
     const device = makeDevice({ deviceId: 'd_omer', flags });
     device.setToday('2026-08-26');
@@ -622,6 +644,7 @@ function omer(flags) {
     const { readFileSync } = await import('node:fs');
 
     const device = omer({ carryAdvances: true, ledgerWrites: true });
+    approveCarry(device);
     const advanceId = Object.keys(device.State.schedule.advances)[0];
     device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
         advanceId, 'w_01', OMER_A.from, OMER_A.to, 3050,
@@ -1326,6 +1349,7 @@ function omer(flags) {
     // his wage. So a man could be told 1,950 on the screen, 5,000 in the archive warning
     // and 3,050 on WhatsApp, about the same fortnight, on the same evening.
     const device = omer({ carryAdvances: true, ledgerWrites: true });
+    approveCarry(device);
     const id = Object.keys(device.State.schedule.advances)[0];
     device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
         id, 'w_01', OMER_A.from, OMER_A.to, 3050,

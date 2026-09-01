@@ -177,7 +177,15 @@ const approve = device => {
     given('so nothing financial may be written',
         device.call('financialWritingEnabled', device.State.schedule) === false);
 
-    readsLegacy(LEGACY, surfaces(device, run));
+    // THE ACCEPTANCE EXAMPLE, spelled out here rather than only inside the helper, so a
+    // reader can see the three numbers this whole suite is about without following a
+    // call: he earned 3,050, he was handed 5,000, the sheet owes him -1,950.
+    const seen = surfaces(device, run);
+    same('the sheet reads 3,050 earned, 5,000 advanced, -1,950 payable',
+        [seen.earned, Number(seen.deductionColumn), Number(seen.payable)],
+        [GROSS, -ADVANCE, LEGACY_PAYABLE]);
+
+    readsLegacy(LEGACY, seen);
 }
 
 // ----------------------------------------------------------------- and after somebody has
@@ -194,7 +202,14 @@ const approve = device => {
     given('and the record now reads as settled',
         device.call('carryMigrationSettled', device.State.schedule) === true);
 
-    readsCarried(CARRIED, surfaces(device, run));
+    // The same three numbers, the other side of the decision: 3,050 came off the wage,
+    // nothing is payable, and 1,950 is carried into the next account.
+    const after = surfaces(device, run);
+    same('and now reads 3,050 earned, 3,050 deducted, nothing payable',
+        [after.earned, Number(after.deductionColumn), Number(after.payable)],
+        [GROSS, -GROSS, 0]);
+
+    readsCarried(CARRIED, after);
 }
 
 // ------------------------------------------------------- an approval that never landed
