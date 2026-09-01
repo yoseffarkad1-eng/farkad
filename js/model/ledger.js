@@ -809,11 +809,20 @@ function closureFacts(schedule, workerId, from, to, carriedIn) {
         net: walk.net,
         days,
         // What it was priced at, so the number can be explained without the schedule.
+        // EVERY COUNT THE SHEET PRINTS, not only the two the wage is checked against.
+        // Freezing the wage and leaving שעות נוספות live meant a corrected-off day still
+        // moved a cell on a payslip somebody was handed - the same fault as the day count,
+        // one column along.
         basis: {
             dailyRate: worker ? Number(worker.dailyRate) || 0 : 0,
             hourlyRate: worker ? Number(worker.hourlyRate) || 0 : 0,
             payUnits: row ? Number(row.payUnits) || 0 : 0,
             attendanceDays: row ? Number(row.attendanceDays) || 0 : 0,
+            normalDays: row ? Number(row.normalDays) || 0 : 0,
+            doubleDays: row ? Number(row.doubleDays) || 0 : 0,
+            extraHours: row ? Number(row.extraHours) || 0 : 0,
+            siteVisits: row ? Number(row.siteVisits) || 0 : 0,
+            absent: row ? Number(row.absent) || 0 : 0,
             workerName: worker ? String(worker.name || '') : ''
         }
     };

@@ -713,4 +713,129 @@ function csvRows(text) {
         raw.indexOf(ids.advanceId) !== -1 && raw.indexOf('cm_carry') !== -1);
 }
 
+// ------------------------------------------------ a CLOSED fortnight, in the files
+{
+    suite('a fortnight that has been closed leaves the app frozen');
+
+    // C9's closed-period half. Everything above measures an OPEN account, where every
+    // figure in the file is recomputed from the live schedule and is SUPPOSED to be. A
+    // closed fortnight is the opposite promise: the payslip is a record and the file is
+    // the copy somebody was handed, so a day corrected off it afterwards must change
+    // nothing in the export - not the wage, not the day count, not the day list - while
+    // the live debt beside it moves with the money.
+    const A_FROM = '2026-08-07';
+    const A_TO = '2026-08-20';
+    const A_STAMP = `${A_FROM}_${A_TO}`;
+
+    const device = phone({ deviceId: 'd_closed',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'עומר סעד', active: true, dailyRate: 500, hourlyRate: 50 }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+    ['2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13']
+        .forEach(date => device.State.commit(device.call('assignPlace',
+            device.State.schedule, date, 'w_01', 'actual', 'p_01')));
+    device.State.commit(device.call('assignPlace', device.State.schedule,
+        '2026-08-14', 'w_01', 'actual', 'p_01', 'extra', 1));
+    const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+        '2026-08-10', 5000, '', '2026-08-10T09:00:00.000Z', 'd_closed', 'cash');
+    device.State.commitMany(made);
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    if (plan.needed) {
+        device.State.commit(device.call('recordCarryApproval', device.State.schedule,
+            plan, '2026-08-15T08:00:00.000Z', 'd_closed'));
+    }
+    device.State.commitMany(device.call('closePeriodChanges', device.State.schedule,
+        'w_01', A_FROM, A_TO, '2026-08-20T18:00:00.000Z', 'd_closed'));
+    run(device, `REPORT_RANGE.from='${A_FROM}'; REPORT_RANGE.to='${A_TO}';`
+        + ` REPORT_SECTION='workers'; INVOICE_PLACE=null;`);
+
+    const account = () => device.call('advanceAccount', device.State.schedule, 'w_01',
+        A_FROM, A_TO);
+    given('the fortnight is closed at 3,050 earned, 3,050 off, 1,950 carried',
+        account().closed === true && account().gross === 3050
+        && account().deducted === 3050 && account().carriedOut === 1950,
+        JSON.stringify(account()));
+
+    // The NEWEST file of a name, because this suite exports twice on purpose and
+    // fileNamed deliberately refuses an ambiguous name.
+    const latest = name => {
+        const found = device.downloads.filter(item => item.name === name);
+        return found.length ? found[found.length - 1].text : null;
+    };
+
+    // The three files as they were handed over.
+    await run(device, 'exportReports()');
+    const beforeSheet = latest(`שכר_${A_STAMP}.csv`);
+    const beforeSaid = run(device, `workerStatementText('w_01')`);
+    given('the sheet came out', typeof beforeSheet === 'string');
+    const headOf = text => csvRows(text)[0];
+    const rowOf = text => csvRows(text).find(cells => cells[0] === 'עומר סעד');
+    const cellOf = (text, name) => rowOf(text)[headOf(text).indexOf(name)];
+    given('and prices him at what he was paid',
+        cellOf(beforeSheet, 'נצבר') === '3050', JSON.stringify(rowOf(beforeSheet)));
+
+    // A HISTORICAL DAY IS CORRECTED OFF, after the money was paid. This is the edit the
+    // whole freezing story is about, and the files are where somebody would see it.
+    device.State.commit(device.call('clearWorkerDay', device.State.schedule,
+        '2026-08-14', 'w_01', 'actual'));
+    await run(device, 'exportReports()');
+    const afterSheet = latest(`שכר_${A_STAMP}.csv`);
+    const afterSaid = run(device, `workerStatementText('w_01')`);
+
+    check('the pay sheet is the sheet he was paid from, unchanged',
+        rowOf(afterSheet).join('|') === rowOf(beforeSheet).join('|'),
+        JSON.stringify([rowOf(beforeSheet), rowOf(afterSheet)]));
+    check('including the days it counted',
+        cellOf(afterSheet, 'ימים') === cellOf(beforeSheet, 'ימים'),
+        `${cellOf(beforeSheet, 'ימים')} -> ${cellOf(afterSheet, 'ימים')}`);
+    check('and his own statement is word for word the one he was sent',
+        afterSaid === beforeSaid,
+        JSON.stringify([beforeSaid.slice(0, 220), afterSaid.slice(0, 220)]));
+
+    // AND THE MONEY STILL MOVES, into the account that is open. Freezing the payslip is
+    // not freezing the debt, and a file that lost a late repayment would be losing money.
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        made[0].value.id, 400, '2026-08-18', '',
+        '2026-08-25T09:00:00.000Z', 'd_closed', 'cash'));
+    const late = account();
+    check('the payslip still says what it was closed on',
+        late.carriedOut === 1950, JSON.stringify(late));
+    check('and the live debt has come down by what he handed back',
+        late.carriedForward === 1550 && late.lateSinceClose === -400,
+        JSON.stringify(late));
+    const saidLate = run(device, `workerStatementText('w_01')`);
+    check('his statement names both, each by its own label',
+        saidLate.indexOf('יתרת סגירה: 1950') !== -1
+        && saidLate.indexOf('חוב פתוח כולל: 1550') !== -1, saidLate.slice(-220));
+
+    // The backup carries the frozen fortnight itself, so a phone that reads the file
+    // reads the same payslip rather than recomputing one.
+    run(device, 'exportBackup()');
+    const backup = JSON.parse(latest(`farkad-${TODAY}.json`));
+    const artifact = Object.keys(backup.ledger.advances)
+        .map(id => backup.ledger.advances[id])
+        .find(entry => String(entry.kind) === 'closed');
+    check('the backup carries the closed fortnight as its own record',
+        Boolean(artifact) && artifact.gross === 3050 && artifact.periodFrom === A_FROM,
+        JSON.stringify(artifact));
+    check('with the days that wage was made of',
+        Boolean(artifact) && Array.isArray(artifact.days) && artifact.days.length === 6,
+        JSON.stringify((artifact || {}).days || null));
+
+    const other = phone({ deviceId: 'd_closed_two',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    other.ctx.importBackup(other.fileEvent(`farkad-${TODAY}.json`,
+        latest(`farkad-${TODAY}.json`)));
+    await settle(30);
+    run(other, `REPORT_RANGE.from='${A_FROM}'; REPORT_RANGE.to='${A_TO}';`
+        + ` REPORT_SECTION='workers'; INVOICE_PLACE=null;`);
+    same('the second phone reads the same closed account off the file',
+        JSON.stringify(other.call('advanceAccount', other.State.schedule, 'w_01',
+            A_FROM, A_TO)), JSON.stringify(late));
+    same('and sends him the same statement', run(other, `workerStatementText('w_01')`),
+        saidLate);
+}
+
 report();

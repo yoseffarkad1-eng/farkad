@@ -1601,7 +1601,8 @@ function ledgerEntryProblems(id, value) {
     }
     if (value.basis !== undefined && value.basis !== null) {
         if (!isPlainObject(value.basis)) return ['a closure whose basis is not a record'];
-        const counts = ['dailyRate', 'hourlyRate', 'payUnits', 'attendanceDays'];
+        const counts = ['dailyRate', 'hourlyRate', 'payUnits', 'attendanceDays',
+            'normalDays', 'doubleDays', 'extraHours', 'siteVisits', 'absent'];
         for (let at = 0; at < counts.length; at += 1) {
             const field = counts[at];
             if (value.basis[field] === undefined) continue;
@@ -2641,12 +2642,15 @@ function payrollReport(schedule, fromDate, toDate) {
                 row.netAmount = frozen.gross - netted;
             }
             if (isPlainObject(frozen.basis)) {
-                if (Number.isFinite(Number(frozen.basis.attendanceDays))) {
-                    row.attendanceDays = Number(frozen.basis.attendanceDays);
-                }
-                if (Number.isFinite(Number(frozen.basis.payUnits))) {
-                    row.payUnits = Number(frozen.basis.payUnits);
-                }
+                // Every count the sheet prints, where the closure recorded it. A closure
+                // from before a given field exists carries none, and that column is the
+                // live one - which is the same fallback the wage takes.
+                ['attendanceDays', 'payUnits', 'normalDays', 'doubleDays', 'extraHours',
+                    'siteVisits', 'absent'].forEach(field => {
+                        if (Number.isFinite(Number(frozen.basis[field]))) {
+                            row[field] = Number(frozen.basis[field]);
+                        }
+                    });
             }
         }
 
