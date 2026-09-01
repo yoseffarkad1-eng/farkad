@@ -243,6 +243,13 @@ function appendLedgerEntry(schedule, entry) {
     // advance have to mint the SAME key, or the union keeps both and the fold's winner
     // is decided by whichever random id sorts later.
     const id = entry.id ? String(entry.id) : ledgerEntryId();
+    // BEFORE ANYTHING IS TOUCHED. A caller-supplied id reaches this function from the
+    // migration, from a rescue import and from any build that ever writes an entry, and
+    // the line below it writes straight into the live schedule. An id this app cannot
+    // safely use as a map key is refused here rather than stored and discovered later:
+    // `null` back means no change, no memory mutation, no disk write and no queued
+    // operation, which is what State.commit reads as a refusal.
+    if (!isSafeId(id)) return null;
     // Undefined fields are dropped, never stored. `method: undefined` survives
     // Object.assign as an own property, and an entry that carries the KEY without a
     // value reads as an entry that was asked how the money moved and answered

@@ -44,6 +44,22 @@ const PLACES = [{ id: 'p_01', name: 'הרצליה', active: true }];
 // passes without the code doing anything at all.
 const owns = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
 
+// Whether a map was re-parented, asked WITHOUT naming a prototype.
+//
+// A device runs in its own V8 context, so its objects inherit from THAT realm's
+// Object.prototype and `getPrototypeOf(theirs) === Object.prototype` is false here for a
+// perfectly ordinary map. The question that actually matters is observable from either
+// side: can a field of the entry be read through the map that was supposed to hold it.
+const reparented = (map, field) => (map || {})[field] !== undefined;
+
+// The rescue export is a map of key -> the raw TEXT on the disk, so stringifying it
+// escapes the quotes inside. Searched for the number and its field separately rather
+// than for a quoted fragment that only exists before the escaping.
+const rescued = (device, ...needles) => {
+    const text = JSON.stringify(device.global('Recovery').rawRecords());
+    return needles.every(needle => text.indexOf(needle) !== -1);
+};
+
 const POISON = ['__proto__', 'prototype', 'constructor'];
 
 function phone(deviceId, storage) {
@@ -107,8 +123,9 @@ function seeded() {
         Object.getOwnPropertyNames(Object.prototype).length === beforeProto);
     // THE MAP'S OWN PROTOTYPE. This is the mechanism, and it is the thing that used to
     // make the entry invisible rather than merely wrong.
-    check('and the map the entries live in still has an ordinary prototype',
-        Object.getPrototypeOf(device.State.schedule.ledger.advances) === Object.prototype);
+    check('and the map the entries live in was not re-parented by the read',
+        reparented(device.State.schedule.ledger.advances, 'amount') === false,
+        JSON.stringify(device.State.schedule.ledger.advances.amount));
     check('the entry is not in the fold',
         Object.keys(device.State.schedule.ledger.advances).length === 0,
         JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
@@ -120,7 +137,8 @@ function seeded() {
     check('and the device stops writing while the money is uncertain',
         device.call('farkadWritesBlocked') === true);
     check('the rescue export still carries the 500 out',
-        JSON.stringify(device.global('Recovery').rawRecords()).indexOf('"amount":500') !== -1);
+        rescued(device, 'amount', '500'),
+        JSON.stringify(Object.keys(device.global('Recovery').rawRecords())));
 
     // THE SAVE, which is where the deletion actually happened.
     device.State.save({ silent: true });
@@ -154,9 +172,8 @@ function seeded() {
         { 'scheduleData:v2': JSON.stringify(disk) }));
     device.State.load();
     check('and five hundred shekels does not vanish on the way in',
-        JSON.stringify(device.global('Recovery').rawRecords()).indexOf('"amount":500') !== -1
-        || Object.keys(device.State.schedule.advances).length > 0,
-        JSON.stringify(device.State.schedule.advances));
+        rescued(device, 'amount', '500'),
+        JSON.stringify(Object.keys(device.global('Recovery').rawRecords())));
     check('the person is told rather than the record quietly emptied',
         device.global('Recovery').problems.length > 0,
         JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
@@ -220,7 +237,8 @@ function device_problems(device, raw) {
     check('the writer refuses it', threw !== null || change === null,
         threw ? String(threw.message) : JSON.stringify(change));
     check('the live schedule in memory is not re-parented',
-        Object.getPrototypeOf(device.State.schedule.ledger.advances) === Object.prototype);
+        reparented(device.State.schedule.ledger.advances, 'amount') === false,
+        JSON.stringify(device.State.schedule.ledger.advances.amount));
     check('nothing changed in memory', JSON.stringify(device.State.schedule) === before);
     check('nothing reached the disk', device.raw('scheduleData:v2') === beforeDisk);
     check('and nothing reached the outbox',

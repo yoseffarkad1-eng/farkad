@@ -737,11 +737,29 @@ function normaliseSchedule(raw, hints) {
         // ledgerEntryProblems is the same check the queue applies to an edit on its way
         // out. Applying it here means an entry that could never have been written by this
         // build cannot be READ by it either, whatever door it arrived through.
-        const readable = entry && typeof entry === 'object'
-            && ledgerEntryProblems(String(id), Object.assign({}, entry, { id: String(id) }))
-                .length === 0;
+        // THE ENTRY AS IT ARRIVED, and the key it arrived under, asked separately.
+        //
+        // This used to validate `Object.assign({}, entry, { id: String(id) })` - the id
+        // forced to agree with the key BEFORE the check that they agree - so an entry
+        // stored under le_a claiming to be le_b was silently rewritten to le_a, folded as
+        // money, and the evidence of the mismatch destroyed. An immutable identity is the
+        // one field in this record nothing may invent: two phones that disagree about
+        // which entry this is have to be told, not averaged.
+        //
+        // And the KEY is checked at all, which it never was. A key this build cannot
+        // safely store - see isSafeId - would not have been stored: it would have
+        // re-parented the map and taken the entry out of every reader at once.
+        const readable = isSafeId(String(id))
+            && entry && typeof entry === 'object'
+            && ledgerEntryProblems(String(id), entry).length === 0;
         if (!readable) {
-            schedule.ledger.unreadable[id] = entry;
+            // Under a key the read can see. An unsafe id cannot be used as the key of the
+            // held-aside map either - it would vanish there for exactly the same reason -
+            // so it is defined as an own property instead, which stores the bytes without
+            // going through the prototype setter.
+            Object.defineProperty(schedule.ledger.unreadable, id, {
+                value: entry, writable: true, enumerable: true, configurable: true
+            });
             return;
         }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });

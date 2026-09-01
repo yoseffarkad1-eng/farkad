@@ -236,11 +236,34 @@ function isSafeSeq(value) {
 // that path into a different one: the write lands somewhere else in the document and the
 // entry it was meant to be arrives against a stranger. The rest are Firestore's own
 // field-path metacharacters, refused for the same reason.
+// ONE PREDICATE, and it knows about prototypes.
+//
+// This used to accept `__proto__`, `prototype` and `constructor`, and every map key in
+// this app is checked by it: the ledger's entries, the legacy advances field every phone
+// still writes, the day records, the roster. Assigning into a plain object under the
+// first of those three does not store a value - it RE-PARENTS the map. Object.keys()
+// then answers [], the record is in no map anybody reads, `unreadable` never hears of
+// it, Recovery is never told, writes are not blocked, and the next ordinary save writes
+// the emptiness over the only record that money changed hands.
+//
+// It is not prototype pollution: Object.prototype is untouched, and a check for that
+// would have passed while the money vanished. It is a deletion performed by a read,
+// which is the one thing iron law 10 exists to make impossible.
+//
+// The wire predicate below - isSafeSegment - already knew the three names, because
+// journalEntryProblems asks it. So the app looked like it had thought about this, and
+// half of it had. The two predicates are now the same answer about the same question,
+// and isSafeSegment is kept as the name the path code reads.
+//
+// POISON_SEGMENTS is declared further down the file, beside the path checks it was
+// written for; this function is only ever called at run time, so the order is fine and
+// the list stays where its own reasoning lives.
 function isSafeId(value) {
     return typeof value === 'string'
         && value.length > 0 && value.length <= 100
         && value === value.trim()
-        && !UNSAFE_ID.test(value);
+        && !UNSAFE_ID.test(value)
+        && POISON_SEGMENTS.indexOf(value) === -1;
 }
 
 // A date that exists. The regex on its own accepts 2026-02-30 and 2025-02-29, which are
@@ -832,8 +855,11 @@ function readReplacementDocument(raw) {
 // A segment that would land on Object.prototype rather than in the record.
 const POISON_SEGMENTS = ['__proto__', 'prototype', 'constructor'];
 
+// The same answer, kept under the name the path code reads. isSafeId refuses the poison
+// names itself now - see the block over it - so this is one call rather than two, and the
+// two can no longer drift apart.
 function isSafeSegment(value) {
-    return isSafeId(value) && POISON_SEGMENTS.indexOf(value) === -1;
+    return isSafeId(value);
 }
 
 // Everything wrong with one journal entry. Empty means it is one.
