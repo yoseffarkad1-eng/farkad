@@ -904,8 +904,24 @@ function normaliseSchedule(raw, hints) {
     if (typeof Recovery !== 'undefined'
         && (Object.keys(schedule.ledger.unreadable).length > 0
             || Object.keys(schedule.ledger.unreadableMigrations).length > 0)) {
+        // BOTH FAMILIES, because either one alone can be the whole trouble.
+        //
+        // This passed schedule.ledger.unreadable and nothing else. A record whose only
+        // damaged part was an APPROVAL therefore raised its problem with a payload of
+        // "{}", Recovery quarantined "{}", and the rescue export - the one way those
+        // bytes have of leaving the phone - carried an empty object where somebody's
+        // approval of a money migration used to be. The person was told to export a
+        // backup before they could carry on, and the backup did not contain the thing
+        // that stopped them.
+        //
+        // Named rather than merged into one map: the two have separate id namespaces
+        // and putting them in one object would let a collision decide which record
+        // survives, which is the fault the two maps exist to prevent.
         Recovery.damaged('scheduleData:v2:ledger',
-            JSON.stringify(schedule.ledger.unreadable),
+            JSON.stringify({
+                unreadable: schedule.ledger.unreadable,
+                unreadableMigrations: schedule.ledger.unreadableMigrations
+            }),
             'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
             + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
     }

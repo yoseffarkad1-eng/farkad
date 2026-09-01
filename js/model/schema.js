@@ -389,8 +389,16 @@ function ledgerContainerProblem(raw) {
     // device may write money at all. A `migrations` that is a string or an array read as
     // no approvals - which is not the same statement as "nobody approved" and would put a
     // migration screen in front of a person who has already answered it.
-    if (ledger.migrations !== undefined && ledger.migrations !== null
-        && !isPlainObject(ledger.migrations)) {
+    //
+    // AND NULL IS NOT AN ABSENCE HERE. Everywhere else in this function null is waved
+    // through, and rightly: a device that has never recorded an advance has no ledger and
+    // no entries, and the absent case has to stay cheap. This map is different because of
+    // what reading it wrongly COSTS. An absent `migrations` is a device that was never
+    // asked; a null is a value something wrote, and the only reading available for it is
+    // "nobody approved" - which either re-asks a person who has already answered, or, on
+    // the other side of the same coin, lets a record claim an approval it does not hold.
+    // Neither is a guess this build is entitled to make about somebody's money.
+    if (ledger.migrations !== undefined && !isPlainObject(ledger.migrations)) {
         return 'the approvals of the advances history are not a record';
     }
     return null;
