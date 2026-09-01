@@ -1,6 +1,9 @@
 # The suites
 
-Forty-nine suites, thirty-five of which need no browser at all. From a clean clone:
+Fifty suites at `10a40a5`, thirty-six of which need no browser at all. (Counted off
+package.json at that commit, which is the only place a suite count is true: `npm test`
+names the node suites, `test:all` adds the eight browser suites, `test:release` adds
+sendclaim and the five emulator suites.) From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
@@ -12,7 +15,7 @@ Forty-nine suites, thirty-five of which need no browser at all. From a clean clo
 `npm test` and `npm run test:all` are DEVELOPMENT gates. Neither one is permission to
 ship, and a green run of either must never be reported as a release gate.
 
-`npm run test:release` is the release gate. It adds `test:sendclaim` and the three
+`npm run test:release` is the release gate. It adds `test:sendclaim` and the five
 emulator suites, and at the commit this line was written it is GREEN.
 
 It was not. This paragraph used to say the gate was red on purpose: `test:sendclaim`
@@ -45,8 +48,29 @@ Green means EVERY check passes. The runner prints `N/N checks passed` and exits
 non-zero on any failure; a `SETUP FAILED` from `given()` means a precondition of the
 test broke, not the app — fix the setup before reading anything into the run.
 
-MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no other:
+MEASURED, and each number names the commit it was measured on, because a count that
+does not is a count from some other tree:
 
+    At 10a40a5 (v93), from the fix/docs worktree, Node v22.22.2, copied from no other run:
+    npm test           36 suites   3493/3493
+      isolation 18, blobs 11, build 29, poison 37, merge 22, contested 54, receipt 18,
+      data 1943, recovery 47, adversarial 116, probes 35, capacity 44, concurrency 46,
+      exports 42, fence 35, fence-ingress 43, fence-legacy 21, money-history 9,
+      money-units 21, money-cloud 17, money-display 4, snapshot-poison 33, repayment 45,
+      ledger-ingress 151, cas 58, status 14, money 40, money-ingress 206, method 51,
+      restore 42, upgrade 48, vehicles 61, xlsx 54, nonassertions 23, labels 23,
+      labelcache 32
+    test:sendclaim      1 suite     43/43
+    data.test.mjs at seeds 1, 42 and 2026: 1943/1943 every time
+
+    At c744d49, from a clean detached worktree, Node v22.22.2:
+    npm test           36 suites   3493/3493
+    test:emulator       5 suites    151/151   (rules, cas-emulator, rollout, bootstrap,
+                                               bootstrap-rules)
+
+    At cf8b9e5 (v91), from a clean detached worktree - written down in 2f6b6dc, and the
+    last time the WHOLE gate was run and recorded; the eight browser suites have not been
+    counted since, and v93 re-pinned smoke and mobile, so these are not v93's numbers:
     npm test           35 suites   3429/3429
     npm run test:all   + 8 suites  + 1893   (smoke 1030, print 65, mobile 631,
                                              update 30, recovery-browser 25,
@@ -57,7 +81,9 @@ MEASURED AT THIS COMMIT, from one clean detached worktree, and copied from no ot
     ------------------------------------------------------------------
     the whole gate     49 suites   5516/5516
 
-`data.test.mjs` re-run at seeds 1, 42, 2026 and 42: 1943/1943 every time.
+The 36th node suite, `tests/snapshot.poison.test.mjs`, arrived after cf8b9e5 with the
+poisoned-name repair; the gate at 10a40a5 is 50 suites, and its browser and emulator
+halves have not been run on that tree.
 
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers
