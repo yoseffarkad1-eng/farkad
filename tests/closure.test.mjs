@@ -352,6 +352,195 @@ const reopen = (device, id) => {
             modern.State.schedule, closureIn(modern))));
 }
 
+// ------------------------------------------------ the snapshot is money, and it is read
+{
+    suite('a closure snapshot nobody can read is not folded as a number');
+
+    // WHAT C4 ADDED AND DID NOT GUARD. The closure now carries the fortnight it froze -
+    // gross, carriedIn, and the basis it was priced at - and every one of those is money
+    // or a count that came off ANOTHER PHONE. closedPeriods reads them like this:
+    //
+    //     if (at.gross === undefined && entry.gross !== undefined && entry.gross !== null) {
+    //         at.gross = Number(entry.gross);
+    //     }
+    //
+    // `Number("not-money")` is NaN, and NaN is not undefined, so it wins the "is it
+    // there" test and becomes the fortnight's wage. Measured on the commit this was
+    // written against, with one character changed on a closure this device wrote itself:
+    //
+    //     closedPeriods  { gross: null, ... }          (NaN, through JSON)
+    //     advanceAccount  gross NaN, net 0, deducted 3050
+    //     ledgerEntryProblems   []          - the entry is called readable
+    //     impossibleClosures    []          - and nothing is held aside
+    //
+    // A wage of NaN on a payslip, from a record every door called clean. ledgerEntryProblems
+    // already refuses an unreadable amount and an unreadable balanceAfter on this same
+    // entry; the five numbers C4 put beside them were not added to the list.
+    const NUMBERS = ['gross', 'carriedIn', 'given', 'repaid', 'reversed', 'net'];
+    for (const field of NUMBERS) {
+        const device = closed('d_nan_' + field);
+        const entry = closureIn(device);
+        given(`${field}: the closure carries one`, entry[field] !== undefined,
+            JSON.stringify(entry));
+        const broken = Object.assign({}, entry, { [field]: 'not-money' });
+        check(`${field}: a value that is not money makes the entry unreadable`,
+            device.call('ledgerEntryProblems', broken.id, broken).length > 0,
+            JSON.stringify(device.call('ledgerEntryProblems', broken.id, broken)));
+    }
+
+    // AND THE FOLD NEVER COERCES. Even if such an entry reaches a fold - from a build
+    // that wrote it before this check existed - the answer must not be NaN.
+    {
+        const device = closed('d_nan_fold');
+        const entry = closureIn(device);
+        device.State.schedule.ledger.advances[entry.id] = Object.assign({}, entry,
+            { gross: 'not-money' });
+        const periods = device.call('closedPeriods', device.State.schedule, 'w_01');
+        const held = periods[A.from] || {};
+        check('a wage that is not money is not adopted as the fortnight\'s wage',
+            held.gross === undefined || Number.isFinite(held.gross),
+            JSON.stringify(periods));
+        const account = device.call('advanceAccount', device.State.schedule, 'w_01',
+            A.from, A.to);
+        check('and no account anywhere reports a wage of NaN',
+            Number.isFinite(account.gross), JSON.stringify(account));
+        check('the entry is held aside rather than folded',
+            device.call('impossibleClosures', device.State.schedule).length === 1,
+            JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+    }
+
+    // The basis is counts rather than money, and it is read the same way - straight onto
+    // a payslip as "6 ימים".
+    {
+        const device = closed('d_nan_basis');
+        const entry = closureIn(device);
+        const broken = Object.assign({}, entry,
+            { basis: Object.assign({}, entry.basis, { attendanceDays: 'lots' }) });
+        check('a basis that is not counts makes the entry unreadable',
+            device.call('ledgerEntryProblems', broken.id, broken).length > 0,
+            JSON.stringify(device.call('ledgerEntryProblems', broken.id, broken)));
+        const notObject = Object.assign({}, entry, { basis: 'six days' });
+        check('and neither is a basis that is not a record',
+            device.call('ledgerEntryProblems', notObject.id, notObject).length > 0,
+            JSON.stringify(device.call('ledgerEntryProblems', notObject.id, notObject)));
+    }
+}
+
+// ------------------------------------------- the whole artifact, not only its money half
+{
+    suite('a closed fortnight freezes its counts and its days, not only its shekels');
+
+    // C4 froze the MONEY columns and stopped there. The counts and the day list beside
+    // them are still recomputed from the live schedule every time somebody looks, so the
+    // payslip's three shekel figures hold while the sentence next to them changes:
+    //
+    //   at closure                   6 ימים · נצבר 3050 · six detail rows
+    //   one historical day removed   5 ימים · נצבר 3050 · five detail rows
+    //
+    // and the worker's own statement, which computes its total from those same live days
+    // rather than from the account, prints a DIFFERENT wage from the sheet he is paid
+    // against - the one thing tests/money.display.test.mjs exists to prevent.
+    const device = closed('d_whole');
+    const row = () => device.call('payrollReport', device.State.schedule, A.from, A.to)
+        .find(item => item.workerId === 'w_01');
+    const detail = () => device.call('workerDaysReport', device.State.schedule,
+        device.State.schedule.workers[0], A.from, A.to);
+    const statement = () => {
+        const run = reportsIn(device);
+        return run(`workerStatementText('w_01')`);
+    };
+
+    const daysAtClose = detail().length;
+    const countAtClose = row().attendanceDays;
+    const unitsAtClose = row().payUnits;
+    given('the closed fortnight is five days and five pay units',
+        daysAtClose === 5 && countAtClose === 5 && unitsAtClose === 5,
+        JSON.stringify([daysAtClose, countAtClose, unitsAtClose]));
+    const saidAtClose = statement();
+    given('and the statement says what the sheet says',
+        saidAtClose.indexOf(String(GROSS)) !== -1, saidAtClose.slice(0, 200));
+
+    device.State.commit(device.call('clearWorkerDay', device.State.schedule,
+        '2026-08-14', 'w_01', 'actual'));
+
+    check('the days it was paid for do not change',
+        row().attendanceDays === countAtClose,
+        `${countAtClose} -> ${row().attendanceDays}`);
+    check('nor the units it was priced on',
+        row().payUnits === unitsAtClose, `${unitsAtClose} -> ${row().payUnits}`);
+    check('nor the detail behind them',
+        detail().length === daysAtClose, `${daysAtClose} -> ${detail().length}`);
+    check('and the wage on the row is the one it was closed on',
+        row().amount === GROSS, `${GROSS} -> ${row().amount}`);
+    // THE WHOLE DOCUMENT, byte for byte. Looking for one number in it would pass on a
+    // statement that had lost a day and kept the total, and the day list is half of what
+    // the man is being asked to agree with.
+    check('the statement he was handed is the statement he is handed again',
+        statement() === saidAtClose,
+        JSON.stringify([saidAtClose.slice(0, 240), statement().slice(0, 240)]));
+}
+
+// ------------------------------------------------- a fortnight with no advances in it
+{
+    suite('a fortnight can be closed whether or not anybody took an advance');
+
+    // MOST MEN HAVE NO ADVANCE. recordPeriodClosed takes an advanceId and
+    // closePeriodChanges writes one entry per advance the close would touch, so a worker
+    // who never borrowed has nothing to hang a closure on:
+    //
+    //     planPeriodClosure  { canClose: false, rows: [] }
+    //     closePeriodChanges []
+    //
+    // and his fortnight can never be frozen. Every payslip he is handed goes on being
+    // recomputed from the live schedule for ever - which is the same fault the suite
+    // above this one is about, for the majority of the crew rather than a minority.
+    const device = crew('d_noadv');
+    // The advance the fixture adds, taken back out: this man borrowed nothing.
+    delete device.State.schedule.advances[advanceIdIn(device)];
+    device.State.schedule.ledger.advances = {};
+    device.State.save({ silent: true });
+    given('he has no advances at all',
+        Object.keys(device.State.schedule.advances).length === 0,
+        JSON.stringify(device.State.schedule.advances));
+
+    const plan = device.call('planPeriodClosure', device.State.schedule, 'w_01',
+        A.from, A.to);
+    check('the fortnight can still be closed', plan.canClose === true,
+        JSON.stringify(plan));
+
+    const changes = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-20T18:00:00.000Z', 'd_noadv');
+    check('and closing it writes something', changes.length > 0,
+        JSON.stringify(changes));
+    device.State.commitMany(changes);
+
+    const account = device.call('advanceAccount', device.State.schedule, 'w_01',
+        A.from, A.to);
+    check('the fortnight reads as closed', account.closed === true,
+        JSON.stringify(account));
+    check('with the wage it was closed on', account.gross === GROSS,
+        JSON.stringify(account));
+    check('and nothing was deducted, because nothing was owed',
+        account.deducted === 0 && account.net === GROSS, JSON.stringify(account));
+
+    // AND IT IS FROZEN, which is the whole point of writing it.
+    const before = device.call('payrollReport', device.State.schedule, A.from, A.to)
+        .find(item => item.workerId === 'w_01');
+    device.State.commit(device.call('clearWorkerDay', device.State.schedule,
+        '2026-08-14', 'w_01', 'actual'));
+    const after = device.call('payrollReport', device.State.schedule, A.from, A.to)
+        .find(item => item.workerId === 'w_01');
+    same('his payslip does not move either', [after.amount, after.attendanceDays],
+        [before.amount, before.attendanceDays]);
+
+    check('the closure is not called impossible',
+        device.call('impossibleClosures', device.State.schedule).length === 0,
+        JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+    check('and a reopen reads it back the same way',
+        reopen(device, 'd_noadv2').call('advanceAccount',
+            reopen(device, 'd_noadv3').State.schedule, 'w_01', A.from, A.to).closed === true);
+}
+
 // ------------------------------------------------- a closure that was wrong is still wrong
 {
     suite('freezing does not make a false closure true');
