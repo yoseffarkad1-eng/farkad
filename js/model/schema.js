@@ -387,6 +387,11 @@ function poisonedContainers(raw) {
     };
 
     const days = raw && raw.days;
+    // THE MAP OF DAYS ITSELF, not only each day inside it. This looked into every day and
+    // never at the container holding them, so a days map with an own `__proto__` passed,
+    // and normaliseSchedule dropped the key without a word - a whole day gone, one level
+    // up from the layer this was written to catch.
+    look(days, 'days');
     if (isPlainObject(days)) {
         Object.keys(days).forEach(date => {
             const day = days[date];
@@ -406,6 +411,29 @@ function poisonedContainers(raw) {
         ['advances', 'migrations', 'unreadable', 'unreadableMigrations'].forEach(family =>
             look(ledger[family], `ledger.${family}`));
     }
+    return out;
+}
+
+// EVERY DAY UNDER A NAME THIS APP CANNOT READ AS A DATE - the rest of the same question.
+//
+// normaliseSchedule adopts a day only under a YYYY-MM-DD key and used to skip anything
+// else in silence. The three poison names are one way a key can be unreadable;
+// `not-a-date`, `2026-8-12` and `constructor` are others, and a snapshot carrying any
+// of them lost that day on the way in with nothing reported, nothing quarantined, the
+// device still writing and the status saying synced. A day nobody can find is somebody's
+// pay either way, so each one is named here, with its own bytes, for Recovery to hold.
+//
+// The poison names are left to poisonedContainers, which reports the whole map for them;
+// the entries here are the OTHER keys, one per day, so the two never say one thing twice.
+function unreadableDays(raw) {
+    const days = raw && raw.days;
+    if (!isPlainObject(days)) return [];
+    const out = [];
+    Object.keys(days).forEach(key => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+        if (POISON_SEGMENTS.indexOf(key) !== -1) return;
+        out.push({ at: 'days.' + key, name: key, json: JSON.stringify(days[key]) });
+    });
     return out;
 }
 

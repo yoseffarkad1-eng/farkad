@@ -722,8 +722,13 @@ function normaliseSchedule(raw, hints) {
     // as it arrived rather than described. Writing is blocked for the same reason it is
     // blocked for an unreadable entry: what could not be read is somebody's day or
     // somebody's money, and this device must not write over it.
-    const poisoned = typeof poisonedContainers === 'function'
-        ? poisonedContainers(raw) : [];
+    // AND EVERY DAY UNDER A NAME THAT IS NOT A DATE, held the same way. The loop over
+    // `days` further down adopts only YYYY-MM-DD keys and used to skip the rest without
+    // a word: a whole day arriving under a key this app cannot read was simply gone,
+    // with nothing reported and the device still writing.
+    const poisoned = (typeof poisonedContainers === 'function'
+        ? poisonedContainers(raw) : [])
+        .concat(typeof unreadableDays === 'function' ? unreadableDays(raw) : []);
     // CARRIED ON THE SCHEDULE, under a name nothing reads for arithmetic, exactly as the
     // unreadable ledger entries are. The quarantined copy is on the disk either way, but
     // Recovery's problems live in one session's memory: without this the next boot found a
