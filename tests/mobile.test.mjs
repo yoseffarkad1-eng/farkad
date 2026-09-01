@@ -1630,19 +1630,58 @@ for (const width of WIDTHS) {
 
         const grid = await page.evaluate(() => {
             const wrap = document.querySelector('#weekView .table-scroll');
-            const edge = wrap.getBoundingClientRect();
             const row = document.querySelector('.week-table tbody tr:first-child');
             const cells = [...row.querySelectorAll('.week-cell')];
-            const visible = cells.filter(cell => {
+            const nameOf = row.querySelector('.name-cell') || row.firstElementChild;
+            // THE STRIP THE DAYS ACTUALLY GET, which is the box MINUS the pinned name
+            // column. Measuring against the box counted a cell scrolled underneath the
+            // sticky name as being on the screen - it is behind it, and nobody can read
+            // it there.
+            const strip = () => {
+                const at = wrap.getBoundingClientRect();
+                const name = nameOf ? nameOf.getBoundingClientRect() : null;
+                if (!name || name.width === 0) return { left: at.left, right: at.right };
+                // The name column sits at the reading edge. In RTL that is the right.
+                return name.left >= (at.left + at.right) / 2
+                    ? { left: at.left, right: name.left }
+                    : { left: name.right, right: at.right };
+            };
+            const wholeIn = (cell, edge) => {
                 const at = cell.getBoundingClientRect();
                 return at.width >= 44 && at.height >= 44
                     && at.left >= edge.left - 0.5 && at.right <= edge.right + 0.5;
-            });
+            };
+            const visible = cells.filter(cell => wholeIn(cell, strip()));
             // Every day reachable by scrolling the box sideways, which is what the design
             // trades the width for.
-            wrap.scrollLeft = wrap.scrollWidth;
-            const reachable = cells.filter(cell => cell.getBoundingClientRect().width >= 44);
+            //
+            // MEASURED BY WHERE THE CELL ENDS UP, not by how wide it is. This used to set
+            // scrollLeft and then count cells whose width was at least 44 - a fact about
+            // the stylesheet, true at every scroll position and true whether the box
+            // scrolled or not. A grid pinned solid would have reported all seven
+            // reachable. And it pushed one way only: this engine scrolls RTL negative, so
+            // `scrollLeft = scrollWidth` moved nothing at all.
+            //
+            // Swept, not sampled at the two ends. A finger stops wherever it likes, so a
+            // day that is whole only at some offset in the middle IS reachable - and the
+            // suite has to visit the middle to say so.
+            const seen = new Set();
+            const look = () => {
+                const edge = strip();
+                cells.forEach((cell, index) => { if (wholeIn(cell, edge)) seen.add(index); });
+            };
+            const span = wrap.scrollWidth - wrap.clientWidth;
+            const steps = 24;
+            for (let step = 0; step <= steps; step += 1) {
+                const to = Math.round((span * step) / steps);
+                wrap.scrollLeft = -to;    // RTL scrolls negative in this engine
+                look();
+                wrap.scrollLeft = to;     // and positive in engines that do not
+                look();
+            }
             wrap.scrollLeft = 0;
+            look();
+            const reachable = { length: seen.size };
             const nameCell = row.querySelector('.name-cell') || row.firstElementChild;
             const clip = nameCell ? nameCell.querySelector('.name-clip') : null;
             return {
@@ -1672,7 +1711,8 @@ for (const width of WIDTHS) {
         check(`${label}: a full day cell is on the screen before any scrolling`,
             grid.visible >= 1, JSON.stringify(grid));
         check(`${label}: and all seven days can be reached by scrolling`,
-            grid.reachable === grid.days && grid.days === 7, JSON.stringify(grid));
+            grid.reachable === grid.days && grid.days === 7,
+            JSON.stringify(grid));
         check(`${label}: the name column is bounded rather than taking the width`,
             grid.nameWidth !== null && grid.nameWidth <= Math.round(width * 0.45),
             `${grid.nameWidth}px of ${width}px`);
@@ -1692,12 +1732,24 @@ for (const width of WIDTHS) {
             const last = rows[rows.length - 1];
             const dock = document.querySelector('.day-actions');
             const nav = document.querySelector('.tabs');
+            // SCROLLED TO THE END FIRST. The last man in a crew of thirty is far below the
+            // fold at the top of the list, so asking where he is before scrolling asks
+            // about a row nobody has reached yet.
+            window.scrollTo(0, document.documentElement.scrollHeight);
+            await new Promise(done => setTimeout(done, 150));
             const box = last ? last.getBoundingClientRect() : null;
             return {
                 rows: rows.length,
                 lastReachable: Boolean(box) && box.height >= 44,
+                // CLEAR OF THE DOCK, which is what the question was. As written it read
+                // `box.top < dock.top + box.height` - satisfied by a row whose whole
+                // height is UNDER the dock - and then nothing asserted it, so the day
+                // screen's one bar-collision fact was computed at four widths, in both
+                // orientations, and thrown away.
                 lastAbove: Boolean(box) && Boolean(dock)
-                    && box.top < dock.getBoundingClientRect().top + box.height,
+                    && box.bottom <= dock.getBoundingClientRect().top + 1,
+                dockTop: Boolean(dock) ? Math.round(dock.getBoundingClientRect().top) : null,
+                lastBottom: box ? Math.round(box.bottom) : null,
                 dockAboveNav: Boolean(dock) && Boolean(nav)
                     && dock.getBoundingClientRect().bottom
                         <= nav.getBoundingClientRect().top + 2,
@@ -1707,6 +1759,8 @@ for (const width of WIDTHS) {
         });
         check(`${label}: every worker has a row and the last one is a real target`,
             day.rows === CREW && day.lastReachable === true, JSON.stringify(day));
+        check(`${label}: and the last row clears the dock rather than sitting under it`,
+            day.lastAbove === true, JSON.stringify(day));
         check(`${label}: the dock still clears the nav bar`,
             day.dockAboveNav === true, JSON.stringify(day));
         check(`${label}: and every tab is still tappable`, day.tabs >= 4,
@@ -1742,6 +1796,12 @@ for (const width of WIDTHS) {
             sheet !== null && sheet.shown && sheet.footInside, JSON.stringify(sheet));
         check(`${label}: the sheet's own text is doubled too`,
             sheet !== null && sheet.size >= 24, JSON.stringify(sheet));
+        // 44px IN EITHER DIMENSION, iron law 9, at twice the text size - which is where a
+        // button is likeliest to be squeezed. The number was measured here from the
+        // beginning and never asked about.
+        check(`${label}: and no button in it has been squeezed below 44px`,
+            sheet !== null && sheet.buttons > 0 && sheet.smallest >= 44,
+            JSON.stringify(sheet));
 
         // The keyboard takes the bottom half. The foot has to stay reachable.
         await page.setViewportSize({ width, height: Math.round(HEIGHTS[width] * 0.55) });
