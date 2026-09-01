@@ -1071,12 +1071,20 @@ function openReversalForm(item, settled, row) {
         return input;
     };
 
-    const amountInput = document.createElement('input');
-    amountInput.type = 'text';
-    amountInput.setAttribute('inputmode', 'decimal');
-    amountInput.dir = 'ltr';
-    amountInput.value = String(room);
-    field('סכום לתיקון', amountInput);
+    // THE AMOUNT IS NOT A QUESTION, so it is not a field.
+    //
+    // This was an editable input pre-filled with the room, and the error under it read
+    // "אפשר לתקן עד X ₪" - correct up TO. Both of them invited a number smaller than the
+    // transaction, and the model now refuses every one of those: a correction is the
+    // whole transaction or it is nothing, because a partial strands the remainder where
+    // nothing can reach it. Offering a box somebody can type 100 into and then refusing
+    // 100 is a worse screen than not offering the box.
+    //
+    // It is still SHOWN - the person has to see what they are undoing - as text.
+    const amountLine = el('div', 'advance-form-amount',
+        `${moneyText(room)} ₪ · התיקון מבטל את התנועה במלואה`);
+    form.appendChild(el('label', 'field-label', 'סכום לתיקון'));
+    form.appendChild(amountLine);
 
     // Dated on the advance's own day, not today: this entry says the advance was never
     // handed over, so it belongs in the account the advance is in. Dating it today would
@@ -1095,14 +1103,13 @@ function openReversalForm(item, settled, row) {
     form.appendChild(error);
 
     const save = () => {
-        const typed = amountInput.value.trim()
-            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
-            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
-        const amount = Number(typed);
+        // Re-read, not remembered: the other phone may have corrected this transaction
+        // while the form was open, and `room` is then 0 and this button must not write.
+        const amount = eventReversalRoom(State.schedule, entry.id);
         const reason = reasonInput.value.trim();
-        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0) {
-            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
-            amountInput.focus();
+        if (!(amount > 0)) {
+            error.textContent = 'התנועה הזו כבר תוקנה. תיקון נוסף יזיז את הכסף פעמיים.';
+            reasonInput.focus();
             return;
         }
         if (reason === '') {
@@ -1484,12 +1491,20 @@ function openEventReversalForm(entry, row) {
         return input;
     };
 
-    const amountInput = document.createElement('input');
-    amountInput.type = 'text';
-    amountInput.setAttribute('inputmode', 'decimal');
-    amountInput.dir = 'ltr';
-    amountInput.value = String(room);
-    field('סכום לתיקון', amountInput);
+    // THE AMOUNT IS NOT A QUESTION, so it is not a field.
+    //
+    // This was an editable input pre-filled with the room, and the error under it read
+    // "אפשר לתקן עד X ₪" - correct up TO. Both of them invited a number smaller than the
+    // transaction, and the model now refuses every one of those: a correction is the
+    // whole transaction or it is nothing, because a partial strands the remainder where
+    // nothing can reach it. Offering a box somebody can type 100 into and then refusing
+    // 100 is a worse screen than not offering the box.
+    //
+    // It is still SHOWN - the person has to see what they are undoing - as text.
+    const amountLine = el('div', 'advance-form-amount',
+        `${moneyText(room)} ₪ · התיקון מבטל את התנועה במלואה`);
+    form.appendChild(el('label', 'field-label', 'סכום לתיקון'));
+    form.appendChild(amountLine);
 
     // Dated on the transaction's own day: this entry says that transaction did not
     // happen, so it belongs where the transaction is. Dating it today would move money
@@ -1508,14 +1523,13 @@ function openEventReversalForm(entry, row) {
     form.appendChild(error);
 
     const save = () => {
-        const typed = amountInput.value.trim()
-            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
-            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
-        const amount = Number(typed);
+        // Re-read, not remembered: the other phone may have corrected this transaction
+        // while the form was open, and `room` is then 0 and this button must not write.
+        const amount = eventReversalRoom(State.schedule, entry.id);
         const reason = reasonInput.value.trim();
-        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0) {
-            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
-            amountInput.focus();
+        if (!(amount > 0)) {
+            error.textContent = 'התנועה הזו כבר תוקנה. תיקון נוסף יזיז את הכסף פעמיים.';
+            reasonInput.focus();
             return;
         }
         if (reason === '') {
@@ -1528,11 +1542,12 @@ function openEventReversalForm(entry, row) {
         // phone may have corrected this same transaction while the form was open.
         const problems = eventReversalProblems(State.schedule, entry.id, amount, reason);
         if (problems.length > 0) {
-            const left = eventReversalRoom(State.schedule, entry.id);
-            error.textContent = left <= 0
-                ? 'התנועה הזו כבר תוקנה. תיקון נוסף יזיז את הכסף פעמיים.'
-                : `אפשר לתקן עד ${moneyText(left)} ₪ מהתנועה הזו.`;
-            amountInput.focus();
+            // No "up to" any more: there is no amount this form can offer that the model
+            // would take but this one, so a refusal here is about the transaction, never
+            // about the number.
+            error.textContent = 'אי אפשר לתקן את התנועה הזו עכשיו. רענן ובדוק את '
+                + 'ההיסטוריה - ייתכן שכבר תוקנה ממכשיר אחר.';
+            reasonInput.focus();
             return;
         }
 

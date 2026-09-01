@@ -944,7 +944,22 @@ function eventReversalProblems(schedule, targetId, amount, reason) {
         if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
             out.push('a correction finer than an agora');
         }
-        if (back > held + 1e-6) out.push('a correction larger than the transaction it corrects');
+        // ALL OF IT, OR NONE OF IT.
+        //
+        // This refused only a correction LARGER than its target, so 100 against a 400
+        // repayment was accepted and the record then said that 300 of that repayment
+        // still happened. It did not: this model has no event for part of a payment - the
+        // man handed over 400 or he did not - and the difference is not recoverable
+        // afterwards, because the correction's id is derived from the target and the
+        // second attempt is refused as a second correction of a transaction already
+        // corrected. A partial strands money where no button in this app can reach it.
+        //
+        // Compared in agorot, against the target's own agorot, so a rate that produced
+        // 412.50 is matched exactly and no binary-float slack is left for 412.4999 to
+        // slip through. eventReversalRoom has always said this in words.
+        if (Math.round(agorot) !== Math.round(held * 100)) {
+            out.push('a correction of part of a transaction, which strands the rest');
+        }
     }
     if (typeof reason !== 'string' || reason.trim() === '') {
         out.push('a correction with no reason');
@@ -967,6 +982,15 @@ function recordEventReversed(schedule, targetId, amount, date, reason, at, by) {
     // idempotent on ONE phone; the deterministic id is what makes it idempotent across
     // three.
     if (reversalTarget(schedule, eventReversalId(targetId))) return null;
+    // AND EVERY OTHER RULE, ASKED HERE, because here is where the writing happens.
+    //
+    // This function used to check only the two conditions above and then write whatever
+    // amount it was handed. Every rule about what a correction may be - the whole amount,
+    // an agora at worst, a reason, a target that carries money and is not itself a
+    // correction - lived in a validator that only the form consulted. A validator the
+    // writer does not call is a document, not a guard: any other caller, now or later,
+    // wrote past all of it. Refused before memory, disk or outbox move.
+    if (eventReversalProblems(schedule, targetId, amount, reason).length > 0) return null;
     return appendLedgerEntry(schedule, {
         id: eventReversalId(targetId),
         advanceId: String(target.advanceId),
