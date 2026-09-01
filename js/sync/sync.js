@@ -2829,10 +2829,22 @@ const FarkadSync = {
         // a write out, which is the one thing the batch record exists to prevent. A
         // DIFFERENT batch is untouched: a held write is not a broken connection, and the
         // rest of the evening still has to go.
-        // Computed only when something is actually held. The physical set is a fresh read
-        // of every queue record on the disk, and a send that does it every time pays for a
-        // hold that almost never exists.
+        // FILLED BEFORE IT IS ASKED. This Set was created empty and never added to, so
+        // the question below it always answered no and the guarantee in the paragraph
+        // above was not enforced at all: the held path was skipped and its partner went
+        // out alone, on the next trigger, and was acknowledged. Measured in
+        // tests/contested.test.mjs - one batch, two days, one of them contested, and the
+        // other landing by itself with the queue dropping to one.
+        //
+        // Read off the in-memory queue, which is the same map the send below walks, so
+        // this costs one pass over what is already there rather than a read of the disk.
         const heldBatches = new Set();
+        this._outbox.forEach((item, path) => {
+            if (item.sent) return;
+            if (item.held || this._heldNow.has(String(path))) {
+                heldBatches.add(item.batchKey);
+            }
+        });
         [...this._outbox.entries()]
             .filter(([, item]) => !item.sent)
             .filter(([path, item]) => {
