@@ -113,6 +113,32 @@ service cloud.firestore {
         && request.resource.data.revision == 1;
     }
 
+    // AND IT MAY NOT CARRY ONE BYTE OF WORK.
+    //
+    // The five fields the production bootstrap actually writes - see the
+    // transaction.update in js/sync/firebase-adapter.js - and nothing else. Measured
+    // before this line existed: an ordinary allowed user could take the legacy document
+    // to revision 1 and, in the same accepted write, delete every day worked, alter a
+    // stamped daily rate, delete the advances, forge a ledger entry, erase the roster,
+    // change schemaVersion, or add a field nobody has heard of. Seventeen of nineteen
+    // such writes were accepted. The two that were refused were refused by accident.
+    //
+    // This is the ONE accepted write with no compare-and-set behind it: there is no prior
+    // revision to check it against, so a stale bootstrap sent from a phone that has been
+    // away can carry its own idea of the document over another phone's newer legacy
+    // correction, and nothing else in this file would refuse it. The ordinary
+    // nextRevision() branch does not need this - a whole-document write there is the
+    // restore, it is guarded by fullDocumentOk(), and its revision has to be exactly one
+    // past what is on the server.
+    //
+    // affectedKeys() is the right question rather than listing the business fields: a
+    // build that adds a field this rule has never heard of must not thereby open a hole
+    // in it. Anything outside the five is business, whatever it is called.
+    function bootstrapTouchesOnlyProtocol() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy']);
+    }
+
     // A WRITE FROM A PHONE THAT HAS NOT UPDATED YET.
     //
     // This is what makes the rollout executable rather than a sequencing puzzle with no
@@ -189,7 +215,9 @@ service cloud.firestore {
           // A protocol write: the ordinary next revision, or the one bootstrap that
           // brings a legacy document into the protocol. Either way it carries its
           // receipt, so a revision never exists without the operation that explains it.
-          (versioned() && (nextRevision() || (noRevisionYet() && bootstrapRevision()))
+          (versioned()
+            && (nextRevision()
+              || (noRevisionYet() && bootstrapRevision() && bootstrapTouchesOnlyProtocol()))
             && carriesReceipt(docId))
           // Or a phone that has not updated yet, while the document is still legacy.
           || legacyWrite()

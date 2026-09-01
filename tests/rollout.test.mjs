@@ -74,6 +74,14 @@ const readDoc = async () => {
 
 // The bootstrap, written the way the client writes it: the whole document it already
 // holds, plus the ordering fields, plus the receipt, in one transaction.
+//
+// A WHOLE-DOCUMENT SHAPE, and the rules judge the RESULT rather than the shape - the
+// bootstrap clause asks diff().affectedKeys(), so writing every unchanged byte back is
+// accepted and writing one changed byte is not. That distinction is what this helper
+// cannot show, because it copies the document forward from the snapshot it just read: it
+// proves the rollout is executable and it proves nothing about what a bootstrap may
+// contain. tests/bootstrap.rules.test.mjs is the suite that asks that, from the outside,
+// with nineteen mutations a bootstrap must not be allowed to carry.
 function bootstrap(db, opId, extra = {}) {
     const ref = doc(db, ...PATH);
     return runTransaction(db, transaction =>

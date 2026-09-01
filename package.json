@@ -52,7 +52,8 @@
     "test:cas-emulator": "firebase emulators:exec --only firestore \"node tests/cas.emulator.test.mjs\"",
     "test:rollout": "firebase emulators:exec --only firestore \"node tests/rollout.test.mjs\"",
     "test:bootstrap": "firebase emulators:exec --only firestore \"node tests/bootstrap.emulator.test.mjs\"",
-    "test:emulator": "npm run test:rules && npm run test:cas-emulator && npm run test:rollout && npm run test:bootstrap",
+    "test:bootstrap-rules": "firebase emulators:exec --only firestore \"node tests/bootstrap.rules.test.mjs\"",
+    "test:emulator": "npm run test:rules && npm run test:cas-emulator && npm run test:rollout && npm run test:bootstrap && npm run test:bootstrap-rules",
     "serve": "python3 -m http.server 8802",
     "shot": "node tests/shot.mjs",
     "browsers": "playwright install chromium"
