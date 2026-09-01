@@ -854,4 +854,35 @@ function rebuild(device, payload) {
             problems: device.global('Recovery').problems.length }));
 }
 
+// -------------------------------------------------- E7: the poison family is swept too
+{
+    suite('E7: a quarantined poisoned map made in an earlier session leaves the phone');
+
+    // The copies js/state.js makes of a map with a name it cannot use as a key live under
+    // scheduleData:v2:poison:<where>:damaged. The sweep above carries a copy only when
+    // the record it is a copy OF is one this app writes - by allowlist, on purpose - and
+    // this family was not on the list. So a copy whose original has since been written
+    // over, from a session whose problem list is gone, stayed on a device nobody can
+    // read: the same outcome as deleting it.
+    //
+    // Asked of the export directly, without booting: a boot re-derives a hold from the
+    // copy and puts it on the problem list, which would carry it by a different route
+    // and prove nothing about the sweep.
+    const COPY = '{"__proto__":{"entries":[{"placeId":"p_POISON_SWEEP"}]}}';
+    const device = makeDevice({
+        storage: { 'scheduleData:v2:poison:days.2026-08-12.actual:damaged': COPY }
+    });
+
+    check('the sweep recognises the copy as one of this app’s quarantines',
+        device.call('isFarkadQuarantineKey',
+            'scheduleData:v2:poison:days.2026-08-12.actual:damaged') === true);
+    check('and a numbered copy of the same family',
+        device.call('isFarkadQuarantineKey',
+            'scheduleData:v2:poison:ledger.unreadable:damaged:2') === true);
+    const rescue = device.global('Recovery').rawRecords();
+    check('so the bytes are in the rescue file',
+        Object.keys(rescue).some(key => rescue[key] === COPY),
+        JSON.stringify(Object.keys(rescue)));
+}
+
 report();
