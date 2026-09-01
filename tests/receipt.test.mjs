@@ -51,17 +51,21 @@ const TICK = 6;
 const DAY = '2026-08-12';
 const PATH = `days.${DAY}.actual.w_01`;
 
-function phone(id, cloud) {
-    const device = makeDevice({ deviceId: id });
+function phone(id, cloud, storage) {
+    const device = makeDevice({ deviceId: id, storage });
     device.Sync.pushDelayMs = TICK;
     device.setToday('2026-08-20');
     device.ctx.askTell = () => Promise.resolve();
-    device.State.schedule.workers = [
-        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
-    device.State.schedule.places = [
-        { id: 'p_01', name: 'הרצליה', active: true },
-        { id: 'p_02', name: 'תל אביב', active: true }];
-    device.State.save({ silent: true });
+    // A reopened device brings its own disk; seeding a roster over what it read back
+    // would be a different device wearing the same id.
+    if (!storage) {
+        device.State.schedule.workers = [
+            { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+        device.State.schedule.places = [
+            { id: 'p_01', name: 'הרצליה', active: true },
+            { id: 'p_02', name: 'תל אביב', active: true }];
+        device.State.save({ silent: true });
+    }
     if (cloud) device.Sync.connect(cloud.adapter);
     return device;
 }
@@ -206,6 +210,79 @@ const site = (device, date, placeId) => device.State.commit(device.call('assignP
     check('and the phone still owes what it owed',
         b.Sync.pendingCount() >= 0 && b.Sync.status !== 'synced' || owed === 0,
         `${owed} -> ${b.Sync.pendingCount()}, ${b.Sync.status}`);
+}
+
+// ------------------------------------------------- the create branch of one operation
+{
+    suite('a create whose answer was lost is the same operation when it is retried');
+
+    // THE FIRST WRITE OF A PROJECT, and the one shape where one operation can go out
+    // through two different doors.
+    //
+    // The document does not exist, so the update is refused 'not-found' and createDocument
+    // sends the whole seed instead - deliberately under the SAME operation id, because it
+    // IS that write taking the other branch. The server commits it and the answer is lost.
+    //
+    // The client then retries, and by now the document exists, so this time the operation
+    // goes out as the update it always was. Same id, same edit - and a fingerprint computed
+    // over the seed rather than over the patch, so the receipt the create left describes a
+    // different operation from the one now asking about it. receipt-mismatch, on the only
+    // retry path there is, for ever: the day is in the cloud, the queue never empties, the
+    // status never leaves error, and closing and reopening the app changes nothing.
+    const cloud = makeCloud();
+    const landed = cloud.adapter.create.bind(cloud.adapter);
+    let lost = 0;
+    cloud.adapter.create = data => landed(data).then(() => {
+        lost += 1;
+        // A network that drops after the commit, which is indistinguishable from one that
+        // drops before it - which is the whole reason receipts exist.
+        const dropped = new Error('client is offline');
+        dropped.code = 'unavailable';
+        throw dropped;
+    });
+
+    const a = phone('d_lost');
+    cloud.online = false;
+    a.Sync.connect(cloud.adapter);
+    await settle(TICK * 10);
+    site(a, DAY, 'p_01');
+    await settle(TICK * 10);
+    cloud.online = true;
+    a.Sync.flush();
+    await settleUntil(() => lost > 0 && cloud.attempts.some(one => one.kind === 'update'),
+        5000);
+    await settle(TICK * 20);
+
+    given('the create committed and its answer was lost', lost === 1 && Boolean(cloud.doc),
+        `${lost} lost, document ${cloud.doc ? 'exists' : 'missing'}`);
+    given('the work is in the cloud',
+        Boolean(((cloud.doc.days || {})[DAY] || {}).actual),
+        JSON.stringify((cloud.doc.days || {})[DAY]));
+
+    const applied = cloud.writes.filter(write => !write.replayed).length;
+
+    // Closed and opened again, against a cloud that can create normally now - there is
+    // nothing left to create.
+    const disk = a.dump();
+    cloud.adapter.create = landed;
+    const b = phone('d_lost', cloud, disk);
+    await settleUntil(() => b.Sync.pendingCount() === 0, 5000);
+    await settle(TICK * 20);
+
+    check('the retry is recognised as the operation that already landed',
+        b.Sync.pendingCount() === 0, `${b.Sync.pendingCount()} still owed`);
+    check('the queue clears without applying anything a second time',
+        cloud.writes.filter(write => !write.replayed).length === applied,
+        `${applied} -> ${cloud.writes.filter(write => !write.replayed).length}`);
+    check('and nothing is held as a receipt for a different operation',
+        !(b.Sync.lastError && /different operation/.test(
+            String(b.Sync.lastError.message || b.Sync.lastError))),
+        String(b.Sync.lastError && (b.Sync.lastError.message || b.Sync.lastError)));
+    check('the phone says it is synced', b.Sync.status === 'synced', b.Sync.status);
+    check('and the day it recorded is still the day the cloud holds',
+        JSON.stringify(((cloud.doc.days || {})[DAY] || {}).actual)
+            === JSON.stringify((b.State.schedule.days[DAY] || {}).actual),
+        JSON.stringify([(cloud.doc.days || {})[DAY], b.State.schedule.days[DAY]]));
 }
 
 // ------------------------------------------------------------- and the name covers the value
