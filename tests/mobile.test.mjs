@@ -440,52 +440,165 @@ for (const width of WIDTHS) {
 // doubled text: not a weak test, a test of nothing, printing four green lines a person
 // would have relied on.
 //
-// So the size is forced where the app actually reads it. Every element's COMPUTED
-// font-size is read and set back at twice the value, which changes what is rendered - and
-// the suite asserts that it changed, because a scaling mechanism that silently stops
-// working is how the last one survived.
+// The replacement for that was to read every element's computed size and set it back
+// doubled as an INLINE STYLE. That was measurably better and still not true, and the way
+// it failed is worth writing down because it is the same shape as the first failure.
 //
-// It is still not iOS Dynamic Type. Chromium cannot model that: AX2 changes text metrics
-// through the system, interacts with -apple-system font faces and with Safari's own
-// minimum sizes, and reflows some controls the way no stylesheet here can be made to.
-// What this proves is that the layout survives text at twice the size. Dynamic Type at
-// AX2 on a real phone stays a physical check, and docs/iphone-acceptance.md says so.
+// js/app.js redraws the whole visible view on every change - deliberately; its own comment
+// says redrawing is cheaper in bugs than tracking which nodes need patching - so showView()
+// and render() REPLACE the nodes the inline styles were written on. css/app.css declares
+// 169 font sizes in px and no rem at all, and every one of those rules re-imposes its fixed
+// size on each freshly created element. Measured on this app at 390px, after the four
+// showView() calls this block performs: 14 of 121 visible text nodes were still doubled and
+// 107 were byte-identical to a run with no scaling at all. The 14 survivors were the static
+// shell in index.html - body, .tabs, .day-actions, the sheet frame - which is precisely and
+// only the set the old four-selector guard sampled. The guard stayed green while 88% of the
+// screen was at ordinary size, and .day-header passed it by inheriting from a doubled body
+// rather than by being scaled.
+//
+// So the CASCADE is rewritten instead of the nodes. Every font-size rule in every same-
+// origin stylesheet is re-emitted at twice its value with !important, in one <style> tag
+// appended last. Nothing is attached to any element, so a node that does not exist yet is
+// covered the instant it is created - which is the whole property the previous two
+// mechanisms lacked. Measured the same way afterwards: 121 of 121, an exact bijection with
+// the unscaled buckets.
+//
+// Rejected, with the numbers, so nobody re-tries them: `body { zoom: 2 }` moves no computed
+// font-size at all (17 -> 17) and corrupts the measurement this block is built on -
+// scrollWidth went 390 -> 461 against an unchanged clientWidth, so every "still fits across"
+// check would fail spuriously. A MutationObserver compounds through inheritance: a node
+// inserted under an already-doubled ancestor reads the inherited 34 and doubles that, and
+// .day-header lands at 68px.
+//
+// It is still not iOS Dynamic Type. Chromium cannot model that, and the list is specific:
+// Dynamic Type is not a uniform multiplier - each UIFont.TextStyle has its own non-linear
+// curve and some clamp - `-webkit-text-size-adjust: 100%` in css/app.css is a WebKit opt-out
+// with no Chromium equivalent in play, SF's optical variants change advance widths across
+// the 20pt boundary while Chromium substitutes a different family entirely, and Safari has
+// its own minimum font size and font-boosting heuristics. VoiceOver is not modelled at all:
+// focus order under the rotor, the announcement of RTL Hebrew mixed with LTR digits, and
+// whether the dock is reachable are not rendering questions. What this proves is that the
+// layout survives text at twice the size. Dynamic Type at AX2 and VoiceOver on a real phone
+// stay physical checks, and docs/iphone-acceptance.md says so.
 const doubleEveryFontSize = page => page.evaluate(() => {
-    const sizes = new Map();
-    document.querySelectorAll('*').forEach(node => {
-        const px = parseFloat(getComputedStyle(node).fontSize);
-        if (Number.isFinite(px)) sizes.set(node, px);
-    });
-    sizes.forEach((px, node) => { node.style.fontSize = (px * 2) + 'px'; });
-    return sizes.size;
+    const out = [];
+    let seen = 0;
+    const walk = (rules, wrap) => {
+        for (const rule of rules) {
+            // Branch on TYPE, not on the presence of .cssRules: CSS Nesting gives an
+            // ordinary style rule one too, and testing for it swallows the whole file and
+            // emits nothing. 4 is @media, 12 is @supports, 1 is a style rule.
+            if (rule.type === 4 || rule.type === 12) {
+                const head = rule.type === 4
+                    ? `@media ${rule.media.mediaText}` : `@supports ${rule.conditionText}`;
+                walk(rule.cssRules, text => wrap(`${head}{${text}}`));
+                continue;
+            }
+            if (rule.type !== 1 || !rule.style) continue;
+            const raw = rule.style.getPropertyValue('font-size');
+            if (!raw) continue;
+            seen += 1;
+            // pt appears only inside @media print, which this suite never renders.
+            if (!/^[\d.]+px$/.test(raw.trim())) continue;
+            wrap(`${rule.selectorText}{font-size:${parseFloat(raw) * 2}px !important;}`);
+        }
+    };
+    for (const sheet of document.styleSheets) {
+        let rules = null;
+        try { rules = sheet.cssRules; } catch (error) { rules = null; }
+        if (rules) walk(rules, text => out.push(text));
+    }
+    out.unshift('html{font-size:32px !important;}');
+    const style = document.createElement('style');
+    style.id = 'ax2-cascade';
+    // Last, and !important: it competes with rules of identical specificity from the very
+    // sheet it was generated from.
+    style.textContent = out.join('\n');
+    document.head.appendChild(style);
+    return { seen, emitted: out.length };
 });
 
-const sampleSizes = page => page.evaluate(() => {
+// SAMPLED ON NODES THE APP BUILDS, not on the shell it was served with.
+//
+// The old sampler read .day-header, .tab, body and a dock button. Three of those are static
+// elements of index.html that keep an inline style for the life of the page, and the fourth
+// has no font-size rule of its own and inherits from the third. It was structurally
+// incapable of failing: it would have stayed green if the mechanism were reduced to setting
+// one size on <body>.
+//
+// These four are created by renderDay() and openAssignSheet(), every one of them has its
+// own px rule in css/app.css, and none of them exists in index.html.
+const REBUILT = ['.wrow-name', '.wrow .tag',
+    '#assignSheet .sheet-foot button', '#assignSheet .sheet-body button'];
+
+const sampleSizes = page => page.evaluate(list => {
     const at = selector => {
         const node = document.querySelector(selector);
         return node ? parseFloat(getComputedStyle(node).fontSize) : null;
     };
-    return { header: at('.day-header'), tab: at('.tab'), body: at('body'),
+    const out = { header: at('.day-header'), tab: at('.tab'), body: at('body'),
         button: at('.day-actions button') };
-});
+    list.forEach(selector => { out[selector] = at(selector); });
+    return out;
+}, REBUILT);
+
+// The sheet has to be open for its two nodes to exist at all, in the baseline as well as
+// afterwards - comparing a null against a number is how a sampler reports success for a
+// node it never found.
+const withSheetOpen = async (page, work) => {
+    await page.evaluate(async () => {
+        openAssignSheet('w_01');
+        await new Promise(done => setTimeout(done, 350));
+    });
+    const out = await work();
+    await page.evaluate(async () => {
+        if (typeof closeAssignSheet === 'function') closeAssignSheet();
+        await new Promise(done => setTimeout(done, 250));
+    });
+    return out;
+};
 
 for (const width of WIDTHS) {
     const label = `${width}px at 200% text`;
     suite(label);
 
     const page = await open({ width, height: HEIGHTS[width] });
-    const before = await sampleSizes(page);
+    const before = await withSheetOpen(page, () => sampleSizes(page));
     const touched = await doubleEveryFontSize(page);
     await page.waitForTimeout(300);
-    const after = await sampleSizes(page);
+
+    // AFTER THE APP HAS REDRAWN ITSELF, which is the state every check below runs in.
+    // Sampling here rather than at the moment of scaling is the whole repair: the previous
+    // mechanism was at its most effective in the instant it was applied and had stopped
+    // working by the first showView().
+    await page.evaluate(async () => {
+        for (const view of ['day', 'week', 'roster', 'reports']) {
+            showView(view);
+            await new Promise(done => setTimeout(done, 150));
+        }
+        showView('day');
+        render();
+        await new Promise(done => setTimeout(done, 150));
+    });
+    const after = await withSheetOpen(page, () => sampleSizes(page));
 
     // THE MECHANISM ITSELF, asserted first. Everything below is worthless if the text did
-    // not actually grow, and that is exactly the state this suite was in.
-    const grew = Object.keys(before).filter(key =>
-        before[key] !== null && after[key] !== null && after[key] >= before[key] * 2 - 0.5);
+    // not actually grow, and that is exactly the state this suite was in - twice.
+    const measured = Object.keys(before).filter(key => before[key] !== null);
+    const grew = measured.filter(key =>
+        after[key] !== null && after[key] >= before[key] * 2 - 0.5);
     check(`${label}: the text really is twice the size, measured`,
-        touched > 0 && grew.length === Object.keys(before).filter(k => before[k] !== null).length,
+        touched.emitted > 1 && grew.length === measured.length,
         JSON.stringify({ touched, before, after }));
+    // AND ON THE NODES THE APP REBUILT. Named separately, because those are the ones the
+    // last two mechanisms lost and the guard could not see.
+    const rebuilt = REBUILT.filter(selector =>
+        before[selector] !== null && after[selector] !== null
+        && after[selector] >= before[selector] * 2 - 0.5);
+    check(`${label}: including every node the app rebuilt after the scaling`,
+        rebuilt.length === REBUILT.length,
+        JSON.stringify(REBUILT.map(selector =>
+            [selector, before[selector], after[selector]])));
 
     const views = await page.evaluate(async () => {
         const out = {};
@@ -539,7 +652,9 @@ for (const width of WIDTHS) {
     // worker in the list can be reached at all.
     const bars = await page.evaluate(() => {
         const dock = document.querySelector('.day-actions');
-        const nav = document.querySelector('.tabbar');
+        // .tabs, not .tabbar - which exists nowhere in this repo, so `bars` was null at
+        // every width and the check below it was vacuously true in all eight runs.
+        const nav = document.querySelector('.tabs');
         if (!dock || !nav) return null;
         return {
             dock: Math.round(dock.getBoundingClientRect().bottom),
@@ -1477,43 +1592,180 @@ for (const [script, longName] of LONG_NAMES) {
     }
 }
 
-// ---------------------------------------------------------------- long names, big text
-{
-    suite('320px: a long name at doubled text still leaves a day on the screen');
+// ------------------------------------------------- long names, big text, every width
+//
+// This block used to set document.documentElement.style.fontSize = '32px' and call it
+// doubled text. Measured: root 16 -> 32, body 17 -> 17, .name-cell 14 -> 14, .week-cell
+// 13 -> 13, scrollWidth 320 -> 320. Three green lines about a screen at its ordinary size.
+// It now uses the same cascade rewrite as the block above, which is the only mechanism in
+// this file that survives a rerender.
+//
+// The names are the two scripts this crew is actually named in, at the length a real one
+// reaches: Hebrew with a triple patronymic, and Arabic with the definite article and a
+// nisba. Both are read right-to-left and both are long enough to take the whole width of a
+// phone on their own, which is the point - the sticky name column is what decides whether
+// any day is reachable at all.
+for (const width of WIDTHS) {
+    for (const [script, naming] of [
+        ['Hebrew', at => 'מוחמד עבד אל רחמן מחאמיד ' + (at + 1)],
+        ['Arabic', at => 'عبد الرحمن محمد الأحمدي الشمالي ' + (at + 1)]
+    ]) {
+        const label = `${width}px, a long ${script} name at 200% text`;
+        suite(label);
 
-    const page = await open({ width: 320, height: 568 });
-    await setInset(page, 34);
-    await page.evaluate(() => {
-        State.schedule.workers.forEach((worker, at) => {
-            worker.name = 'מוחמד עבד אל רחמן מחאמיד ' + (at + 1);
+        const page = await open({ width, height: HEIGHTS[width] });
+        await setInset(page, 34);
+        await page.evaluate(source => {
+            const name = eval(`(${source})`);
+            State.schedule.workers.forEach((worker, at) => { worker.name = name(at); });
+            State.save();
+            render();
+        }, naming.toString());
+        await doubleEveryFontSize(page);
+        await page.waitForTimeout(200);
+
+        // THE WEEK GRID, which is where the name column and the days compete.
+        await page.click('#tab-week');
+        await page.waitForTimeout(400);
+
+        const grid = await page.evaluate(() => {
+            const wrap = document.querySelector('#weekView .table-scroll');
+            const edge = wrap.getBoundingClientRect();
+            const row = document.querySelector('.week-table tbody tr:first-child');
+            const cells = [...row.querySelectorAll('.week-cell')];
+            const visible = cells.filter(cell => {
+                const at = cell.getBoundingClientRect();
+                return at.width >= 44 && at.height >= 44
+                    && at.left >= edge.left - 0.5 && at.right <= edge.right + 0.5;
+            });
+            // Every day reachable by scrolling the box sideways, which is what the design
+            // trades the width for.
+            wrap.scrollLeft = wrap.scrollWidth;
+            const reachable = cells.filter(cell => cell.getBoundingClientRect().width >= 44);
+            wrap.scrollLeft = 0;
+            const nameCell = row.querySelector('.name-cell') || row.firstElementChild;
+            const clip = nameCell ? nameCell.querySelector('.name-clip') : null;
+            return {
+                rows: document.querySelectorAll('.week-table tbody tr').length,
+                days: cells.length,
+                visible: visible.length,
+                reachable: reachable.length,
+                nameWidth: nameCell ? Math.round(nameCell.getBoundingClientRect().width) : null,
+                clipped: clip ? getComputedStyle(clip).textOverflow : null,
+                titled: clip ? String(clip.getAttribute('title') || '').length > 0 : false,
+                labelled: nameCell
+                    ? String(nameCell.getAttribute('aria-label')
+                        || (nameCell.textContent || '')).length > 0 : false,
+                page: document.documentElement.scrollWidth,
+                client: document.documentElement.clientWidth,
+                size: parseFloat(getComputedStyle(
+                    document.querySelector('.week-cell') || document.body).fontSize)
+            };
         });
-        State.save();
-        document.documentElement.style.fontSize = '32px';
-    });
-    await page.click('#tab-week');
-    await page.waitForTimeout(400);
 
-    const box = await page.evaluate(() => {
-        const wrap = document.querySelector('#weekView .table-scroll');
-        const edge = wrap.getBoundingClientRect();
-        const cells = [...document.querySelectorAll('.week-table tbody tr:first-child .week-cell')];
-        const visible = cells.filter(cell => {
-            const at = cell.getBoundingClientRect();
-            return at.width >= 44 && at.left >= edge.left - 0.5 && at.right <= edge.right + 0.5;
+        check(`${label}: the whole crew is still drawn`, grid.rows === CREW,
+            JSON.stringify(grid));
+        check(`${label}: the text really is doubled here too`, grid.size >= 24,
+            `${grid.size}px`);
+        // A WHOLE 44x44 DAY, before anything is scrolled. Below that the column has taken
+        // the screen and the grid is a name list.
+        check(`${label}: a full day cell is on the screen before any scrolling`,
+            grid.visible >= 1, JSON.stringify(grid));
+        check(`${label}: and all seven days can be reached by scrolling`,
+            grid.reachable === grid.days && grid.days === 7, JSON.stringify(grid));
+        check(`${label}: the name column is bounded rather than taking the width`,
+            grid.nameWidth !== null && grid.nameWidth <= Math.round(width * 0.45),
+            `${grid.nameWidth}px of ${width}px`);
+        check(`${label}: the name is clipped rather than wrapped away`,
+            grid.clipped === 'ellipsis', String(grid.clipped));
+        check(`${label}: and the whole name is still available to a reader`,
+            grid.titled === true && grid.labelled === true, JSON.stringify(grid));
+        check(`${label}: the page still does not scroll sideways`,
+            grid.page <= grid.client + 1, JSON.stringify(grid));
+
+        // THE DAY SCREEN, the sheet, and the last worker in the list - the three places a
+        // control gets pushed off a short screen at this size.
+        const day = await page.evaluate(async () => {
+            showView('day');
+            await new Promise(done => setTimeout(done, 250));
+            const rows = [...document.querySelectorAll('.wrow')];
+            const last = rows[rows.length - 1];
+            const dock = document.querySelector('.day-actions');
+            const nav = document.querySelector('.tabs');
+            const box = last ? last.getBoundingClientRect() : null;
+            return {
+                rows: rows.length,
+                lastReachable: Boolean(box) && box.height >= 44,
+                lastAbove: Boolean(box) && Boolean(dock)
+                    && box.top < dock.getBoundingClientRect().top + box.height,
+                dockAboveNav: Boolean(dock) && Boolean(nav)
+                    && dock.getBoundingClientRect().bottom
+                        <= nav.getBoundingClientRect().top + 2,
+                tabs: [...document.querySelectorAll('.tab')].filter(node =>
+                    node.getBoundingClientRect().width >= 44).length
+            };
         });
-        return {
-            rows: document.querySelectorAll('.week-table tbody tr').length,
-            visible: visible.length,
-            page: document.documentElement.scrollWidth,
-            client: document.documentElement.clientWidth
-        };
-    });
-    check('the whole crew is still drawn', box.rows === CREW, JSON.stringify(box));
-    check('a day is still reachable without scrolling', box.visible >= 1, JSON.stringify(box));
-    check('and the page still does not scroll sideways',
-        box.page <= box.client + 1, JSON.stringify(box));
+        check(`${label}: every worker has a row and the last one is a real target`,
+            day.rows === CREW && day.lastReachable === true, JSON.stringify(day));
+        check(`${label}: the dock still clears the nav bar`,
+            day.dockAboveNav === true, JSON.stringify(day));
+        check(`${label}: and every tab is still tappable`, day.tabs >= 4,
+            JSON.stringify(day));
 
-    await page.context().close();
+        // A KEYBOARD-SIZED VIEWPORT, which is what a phone actually gives the sheet.
+        const sheet = await page.evaluate(async () => {
+            openAssignSheet(State.schedule.workers[State.schedule.workers.length - 1].id);
+            await new Promise(done => setTimeout(done, 350));
+            const content = document.querySelector('#assignSheet .sheet-content');
+            const foot = document.querySelector('#assignSheet .sheet-foot');
+            if (!content || !foot) return null;
+            const buttons = [...document.querySelectorAll('#assignSheet button')]
+                .filter(node => {
+                    const box = node.getBoundingClientRect();
+                    return box.width > 0 && box.height > 0;
+                });
+            return {
+                shown: content.getBoundingClientRect().height > 0,
+                footInside: foot.getBoundingClientRect().bottom <= window.innerHeight + 2,
+                buttons: buttons.length,
+                smallest: buttons.length
+                    ? Math.round(Math.min(...buttons.map(node =>
+                        Math.min(node.getBoundingClientRect().width,
+                            node.getBoundingClientRect().height))))
+                    : 0,
+                size: parseFloat(getComputedStyle(
+                    document.querySelector('#assignSheet .sheet-body button')
+                    || document.body).fontSize)
+            };
+        });
+        check(`${label}: the sheet opens for the last worker with its buttons on screen`,
+            sheet !== null && sheet.shown && sheet.footInside, JSON.stringify(sheet));
+        check(`${label}: the sheet's own text is doubled too`,
+            sheet !== null && sheet.size >= 24, JSON.stringify(sheet));
+
+        // The keyboard takes the bottom half. The foot has to stay reachable.
+        await page.setViewportSize({ width, height: Math.round(HEIGHTS[width] * 0.55) });
+        await page.waitForTimeout(300);
+        const keyboard = await page.evaluate(() => {
+            const foot = document.querySelector('#assignSheet .sheet-foot');
+            const sheetNode = document.querySelector('#assignSheet');
+            if (!foot || !sheetNode) return null;
+            return {
+                open: sheetNode.getBoundingClientRect().height > 0,
+                reachable: foot.getBoundingClientRect().top < window.innerHeight,
+                page: document.documentElement.scrollWidth,
+                client: document.documentElement.clientWidth
+            };
+        });
+        check(`${label}: with the keyboard up the sheet's foot is still reachable`,
+            keyboard !== null && keyboard.open && keyboard.reachable,
+            JSON.stringify(keyboard));
+        check(`${label}: and nothing has started scrolling sideways`,
+            keyboard !== null && keyboard.page <= keyboard.client + 1,
+            JSON.stringify(keyboard));
+
+        await page.context().close();
+    }
 }
 
 await browser.close();
