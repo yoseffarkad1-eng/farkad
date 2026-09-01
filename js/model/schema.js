@@ -363,6 +363,52 @@ function storedScheduleProblems(raw) {
 //
 // Returns a reason, or null. English, like every other diagnostic in this file - the
 // screen says it in Hebrew in its own words.
+// EVERY MAP THIS APP READS BY ID, scanned for a name it cannot safely use as a key.
+//
+// isSafeId refuses `__proto__`, `prototype` and `constructor` at every WRITER. This is the
+// same question asked of a document arriving from somewhere else - the cloud, a backup, a
+// rescue file - where the key is already an own property of a parsed object and assigning
+// it into an ordinary map either reparents that map or silently does nothing.
+//
+// Measured before this existed: a day layer arriving with an own `__proto__` came out the
+// other side with the key simply gone, nobody told, the device still writing, and the
+// normalised schedule written over the record that had it. Iron law 10, exactly inverted.
+//
+// Returns one entry per poisoned map: where it was, and the map's bytes exactly as they
+// arrived, so the evidence can be quarantined rather than described.
+function poisonedContainers(raw) {
+    const out = [];
+    const look = (map, where) => {
+        if (!isPlainObject(map)) return;
+        POISON_SEGMENTS.forEach(name => {
+            if (!Object.prototype.hasOwnProperty.call(map, name)) return;
+            out.push({ at: where, name, json: JSON.stringify(map) });
+        });
+    };
+
+    const days = raw && raw.days;
+    if (isPlainObject(days)) {
+        Object.keys(days).forEach(date => {
+            const day = days[date];
+            if (!isPlainObject(day)) return;
+            look(day, `days.${date}`);
+            ['plan', 'actual'].forEach(layer => look(day[layer], `days.${date}.${layer}`));
+        });
+    }
+    look(raw && raw.advances, 'advances');
+    const roster = raw && raw.roster;
+    if (isPlainObject(roster)) {
+        look(roster.workers, 'roster.workers');
+        look(roster.places, 'roster.places');
+    }
+    const ledger = raw && raw.ledger;
+    if (isPlainObject(ledger)) {
+        ['advances', 'migrations', 'unreadable', 'unreadableMigrations'].forEach(family =>
+            look(ledger[family], `ledger.${family}`));
+    }
+    return out;
+}
+
 function ledgerContainerProblem(raw) {
     const ledger = raw && raw.ledger;
     // Absent is not malformed. Every device that has never recorded an advance has none,
