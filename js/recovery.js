@@ -464,8 +464,20 @@ function quarantineRecord(key, raw) {
     // Bounded. A device with twenty damaged copies of one record has a different problem,
     // and an unbounded loop on a full disk would spin.
     for (let n = 2; Store.get(target) !== null && n <= 20; n += 1) {
+        // A copy on the ladder that already holds these exact bytes IS the copy. It has
+        // just been read back, which is the whole test a fresh one would have to pass.
+        //
+        // Without this, the hold that js/state.js re-derives at every boot from a
+        // quarantined poisoned map - the same bytes, every session - minted one more
+        // copy per open until the ladder ran out at twenty. From then on this answered
+        // null, the problem was held with mustHold, acknowledging did nothing, and the
+        // banner told the person there was no room for a copy while twenty identical
+        // copies sat on the disk. Different bytes still go beside the earlier ones,
+        // never over them.
+        if (Store.get(target) === raw) return target;
         target = key + ':damaged:' + n;
     }
+    if (Store.get(target) === raw) return target;
     if (Store.get(target) !== null) return null;
 
     // NOT optional. An optional write is one the app can live without, and this is the
