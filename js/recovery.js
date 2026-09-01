@@ -395,6 +395,14 @@ const FARKAD_RECORD_KEYS = [
 function isFarkadRecordKey(key) {
     if (FARKAD_RECORD_KEYS.indexOf(key) !== -1) return true;
     if (key.indexOf('farkad:prov:') === 0) return true;
+    // THE POISON FAMILY, for the same reason the ledger's quarantine is on the list.
+    //
+    // js/state.js hands Recovery a map whose name it cannot use as a key under
+    // scheduleData:v2:poison:<where>, and there is no live record by that name: only
+    // the :damaged copies exist. A copy from an earlier session, whose original has
+    // since been written over by an ordinary save, was the only trace of somebody's
+    // day - and this predicate walked straight past it.
+    if (key.indexOf('scheduleData:v2:poison:') === 0) return true;
     return typeof FarkadSync !== 'undefined' && FarkadSync.isQueueKey
         ? FarkadSync.isQueueKey(key)
         : false;

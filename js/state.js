@@ -822,9 +822,16 @@ function normaliseSchedule(raw, hints) {
     };
 
     // Anything an older or newer build left under ledger.unreadable stays there too.
+    //
+    // Asked as an OWN key, not with `map[id] === undefined`. For `__proto__` that lookup
+    // reads Object.prototype off a plain object and is never undefined, so keepUnder
+    // below never ran for the one id it was written for: the reopened schedule came
+    // back without the entry, and the first ordinary save after the person acknowledged
+    // wrote that record over the one that had the evidence. Measured: the quarantine
+    // copy was the only trace left, and the sweep did not know its name either.
     const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {
-        if (schedule.ledger.unreadable[id] === undefined) {
+        if (!Object.prototype.hasOwnProperty.call(schedule.ledger.unreadable, id)) {
             keepUnder(schedule.ledger.unreadable, id, held[id]);
         }
     });
