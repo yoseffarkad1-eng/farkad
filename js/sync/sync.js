@@ -3236,7 +3236,7 @@ const FarkadSync = {
                 .then(() => Promise.resolve(this.adapter.update(patch)))
                 .catch(onFailure);
         })
-            .then(() => {
+            .then(answer => {
                 // Only now. Up to this point the edits were on disk and would have been
                 // replayed by the next session; from here the cloud is holding them.
                 const acked = this.acknowledge(sent);
@@ -3263,6 +3263,16 @@ const FarkadSync = {
                     return;
                 }
 
+                // THE SNAPSHOT AGAIN, now that these paths are no longer owed.
+                //
+                // Answered from its receipt, a retry performs no write and no snapshot
+                // follows it. If another phone corrected one of these paths while the
+                // write was owed, that snapshot has already been adopted here with the
+                // owed value put back on top of it - and the acknowledgement was the
+                // last word: screen and disk kept the older value, the cloud the
+                // correction, and the line said synced. See readoptAfter.
+                if (this.readoptAfter(sent, patch, answer)) return;
+
                 if (this.status !== 'error') this.setStatus('synced');
                 // Something was edited while the send was open.
                 if (this.pendingCount() > 0) this.scheduleFlush();
@@ -3275,6 +3285,47 @@ const FarkadSync = {
                 this.fail(error);
                 this.scheduleRetry();
             });
+    },
+
+    // The paths reapplyPending last put back on top of an adopted snapshot - the queued
+    // values the screen is showing INSTEAD of what that snapshot held at them. Emptied
+    // as they are acknowledged, since an acknowledged path shows the snapshot's value at
+    // the next adoption anyway.
+    _reappliedOver: new Set(),
+
+    // After an acknowledgement: does the latest snapshot need adopting again?
+    //
+    // The answer is yes when both hold: the snapshot already INCLUDES the write that was
+    // just acknowledged - otherwise adopting it would take the write off this screen
+    // until its own echo arrives, which on a transaction is after the answer - and the
+    // snapshot was adopted with one of these paths' owed values reapplied over it, so
+    // what the screen shows at that path is not what the snapshot held.
+    //
+    // Which revision the write reached is the whole question, and it is not the same on
+    // the two answers a send can get. A write that landed reached the revision it
+    // claimed. A REPLAY - the operation had already landed and the server answered from
+    // its receipt - reached the receipt's revision, which is older, and the retry's
+    // claimed revision says nothing about it; that is why the adapter hands the receipt's
+    // revision back with the answer. Without it a replay acknowledged against a snapshot
+    // that already carried another phone's correction left the older value on this
+    // screen and on this disk, saying synced. Returns whether the snapshot was re-run,
+    // in which case receive() has set the status and scheduled anything still owed.
+    readoptAfter(sent, patch, answer) {
+        const replayed = Boolean(answer && typeof answer === 'object'
+            && answer.replayed === true);
+        const reached = replayed && Number.isInteger(answer.revision)
+            ? answer.revision : patch.revision;
+        const latest = this._latestRaw;
+        const over = this._reappliedOver;
+        let stale = false;
+        sent.forEach((item, path) => {
+            if (over.has(String(path))) { stale = true; over.delete(String(path)); }
+        });
+        if (!stale) return false;
+        if (!latest || typeof latest !== 'object' || !Number.isInteger(reached)
+            || !Number.isInteger(latest.revision) || latest.revision < reached) return false;
+        this.receive(latest);
+        return true;
     },
 
     // How long the claim is left to settle before it is read back. A property so the
@@ -4807,7 +4858,7 @@ const FarkadSync = {
             mergeVehiclesInto(State.schedule, previous);
             mergeVehicleDaysInto(State.schedule, previous);
         }
-        this.reapplyPending(State.schedule, gone);
+        this._reappliedOver = new Set(this.reapplyPending(State.schedule, gone));
 
         // AGAIN, after the pending edits are back on top.
         //
@@ -5151,6 +5202,9 @@ const FarkadSync = {
         pending.forEach(([path, item]) => {
             applyJournalEntry(schedule, path, item.value, perEntity, tombstoned);
         });
+        // What was put back, so the acknowledgement that retires one of these can tell
+        // that the screen is showing the queue's value there and not the snapshot's.
+        return pending.map(([path]) => String(path));
     },
 
     scheduleFlush() {
