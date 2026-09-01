@@ -144,6 +144,121 @@ const BAD_APPROVAL = JSON.stringify({
         second.call('farkadWritesBlocked') === true);
 }
 
+// ------------------------------------------------- the approval that names another id
+{
+    suite('an approval whose body names a different id is held, not rewritten');
+
+    // THE ID AND THE KEY, ASKED SEPARATELY - which is what the entries next door already
+    // do, with a comment saying why, and what the approvals did not.
+    //
+    //     migrationApprovalProblems(String(id),
+    //         Object.assign({}, approval, { id: String(id) }))
+    //
+    // The body's id is overwritten with the path's id BEFORE the check that the two
+    // agree, so `if (String(value.id) !== String(id))` inside the validator can never be
+    // false, whatever the record says. An approval stored under cm_carry claiming to be
+    // cm_WRONG passes, is stored as cm_carry, and the disagreement is gone.
+    //
+    // This is not a cosmetic id. carryMigrationApproved asks whether an approval exists
+    // under the plan's own id, and that answer is what opens financialWritingEnabled. So
+    // a record carrying an approval of SOMETHING ELSE - a plan with different rows, from
+    // a build that named its migrations differently, or a byte that flipped - is read as
+    // an approval of this one, and every account on three phones restates itself on it.
+    const device = opened('d_wrongid', JSON.stringify({
+        migrations: { cm_carry: {
+            id: 'cm_WRONG_' + MARKER, kind: 'carry', rows: 3, at: '2026-08-01', by: 'd_x' } }
+    }));
+
+    given('the migration is needed, so the approval decides something',
+        device.call('planCarryMigration', device.State.schedule).needed === true);
+
+    check('the approval is not read as an approval of this plan',
+        Object.keys(device.State.schedule.ledger.migrations).length === 0,
+        JSON.stringify(device.State.schedule.ledger.migrations));
+    check('its id is not rewritten to agree with the path it was found under',
+        JSON.stringify(device.State.schedule.ledger.migrations).indexOf('cm_carry') === -1,
+        JSON.stringify(device.State.schedule.ledger.migrations));
+    check('it is held aside with the id it actually claimed',
+        JSON.stringify(device.State.schedule.ledger.unreadableMigrations)
+            .indexOf('cm_WRONG_' + MARKER) !== -1,
+        JSON.stringify(device.State.schedule.ledger.unreadableMigrations));
+    check('the gate stays shut',
+        device.call('carryMigrationSettled', device.State.schedule) === false);
+    check('and the device is not writing money on it',
+        device.call('farkadWritesBlocked') === true);
+
+    const problem = findProblem(device, LEDGER_KEY);
+    check('the person is told, with the bytes that caused it',
+        problem !== null && String(problem.raw).indexOf('cm_WRONG_' + MARKER) !== -1,
+        JSON.stringify(String((problem || {}).raw).slice(0, 160)));
+    check('and the rescue file carries them off the phone',
+        rescueText(device).indexOf('cm_WRONG_' + MARKER) !== -1);
+
+    // The original bytes are still the original bytes.
+    check('nothing on the disk was rewritten',
+        String(device.dump()['scheduleData:v2']).indexOf('cm_WRONG_' + MARKER) !== -1,
+        String(device.dump()['scheduleData:v2']).slice(0, 60));
+
+    // AND A REOPEN. A hold that a reopen forgets is not a hold.
+    const again = makeDevice({ deviceId: 'd_wrongid2', storage: device.dump() });
+    again.setToday('2026-08-26');
+    again.ctx.askTell = () => Promise.resolve();
+    again.State.load();
+    check('a reopened phone is still held', again.call('farkadWritesBlocked') === true);
+    check('and still has not approved anything',
+        again.call('carryMigrationSettled', again.State.schedule) === false);
+}
+
+// ---------------------------------------------------- the approval is looked up as OWN
+{
+    suite('an approval nobody owns is not an approval');
+
+    // Two inherited lookups, on the pair of functions that decide whether this device may
+    // write money:
+    //
+    //     carryMigrationApproved   Boolean(held[String(plan.id)])
+    //     recordCarryApproval      if (schedule.ledger.migrations[record.id]) ... already
+    //
+    // Neither asks whether the map OWNS the name. So a value reached through the
+    // prototype opens the gate on an approval that is not in the record - and, worse, the
+    // second one then reports `already: true` and declines to write the real approval, so
+    // the person presses the button, is told it is done, and nothing durable says so.
+    const device = seeded('d_own');
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    given('the migration is needed', plan.needed === true);
+
+    const map = {};
+    device.State.schedule.ledger.migrations = map;
+    const proto = Object.getPrototypeOf(map);
+    proto[String(plan.id)] = { id: String(plan.id), kind: 'carry', rows: 0 };
+    try {
+        given('nothing owns the name, and the prototype answers for it',
+            Object.prototype.hasOwnProperty.call(map, String(plan.id)) === false
+            && map[String(plan.id)] !== undefined);
+
+        check('an inherited value is not an approval',
+            device.call('carryMigrationApproved', device.State.schedule, plan) === false,
+            JSON.stringify(device.call('carryMigrationApproved',
+                device.State.schedule, plan)));
+        check('and the gate it guards is still shut',
+            device.call('carryMigrationSettled', device.State.schedule) === false);
+
+        // AND THE WRITE STILL HAPPENS. The person presses the button; something durable
+        // has to record it.
+        const written = device.call('recordCarryApproval', device.State.schedule, plan,
+            '2026-08-26T00:00:00.000Z', device.id);
+        check('a real approval is written rather than reported as already there',
+            written.already !== true, JSON.stringify(written));
+        check('and it is the map that owns it afterwards',
+            Object.prototype.hasOwnProperty.call(
+                device.State.schedule.ledger.migrations, String(plan.id)) === true);
+        check('so the gate opens on the record rather than on a prototype',
+            device.call('carryMigrationApproved', device.State.schedule, plan) === true);
+    } finally {
+        delete proto[String(plan.id)];
+    }
+}
+
 // ------------------------------------------------------------- the container, five ways
 {
     suite('a migrations map that is not a map is a damaged container, every way it arrives');
