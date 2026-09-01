@@ -1094,7 +1094,27 @@ function carryMigrationSettled(schedule) {
 // device whose accounts would be restated by the carry has money on the line that nobody
 // has looked at, and no button here may write against it until somebody has.
 function financialWritingEnabled(schedule) {
-    return ledgerWritesEnabled() && advanceCarryEnabled() && carryMigrationSettled(schedule);
+    return ledgerWritesEnabled() && carryReportingEnabled(schedule);
+}
+
+// AND THE SAME QUESTION FOR EVERY SURFACE THAT MERELY READS.
+//
+// This is the half that was missing, and it was missing everywhere at once. Three callers
+// asked advanceCarryEnabled() on its own - the payroll rows, the worker account behind
+// the statement and the net line, and openAdvanceBalance behind the archive warning - so
+// with the flag open and nobody having approved anything, the sheet, the WhatsApp message
+// and the dialog that decides whether a man may be put away were all printing the
+// post-migration arithmetic. The screen was still asking the question; every surface
+// behind it had answered.
+//
+// A report is not a lesser thing than a write. Somebody is paid from the sheet.
+//
+// It does NOT include ledgerWritesEnabled: whether this build may APPEND to the ledger is
+// a different question from whether the accounts on it may be READ the new way. A build
+// with the writer shut and the carry open still has to show a record that another phone
+// has already approved and written against, or the two phones print different money.
+function carryReportingEnabled(schedule) {
+    return advanceCarryEnabled() && carryMigrationSettled(schedule);
 }
 
 // ---------------------------------------------------------------- migration

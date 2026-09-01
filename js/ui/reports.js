@@ -274,7 +274,12 @@ function payrollRows() {
     //
     // With the gate off, `carry` is absent everywhere and every reader falls through the
     // same way - see moneyOf.
-    const carrying = advanceCarryEnabled()
+    // carryReportingEnabled, not advanceCarryEnabled: the flag says what this BUILD
+    // does, and the question here is whether this RECORD may be read the new way yet.
+    // See js/model/ledger.js - a sheet that restates a printed fortnight before anybody
+    // approved the migration is the same fault as a writer that does, on the surface
+    // somebody is actually paid from.
+    const carrying = carryReportingEnabled(State.schedule)
         && wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to);
 
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
@@ -1152,11 +1157,12 @@ function openReversalForm(item, settled, row) {
 // one evening, one fortnight could read 1,950 on the screen, 5,000 in the archive warning
 // and 3,050 on WhatsApp - and each of those numbers was arrived at honestly.
 //
-// Null when there is no account to read: the carry gate is shut, or the range somebody
-// picked is not a whole account. Every caller falls back to the arithmetic this build has
-// always done, which is what a phone with the gates closed must keep saying.
+// Null when there is no account to read: the carry gate is shut, the migration has not
+// been approved on this record, or the range somebody picked is not a whole account.
+// Every caller falls back to the arithmetic this build has always done, which is what a
+// phone with the gates closed - or a record nobody has signed off - must keep saying.
 function workerAccountFor(workerId) {
-    if (!advanceCarryEnabled()) return null;
+    if (!carryReportingEnabled(State.schedule)) return null;
     if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)) return null;
     if (typeof advanceAccount !== 'function') return null;
     return advanceAccount(State.schedule, workerId, REPORT_RANGE.from, REPORT_RANGE.to);

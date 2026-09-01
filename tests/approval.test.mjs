@@ -244,9 +244,15 @@ const approve = device => {
         JSON.stringify(JSON.parse(device.dump()['scheduleData:v2'] || '{}').ledger || {})
             .indexOf('"migrations":{"cm_') === -1);
 
+    // The reopened phone's OWN schedule, read off its OWN disk. Asking it about the
+    // in-memory object that still carries the approval would be asking the wrong phone.
+    const again = phone('d_memory_r', device.dump());
     check('a reopened phone does not read it as approved',
-        phone('d_memory_r', device.dump())
-            .call('carryMigrationSettled', device.State.schedule) === false);
+        again.call('carryMigrationSettled', again.State.schedule) === false,
+        JSON.stringify((again.State.schedule.ledger || {}).migrations || {}));
+    check('and it holds no approval at all',
+        Object.keys((again.State.schedule.ledger || {}).migrations || {}).length === 0,
+        JSON.stringify((again.State.schedule.ledger || {}).migrations || {}));
 }
 
 // ------------------------------------------------------------------- and it stays approved

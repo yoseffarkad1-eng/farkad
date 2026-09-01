@@ -1117,7 +1117,14 @@ function openAdvanceBalance(schedule, workerId) {
     // may not be loaded, and gated on the carry because with it shut there are no
     // repayments to read and the gross IS the answer - which is what this build has always
     // said and what a phone that cannot read entries needs it to keep saying.
-    const folded = typeof advanceOutstanding === 'function' && advanceCarryEnabled();
+    //
+    // carryReportingEnabled rather than the flag alone: this sentence is the last thing
+    // somebody reads before a man is put away, and until the migration on THIS record has
+    // been approved it must keep saying what it has always said. Feature-detected for the
+    // same reason the fold is - ledger.js loads after this file.
+    const folded = typeof advanceOutstanding === 'function'
+        && typeof carryReportingEnabled === 'function'
+        && carryReportingEnabled(schedule);
     const total = advances.reduce((sum, id) => (folded
         ? sum + advanceOutstanding(schedule, id).left
         : sum + (Number((schedule.advances[id] || {}).amount) || 0)), 0);
