@@ -1861,7 +1861,16 @@ function omer(flags) {
     check('more than the transaction it corrects', problems(repayId, 401, 'למה').length > 0,
         JSON.stringify(problems(repayId, 401, 'למה')));
     check('exactly the transaction is allowed', problems(repayId, 400, 'למה').length === 0);
-    check('part of it is allowed too', problems(repayId, 100, 'למה').length === 0);
+    // CHANGED DELIBERATELY, and this line is where it is written down. A correction used
+    // to accept any amount up to its target, so 100 against a 400 repayment was legal and
+    // the record then said 300 of that repayment still happened. It did not - there is no
+    // event here for part of a payment - and the remaining 300 was unreachable ever after,
+    // because the correction's id is derived from the target and a second attempt is
+    // refused as a double correction. See tests/correction.test.mjs, which is the whole
+    // rule; this line is the L4 suite agreeing with it.
+    check('part of it is refused, because a partial strands the rest',
+        problems(repayId, 100, 'למה').length > 0,
+        JSON.stringify(problems(repayId, 100, 'למה')));
     check('nothing at all is refused', problems(repayId, 0, 'למה').length > 0);
     check('and no reason is refused', problems(repayId, 400, '   ').length > 0);
 
@@ -2097,13 +2106,20 @@ function omer(flags) {
     given('the origin entry is there to correct',
         Boolean(back.State.schedule.ledger.advances[origin]),
         JSON.stringify(Object.keys(back.State.schedule.ledger.advances)));
+    // The WHOLE origin entry, which is the only correction of it there can be: the advance
+    // was handed over or it was not. This asked for 1,000 of the 5,000 back when a
+    // partial was legal - see the L4 refusals above and tests/correction.test.mjs.
     back.State.commit(back.call('recordEventReversed', back.State.schedule,
-        origin, 1000, '2026-08-17', 'נרשם פעמיים', '2026-08-17T09:00:00.000Z', 'd_omer'));
+        origin, 5000, '2026-08-17', 'נרשם פעמיים', '2026-08-17T09:00:00.000Z', 'd_omer'));
     const undone = back.call('advanceOutstanding', back.State.schedule, backId);
     const undoneWalk = back.call('advanceAccount', back.State.schedule, 'w_01',
         OMER_A.from, OMER_A.to);
+    // Nothing left on either fold: the whole advance is undone, so there is no debt to
+    // carry and nothing for the fortnight to deduct. With the partial gone these are the
+    // only numbers the record can produce - 4,000 and 950 were 5,000 and 1,950 minus a
+    // 1,000 the model no longer lets anybody take back on its own.
     same('correcting the advance itself takes it off, on both folds',
-        [undone.left, undoneWalk.carriedForward], [4000, 950],
+        [undone.left, undoneWalk.carriedForward], [0, 0],
         JSON.stringify([undone, undoneWalk]));
 }
 
