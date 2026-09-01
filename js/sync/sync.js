@@ -3273,7 +3273,16 @@ const FarkadSync = {
                 // correction, and the line said synced. See readoptAfter.
                 if (this.readoptAfter(sent, patch, answer)) return;
 
-                if (this.status !== 'error') this.setStatus('synced');
+                // ASKED FOR, whatever the line said before. This read
+                // `if (this.status !== 'error')`, and the guard outlived its reason: a
+                // send that has just been answered is the recovery from whatever error
+                // the line was showing, and honestStatusFor is the one door that decides
+                // whether 'synced' may be said. A retry answered from its receipt was
+                // where it showed: the answer was lost (status 'error'), the ladder
+                // retried, the replay performed no write so no snapshot followed, the
+                // queue emptied - and the phone read «שגיאת סנכרון - הנתונים שמורים
+                // במכשיר הזה.» with nothing owed until the next real write from anyone.
+                this.setStatus('synced');
                 // Something was edited while the send was open.
                 if (this.pendingCount() > 0) this.scheduleFlush();
             })
