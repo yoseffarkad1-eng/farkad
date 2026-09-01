@@ -84,19 +84,20 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the thirty-five node suites; no browser, runs in a few minutes
+    npm test                # the thirty-six node suites; no browser, runs in a few minutes
     npm run test:all        # adds smoke, print, mobile, update, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
     npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
                             #   CAS, the rollout and the cutover (needs Java)
 
-Node 20 or 22 (`engines` says `>=20.11 <23`). Measured at this commit, from one clean
-detached worktree and copied from no other: `npm test` is **3429/3429 across 35 suites**,
-and `npm run test:release` — which adds the eight browser suites, `sendclaim` and the
-five emulator suites — is **5516/5516 across 49 suites**, and is the gate a build has to
-pass whole. `data.test.mjs` was re-run at seeds 1, 42, 2026 and 42 — 1943/1943 every
-time. Anything less than every check passing is a stop, not a warning. `npm test`
+Node 20 or 22 (`engines` says `>=20.11 <23`). NO COUNT IS WRITTEN HERE, deliberately. A
+count belongs to a commit and to nothing else, and one left in a file goes stale the
+moment the next suite lands - at which point it is worse than no count, because it reads
+as a fact, and the paragraph below already says so about counts carried between commits.
+Run the gate on the commit you are asking about, from one clean detached worktree, and
+say which commit you ran it on. Anything less than every check passing is a stop, not a
+warning. `npm test`
 and `npm run test:release` are different gates and are reported separately; neither is
 wrapped in anything that turns a nonzero exit into a success. A count carried over from
 another commit is worse than no count: re-measure, or say you did not.
@@ -170,6 +171,7 @@ written down so it cannot happen twice.
     tests/vehicles.test.mjs    the retired feature, from both sides of its flag
     tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx, built by the shipped library
     tests/money.display.test.mjs one day has one price on every surface: screen, WhatsApp, sheet
+    tests/snapshot.poison.test.mjs a poisoned name arriving from the cloud, from every family
     tests/cas.test.mjs         the client half of the ordering protocol: revision, receipt, rebase, hold
     tests/repayment.test.mjs   the advance that outlives its fortnight: carry, repayment, closure, the two labels
     vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
