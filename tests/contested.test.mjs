@@ -211,6 +211,83 @@ const wonCount = accepted();
         b.Sync.status !== 'synced', b.Sync.status);
 }
 
+// ------------------------------------------------- and a batch is held whole, or not at all
+{
+    suite('one held path holds its whole batch');
+
+    // A batch is written once and is atomic. Sending the rest of it because only one path
+    // was contested is splitting a write to get part of it out, which is the one thing the
+    // batch record exists to prevent - a copy-a-day, a quickstart roster or a bulk edit
+    // arriving half-applied on the other phones.
+    //
+    // sendClaimed builds `heldBatches` for exactly this, and NOTHING EVER PUT ANYTHING IN
+    // IT: the Set is created empty, asked `heldBatches.has(item.batchKey)`, and never
+    // added to. So the held path was skipped and its partner went out alone.
+    const cloud2 = makeCloud();
+    const one = phone('d_batch_a');
+    const two = phone('d_batch_b');
+    const gate2 = tunnel(cloud2);
+    one.Sync.connect(cloud2.adapter);
+    await settle(TICK * 10);
+    two.Sync.connect(gate2.adapter);
+    await settle(TICK * 10);
+
+    const DAY_ONE = '2026-08-18';
+    const DAY_TWO = '2026-08-19';
+    const put = (device, date, placeId) => device.call('assignPlace',
+        device.State.schedule, date, 'w_01', 'actual', placeId);
+
+    one.State.commit(put(one, DAY_ONE, 'p_00'));
+    await settleUntil(() => Boolean((cloud2.doc.days || {})[DAY_ONE])
+        && two.Sync._revision === cloud2.doc.revision, 5000);
+    given('both phones start from the same document',
+        Boolean((cloud2.doc.days || {})[DAY_ONE]));
+
+    // A corrects the first day. B, which cannot hear, edits BOTH days in ONE batch.
+    gate2.close();
+    one.State.commit(put(one, DAY_ONE, 'p_01'));
+    await settleUntil(() => JSON.stringify(cloud2.doc.days[DAY_ONE]).indexOf('p_01') !== -1,
+        5000);
+    const wonAtTwo = cloud2.doc.revision;
+
+    two.State.commitMany([put(two, DAY_ONE, 'p_02'), put(two, DAY_TWO, 'p_02')]);
+    two.Sync.flush();
+    await settleUntil(() => two.Sync.status === 'contested', 5000);
+
+    check('B is told it lost', two.Sync.status === 'contested', two.Sync.status);
+    check('the contested day is still the winner\'s',
+        JSON.stringify(cloud2.doc.days[DAY_ONE]).indexOf('p_01') !== -1,
+        JSON.stringify(cloud2.doc.days[DAY_ONE]));
+    // THE OTHER HALF OF THE SAME BATCH. It is not contested and it would have gone out
+    // alone, leaving the cloud holding half of one atomic edit.
+    check('and the OTHER day of that batch never left the phone',
+        (cloud2.doc.days || {})[DAY_TWO] === undefined,
+        JSON.stringify(Object.keys(cloud2.doc.days || {})));
+
+    // Every trigger, again, against the batch rather than the operation.
+    gate2.release();
+    await settle(TICK * 40);
+    two.Sync.flush();
+    await settle(3000);
+    check('no trigger sends half of it afterwards either',
+        (cloud2.doc.days || {})[DAY_TWO] === undefined
+        && JSON.stringify(cloud2.doc.days[DAY_ONE]).indexOf('p_01') !== -1,
+        JSON.stringify(Object.keys(cloud2.doc.days || {})));
+    check('B still owes the whole batch', two.Sync.pendingCount() >= 2,
+        String(two.Sync.pendingCount()));
+    check('and never says synced', two.Sync.status !== 'synced', two.Sync.status);
+
+    // A DIFFERENT batch is untouched - the control. A held write is not a broken
+    // connection, and the rest of the evening still has to go.
+    const before = cloud2.writes.filter(write => !write.replayed).length;
+    two.State.commit(put(two, '2026-08-20', 'p_01'));
+    await settleUntil(() =>
+        cloud2.writes.filter(write => !write.replayed).length > before, 6000);
+    check('an unrelated day in its own batch still goes',
+        Boolean((cloud2.doc.days || {})['2026-08-20']),
+        JSON.stringify(Object.keys(cloud2.doc.days || {})));
+}
+
 // ------------------------------------------------------------------ the way out is a person
 {
     suite('a fresh explicit edit of the same path supersedes the held one');
