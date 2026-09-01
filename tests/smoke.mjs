@@ -4983,9 +4983,14 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     renderSettings();
   });
   await page.waitForTimeout(200);
+  // THE NAME MOVED, DELIBERATELY. C6 removed the build number from every sentence a
+  // person reads - "פנקס המקדמות (v80)" named a release that stopped being this one
+  // several builds ago - and the line now calls the thing by what it is. The pinned
+  // string moves with the decision; see tests/wording.test.mjs for the rule.
   check('with the ledger agreeing, the parity line is quiet',
-    (await page.textContent('#ledgerParity')).includes('פנקס המקדמות (v80)') &&
-    !(await page.textContent('#ledgerParity')).includes('אינו תואם') &&
+    (await page.textContent('#ledgerParity')).includes('היסטוריית המקדמות') &&
+    !(await page.textContent('#ledgerParity')).includes('v80') &&
+    !(await page.textContent('#ledgerParity')).includes('אינה תואמת') &&
     !(await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
     await page.textContent('#ledgerParity'));
 
@@ -5004,9 +5009,10 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     renderSettings();
   });
   await page.waitForTimeout(200);
+  // Feminine, because היסטוריה is - the agreement follows the noun the rename chose.
   check('a disagreement warns against flipping the write gate',
     (await page.textContent('#ledgerParity'))
-      .includes('אינו תואם את המקדמות הרשומות') &&
+      .includes('אינה תואמת את המקדמות הרשומות') &&
     (await page.locator('#ledgerParity').getAttribute('class')).includes('hint-warn'),
     await page.textContent('#ledgerParity'));
 
@@ -5750,22 +5756,47 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('the export carries the same money columns as the screen',
     head.includes('נצבר') && head.includes('מקדמות') && head.includes('לתשלום'),
     JSON.stringify(head));
-  // MOVED ON THIS BRANCH, and it is the second row the gates change - see the commit
-  // that opened them.
+  // MOVED AGAIN, and this time it is the RECORD that decides rather than the build.
   //
   // On main an advance from another account is not deducted from this one, so w_01's
-  // column is 0 and he is paid the whole 1,600. That guarantee is exactly what the carry
-  // is built to overturn: this man took 900 in accounts where he worked nothing, so
-  // nothing could come off it there, and it comes off here. 1,600 earned, 900 deducted,
-  // 700 to pay, with the note saying where the 900 came from.
+  // column is 0 and he is paid the whole 1,600. That guarantee is what the carry is
+  // built to overturn: this man took 900 in accounts where he worked nothing, so
+  // nothing could come off it there, and it comes off here - 1,600 earned, 900
+  // deducted, 700 to pay.
   //
-  // The check directly above it - "an advance from another account is not deducted from
-  // this one" - still passes, because row.advances is the legacy in-range total and the
-  // carry does not touch it. That is worth knowing rather than tidying away: the two
-  // numbers answer different questions, and only the column is what somebody is paid on.
-  check('and its לתשלום is net of the carry, which is what the gate turns on',
-    w1[head.indexOf('לתשלום')] === 700 && w1[head.indexOf('מקדמות')] === -900,
-    JSON.stringify(w1));
+  // When this check was written, opening the two flags was enough to make that happen.
+  // C1 took that away: no surface may read the new arithmetic until a person has read
+  // the rows and approved the migration, because a fortnight already printed and paid
+  // must not restate itself at the next open. So the file below is measured TWICE, and
+  // the pair is the whole rule.
+  check('before anybody approves the migration the file is the old arithmetic',
+    w1[head.indexOf('לתשלום')] === 1600 && w1[head.indexOf('מקדמות')] === 0
+    && head.includes('מקדמות') && !head.includes('נוכה מהשכר'),
+    JSON.stringify([head, w1]));
+
+  const approved = await page.evaluate(() => {
+    const plan = planCarryMigration(State.schedule);
+    if (plan.needed) {
+      State.commit(recordCarryApproval(State.schedule, plan,
+        new Date().toISOString(), syncDeviceId()));
+    }
+    const sheet = reportSheets().payroll;
+    return { head: sheet[0], row: sheet.find(line => line[0] === 'דוד') };
+  });
+  check('and once somebody has, its לתשלום is net of the carry',
+    approved.row[approved.head.indexOf('לתשלום')] === 700
+    && approved.row[approved.head.indexOf('נוכה מהשכר')] === -900,
+    JSON.stringify([approved.head, approved.row]));
+  // The column is named after what is IN it, which is the other half of the same
+  // decision: before approval that cell is the advances, after it the deduction.
+  check('under a heading that says which of the two it is',
+    approved.head.includes('נוכה מהשכר') && !approved.head.includes('מקדמות'),
+    JSON.stringify(approved.head));
+
+  // The check further up - "an advance from another account is not deducted from this
+  // one" - still passes, because row.advances is the legacy in-range total and the carry
+  // does not touch it. That is worth knowing rather than tidying away: the two numbers
+  // answer different questions, and only the column is what somebody is paid on.
 
   // The minus sign in Hebrew text lays out on the wrong side of the digits without a
   // direction mark - the worker read "500-" on the one number that says money was taken.
