@@ -1093,6 +1093,16 @@ function recordEventReversed(schedule, targetId, amount, date, reason, at, by) {
         // say which line stopped being true.
         targetId: String(targetId),
         targetKind: String(target.kind),
+        // AND WHAT THE CORRECTED TRANSACTION WAS, on the correction itself.
+        //
+        // targetId and targetKind say which entry and what sort; they do not say what it
+        // WAS. A manager reading "תיקון-היפוך 500" had to go and find the entry it names
+        // before they could tell whether the correction was right - on a statement, in a
+        // workbook or in a backup, where the other entry may not be beside it at all.
+        // Copied rather than looked up because the entry is immutable and this is the
+        // record somebody answers for.
+        targetDate: String(target.date || ''),
+        targetAmount: Number(target.amount) || 0,
         date: String(date),
         amount: Number(amount) || 0,
         reason: String(reason || ''),

@@ -236,7 +236,7 @@ function renderInstallState() {
         : 'פועל בדפדפן - לא מותקן על מסך הבית.';
 }
 
-// Does the v80 advances ledger agree with the record it was built from?
+// Does the advances ledger agree with the record it was built from?
 //
 // The check itself lives with the ledger (js/model/ledger.js) and is landing in its own
 // workstream, so everything here is feature-detected: when no check is reachable the
@@ -287,16 +287,16 @@ function renderLedgerParity() {
     const behind = (verdict.missing || []).length;
     const wrong = (verdict.different || []).length + (verdict.orphaned || []).length;
     if (verdict.agrees) {
-        line.textContent = 'פנקס המקדמות (v80) תואם את המקדמות הרשומות.';
+        line.textContent = 'היסטוריית המקדמות תואמת את המקדמות הרשומות.';
         line.className = 'hint';
     } else if (wrong === 0 && behind > 0) {
         // Behind is not broken: an advance recorded since the last boot simply has no
         // mirror yet, and the next open writes it. A red warning here taught people to
         // ignore the red warning that matters.
-        line.textContent = 'פנקס המקדמות (v80) טרם הועתק במלואו - יושלם בפתיחה הבאה.';
+        line.textContent = 'היסטוריית המקדמות טרם הועתקה במלואה - תושלם בפתיחה הבאה.';
         line.className = 'hint';
     } else {
-        line.textContent = 'פנקס המקדמות (v80) אינו תואם את המקדמות הרשומות - ' +
+        line.textContent = 'היסטוריית המקדמות אינה תואמת את המקדמות הרשומות - ' +
             'אין להפעיל את הכתיבה החדשה לפני בדיקה.';
         line.className = 'hint hint-warn';
     }

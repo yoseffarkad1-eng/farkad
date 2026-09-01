@@ -364,7 +364,11 @@ function renderPayrollTable() {
     const headers = ['עובד'].concat(columns.map(column => column.header));
     if (anyVehicle) headers.push('ימי רכב', 'שכר רכב');
     if (anyRate) headers.push('שכר יומי', 'נצבר');
-    if (anyAdvance) headers.push('מקדמות');
+    // THE COLUMN IS NAMED AFTER WHAT IS IN IT. With the account being read, this cell is
+    // the DEDUCTION - what came off this fortnight - which for an advance larger than the
+    // wage is not the advance, and for a man in review is zero while he holds one. See
+    // moneyOf. With the account shut it is the advances, and then מקדמות is the truth.
+    if (anyAdvance) headers.push(deductionColumnName());
     if (anyRate) headers.push('לתשלום');
 
     const table = buildTable(headers, rows.map(row => {
@@ -1371,6 +1375,44 @@ function openAdvanceForm(worker, actions) {
 // history list, the advance row, the pay sheet and the statement. Each names an EVENT, so
 // no two of them can be read as the same thing - which is the point of writing them down
 // here rather than at each call site.
+// Every correction against this man, dated in the range, oldest first. Read off the
+// ledger because that is where a correction lives, and feature-detected because the
+// ledger file may not be loaded on a build that never opened it.
+function correctionsIn(workerId, from, to) {
+    if (typeof ledgerEntries !== 'function') return [];
+    return ledgerEntries(State.schedule)
+        .filter(entry => String(entry.kind) === 'reversed')
+        .filter(entry => String(entry.workerId || '') === String(workerId)
+            || String((State.schedule.advances[entry.advanceId] || {}).workerId || '')
+                === String(workerId))
+        .filter(entry => String(entry.date) >= from && String(entry.date) <= to)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+// One correction, in the words a person can answer for: what it undid, when that was,
+// how much it was, and why. The same sentence on every surface that shows it.
+function correctionLine(entry) {
+    const what = LEDGER_KIND_LABELS[String(entry.targetKind)] || String(entry.targetKind);
+    const when = entry.targetDate
+        ? formatShortDate(parseLocalDate(String(entry.targetDate))) : '';
+    const howMuch = entry.targetAmount !== undefined
+        ? `${moneyText(Number(entry.targetAmount) || 0)} ₪` : '';
+    const head = [what, when, howMuch].filter(Boolean).join(' ');
+    const why = String(entry.reason || '').trim();
+    return why ? `${head} - ${why}` : head;
+}
+
+// What the third money column is called, which depends on what it holds - see moneyOf.
+// One function so the screen, the CSV and the workbook cannot disagree about the heading
+// over the same number.
+function deductionColumnName() {
+    return (typeof carryReportingEnabled === 'function'
+        && carryReportingEnabled(State.schedule)
+        && wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to))
+        ? LEDGER_KIND_LABELS.deducted
+        : 'מקדמות';
+}
+
 const LEDGER_KIND_LABELS = {
     given: 'ניתנה מקדמה',
     repaid: 'הוחזר במזומן',
@@ -1633,11 +1675,19 @@ function workerStatementText(workerId) {
     // from the advance he remembers to the number he is handed.
     if (account && account.carriedIn > 0) {
         lines.push('');
-        lines.push(`${LEDGER_KIND_LABELS.given} מחשבון קודם: ${moneyText(account.carriedIn)}`);
+        // יתרת פתיחה, not "ניתנה מקדמה מחשבון קודם". Nothing was given from a previous
+        // account; a balance was carried out of one. The old wording said money changed
+        // hands on a date it did not, in the document the man checks his own pay against.
+        lines.push(`יתרת פתיחה: ${moneyText(account.carriedIn)}`);
     }
 
     if (advances.length > 0) {
         lines.push('');
+        // What was handed over IN THIS PERIOD, totalled before the individual lines, so
+        // the four figures below read as one account: opening balance, new advances,
+        // what came off the wage, what is still open.
+        lines.push(`מקדמות חדשות: ${moneyText(agora(advances.reduce(
+            (sum, item) => sum + (Number(item.amount) || 0), 0)))}`);
         // The same three words the screen draws over the same record. The man is the one
         // person who will ever dispute "you were paid in cash", and his own copy used to
         // be the one document in the app that could not answer.
@@ -1653,9 +1703,25 @@ function workerStatementText(workerId) {
     }
     if (account && account.reversed > 0) {
         lines.push(`${LEDGER_KIND_LABELS.reversed}: ${moneyText(account.reversed)}`);
+        // AND WHY, and against what. An amount with no reason is the one line on this
+        // message a man cannot check: it says money moved and does not say what it
+        // undid. Each correction names the transaction it corrects - its kind, its date
+        // and its amount - and the reason somebody typed when they wrote it.
+        correctionsIn(worker.id, REPORT_RANGE.from, REPORT_RANGE.to).forEach(entry => {
+            lines.push(`  · ${correctionLine(entry)}`);
+        });
     }
     if (account && account.deducted > 0) {
         lines.push(`${LEDGER_KIND_LABELS.deducted}: ${moneyText(account.deducted)}`);
+    }
+
+    // AND THE ONE THING THAT STOPS A PAYMENT. The man's own copy is the document he
+    // acts on, and it was the one surface that said nothing when his account did not add
+    // up - a clean net, on a record where more had been handed back than was ever given.
+    const overpayment = overpaymentWarning(account);
+    if (overpayment) {
+        lines.push('');
+        lines.push(overpayment);
     }
 
     if (priced) {
@@ -1951,7 +2017,7 @@ function payrollSheetRows() {
     const withVehicles = vehiclesEnabled();
     const headers = ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר']
         .concat(withVehicles ? ['ימי רכב', 'שכר רכב'] : [])
-        .concat(['שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']);
+        .concat(['שכר יומי', 'נצבר', deductionColumnName(), 'לתשלום', 'הערה']);
 
     return [headers].concat(payrollRows().map(row => [
         row.name, row.attendanceDays, row.payUnits, row.doubleDays,
@@ -2011,6 +2077,23 @@ function moneyText(value) {
 
 // The three numbers, derived together. `advances` is negative or zero, `net` is their
 // sum, and `gross` is null when the man has no rate - unknown is not zero.
+// AN OVER-SETTLED ACCOUNT, in one sentence, for every surface that shows money.
+//
+// More has been settled against this man's advances than was ever handed to him - two
+// phones recording the same 500 handed back is how it happens, and both entries are real.
+// advanceWalk stops the automatic deduction while that stands, which is right and is
+// invisible: the sheet showed a clean net and the statement the man is SENT said nothing
+// at all, so the one number a person would act on looked ordinary.
+//
+// Three things have to be said, and the same three everywhere: the account needs a
+// person, by how much, and that the payment is not to be finalised on this. Written once
+// here so a surface cannot say two of them.
+function overpaymentWarning(account) {
+    if (!account || !account.review || !(account.overpaid > 0)) return null;
+    return `⚠️ החשבון דורש בדיקה · ההחזרים עולים על החוב הפתוח ב-${moneyText(account.overpaid)} ₪`
+        + ' · אין לאשר את התשלום אוטומטית';
+}
+
 function moneyOf(row) {
     // Only a POSITIVE advance is money that was handed over, and only that is netted. A
     // negative one is not a repayment this build knows how to account for - netting it
@@ -2108,6 +2191,11 @@ function moneyCells(row) {
     // that carried one, and it is the one the argument about the money happens over.
     if (row.carry && row.carry.reversed > 0) {
         notes.push(`${moneyText(row.carry.reversed)} ₪ ${LEDGER_KIND_LABELS.reversed}`);
+        // With the reason, in the file the argument about the money happens over. A
+        // workbook that says 500 was corrected and does not say why sends the reader
+        // back to a phone.
+        correctionsIn(row.workerId, REPORT_RANGE.from, REPORT_RANGE.to)
+            .forEach(entry => notes.push(correctionLine(entry)));
     }
     // THE ACCOUNT DOES NOT ADD UP, and the sheet says so where the number would have been.
     //
@@ -2115,10 +2203,8 @@ function moneyCells(row) {
     // two phones recording the same repayment is the way it happens. Nothing is deducted
     // while that stands (see advanceWalk), so this note is the difference between a clean
     // net somebody would pay out and a net with a reason to stop and ask.
-    if (row.carry && row.carry.review) {
-        notes.push(`עודף ${moneyText(row.carry.overpaid)} ₪ בהחזרי מקדמה - `
-            + 'לא נוכה דבר עד לבדיקה');
-    }
+    const overpayment = overpaymentWarning(row.carry);
+    if (overpayment) notes.push(overpayment);
     if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
     if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');
     return [row.dailyRate, gross, advances, net, notes.join(' · ')];
