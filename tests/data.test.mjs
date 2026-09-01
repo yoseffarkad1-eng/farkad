@@ -1107,11 +1107,25 @@ function record(device, date, workerId, placeId, rate) {
     seed(device);
     await connected(device, cloud);
     record(device, '2026-08-12', 'w_01', 'p_01');
-    await wait();
+
+    // A BARRIER ON THE CONDITION, not a count of milliseconds. `wait()` is TICK * 5, and
+    // TICK * 5 on an idle host is not TICK * 5 on one running a release gate: measured
+    // once, under load, the write had not reached the fake cloud when this line read it,
+    // so `cloud.doc` had no day, workerDay answered null, and the suite died on
+    // `null.rates` - taking the eight hundred checks below it with it. See settleUntil
+    // in tests/harness.mjs, which exists for exactly this and says so.
+    //
+    // And a `given`, so that a write which genuinely never lands REPORTS rather than
+    // throwing a TypeError three lines later.
+    const landed = await settleUntil(() =>
+        Boolean(((cloud.doc || {}).days || {})['2026-08-12']), 5000);
+    given('the day reached the cloud', landed,
+        JSON.stringify(Object.keys((cloud.doc || {}).days || {})));
 
     const remote = device.call('normaliseSchedule', cloud.doc);
     check('the rate a day was recorded at reaches the cloud with it',
-        (device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual').rates || {}).daily === 400,
+        ((device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual') || {}).rates
+            || {}).daily === 400,
         JSON.stringify(device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual')));
 
     // And through a backup file.
