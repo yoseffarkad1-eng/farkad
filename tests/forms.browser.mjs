@@ -14,6 +14,7 @@
 // error fails the run, whatever else passes.
 
 import { serve } from './serve.mjs';
+import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -21,6 +22,15 @@ const EXEC = process.env.CHROME_PATH || undefined;
 const server = process.env.SMOKE_URL
     ? { url: process.env.SMOKE_URL, close: () => {} }
     : await serve(new URL('..', import.meta.url).pathname);
+
+// WHATEVER THE ORIGIN HANDED THE BROWSER, hashed against the commit. SMOKE_URL points
+// this suite at a server somebody is already running, and without this a run rooted at
+// another tree would pass every check below and the count would mean nothing.
+const SERVED_ROOT = new URL('..', import.meta.url).pathname;
+const SERVED_SHA = expectedShaFor(SERVED_ROOT);
+const SERVED = await verifyServedAssets(server.url, SERVED_ROOT, SERVED_SHA);
+check('the origin served this commit, byte for byte',
+    SERVED.ok, `${SERVED.checked} assets; ${SERVED.wrong.slice(0, 3).join(' | ')}`);
 
 const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 
