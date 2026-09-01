@@ -733,6 +733,16 @@ function normaliseSchedule(raw, hints) {
     //
     // Anything an earlier read held aside stays held: a second reading is not a licence to
     // drop it.
+    // An own property, whatever the name is. `map[id] = value` for an id of `__proto__`
+    // writes the PROTOTYPE and creates nothing - which is how the map that keeps
+    // unreadable evidence lost it and came back reparented. See putKey in
+    // js/model/ledger.js, which is the same rule for the merge.
+    const keepUnder = (map, id, value) => {
+        Object.defineProperty(map, id, {
+            value, writable: true, enumerable: true, configurable: true
+        });
+    };
+
     const POISON_KEY = 'scheduleData:v2:poison:';
     const POISON_SAID = 'הגיע רישום עם שם שאי אפשר להשתמש בו כמפתח. שום דבר לא נמחק - '
         + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי.';
@@ -825,7 +835,7 @@ function normaliseSchedule(raw, hints) {
     // the bytes stay exactly as they arrived.
     if (typeof impossibleClosures === 'function') {
         impossibleClosures(schedule).forEach(id => {
-            schedule.ledger.unreadable[id] = schedule.ledger.advances[id];
+            keepUnder(schedule.ledger.unreadable, id, schedule.ledger.advances[id]);
             delete schedule.ledger.advances[id];
         });
     }
@@ -856,7 +866,7 @@ function normaliseSchedule(raw, hints) {
                 isPlainObject(approval) ? Object.assign({}, approval, { id: String(id) })
                     : approval).length === 0;
         if (!readable) {
-            schedule.ledger.unreadableMigrations[id] = approval;
+            keepUnder(schedule.ledger.unreadableMigrations, id, approval);
             return;
         }
         schedule.ledger.migrations[id] = Object.assign({}, approval, { id: String(id) });
@@ -866,7 +876,7 @@ function normaliseSchedule(raw, hints) {
     const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {
         if (schedule.ledger.unreadable[id] === undefined) {
-            schedule.ledger.unreadable[id] = held[id];
+            keepUnder(schedule.ledger.unreadable, id, held[id]);
         }
     });
     // And the approvals held aside on an earlier read: they were kept because nothing may
@@ -876,7 +886,7 @@ function normaliseSchedule(raw, hints) {
         ? ledger.unreadableMigrations : {};
     Object.keys(heldApprovals).forEach(id => {
         if (schedule.ledger.unreadableMigrations[id] === undefined) {
-            schedule.ledger.unreadableMigrations[id] = heldApprovals[id];
+            keepUnder(schedule.ledger.unreadableMigrations, id, heldApprovals[id]);
         }
     });
 
