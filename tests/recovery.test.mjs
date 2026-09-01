@@ -885,4 +885,173 @@ function rebuild(device, payload) {
         JSON.stringify(Object.keys(rescue)));
 }
 
+// ================================================================ E8
+//
+// The rescue door and a name nobody can use as a key.
+//
+// A phone whose record carries a map with an own `__proto__` is HELD: the map's bytes are
+// quarantined, writing stops, and - since the evidence has to outlive the session that
+// found it - the poisoned key is kept on the record itself, so every reopen holds again.
+// The rescue file is the one door that phone has left. It is built through the real
+// export, from a real disk, and opened on a second phone through the real reader,
+// because the gate that refuses is three calls below the button.
+{
+    suite('E8: a rescue file from a phone holding a poisoned ledger map opens on a fresh phone');
+
+    // The record as an older session left it: the held-aside part of the advances history
+    // carries an entry under a name the map cannot take as an ordinary key. The reopened
+    // phone holds it - that is the branch this suite sits on - and exports its file.
+    const MARKER = 'le_POISON_RESCUE';
+    const source = seed(makeDevice({ deviceId: 'd_e8_src' }));
+    source.setToday('2026-08-26');
+    given('a day is recorded on the source phone', put(source, 'days.2026-08-12.actual.w_01', 'p_01'));
+    const record = JSON.parse(source.raw('scheduleData:v2'));
+    record.ledger = JSON.parse('{"advances":{},"unreadable":{"__proto__":'
+        + `{"id":"${MARKER}","amount":500}}}`);
+    const disk = source.dump();
+    disk['scheduleData:v2'] = JSON.stringify(record);
+    given('the record really carries the name as an own key',
+        disk['scheduleData:v2'].indexOf('"__proto__"') !== -1);
+
+    const held = makeDevice({ deviceId: 'd_e8_held', storage: disk });
+    held.setToday('2026-08-26');
+    held.State.load();
+    given('the reopened phone is held for it, with the bytes quarantined',
+        held.call('farkadWritesBlocked') === true
+        && held.global('Recovery').problems.some(problem =>
+            problem.key === 'scheduleData:v2:poison:ledger.unreadable' && problem.copy),
+        JSON.stringify(held.global('Recovery').problems.map(problem => problem.key)));
+    held.ctx.askTell = () => Promise.resolve();
+    held.call('exportRecoveryData');
+    given('and it hands over a rescue file', held.downloads.length === 1);
+    const text = held.downloads[0].text;
+    const file = JSON.parse(text);
+    given('which carries the poisoned record itself, not only a copy of the map',
+        file.kind === 'farkad-recovery'
+        && typeof file.records['scheduleData:v2'] === 'string'
+        && file.records['scheduleData:v2'].indexOf(MARKER) !== -1
+        && JSON.stringify(file.liveSchedule).indexOf(MARKER) !== -1);
+
+    // A fresh phone, through readBackupFile - which is what the import handler calls.
+    const fresh = seed(makeDevice({ deviceId: 'd_e8_fresh' }));
+    fresh.setToday('2026-08-26');
+    let read = null;
+    let refused = null;
+    try {
+        read = rebuild(fresh, file);
+    } catch (error) {
+        refused = error;
+    }
+    check('the rescue door opens the file rather than calling it unusable',
+        read !== null && read.rescue === true,
+        refused ? `${refused.message}: ${JSON.stringify(refused.problems)}` : 'opened');
+    const dayRead = read && read.schedule.days['2026-08-12'];
+    check('and rebuilds the day the held phone was carrying',
+        Boolean(dayRead) && placeOf(dayRead.actual && dayRead.actual.w_01) === 'p_01',
+        JSON.stringify(dayRead));
+    const unreadable = read && read.schedule.ledger && read.schedule.ledger.unreadable;
+    check('the evidence rides on the rebuilt schedule as an own key, exactly as the held phone kept it',
+        Boolean(unreadable)
+        && Object.prototype.hasOwnProperty.call(unreadable, '__proto__')
+        && JSON.stringify(read.schedule).indexOf(MARKER) !== -1,
+        unreadable ? JSON.stringify(Object.getOwnPropertyNames(unreadable)) : 'no schedule');
+    const evidence = fresh.global('Recovery').problems.find(problem =>
+        problem.key === 'scheduleData:v2:poison:ledger.unreadable');
+    check('and is held on the reading phone, with its own bytes quarantined there',
+        Boolean(evidence) && Boolean(evidence.copy)
+        && String(fresh.raw(evidence.copy)).indexOf(MARKER) !== -1
+        && fresh.call('farkadWritesBlocked') === true,
+        JSON.stringify(fresh.global('Recovery').problems.map(problem => [problem.key, problem.copy])));
+    check('nothing in the file is reported unreadable because of the name',
+        read !== null && read.unread.every(line => line.indexOf('כמפתח') === -1),
+        read ? JSON.stringify(read.unread) : 'not opened');
+}
+
+{
+    suite('E8: a rescue file carrying a held poisoned day layer opens the same way');
+
+    // The other family: a layer that arrived from the cloud with a worker under a name the
+    // map cannot take. The phone that heard it held the layer's bytes under the poison
+    // family and its record stayed as it was, so what the file carries is the quarantine
+    // copy beside the clean record - and the door has to open that too, name the copy,
+    // and rebuild the day for the worker whose name can be read.
+    const MARKER = 'p_POISON_LAYER';
+    const sky = seed(makeDevice({ deviceId: 'd_e8_sky' }));
+    sky.setToday('2026-08-26');
+    given('a day is recorded on that phone', put(sky, 'days.2026-08-12.actual.w_01', 'p_01'));
+    const raw = JSON.parse(JSON.stringify(sky.State.schedule));
+    raw.days['2026-08-12'] = JSON.parse('{"actual":{"__proto__":{"entries":[{"placeId":"'
+        + MARKER + '"}]},"w_01":{"entries":[{"placeId":"p_01"}]}}}');
+    raw.updatedAt = '2026-08-26T10:00:00.000Z';
+    raw.updatedBy = 'd_other';
+    sky.Sync.receive(raw);
+    await settle(40);
+    given('the phone that heard it is held, with the layer quarantined',
+        sky.call('farkadWritesBlocked') === true
+        && Object.keys(sky.dump()).some(key =>
+            key.indexOf('scheduleData:v2:poison:days.2026-08-12.actual') === 0
+            && String(sky.raw(key)).indexOf(MARKER) !== -1),
+        JSON.stringify(Object.keys(sky.dump()).filter(key => key.indexOf('poison') !== -1)));
+    sky.ctx.askTell = () => Promise.resolve();
+    sky.call('exportRecoveryData');
+    given('and it hands over a rescue file carrying the layer’s bytes',
+        sky.downloads.length === 1 && sky.downloads[0].text.indexOf(MARKER) !== -1);
+    const file = JSON.parse(sky.downloads[0].text);
+
+    const fresh = seed(makeDevice({ deviceId: 'd_e8_fresh2' }));
+    fresh.setToday('2026-08-26');
+    let read = null;
+    let refused = null;
+    try {
+        read = rebuild(fresh, file);
+    } catch (error) {
+        refused = error;
+    }
+    check('the rescue door opens the file',
+        read !== null && read.rescue === true,
+        refused ? `${refused.message}: ${JSON.stringify(refused.problems)}` : 'opened');
+    const dayRead = read && read.schedule.days['2026-08-12'];
+    check('and rebuilds the day for the worker whose name can be read',
+        Boolean(dayRead) && placeOf(dayRead.actual && dayRead.actual.w_01) === 'p_01',
+        JSON.stringify(dayRead));
+    check('and names the quarantined layer it carries rather than dropping it',
+        read !== null && read.damagedKeys.some(key =>
+            key.indexOf('scheduleData:v2:poison:days.2026-08-12.actual') === 0
+            && String(file.records[key]).indexOf(MARKER) !== -1),
+        read ? JSON.stringify(read.damagedKeys) : 'not opened');
+}
+
+{
+    suite('E8: an ordinary backup carrying a poisoned map is still refused at the door');
+
+    // The other half of the same rule, so the rescue door opening cannot be bought by
+    // letting a REPLACEMENT through. A backup file is about to become the whole record on
+    // three phones; one carrying a name nobody can use as a key is refused in its own
+    // words, and the phone that only read it is not held for it - restore.test R8 says
+    // the same through the restore-point door.
+    const MARKER = 'le_POISON_BACKUP';
+    const device = seed(makeDevice({ deviceId: 'd_e8_backup' }));
+    device.setToday('2026-08-26');
+    const backup = JSON.parse(JSON.stringify(device.State.schedule));
+    backup.ledger = JSON.parse('{"advances":{},"unreadable":{"__proto__":'
+        + `{"id":"${MARKER}","amount":500}}}`);
+    let refused = null;
+    try {
+        rebuild(device, backup);
+    } catch (error) {
+        refused = error;
+    }
+    check('the backup door refuses it and names the key',
+        refused !== null && Array.isArray(refused.problems)
+        && refused.problems.some(problem =>
+            problem.indexOf('שאי אפשר להשתמש בו כמפתח') !== -1
+            && problem.indexOf('ledger.unreadable') !== -1),
+        refused ? JSON.stringify(refused.problems) : 'opened');
+    check('and the phone is not held for a file it only read',
+        device.call('farkadWritesBlocked') === false
+        && device.global('Recovery').problems.length === 0
+        && Object.keys(device.dump()).every(key => key.indexOf(':poison:') === -1),
+        JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
+}
+
 report();
