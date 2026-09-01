@@ -573,6 +573,166 @@ const reopen = (device, id) => {
             reopen(device, 'd_noadv3').State.schedule, 'w_01', A.from, A.to).closed === true);
 }
 
+// ------------------------------------------- the statement says both numbers, or neither
+{
+    suite('a man whose fortnight closed and then moved is told both figures');
+
+    // TWO NUMBERS, AND THE MAN GETS ONE OF THEM. advanceWalk has said this since C4:
+    // carriedOut is the figure the payslip was closed on and says forever, carriedForward
+    // is what he actually still owes today. The pay sheet prints both - "יתרת סגירה" on
+    // the row and "הגיעה תנועה אחרי סגירת התקופה · חוב פתוח" beside it. The statement HE
+    // is sent prints only the first:
+    //
+    //     if (account && account.closed && account.carriedOut > 0) {
+    //         lines.push(`יתרת סגירה: ...`);
+    //     } else if (account && account.carriedForward > 0) {
+    //         lines.push(`חוב פתוח: ...`);
+    //     }
+    //
+    // So a man who handed back 400 after his fortnight shut is handed a document saying
+    // he still owes 1,950. He owes 1,550. The one figure he can check is the one that
+    // does not include the money he paid, and the sheet the office reads says otherwise -
+    // which is the two-surfaces-one-number fault, on the two documents that meet.
+    const device = closed('d_says_both');
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceIdIn(device), 400, '2026-08-18', '',
+        '2026-08-25T09:00:00.000Z', 'd_says_both', 'cash'));
+
+    const account = device.call('advanceAccount', device.State.schedule, 'w_01',
+        A.from, A.to);
+    given('the payslip is frozen at 1,950 and he actually owes 1,550',
+        account.closed === true && account.carriedOut === 1950
+        && account.carriedForward === 1550, JSON.stringify(account));
+
+    const run = reportsIn(device);
+    const said = run(`workerStatementText('w_01')`);
+    check('his statement still reports the balance the period closed on',
+        said.indexOf('יתרת סגירה') !== -1, said.slice(-200));
+    check('and says what he owes now, separately and by its own name',
+        said.indexOf('חוב פתוח כולל') !== -1, said.slice(-200));
+    check('with the two figures beside their own labels',
+        /יתרת סגירה: [^\n]*1,?950/.test(said)
+        && /חוב פתוח כולל: [^\n]*1,?550/.test(said), said.slice(-200));
+
+    // AND NEITHER LABEL EVER MEANS THE OTHER. A closed period with nothing after it has
+    // one figure and says it once.
+    const quiet = closed('d_says_one');
+    const quietSaid = reportsIn(quiet)(`workerStatementText('w_01')`);
+    check('a closed period nothing arrived after says only its closing balance',
+        quietSaid.indexOf('יתרת סגירה') !== -1
+        && quietSaid.indexOf('חוב פתוח כולל') === -1, quietSaid.slice(-160));
+
+    // And an OPEN period is unchanged: it has no closing balance to report.
+    const open = crew('d_says_open');
+    const openSaid = reportsIn(open)(`workerStatementText('w_01')`);
+    check('an open period says חוב פתוח and nothing about a closing balance',
+        openSaid.indexOf('חוב פתוח') !== -1
+        && openSaid.indexOf('יתרת סגירה') === -1, openSaid.slice(-160));
+}
+
+// ------------------------------------------ the legacy policy, decided once and for all
+{
+    suite('a closure with no snapshot is judged the same way on every later read');
+
+    // THE FALLBACK IS A POLICY, and a policy that changes between two readings of one
+    // record is not a policy. A closure that records no wage is measured against the live
+    // one - stated out loud in closureProblems, with the cost accepted - and every route
+    // into this app has to reach the same verdict: the boot, the reopen, a snapshot
+    // arriving from another phone, and a second phone opening the same disk. If any of
+    // them differed, whether a man's books are called sound would depend on which door
+    // he came through.
+    // BUILT AS A DISK, not by editing a live device's memory. A device that wrote the
+    // closure itself has it in its journal, and the journal replays over the edit at the
+    // next load - correctly, and it would measure the journal rather than the policy.
+    // This is somebody's phone, opened for the first time on this build.
+    const source = closed('d_policy_seed');
+    const seedEntry = closureIn(source);
+    const legacy = JSON.parse(source.dump()['scheduleData:v2']);
+    const bare = {};
+    ['id', 'advanceId', 'kind', 'workerId', 'balanceAfter', 'date',
+        'periodFrom', 'periodTo', 'amount', 'at', 'by'].forEach(field => {
+            bare[field] = seedEntry[field];
+        });
+    legacy.ledger.advances = { [seedEntry.id]: bare };
+    const LEGACY_DISK = JSON.stringify(legacy);
+    const openLegacy = id => {
+        const made = makeDevice({ deviceId: id,
+            flags: { carryAdvances: true, ledgerWrites: true },
+            storage: { 'scheduleData:v2': LEGACY_DISK } });
+        made.setToday('2026-08-26');
+        made.ctx.askTell = () => Promise.resolve();
+        made.State.load();
+        return made;
+    };
+
+    const device = openLegacy('d_policy');
+    const entry = { id: seedEntry.id };
+
+    // The boot mirror writes the advance's origin entry, as it does on every device;
+    // what must not be there is a snapshot on the closure or a period artifact beside it.
+    given('the closure carries no snapshot and no artifact stands beside it',
+        device.State.schedule.ledger.advances[entry.id].gross === undefined
+        && Object.keys(device.State.schedule.ledger.advances)
+            .every(id => String(id).indexOf('le_period_') !== 0),
+        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
+
+    const verdict = who => JSON.stringify(who.call('impossibleClosures', who.State.schedule));
+    const payslipOf = who => JSON.stringify(who.call('advanceAccount', who.State.schedule,
+        'w_01', A.from, A.to));
+
+    const atBoot = verdict(device);
+    const paidAtBoot = payslipOf(device);
+    given('at boot it is unaccused', atBoot === '[]', atBoot);
+
+    const once = openLegacy('d_policy1');
+    same('a second phone opening the same disk reaches the same verdict',
+        verdict(once), atBoot);
+    same('and reads the same payslip', payslipOf(once), paidAtBoot);
+
+    const twice = reopen(once, 'd_policy2');
+    same('and so does a reopen of that one', verdict(twice), atBoot);
+
+    const arriving = JSON.parse(JSON.stringify(device.State.schedule));
+    arriving.updatedAt = '2026-08-28T10:00:00.000Z';
+    arriving.updatedBy = 'd_far';
+    twice.Sync.receive(arriving);
+    same('a snapshot of the same record does not change it', verdict(twice), atBoot);
+    same('nor the payslip it reports', payslipOf(twice), paidAtBoot);
+
+    // AND THE COST STAYS THE COST, on every route. Move a day out of the fortnight and
+    // the live wage is the only evidence there is, so the accusation appears - and it
+    // appears identically everywhere, rather than on some doors and not others.
+    // Built as a disk again, for the same reason: this is what the record looks like on
+    // a phone where that day was never recorded.
+    const moved = JSON.parse(LEGACY_DISK);
+    delete moved.days['2026-08-14'];
+    const openMoved = id => {
+        const made = makeDevice({ deviceId: id,
+            flags: { carryAdvances: true, ledgerWrites: true },
+            storage: { 'scheduleData:v2': JSON.stringify(moved) } });
+        made.setToday('2026-08-26');
+        made.ctx.askTell = () => Promise.resolve();
+        made.State.load();
+        return made;
+    };
+    const held = openMoved('d_policy3');
+    check('a record whose live wage disagrees holds the closure aside',
+        Object.keys(held.State.schedule.ledger.unreadable).indexOf(entry.id) !== -1,
+        JSON.stringify(Object.keys(held.State.schedule.ledger.unreadable)));
+    check('and stops the phone rather than paying from it',
+        held.call('farkadWritesBlocked') === true);
+    const heldPayslip = payslipOf(held);
+    same('a second phone on the same disk reaches the same state',
+        [Object.keys(openMoved('d_policy4').State.schedule.ledger.unreadable),
+            openMoved('d_policy5').call('farkadWritesBlocked'),
+            payslipOf(openMoved('d_policy6'))],
+        [[entry.id], true, heldPayslip]);
+    same('and a reopen of the held phone does not change its mind',
+        [Object.keys(reopen(held, 'd_policy7').State.schedule.ledger.unreadable),
+            reopen(held, 'd_policy8').call('farkadWritesBlocked')],
+        [[entry.id], true]);
+}
+
 // ------------------------------------------------- a closure that was wrong is still wrong
 {
     suite('freezing does not make a false closure true');
