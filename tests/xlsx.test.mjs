@@ -203,6 +203,18 @@ function phone(seed, options = {}) {
         confirmed.push(options);
         return Promise.resolve(true);
     };
+    // The same dialog asked as a CHOICE - «הבנתי» or «שמירה חוזרת» - which is the only
+    // shape in ask.js whose dismissal is its own answer: Escape and a tap beside the
+    // dialog resolve null there, not the cancel button's value. Answers come off a
+    // queue, and an empty queue answers null - the dismissal - so a test that never
+    // presses anything is a test that closed the dialog, and a second file after it is
+    // the fault this stub exists to see.
+    const chosen = [];
+    const answers = [];
+    device.ctx.askChoice = options => {
+        chosen.push(options);
+        return Promise.resolve(answers.length ? answers.shift() : null);
+    };
 
     device.State.schedule.workers = options.workers || [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
@@ -234,7 +246,7 @@ function phone(seed, options = {}) {
              };`);
     }
     return {
-        device, run, caught, fetched, told, confirmed,
+        device, run, caught, fetched, told, confirmed, chosen, answers,
         downloads: device.downloads,
         hangOnFetch: () => { onAppend = null; },
         failOnFetch: () => { onAppend = tag => tag.onerror(); },
@@ -442,6 +454,55 @@ check('and nobody is named, or priced, anywhere in its bytes',
     check('and it offers the second press rather than leaving somebody guessing',
         said.confirmed[0].ok === 'הבנתי' && said.confirmed[0].cancel === 'שמירה חוזרת',
         JSON.stringify([said.confirmed[0].ok, said.confirmed[0].cancel]));
+}
+
+// --------------------------------------- closing that dialog is not a second press
+//
+// «שמירה חוזרת» was the CANCEL button of an askConfirm, and the export ran again
+// whenever the promise came back false - which is also what Escape and a tap beside
+// the dialog resolve to on that path (js/ui/ask.js askCancel; js/ui/modal.js routes
+// the backdrop there). Measured in Chromium on the v96 tree, 390x844: one press, three
+// taps beside the dialog, four workbooks. A person closing a dialog they have read is
+// not asking the bookkeeper to hold a fourth copy. The second file has to be a NAMED
+// answer, and closing the dialog any other way has to write nothing.
+{
+    suite('closing the hand-over dialog is not a request for another file');
+
+    // The microtask that re-runs the export is queued by the dialog's promise, after
+    // exportReports itself has returned; a moment is left for it to do its damage.
+    const settle = () => new Promise(resolve => setTimeout(resolve, 40));
+
+    const closed = phone(FORTNIGHT);
+    // What the backdrop does on the confirm path: the promise comes back false. Once -
+    // a stub that said false forever would prove the loop by never coming back.
+    let confirms = 0;
+    closed.device.ctx.askConfirm = options => {
+        closed.confirmed.push(options);
+        confirms += 1;
+        return Promise.resolve(confirms > 1);
+    };
+    await closed.run('exportReports()');
+    await settle();
+    check('the hand-over is asked as a choice: the way out first, the second file named',
+        closed.chosen.length === 1
+        && JSON.stringify(closed.chosen[0].choices) === JSON.stringify(['הבנתי', 'שמירה חוזרת']),
+        JSON.stringify(closed.chosen.map(options => options.choices)));
+    check('never through a confirm, whose cancel path a slipped finger takes',
+        closed.confirmed.length === 0, String(closed.confirmed.length));
+    check('and closing it writes no second file',
+        closed.caught.length === 1, `${closed.caught.length} workbooks`);
+
+    // The explicit press, and then the way out.
+    const again = phone(FORTNIGHT);
+    again.answers.push('שמירה חוזרת', 'הבנתי');
+    await again.run('exportReports()');
+    await settle();
+    check('«שמירה חוזרת» writes exactly one more, and asks again over it',
+        again.caught.length === 2 && again.chosen.length === 2,
+        `${again.caught.length} workbooks, asked ${again.chosen.length} times`);
+    await settle();
+    check('and «הבנתי» ends it', again.caught.length === 2 && again.chosen.length === 2,
+        `${again.caught.length} workbooks, asked ${again.chosen.length} times`);
 }
 
 // ---------------------------------------------------------------- the fallback

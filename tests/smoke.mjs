@@ -6752,6 +6752,126 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- closing the hand-over is not a second press
+{
+  // The workbook dialog offers «שמירה חוזרת» for the person who looked in "קבצים" and
+  // did not find the file. Asked through askConfirm that was the CANCEL button, and the
+  // export ran again whenever the promise came back false - which is also what Escape
+  // and a tap beside the dialog resolve to (modal.js routes the backdrop to askCancel).
+  // Measured on the v96 tree at 390x844: one press, three taps beside the dialog, four
+  // workbooks. Here the shipped library writes the real file, and what is counted is the
+  // write and the download the browser saw - the two copies a person would actually find.
+  const page = await open({ acceptDownloads: true });
+  const downloads = [];
+  page.on('download', d => downloads.push(d.suggestedFilename()));
+  await seedRoster(page);
+  await page.evaluate(async () => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save();
+    showView('reports');
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    render();
+    await loadXlsx();
+    window.__writes = [];
+    const real = XLSX.writeFile;
+    XLSX.writeFile = function (wb, name) {
+      window.__writes.push(name);
+      return real.apply(this, arguments);
+    };
+  });
+  await page.waitForTimeout(300);
+
+  const state = () => page.evaluate(() => ({
+    writes: window.__writes.slice(),
+    shown: document.getElementById('askModal').style.display === 'flex',
+    title: document.getElementById('askTitle').textContent,
+    message: document.getElementById('askMessage').textContent,
+    // Every visible button on the dialog, and whether it is one of askChoice's named
+    // answers or the confirm pair underneath.
+    buttons: [...document.querySelectorAll('#askModal button')]
+      .filter(node => node.offsetParent !== null)
+      .map(node => ({ text: node.textContent, choice: Boolean(node.closest('#askChoices')) }))
+  }));
+  // Pressed through the DOM rather than a locator: on a build without the button a
+  // locator waits thirty seconds and throws, taking the rest of the suite with it.
+  // Returns whether the button pressed was a named answer, null when there was none.
+  const press = label => page.evaluate(text => {
+    const found = [...document.querySelectorAll('#askModal button')]
+      .find(node => node.offsetParent !== null && node.textContent === text);
+    if (!found) return null;
+    found.click();
+    return Boolean(found.closest('#askChoices'));
+  }, label);
+  // A point beside the dialog: the first pixel that hit-tests to the backdrop itself.
+  const beside = () => page.evaluate(() => {
+    for (let y = 4; y < innerHeight; y += 8) {
+      for (let x = 2; x < innerWidth; x += 8) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && hit.id === 'askModal') return { x, y };
+      }
+    }
+    return null;
+  });
+
+  await page.evaluate(() => exportReports());
+  await page.waitForTimeout(500);
+  let now = await state();
+  check('one press, one workbook, and the dialog that says so',
+    now.writes.length === 1 && now.shown && now.title === 'קובץ ה-Excel נמסר לשמירה',
+    JSON.stringify({ writes: now.writes, shown: now.shown, title: now.title }));
+  check('its answers are named - the way out first, then the second file',
+    now.buttons.length === 2 && now.buttons.every(b => b.choice)
+    && now.buttons.map(b => b.text).join(',') === 'הבנתי,שמירה חוזרת',
+    JSON.stringify(now.buttons));
+
+  // (a) a tap beside the dialog
+  const point = await beside();
+  check('there is a backdrop beside it to tap', point !== null, JSON.stringify(point));
+  if (point) await page.mouse.click(point.x, point.y);
+  await page.waitForTimeout(500);
+  now = await state();
+  check('a tap beside the dialog closes it', !now.shown, JSON.stringify(now.buttons));
+  check('and writes nothing', now.writes.length === 1, `${now.writes.length} writes`);
+  // A build that answered the tap with another file has the dialog open again; it is
+  // closed the ordinary way so the checks below still describe that build.
+  if (now.shown) await press('הבנתי');
+  await page.waitForTimeout(200);
+
+  // (b) Escape
+  await page.evaluate(() => exportReports());
+  await page.waitForTimeout(500);
+  const before = (await state()).writes.length;
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  now = await state();
+  check('escape closes it too', !now.shown);
+  check('without a file', now.writes.length === before, `${now.writes.length} writes, was ${before}`);
+  if (now.shown) await press('הבנתי');
+  await page.waitForTimeout(200);
+
+  // (c) the explicit press, then the way out
+  await page.evaluate(() => exportReports());
+  await page.waitForTimeout(500);
+  const base = (await state()).writes.length;
+  const named = await press('שמירה חוזרת');
+  await page.waitForTimeout(500);
+  now = await state();
+  check('«שמירה חוזרת» is a named answer, not the cancel button', named === true, String(named));
+  check('and writes exactly one more, then asks again over it',
+    now.writes.length === base + 1 && now.shown && now.title === 'קובץ ה-Excel נמסר לשמירה',
+    `${now.writes.length} writes, was ${base}; shown ${now.shown}`);
+  await press('הבנתי');
+  await page.waitForTimeout(600);
+  now = await state();
+  check('«הבנתי» ends it', !now.shown && now.writes.length === base + 1,
+    `${now.writes.length} writes, was ${base}; shown ${now.shown}`);
+  check('and the browser was handed exactly the files that were written, no more',
+    downloads.length === now.writes.length,
+    `${downloads.length} downloads, ${now.writes.length} writes`);
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- room on the device
 {
   // C1. Every message this app had about space arrived at the moment a write was refused
