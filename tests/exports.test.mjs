@@ -849,4 +849,97 @@ function csvRows(text) {
         saidLate);
 }
 
+
+// -------------------------------------------------- every line starts in the right direction
+{
+    suite('a Latin name does not turn a line of the message round');
+
+    // WHAT DECIDES A LINE'S DIRECTION is its first STRONG character - bidi's first-strong
+    // rule - and an emoji, a bullet, a dash and a space are all neutral. So «📍 הרצליה»
+    // is an RTL line and «📍 Rothschild 12» is an LTR one: the pin flips to the left edge
+    // while every other line in the same message keeps it on the right, and a line that
+    // mixes the two - «• Dan Levi (‎+2 ש׳)» - lays its Hebrew out on the wrong side of
+    // the name.
+    //
+    // workerStatementText has always known this: it writes isolate(worker.name), and the
+    // statement is clean. dayMessage never did. Measured on 4a4d277 with one Latin worker
+    // and one Latin site: twenty-seven lines across the three styles.
+    //
+    // This is the same fault v97 fixed for date ranges (dateRange, js/ui/dom.js) and the
+    // same answer: U+2068 FIRST STRONG ISOLATE ... U+2069, invisible, carried through
+    // textContent and through a copy into WhatsApp.
+    const device = phone();
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'Dan Levi', active: true, dailyRate: 400, hourlyRate: 50 },
+        { id: 'w_02', name: 'דוד', active: true, dailyRate: 350, hourlyRate: 0 }];
+    device.State.schedule.places = [
+        { id: 'p_01', name: 'Rothschild 12', active: true },
+        { id: 'p_02', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+    const put = (date, worker, place, rate, hours) => device.State.commit(device.call(
+        'assignPlace', device.State.schedule, date, worker, 'actual', place, rate, hours));
+    put('2026-08-10', 'w_01', 'p_01');
+    put('2026-08-10', 'w_02', 'p_02');
+    put('2026-08-11', 'w_01', 'p_01', device.global('RATE_EXTRA'), 2);
+    device.State.commit(device.call('markAbsent', device.State.schedule,
+        '2026-08-12', 'w_01', 'actual'));
+    device.State.commit(device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-12', 500, ''));
+    run(device, `REPORT_RANGE.from='${FROM}'; REPORT_RANGE.to='${TO}';`
+        + ` REPORT_SECTION='workers'; INVOICE_PLACE=null;`);
+
+    // Strong classes, by the ranges that matter here: Hebrew and Arabic on one side,
+    // Latin and the Latin-1/extended letters on the other. Everything else - digits,
+    // punctuation, emoji, the bullet, the en dash - is neutral and decides nothing.
+    const RTL = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+    const LTR = /[A-Za-z\u00C0-\u02AF\u0370-\u052F]/;
+    const ISOLATE = /[\u2066\u2067\u2068]/;
+    const firstStrong = line => {
+        for (const ch of line) {
+            if (ISOLATE.test(ch)) return 'isolate';
+            if (RTL.test(ch)) return 'rtl';
+            if (LTR.test(ch)) return 'ltr';
+        }
+        return 'none';
+    };
+
+    const wrong = [];
+    ['pin', 'crane', 'morning'].forEach(style => {
+        ['2026-08-10', '2026-08-11', '2026-08-12'].forEach(date => {
+            [null, 'p_01'].forEach(place => {
+                const text = run(device, `dayMessage('${date}', 'actual', '${style}', `
+                    + `${place ? `'${place}'` : 'null'})`);
+                String(text).split('\n').filter(line => line.trim() !== '')
+                    .forEach(line => {
+                        if (firstStrong(line) === 'ltr') {
+                            wrong.push(`${style}/${date}/${place || 'all'}: ${line}`);
+                        }
+                    });
+            });
+        });
+    });
+    given('the fixture really does mix the two scripts',
+        run(device, `dayMessage('2026-08-10', 'actual', 'pin', null)`).indexOf('Dan Levi') !== -1
+        && run(device, `dayMessage('2026-08-10', 'actual', 'pin', null)`).indexOf('הרצליה') !== -1,
+        run(device, `dayMessage('2026-08-10', 'actual', 'pin', null)`));
+    check('no line of any style reads left to right', wrong.length === 0,
+        JSON.stringify(wrong.slice(0, 6)));
+
+    // And the statement, which has isolated its heading since it was written - pinned
+    // here so it stays that way.
+    const statementLines = String(run(device, `workerStatementText('w_01')`))
+        .split('\n').filter(line => line.trim() !== '')
+        .filter(line => firstStrong(line) === 'ltr');
+    check('nor any line of the worker\'s own statement', statementLines.length === 0,
+        JSON.stringify(statementLines));
+
+    // THE ALL-HEBREW MESSAGE IS UNCHANGED WHERE IT MATTERS: an isolate is invisible, and
+    // the words a person reads are the words the owner wrote.
+    const hebrewOnly = run(device, `dayMessage('2026-08-10', 'actual', 'pin', 'p_02')`);
+    check('and a Hebrew-only message still reads exactly as it did',
+        hebrewOnly.replace(/[\u2066-\u2069]/g, '')
+            === '📅 סידור עבודה – יום שני 10/08/2026\n\n📍 הרצליה\n• דוד',
+        JSON.stringify(hebrewOnly));
+}
+
 report();
