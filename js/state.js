@@ -120,8 +120,14 @@ const State = {
         // Shown, so the week is on screen and can be read - but not written down. Saving
         // it would put pre-migration data over the newest record there is.
         if (!damaged) {
-            writeIssues(result.issues);
+            // The schedule FIRST, then the questions about it.
+            //
+            // Written the other way round, the fingerprint was taken before the record it
+            // fingerprints existed - so it was the empty string, and the very next open
+            // compared it against a real one and dropped every question the migration had
+            // raised. The week came back and the things nobody had answered did not.
             this.save({ silent: true });
+            writeIssues(result.issues);
         }
 
         return { migrated: true, issues: result.issues, damaged };
@@ -597,16 +603,28 @@ function normaliseSchedule(raw, hints) {
     // The rate history is the part worth being careful with: it is what stops a raise
     // repaying last month, so an entry without a date it applies from is dropped rather
     // than guessed at.
+    // DORMANT. This build does not do vehicles - FARKAD_FLAGS in js/model/schema.js - and
+    // that is a reason to draw nothing and charge nobody, not a reason to lose records.
+    //
+    // So the fields this app knows are read the way it knows them, and everything else on
+    // the record is carried through untouched. This function starts from an empty
+    // schedule and copies across what it recognises, so a field it does not name is a
+    // field that disappears at the next save: a plate, a note, whatever the build that
+    // wrote them called them. A rate entry with no date it applies from is kept beside
+    // them rather than dropped - it earns nothing while this is off, and it is somebody's
+    // record of a price.
     schedule.vehicles = (Array.isArray(raw.vehicles) ? raw.vehicles : [])
         .filter(v => v && v.id)
-        .map(v => ({
+        .map(v => Object.assign({}, v, {
             id: String(v.id),
             name: String(v.name || ''),
             ownerId: String(v.ownerId || ''),
             active: v.active !== false,
-            rates: (Array.isArray(v.rates) ? v.rates : [])
-                .filter(entry => entry && typeof entry.from === 'string' && entry.from)
-                .map(entry => ({ from: String(entry.from), amount: Number(entry.amount) || 0 }))
+            rates: (Array.isArray(v.rates) ? v.rates : []).map(entry =>
+                (entry && typeof entry.from === 'string' && entry.from)
+                    ? Object.assign({}, entry,
+                        { from: String(entry.from), amount: Number(entry.amount) || 0 })
+                    : entry)
         }));
 
     const days = (raw.days && typeof raw.days === 'object') ? raw.days : {};
@@ -617,6 +635,14 @@ function normaliseSchedule(raw, hints) {
             plan: normaliseLayer(day.plan),
             actual: normaliseLayer(day.actual)
         };
+        // Which vehicles stayed in the yard that evening. Carried through even though
+        // this build does not do vehicles: it is a fact somebody recorded about a day,
+        // this function keeps only what it names, and a field it does not name is a field
+        // that disappears at the next reopen.
+        if (Array.isArray(day.vehiclesOff)) {
+            schedule.days[date].vehiclesOff = day.vehiclesOff
+                .filter(id => typeof id === 'string').map(String);
+        }
     });
 
     // Advances arrive keyed by id. A null value is a deletion another device sent and
@@ -626,28 +652,266 @@ function normaliseSchedule(raw, hints) {
     Object.keys(advances).forEach(id => {
         const item = advances[id];
         if (!item || typeof item !== 'object') return;
+        // Never assigned under a poison name: `schedule.advances.__proto__ = advance`
+        // reparents the map rather than adding to it. The map's bytes were reported and
+        // quarantined above; here the name is simply not written.
+        if (POISON_SEGMENTS.indexOf(String(id)) !== -1) return;
         if (!item.workerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) return;
-        schedule.advances[id] = {
+        const advance = {
             id: String(id),
             workerId: String(item.workerId),
             date: String(item.date),
             amount: Number(item.amount) || 0,
             note: String(item.note || '')
         };
+        // HOW it was paid. This function starts from an empty record and copies across
+        // what it recognises, so a field it does not name is a field that disappears at
+        // the next reopen - and this one had no name here. An advance handed over in cash
+        // and one sent by transfer are different facts about somebody's money, and the
+        // second reopen was quietly turning both of them into neither.
+        //
+        // Carried verbatim rather than checked against a list: a value written by a build
+        // that does not exist yet is still what somebody chose, and replacing it with a
+        // guess is worse than keeping a word this build does not draw.
+        if (typeof item.method === 'string' && item.method) advance.method = item.method;
+        schedule.advances[id] = advance;
     });
 
-    // The ledger, carried through unchanged. Entries are append-only and this is a
-    // read: an entry that will not parse is DROPPED from the fold rather than repaired,
-    // because a repaired entry is a claim about money that nobody made.
-    const ledger = (raw.ledger && typeof raw.ledger === 'object') ? raw.ledger : {};
-    const entries = (ledger.advances && typeof ledger.advances === 'object')
-        ? ledger.advances : {};
+    // The ledger, carried through unchanged - and CARRIED, not filtered.
+    //
+    // This used to skip an entry it could not use, and the comment above it said the
+    // entry was "DROPPED from the fold rather than repaired". It was not dropped from the
+    // fold. The object being built here IS State.schedule, and save() serialises exactly
+    // that - so the drop was from the RECORD. A ledger entry with no advanceId, arriving
+    // from a partial sync write or a newer build, was read off the disk, left out of this
+    // object, and then written over by the next save. The only copy of somebody's
+    // correction, gone, with load() reporting clean, no quarantine, writes not blocked,
+    // the parity check blessing the result, and the rescue export - which reads the disk -
+    // unable to find it either.
+    //
+    // Now nothing is left out. An entry this build can fold goes where it always went; an
+    // entry it cannot goes into `unreadable`, which the writer round-trips untouched and
+    // nothing reads for arithmetic. The bytes survive and the fold ignores them.
+    //
+    // This comment used to say storedScheduleProblems refused such a record "in the first
+    // place", so that this path was the second line rather than the only one. It did not,
+    // and that sentence is why nobody went looking: a repayment whose amount was the
+    // string "abc" passed every document gate in the app. The document is still not
+    // refused - the rescue file has to be able to open it, which is the reasoning written
+    // into storedScheduleProblems and it is right - but this path is now the real line,
+    // and js/app.js stops the device WRITING while any of it is unreadable.
+    // AND THE CONTAINER BEFORE THE ENTRIES, because there is not always a container.
+    //
+    // This line read `typeof raw.ledger === 'object'` and fell back to {} for anything
+    // else. A `ledger` that arrived as a string was therefore dropped on the floor; one
+    // that arrived as an array was read as a record with no advances. Either way the
+    // schedule that came out carried an EMPTY history, load() reported clean, nothing was
+    // blocked, and the first ordinary save wrote that emptiness over the only copy of
+    // somebody's advances.
+    //
+    // The entry checks below could not catch it: there were no entries to check. So the
+    // container is checked first, its bytes are carried on the schedule under a name
+    // nothing reads for arithmetic, and Recovery is told under a key of its own - the
+    // trouble is a different trouble from an unreadable entry and deserves its own
+    // sentence and its own quarantine slot.
+    // A NAME NOBODY CAN USE AS A KEY, in any map this app reads by id.
+    //
+    // Checked here because here is where every door meets, and BEFORE anything is copied
+    // out of `raw`: assigning an own `__proto__` into an ordinary object either reparents
+    // it or silently does nothing, and the silent nothing is what used to happen - the key
+    // vanished, no problem was raised, the device went on writing, and the next save put
+    // the emptied record over the one that had it.
+    //
+    // The bytes under the name are handed to Recovery, so the evidence is quarantined
+    // exactly as it arrived rather than described - and ONLY those bytes, because they
+    // are the sighting's identity: see poisonedContainers in js/model/schema.js. Writing is blocked for the same reason it is
+    // blocked for an unreadable entry: what could not be read is somebody's day or
+    // somebody's money, and this device must not write over it.
+    // AND EVERY DAY UNDER A NAME THAT IS NOT A DATE, held the same way. The loop over
+    // `days` further down adopts only YYYY-MM-DD keys and used to skip the rest without
+    // a word: a whole day arriving under a key this app cannot read was simply gone,
+    // with nothing reported and the device still writing.
+    const poisoned = (typeof poisonedContainers === 'function'
+        ? poisonedContainers(raw) : [])
+        .concat(typeof unreadableDays === 'function' ? unreadableDays(raw) : []);
+    // CARRIED ON THE SCHEDULE, under a name nothing reads for arithmetic, exactly as the
+    // unreadable ledger entries are. The quarantined copy is on the disk either way, but
+    // Recovery's problems live in one session's memory: without this the next boot found a
+    // record with the poisoned key already gone, had nothing to report, and let the device
+    // write again. The evidence has to be part of the record to outlive the session that
+    // found it.
+    //
+    // Anything an earlier read held aside stays held: a second reading is not a licence to
+    // drop it.
+    const POISON_KEY = 'scheduleData:v2:poison:';
+    const POISON_SAID = 'הגיע רישום עם שם שאי אפשר להשתמש בו כמפתח. שום דבר לא נמחק - '
+        + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי.';
+    // Through Recovery.evidence, not Recovery.damaged: damaged is keyed and says one
+    // trouble once per session, which for a map quarantined as it arrived meant that
+    // DIFFERENT bytes under the same poisoned name, arriving after the person had
+    // acknowledged the first sighting, were never copied and never mentioned. Here the
+    // bytes are the evidence, so identical bytes are the same sighting and anything
+    // else is a new one.
+    if (typeof Recovery !== 'undefined') {
+        poisoned.forEach(found => {
+            Recovery.evidence(POISON_KEY + found.at, found.json, POISON_SAID);
+        });
+        // AND WHATEVER AN EARLIER SESSION ALREADY HELD ASIDE.
+        //
+        // The evidence cannot ride back on the schedule: Recovery.damaged blocks writing
+        // the moment it is called, so the record carrying the marker is never saved - the
+        // same ordering trap the ledger clash hit. What IS durable is the quarantined
+        // copy, written by Recovery itself, so the next boot re-derives the hold from
+        // that rather than from a field it was never allowed to store. Without this the
+        // reopened device found a record whose poisoned key was already gone, had nothing
+        // to report, and started writing again.
+        const kept = typeof Store !== 'undefined' && typeof Store.keys === 'function'
+            ? Store.keys().filter(key => String(key).indexOf(POISON_KEY) === 0) : [];
+        kept.forEach(key => {
+            const at = String(key).slice(POISON_KEY.length).replace(/:damaged.*$/, '');
+            Recovery.evidence(POISON_KEY + at, Store.get(key), POISON_SAID);
+        });
+    }
+
+    const containerProblem = typeof ledgerContainerProblem === 'function'
+        ? ledgerContainerProblem(raw) : null;
+    if (containerProblem) {
+        schedule.ledger.unreadableContainer = raw.ledger;
+        if (typeof Recovery !== 'undefined') {
+            Recovery.damaged('scheduleData:v2:ledger:container',
+                JSON.stringify(raw.ledger),
+                'היסטוריית המקדמות ברישום אינה בצורה שאפשר לקרוא. שום דבר לא נמחק - '
+                + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי, '
+                + 'כדי שלא ייכתב רישום ריק על ההיסטוריה.');
+        }
+    }
+    // A container that could not be read has nothing this build may take entries out of.
+    const ledger = (!containerProblem && isPlainObject(raw.ledger)) ? raw.ledger : {};
+    const entries = isPlainObject(ledger.advances) ? ledger.advances : {};
     Object.keys(entries).forEach(id => {
         const entry = entries[id];
-        if (!entry || typeof entry !== 'object') return;
-        if (!entry.advanceId || !entry.kind) return;
+        // THE WHOLE CHECK, not a shape test.
+        //
+        // This asked only whether the entry had an advanceId and a kind. An entry that
+        // had both and carried the string "abc" as its amount was therefore READABLE, and
+        // went into the fold - where the arithmetic read it as nothing. A number nobody
+        // can read, silently reinterpreted as zero, on a man's outstanding debt.
+        //
+        // ledgerEntryProblems is the same check the queue applies to an edit on its way
+        // out. Applying it here means an entry that could never have been written by this
+        // build cannot be READ by it either, whatever door it arrived through.
+        // THE ENTRY AS IT ARRIVED, and the key it arrived under, asked separately.
+        //
+        // This used to validate `Object.assign({}, entry, { id: String(id) })` - the id
+        // forced to agree with the key BEFORE the check that they agree - so an entry
+        // stored under le_a claiming to be le_b was silently rewritten to le_a, folded as
+        // money, and the evidence of the mismatch destroyed. An immutable identity is the
+        // one field in this record nothing may invent: two phones that disagree about
+        // which entry this is have to be told, not averaged.
+        //
+        // And the KEY is checked at all, which it never was. A key this build cannot
+        // safely store - see isSafeId - would not have been stored: it would have
+        // re-parented the map and taken the entry out of every reader at once.
+        const readable = isSafeId(String(id))
+            && entry && typeof entry === 'object'
+            && ledgerEntryProblems(String(id), entry).length === 0;
+        if (!readable) {
+            // Under a key the read can see. An unsafe id cannot be used as the key of the
+            // held-aside map either - it would vanish there for exactly the same reason -
+            // so it is defined as an own property instead, which stores the bytes without
+            // going through the prototype setter.
+            Object.defineProperty(schedule.ledger.unreadable, id, {
+                value: entry, writable: true, enumerable: true, configurable: true
+            });
+            return;
+        }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
     });
+    // An own property, whatever the name is. `map[id] = value` for an id of `__proto__`
+    // writes the PROTOTYPE and creates nothing - which is how the map that keeps
+    // unreadable evidence lost it and came back reparented. See putKey in
+    // js/model/ledger.js, which is the same rule for the merge.
+    const keepUnder = (map, id, value) => {
+        Object.defineProperty(map, id, {
+            value, writable: true, enumerable: true, configurable: true
+        });
+    };
+
+    // Anything an older or newer build left under ledger.unreadable stays there too.
+    //
+    // Asked as an OWN key, not with `map[id] === undefined`. For `__proto__` that lookup
+    // reads Object.prototype off a plain object and is never undefined, so keepUnder
+    // below never ran for the one id it was written for: the reopened schedule came
+    // back without the entry, and the first ordinary save after the person acknowledged
+    // wrote that record over the one that had the evidence. Measured: the quarantine
+    // copy was the only trace left, and the sweep did not know its name either.
+    const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
+    Object.keys(held).forEach(id => {
+        if (!Object.prototype.hasOwnProperty.call(schedule.ledger.unreadable, id)) {
+            keepUnder(schedule.ledger.unreadable, id, held[id]);
+        }
+    });
+
+    // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns two of
+    // them and the record is not two of them.
+    //
+    // The object being built here IS State.schedule and save() serialises exactly that,
+    // so a part of `ledger` this build does not name was read off the disk, left out, and
+    // written over by the next ordinary save. That is the same deletion-by-reading the
+    // block above this one exists to have stopped, one level up: it was fixed for an
+    // ENTRY and left in place for the container's own fields.
+    //
+    // It is not hypothetical. The next build adds `ledger.migrations` - a person's
+    // approval of a financial migration, which decides whether their phones may write
+    // money at all - and three phones do not update together. A phone on this build,
+    // sharing the record, would have deleted that approval on every save: silently, with
+    // the load reporting clean, nothing quarantined, and the parity check blessing it.
+    //
+    // Carried, not quarantined and not a reason to stop. "This build has no opinion about
+    // it" is not "it cannot be read": a device that went into recovery over a field a
+    // later build added is a device nobody can record a day on, and that is the failure
+    // this app trades everything else to avoid.
+    Object.keys(ledger).forEach(key => {
+        if (key === 'advances' || key === 'unreadable') return;
+        // See normaliseLayer: a bare assignment under a poison name reparents the
+        // container instead of carrying a field.
+        if (POISON_SEGMENTS.indexOf(key) !== -1) return;
+        if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
+    });
+
+    // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.
+    //
+    // A schedule reaches this function from boot, from a cloud snapshot, from a restore,
+    // from a backup import, from the raw rescue import, from the migration and from a
+    // whole-document replacement. Reporting at each of those is seven chances to forget
+    // one; reporting here is none.
+    //
+    // Recovery is the right home and not an overreach: it quarantines rather than
+    // deletes, it blocks WRITING rather than reading, and it leaves the rescue export
+    // working - which is exactly the shape this needs. The document still opens, the
+    // bytes are still there, the fold cannot see them, and the device will not record a
+    // new day on top of financial history it cannot read. Recovery.damaged is keyed, so
+    // arriving here twice with the same trouble says it once.
+    // AND A DISPUTED ID, re-reported on every read for the same reason the unreadable
+    // entries are: Recovery's hold lives for one session and is re-derived from what the
+    // record says, so a device that boots onto two bodies under one id has to be told
+    // again rather than carrying on because the last session already said it.
+    if (typeof Recovery !== 'undefined'
+        && isPlainObject(schedule.ledger.conflicted)
+        && Object.keys(schedule.ledger.conflicted).length > 0) {
+        Recovery.damaged('scheduleData:v2:ledger:conflict',
+            JSON.stringify(schedule.ledger.conflicted),
+            'יש רשומת מקדמה עם אותו מזהה ותוכן אחר. שתי הגרסאות נשמרו כמו שהן ולא נמחק '
+            + 'דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי ותבדוק איזו מהן נכונה.');
+    }
+
+    if (typeof Recovery !== 'undefined'
+        && Object.keys(schedule.ledger.unreadable).length > 0) {
+        Recovery.damaged('scheduleData:v2:ledger',
+            JSON.stringify(schedule.ledger.unreadable),
+            'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
+            + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
+    }
 
     // The invariant, enforced here because here is where every route in meets: a
     // snapshot, a boot from disk, an imported file, a restored backup. Anything with a
@@ -703,6 +967,14 @@ function normaliseLayer(side) {
     Object.keys(side).forEach(workerId => {
         const record = side[workerId];
         if (!record || typeof record !== 'object') return;
+        // NOT COPIED under a poison name. `out.__proto__ = kept` is not a copy - it
+        // makes the poisoned record the layer's prototype, so `layer.entries` answers
+        // that worker's entries and the row itself is nowhere. It did not show at the
+        // first sighting, which Recovery holds before adoption; it showed when the
+        // person acknowledged and the same document arrived again. The map's bytes are
+        // reported and quarantined by poisonedContainers; this only refuses to write
+        // the name into an ordinary object.
+        if (POISON_SEGMENTS.indexOf(String(workerId)) !== -1) return;
 
         const entries = (Array.isArray(record.entries) ? record.entries : [])
             .filter(entry => entry && entry.placeId)
@@ -724,18 +996,79 @@ function normaliseLayer(side) {
     return out;
 }
 
-function readIssues() {
-    try {
-        const raw = Store.get(ISSUES_KEY);
-        const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-        return [];
+// A decision the migration refused to guess is a question about one cell in ONE schedule.
+// It was stored as a bare list under a fixed key, so a list left by whatever was on the
+// phone before survived an import and attached itself to the week that had just arrived -
+// pointing at a worker and a date that record has never heard of.
+//
+// So the list carries the fingerprint of the schedule it describes, and a list that does
+// not match the record on the disk is not adopted. An older build's bare array is still
+// read: it is all there is, and refusing it would throw away questions somebody has not
+// answered yet.
+function fingerprintOf(text) {
+    let value = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        value = (Math.imul(value, 31) + text.charCodeAt(i)) | 0;
     }
+    return (value >>> 0).toString(36) + ':' + text.length;
 }
 
-function writeIssues(issues) {
-    Store.set(ISSUES_KEY, JSON.stringify(issues || []));
+// Of the record the NEXT session would open, not of what is in memory: the questions have
+// to belong to the schedule that survives the app being closed.
+function scheduleFingerprint() {
+    const raw = Store.durableGet(V2_KEY);
+    return raw === null ? '' : fingerprintOf(raw);
+}
+
+// One reader for the record, and it says which of the three things it found.
+//
+//   bound      the list names the schedule it describes, and that schedule is here
+//   unbound    a bare array, the way a build before the binding wrote one. It is all
+//              there is, so it is carried - and it is NOT evidence about this week
+//   stale      the list names a different schedule: not adopted
+//
+// The version this replaced returned a bare array for all three, and its caller could not
+// tell them apart.
+function parseIssuesRecord(raw, fingerprint) {
+    if (!raw) return { issues: [], bound: true, found: false };
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        return { issues: [], bound: true, found: false };
+    }
+    if (Array.isArray(parsed)) return { issues: parsed, bound: false, found: true };
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.issues)) {
+        return { issues: [], bound: true, found: false };
+    }
+    if (typeof parsed.forSchedule !== 'string') {
+        return { issues: parsed.issues, bound: false, found: true };
+    }
+    if (fingerprint !== undefined && parsed.forSchedule !== fingerprint) {
+        return { issues: [], bound: false, found: true, stale: true };
+    }
+    return { issues: parsed.issues, bound: true, found: true };
+}
+
+function readIssues() {
+    const read = parseIssuesRecord(Store.get(ISSUES_KEY), scheduleFingerprint());
+    return read.issues;
+}
+
+// Written and READ BACK, and the answer is returned. The caller used to ignore it, so an
+// import could report success over a device holding the new schedule and none of the
+// questions that came with it - and the questions were the half nobody could reconstruct.
+//
+// `bound` says whether the list can be shown to belong to the schedule on the disk. It is
+// false for a list that arrived in a file written before the binding existed: those
+// questions are still somebody's questions and are kept, but nothing here pretends to
+// know which week they are about.
+function writeIssues(issues, options) {
+    const bound = !options || options.bound !== false;
+    const record = { issues: issues || [] };
+    if (bound) record.forSchedule = scheduleFingerprint();
+    else record.bound = false;
+    return Store.setVerified(ISSUES_KEY, JSON.stringify(record));
 }
 
 // By identity, not by position: the list is rebuilt on every render, and an index

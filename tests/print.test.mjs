@@ -16,6 +16,7 @@
 // those are facts about a PDF, not about a computed style.
 
 import { serve } from './serve.mjs';
+import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, given, report } from './runner.mjs';
 import { readPdf, pageText, heavyFills } from './pdf.mjs';
 
@@ -26,6 +27,20 @@ const server = process.env.SMOKE_URL
     ? { url: process.env.SMOKE_URL, close: () => {} }
     : await serve(new URL('..', import.meta.url).pathname);
 const BASE = server.url;
+
+// Whatever the ORIGIN handed the browser, hashed against the commit.
+//
+// SMOKE_URL points this suite at a server somebody is already running. Nothing checked
+// what that server served, so an origin rooted at another tree passed every check in this
+// file and the count meant nothing. Each shell path is fetched and compared with the Git
+// blob at the commit under test - which is also the honest answer to "which bytes did
+// these numbers come from".
+const SERVED_ROOT = new URL('..', import.meta.url).pathname;
+const SERVED_SHA = expectedShaFor(SERVED_ROOT);
+const SERVED = await verifyServedAssets(BASE, SERVED_ROOT, SERVED_SHA);
+check('the origin served this commit, byte for byte',
+    SERVED.ok, `${SERVED.checked} assets; ${SERVED.wrong.slice(0, 3).join(' | ')}`);
+
 const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 
 // A page in an RTL PDF stores its text in VISUAL order, so a Hebrew phrase comes back
@@ -570,6 +585,51 @@ for (const scenario of [
     check('the pay sheet is what was printed', says(whole, 'שכר - לפי עובד'), '');
     check('and the client\'s report is not behind it', !says(whole, 'חיוב - לפי אתר'),
         JSON.stringify(pages.map(item => pageText(item).slice(0, 24))));
+
+    await page.context().close();
+}
+
+// ------------------------------------------------- the warning has to reach the paper
+//
+// A pay sheet's warnings are not decoration. "שעות נוספות בלי שכר שעה - לא נכללו" says a
+// man worked hours this sheet did NOT pay him for, and it is the one line that stops the
+// total being read as the whole story. The print stylesheet hides almost everything by
+// default and lifts this class back out by name - a cascade that is correct today and
+// that nothing measured, so a later `display: none` on a parent would have taken the
+// warning off the paper and left the number that needs it.
+{
+    suite('a pay sheet that is missing hours says so on the paper too');
+
+    const page = await open();
+    await page.evaluate(() => {
+        // One man with hours and NO hourly rate: the case the warning exists for. His
+        // three extra hours cannot be priced, so they are not in his total.
+        State.schedule.workers = [
+            { id: 'w_1', name: 'Worker 01', active: true, dailyRate: 400, hourlyRate: 0 }];
+        State.schedule.places = [{ id: 'p_01', name: 'Site A', active: true }];
+        assignPlace(State.schedule, '2026-08-10', 'w_1', 'actual', 'p_01', RATE_EXTRA, 3);
+        State.save();
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(300);
+
+    const onScreen = await page.evaluate(() =>
+        document.getElementById('reportsView').textContent);
+    given('the screen carries the warning to begin with',
+        onScreen.indexOf('שעות נוספות בלי שכר שעה') !== -1,
+        onScreen.replace(/\s+/g, ' ').slice(0, 120));
+
+    const buffer = await page.pdf({ format: 'A4', printBackground: true });
+    const pdf = readPdf(buffer);
+    const texts = pdf.pages.map(pageText);
+    given('the print produced a real PDF', buffer.length > 2000, `${buffer.length} bytes`);
+
+    check('the warning is on the printed page, not only on the screen',
+        texts.some(text => says(text, 'שעות נוספות בלי שכר שעה')),
+        texts.map(t => t.replace(/\s+/g, ' ').slice(0, 80)).join(' | '));
 
     await page.context().close();
 }

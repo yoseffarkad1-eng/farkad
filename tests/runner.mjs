@@ -24,9 +24,13 @@ export function same(name, actual, expected) {
 // An assertion that a test itself depends on - a precondition, not a claim about the
 // app. If one of these is wrong the test below it is meaningless, so it stops the run
 // rather than reporting a failure that points at the wrong place.
-export function given(what, condition) {
+// The third argument is the failure report - the number or the JSON that says WHY - and
+// it used to be dropped on the floor: sixty-three call sites in this repository wrote one
+// and the operator saw `SETUP FAILED: <name>` and none of it, on the one kind of failure
+// that stops the whole run.
+export function given(what, condition, detail = '') {
     if (!condition) {
-        console.error(`\nSETUP FAILED: ${what}`);
+        console.error(`\nSETUP FAILED: ${what}${detail ? '  — ' + detail : ''}`);
         process.exit(2);
     }
 }

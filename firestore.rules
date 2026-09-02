@@ -46,11 +46,265 @@ service cloud.firestore {
       return request.resource.data.updatedAt is string;
     }
 
+    // ---------------------------------------------------------------- the ordering
+    //
+    // Three phones share this document. Firestore merges disjoint field paths server-side,
+    // which is what lets two people fill in the same evening at once - but everything that
+    // is NOT a disjoint merge had no ordering at all: a restore raced an edit and the loser
+    // was silent, a stale writer overwrote a newer document, and a request that might still
+    // land was treated as dead and sent twice.
+    //
+    // The client's send claim cannot fix that. It is a lease in localStorage: it
+    // coordinates tabs of one browser profile, and the three phones share no storage. The
+    // only party all three can agree with is this file.
+    //
+    // Three fields carry it, and none of them is a clock. updatedAt stays exactly what it
+    // was - a phone's own time, informational, never load-bearing.
+
+    // The version of the protocol the writer speaks.
+    //
+    // This is the backward-compatibility decision, stated rather than finessed: a build
+    // that predates the protocol writes no such field, and there is no rule that both
+    // accepts those writes and orders them - accepting them once the document is ordered
+    // IS the hole. So after cutover it is refused, the old build shows a visible sync
+    // error, keeps its queue, does not say synced, and cannot diverge quietly.
+    //
+    // Cutover is not a date somebody picks. It is the first protocol write landing on the
+    // document; until then legacyWrite() below keeps the un-updated phone working. That is
+    // what makes the rollout executable rather than a sentence. See docs/sync-protocol.md.
+    function versioned() {
+      return request.resource.data.protocol is int
+        && request.resource.data.protocol >= 1;
+    }
+
+    // The compare-and-set. Exactly one more than what is there.
+    //
+    // Two phones that both read revision 5 both try to write 6. The first lands; for the
+    // second, the document now says 6, its write still says 6, and 6 is not 6 + 1 - so it
+    // is refused instead of silently overwriting work that is already there. The client
+    // turns that refusal into a held conflict rather than a retry that would overwrite.
+    function nextRevision() {
+      return request.resource.data.revision is int
+        && request.resource.data.revision == resource.data.revision + 1;
+    }
+
+    function firstRevision() {
+      return request.resource.data.revision is int
+        && request.resource.data.revision == 1;
+    }
+
+    // THE DOCUMENT THAT IS ALREADY THERE, and has never spoken the protocol.
+    //
+    // The live schedule was written by builds that had never heard of a revision. It has
+    // a roster, days and advances and no `revision` field at all - so nextRevision()
+    // asks it for `null + 1` and refuses, for ever. Without an exception the existing
+    // document could never take its first protocol write, and the rollout is a paragraph
+    // that cannot be executed.
+    function noRevisionYet() {
+      return !('revision' in resource.data);
+    }
+
+    // The exception is exactly one write wide. It applies only while the document has no
+    // revision; the moment one lands, noRevisionYet() is false and nextRevision() governs
+    // everything after. A later write claiming revision 1 over a document already at 7 is
+    // refused by both halves, so this cannot be reused to reset the count.
+    function bootstrapRevision() {
+      return request.resource.data.revision is int
+        && request.resource.data.revision == 1;
+    }
+
+    // AND IT MAY NOT CARRY ONE BYTE OF WORK.
+    //
+    // The five fields the production bootstrap actually writes - see the
+    // transaction.update in js/sync/firebase-adapter.js - and nothing else. Measured
+    // before this line existed: an ordinary allowed user could take the legacy document
+    // to revision 1 and, in the same accepted write, delete every day worked, alter a
+    // stamped daily rate, delete the advances, forge a ledger entry, erase the roster,
+    // change schemaVersion, or add a field nobody has heard of. Seventeen of nineteen
+    // such writes were accepted. The two that were refused were refused by accident.
+    //
+    // This is the ONE accepted write with no compare-and-set behind it: there is no prior
+    // revision to check it against, so a stale bootstrap sent from a phone that has been
+    // away can carry its own idea of the document over another phone's newer legacy
+    // correction, and nothing else in this file would refuse it. The ordinary
+    // nextRevision() branch does not need this - a whole-document write there is the
+    // restore, it is guarded by fullDocumentOk(), and its revision has to be exactly one
+    // past what is on the server.
+    //
+    // affectedKeys() is the right question rather than listing the business fields: a
+    // build that adds a field this rule has never heard of must not thereby open a hole
+    // in it. Anything outside the five is business, whatever it is called.
+    function bootstrapTouchesOnlyProtocol() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['protocol', 'revision', 'lastOpId', 'updatedAt', 'updatedBy']);
+    }
+
+    // A WRITE FROM A PHONE THAT HAS NOT UPDATED YET.
+    //
+    // This is what makes the rollout executable rather than a sequencing puzzle with no
+    // valid order. Publishing rules that demand a protocol breaks every phone in the
+    // field the same minute; waiting until every phone has updated means the updated ones
+    // cannot write in the meantime, because the published rules have no receipts
+    // subcollection. Neither order works.
+    //
+    // So during the transition both shapes are allowed - and only until the document is
+    // bootstrapped. Once it carries a revision, a write with no protocol is refused, so
+    // an old phone cannot flatten the ordering fields after cutover. That is the whole
+    // rollout: publish this, let the phones update, and the first protocol-capable write
+    // closes the door behind itself.
+    function legacyWrite() {
+      return noRevisionYet() && !('protocol' in request.resource.data);
+    }
+
+    // The operation this write carries, and its receipt - which must exist AFTER this
+    // commit. getAfter() is the whole of the atomicity guarantee: the rule can only be
+    // satisfied if the document and the receipt land together, so a reader never sees a
+    // revision without the receipt that explains it, or a receipt for a revision that was
+    // never applied.
+    //
+    // The receipt is also what makes a retry safe. A request that may still land can be
+    // sent again, because the second attempt finds its own receipt and stops - which is
+    // the difference between "sent twice" and "acknowledged once".
+    // THE OTHER HALF OF THE PAIR, read from the receipt's side.
+    //
+    // carriesReceipt() asks, of a schedule write, "is the receipt there afterwards".
+    // This asks, of a receipt write, "is the schedule pointing at me afterwards" - the
+    // same single commit, checked from both ends, so neither half can land without the
+    // other whichever one the client sends first.
+    //
+    // Three things, and each of them is load-bearing. The schedule must exist, or this is
+    // a receipt for a document that is not there. Its lastOpId must be THIS operation, or
+    // the receipt is naming somebody else's write. And its revision must equal the
+    // revision the receipt claims, or a retry that finds this receipt is told the
+    // operation landed at a revision it did not.
+    // NOT exists(). That reads the state BEFORE this commit, and the commonest legitimate
+    // pair is the very first write of a document: the schedule is created and its receipt
+    // beside it, in one transaction, and before that transaction there is no schedule at
+    // all. An exists() here refused every create - the first write of every new project.
+    //
+    // getAfter alone is the whole test. If the schedule does not exist afterwards there is
+    // nothing to read a field from, the rule errors, and the write is denied - which is
+    // exactly the answer an orphan receipt deserves.
+    // AND WHAT THE OPERATION DID, not only when it landed.
+    //
+    // A revision says a write wearing this name reached this point. It does not say what
+    // that write was, and the client is built to BELIEVE a receipt - that is what makes a
+    // retry safe - so a second arrival carrying the same name and a different path and
+    // value was answered "already applied", acknowledged, pruned and reported synced,
+    // with the phone holding one value and the cloud another.
+    //
+    // WHAT THESE RULES CAN AND CANNOT DO, said plainly because the difference matters.
+    // They can require the fingerprint to be present and well-formed, require the schedule
+    // and the receipt to carry the SAME one, and - because getAfter() makes the pair a
+    // single commit and receipts are immutable - make that first pairing binding for ever,
+    // so a name can never afterwards be re-pointed at different semantics. They cannot
+    // recompute it: there is no canonical serializer here, no loops, .keys() reaches only
+    // the top level, and on an update request.resource.data is the MERGED document, so the
+    // rules cannot even enumerate which nested paths this write touched. The fingerprint
+    // is therefore made trustworthy against loss and tampering by the server, and made to
+    // MEAN something by the client - which is also the only place the replay can be
+    // refused, because a replay performs no write and never reaches these rules.
+    // The bootstrap's own pairing: the same single commit, without the fingerprint the
+    // bootstrap has nothing to put in.
+    function bootstrapReceipt(docId) {
+      return request.resource.data.lastOpId is string
+        && request.resource.data.lastOpId.size() > 0
+        && request.resource.data.lastOpId.size() < 128
+        && getAfter(/databases/$(database)/documents/schedules/$(docId)/receipts/$(request.resource.data.lastOpId)).data.revision
+             == request.resource.data.revision;
+    }
+
+    function boundFingerprint() {
+      return request.resource.data.opFingerprint is string
+        && request.resource.data.opFingerprint.size() > 0
+        && request.resource.data.opFingerprint.size() < 128;
+    }
+
+    function receiptMatchesSchedule(docId, opId) {
+      let after = getAfter(/databases/$(database)/documents/schedules/$(docId)).data;
+      return after.lastOpId == opId
+        && after.revision == request.resource.data.revision
+        // The bootstrap has no fingerprint on either side - its five protocol fields ARE
+        // the operation - so the pair is required to AGREE about that rather than to
+        // carry one. A receipt with a fingerprint for a schedule without one, or the
+        // reverse, is a mismatched pair and refused.
+        && (('opFingerprint' in after)
+            ? (('opFingerprint' in request.resource.data)
+                && after.opFingerprint == request.resource.data.opFingerprint)
+            : !('opFingerprint' in request.resource.data));
+    }
+
+    function carriesReceipt(docId) {
+      let receipt = getAfter(/databases/$(database)/documents/schedules/$(docId)/receipts/$(request.resource.data.lastOpId)).data;
+      return request.resource.data.lastOpId is string
+        && request.resource.data.lastOpId.size() > 0
+        && request.resource.data.lastOpId.size() < 128
+        && boundFingerprint()
+        && receipt.revision == request.resource.data.revision
+        && receipt.opFingerprint == request.resource.data.opFingerprint;
+    }
+
     match /schedules/{docId} {
       allow read: if allowed();
-      allow write: if allowed()
+
+      allow create: if allowed()
         && stamped()
+        && versioned()
+        && firstRevision()
+        && carriesReceipt(docId)
         && (!isFullReplacement() || fullDocumentOk());
+
+      allow update: if allowed()
+        && stamped()
+        && (
+          // A protocol write: the ordinary next revision, or the one bootstrap that
+          // brings a legacy document into the protocol. Either way it carries its
+          // receipt, so a revision never exists without the operation that explains it.
+          (versioned() && nextRevision() && carriesReceipt(docId))
+          // The bootstrap carries no business semantics to fingerprint - its five fields
+          // ARE the whole operation, and adding a sixth would break the affected-key rule
+          // that keeps it protocol-only. Its receipt is bound by revision alone.
+          || (versioned() && noRevisionYet() && bootstrapRevision()
+            && bootstrapTouchesOnlyProtocol() && bootstrapReceipt(docId))
+          // Or a phone that has not updated yet, while the document is still legacy.
+          || legacyWrite()
+        )
+        && (!isFullReplacement() || fullDocumentOk());
+
+      // Nothing deletes the schedule. It is the record of who worked where.
+      allow delete: if false;
+
+      // The receipts. Created with the write they belong to, and then frozen.
+      //
+      // Immutable on purpose: a receipt that could be changed or removed is a receipt that
+      // cannot answer "did my operation already land", which is the one question a retry
+      // has to ask. Readable, because that is how the retry asks it.
+      //
+      // AND NEVER ALONE. This rule used to require only that the receipt name an integer
+      // revision of one or more, which let anyone on the list create
+      //
+      //   schedules/current/receipts/op_never_applied   { revision: 999 }
+      //
+      // without a schedule write anywhere near it. The client treats an existing receipt
+      // as proof that its operation landed - that is the whole point of a receipt, and it
+      // is what makes a retry safe - so a receipt for an operation that was never applied
+      // is a lie the client is built to believe. It would find it, stop, acknowledge, and
+      // prune the queue: an evening pruned off the phone on the strength of a record that
+      // nothing wrote.
+      //
+      // So a receipt is only creatable together with the schedule write it names, and
+      // getAfter is what says "together". After this commit the schedule must exist, must
+      // be pointing at THIS operation, and must be at exactly the revision this receipt
+      // claims. There is no order of writes that satisfies all three except the one that
+      // applies the operation - which is what the receipt was always supposed to mean.
+      match /receipts/{opId} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && request.resource.data.revision is int
+          && request.resource.data.revision >= 1
+          && receiptMatchesSchedule(docId, opId);
+        allow update, delete: if false;
+      }
     }
 
     // One copy of the schedule per day, and the reason sync is not the same thing as a

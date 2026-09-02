@@ -14,6 +14,7 @@
 // a browser binary, and PLAYWRIGHT_MODULE for a playwright installed somewhere else.
 
 import { serve } from './serve.mjs';
+import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 
 // ESM ignores NODE_PATH, so allow an explicit path to a global playwright install.
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -30,12 +31,27 @@ const server = process.env.SMOKE_URL
   : await serve(new URL('..', import.meta.url).pathname);
 const BASE = server.url;
 
+// Whatever the ORIGIN handed the browser, hashed against the commit.
+//
+// SMOKE_URL points this suite at a server somebody is already running. Nothing checked
+// what that server served, so an origin rooted at another tree passed every check in this
+// file and the count meant nothing. Each shell path is fetched and compared with the Git
+// blob at the commit under test - which is also the honest answer to "which bytes did
+// these numbers come from".
+const SERVED_ROOT = new URL('..', import.meta.url).pathname;
+const SERVED_SHA = expectedShaFor(SERVED_ROOT);
+const SERVED = await verifyServedAssets(BASE, SERVED_ROOT, SERVED_SHA);
+
+
 const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 const results = [];
 const check = (name, pass, detail = '') => {
   results.push({ name, pass, detail });
   console.log(`${pass ? '  PASS' : '**FAIL**'}  ${name}${detail ? '  — ' + detail : ''}`);
 };
+
+check('the origin served this commit, byte for byte',
+  SERVED.ok, `${SERVED.checked} assets; ${SERVED.wrong.slice(0, 3).join(' | ')}`);
 
 async function newPage(opts = {}) {
   const ctx = await browser.newContext(opts);
@@ -89,6 +105,11 @@ async function seedRoster(page) {
       .every(v => document.getElementById(v + 'View').style.display === 'none'))));
   check('with no data the app welcomes rather than rendering an empty grid',
     (await page.textContent('#dayView')).includes('ברוך הבא'));
+  check('and the welcome wears its glyph, out of a screen reader\'s way',
+    (await page.evaluate(() => {
+      const glyph = document.querySelector('.setup-card .setup-glyph');
+      return Boolean(glyph) && glyph.getAttribute('aria-hidden') === 'true';
+    })));
 
   // The ☰ must be findable on the very first visit - it lives in the header, which
   // renders with or without data, not on the progress bar that needs workers to exist.
@@ -232,6 +253,40 @@ async function seedRoster(page) {
     (await page.locator('.chip-absent').count()) === 1);
   check('an absent worker counts as handled, not outstanding',
     (await page.textContent('.progress-line')).includes('1 מתוך 3'));
+  // The headers say how deep each tray is without a chip-by-chip count...
+  // The undo and redo arrows, same reasoning as the chevrons, opposite failure: the
+  // characters ↶ and ↷ are NOT Bidi_Mirrored, so the renderer left ↶'s head pointing
+  // left on a calendar where back in time is right - the undo arrow pointed the way redo
+  // goes. Drawn paths now (stepIcon in dom.js): undo's head lands at (20,9) riding right,
+  // redo's at (4,9) riding left, and the words stay on the buttons beside them.
+  const steps = await page.evaluate(() => ({
+    undo: document.querySelector('#undoBtn svg path')?.getAttribute('d'),
+    redo: document.querySelector('#redoBtn svg path')?.getAttribute('d'),
+    undoWord: (document.getElementById('undoBtn')?.textContent || '').trim(),
+    redoWord: (document.getElementById('redoBtn')?.textContent || '').trim()
+  }));
+  check('the undo arrow is drawn curling back to the right',
+    steps.undo === 'M15 14l5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13',
+    String(steps.undo));
+  check('and the redo arrow curling forward to the left',
+    steps.redo === 'M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11',
+    String(steps.redo));
+  check('with the words still on the buttons, not an arrow alone',
+    steps.undoWord === 'בטל' && steps.redoWord === 'שוב',
+    JSON.stringify([steps.undoWord, steps.redoWord]));
+
+  check('the tray headers carry their counts',
+    (await page.locator('.tray h4').allTextContents()).join(' | ')
+      === 'לא נרשמו (2) | נעדרים (1)');
+  // ...and an empty tray keeps the bare word: its line below already says "nobody" in
+  // words, and (0) next to that is noise.
+  await page.evaluate(() => {
+    State.commit(clearWorkerDay(State.schedule, State.date, 'w_01', 'actual'));
+  });
+  await page.waitForTimeout(300);
+  check('an emptied tray drops the count rather than saying (0)',
+    (await page.locator('.tray h4').allTextContents()).join(' | ')
+      === 'לא נרשמו (3) | נעדרים');
   await page.context().close();
 }
 
@@ -626,8 +681,14 @@ async function seedRoster(page) {
     (await page.textContent('.roster-archive')).includes('דוד'),
     await page.textContent('.roster-archive'));
 
-  // A name typed by mistake, with nothing recorded against it, IS deletable - and the
-  // button for it is in his own screen, behind a dialog carrying his name.
+  // A name typed by mistake, with nothing recorded against it, is the ONE case permanent
+  // deletion was ever for - and in this build it is not offered either. The gate is
+  // FARKAD_FLAGS in js/model/schema.js and it is shut; what this reads is the screen a
+  // person actually gets, which is the archive and a sentence saying why.
+  //
+  // The machinery behind the gate is exercised in tests/data.test.mjs against a device
+  // built with the flag on. This is the shipped reading, and the two are deliberately
+  // different tests.
   await page.evaluate(() => {
     State.schedule.workers.push({
       id: State.nextWorkerId(), name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0
@@ -641,41 +702,44 @@ async function seedRoster(page) {
   await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
-  check('a worker with nothing recorded is offered a delete',
-    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
 
-  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
-  await page.waitForTimeout(250);
-  // The title carries the ACT (מחיקת עובד) and the message carries the man - along
-  // with the three things that were just checked about him.
-  check('the dialog names the man before he goes',
-    (await page.textContent('#askMessage')).includes('טעות'),
+  check('the shipped build offers no delete, even for a name typed by mistake',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0,
+    await page.textContent('#workerFormDanger'));
+  check('and says why, rather than leaving a gap where a button was',
+    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת בגרסה הזו'),
+    await page.textContent('#workerFormDanger'));
+  check('the archive is what it does offer instead',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /ארכיון/ }).count()) > 0);
+
+  // And the write path, called the way a screen drawn by an older build would call it.
+  // NOT awaited inside the page: the refusal opens a dialog and waits for somebody to
+  // read it, so returning that promise would hang until the test timed out. What is being
+  // read here is what the call DID, which is nothing.
+  await page.evaluate(() => {
+    const typo = State.schedule.workers.find(worker => worker.name === 'טעות');
+    deleteWorker(typo.id);
+  });
+  await page.waitForTimeout(400);
+  check('and it says why rather than failing silently',
+    (await page.textContent('#askMessage')).includes('מחיקה סופית מושבתת'),
     await page.textContent('#askMessage'));
-
-  // One more tap in the same place as the last tap is not a decision. The name has to be
-  // typed, and a wrong one is refused rather than accepted quietly.
-  await page.fill('#askInput', 'טעו');
   await page.click('#askOk');
-  await page.waitForTimeout(250);
-  check('a name that does not match is refused',
-    (await page.isVisible('#askModal')) === true
-    && (await page.textContent('#askError')).length > 0,
-    await page.textContent('#askError'));
-  check('and nobody has been deleted on the strength of it',
+  await page.waitForTimeout(200);
+  check('and calling the deletion directly does not remove him either',
     (await page.evaluate(() => State.schedule.workers.length)) === before,
     String(await page.evaluate(() => State.schedule.workers.length)));
+  check('he is still on the disk, not only on the screen',
+    (await page.evaluate(() => localStorage.getItem('scheduleData:v2') || '')).includes('טעות'));
 
-  await page.fill('#askInput', 'טעות');
-  await page.click('#askOk');
-  await page.waitForTimeout(300);
-
-  check('and he is gone',
-    (await page.evaluate(() => State.schedule.workers.length)) === before - 1,
-    String(await page.evaluate(() => State.schedule.workers.length)));
-  check('gone from the list too',
-    !(await page.textContent('#workerList')).includes('טעות'));
-  check('and gone from the disk, not only the screen',
-    !(await page.evaluate(() => localStorage.getItem('scheduleData:v2') || '')).includes('טעות'));
+  // Vehicles are retired in this build too, and the roster is where they were managed.
+  check('no vehicle panel is drawn',
+    (await page.evaluate(() => {
+      const list = document.getElementById('vehicleList');
+      if (!list) return true;
+      const panel = list.closest('.roster-panel');
+      return !panel || panel.style.display === 'none';
+    })), 'vehicle panel');
 
   // A new worker must never reuse an archived id - and must not be one past the highest
   // either. Two phones holding the same roster used to hand the same next id to two
@@ -1192,6 +1256,13 @@ async function seedRoster(page) {
     // of the next check is the failure it reports, not how long the wait was.
     FarkadSync._cloudChain = null;
     FarkadSync._cloudOpen = 0;
+    // And the right to send, which since v87 is a record on the DISK rather than a
+    // property of this tab - see SEND_CLAIM_KEY. A send that never answered still holds
+    // it, and the next flush correctly refuses to start while another sender might be
+    // open. Given back here for the same reason as the two above: what the next check is
+    // about is the failure that gets reported, not the wait before it.
+    FarkadSync.releaseSendClaim();
+    FarkadSync._claiming = false;
     FarkadSync.adapter.update = () => Promise.reject(new Error('offline'));
     FarkadSync.edit('days.2026-08-12.actual.w_09', { entries: [] });
   });
@@ -1346,8 +1417,30 @@ async function seedRoster(page) {
     `${cached.length} entries`);
   check('the icons are cached too',
     cached.some(c => c.endsWith('/icons/icon-192.png')));
-  check('the third-party CDN is NOT cached',
-    !cached.some(c => c.includes('xlsx')));
+  // This used to read "the third-party CDN is NOT cached", and it was right while the
+  // spreadsheet library came from one: caching a CDN response would have put somebody
+  // else's bytes in the shell. The library is a file in this repo now, so the guarantee
+  // is the same one stated the other way round - the shell holds it, and holds nothing
+  // that came from anywhere else.
+  check('the spreadsheet library is in the shell, so an offline phone can export',
+    cached.some(c => c.endsWith('/vendor/xlsx-0.18.5.min.js')),
+    `${cached.length} entries`);
+  const offOrigin = await page.evaluate(() =>
+    caches.keys().then(keys => Promise.all(keys.map(k =>
+      caches.open(k).then(c => c.keys().then(reqs => reqs.map(r => r.url)))
+    )).then(all => all.flat().filter(url => {
+      const at = new URL(url);
+      if (at.origin === location.origin) return false;
+      // The worker's own bookkeeping. sw.js keys its shelf registry, its manifests and
+      // its client records as Requests on a sentinel origin that resolves nowhere - see
+      // the block over SHELVES in sw.js. Those are this app's records about itself, not
+      // somebody else's bytes in the shell, and counting them here would report the
+      // service worker as a third party.
+      if (at.hostname === 'farkad.invalid') return false;
+      return true;
+    }))));
+  check('and nothing from another origin is in it',
+    offOrigin.length === 0, offOrigin.join(', '));
 
   await seedRoster(page);
   await page.evaluate(() => {
@@ -1444,24 +1537,26 @@ async function seedRoster(page) {
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
 
-  check('an archived typo is still offered the permanent delete',
-    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isVisible());
-  check('and the restore button is there beside it',
+  // An archived typo is offered no permanent delete either - the gate is shut for the
+  // archive as much as for the working list, which is the point of putting it first in
+  // deletionBlockers rather than at the end.
+  check('an archived typo is offered no permanent delete',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0,
+    await page.textContent('#workerFormDanger'));
+  check('and the restore button is what is there instead',
     await page.locator('#workerFormDanger').getByRole('button', { name: /החזר/ }).isVisible());
+  check('with the reason named',
+    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת בגרסה הזו'),
+    await page.textContent('#workerFormDanger'));
 
-  // By typed name, exactly as it is for an active one.
-  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).click();
-  await page.waitForTimeout(250);
-  check('the dialog asks for the name to be typed',
-    (await page.textContent('#askMessage')).includes('הקלד את שם העובד'),
-    await page.textContent('#askMessage'));
-  await page.fill('#askInput', 'טעות');
-  await page.click('#askOk');
-  await page.waitForTimeout(350);
-
-  check('and he is gone',
-    !(await page.textContent('#workerList')).includes('טעות'),
+  check('and he is still in the archive rather than gone',
+    (await page.textContent('#workerList')).includes('טעות'),
     await page.textContent('#workerList'));
+
+  // The form has to be closed by hand now. It used to close because the deletion below
+  // it went through, and a modal left open swallows every click after it.
+  await page.evaluate(() => closeWorkerForm());
+  await page.waitForTimeout(200);
 
   // The man with a day behind him is archived and stays that way.
   await page.evaluate(() => {
@@ -1702,17 +1797,28 @@ async function seedRoster(page) {
   await page.context().close();
 }
 
-// ------------------------------------------------- the export, and the CDN it may need
+// ------------------------------------------------- the export, with no signal at all
 //
-// SheetJS is fetched from a CDN, which on a building site is a request that hangs rather
-// than fails. Two rules follow: it is not asked for until somebody presses export, and
-// when it does not arrive the numbers still come off the phone.
+// SheetJS used to come from a CDN, which on a building site is a request that hangs
+// rather than fails - so the rules were "do not ask for it until somebody presses export"
+// and "when it does not arrive the numbers still come off the phone". The second was a
+// consolation prize: three CSVs, under three names, for a bookkeeper expecting one
+// workbook.
+//
+// It is a file on this origin now, precached with the rest of the shell. So the question
+// changed, and it is a better one: with the network switched OFF, does the pay sheet come
+// off the phone as the workbook it is supposed to be. That is the van, at the end of a
+// fortnight, which is where this export is actually used.
 {
   const page = await open();
-  const asked = [];
-  await page.route('**://cdnjs.cloudflare.com/**', route => {
-    asked.push(Date.now());
-    // Hangs, the way it does on one bar of signal.
+  // Every off-origin request, with a mark dropped when the export is pressed - so the
+  // Firebase SDK's boot fetch from gstatic, which is documented and happens before any of
+  // this, is not confused with the export reaching for something.
+  const offOrigin = [];
+  await page.route('**', route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== new URL(BASE).origin) { offOrigin.push(url.href); route.abort(); return; }
+    route.continue();
   });
 
   await seedRoster(page);
@@ -1720,29 +1826,45 @@ async function seedRoster(page) {
     assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
     assignPlace(State.schedule, '2026-08-11', 'w_02', 'actual', 'p_01');
     State.save();
+  });
+  // Let the worker take the shell down before the plug is pulled - which is exactly the
+  // order it happens in on a phone: the app is opened once with signal, then used without.
+  await page.waitForTimeout(1500);
+  await page.context().setOffline(true);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(800);
+  await page.evaluate(() => {
     REPORT_RANGE.from = '2026-08-01';
     REPORT_RANGE.to = '2026-08-31';
   });
   await page.click('#tab-reports');
   await page.waitForTimeout(400);
 
-  check('opening the reports asks the CDN for nothing', asked.length === 0,
-    String(asked.length));
+  check('the reports open with the network off',
+    (await page.evaluate(() => document.getElementById('reportsView').children.length > 0)));
 
-  // Pressed for real, from the screen, and the CSV files caught as they are saved.
-  const files = [];
-  page.on('download', download => files.push(download.suggestedFilename()));
-  await page.evaluate(() => { loadXlsx(600); });
+  const beforeExport = offOrigin.length;
+  const saved = [];
+  page.on('download', download => saved.push(download));
   await page.locator('#reportsView button').filter({ hasText: 'יצוא' }).click();
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(3000);
 
-  check('pressing export is what fetches it', asked.length > 0, String(asked.length));
-  // Three files, one per report. The names the browser hands back are sanitised - the
-  // real ones are Hebrew - so what is counted is the saves, not the spelling.
-  check('and when it does not arrive the numbers come out as three files anyway',
-    files.length === 3, files.join(', '));
-  check('the person is told which format they got, rather than left guessing',
-    (await page.textContent('#askModal')).includes('CSV'),
+  check('one file comes out, not three', saved.length === 1, String(saved.length));
+
+  // The BYTES, not the name. Playwright hands back a sanitised filename for a Hebrew one,
+  // so the extension says nothing; an .xlsx is a zip, and a zip begins PK\x03\x04.
+  let head = '';
+  if (saved.length === 1) {
+    const where = await saved[0].path();
+    head = where ? (await import('node:fs')).readFileSync(where).subarray(0, 4).toString('hex') : '';
+  }
+  check('and it is a real workbook, on a phone with no signal at all',
+    head === '504b0304', head || 'nothing saved');
+  check('the export itself asked nothing of any other origin',
+    offOrigin.length === beforeExport,
+    offOrigin.slice(beforeExport).join(', '));
+  check('and nobody was told to settle for CSV',
+    !((await page.textContent('#askModal')) || '').includes('CSV'),
     await page.textContent('#askModal'));
 
   await page.context().close();
@@ -2216,19 +2338,33 @@ async function seedRoster(page) {
   // replaced there by whatever the network happens to be serving.
   const served = await page.evaluate(async () => {
     const keys = await caches.keys();
-    const cache = await caches.open(keys[0]);
+    // The BUILD SHELF, by name. keys[0] was the shelf back when a shelf was the only kind
+    // of cache here; there are two bookkeeping caches now and caches.keys() is in creation
+    // order, so the first name is as likely to be one of those - and then this measures
+    // whether index.html is in the registry, which it never is.
+    const shelves = keys.filter(key => key !== 'farkad-clients' && key !== 'farkad-shelves');
+    const cache = await caches.open(shelves[0]);
     const before = await cache.match('./index.html').then(r => r && r.text());
 
     // A navigation, the way a reload is one.
     await fetch('index.html', { mode: 'navigate' }).then(r => r.text()).catch(() => '');
     const after = await cache.match('./index.html').then(r => r && r.text());
 
-    return { cached: Boolean(before), unchanged: before === after, caches: keys.length };
+    // farkad-clients holds which window runs which build; farkad-shelves holds each
+    // shelf's lifecycle state, the active pointer, and the per-build manifests. Neither is
+    // a shelf - see the note in tests/update.test.mjs.
+  return {
+    cached: Boolean(before), unchanged: before === after,
+    caches: shelves.length,
+    bookkeeping: keys.includes('farkad-clients') && keys.includes('farkad-shelves')
+  };
   });
   check('the document is served from this version\'s cache', served.cached);
   check('and a navigation does not overwrite it', served.unchanged);
   check('exactly one version cache exists at a time', served.caches === 1,
     String(served.caches));
+  check('and the bookkeeping sits beside them: who runs what, and each shelf\'s state',
+    served.bookkeeping === true, String(served.bookkeeping));
 
   // A build mismatch is noticed and stops the app writing, rather than saving an edit in
   // a shape the other half of the app does not read.
@@ -2271,7 +2407,7 @@ async function seedRoster(page) {
   check('progress starts at zero', (await page.textContent('.progress-line')).includes('0 מתוך 3'));
 
   // one tap per worker: the sheet advances by itself
-  await page.getByText('המשך (3)').click();
+  await page.locator('.now-count').click();
   await page.waitForTimeout(250);
   check('the continue button opens the first unfilled worker',
     (await page.textContent('#assignSheetTitle')) === 'דוד');
@@ -2319,7 +2455,7 @@ async function seedRoster(page) {
   await page.waitForTimeout(200);
 
   let taps = 0;
-  await page.getByText('המשך (12)').click(); taps++;
+  await page.locator('.now-count').click(); taps++;
   await page.waitForTimeout(200);
 
   for (let i = 0; i < 12; i++) {
@@ -2858,6 +2994,101 @@ async function seedRoster(page) {
   check('while a new warning is not silenced by yesterday\'s dismissal',
     await page.locator('#accountBanner').isVisible());
 
+  // The fold (v93): one strong line first, the whole warning one tap down - and never
+  // out of the DOM, because the checks above read the dates there.
+  const fold = await page.evaluate(() => {
+    const banner = document.getElementById('accountBanner');
+    const sum = banner.querySelector('.banner-sum');
+    const full = document.getElementById('accountBannerFull');
+    return {
+      expanded: sum && sum.getAttribute('aria-expanded'),
+      summary: (banner.querySelector('.banner-summary') || {}).textContent,
+      fullHidden: full ? getComputedStyle(full).display === 'none' : null,
+      height: Math.round(banner.getBoundingClientRect().height)
+    };
+  });
+  check('the warning opens folded to one line',
+    fold.expanded === 'false' && fold.fullHidden === true, JSON.stringify(fold));
+  check('and the line says what is still open',
+    typeof fold.summary === 'string' && fold.summary.includes('עדיין פתוח'), String(fold.summary));
+  await page.locator('#accountBanner .banner-sum').click();
+  await page.waitForTimeout(200);
+  const opened = await page.evaluate(() => {
+    const banner = document.getElementById('accountBanner');
+    const full = document.getElementById('accountBannerFull');
+    return {
+      expanded: banner.querySelector('.banner-sum').getAttribute('aria-expanded'),
+      shown: getComputedStyle(full).display !== 'none',
+      text: full.textContent,
+      doors: [...full.querySelectorAll('button')].map(b => b.textContent)
+    };
+  });
+  check('one tap opens the whole sentence, dates and all',
+    opened.expanded === 'true' && opened.shown && opened.text.includes('בלי אף רישום'),
+    JSON.stringify(opened).slice(0, 200));
+  check('with the report and the backup one tap away',
+    opened.doors.includes('לדוחות') && opened.doors.some(t => t.includes('שמירת גיבוי')),
+    JSON.stringify(opened.doors));
+  await page.evaluate(() => render());
+  await page.waitForTimeout(200);
+  check('a render keeps it open - a posture, not a per-render default',
+    (await page.evaluate(() => document.getElementById('accountBanner')
+      .querySelector('.banner-sum').getAttribute('aria-expanded'))) === 'true');
+  await page.locator('#accountBanner .banner-sum').click();
+  await page.waitForTimeout(150);
+  check('and a second tap folds it back',
+    (await page.evaluate(() => document.getElementById('accountBanner')
+      .querySelector('.banner-sum').getAttribute('aria-expanded'))) === 'false');
+
+  // The chip beside the name mirrors the status line and only recognises its words -
+  // it says less than the line, never something the line does not.
+  const chips = await page.evaluate(() => {
+    const notice = document.getElementById('storageNotice');
+    const chip = document.getElementById('syncChip');
+    const read = text => {
+      notice.textContent = text;
+      renderSyncChip();
+      return { hidden: chip.hidden, text: chip.textContent, cls: chip.className };
+    };
+    const out = {
+      local: read('הנתונים נשמרים במכשיר הזה בלבד.'),
+      synced: read('מסונכרן בין המכשירים. · עודכן: 19:42'),
+      waiting: read('מחובר. יש רישומים שעדיין נשלחים. (3 ממתינים לשליחה)'),
+      one: read('אין חיבור - השינויים יישלחו כשהחיבור יחזור. (רישום אחד ממתין לשליחה)'),
+      failed: read('⚠️ השינוי האחרון לא נשמר במכשיר. ייצא קובץ גיבוי עכשיו.'),
+      // The three lines below are the ones updateSyncNotice actually composes - a held
+      // edit is still counted by pendingCount(), so the contested and blocked sentences
+      // NEVER appear without the queue suffix. The chip must read the sentence first:
+      // "waiting to send" on an edit that will not be sent until a person decides is
+      // the lie 63b7776 took off the line, back on the chip.
+      contested: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (רישום אחד ממתין לשליחה)'),
+      contestedTwo: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (2 ממתינים לשליחה)'),
+      blocked: read('הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד. (רישום אחד ממתין לשליחה)')
+    };
+    updateSyncNotice();
+    renderSyncChip();
+    return out;
+  });
+  check('with no cloud there is no chip to read', chips.local.hidden === true, JSON.stringify(chips.local));
+  check('synced is one word on the chip',
+    chips.synced.hidden === false && chips.synced.text === 'מסונכרן' && chips.synced.cls.includes('chip-ok'),
+    JSON.stringify(chips.synced));
+  check('a queue is the chip, not "synced"',
+    chips.waiting.text === '3 ממתינים לשליחה' && chips.waiting.cls.includes('chip-warn'),
+    JSON.stringify(chips.waiting));
+  check('one waits in the singular there too', chips.one.text === 'ממתין לשליחה', JSON.stringify(chips.one));
+  check('a save that failed is never softened on the chip',
+    chips.failed.text === 'לא נשמר' && chips.failed.cls.includes('chip-danger'), JSON.stringify(chips.failed));
+  check('a held edit is a decision on the chip, not a queue',
+    chips.contested.text === 'דורש הכרעה' && chips.contested.cls.includes('chip-warn'),
+    JSON.stringify(chips.contested));
+  check('however many are held',
+    chips.contestedTwo.text === 'דורש הכרעה' && chips.contestedTwo.cls.includes('chip-warn'),
+    JSON.stringify(chips.contestedTwo));
+  check('a suspended sync says so on the chip in the line\'s own words, not "waiting to send"',
+    chips.blocked.text === 'הסנכרון מושהה' && chips.blocked.cls.includes('chip-warn'),
+    JSON.stringify(chips.blocked));
+
   // the crash banner: it names the error, and it closes
   await page.evaluate(() => {
     window.dispatchEvent(new ErrorEvent('error', { message: 'boom: something specific' }));
@@ -3330,6 +3561,22 @@ async function seedRoster(page) {
   await page.waitForTimeout(300);
   check('the restore point is offered where the backups are',
     (await page.locator('#restorePoints button').count()) === 1);
+  // AND IT IS ON THE SCREEN, not merely in the document.
+  //
+  // The restore points sit in a <details> so the panel reads as counted rows rather than
+  // a wall of dates. Shut by default, that fold put a closed door between somebody who
+  // has just lost a fortnight and the way back - and the accidental tap it would guard
+  // against is already guarded, because restoreSnapshot goes through askConfirm and
+  // names the date before anything is replaced.
+  //
+  // A count check alone cannot see this: a button inside a shut <details> is still in the
+  // DOM and still counts. It was a click timing out against an invisible element that
+  // said so, which is a failure that reads as the app being broken.
+  check('and it is visible without anybody opening a fold first',
+    await page.locator('#restorePoints button').first().isVisible());
+  check('with the summary saying how many ways back there are',
+    (await page.textContent('#restorePoints summary')).includes('(1'),
+    await page.textContent('#restorePoints summary'));
 
   await page.locator('#restorePoints button').first().click();
   await page.waitForTimeout(300);
@@ -3574,6 +3821,13 @@ async function seedRoster(page) {
       window.__cloud.hold = null;
       Store.remove('scheduleData:undoStack');
       Store.remove('scheduleData:v2backup');
+      // The right to send. A case that blocks Store.remove leaves the record this tab
+      // wrote on the disk, and it is honoured for twenty seconds - so the next case's
+      // send or restore is refused by the previous case's fault rather than by anything
+      // it did itself.
+      Store.remove('farkad:sendClaim');
+      FarkadSync._claimToken = null;
+      FarkadSync._claiming = false;
       Store.set('scheduleData:snap:2026-08-01', restorePoint);
       Store.set('scheduleData:undoStack', JSON.stringify(
         [{ at: '2026-08-01T06:00:00.000Z', schedule: restorePoint }]));
@@ -3605,7 +3859,14 @@ async function seedRoster(page) {
 
       if (fault === 'prepare') refuse(key => key === 'farkad:pendingReplace');
       if (fault === 'local-save') refuse(key => key === 'scheduleData:v2');
-      if (fault === 'queue-prune') refuse(key => key.indexOf('farkad:outbox') === 0);
+      // A restore FENCES the queue by taking the operations it supersedes off the disk,
+      // so the fault that stops one is a browser that will not remove. A full disk is
+      // not: taking bytes away has never needed room, and refusing writes here left the
+      // fence landing happily and the door reporting the success it had.
+      if (fault === 'queue-prune') {
+        Store.remove = key => (String(key).indexOf('farkad:outbox') === 0
+          ? undefined : realRemove(key));
+      }
       if (fault === 'finalize') {
         refuse((key, value) =>
           key === 'farkad:pendingReplace' && value.indexOf('"cancelled"') !== -1);
@@ -3986,23 +4247,37 @@ async function seedRoster(page) {
       width.page <= width.viewport + 1, JSON.stringify(width));
   }
 
-  // on a phone the week is a colour map: seven days on one screen, no sideways scroll
+  // On a phone the week is a colour map of seven days, and it scrolls inside its own box.
+  //
+  // This check used to read `week.inner <= week.box + 1` - the whole week on the screen
+  // with nothing to push. It was changed deliberately, and the reason is the one thing
+  // worth reading here: showing all seven columns beside a column of names on a 390px
+  // screen meant columns of 42px, and 320px meant 32px. Those are not tap targets, and a
+  // mis-tap on this grid opens a day with somebody else's name on it. The floor won; the
+  // strip scrolls. What must NOT change is the line above it - the PAGE still never
+  // scrolls sideways, on any view, which is the defect this whole block was written for.
   await page.evaluate(() => showView('week'));
   await page.waitForTimeout(250);
   const week = await page.evaluate(() => {
     const wrap = document.querySelector('#weekView .table-scroll');
     const name = document.querySelector('.week-cell .cell-line .site-name');
     const legend = document.querySelector('.week-legend');
+    const cells = [...document.querySelectorAll('.week-cell')]
+      .map(node => node.getBoundingClientRect());
     return {
       inner: wrap.scrollWidth,
       box: wrap.clientWidth,
       cols: document.querySelectorAll('.week-table thead th').length,
+      narrowest: Math.round(Math.min(...cells.map(b => b.width))),
+      shortest: Math.round(Math.min(...cells.map(b => b.height))),
       nameHidden: name ? getComputedStyle(name).display === 'none' : false,
       legendShown: legend ? getComputedStyle(legend).display !== 'none' : false
     };
   });
-  check('the whole week fits on one phone screen, all seven days',
-    week.inner <= week.box + 1 && week.cols === 8, JSON.stringify(week));
+  check('all seven days are in the week, and the box is what scrolls',
+    week.cols === 8 && week.inner >= week.box, JSON.stringify(week));
+  check('and every one of them is a 44px target',
+    week.narrowest >= 44 && week.shortest >= 44, JSON.stringify(week));
   check('cells shrink to the site colour alone', week.nameHidden, JSON.stringify(week));
 
   // the shrunk headers use the calendar letters א׳-ש׳, not first letters - four of the
@@ -4870,12 +5145,13 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
           if (node.getAttribute('aria-hidden') === 'true') return;
           const box = node.getBoundingClientRect();
           if (box.width === 0 || box.height === 0) return;
-          // The week grid is the one deliberate exception, and only across: seven days
-          // plus the names have to fit the narrowest phone, so a column is 42px rather
-          // than 44. It is full height, and a mis-tap there opens the wrong day's picker
-          // - which names the day before anything is recorded.
-          const floor = node.classList.contains('week-cell') ? 40 : 44;
-          if (box.width >= floor && box.height >= 44) return;
+          // NO EXCEPTION. This carried one for .week-cell - 40px across rather than 44 -
+          // on the argument that seven days plus the names have to fit the narrowest
+          // phone. They do not have to: what does not fit on the screen fits in a box
+          // that scrolls, and the cells are 44 everywhere now. An exemption left in a
+          // floor is a list of the controls that were allowed to be too small, written
+          // in the place a reader looks for the guarantee.
+          if (box.width >= 44 && box.height >= 44) return;
           out.push({
             cls: String(node.className).slice(0, 30),
             text: (node.textContent || node.value || '').trim().slice(0, 14),
@@ -5664,8 +5940,17 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     FarkadSync.receive({ days: { '2026-08-12': { actual: {} } }, updatedAt: '2026-08-12T10:00:00Z' });
     return { status: FarkadSync.status, queued: FarkadSync.pendingPaths() };
   });
+  // NOT A FAILURE, and not finished either - which is the whole of what changed here.
+  //
+  // This read `fresh.status === 'synced'` and it was the reproduction of the defect it
+  // sat next to: ten roster operations queued and the line saying everything was on the
+  // other two phones. The check's point was that an unfinished document must not lock the
+  // status on "sync error" while writes are in fact landing, and that point is intact -
+  // 'sending' is not an error. It is the state the line had no word for.
   check('a server document with no roster yet is not treated as a failure',
-    fresh.status === 'synced', JSON.stringify(fresh));
+    fresh.status !== 'error' && fresh.status !== 'contested', JSON.stringify(fresh));
+  check('and it does not claim to be finished with ten roster paths still queued',
+    fresh.status === 'sending' && fresh.queued.length > 0, JSON.stringify(fresh));
   check('and this device seeds it with the roster it has',
     fresh.queued.includes('workers'), JSON.stringify(fresh));
 
@@ -6498,84 +6783,98 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 }
 
 // ---------------------------------------------------------------- the crew's vehicles
+//
+// RETIRED. The owner cancelled the feature; FARKAD_FLAGS in js/model/schema.js is where
+// that is said, and this is what a person actually gets. The arithmetic and the screens
+// that drew it are exercised with the gate open in tests/data.test.mjs - what is read
+// here is that none of it is reachable, and that the records are still there.
 {
-  // A vehicle is paid a flat amount for a day it went out, to the man who OWNS it -
-  // whether or not he was on a site himself. Added through the screen rather than by
-  // writing the array, because what is being checked is that a person can do this.
   const page = await open();
   await seedRoster(page);
+
+  // A vehicle, and an evening that remembered it stayed in the yard: bytes a build that
+  // still did vehicles would have written, on a phone that now runs this one.
+  await page.evaluate(() => {
+    State.schedule.vehicles = [{
+      id: 'v_01', name: 'טנדר לבן', ownerId: 'w_01', active: true,
+      rates: [{ from: '2026-01-01', amount: 300 }]
+    }];
+    State.commit(assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    State.schedule.days['2026-08-12'].vehiclesOff = ['v_01'];
+    State.save({ silent: true });
+  });
   await page.click('#tab-roster');
   await page.waitForTimeout(300);
 
-  check('the crew screen offers somewhere to put them',
-    await page.locator('#vehicleList').isVisible());
-  check('and says so while there are none',
-    (await page.textContent('#vehicleList')).includes('אין רכבים'));
+  check('the crew screen offers no vehicle panel at all',
+    await page.evaluate(() => {
+      const list = document.getElementById('vehicleList');
+      if (!list) return true;
+      const panel = list.closest('.roster-panel');
+      return !panel || panel.style.display === 'none';
+    }));
+  check('and no button that would add one',
+    (await page.getByRole('button', { name: '+ הוסף רכב' }).count()) === 0
+    || !(await page.getByRole('button', { name: '+ הוסף רכב' }).isVisible()));
 
-  await page.getByRole('button', { name: '+ הוסף רכב' }).click();
-  await page.waitForTimeout(250);
-  await page.fill('#askInput', 'טנדר לבן');
-  await page.getByRole('button', { name: 'המשך' }).click();
-  await page.waitForTimeout(250);
-  await page.getByRole('button', { name: 'דוד', exact: true }).click();
-  await page.waitForTimeout(250);
-  await page.fill('#askInput', '300');
-  await page.click('#askOk');
-  await page.waitForTimeout(400);
+  await page.click('#tab-day');
+  await page.waitForTimeout(300);
+  check('the day screen draws no vehicle tray',
+    (await page.locator('.chip-vehicle').count()) === 0);
 
-  const listed = await page.textContent('#vehicleList');
-  check('the vehicle is on the list', listed.includes('טנדר לבן'), listed.slice(0, 60));
-  check('with the man who owns it', listed.includes('דוד'), listed.slice(0, 60));
-  check('and what it is worth a day', listed.includes('300'), listed.slice(0, 60));
-
-  const stored = await page.evaluate(() => State.schedule.vehicles[0]);
-  check('it is owned by an id, not by a name that could change',
-    stored.ownerId === 'w_01', JSON.stringify(stored));
-  check('and it starts earning today, not in a month already paid',
-    stored.rates.length === 1 && stored.rates[0].from === new Date().toISOString().slice(0, 10),
-    JSON.stringify(stored.rates));
-
-  // The money, on the sheet that gets printed.
-  await page.evaluate(() => {
-    const today = todayStr();
-    assignPlace(State.schedule, today, 'w_02', 'actual', 'p_01');
-    State.save();
-    showView('reports');
-    REPORT_RANGE.from = today;
-    REPORT_RANGE.to = today;
-    render();
+  // The money, which is the half a screen gate would not have covered.
+  const pay = await page.evaluate(() => {
+    State.date = '2026-08-12';
+    return {
+      out: vehiclesOutOn(State.schedule, '2026-08-12'),
+      owed: vehiclePayFor(State.schedule, 'w_01', '2026-08-01', '2026-08-31'),
+      row: payrollReport(State.schedule, '2026-08-01', '2026-08-31')
+        .find(item => item.workerId === 'w_01')
+    };
   });
-  await page.waitForTimeout(400);
+  check('nothing went out, so nobody is charged for one',
+    pay.out.length === 0 && pay.owed.days === 0 && pay.owed.amount === 0,
+    JSON.stringify(pay.owed));
+  check('and the pay sheet is his day and nothing else',
+    pay.row.amount === 400 && pay.row.netAmount === 400 && pay.row.vehicleAmount === 0,
+    JSON.stringify(pay.row));
 
-  const sheet = await page.textContent('.report-payroll');
-  check('the pay sheet grows a vehicle column', sheet.includes('ימי רכב'), sheet.slice(0, 80));
-  const owed = await page.evaluate(() => {
-    const rows = payrollRows();
-    const owner = rows.find(row => row.workerId === 'w_01');
-    return { days: owner.vehicleDays, amount: owner.vehicleAmount, total: owner.amount };
+  // The export a bookkeeper opens: no vehicle headings at all, rather than two columns
+  // of zeroes under headings that say this app still accounts for them.
+  const headers = await page.evaluate(() => {
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    return payrollSheetRows()[0];
   });
-  check('the owner is paid for the day his vehicle went out, though he did not work',
-    owed.days === 1 && owed.amount === 300 && owed.total === 300, JSON.stringify(owed));
+  check('the exported sheet has no vehicle columns',
+    !headers.includes('ימי רכב') && !headers.includes('שכר רכב'),
+    JSON.stringify(headers));
 
-  // The exception, on the evening it happens.
-  await page.evaluate(() => { showView('day'); State.date = todayStr(); render(); });
-  await page.waitForTimeout(350);
-  const tray = await page.textContent('.tray:last-of-type');
-  check('the day screen lists the vehicles', tray.includes('טנדר לבן'), tray.slice(0, 50));
-  check('and says it went out', tray.includes('יצא'), tray.slice(0, 50));
+  // And the records are exactly where they were.
+  const kept = await page.evaluate(() => ({
+    vehicles: State.schedule.vehicles,
+    off: (State.schedule.days['2026-08-12'] || {}).vehiclesOff,
+    stored: localStorage.getItem('scheduleData:v2')
+  }));
+  check('the vehicle is still in the record, rates and all',
+    kept.vehicles.length === 1 && kept.vehicles[0].rates.length === 1
+    && kept.vehicles[0].rates[0].amount === 300, JSON.stringify(kept.vehicles));
+  check('the evening that remembered it stayed in still says so',
+    JSON.stringify(kept.off) === '["v_01"]', JSON.stringify(kept.off));
+  check('and all of it is on the disk, not only on the screen',
+    kept.stored.includes('v_01') && kept.stored.includes('vehiclesOff'));
 
-  await page.getByRole('button', { name: /טנדר לבן/ }).first().click();
-  await page.waitForTimeout(350);
-  check('one tap says it did not',
-    (await page.textContent('.tray:last-of-type')).includes('לא יצא'));
-  check('and that day is no longer paid for',
-    (await page.evaluate(() => vehiclePayFor(State.schedule, 'w_01', todayStr(), todayStr()))).amount === 0);
-  check('the undo bar offers it back', await page.locator('#undoBar').isVisible());
-
-  await page.getByRole('button', { name: 'בטל', exact: true }).first().click();
-  await page.waitForTimeout(350);
-  check('and taking it back pays for it again',
-    (await page.evaluate(() => vehiclePayFor(State.schedule, 'w_01', todayStr(), todayStr()))).amount === 300);
+  // A reload, through the real service worker, on the real record.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  const after = await page.evaluate(() => ({
+    vehicles: (State.schedule.vehicles || []).map(item => item.id),
+    off: (State.schedule.days['2026-08-12'] || {}).vehiclesOff,
+    problems: Recovery.problems.map(problem => problem.key)
+  }));
+  check('a reload keeps them and quarantines nothing',
+    after.vehicles.join() === 'v_01' && JSON.stringify(after.off) === '["v_01"]'
+    && after.problems.length === 0, JSON.stringify(after));
 
   await page.context().close();
 }
@@ -6881,8 +7180,18 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
 // ---------------------------------------------------------------- install prompt
 {
-  // An iPhone in Safari: no install event exists, and the storage is wiped after a week
-  // unless the site is on the home screen - so the instructions have to be spelled out.
+  // CHROMIUM WEARING AN IPHONE'S USER-AGENT STRING. Not Safari, and this comment used to
+  // say it was.
+  //
+  // What is actually being tested is the app's own branch: it reads the user-agent, finds
+  // no beforeinstallprompt event, and draws the by-hand instructions instead. That branch
+  // is real code and this proves it runs. What it does not prove is anything about
+  // WebKit - not the install flow, not the storage eviction the banner is warning about,
+  // not the share sheet the instructions point at. A string is not a browser.
+  //
+  // The behaviour behind it is real and is why the banner exists: an iPhone wipes a
+  // site's storage after a week unless it is on the home screen. That fact is from
+  // Apple's documentation, not from this run.
   const page = await open({
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
   });
@@ -6932,7 +7241,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 {
   const page = await open();
   const cached = await page.evaluate(async () => {
-    const names = await caches.keys();
+    const names = (await caches.keys())
+      .filter(key => key !== 'farkad-clients' && key !== 'farkad-shelves');
     const cache = await caches.open(names[0]);
     return (await cache.keys()).map(r => new URL(r.url).pathname);
   });

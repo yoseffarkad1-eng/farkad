@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v86';
+const APP_VERSION = 'v95';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -103,6 +103,8 @@ function render() {
     renderCopyButton();
     renderAccountBanner();
     updateSyncNotice();
+    // After the line, because the chip is read from it.
+    renderSyncChip();
     // Only if it is open. Everything on it - the backup age, the restore points, the
     // cloud copies - is answered by state that changes while it is on screen.
     if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
@@ -111,6 +113,66 @@ function render() {
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
     // for a number somebody wrote down once.
     scheduleBarMeasure();
+}
+
+// The chip beside the app's name: the sync line, shortened. Read from #storageNotice
+// rather than composed again, so the two can never disagree - updateSyncNotice
+// (js/sync/sync.js) owns the words and this only recognises them. Anything it does not
+// recognise, including the local-only line, leaves the chip off: a chip that guesses is
+// worse than no chip.
+function renderSyncChip() {
+    const chip = document.getElementById('syncChip');
+    const notice = document.getElementById('storageNotice');
+    if (!chip || !notice) return;
+    const text = notice.textContent || '';
+    const waiting = text.match(/\((\d+) ממתינים לשליחה\)/);
+
+    let state = '';
+    let label = '';
+    if (text.startsWith('⚠️')) {
+        // A change that was NOT written down - the one state the chip must never soften.
+        state = 'chip-danger';
+        label = 'לא נשמר';
+    } else if (text.startsWith('הנתונים השתנו במכשיר אחר')) {
+        // THE SENTENCE BEFORE THE COUNT. A held edit is still counted by pendingCount(),
+        // so this line never arrives without a queue suffix - and read count-first the
+        // chip called it "waiting to send", which is the one thing a held edit is not:
+        // nothing goes until a person decides. That is the lie 63b7776 took off the
+        // status line, and the chip had put it back beside the app's name.
+        state = 'chip-warn';
+        label = 'דורש הכרעה';
+    } else if (text.startsWith('הסנכרון מושהה')) {
+        // Same precedence, same reason: the queue behind a suspended sync is not on its
+        // way anywhere until the poisoned record is exported. The chip repeats the
+        // line's own first words rather than inventing a shorter one.
+        state = 'chip-warn';
+        label = 'הסנכרון מושהה';
+    } else if (waiting) {
+        state = 'chip-warn';
+        label = `${waiting[1]} ממתינים לשליחה`;
+    } else if (text.includes('רישום אחד ממתין לשליחה')) {
+        state = 'chip-warn';
+        label = 'ממתין לשליחה';
+    } else if (text.startsWith('אין חיבור')) {
+        state = 'chip-warn';
+        label = 'אין חיבור';
+    } else if (text.startsWith('מסונכרן')) {
+        state = 'chip-ok';
+        label = 'מסונכרן';
+    } else if (text.startsWith('מחובר') || text.startsWith('מתחבר')) {
+        state = 'chip-warn';
+        label = 'שולח…';
+    }
+    chip.textContent = label;
+    chip.className = 'sync-chip' + (state ? ' ' + state : '');
+    chip.hidden = label === '';
+}
+
+function watchSyncNotice() {
+    const notice = document.getElementById('storageNotice');
+    if (!notice || typeof MutationObserver !== 'function') return;
+    new MutationObserver(renderSyncChip)
+        .observe(notice, { childList: true, characterData: true, subtree: true });
 }
 
 // A crash on a phone looks like nothing: half a screen, no console, no clue whether what
@@ -209,6 +271,12 @@ function boot() {
     // Before the first edit of the day, and only ever from the state as it was found.
     takeDailySnapshot();
     render();
+    // From here on, Recovery may redraw the app itself when it holds new evidence. Not
+    // before: State.load above reports a poisoned map through Recovery.evidence, and a
+    // redraw from inside that read drew every view over a half-read State and turned a
+    // fault in the drawing into a quarantined record - see evidence() in js/recovery.js.
+    // The render just above is what shows a hold found by the read.
+    if (typeof Recovery !== 'undefined') Recovery.onScreen = true;
 
     // The recovery banner, painted here rather than only where the damage is found.
     //
@@ -226,6 +294,10 @@ function boot() {
     watchInstall();
     watchDayRollover();
     watchBottomBars();
+    // The status line is rewritten by sync.js on its own clock, between renders; the
+    // chip that mirrors it follows every rewrite, or it would sit on "3 ממתינים" after
+    // the three had gone.
+    watchSyncNotice();
 
     if (result.migrated) {
         const count = (result.issues || []).length;

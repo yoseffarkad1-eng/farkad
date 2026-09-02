@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v86">
+<meta name="farkad-build" content="v95">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -31,6 +31,10 @@
             <strong>פרקד</strong>
             <span class="brand-sub">רישום עבודה</span>
         </div>
+        <!-- The sync state, beside the name: a mirror of #storageNotice, written by
+             renderSyncChip (js/app.js) from that line's own words. aria-hidden because
+             the line is the live region; two announcements of one fact is noise. -->
+        <span class="sync-chip" id="syncChip" hidden aria-hidden="true"></span>
 
         <nav class="tabs" role="tablist">
             <button type="button" class="tab" id="tab-day" role="tab" aria-controls="dayView" onclick="showView('day')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></svg></span><span>היום</span></button>

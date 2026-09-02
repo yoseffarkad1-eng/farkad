@@ -39,6 +39,7 @@ function renderDay() {
     // day screen, and no way to tell whether the app is broken or simply not set up.
     if (State.activeWorkers().length === 0) {
         const card = renderSetupCard(
+            '👷',
             'ברוך הבא לפרקד',
             'הדבק את רשימת העובדים ואת רשימת האתרים - והאפליקציה מוכנה תוך חצי דקה.',
             '🚀 התחלה מהירה',
@@ -52,6 +53,7 @@ function renderDay() {
     }
     if (State.activePlaces().length === 0) {
         root.appendChild(renderSetupCard(
+            '🏗️',
             'עוד אין אתרי עבודה',
             'העובדים כבר קיימים. חסרים האתרים - בלעדיהם אין לאן לשבץ אותם.',
             '+ הוסף אתר',
@@ -60,13 +62,18 @@ function renderDay() {
         return;
     }
 
-    // The progress row rides INSIDE the sticky header, as its last row. As a second
-    // sticky box it spent its scrolled life buried under the header - same top, lower
-    // z - taking המשך with it, and a tap where the button appeared to be landed on
-    // "יום הבא". One box cannot bury itself.
-    root.querySelector('.day-header').appendChild(renderProgress());
-    root.appendChild(renderModeToggle());
-    root.appendChild(renderBulkRow());
+    // The progress rides INSIDE the sticky header, on its tools row - beside undo and
+    // redo, not under them. As a second sticky box it spent its scrolled life buried
+    // under the header - same top, lower z - and a tap where the count appeared to be
+    // landed on "יום הבא". One box cannot bury itself; and one row rather than two is
+    // what keeps the header inside the 96-112px the list was promised above it.
+    root.querySelector('.day-tools').appendChild(renderProgress());
+    // The bulk row is built first because the switcher row carries its disclosure
+    // button: the fold used to be a 44px row of its own above the list, which on a
+    // 320px screen was the difference between three whole names and two.
+    const bulk = renderBulkRow();
+    root.appendChild(renderModeToggle(bulk));
+    root.appendChild(bulk);
 
     if (dayMode === 'workers') {
         root.appendChild(renderDayWorkerList());
@@ -82,8 +89,14 @@ function renderDay() {
     if (vehicles) root.appendChild(vehicles);
 }
 
-function renderSetupCard(title, text, label, onClick) {
+function renderSetupCard(glyph, title, text, label, onClick) {
     const card = el('div', 'setup-card');
+    // A glyph the size of an icon, not an illustration: the card is a doorway with one
+    // sentence and one button, and anything bigger upstages the button. Hidden from a
+    // screen reader - the title says the same thing in words.
+    const mark = el('div', 'setup-glyph', glyph);
+    mark.setAttribute('aria-hidden', 'true');
+    card.appendChild(mark);
     card.appendChild(el('h3', null, title));
     card.appendChild(el('p', null, text));
     card.appendChild(button(label, 'btn-add', onClick));
@@ -140,9 +153,11 @@ function renderAccountBanner() {
 
     // The last two days before settlement, when a correction is still cheap.
     const daysLeft = Math.round((end - parseLocalDate(today)) / 86400000);
-    if (daysLeft >= 0 && daysLeft <= 2) {
-        const when = daysLeft === 0 ? 'היום' : daysLeft === 1 ? 'מחר' : 'בעוד יומיים';
-        notes.push(`החשבון נסגר ${when} - בדוק את השכר ושמור קובץ גיבוי.`);
+    const closing = daysLeft >= 0 && daysLeft <= 2
+        ? (daysLeft === 0 ? 'היום' : daysLeft === 1 ? 'מחר' : 'בעוד יומיים')
+        : null;
+    if (closing) {
+        notes.push(`החשבון נסגר ${closing} - בדוק את השכר ושמור קובץ גיבוי.`);
     }
 
     if (notes.length === 0) { banner.style.display = 'none'; return; }
@@ -157,13 +172,59 @@ function renderAccountBanner() {
     }
 
     clear(banner);
-    banner.appendChild(el('span', null, `⚠️ ${text}`));
-    banner.appendChild(button('לדוחות', 'btn-secondary', () => showView('reports')));
+    // Folded by default: one strong line, the report door and ✕ - a 60px row, not the
+    // four lines of prose that used to stand between the top of the screen and the
+    // day. The prose is still here, one tap down, and still in the DOM for the checks
+    // that read it: a financial warning is never made smaller by hiding what it says,
+    // only by saying the short form first.
+    banner.classList.add('banner-fold');
+    banner.classList.toggle('banner-open', accountOpen);
+    const sum = button('', 'banner-sum', () => {
+        accountOpen = !accountOpen;
+        renderAccountBanner();
+    });
+    sum.setAttribute('aria-expanded', String(accountOpen));
+    sum.setAttribute('aria-controls', 'accountBannerFull');
+    const glyph = el('span', 'banner-glyph', '⚠️');
+    glyph.setAttribute('aria-hidden', 'true');
+    sum.appendChild(glyph);
+    sum.appendChild(el('strong', 'banner-summary', accountSummary(blank.length, closing)));
+    // The shared back chevron, turned by CSS: down when folded, up when open.
+    sum.appendChild(chevronIcon('back'));
+    banner.appendChild(sum);
+    banner.appendChild(button('לדוחות', 'btn-secondary banner-go', () => showView('reports')));
     banner.appendChild(button('✕', 'btn-icon', () => {
         Store.set(ACCOUNT_BANNER_KEY, todayStr() + '|' + text);
         banner.style.display = 'none';
     }, 'הסתר להיום'));
+
+    const full = el('div', 'banner-full');
+    full.id = 'accountBannerFull';
+    full.appendChild(el('p', 'banner-text', text));
+    const acts = el('div', 'banner-acts');
+    acts.appendChild(button('לדוחות', 'btn-secondary', () => showView('reports')));
+    // The sentence says "שמור קובץ גיבוי"; this is the same door Settings opens, under
+    // the fold's own shorter name - the Settings button's exact label is pinned to that
+    // button, and a second element wearing it is two answers to one locator.
+    acts.appendChild(button('💾 שמירת גיבוי', 'btn-secondary', () => exportBackup()));
+    full.appendChild(acts);
+    banner.appendChild(full);
     banner.style.display = '';
+}
+
+// Open or folded is a session posture, like the bulk row's: a fresh open starts folded,
+// and a render in between (every tap on the list is one) keeps whatever was chosen.
+let accountOpen = false;
+
+// The fold's one line. "עדיין פתוח" is the day's state, not an accusation, and "בחשבון
+// שנסגר מחר" keeps the deadline on the same line as the debt; the full sentences, with
+// the dates, are the text under it.
+function accountSummary(blankCount, closing) {
+    const open = blankCount === 0 ? ''
+        : blankCount === 1 ? 'יום אחד עדיין פתוח' : `${blankCount} ימים עדיין פתוחים`;
+    if (open && closing) return `${open} בחשבון שנסגר ${closing}`;
+    if (open) return `${open} בחשבון הנוכחי`;
+    return `החשבון נסגר ${closing} - בדוק את השכר`;
 }
 
 // What was dismissed, and for which day and which message: a NEW warning on the same day
@@ -195,8 +256,18 @@ function renderProgress() {
     // The verb carries the count: "19 מתוך 30" alone reads as a position in a list,
     // and this number is the day's one health figure. A finished day gets the word,
     // not a bigger number - הכל נרשם is the state a manager is scrolling for.
-    line.appendChild(el('span', 'now-count',
-        left === 0 ? '✓ הכל נרשם' : `נרשמו ${done} מתוך ${workers.length}`));
+    if (left === 0) {
+        line.appendChild(el('span', 'now-count', '✓ הכל נרשם'));
+    } else {
+        // The count IS the way forward. It used to sit beside a separate המשך button,
+        // and the two together were a row the 320px header could not spare; one tap on
+        // the number that says how much is left opens the next man who is.
+        const count = `נרשמו ${done} מתוך ${workers.length}`;
+        line.appendChild(button(count, 'now-count', () => {
+            const next = State.unrecorded()[0];
+            if (next) openAssignSheet(next.id);
+        }, `${count} - המשך אל הבא שטרם נרשם`));
+    }
     // Announced politely on change - the day switch and the climbing count are the two
     // things a person not looking at the screen most needs to hear.
     line.setAttribute('role', 'status');
@@ -206,12 +277,6 @@ function renderProgress() {
         line.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
     }
 
-    if (left > 0) {
-        line.appendChild(button(`המשך (${left})`, 'btn-add', () => {
-            const next = State.unrecorded()[0];
-            if (next) openAssignSheet(next.id);
-        }));
-    }
     wrap.appendChild(line);
 
     const bar = el('div', 'progress-bar');
@@ -236,21 +301,73 @@ function renderProgress() {
 // site's chip writes every unrecorded worker into it at once. It never touches anyone
 // already recorded, and the undo bar takes the whole thing back in one press, so a
 // mis-tap costs nothing. Hidden when it could not help (fewer than two people left).
+// On a phone the chips fold behind one 44px row. Eight sites of chips stood 268px tall on
+// a 320px screen - the third-largest thing on it, above a list it pushed entirely below
+// the dock - for a shortcut most evenings never touch.
+//
+// Open or closed is remembered for the session in a variable, not in storage: it is a
+// posture, not a setting, and a fresh open starts compact.
+let bulkOpen = false;
+
 function renderBulkRow() {
     const remaining = State.unrecorded();
     if (remaining.length < 2) return el('span');
 
-    const row = el('div', 'bulk-row');
-    row.appendChild(el('span', 'bulk-label', `כל ה-${remaining.length} שנותרו ב:`));
+    const row = el('div', bulkOpen ? 'bulk-row' : 'bulk-row bulk-closed');
+    row.id = 'bulkRow';
+    // The disclosure control is on the switcher row (bulkToggle, below): this row is the
+    // chips alone, and folded it costs the list nothing at all.
+
+    // Closed is display:none, never out of the DOM. The chips' behaviour is pinned by
+    // tests that drive them with element.click(), and a hidden button still clicks - only
+    // the layout cost is gone. Above 700px the toggle is what hides instead, and the row
+    // reads exactly as it always has.
+    const body = el('div', 'bulk-body');
+    body.appendChild(el('span', 'bulk-label', `כל ה-${remaining.length} שנותרו ב:`));
 
     State.activePlaces().forEach(place => {
         const chip = button('', 'bulk-chip', () => bulkAssign(place));
         appendSiteName(chip, place.id, place.name);
         paintSite(chip, place.id);
-        row.appendChild(chip);
+        body.appendChild(chip);
     });
+    row.appendChild(body);
 
     return row;
+}
+
+// The disclosure button, on the switcher row: a checklist glyph and the count, labelled
+// in full for a screen reader. Only the class changes on tap - no render() - so the list
+// under it does not rebuild and the scroll position stays where the thumb left it.
+function bulkToggle(row) {
+    const remaining = State.unrecorded().length;
+    const toggle = button('', 'btn-secondary bulk-toggle', () => {
+        bulkOpen = !bulkOpen;
+        row.classList.toggle('bulk-closed', !bulkOpen);
+        toggle.setAttribute('aria-expanded', String(bulkOpen));
+    }, `פעולות מרוכזות (${remaining})`);
+    toggle.setAttribute('aria-expanded', String(bulkOpen));
+    toggle.setAttribute('aria-controls', 'bulkRow');
+    toggle.appendChild(bulkIcon());
+    toggle.appendChild(el('span', 'bulk-count', String(remaining)));
+    return toggle;
+}
+
+// Three ticked lines - drawn, like every other glyph on the header, so it takes the
+// button's colour and no platform paints it as a coloured emoji.
+function bulkIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.9');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M4 6l1.5 1.5L8 5M11 6.5h9M4 12l1.5 1.5L8 11M11 12.5h9M4 18l1.5 1.5L8 17M11 18.5h9');
+    svg.appendChild(path);
+    return svg;
 }
 
 function bulkAssign(place) {
@@ -384,10 +501,10 @@ function renderDayWorkerList() {
         } else if (entries.length === 0) {
             value.appendChild(el('span', 'tag tag-empty', 'טרם נרשם'));
         } else {
+            const labels = placeLabelsIn(State.schedule);
             entries.forEach(entry => {
-                const place = State.place(entry.placeId);
                 const tag = el('span', 'tag tag-place');
-                appendSiteName(tag, entry.placeId, place ? place.name : entry.placeId);
+                appendSiteName(tag, entry.placeId, placeLabelFrom(labels, entry.placeId));
                 paintSite(tag, entry.placeId);
 
                 const rate = entryRate(entry);
@@ -485,9 +602,18 @@ function renderDayHeader() {
     // to it. The row above is now only the date and the two ways to move it.
     const steps = el('div', 'day-steps');
 
-    const undoBtn = button('↶ בטל', 'btn-secondary step-btn', runUndo, 'אין מה לבטל');
+    // The arrows are drawn (stepIcon in dom.js), not the characters ↶ ↷: those keep
+    // their left/right heads regardless of direction, so the undo arrow pointed the way
+    // redo goes on this right-to-left calendar. The WORDS stay beside them.
+    // The WORDS are in a span of their own: on the narrowest phone, on a day that is not
+    // today, "היום" joins this row and the count beside it would have to give way - so
+    // there, and only there, the stylesheet keeps the arrows and drops the words. The
+    // aria-labels carry the full sentence either way.
+    const undoBtn = button('', 'btn-secondary step-btn', runUndo, 'אין מה לבטל');
     undoBtn.id = 'undoBtn';
     undoBtn.disabled = true;
+    undoBtn.appendChild(stepIcon('undo'));
+    undoBtn.appendChild(el('span', 'step-word', 'בטל'));
     steps.appendChild(undoBtn);
 
     // A thin wall between them: undo and redo are opposites, and a redo mis-tap right
@@ -497,9 +623,11 @@ function renderDayHeader() {
     wall.setAttribute('aria-hidden', 'true');
     steps.appendChild(wall);
 
-    const redoBtn = button('↷ שוב', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
+    const redoBtn = button('', 'btn-secondary step-btn', runRedo, 'אין מה לבצע שוב');
     redoBtn.id = 'redoBtn';
     redoBtn.disabled = true;
+    redoBtn.appendChild(stepIcon('redo'));
+    redoBtn.appendChild(el('span', 'step-word', 'שוב'));
     steps.appendChild(redoBtn);
 
     // "היום" joins them rather than standing alone: on a phone the mode toggle takes the
@@ -519,11 +647,19 @@ function renderDayHeader() {
 // The two ways of looking at one day, as the first thing in the SCROLLING content. On
 // the header it wrapped to a second line at 320px and the whole pinned block paid for
 // it on every scroll; a way of working is chosen once, not consulted every row.
-function renderModeToggle() {
-    const modes = el('div', 'layer-toggle mode-toggle mode-quiet day-mode-row');
+//
+// The bulk fold's button shares the row, at its end: one 44px row for both, where the
+// fold used to have a row of its own.
+function renderModeToggle(bulkRow) {
+    const row = el('div', 'day-mode-row');
+    const modes = el('div', 'layer-toggle mode-toggle mode-quiet');
     modes.appendChild(modeButton('workers', 'לפי עובדים'));
     modes.appendChild(modeButton('sites', 'לפי אתרים'));
-    return modes;
+    row.appendChild(modes);
+    if (bulkRow && bulkRow.classList && bulkRow.classList.contains('bulk-row')) {
+        row.appendChild(bulkToggle(bulkRow));
+    }
+    return row;
 }
 
 function openDayPicker() {
@@ -666,7 +802,11 @@ function renderRateControl(placeId, workerId, entry) {
 // against the failure that costs real money: forgetting someone entirely.
 function renderUnassignedTray(unrecorded) {
     const tray = el('div', 'tray');
-    tray.appendChild(el('h4', null, 'לא נרשמו'));
+    // The count rides on the header: this tray is the day's debt, and how deep it is
+    // should not take a chip-by-chip count to know. An empty tray keeps the bare word -
+    // the line under it already says "nobody" in words, and (0) next to that is noise.
+    tray.appendChild(el('h4', null,
+        unrecorded.length > 0 ? `לא נרשמו (${unrecorded.length})` : 'לא נרשמו'));
 
     if (unrecorded.length === 0) {
         tray.appendChild(el('p', 'tray-empty', '✔️ כל העובדים טופלו.'));
@@ -696,6 +836,11 @@ function renderUnassignedTray(unrecorded) {
 // Returns null when there are no vehicles at all: an empty tray on the busiest screen in
 // the app is a row of nothing to read every evening.
 function renderVehicleTray() {
+    // The feature is retired; see vehiclesEnabled in js/model/schema.js. The tray is the
+    // busiest screen in the app and every chip on it writes a day record, so it is not
+    // drawn at all rather than drawn and made inert.
+    if (!vehiclesEnabled()) return null;
+
     const vehicles = (State.schedule.vehicles || []).filter(item => item.active !== false);
     if (vehicles.length === 0) return null;
 
@@ -737,7 +882,9 @@ function renderVehicleTray() {
 function renderAbsentTray() {
     const absent = State.absentToday();
     const tray = el('div', 'tray');
-    tray.appendChild(el('h4', null, 'נעדרים'));
+    // Same rule as the tray above: a count when there is anyone to count.
+    tray.appendChild(el('h4', null,
+        absent.length > 0 ? `נעדרים (${absent.length})` : 'נעדרים'));
 
     if (absent.length === 0) {
         tray.appendChild(el('p', 'tray-empty', 'אין נעדרים.'));

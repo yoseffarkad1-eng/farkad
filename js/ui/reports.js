@@ -258,9 +258,43 @@ function payrollRows() {
     // A vehicle does the same, and for the same reason. Its owner is paid for the days it
     // went out whether or not he was on a site, so a man with three vans and a fortnight
     // off is owed real money and had no row to be owed it on.
+    // What an unsettled advance did to this account, worked out ONCE and carried on the
+    // row. Every surface below reads it from here rather than asking again: the walk goes
+    // back over every account this man has ever had, and two callers doing that separately
+    // is both slow and a second place for the answer to differ.
+    //
+    // ONLY OVER A WHOLE ACCOUNT, which is the condition the arithmetic needs and the one
+    // this first got wrong. An account is a Friday and the thirteen days after it; the
+    // report range is whatever somebody picked, and "החודש" is a month. Handed a month,
+    // the walk stepped back through fourteen-day accounts from the first advance and then
+    // counted an advance INSIDE the displayed range as carried in from before it - the
+    // same 500 deducted twice, on a pay sheet. A range that is not an account gets no
+    // carry and the arithmetic this build has always done; a month is not a payday, and
+    // the carry is a statement about what one payday left owed to the next.
+    //
+    // With the gate off, `carry` is absent everywhere and every reader falls through the
+    // same way - see moneyOf.
+    const carrying = advanceCarryEnabled()
+        && wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to);
+
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
+        // The carry is worked out BEFORE the filter, because it is one of the things that
+        // keeps a row alive - see the next comment.
+        .map(row => (carrying
+            ? Object.assign({}, row, {
+                carry: advanceAccount(State.schedule, row.workerId,
+                    REPORT_RANGE.from, REPORT_RANGE.to)
+            })
+            : row))
         .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
-            || row.vehicleDays > 0);
+            // A DEBT KEEPS A ROW ALIVE TOO, for the same reason an advance does, one line
+            // up: a man who owes a carried balance and worked no days this fortnight had
+            // no row to owe it on, so he dropped off the sheet and the debt went with
+            // him - out of the total, off the paper, and off the screen that is supposed
+            // to say what is still outstanding. Found by a check that asked the open
+            // period for his opening balance and got back undefined.
+            || (row.carry && (row.carry.carriedIn > 0 || row.carry.carriedForward > 0))
+            || (vehiclesEnabled() && row.vehicleDays > 0));
 }
 
 function invoiceRows() {
@@ -309,14 +343,18 @@ function renderPayrollTable() {
     // accounts with no advances is not carrying two empty columns across every card.
     // NOT gated on anyRate: cash handed over is real whether or not rates were entered,
     // and hiding it because the rates are blank made 500 shekels disappear in silence.
-    const anyAdvance = rows.some(row => row.advances > 0);
+    // Any advance at all, not just a payable one. A record can hold an amount this build
+    // refuses to net - a negative one, which would INCREASE what somebody is owed - and
+    // hiding the column then made that money invisible on the one screen where it is
+    // read. It is shown, and it does not move the net: see moneyOf.
+    const anyAdvance = rows.some(row => Number(row.advances) !== 0);
 
     // Vehicles get their own two columns, on the same rule as the advances: they appear
     // once somebody owns one that went out. Two columns and not one, because the days and
     // the money answer different questions - and separate from the day rate, because a
     // vehicle is paid for going out and the man's day is paid for his working. Adding
     // them together is how five days at 450 comes to 3750 and explains nothing.
-    const anyVehicle = rows.some(row => row.vehicleDays > 0);
+    const anyVehicle = vehiclesEnabled() && rows.some(row => row.vehicleDays > 0);
 
     const headers = ['עובד'].concat(columns.map(column => column.header));
     if (anyVehicle) headers.push('ימי רכב', 'שכר רכב');
@@ -326,19 +364,21 @@ function renderPayrollTable() {
 
     const table = buildTable(headers, rows.map(row => {
         const cells = [row.name].concat(columns.map(column => column.value(row)));
-        if (anyVehicle) cells.push(row.vehicleDays || 0, Math.round(row.vehicleAmount || 0));
+        if (anyVehicle) cells.push(row.vehicleDays || 0, agora(row.vehicleAmount || 0));
         if (anyRate) {
             cells.push(row.dailyRate);
             // null, not 0: a worker whose rate was never entered owes an unknown amount,
             // which is a different statement from owing nothing.
-            cells.push(row.amount === null ? '—'
-                : Math.round(row.amount) + (row.hoursUnpriced ? ' *' : ''));
-        }
-        if (anyAdvance) cells.push(row.advances > 0 ? minusAmount(row.advances) : 0);
-        if (anyRate) {
+            const money = moneyOf(row);
+            cells.push(money.gross === null ? '—'
+                : moneyText(money.gross) + (row.hoursUnpriced ? ' *' : ''));
+            if (anyAdvance) cells.push(money.advances === 0 ? 0 : minusAmount(-money.advances));
             // The * follows the money onto the number actually paid.
-            cells.push(row.netAmount === null ? '—'
-                : bidiAmount(Math.round(row.netAmount)) + (row.hoursUnpriced ? ' *' : ''));
+            cells.push(money.net === null ? '—'
+                : bidiAmount(moneyText(money.net)) + (row.hoursUnpriced ? ' *' : ''));
+        } else if (anyAdvance) {
+            const money = moneyOf(row);
+            cells.push(money.advances === 0 ? 0 : minusAmount(-money.advances));
         }
         return cells;
     }));
@@ -362,9 +402,12 @@ function renderPayrollTable() {
         ? `סה״כ לתשלום · ${countedIn(paid, 'עובד אחד', 'עובדים')}`
         : 'סה״כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
-    if (anyRate) footer.push('', Math.round(totals.amount));
-    if (anyAdvance) footer.push(minusAmount(totals.advances));
-    if (anyRate) footer.push(bidiAmount(Math.round(totals.amount - totals.advances)));
+    // The band under the column adds up the same way each row did - see moneyOf.
+    const bandGross = agora(totals.amount);
+    const bandTaken = agora(totals.advances);
+    if (anyRate) footer.push('', moneyText(bandGross));
+    if (anyAdvance) footer.push(bandTaken === 0 ? 0 : minusAmount(bandTaken));
+    if (anyRate) footer.push(bidiAmount(moneyText(agora(bandGross - bandTaken))));
     table.appendChild(totalRow(footer, headers));
 
     // The net is the last cell of every row - the column order is the ledger's - and it
@@ -645,6 +688,13 @@ function renderAttendanceChips(days) {
 // is still a plain מקדמה - the record does not guess.
 const ADVANCE_METHOD_LABELS = { cash: 'מקדמה במזומן', transfer: 'מקדמה בהעברה' };
 
+// One reading of the record, for the screen and for the message the worker is sent - a
+// word this build does not draw is not a word it invents a label for.
+function advanceMethodLabel(method) {
+    return Object.prototype.hasOwnProperty.call(ADVANCE_METHOD_LABELS, method)
+        ? ADVANCE_METHOD_LABELS[method] : 'מקדמה';
+}
+
 // Cash handed over before settlement day. Recorded here, next to the days it will be
 // deducted from, because the question it answers - "how much is left" - is asked on this
 // screen and nowhere else.
@@ -653,19 +703,161 @@ function renderAdvanceRow(item) {
     const parsed = parseLocalDate(item.date);
 
     const when = el('div', 'wday-date');
-    when.appendChild(el('strong', null,
-        Object.prototype.hasOwnProperty.call(ADVANCE_METHOD_LABELS, item.method)
-            ? ADVANCE_METHOD_LABELS[item.method] : 'מקדמה'));
+    when.appendChild(el('strong', null, advanceMethodLabel(item.method)));
     when.appendChild(el('span', null, formatFullDate(parsed)));
     row.appendChild(when);
 
     const what = el('div', 'wday-what');
     if (item.note) what.appendChild(el('span', 'wday-note', item.note));
+
+    // WHAT IS LEFT ON IT, and the way to settle some of that in cash.
+    //
+    // BEHIND BOTH GATES, and it has to be both.
+    //
+    // The writer gate, because a repayment IS a ledger entry - schedule.advances holds a
+    // single number per advance and no room for a second event about it - so recording
+    // one with that gate shut writes something the other two phones cannot read: money
+    // handed back and nowhere on their pay sheets, which is the failure the gate exists
+    // to prevent, pointed the other way.
+    //
+    // And the CARRY gate, which is the half that was missing. moneyOf reads the deduction
+    // off row.carry, and with the carry off there is no row.carry - so with the writer
+    // alone open, a man hands back 200, this row says "200 ₪ הוחזרו · נותרו 300", and the
+    // pay column goes on deducting the whole 500. Recorded, visible, and absent from the
+    // sum somebody is paid from. A repayment nobody deducts is worse than no repayment at
+    // all, because it reads as settled and is not.
+    //
+    // Either a build deducts what it lets somebody record, or it does not offer a way to
+    // record one. There is no third state worth shipping.
+    const settled = ledgerWritesEnabled() && advanceCarryEnabled()
+        ? advanceSettled(State.schedule, item.id) : null;
+    // THE TWO LABELS THAT NEVER SWAP.
+    //
+    // "חוב פתוח" is the live number - what this man still owes as of today, and it moves
+    // with every new transaction. "יתרת סגירה" is the historical one, printed on a closed
+    // payslip and fixed there forever. They are different questions with different
+    // answers, and the moment a screen uses one word for both, somebody reads a settled
+    // fortnight's figure as what is still owed - or the reverse, which is worse.
+    //
+    // Taken from the design's HistoryVsToday frame, where the whole point of the frame is
+    // that these two never trade places.
+    if (settled && settled.repaid > 0) {
+        what.appendChild(el('span', 'wday-note',
+            `${moneyText(settled.repaid)} ₪ הוחזרו במזומן · `
+            + `חוב פתוח ${moneyText(settled.left)} ₪`));
+    }
+    if (settled && settled.left > 0) {
+        what.appendChild(button('החזר', 'btn-secondary',
+            () => openRepaymentForm(item, settled, row), 'רישום החזר מזומן'));
+    }
+
     what.appendChild(button('✕', 'btn-icon', () => removeAdvanceRow(item), 'מחק מקדמה'));
     row.appendChild(what);
 
     row.appendChild(el('div', 'wday-money', minusAmount(item.amount)));
     return row;
+}
+
+// How much of this advance is still owed, from the ledger's own entries.
+//
+// `amount` is what was handed over and never changes - see foldAdvance. What a person
+// asks on this screen is the other number, and it is the difference.
+function advanceSettled(schedule, advanceId) {
+    const folded = foldLedger(schedule)[String(advanceId)];
+    const given = folded ? Number(folded.amount) || 0
+        : Number(((schedule.advances || {})[advanceId] || {}).amount) || 0;
+    const repaid = folded ? Number(folded.repaid) || 0 : 0;
+    return { given: agora(given), repaid: agora(repaid), left: agora(given - repaid) };
+}
+
+// Cash handed back, recorded against the advance it settles.
+//
+// Deliberately the same shape as the advance form above it, because it is the same act
+// seen from the other side and a person who has used one should not have to learn the
+// other. The two differences are the ones that matter:
+//
+//   the ceiling      a repayment larger than what is left is not a repayment, it is a
+//                    number somebody mistyped - and accepting it would credit a man for
+//                    money the firm never lent him
+//   the account      dated inside the CURRENT account, like an advance, because a
+//                    repayment filed into a fortnight that was printed and paid weeks
+//                    ago moves a number on a sheet somebody was already handed
+function openRepaymentForm(item, settled, row) {
+    const host = row.parentNode;
+    if (!host || host.querySelector('.advance-form')) return;
+
+    const form = el('div', 'advance-form');
+    form.appendChild(el('div', 'advance-form-title',
+        `החזר מקדמה · חוב פתוח ${moneyText(settled.left)} ₪`));
+
+    const field = (labelText, input) => {
+        form.appendChild(el('label', 'field-label', labelText));
+        form.appendChild(input);
+        return input;
+    };
+
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.setAttribute('inputmode', 'decimal');
+    amountInput.dir = 'ltr';
+    // The whole of what is left, because settling in full is what usually happens and
+    // typing it again is a chance to type it wrong.
+    amountInput.value = String(settled.left);
+    field('סכום שהוחזר', amountInput);
+
+    const today = todayStr();
+    const accountFrom = accountStart(parseLocalDate(today));
+    const accountTo = new Date(accountFrom);
+    accountTo.setDate(accountFrom.getDate() + 13);
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = today;
+    dateInput.min = toLocalDateStr(accountFrom);
+    dateInput.max = toLocalDateStr(accountTo);
+    field('תאריך', dateInput);
+
+    const noteInput = document.createElement('input');
+    noteInput.type = 'text';
+    noteInput.maxLength = 120;
+    field('הערה (לא חובה)', noteInput);
+
+    const error = el('p', 'field-error');
+    form.appendChild(error);
+
+    const save = () => {
+        const typed = amountInput.value.trim()
+            .replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+            .replace(/[۰-۹]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+        const amount = Number(typed);
+        if (!/^\d+$/.test(typed) || !Number.isFinite(amount) || amount <= 0) {
+            error.textContent = 'הכנס סכום בשקלים שלמים, גדול מאפס.';
+            amountInput.focus();
+            return;
+        }
+        if (amount > settled.left) {
+            error.textContent = 'אי אפשר להחזיר יותר מהחוב הפתוח - '
+                + `${moneyText(settled.left)} ₪.`;
+            amountInput.focus();
+            return;
+        }
+        const date = dateInput.value;
+        if (!isRealDate(date) || date < dateInput.min || date > dateInput.max) {
+            error.textContent = 'בחר תאריך בתוך תקופת החשבון הנוכחית - החזר מחוץ לה ' +
+                'ישנה חשבון שכבר שולם.';
+            return;
+        }
+
+        const change = recordAdvanceRepaid(State.schedule, item.id, amount, date,
+            noteInput.value.trim(), new Date().toISOString(), syncDeviceId(), 'cash');
+        if (!State.commit(change)) return;
+        openWorkerDays(item.workerId);
+    };
+
+    const buttons = el('div', 'modal-actions');
+    buttons.appendChild(button('שמור', 'btn-primary', save));
+    buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
+    form.appendChild(buttons);
+    host.insertBefore(form, row.nextSibling);
 }
 
 function renderNetRow(days, worker, advances) {
@@ -676,9 +868,10 @@ function renderNetRow(days, worker, advances) {
     const row = el('div', 'wday wday-total wday-net');
     row.appendChild(el('div', 'wday-date', 'נותר לתשלום'));
     row.appendChild(el('div', 'wday-what',
-        `${Math.round(earned)} נצבר · ${Math.round(taken)} מקדמות`));
+        `${moneyText(agora(earned))} נצבר · ${moneyText(agora(taken))} מקדמות`));
     row.appendChild(el('div', 'wday-money',
-        Number(worker.dailyRate) > 0 ? bidiAmount(Math.round(earned - taken)) : '—'));
+        Number(worker.dailyRate) > 0
+            ? bidiAmount(moneyText(agora(agora(earned) - agora(taken)))) : '—'));
     return row;
 }
 
@@ -832,7 +1025,7 @@ function openAdvanceForm(worker, actions) {
 async function removeAdvanceRow(item) {
     const ok = await askConfirm({
         title: 'למחוק את המקדמה?',
-        message: `${Math.round(item.amount)} ₪ מ-${formatFullDate(parseLocalDate(item.date))}.`,
+        message: `${moneyText(item.amount)} ₪ מ-${formatFullDate(parseLocalDate(item.date))}.`,
         ok: 'מחק'
     });
     if (!ok) return;
@@ -897,7 +1090,7 @@ function renderLedgerEntry(entry) {
     // amount cell is filled only when the entry actually states one.
     const amount = Number(entry.amount);
     row.appendChild(el('div', 'ledger-amount',
-        entry.amount !== undefined && isFinite(amount) ? bidiAmount(Math.round(amount)) : ''));
+        entry.amount !== undefined && isFinite(amount) ? bidiAmount(moneyText(amount)) : ''));
 
     if (entry.note) row.appendChild(el('div', 'ledger-note', entry.note));
     if (entry.origin === 'migration') {
@@ -930,9 +1123,9 @@ function workerStatementText(workerId) {
         const when = `${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`;
         if (day.absent) { lines.push(`• ${when} - נעדר`); return; }
 
+        const labels = reportPlaceLabels();
         const where = day.entries.map(entry => {
-            const place = State.place(entry.placeId);
-            const name = place ? place.name : entry.placeId;
+            const name = placeLabelFrom(labels, entry.placeId);
             const rate = entryRate(entry);
             if (rate === RATE_DOUBLE) return `${name} (כפול)`;
             if (rate === RATE_EXTRA) {
@@ -942,7 +1135,7 @@ function workerStatementText(workerId) {
             return name;
         }).join(' + ');
 
-        lines.push(`• ${when} - ${where}${priced && day.amount !== null ? ` - ${Math.round(day.amount)}` : ''}`);
+        lines.push(`• ${when} - ${where}${priced && day.amount !== null ? ` - ${moneyText(day.amount)}` : ''}`);
     });
 
     lines.push('');
@@ -951,7 +1144,7 @@ function workerStatementText(workerId) {
     const summary = workerDaysSummary(days);
     lines.push('סה״כ ' + countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות'));
     lines.push(workUnitsLine(summary));
-    if (priced) lines.push(`נצבר: ${Math.round(earned)}`);
+    if (priced) lines.push(`נצבר: ${moneyText(agora(earned))}`);
 
     // The screen puts a * on unpriced hours and the sheet explains it; the message the
     // worker actually receives must not be the one place that pretends the number is
@@ -964,13 +1157,18 @@ function workerStatementText(workerId) {
 
     if (advances.length > 0) {
         lines.push('');
+        // The same three words the screen draws over the same record. The man is the one
+        // person who will ever dispute "you were paid in cash", and his own copy used to
+        // be the one document in the app that could not answer.
         advances.forEach(item => lines.push(
-            `מקדמה ${formatShortDate(parseLocalDate(item.date))}: ${minusAmount(item.amount)}`));
+            `${advanceMethodLabel(item.method)} ${formatShortDate(parseLocalDate(item.date))}: `
+            + `${minusAmount(item.amount)}`));
     }
 
     if (priced) {
         lines.push('');
-        lines.push(`נותר לתשלום: ${bidiAmount(Math.round(earned - taken))}`);
+        lines.push(`נותר לתשלום: `
+            + `${bidiAmount(moneyText(agora(agora(earned) - agora(taken))))}`);
     }
 
     return lines.join('\n');
@@ -1006,10 +1204,10 @@ function renderWorkerDayRow(day, worker) {
     if (day.absent) {
         what.appendChild(el('span', 'tag tag-absent', 'נעדר'));
     } else {
+        const labels = reportPlaceLabels();
         day.entries.forEach(entry => {
-            const place = State.place(entry.placeId);
             const tag = el('span', 'tag tag-place');
-            appendSiteName(tag, entry.placeId, place ? place.name : entry.placeId);
+            appendSiteName(tag, entry.placeId, placeLabelFrom(labels, entry.placeId));
             paintSite(tag, entry.placeId);
 
             const rate = entryRate(entry);
@@ -1030,7 +1228,7 @@ function renderWorkerDayRow(day, worker) {
 
     const money = el('div', 'wday-money');
     if (!day.absent) {
-        money.textContent = day.amount === null ? '—' : String(Math.round(day.amount));
+        money.textContent = day.amount === null ? '—' : moneyText(day.amount);
         if (day.amount !== null && day.extraHours > 0 && !(Number(worker.hourlyRate) > 0)) {
             money.textContent += ' *';
         }
@@ -1079,7 +1277,7 @@ function renderWorkerDaysTotal(days, worker) {
     // that prints the equation while refusing the sum reads as an argument with itself.
     const knowsMoney = summary.amount !== null || total > 0;
     row.appendChild(el('div', 'wday-money',
-        knowsMoney ? String(Math.round(total)) : '—'));
+        knowsMoney ? moneyText(total) : '—'));
     return row;
 }
 
@@ -1114,7 +1312,7 @@ function singleRateLine(days, summary, total) {
     if (!(rate > 0)) return null;
 
     const product = summary.payUnits * rate;
-    if (Math.round(total) !== product) return null;
+    if (agora(total) !== agora(product)) return null;
     return countedIn(summary.payUnits, 'יום שכר אחד', 'ימי שכר') +
         ` × ${rate.toLocaleString('en-US')} = ${product.toLocaleString('en-US')}`;
 }
@@ -1206,6 +1404,34 @@ function scopedExportPlace() {
         .places.find(place => place.placeId === INVOICE_PLACE) || null;
 }
 
+// The one labelling map this page draws every site from.
+//
+// Built over REPORT_RANGE, because that is the span a report covers. Every surface the
+// reports page produces reads it: the invoice sheet's column headers, the detail sheet's
+// אתר column, the table on screen, the worker's own modal, the message he is sent, and
+// the printed page. They used to ask separately - two of them with different spans and
+// three of them not at all, printing the record id - so one site could carry three names
+// in one export.
+//
+// It is NOT memoised, and that is the point of this version. It was, on
+// `from|to|places.length|days.length` - collection SIZES, not contents - so anything that
+// kept the counts equal left a stale map standing: a site renamed, a day moved from one
+// site to another, a whole different record restored. And because only three of the
+// consumers read the memo while the invoice half rebuilds its labels fresh in the model,
+// a stale map did not merely age, it SPLIT ONE EXPORT IN TWO - the invoice sheet saying
+// the new name and the detail sheet the old, in one workbook, for one site.
+//
+// Worse than an old name: unlisted sites are numbered positionally over a sorted list, so
+// a stale map yields a wrong NUMBER. Moving one day renumbered a day nobody had touched.
+//
+// A correct key would have to be a hash of every place and every day's site references,
+// which is most of the work the map itself does. So there is no key. It is a walk over
+// the days in range, built per render, and the alternative to paying for it is a report
+// that names a site by a number that belongs to a different site.
+function reportPlaceLabels() {
+    return placeLabelsIn(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
+}
+
 // Each sheet built on its own, so a test can hold the rows up to the light without a
 // browser or the spreadsheet library - the leak this file had lived exactly in what got
 // bundled, not in any one sheet's arithmetic.
@@ -1214,21 +1440,154 @@ function payrollSheetRows() {
     // This file is the one that reaches the bookkeeper, and it used to write the gross
     // amount under 'לתשלום' - the heading the screen uses for the net - so the two
     // disagreed by exactly the advances, and the paper won.
-    // The vehicle columns are always here, unlike on the screen where they appear only
-    // when somebody owns one. A spreadsheet is compared against last month's, and a file
-    // whose columns move depending on whether a van went out is a file that cannot be.
-    return [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
-        'נעדר', 'ימי רכב', 'שכר רכב', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']]
-        .concat(payrollRows().map(row => [
-            row.name, row.attendanceDays, row.payUnits, row.doubleDays,
-            row.extraHours, row.absent,
-            row.vehicleDays || 0, Math.round(row.vehicleAmount || 0),
-            row.dailyRate,
-            row.amount === null ? '' : Math.round(row.amount),
-            row.advances > 0 ? -Math.round(row.advances) : 0,
-            row.netAmount === null ? '' : Math.round(row.netAmount),
-            row.hoursUnpriced ? 'שעות נוספות בלי שכר שעה - לא נכללו' : ''
-        ]));
+    // The vehicle columns are here whenever this build does vehicles at all, unlike on
+    // the screen where they appear only when somebody owns one. A spreadsheet is compared
+    // against last month's, and a file whose columns move depending on whether a van went
+    // out is a file that cannot be.
+    //
+    // While the feature is retired they are not written. Two columns of zeroes in a file
+    // that reaches a bookkeeper are not neutral: they are a heading that says this app
+    // still accounts for vehicles, beside a number saying it accounted for none.
+    const withVehicles = vehiclesEnabled();
+    const headers = ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר']
+        .concat(withVehicles ? ['ימי רכב', 'שכר רכב'] : [])
+        .concat(['שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']);
+
+    return [headers].concat(payrollRows().map(row => [
+        row.name, row.attendanceDays, row.payUnits, row.doubleDays,
+        row.extraHours, row.absent
+    ].concat(withVehicles
+        ? [row.vehicleDays || 0, agora(row.vehicleAmount || 0)]
+        : []
+    ).concat(moneyCells(row))));
+}
+
+// נצבר, מקדמות and לתשלום - the three columns a bookkeeper adds up, and the one
+// reconciliation this file states in its own headings. Two faults lived in rounding each
+// of them on its own and reading the net off a different number than the two cells above
+// it:
+//
+//   Half a shekel. 400 earned, 250.5 taken, 149.5 left, rounded separately: 400, -251,
+//   150 - and 400 − 251 is 149. One shekel, printed twice as two different answers, on
+//   the row somebody is paid from. The advance form refuses a fraction, so this arrives
+//   from another phone, an import or a restore - and the wire accepts it. So the net is
+//   computed FROM the two cells as they are printed, never rounded on its own.
+//
+//   A man with no daily rate who was handed cash. His נצבר is blank - a man whose rate
+//   was never entered is owed an unknown amount, which is not the same statement as
+//   being owed nothing - but the 300 he was handed is not unknown at all, and it used to
+//   sit alone in the מקדמות column with no total in the file that included it. Down the
+//   column, נצבר less מקדמות did not equal לתשלום and the 300 in the gap was money
+//   nobody could find; the person who found it was the bookkeeper, next month, in an
+//   argument about 300 shekels.
+//
+//   So a row that has money in it is a row that adds up. With advances and no rate the
+//   three cells are written as numbers - 0, -300, -300 - and the הערה says why the 0 is
+//   there, because on its own it would read as a claim that he earned nothing. With no
+//   rate AND no advances there is nothing to add up and all three stay blank, which is
+//   where "unknown rather than zero" was argued and where it still holds.
+// ONE derivation of displayed money, for every surface.
+//
+// Six surfaces show these three numbers - the table on screen, its totals band, the
+// worker's modal, the message he is sent, the CSV and the workbook - and each of them
+// rounded gross, advance and net independently, from the exact value. For 400 earned and
+// 250.5 taken that produced 150, 150, 150, 149, 149 and a screen whose own columns said
+// 400 − 251 = 150. Six answers to one question, on the rows somebody is paid from.
+//
+// So the rounding happens ONCE, to the agora, and the net is computed from the rounded
+// parts rather than from the exact ones. An agora is the precision the record can hold:
+// the advance form refuses a fraction, but the wire accepts one, so a fraction arrives
+// from another phone, an import or a restore - and a value the surfaces cannot all
+// represent is a value they will disagree about.
+const agora = value => Math.round(Number(value) * 100) / 100;
+
+// A number as a person reads it: whole shekels stay whole, an agora is shown rather than
+// hidden. Showing 150 for 149.5 is not a rounding, it is a different number from the one
+// the record holds, and somebody is paid from it.
+function moneyText(value) {
+    const at = agora(value);
+    return Number.isInteger(at) ? String(at) : at.toFixed(2).replace(/0$/, '');
+}
+
+// The three numbers, derived together. `advances` is negative or zero, `net` is their
+// sum, and `gross` is null when the man has no rate - unknown is not zero.
+function moneyOf(row) {
+    // Only a POSITIVE advance is money that was handed over, and only that is netted. A
+    // negative one is not a repayment this build knows how to account for - netting it
+    // would report a man as owed MORE than he earned, which is how gross 400 with an
+    // advance of -500 came out as 900. It is shown, in the column, and it changes nothing.
+    const taken = Number(row.advances);
+    // WHAT COMES OFF THIS FORTNIGHT, which is not always what was taken in it.
+    //
+    // With the carry on, an advance larger than the wage is deducted only as far as the
+    // wage reaches and the rest goes to the next account, so the number in this column is
+    // the DEDUCTION - and moneyCells says so in the note, because a column quietly
+    // showing less than was handed over, with nothing explaining where the remainder
+    // went, is a worse sheet than the one it replaces.
+    //
+    // EXCEPT for a man with no rate, who keeps the arithmetic he always had.
+    //
+    // The walk is right about him - nothing can be deducted from a wage this app cannot
+    // price, so his balance passes through untouched and carries. The COLUMN is a
+    // different question, and taking the walk's answer there emptied his row: 300 handed
+    // over in cash came out as a blank נצבר, a 0 in מקדמות and a blank לתשלום, with the
+    // only trace of it a note. A bookkeeper totalling that column would be 300 short of
+    // the cash that actually left the tin.
+    //
+    // So an unpriced row still says what he was handed. It is the one row where the
+    // reconciliation cannot balance anyway - an unknown wage is not a number - and the
+    // sheet's job there is to report the fact, not to tidy it away.
+    const priceless = row.carry && row.carry.gross === null;
+    const netted = row.carry && !priceless
+        ? -agora(row.carry.deducted)
+        : (taken > 0 ? -agora(taken) : 0);
+    const priced = row.amount !== null;
+    const gross = priced ? agora(row.amount) : null;
+    return {
+        gross,
+        advances: taken === 0 ? 0 : -agora(taken),
+        netted,
+        net: gross === null ? null : agora(gross + netted)
+    };
+}
+
+function moneyCells(row) {
+    const money = moneyOf(row);
+    const advances = money.netted;
+    const priced = row.amount !== null;
+    const gross = priced ? money.gross : (advances === 0 ? '' : 0);
+    const net = gross === '' ? '' : agora(gross + advances);
+
+    const notes = [];
+    // Said in shekels, not in a word like "partial": the man asking is asking how much.
+    // A closed period says so, in the design's words, before it says anything else: the
+    // figures beside that sentence are a record and not a reckoning.
+    if (row.carry && row.carry.closed) {
+        notes.push('החשבון נסגר ולא ישתנה');
+    }
+    if (row.carry && row.carry.carriedIn > 0) {
+        notes.push(`${moneyText(row.carry.carriedIn)} ₪ מקדמה מחשבון קודם`);
+    }
+    // Not on an unpriced row: that row shows the whole amount in its own column, so a
+    // note saying the same shekels are ALSO going to the next account would have the
+    // sheet counting one advance twice.
+    if (row.carry && row.carry.gross !== null && row.carry.carriedOut > 0) {
+        notes.push(row.carry.closed
+            ? `יתרת סגירה ${moneyText(row.carry.carriedOut)} ₪`
+            : `${moneyText(row.carry.carriedOut)} ₪ מקדמה עוברים לחשבון הבא`);
+    }
+    // A transaction that arrived after the period shut. The payslip does not move; this
+    // says why the two numbers differ rather than leaving them on the page unexplained.
+    if (row.carry && row.carry.closed && row.carry.lateSinceClose !== 0) {
+        notes.push('הגיעה תנועה אחרי סגירת התקופה · '
+            + `חוב פתוח ${moneyText(row.carry.carriedForward)} ₪`);
+    }
+    if (row.carry && row.carry.repaid > 0) {
+        notes.push(`${moneyText(row.carry.repaid)} ₪ הוחזרו במזומן`);
+    }
+    if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
+    if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');
+    return [row.dailyRate, gross, advances, net, notes.join(' · ')];
 }
 
 function invoiceSheetRows() {
@@ -1269,6 +1628,10 @@ function reportSheets() {
 // the app to scroll a fortnight.
 function detailRows() {
     const rows = [['תאריך', 'יום', 'עובד', 'אתר', 'סוג', 'שעות נוספות', 'לתשלום ליום']];
+    // The page's own map - the same one the invoice sheet beside it bills into. It used to
+    // read the whole schedule while the invoice read the report range, so the same missing
+    // site was numbered differently on two sheets of one file.
+    const labels = reportPlaceLabels();
 
     payrollRows().forEach(row => {
         const worker = State.worker(row.workerId);
@@ -1286,15 +1649,14 @@ function detailRows() {
                 // The day's pay is written once, on its first line: repeating it against
                 // every site would add up to double when the column is summed.
                 day.entries.forEach((entry, index) => {
-                    const place = State.place(entry.placeId);
                     rows.push([
                         day.date,
                         HEBREW_DAY_NAMES[parsed.getDay()],
                         worker.name,
-                        place ? place.name : entry.placeId,
+                        placeLabelFrom(labels, entry.placeId),
                         RATE_LABELS[entryRate(entry)],
                         entryExtraHours(entry) || '',
-                        index === 0 ? (day.amount === null ? '' : Math.round(day.amount)) : ''
+                        index === 0 ? (day.amount === null ? '' : agora(day.amount)) : ''
                     ]);
                 });
             });
@@ -1303,15 +1665,26 @@ function detailRows() {
     return rows;
 }
 
-// SheetJS, fetched only when somebody actually asks for a spreadsheet.
+// SheetJS, from this origin, loaded only when somebody actually asks for a spreadsheet.
 //
 // It used to be a plain script tag in the head, which is the most expensive place a
 // third-party library can be: synchronous, before anything on the page, and on a slow
 // mobile connection it does not fail so much as sit there - taking the whole app down
-// with it for a feature used once a fortnight. Nothing is loaded now until the export
-// button is pressed, and if it does not arrive in a few seconds the CSV path takes over,
-// which is the same fallback as before and produces the same numbers.
-const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+// with it for a feature used once a fortnight. Nothing is loaded until the button is
+// pressed.
+//
+// And it used to come from a CDN, which meant the spreadsheet was the one thing in this
+// app that needed a signal. On a building site that is not an edge case, it is most
+// Tuesdays: the pay sheet is worked out on the phone, in the van, where the phone has
+// been offline all day - and the export quietly produced three CSVs instead, under
+// different filenames, for a bookkeeper expecting one workbook.
+//
+// It is a file on this origin now, in the service worker's shell like every other script,
+// so a phone that has opened the app once can export from a tunnel. Pinned by filename to
+// the exact version the arithmetic was proved against: tests/xlsx.test.mjs reads a real
+// generated workbook back, and a silent version bump underneath it would change what that
+// proves.
+const XLSX_URL = 'vendor/xlsx-0.18.5.min.js';
 let xlsxLoading = null;
 
 function loadXlsx(timeoutMs = 8000) {
@@ -1347,16 +1720,27 @@ async function exportReports() {
 
     await loadXlsx();
 
-    // Falls back to CSV rather than failing when the SheetJS CDN is unreachable - which
-    // on a building site is a normal Tuesday, not an exception. The client-scoped
-    // export stays scoped here too: only the billing sheet exists to fall back to.
+    // CSV is still written rather than nothing - the numbers are the point and a person
+    // who pressed export at the end of a fortnight must not be handed an error and an
+    // empty hand. What changed is what it MEANS.
+    //
+    // While the library came from a CDN this was the ordinary offline path, and the
+    // message said so gently. The file is on this origin now and in the shell, so
+    // reaching here means the build itself is incomplete - a shelf that installed without
+    // it, or a phone serving an app it only half has. That is worth saying plainly,
+    // because the remedy is different: no amount of waiting for signal fixes it, and the
+    // person needs to know the workbook is not coming back on its own.
+    //
+    // The client-scoped export stays scoped: only the billing sheet exists to fall back to.
     if (typeof XLSX === 'undefined') {
         if (sheets.payroll) downloadCsv(sheets.payroll, `שכר_${stamp}.csv`);
         downloadCsv(sheets.invoice, `חיוב_${stamp}.csv`);
         if (sheets.detail) downloadCsv(sheets.detail, `פירוט_${stamp}.csv`);
         askTell(client
-            ? 'ספריית Excel לא נטענה, ולכן קובץ החיוב יוצא כ-CSV.'
-            : 'ספריית Excel לא נטענה, ולכן הקבצים יוצאו כ-CSV.');
+            ? 'חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
+                + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.'
+            : 'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
+                + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
         return;
     }
 
@@ -1383,7 +1767,30 @@ async function exportReports() {
         if (sheets.detail) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');
         }
-        XLSX.writeFile(wb, client ? `חיוב_${stamp}.xlsx` : `דוחות_${stamp}.xlsx`);
+        const name = client ? `חיוב_${stamp}.xlsx` : `דוחות_${stamp}.xlsx`;
+        XLSX.writeFile(wb, name);
+
+        // SAID OUT LOUD, on the same pattern as the backup above it.
+        //
+        // The download was silent. A person pressed export at the end of a fortnight, the
+        // sheet did not visibly change, and there was nothing on the screen to say
+        // whether a file had been made - so the honest thing to do was press it again,
+        // and again, which is how three copies of one workbook end up in a bookkeeper's
+        // inbox with nobody sure which is current.
+        //
+        // The wording follows the backup dialog word for word in its shape, and stops
+        // exactly where the backup does: the browser was HANDED the file. It is never
+        // "נשמר בהצלחה", because this app cannot see the Files app and must not claim to.
+        // The filename is Latin inside a Hebrew sentence, so it travels wrapped in
+        // LRI…PDI - askConfirm writes textContent, so the isolation has to be in the
+        // string or the bidi algorithm folds the date backwards.
+        askConfirm({
+            title: 'קובץ ה-Excel נמסר לשמירה',
+            message: '\u2066' + name + '\u2069 נמסר לדפדפן — '
+                + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
+            ok: 'הבנתי',
+            cancel: 'שמירה חוזרת'
+        }).then(again => { if (!again) exportReports(); });
     } catch (error) {
         console.error('Report export failed:', error);
         // Named, the way the crash banner does it: which file failed, that the record

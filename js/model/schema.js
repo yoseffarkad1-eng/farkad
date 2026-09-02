@@ -19,6 +19,62 @@
 // Because every value hangs off a (date, worker) path, two people editing different
 // workers touch different fields and never collide.
 
+// ---------------------------------------------------------------- what this build does
+//
+// Features that are OFF, in one place, so that "is it on?" is a question with one answer
+// and not a guess made separately by four screens.
+//
+// Both of these are off because turning them on would be a decision about somebody's
+// money or somebody's record, and neither decision has been made. Every path behind them
+// is still here and still tested - a gate that rots while it is shut is not a gate - and
+// the suites that prove they work turn the flag on deliberately. Nothing in the app ever
+// writes to this object; there is no setting, no URL parameter and no dialog that reaches
+// it. It is changed by editing this line, in a commit, with the reason in the message.
+const FARKAD_SHIPPED_FLAGS = {
+    // The one action with nothing behind it. Off because the proof it depends on - "made
+    // here and never sent anywhere" - is a statement about what two OTHER phones hold,
+    // and the evidence for it lives on this one. Getting it wrong deletes a man the other
+    // two are still recording days against. The archive does everything this was for.
+    permanentDeletion: false,
+
+    // Vehicles. Off because the owner cancelled the feature, and because the shape it had
+    // assumed that every active vehicle went out on every worked day - so one day with no
+    // vehicle state recorded quietly added the daily vehicle charge to somebody's pay.
+    // The stored vehicle records are NOT removed by this; see the retirement below.
+    vehicles: false,
+
+    // Carrying an unsettled advance from one account to the next. OFF, and not because
+    // the arithmetic is in doubt - it is in advanceAccount below, and tested - but
+    // because switching it on RESTATES fortnights that have already been paid. A man who
+    // took 5,000 against 3,200 earned is currently shown a net of -1,800 and a next
+    // account that starts from nothing; with the carry, the first account deducts 3,200
+    // and the second deducts the rest, so both change what they say.
+    //
+    // This app does not know which fortnights have been handed over, and a report that
+    // reprints differently from the copy somebody was paid against is the one thing the
+    // owner ruled out. So the switch belongs to a person who knows, and planAdvanceCarry
+    // tells them exactly which accounts and which men it would move before they touch it
+    // - the same courtesy planRateStamping gives before stamping old days.
+    carryAdvances: false
+};
+
+// FROZEN. `const` binds the name, not the object: anything holding a reference could set
+// a field on it, and a feature gate that a stray line can open is not a gate. The suites
+// were doing exactly that, which meant the shipped default was never actually read by the
+// tests that claimed to be reading it.
+//
+// The one seam is FARKAD_FLAG_OVERRIDES, and it is a TEST seam. No file this app ships
+// defines it - tests/build.test.mjs fails if one ever does - and nothing in a browser can
+// create it, because index.html loads only the scripts in that shell. A suite that needs
+// the machinery behind a shut gate sets it in the sandbox before the app loads, which is
+// the same thing a build with the flag on would do, and then it is testing that build.
+const FARKAD_FLAGS = Object.freeze(Object.assign(
+    {},
+    FARKAD_SHIPPED_FLAGS,
+    (typeof FARKAD_FLAG_OVERRIDES !== 'undefined' && FARKAD_FLAG_OVERRIDES
+        && typeof FARKAD_FLAG_OVERRIDES === 'object') ? FARKAD_FLAG_OVERRIDES : {}
+));
+
 const SCHEMA_VERSION = 2;
 
 const RATE_NORMAL = 'normal';
@@ -64,7 +120,14 @@ function emptySchedule() {
         // by this build, written by nothing yet: three phones share this record and the
         // other two cannot read entries, so the old field above is still the one every
         // device writes until they have all updated.
-        ledger: { advances: {} },
+        // `unreadable` holds ledger entries this build cannot fold, kept verbatim.
+        //
+        // Nothing reads it for arithmetic and nothing repairs what is in it - a repaired
+        // entry is a claim about money that nobody made. It exists so that the read path
+        // has somewhere to put an entry it does not understand OTHER than the floor.
+        // Before it, normaliseSchedule left such an entry out of the object it built,
+        // save() serialised that object over the record, and the only copy was gone.
+        ledger: { advances: {}, unreadable: {} },
         updatedAt: null,
         updatedBy: null
     };
@@ -173,11 +236,34 @@ function isSafeSeq(value) {
 // that path into a different one: the write lands somewhere else in the document and the
 // entry it was meant to be arrives against a stranger. The rest are Firestore's own
 // field-path metacharacters, refused for the same reason.
+// ONE PREDICATE, and it knows about prototypes.
+//
+// This used to accept `__proto__`, `prototype` and `constructor`, and every map key in
+// this app is checked by it: the ledger's entries, the legacy advances field every phone
+// still writes, the day records, the roster. Assigning into a plain object under the
+// first of those three does not store a value - it RE-PARENTS the map. Object.keys()
+// then answers [], the record is in no map anybody reads, `unreadable` never hears of
+// it, Recovery is never told, writes are not blocked, and the next ordinary save writes
+// the emptiness over the only record that money changed hands.
+//
+// It is not prototype pollution: Object.prototype is untouched, and a check for that
+// would have passed while the money vanished. It is a deletion performed by a read,
+// which is the one thing iron law 10 exists to make impossible.
+//
+// The wire predicate below - isSafeSegment - already knew the three names, because
+// journalEntryProblems asks it. So the app looked like it had thought about this, and
+// half of it had. The two predicates are now the same answer about the same question,
+// and isSafeSegment is kept as the name the path code reads.
+//
+// POISON_SEGMENTS is declared further down the file, beside the path checks it was
+// written for; this function is only ever called at run time, so the order is fine and
+// the list stays where its own reasoning lives.
 function isSafeId(value) {
     return typeof value === 'string'
         && value.length > 0 && value.length <= 100
         && value === value.trim()
-        && !UNSAFE_ID.test(value);
+        && !UNSAFE_ID.test(value)
+        && POISON_SEGMENTS.indexOf(value) === -1;
 }
 
 // A date that exists. The regex on its own accepts 2026-02-30 and 2025-02-29, which are
@@ -236,6 +322,183 @@ function storedScheduleProblems(raw) {
     rosterProblems(raw).forEach(problem => problems.push(problem));
     dayProblems(raw, null).forEach(problem => problems.push(problem));
     advanceProblems(raw, null).forEach(problem => problems.push(problem));
+    // The ledger is deliberately NOT a reason to refuse the whole record.
+    //
+    // It was, briefly, and that was the wrong shape: the rescue file's whole purpose is to
+    // salvage what can be read and NAME what cannot, so refusing the document for one
+    // unreadable line of history turned the last door into another wall. The entry is
+    // carried through normaliseSchedule verbatim instead - see the note there - which is
+    // what stops it being deleted, and ledgerProblems below is what lets a caller say so.
+    return problems;
+}
+
+// The ledger, checked at the door - which it never was.
+//
+// This gate asked about workers, places, days and advances, and the file's own comment
+// says all three run on the RAW parsed content before normaliseSchedule. The ledger was
+// not among them, while ledgerEntryProblems - the strict validator, in this same file,
+// which refuses exactly the entries that were being lost - had one caller, on the sync
+// path, guarding edits arriving from another phone.
+//
+// So a record whose ledger held an entry this build cannot fold was reported CLEAN, and
+// normaliseSchedule then quietly left the entry out of the object that save() writes.
+// The append-only history was deleted by a read.
+//
+// Refusing here sends the record to Recovery, which quarantines the bytes and blocks
+// writing until a person is told - which is what iron law 10 requires of anything
+// unreadable, and the ledger is the one record in this app that is never allowed to lose
+// an entry at all.
+// THE CONTAINER ITSELF, which nothing checked.
+//
+// Every check below this one is about an ENTRY inside the map. There has to be a map for
+// that to mean anything, and there is not always one. Reproduced: `ledger` arriving as a
+// string, as an array, or with `advances` as either - at which point normaliseSchedule
+// read `typeof raw.ledger === 'object'`, fell back to {} for anything else, and produced
+// a schedule with an EMPTY history. The first ordinary save then wrote that empty history
+// over the only copy of somebody's advances, with the load reporting clean and nothing
+// blocked.
+//
+// The entry checks could not catch it: there were no entries to check. A container this
+// build cannot read is not an absent container, and the difference is a man's money.
+//
+// Returns a reason, or null. English, like every other diagnostic in this file - the
+// screen says it in Hebrew in its own words.
+// EVERY MAP THIS APP READS BY ID, scanned for a name it cannot safely use as a key.
+//
+// isSafeId refuses `__proto__`, `prototype` and `constructor` at every WRITER. This is the
+// same question asked of a document arriving from somewhere else - the cloud, a backup, a
+// rescue file - where the key is already an own property of a parsed object and assigning
+// it into an ordinary map either reparents that map or silently does nothing.
+//
+// Measured before this existed: a day layer arriving with an own `__proto__` came out the
+// other side with the key simply gone, nobody told, the device still writing, and the
+// normalised schedule written over the record that had it. Iron law 10, exactly inverted.
+//
+// Returns one entry per poisoned NAME: where it sits, and the bytes UNDER that name
+// exactly as they arrived, so the evidence can be quarantined rather than described.
+//
+// Under the name, not the whole map, because the bytes are the sighting's identity -
+// Recovery.evidence answers identical bytes from the first copy and calls anything else
+// new evidence. The whole map's bytes change whenever anybody edits any OTHER row of it,
+// and nothing ever removes a poisoned layer from the cloud document; so with the map as
+// the identity every ordinary edit beside the poisoned name - for a poisoned days map,
+// every day anybody recorded - was a new sighting: a new copy, the acknowledgement
+// withdrawn, writing blocked, the snapshot refused. The phone never adopted the crew's
+// work on that day and the quarantine ladder ran out at twenty, blaming a full disk.
+// The readable rows are adopted onto the record like any other; only what could not be
+// read is held, and a sibling edit is then the same sighting.
+//
+// `at` names the poisoned key itself (`days.2026-08-12.actual.__proto__`), so two
+// poisoned names in one map are two problems with two sets of bytes rather than one
+// entry that a person acknowledges having seen half of.
+function poisonedContainers(raw) {
+    const out = [];
+    const look = (map, where) => {
+        if (!isPlainObject(map)) return;
+        POISON_SEGMENTS.forEach(name => {
+            if (!Object.prototype.hasOwnProperty.call(map, name)) return;
+            out.push({ at: where + '.' + name, name, json: JSON.stringify(map[name]) });
+        });
+    };
+
+    const days = raw && raw.days;
+    // THE MAP OF DAYS ITSELF, not only each day inside it. This looked into every day and
+    // never at the container holding them, so a days map with an own `__proto__` passed,
+    // and normaliseSchedule dropped the key without a word - a whole day gone, one level
+    // up from the layer this was written to catch.
+    look(days, 'days');
+    if (isPlainObject(days)) {
+        Object.keys(days).forEach(date => {
+            const day = days[date];
+            if (!isPlainObject(day)) return;
+            look(day, `days.${date}`);
+            ['plan', 'actual'].forEach(layer => look(day[layer], `days.${date}.${layer}`));
+        });
+    }
+    look(raw && raw.advances, 'advances');
+    const roster = raw && raw.roster;
+    if (isPlainObject(roster)) {
+        look(roster.workers, 'roster.workers');
+        look(roster.places, 'roster.places');
+    }
+    const ledger = raw && raw.ledger;
+    if (isPlainObject(ledger)) {
+        ['advances', 'migrations', 'unreadable', 'unreadableMigrations'].forEach(family =>
+            look(ledger[family], `ledger.${family}`));
+    }
+    return out;
+}
+
+// EVERY DAY UNDER A NAME THIS APP CANNOT READ AS A DATE - the rest of the same question.
+//
+// normaliseSchedule adopts a day only under a YYYY-MM-DD key and used to skip anything
+// else in silence. The three poison names are one way a key can be unreadable;
+// `not-a-date`, `2026-8-12` and `constructor` are others, and a snapshot carrying any
+// of them lost that day on the way in with nothing reported, nothing quarantined, the
+// device still writing and the status saying synced. A day nobody can find is somebody's
+// pay either way, so each one is named here, with its own bytes, for Recovery to hold.
+//
+// The poison names are left to poisonedContainers, which reports the whole map for them;
+// the entries here are the OTHER keys, one per day, so the two never say one thing twice.
+function unreadableDays(raw) {
+    const days = raw && raw.days;
+    if (!isPlainObject(days)) return [];
+    const out = [];
+    Object.keys(days).forEach(key => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+        if (POISON_SEGMENTS.indexOf(key) !== -1) return;
+        out.push({ at: 'days.' + key, name: key, json: JSON.stringify(days[key]) });
+    });
+    return out;
+}
+
+function ledgerContainerProblem(raw) {
+    const ledger = raw && raw.ledger;
+    // Absent is not malformed. Every device that has never recorded an advance has none,
+    // and a build that predates the ledger writes none.
+    if (ledger === undefined || ledger === null) return null;
+    if (!isPlainObject(ledger)) return 'the advances history is not a record';
+    if (ledger.advances !== undefined && ledger.advances !== null
+        && !isPlainObject(ledger.advances)) {
+        return 'the entries of the advances history are not a record';
+    }
+    // An array here would read as a record with numeric keys, which is how a list of
+    // entries would arrive from a build that stored them differently - readable-looking
+    // and not this build's shape.
+    if (ledger.unreadable !== undefined && ledger.unreadable !== null
+        && !isPlainObject(ledger.unreadable)) {
+        return 'the held-aside part of the advances history is not a record';
+    }
+    return null;
+}
+
+function ledgerProblems(raw) {
+    if (raw.ledger === undefined || raw.ledger === null) return [];
+    if (ledgerContainerProblem(raw) !== null) {
+        return ['היסטוריית המקדמות ברישום אינה תקינה.'];
+    }
+    if (!isPlainObject(raw.ledger)) return ['היסטוריית המקדמות ברישום אינה תקינה.'];
+
+    const entries = raw.ledger.advances;
+    if (entries === undefined || entries === null) return [];
+    if (!isPlainObject(entries)) return ['היסטוריית המקדמות ברישום אינה רשימה.'];
+
+    const problems = [];
+    Object.keys(entries).forEach(id => {
+        if (!isSafeId(id)) {
+            problems.push('מזהה רשומת היסטוריה שאינו תקין: ' + id + '.');
+            return;
+        }
+        // ledgerEntryProblems answers in English - it was written for the sync layer's
+        // own log, where nobody reads it. What comes out of THIS function is shown to a
+        // person, in a dialog, in Hebrew. So the entry is named and the reason is not
+        // translated word for word: what the person needs is that a line of the history
+        // cannot be read and that nothing was deleted, which is what the recovery banner
+        // goes on to say.
+        if (ledgerEntryProblems(id, entries[id]).length > 0) {
+            problems.push('רשומת היסטוריה ' + id + ' אינה קריאה.');
+        }
+    });
     return problems;
 }
 
@@ -253,6 +516,39 @@ function fullScheduleProblems(raw) {
     };
     dayProblems(raw, known).forEach(problem => problems.push(problem));
     advanceProblems(raw, known).forEach(problem => problems.push(problem));
+
+    // A REPLACEMENT WHOSE FINANCIAL HISTORY CANNOT BE READ IS NOT ACCEPTED - and this is
+    // the one gate where refusing is right.
+    //
+    // storedScheduleProblems deliberately does not refuse such a record: the rescue file's
+    // whole purpose is to open what can be opened and name what cannot, so a document that
+    // will not open is a wall where the last door should be. That reasoning is about
+    // READING.
+    //
+    // This is the other thing. A replacement is a deliberate act that overwrites the
+    // record on every phone - a restore, an imported backup, the v71 upgrade - and
+    // accepting one whose ledger container is a string or a list would propagate an
+    // unreadable financial history to all three of them, from a button whose promise is
+    // the opposite. An unreadable ENTRY is carried through and held aside; an unreadable
+    // container has nothing to hold entries in, and the honest answer at this door is no.
+    if (typeof ledgerContainerProblem === 'function' && ledgerContainerProblem(raw) !== null) {
+        problems.push('היסטוריית המקדמות בקובץ אינה בצורה שאפשר לקרוא.');
+    }
+    // A NAME NOBODY CAN USE AS A KEY is deliberately NOT asked here.
+    //
+    // It was, for one commit. The refusal is right at the doors where a document is
+    // about to REPLACE this phone's record - see poisonedMapProblems below - and this
+    // gate looked like the place to put it, because every one of those doors runs it.
+    // So does the rescue rebuild in js/ui/share.js, which reads every candidate in a
+    // rescue file through readReplacementDocument: scheduleData:v2, its quarantined
+    // copies, the legacy record, the liveSchedule fallback. A phone holding a poisoned
+    // map keeps the map on its record on purpose, so that the hold outlives the session
+    // that found it - and its rescue file, the one door it has left, was refused for
+    // the very key the hold exists to carry: "no usable schedule in the rescue file".
+    //
+    // The rescue door opens such a file and holds what it carries; the replacement
+    // doors ask the extra question themselves. This gate answers whether the document
+    // is a whole schedule, and a held map does not make it less of one.
     return problems;
 }
 
@@ -361,10 +657,8 @@ function entityProblems(item, kind, label) {
     if (kind !== 'workers') return problems;
 
     ['dailyRate', 'hourlyRate'].forEach(field => {
-        if (item[field] === undefined) return;
-        if (!isFiniteNumber(item[field]) || item[field] < 0) {
-            problems.push(label + ' ' + item.id + ': השכר אינו מספר תקין.');
-        }
+        rateProblems(item[field], 'השכר של', label + ' ' + item.id)
+            .forEach(problem => problems.push(problem));
     });
     return problems;
 }
@@ -383,11 +677,25 @@ function dayProblems(raw, known) {
             problems.push('היום ' + date + ' ברישום אינו תקין.');
             return;
         }
-        // Only the two sides the model has. A third key is something this app did not
-        // write, and reading it as a day would be reading somebody else's document.
-        const extra = Object.keys(day).filter(key => key !== 'plan' && key !== 'actual');
+        // Only the two sides the model has, plus the one field a day can carry beside
+        // them. A key that is neither is something this app did not write, and reading it
+        // as a day would be reading somebody else's document.
+        //
+        // vehiclesOff is accepted whether or not this build DOES vehicles. It is on real
+        // devices - written by a build that did - and refusing it here would quarantine
+        // the whole record: the app would open on a phone whose schedule it will not
+        // read, hold every write, and tell somebody their data is unreadable, over a
+        // field naming a van that stayed in the yard one evening in June.
+        const extra = Object.keys(day).filter(key =>
+            key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff');
         if (extra.length > 0) {
             problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
+            return;
+        }
+        if (day.vehiclesOff !== undefined
+            && !(Array.isArray(day.vehiclesOff)
+                && day.vehiclesOff.every(id => typeof id === 'string'))) {
+            problems.push('ליום ' + date + ' יש רישום רכבים שאינו תקין.');
             return;
         }
         if (day.plan === undefined && day.actual === undefined) {
@@ -438,11 +746,13 @@ function recordProblems(known, date, workerId, record) {
         if (!isPlainObject(record.rates)) {
             problems.push('שכר שמור שאינו תקין' + who);
         } else {
+            // Stamped rates get the same ceiling as live ones. A stamped day is never
+            // restated - iron law 2 - but a stamp that is not a number anybody could be
+            // paid was never a rate, and admitting it makes every total downstream of it
+            // Infinity.
             ['daily', 'hourly'].forEach(field => {
-                if (record.rates[field] === undefined) return;
-                if (!isFiniteNumber(record.rates[field]) || record.rates[field] < 0) {
-                    problems.push('שכר שמור שאינו מספר תקין' + who);
-                }
+                rateProblems(record.rates[field], 'שכר שמור', who.replace(/^ /, ''))
+                    .forEach(problem => problems.push(problem));
             });
         }
     }
@@ -478,15 +788,126 @@ function recordProblems(known, date, workerId, record) {
     return problems;
 }
 
-function advanceProblems(raw, known) {
+// What an advance amount may be, in ONE place.
+//
+// This used to be `isFiniteNumber` and nothing else - no sign, no zero, no magnitude -
+// while the real rule lived in the advance form and nowhere else: digits only, greater
+// than zero, at most ten million. So nothing on the wire, in a file, or out of a restore
+// was held to any part of it, and gross 400 with an advance of -500 reported a man as
+// owed 900. payrollReport does gross minus advances, which is correct arithmetic on a
+// value that should never have been admitted.
+//
+// The domain, stated rather than assumed:
+//
+//   a positive amount of money, in shekels, that a person actually handed over;
+//   at most ten million, which is the form's own ceiling and is already far past any
+//     real day's cash;
+//   never zero - handing over nothing is not an advance, and the form refuses it, so a
+//     zero arriving from anywhere else is a record of something that did not happen;
+//   never negative - money going the other way is a repayment, which this build does
+//     not have and must not silently pay for by INCREASING what is owed;
+//   never more precise than an agora, because three surfaces round it independently and
+//     a value they cannot all represent is a value they will disagree about.
+//
+// Fractions that are already on somebody's disk are NOT refused: refusing them would
+// quarantine a record that exists and has been paid against. Only what arrives is held
+// to the agora rule.
+const ADVANCE_MAX = 10000000;
+
+function advanceAmountProblems(id, amount) {
+    if (typeof amount !== 'number' || !isFinite(amount)) {
+        return ['הסכום של המקדמה ' + id + ' אינו מספר תקין.'];
+    }
+    if (amount <= 0) {
+        return ['הסכום של המקדמה ' + id + ' אינו סכום שנמסר.'];
+    }
+    if (amount > ADVANCE_MAX) {
+        return ['הסכום של המקדמה ' + id + ' גדול מהמותר.'];
+    }
+    // AN EXACT NUMBER OF AGOROT, which is what the comment above has always said and
+    // what the line here never checked.
+    //
+    // It used to be `!Number.isSafeInteger(Math.round(amount * 100))`, and that branch
+    // could not fire. The three guards above already require 0 < amount <= ADVANCE_MAX,
+    // and ADVANCE_MAX is ten million - so amount * 100 is at most a billion, five orders
+    // of magnitude below MAX_SAFE_INTEGER, and Math.round of it is always a safe integer.
+    // The rule had no implementation, its sentence had never been shown to anybody, and
+    // no test named it. An advance of 0.001 was accepted, stored verbatim, netted into
+    // 399.999, and displayed as 0 while the sheet said 400.
+    //
+    // The tolerance is not slack, it is arithmetic: 0.29 * 100 is 28.999999999999996 in
+    // binary floating point, and 0.29 is a real amount somebody can hand over. What is
+    // refused is a value that is not an agora at all - a thousandth of a shekel, which no
+    // surface in this app can show and which three of them would round three ways.
+    const agorot = amount * 100;
+    if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+        return ['הסכום של המקדמה ' + id + ' מדויק מאגורה, ואי אפשר להציג אותו.'];
+    }
+    return [];
+}
+
+// The ceiling a rate never had.
+//
+// dailyRate and hourlyRate were checked for being finite and not negative, and nothing
+// else. A daily rate of 1e308 passed every door, and two days of it made a pay sheet row
+// of Infinity - which is not a wage anybody can be paid, and which then propagates into
+// every total, every export and every printed sheet.
+//
+// The bound is the same ten million the advance gate uses. Nobody is paid ten million
+// shekels for a day, and a value above it is a mistake or a corrupted byte, not a rate.
+const RATE_MAX = ADVANCE_MAX;
+
+function rateProblems(value, what, who) {
+    if (value === undefined || value === null) return [];
+    if (!isFiniteNumber(value) || value < 0) {
+        return [what + ' ' + who + ' אינו מספר תקין.'];
+    }
+    if (value > RATE_MAX) {
+        return [what + ' ' + who + ' גדול מכל שכר.'];
+    }
+    return [];
+}
+
+// `wire` marks a document that arrived from the cloud, where a null at an advance's path
+// is the app's own DELETION and not damage.
+//
+// removeAdvance sends `advances.<id> = null`, and the queue-path validator in this same
+// file agrees: `if (value === null) return []`. This function did not, so a person
+// pressing delete put every phone into recovery - the deleting one on the echo of its own
+// write - and neither could record a day afterwards. Two halves of one app disagreeing
+// about what a null means, and the disagreement cost the whole record.
+//
+// It stays damage for a STORED document. A null sitting in scheduleData:v2 is not a
+// deletion in flight; it is a record with a hole in it, and the restore doors are right to
+// refuse one.
+function advanceProblems(raw, known, wire) {
     const problems = [];
 
-    Object.keys(raw.advances).forEach(id => {
+    // THE CONTAINER, before anything in it.
+    //
+    // Every caller reached this function through
+    // `(raw.advances && typeof raw.advances === 'object') ? raw.advances : {}` - and an
+    // empty ARRAY is truthy and typeof 'object', so it arrived as a map with nothing in
+    // it, while a string and a null fell through to {}. Either way the gate validated an
+    // empty container, found nothing wrong, and let the device adopt a document with no
+    // advances - which deleted a valid, already acknowledged advance from memory and from
+    // the disk, quietly, with the status line reading synced.
+    //
+    // A container that is present and is not a map is damage. Absent is a different thing
+    // and is fine: a document that has never had an advance has no advances field.
+    if (raw.advances !== undefined && raw.advances !== null && !isPlainObject(raw.advances)) {
+        return ['רשימת המקדמות שהגיעה אינה רשימה.'];
+    }
+    if (raw.advances === null) return ['רשימת המקדמות שהגיעה ריקה מסוג שאינו רשימה.'];
+
+    Object.keys(raw.advances || {}).forEach(id => {
         if (!isSafeId(id)) {
             problems.push('מזהה מקדמה שאינו תקין: ' + id + '.');
             return;
         }
         const item = raw.advances[id];
+        // A deletion in flight, on the wire only. See the note above the function.
+        if (wire && item === null) return;
         if (!isPlainObject(item)) {
             problems.push('המקדמה ' + id + ' ברישום אינה תקינה.');
             return;
@@ -503,9 +924,7 @@ function advanceProblems(raw, known) {
         if (!isRealDate(item.date)) {
             problems.push('למקדמה ' + id + ' אין תאריך אמיתי.');
         }
-        if (!isFiniteNumber(item.amount)) {
-            problems.push('הסכום של המקדמה ' + id + ' אינו מספר תקין.');
-        }
+        problems.push(...advanceAmountProblems(id, item.amount));
     });
 
     return problems;
@@ -513,6 +932,16 @@ function advanceProblems(raw, known) {
 
 // The gate the four restore doors and the sync layer share: the narrow migration first,
 // then the complete check. Returns the document to use, and why not.
+//
+// It does NOT ask poisonedMapProblems, and the rescue door depends on that. The rescue
+// rebuild reads every candidate in a rescue file through this function, and then reads
+// its own answer through it again after the queue replay - a schedule that legitimately
+// carries held evidence under ledger.unreadable, because normaliseSchedule keeps the
+// key there so the hold survives the session. The sync layer's own re-check in
+// replaceEverything reads that same rebuilt schedule on its way to the disk, after the
+// person has acknowledged the hold. A poison refusal in here would turn the rescue
+// file into a wall and stop an acknowledged rescue from landing; the doors that must
+// refuse ask the question one line after this one.
 function readReplacementDocument(raw) {
     const upgraded = upgradeStoredSchedule(raw);
     if (!upgraded) {
@@ -520,6 +949,30 @@ function readReplacementDocument(raw) {
     }
     const problems = fullScheduleProblems(upgraded);
     return { document: problems.length === 0 ? upgraded : null, problems };
+}
+
+// A name nobody can use as a key, asked at the doors where a document is about to
+// REPLACE this phone's record - and only there.
+//
+// The doors are acceptRestoreSource and the backup half of readBackupFile in
+// js/ui/share.js: the cloud copy, the restore point, the way back, the imported backup.
+// Before this existed they passed such a file through fullScheduleProblems, and the door
+// then ran normaliseSchedule on it, which - correctly, for a document that is being READ
+// - handed the map to Recovery: a quarantine copy was written and writing was blocked on
+// the phone, before replaceEverything had run. replaceEverything then refused because
+// writing was blocked, and the door reported THAT as no room on the device to record the
+// restore. The device was not full, freeing space changed nothing, and the phone somebody
+// was recording on stayed held, across a reopen, by a file they had only tried to
+// restore.
+//
+// A replacement is refused with its own sentence and touches nothing. The rescue door
+// never asks this: a rescue file is the evidence of a phone that could not read its own
+// records, and a poisoned map inside it is carried as held evidence through Recovery -
+// see scheduleFromRecoveryRecords in js/ui/share.js.
+function poisonedMapProblems(raw) {
+    if (typeof poisonedContainers !== 'function') return [];
+    return poisonedContainers(raw).map(found =>
+        'ברישום יש שם שאי אפשר להשתמש בו כמפתח (' + found.at + ').');
 }
 
 // ---------------------------------------------------------------- the journal, exactly
@@ -540,8 +993,11 @@ function readReplacementDocument(raw) {
 // A segment that would land on Object.prototype rather than in the record.
 const POISON_SEGMENTS = ['__proto__', 'prototype', 'constructor'];
 
+// The same answer, kept under the name the path code reads. isSafeId refuses the poison
+// names itself now - see the block over it - so this is one call rather than two, and the
+// two can no longer drift apart.
 function isSafeSegment(value) {
-    return isSafeId(value) && POISON_SEGMENTS.indexOf(value) === -1;
+    return isSafeId(value);
 }
 
 // Everything wrong with one journal entry. Empty means it is one.
@@ -557,6 +1013,23 @@ function journalEntryProblems(path, value) {
 
     // days.<date>.<layer>.<workerId> - one person, one day, one side of it.
     if (parts[0] === 'days') {
+        // days.<date>.vehiclesOff - the one field on a day that is about the day rather
+        // than about a person, so it is three segments and not four. The wire has to
+        // accept it or the app's own edit is quarantined on its way to the queue and
+        // recording stops on the phone; the feature is retired, but the shape the day it
+        // is turned back on has to be one the queue already understands.
+        if (parts.length === 3 && parts[2] === 'vehiclesOff') {
+            if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
+            if (value === null) return [];
+            if (!Array.isArray(value)) return ['a stayed-in list that is not a list'];
+            const seen = new Set();
+            for (let i = 0; i < value.length; i += 1) {
+                if (!isSafeSegment(value[i])) return ['a stayed-in list naming an unusable id'];
+                if (seen.has(value[i])) return ['a stayed-in list naming the same one twice'];
+                seen.add(value[i]);
+            }
+            return [];
+        }
         if (parts.length !== 4) return ['a day path with the wrong number of segments'];
         if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
         if (parts[2] !== 'plan' && parts[2] !== 'actual') return ['a layer nobody wrote'];
@@ -903,6 +1376,75 @@ function recoveredEntityName(kind, id) {
     return (kind === 'workers' ? 'עובד שנמחק (' : 'אתר שנמחק (') + id + ')';
 }
 
+// A site a day names and the roster has not got.
+//
+// Not exotic: days and roster entries travel as separate field paths, so an edit made on
+// another phone lands here while the write that would have introduced the site is still
+// queued behind it or was refused for room. The day is real, somebody worked it, and it
+// is paid for on the pay sheet - so it has to be billed to somebody and it has to be
+// called something on paper.
+//
+// The name is NOT recoveredEntityName: that one carries the record id, which is right
+// where the app is talking to itself about a record it is repairing, and wrong in a file
+// a bookkeeper opens - an id is not a site name, is not translatable, and is the one
+// place an internal key would reach a person outside the app. So they are numbered, in
+// the order the ids sort, which is the same order on every phone reading the same days.
+function unlistedPlaceIds(schedule, fromDate, toDate) {
+    const known = new Set(((schedule && schedule.places) || []).map(place => String(place.id)));
+    const days = (schedule && schedule.days) || {};
+    const found = new Set();
+    Object.keys(days).forEach(date => {
+        if (fromDate !== undefined && (date < fromDate || date > toDate)) return;
+        const layers = days[date] || {};
+        Object.keys(layers).forEach(layer => {
+            const byWorker = layers[layer] || {};
+            if (layer === 'vehiclesOff') return;
+            Object.keys(byWorker).forEach(workerId => {
+                const record = byWorker[workerId];
+                const entries = (record && record.entries) || [];
+                entries.forEach(entry => {
+                    const id = entry && entry.placeId !== undefined ? String(entry.placeId) : '';
+                    if (id && !known.has(id)) found.add(id);
+                });
+            });
+        });
+    });
+    return Array.from(found).sort();
+}
+
+// What every site is called, over one span of days: a MAP, built once and handed to every
+// consumer of it.
+//
+// It was a function each caller invoked for itself, and two callers scoped it differently
+// - the invoice sheet over the report range, the detail sheet over the whole schedule - so
+// one missing site was 'אתר שאינו ברשימה 1' on one sheet and '2' on the other, in the same
+// export, for the same day. Three more surfaces printed the raw record id instead. One
+// site had three names in one file.
+//
+// So the numbering happens once, for a span, and the map is the only reading. Everything
+// that shows a site over that span asks the same map, or it is not showing the same
+// report. Two spans exist deliberately - a report is drawn over its range, a day or a
+// week screen over what it shows - and no artefact ever mixes them.
+function placeLabelsIn(schedule, fromDate, toDate) {
+    const labels = new Map();
+    ((schedule && schedule.places) || []).forEach(place => {
+        if (place && place.id !== undefined) labels.set(String(place.id), place.name);
+    });
+    unlistedPlaceIds(schedule, fromDate, toDate).forEach((id, at) => {
+        labels.set(id, 'אתר שאינו ברשימה ' + (at + 1));
+    });
+    return labels;
+}
+
+// One site out of that map. A site the map has never heard of - a day outside the span,
+// an entry arriving mid-render - still never shows its record id: it is named for what it
+// is, which is a site this report does not cover.
+function placeLabelFrom(labels, placeId) {
+    const id = String(placeId);
+    if (labels && labels.has(id)) return labels.get(id);
+    return 'אתר שאינו ברשימה';
+}
+
 // Whatever is referenced and missing, put back - archived, and as WHOLE as anything
 // still remembers him.
 //
@@ -965,22 +1507,101 @@ function ledgerEntryProblems(id, value) {
     if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
         return ['a ledger entry with no advance behind it'];
     }
-    if (!['given', 'corrected', 'cancelled'].includes(String(value.kind))) {
+    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted', 'reversed']
+        .includes(String(value.kind))) {
         return ['a ledger entry of a kind nobody wrote'];
     }
     if (value.kind === 'given') {
         if (!value.workerId || !isSafeSegment(String(value.workerId))) {
             return ['an advance given to nobody'];
         }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
-            return ['an advance given on no date'];
+        if (!isRealDate(String(value.date))) return ['an advance given on no date'];
+        const out = Number(value.amount);
+        if (!Number.isFinite(out)) return ['an advance of no amount'];
+        // Money handed over is not negative. A negative "given" is a repayment wearing
+        // the wrong kind, and folding it as an advance credits a man for cash nobody
+        // gave him.
+        if (out < 0) return ['an advance given of less than nothing'];
+        if (out > ADVANCE_MAX) return ['an advance beyond any wage'];
+    }
+    // A correction restates the record, so what it restates has to be readable money.
+    if (value.kind === 'corrected' && value.amount !== undefined) {
+        const fixed = Number(value.amount);
+        if (!Number.isFinite(fixed)) return ['a correction to no amount'];
+        if (fixed < 0) return ['a correction to less than nothing'];
+        if (fixed > ADVANCE_MAX) return ['a correction beyond any wage'];
+    }
+    // A closure's carried balance is the number the NEXT period opens on. Unreadable, it
+    // is the whole debt gone or invented.
+    if (value.balanceAfter !== undefined) {
+        const left = Number(value.balanceAfter);
+        if (!Number.isFinite(left)) return ['a closure whose carried balance is not a number'];
+        if (left < 0) return ['a closure carrying less than nothing'];
+        if (left > ADVANCE_MAX) return ['a closure carrying beyond any wage'];
+    }
+    // CASH HANDED BACK, which is money and is checked like money.
+    //
+    // A repayment with no date lands in no account, so it reduces nothing and is
+    // invisible - and the balance it should have cleared goes on being deducted from
+    // somebody's wage. A NEGATIVE one is worse than invisible: it is a second advance
+    // wearing the wrong name, adding to what the man owes through a form whose whole
+    // meaning is that he paid.
+    // A CLOSURE is money coming off a wage, and is checked like money. It also has to
+    // name the period it closes, or it cannot be found again and cannot freeze anything.
+    if (String(value.kind) === 'deducted') {
+        if (!isRealDate(String(value.periodFrom)) || !isRealDate(String(value.periodTo))) {
+            return ['a period closed over no period'];
         }
-        if (!Number.isFinite(Number(value.amount))) return ['an advance of no amount'];
+        if (String(value.periodTo) < String(value.periodFrom)) {
+            return ['a period that closed before it opened'];
+        }
+        const off = Number(value.amount);
+        if (!Number.isFinite(off)) return ['a deduction of no amount'];
+        if (off < 0) return ['a deduction of less than nothing'];
+        if (off > ADVANCE_MAX) return ['a deduction beyond any wage'];
+        const agorot = off * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            return ['a deduction finer than an agora'];
+        }
+    }
+    // A CORRECTION, and the reason it was made. An unexplained adjustment to money is
+    // the thing an append-only ledger exists to refuse, so the reason is not optional -
+    // "somebody changed a number and nobody wrote down why" is the state this prevents.
+    if (String(value.kind) === 'reversed') {
+        if (!isRealDate(String(value.date))) return ['a reversal on no date'];
+        if (typeof value.reason !== 'string' || value.reason.trim() === '') {
+            return ['a reversal with no reason'];
+        }
+        const back = Number(value.amount);
+        if (!Number.isFinite(back)) return ['a reversal of no amount'];
+        if (back <= 0) return ['a reversal of nothing, or of less than nothing'];
+        if (back > ADVANCE_MAX) return ['a reversal beyond any wage'];
+        const agorot = back * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            return ['a reversal finer than an agora'];
+        }
+    }
+    if (String(value.kind) === 'repaid') {
+        if (!isRealDate(String(value.date))) return ['money handed back on no date'];
+        const back = Number(value.amount);
+        if (!Number.isFinite(back)) return ['money handed back of no amount'];
+        if (back < 0) return ['money handed back of less than nothing'];
+        if (back > ADVANCE_MAX) return ['money handed back beyond any wage'];
+        // The agora, like every other amount this app holds - see advanceProblems. A
+        // value the surfaces cannot all represent is a value they will disagree about,
+        // and this one is subtracted from somebody's pay.
+        const agorot = back * 100;
+        if (Math.abs(agorot - Math.round(agorot)) > 1e-6) {
+            return ['money handed back that is finer than an agora'];
+        }
     }
     if (value.amount !== undefined && !Number.isFinite(Number(value.amount))) {
         return ['a ledger entry with an amount that is not a number'];
     }
-    if (value.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(value.date))) {
+    // isRealDate, not the regex: 2026-02-30 is well shaped and is not a day. A
+    // transaction filed on a date that never happened lands in no account, so it reduces
+    // nothing and is invisible.
+    if (value.date !== undefined && !isRealDate(String(value.date))) {
         return ['a ledger entry with a date that is not a date'];
     }
     return [];
@@ -1026,7 +1647,300 @@ function advancesTotal(schedule, workerId, fromDate, toDate) {
         .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
+// ------------------------------------------------- an advance bigger than its fortnight
+
+function advanceCarryEnabled() {
+    return FARKAD_FLAGS.carryAdvances === true;
+}
+
+// Local, on purpose, both of them.
+//
+// js/model/migrate.js has an addDays and it loads AFTER this file; borrowing a name
+// across that seam works right up until somebody reorders index.html, and then it fails
+// at boot with a message about a function nobody was reading. The same rule that keeps
+// canonicalJson out of this file.
+//
+// The rounding is the agora, which is the precision the record can hold - see the block
+// over `agora` in js/ui/reports.js. A walk that carries binary float error from one
+// account into the next turns 1,800 into 1,799.9999999999998 and prints it.
+function advanceDayStep(dateStr, days) {
+    const at = parseLocalDate(dateStr);
+    at.setDate(at.getDate() + days);
+    at.setHours(12, 0, 0, 0);
+    return toLocalDateStr(at);
+}
+
+function agoraRound(value) {
+    return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+// Every repayment recorded against this man, dated inside [fromDate, toDate].
+//
+// Read off the LEDGER, because that is where a repayment lives - schedule.advances has
+// one number per advance and no room for a second event about it. A build whose ledger
+// is empty answers zero, which is the truth for every device that has never recorded one.
+// Money that never left the tin: an advance recorded in error and compensated. Netted
+// exactly as a repayment is, and counted apart from it so a statement never tells a man
+// he handed back money he never touched.
+function advanceReversalsFor(schedule, workerId, fromDate, toDate) {
+    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'reversed');
+}
+
+function advanceRepaymentsFor(schedule, workerId, fromDate, toDate) {
+    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'repaid');
+}
+
+// The one walk over the ledger both of the above use. Whose entry it is comes from the
+// ADVANCE, not from the entry: a correction that moved the advance to another man would
+// otherwise leave its repayments behind, crediting one person for another's money.
+function advanceLedgerSum(schedule, workerId, fromDate, toDate, kind) {
+    const advances = (schedule && schedule.advances) || {};
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    return Object.keys(held)
+        .map(id => held[id])
+        .filter(entry => entry && entry.kind === kind && entry.advanceId)
+        .filter(entry => {
+            const of = advances[entry.advanceId] || foldLedger(schedule)[entry.advanceId];
+            return Boolean(of) && of.workerId === workerId;
+        })
+        .filter(entry => entry.date >= fromDate && entry.date <= toDate)
+        .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+}
+
+// The account [fromDate, toDate] runs from a Friday and lasts a fortnight - see
+// js/dates.js. This walks the accounts that came BEFORE it, so it can say what this one
+// starts out owing.
+function accountsBefore(schedule, workerId, fromDate) {
+    const advances = advancesFor(schedule, workerId, '0000-01-01', '9999-12-31');
+    if (advances.length === 0) return [];
+
+    const first = toLocalDateStr(accountStart(parseLocalDate(advances[0].date)));
+    const out = [];
+    let at = first;
+    // Bounded by the target, and by a ceiling that cannot be reached in a working life:
+    // a walk driven by dates on a record is a walk a damaged date could send forever.
+    for (let n = 0; at < fromDate && n < 4000; n += 1) {
+        const end = advanceDayStep(at, 13);
+        out.push({ from: at, to: end });
+        at = advanceDayStep(at, 14);
+    }
+    return out;
+}
+
+// What this man owes at the MOMENT the account beginning `fromDate` opens.
+//
+// Derived by walking every account before it, never stored. That is the property the
+// whole feature rests on: the answer for a given account depends only on what is dated
+// on or before its own last day, so an entry made in September cannot move a number on a
+// fortnight somebody was already paid from in August.
+function advanceCarryInto(schedule, workerId, fromDate) {
+    let balance = 0;
+    accountsBefore(schedule, workerId, fromDate).forEach(account => {
+        // carriedForward, not carriedOut: the payslip is frozen, the money is not. See
+        // the two-balance block in advanceWalk.
+        balance = advanceWalk(schedule, workerId, account.from, account.to, balance)
+            .carriedForward;
+    });
+    return agoraRound(balance);
+}
+
+// One account, given what it started out owing. Split out so the walk above and the
+// report below cannot disagree about the order of operations - and the order matters:
+// money handed back reduces what is owed BEFORE the wage is asked to cover the rest, or a
+// man who settled in cash is deducted for it a second time out of his pay.
+function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
+    const given = advancesTotal(schedule, workerId, fromDate, toDate);
+    const repaid = advanceRepaymentsFor(schedule, workerId, fromDate, toDate);
+    // Reversals net exactly as repayments do - the money is not owed either way - and are
+    // counted apart so a statement never calls a clerical correction "הוחזר במזומן".
+    const reversed = advanceReversalsFor(schedule, workerId, fromDate, toDate);
+
+    // A CLOSED PERIOD REPORTS ITS RECORD, and does not do the sum again.
+    //
+    // Recomputing is correct arithmetic over the entries dated on or before this
+    // period's last day - and correct only while that set never changes. It changes: the
+    // advance form clamps a repayment into the current account, but the wire does not,
+    // and a phone offline for three weeks, an import or a restore all deliver entries
+    // dated inside a fortnight that was printed and paid. Measured before this: a
+    // back-dated repayment of 400 moved a closed period's closing balance from 1,950 to
+    // 1,550, without moving either of the two figures on the payslip itself.
+    //
+    // See recordPeriodClosed in js/model/ledger.js. With no closure recorded - every
+    // device today, since the writer gate is shut - this is absent and the walk below
+    // runs exactly as it did.
+    const closed = typeof closedPeriods === 'function'
+        ? closedPeriods(schedule, workerId)[String(fromDate)] : undefined;
+
+    const row = payrollReport(schedule, fromDate, toDate)
+        .find(item => item.workerId === workerId);
+    // A man with no rate is owed an UNKNOWN amount, which is not zero - see moneyOf in
+    // js/ui/reports.js. Nothing can be deducted from a number nobody knows, so the
+    // balance passes through him untouched rather than being written off against a wage
+    // this app cannot price.
+    const gross = row && row.amount !== null ? Number(row.amount) : null;
+
+    let balance = agoraRound((Number(carriedIn) || 0) + given - repaid - reversed);
+    // Never below zero: a man who hands back more than he owes has overpaid, and turning
+    // that into a negative balance would quietly ADD it to his next wage as though the
+    // firm owed him for it. It is his money and he should have it back, but that is a
+    // conversation, not an arithmetic result this app may reach on its own.
+    if (balance < 0) balance = 0;
+
+    // The record wins where there is one. It is what came off that man's wage on the day
+    // the period closed, and no later entry gets to revise it.
+    const deducted = closed !== undefined
+        ? agoraRound(closed.deducted)
+        : (gross === null ? 0 : agoraRound(Math.min(balance, Math.max(gross, 0))));
+
+    // TWO BALANCES OUT OF A CLOSED PERIOD, and the difference between them is the whole
+    // point.
+    //
+    // `carriedOut` is what the payslip says and says forever: the figure the period was
+    // closed on. `carriedForward` is what the NEXT period actually opens owing, which
+    // includes anything that arrived dated into this period after it shut.
+    //
+    // They have to be two numbers. Freezing only the payslip would lose a late
+    // repayment entirely - a man hands back 400, it is dated into a fortnight that has
+    // closed, and it reduces nothing anywhere - and that is money vanishing from the
+    // sum, which is the failure this whole area exists to prevent. Freezing neither
+    // rewrites a payslip somebody was already paid from.
+    //
+    // So the payslip is frozen and the money still moves, into the period that is open.
+    const live = agoraRound(balance - deducted);
+    const frozen = closed !== undefined && closed.balanceAfter !== undefined
+        ? agoraRound(closed.balanceAfter)
+        : live;
+    return {
+        from: fromDate,
+        to: toDate,
+        carriedIn: agoraRound(Number(carriedIn) || 0),
+        given: agoraRound(given),
+        repaid: agoraRound(repaid),
+        reversed: agoraRound(reversed),
+        gross,
+        deducted,
+        // What the payslip says, forever.
+        carriedOut: frozen,
+        // What the next period opens owing. Equal to carriedOut unless something arrived
+        // dated into this period after it closed.
+        carriedForward: live,
+        // Named so a screen can say "הגיעה תנועה אחרי סגירת התקופה" rather than leaving
+        // two numbers on the page with nothing explaining why they differ.
+        lateSinceClose: agoraRound(live - frozen),
+        net: gross === null ? null : agoraRound(gross - deducted),
+        // Whether this row is a record or a reckoning, said out loud - the screen shows
+        // "החשבון נסגר ולא ישתנה" only where it is true.
+        closed: closed !== undefined
+    };
+}
+
+// The account, start to finish, with what came before it already walked.
+function advanceAccount(schedule, workerId, fromDate, toDate) {
+    return advanceWalk(schedule, workerId, fromDate, toDate,
+        advanceCarryInto(schedule, workerId, fromDate));
+}
+
+// WHAT SWITCHING THE CARRY ON WOULD DO, without doing any of it.
+//
+// One row per account and man whose numbers would move, with both answers side by side.
+// The same shape and the same refusal as planRateStamping: this app cannot know which
+// fortnights have been paid, so it will not silently restate one - it reports, and a
+// person decides.
+function planAdvanceCarry(schedule) {
+    const out = [];
+    const workers = (schedule.workers || []).map(worker => worker.id);
+
+    workers.forEach(workerId => {
+        const advances = advancesFor(schedule, workerId, '0000-01-01', '9999-12-31');
+        if (advances.length === 0) return;
+
+        const first = toLocalDateStr(accountStart(parseLocalDate(advances[0].date)));
+        const lastDated = advances[advances.length - 1].date;
+        let at = first;
+        let balance = 0;
+        for (let n = 0; n < 4000; n += 1) {
+            const to = advanceDayStep(at, 13);
+            const walked = advanceWalk(schedule, workerId, at, to, balance);
+            // What the report says TODAY, with the carry off: every advance dated in the
+            // account is deducted in it, and nothing is remembered afterwards.
+            const now = walked.given;
+            if (agoraRound(now) !== walked.deducted) {
+                out.push({
+                    workerId,
+                    from: at,
+                    to,
+                    now: agoraRound(now),
+                    deducted: walked.deducted,
+                    carriedIn: walked.carriedIn,
+                    carriedOut: walked.carriedOut
+                });
+            }
+            balance = walked.carriedForward;
+            at = advanceDayStep(at, 14);
+            // Stop once nothing is left owed and no advance remains to be reached. A
+            // balance that never clears - a man with no rate - is why the date is a
+            // condition too.
+            if (balance === 0 && at > lastDated) break;
+        }
+    });
+
+    return out;
+}
+
 // ---------------------------------------------------------------- vehicles
+
+// Whether this build does vehicles at all. Read at every entry point rather than at one -
+// a gate on the screen while the arithmetic went on running is what let a cancelled
+// feature go on charging people.
+function vehiclesEnabled() {
+    return FARKAD_FLAGS.vehicles === true;
+}
+
+// A snapshot's vehicles, laid on top of the ones this device is holding.
+//
+// The same rule the ledger already follows: a phone that has never heard of a record has
+// not DISAGREED with it. While the feature is retired nothing on any phone writes a
+// vehicle, so a document with an empty array is not a document saying they were deleted -
+// it is a document written by a build that does not carry them. Adopting it wholesale
+// took a crew's vehicles, their rate history and the evenings that named them off the one
+// device that still had them, and the snapshot that did it could not be undone.
+//
+// The remote copy wins where both have the same id: that is an ordinary field merge, and
+// it is what would happen if anybody were editing them. What it may not do is remove.
+function mergeVehiclesInto(target, source) {
+    if (!target || !source) return target;
+    const held = Array.isArray(source.vehicles) ? source.vehicles : [];
+    if (held.length === 0) return target;
+
+    const merged = Array.isArray(target.vehicles) ? target.vehicles.slice() : [];
+    const known = new Set(merged.filter(item => item && item.id).map(item => String(item.id)));
+    held.forEach(item => {
+        if (!item || !item.id || known.has(String(item.id))) return;
+        merged.push(item);
+        known.add(String(item.id));
+    });
+    target.vehicles = merged;
+    return target;
+}
+
+// The other half of the same fact: which vehicles stayed in the yard on a given evening.
+//
+// It lives on the day record, and a build that does not do vehicles does not write it -
+// so a snapshot arriving without one is not a snapshot saying the evening has changed its
+// mind. Carried forward for every day the snapshot DOES carry and says nothing about; a
+// day the snapshot has removed is the days rule, not this one.
+function mergeVehicleDaysInto(target, source) {
+    if (!target || !source) return target;
+    const held = (source && source.days) || {};
+    Object.keys(held).forEach(date => {
+        const was = held[date];
+        const now = (target.days || {})[date];
+        if (!was || !Array.isArray(was.vehiclesOff)) return;
+        if (!now || Array.isArray(now.vehiclesOff)) return;
+        now.vehiclesOff = was.vehiclesOff.slice();
+    });
+    return target;
+}
 //
 // A vehicle is paid a flat amount for a day it went out. Not per trip, not per site, and
 // not scaled by whether the man driving it worked a full day - three hundred is three
@@ -1081,6 +1995,19 @@ function anyWorkOn(schedule, date) {
 // day in the record, including months already paid. The rate history is what stops it:
 // no rate before the day it was added means no money before the day it was added.
 function vehiclesOutOn(schedule, date) {
+    // THE RETIREMENT, at the one place every vehicle number in this app comes from.
+    //
+    // The owner cancelled the feature. Gating the screens alone would have left this
+    // function answering, and the answer is the whole hazard: the default here is that
+    // every active vehicle went out on every worked day, so one evening recorded with
+    // nothing said about vehicles added the daily charge to somebody's pay by itself.
+    // A retired feature that still moves money is not retired.
+    //
+    // The stored records are NOT touched by this. Whoever turns it back on gets the same
+    // vehicles, the same owners and the same rate history - see normaliseSchedule, which
+    // goes on carrying every one of those fields through load, sync, backup and restore.
+    if (!vehiclesEnabled()) return [];
+
     if (!Array.isArray(schedule.vehicles) || schedule.vehicles.length === 0) return [];
     if (!anyWorkOn(schedule, date)) return [];
 
@@ -1113,6 +2040,11 @@ function vehiclePayFor(schedule, workerId, fromDate, toDate) {
 // Mark a vehicle as having stayed in the yard, or take that mark back. Returns the change
 // for State.commit, the same shape every other edit here returns.
 function setVehicleOut(schedule, date, vehicleId, out) {
+    // No mutation path while the feature is off. Nothing draws the control that calls
+    // this, but a stale screen, an undo held from before a reload, or a queued edit from
+    // another build could still reach it - and every one of those writes a day record.
+    if (!vehiclesEnabled()) return { path: null, value: null };
+
     if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
     const day = schedule.days[date];
 
@@ -1526,7 +2458,14 @@ function payrollReport(schedule, fromDate, toDate) {
         }
         if (row.amount !== null) row.amount += row.vehicleAmount;
 
-        row.netAmount = row.amount === null ? null : row.amount - row.advances;
+        // Only a POSITIVE advance is money that was handed over, and only that is netted.
+        // A negative one is not a repayment this build knows how to account for; netting
+        // it reports a man as owed MORE than he earned, which is exactly how gross 400
+        // with an advance of -500 came out as 900 - on a document that passed every gate
+        // this build had. The amount stays in `advances` so the screen can show it and a
+        // person can see there is money here the app is refusing to account for.
+        const netted = row.advances > 0 ? row.advances : 0;
+        row.netAmount = row.amount === null ? null : row.amount - netted;
 
         return row;
     });
@@ -1605,7 +2544,16 @@ function invoiceReport(schedule, fromDate, toDate) {
         .filter(date => date >= fromDate && date <= toDate)
         .sort();
 
-    return schedule.places.map(place => {
+    // The roster first, then every site the days name that the roster has not got. A
+    // sheet built by walking the roster alone drops those days off the invoice while the
+    // pay sheet still pays for them - three sheets in one file, and the money in them not
+    // adding up to the same fortnight.
+    const labels = placeLabelsIn(schedule, fromDate, toDate);
+    const columns = schedule.places.map(place => ({ id: place.id, name: place.name }))
+        .concat(unlistedPlaceIds(schedule, fromDate, toDate)
+            .map(id => ({ id, name: placeLabelFrom(labels, id) })));
+
+    return columns.map(place => {
         const row = { placeId: place.id, name: place.name, workerDays: 0, byDate: {}, days: [] };
 
         dates.forEach(date => {

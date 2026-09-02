@@ -28,6 +28,7 @@ import { cp, readFile, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from './serve.mjs';
+import { deployedFrom } from './shell.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const EXEC = process.env.CHROME_PATH || undefined;
@@ -49,7 +50,11 @@ const given = (what, ok) => {
 // ---------------------------------------------------------------- a deployable copy
 
 const dir = await mkdtemp(join(tmpdir(), 'farkad-deploy-'));
-for (const item of ['index.html', 'sw.js', 'manifest.webmanifest', 'css', 'js', 'icons']) {
+
+// What to copy is read off the shell rather than listed - see tests/shell.mjs for the
+// stale list that made this suite fail on a timeout naming neither the file nor the
+// reason.
+for (const item of await deployedFrom(ROOT)) {
     await cp(join(ROOT, item), join(dir, item), { recursive: true });
 }
 
@@ -106,7 +111,18 @@ const buildOnScreen = page => page.evaluate(() => ({
     caches: null
 }));
 
-const cacheNames = page => page.evaluate(() => caches.keys());
+// The SHELVES. farkad-clients is not one: it holds which window is running which build -
+// the record a worker restart used to lose, after which this build's own window was
+// served the oldest shelf on the device. It is never reaped as a shelf and never served
+// out of as one, and tests/build.test.mjs pins both.
+// The BUILD SHELVES. Two caches are bookkeeping and are not shelves: farkad-clients holds
+// which window is running which build, farkad-shelves holds each shelf's lifecycle state,
+// which build is active, and the per-build asset manifests. Neither is ever served out of
+// as a shelf and neither is reaped as one, so neither belongs in a count of shelves.
+const cacheNames = page => page.evaluate(() =>
+    caches.keys().then(keys => keys.filter(key =>
+        key !== 'farkad-clients' && key !== 'farkad-shelves')));
+const allCacheNames = page => page.evaluate(() => caches.keys());
 
 // ---------------------------------------------------------------- the handover
 {
@@ -201,7 +217,10 @@ const cacheNames = page => page.evaluate(() => caches.keys());
     check('the new build has its own cache', caches.includes(BUILDS.new.cache), caches.join());
     check('and the old one is gone, not left to be served from later',
         !caches.includes(BUILDS.old.cache), caches.join());
-    check('exactly one cache is left', caches.length === 1, String(caches.length));
+    check('exactly one shelf is left', caches.length === 1, String(caches.length));
+    check('and beside it, the record of which window is running what',
+        (await allCacheNames(page)).includes('farkad-clients'),
+        (await allCacheNames(page)).join());
 
     // The point of all of it: the build a person is now running is the build that ships,
     // offline as well as online.
@@ -300,6 +319,79 @@ const cacheNames = page => page.evaluate(() => caches.keys());
         (await page.evaluate(() => midEdit())) === false);
 
     await page.context().close();
+}
+
+// ---------------------------------------------------- the window nobody pressed anything in
+{
+    suite('the other window of the app catches up when the typing is over');
+
+    // clients.claim() takes over EVERY window of the origin, so a person with the app
+    // open twice - the day screen on one, the roster on the other - has a second window
+    // running the old page under the new build's worker the moment the first one crosses.
+    // sw.js keeps serving that window its OWN build's bytes for as long as it is there
+    // (tests/handover.test.mjs measures that against two real trees), and this is the
+    // other half: the window does not stay half-and-half for the rest of the evening. It
+    // reloads itself at the first moment that costs nobody anything - and NOT before,
+    // which is the half that has to be observed rather than assumed.
+    await deploy(BUILDS.old);
+    const asking = await newPage();
+    await asking.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(asking);
+
+    const typing = await asking.context().newPage();
+    typing.on('dialog', d => d.accept());
+    await typing.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(typing);
+    given('both windows are running the old build',
+        (await buildOnScreen(asking)).script === BUILDS.old.app
+        && (await buildOnScreen(typing)).script === BUILDS.old.app);
+
+    // Somebody part-way through entering a name, which is the ordinary state on a site.
+    await typing.bringToFront();
+    await typing.click('#tab-roster');
+    await typing.waitForTimeout(250);
+    await typing.getByRole('button', { name: '+ הוסף עובד' }).click();
+    await typing.fill('#workerFormName', 'אבו פרקד');
+    given('the second window is genuinely mid-edit',
+        (await typing.evaluate(() => midEdit())) === true);
+
+    await asking.waitForTimeout(2000);
+    await deploy(BUILDS.new);
+    await asking.bringToFront();
+    await asking.evaluate(() => navigator.serviceWorker.getRegistration()
+        .then(registration => registration.update()));
+    await asking.waitForSelector('#updateBanner:visible', { timeout: 25000 });
+    await Promise.all([
+        asking.waitForNavigation({ timeout: 25000 }),
+        asking.getByRole('button', { name: 'רענן עכשיו' }).click()
+    ]);
+    await controlled(asking);
+    given('the window that asked crossed',
+        (await buildOnScreen(asking)).script === BUILDS.new.app);
+
+    check('the window in the middle of typing was not reloaded under their hands',
+        (await buildOnScreen(typing)).script === BUILDS.old.app,
+        (await buildOnScreen(typing)).script);
+    check('and the half-entered name is still in the field',
+        (await typing.inputValue('#workerFormName')) === 'אבו פרקד',
+        await typing.inputValue('#workerFormName'));
+
+    await typing.fill('#workerFormName', '');
+    await typing.keyboard.press('Escape');
+    await typing.waitForTimeout(300);
+    given('the edit is over and a reload would cost nothing',
+        (await typing.evaluate(() => midEdit())) === false);
+
+    const caught = await typing.waitForFunction(
+        expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
+        BUILDS.new.app, { timeout: 15000, polling: 250 }).then(() => true, () => false);
+    check('once the typing is finished it catches up to its worker\'s build',
+        caught, (await buildOnScreen(typing)).script);
+    check('and the old build\'s cache goes once nothing is running it',
+        !(await cacheNames(typing)).includes(BUILDS.old.cache),
+        (await cacheNames(typing)).join());
+
+    await asking.context().close();
 }
 
 // ---------------------------------------------------------------- the way out

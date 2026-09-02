@@ -678,6 +678,22 @@ function renderPlaceList() {
 // the price they were worth. See vehicleRateOn() in js/model/schema.js.
 
 function renderVehicleList() {
+    // Retired. Nothing is drawn - no list, no add button, no rate history - so there is
+    // no path from the screen to a vehicle record. The records themselves are untouched;
+    // see vehiclesEnabled in js/model/schema.js.
+    if (!vehiclesEnabled()) {
+        const host = document.getElementById('vehicleList');
+        if (!host) return;
+        if (typeof clear === 'function') clear(host);
+        // The whole panel, heading and "+ add" button included. Hiding the list alone
+        // would leave a heading and a button that opens a form for a feature that does
+        // not exist. Found from the list rather than by an id in the markup, so nothing
+        // in the offline shell has to change to retire a feature.
+        const panel = host.closest ? host.closest('.roster-panel') : null;
+        if (panel) panel.style.display = 'none';
+        return;
+    }
+
     const container = document.getElementById('vehicleList');
     if (!container) return;
     clear(container);
@@ -744,6 +760,10 @@ async function askAmount(title, value, ok, message) {
 }
 
 async function showAddVehicleModal() {
+    // Retired. Reachable only from a screen drawn before this build, or from a hand
+    // typing it into a console - and either way it would create a record for a feature
+    // nothing else reads.
+    if (!vehiclesEnabled()) return;
     if (State.activeWorkers().length === 0) {
         askTell('הוסף קודם עובד - לרכב צריך להיות בעלים שמקבל עליו את התשלום.');
         return;
@@ -789,6 +809,12 @@ async function showAddVehicleModal() {
 }
 
 async function renameVehicle(vehicleId) {
+    // The same gate showAddVehicleModal and setVehicleOut carry. Nothing draws the
+    // button that calls this, but a screen drawn by an older build, an undo held
+    // from before a reload, or a hand in a console still reaches it - and it writes
+    // a vehicle record and commits it to the disk. Nothing moves money while the
+    // flag is off, and renaming is money the moment anybody turns it back on.
+    if (!vehiclesEnabled()) return;
     const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
     if (!vehicle) return;
 
@@ -802,6 +828,12 @@ async function renameVehicle(vehicleId) {
 }
 
 async function changeVehicleRate(vehicleId) {
+    // The same gate showAddVehicleModal and setVehicleOut carry. Nothing draws the
+    // button that calls this, but a screen drawn by an older build, an undo held
+    // from before a reload, or a hand in a console still reaches it - and it writes
+    // a vehicle record and commits it to the disk. Nothing moves money while the
+    // flag is off, and a new rate is money the moment anybody turns it back on.
+    if (!vehiclesEnabled()) return;
     const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
     if (!vehicle) return;
 
@@ -823,6 +855,12 @@ async function changeVehicleRate(vehicleId) {
 }
 
 async function toggleVehicleActive(vehicleId) {
+    // The same gate showAddVehicleModal and setVehicleOut carry. Nothing draws the
+    // button that calls this, but a screen drawn by an older build, an undo held
+    // from before a reload, or a hand in a console still reaches it - and it writes
+    // a vehicle record and commits it to the disk. Nothing moves money while the
+    // flag is off, and archiving is money the moment anybody turns it back on.
+    if (!vehiclesEnabled()) return;
     const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
     if (!vehicle) return;
 
@@ -1158,10 +1196,25 @@ function renderWorkerFormActions() {
 // queue rather than of the screen. Empty means deletable. Read in two places on purpose:
 // once to decide what to draw, and again at the moment of the write - a snapshot can
 // arrive while the confirmation is open.
+// Permanent deletion is OFF in this build; the switch is FARKAD_FLAGS in the model.
+//
+// Everything below it - the footprint, the queue, the provenance, the typed name - stays
+// exactly as it is and goes on being tested, because the day this is turned back on it
+// has to be the same gate it was. What the flag changes is only whether the gate can ever
+// open: while it is false the archive is the whole of what this screen offers, and the
+// one action with nothing behind it is not reachable by any path.
+function permanentDeletionEnabled() {
+    return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.permanentDeletion === true;
+}
+
 function deletionBlockers(workerId) {
     const footprint = workerFootprint(State.schedule, workerId);
     const sync = typeof FarkadSync !== 'undefined' ? FarkadSync : null;
     const blocked = [];
+
+    // First, so it is the reason named first: nothing else about this man is the point
+    // while the feature itself is off.
+    if (!permanentDeletionEnabled()) blocked.push('מחיקה סופית מושבתת בגרסה הזו');
 
     if (footprint.days.length > 0) blocked.push(`${footprint.days.length} ימים רשומים`);
     if (footprint.advances.length > 0) blocked.push(`${footprint.advances.length} מקדמות`);
@@ -1386,8 +1439,21 @@ async function deleteWorker(workerId) {
     render();
 }
 
+// The message names the CAUSE, and the two causes are not the same sentence.
+//
+// "Something changed about him meanwhile" is true of a snapshot that arrived while the
+// confirmation was open, and false - and confusing - when the reason is that this build
+// does not do permanent deletion at all. Somebody reading the second sentence goes
+// looking for the change that was never made.
 function refuseDeletion() {
     renderWorkerFormActions();
+    if (!permanentDeletionEnabled()) {
+        return askTell({
+            title: 'לא נמחק',
+            message: 'מחיקה סופית מושבתת בגרסה הזו. אפשר להעביר לארכיון - ' +
+                'כל הימים והמקדמות שלו יישמרו, והוא יורד מהרשימה.'
+        });
+    }
     return askTell({
         title: 'לא נמחק',
         message: 'בינתיים השתנה משהו על שמו, ולכן אי אפשר למחוק אותו. אפשר להעביר לארכיון - ' +

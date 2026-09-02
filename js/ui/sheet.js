@@ -150,13 +150,20 @@ function renderAssignSheet() {
 
     if (entries.length > 0) {
         const rates = el('div', 'sheet-rates');
+        // What every other screen calls these sites. This row used to fall back to the
+        // record id whenever the roster had no entry for it - the same fallback day.js
+        // and week.js were cured of - so the one screen that check did not look at was
+        // the one still printing an internal key where a site name belongs, in text a
+        // person reads and in the hours field's own label. A day naming a site the roster
+        // has lost is ordinary, not exotic: days and roster entries travel as separate
+        // field paths, so the day can arrive while the site is still queued behind it.
+        const labels = placeLabelsIn(State.schedule);
         entries.forEach(entry => {
-            const place = State.place(entry.placeId);
             const row = el('div', 'sheet-rate-row');
             // The same badge as the list above it: with two sites open at once, the rate
             // buttons need to say which site they belong to at a glance.
             const label = el('span', 'sheet-rate-name tag tag-place');
-            appendSiteName(label, entry.placeId, place ? place.name : entry.placeId);
+            appendSiteName(label, entry.placeId, placeLabelFrom(labels, entry.placeId));
             paintSite(label, entry.placeId);
             row.appendChild(label);
 
@@ -182,7 +189,8 @@ function renderAssignSheet() {
                 hours.dir = 'ltr';
                 hours.value = entryExtraHours(entry) || '';
                 hours.placeholder = 'ש׳';
-                hours.setAttribute('aria-label', `שעות נוספות ב${place ? place.name : ''}`);
+                hours.setAttribute('aria-label',
+                    `שעות נוספות ב${placeLabelFrom(labels, entry.placeId)}`);
                 hours.addEventListener('change', () => {
                     editWithUndo(worker.id, `${isolate(worker.name)}: ${hours.value || 0} שעות נוספות`, () =>
                         setRate(State.schedule, State.date, worker.id, State.layer,

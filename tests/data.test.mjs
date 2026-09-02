@@ -6,7 +6,7 @@
 // Store, State and FarkadSync - so two devices editing at once, and a device closed and
 // reopened against a cloud that is behind, are both things a test can simply say.
 
-import { makeDevice, makeCloud, settle, deferred } from './harness.mjs';
+import { makeDevice, makeCloud, settle, settleUntil, deferred } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 // Real time, kept short. The sync layer debounces before it sends, and a test that does
@@ -51,6 +51,52 @@ async function unplugged(device, cloud) {
             await settle(TICK * 40);
         }
     };
+}
+
+// The queue as the DISK holds it, in whatever shape the disk holds it.
+//
+// The queue is a log of operations across a family of keys - <slot>:op:<batchId> - and an
+// older build's whole queue can still be sitting inside a slot record beside them. A test
+// that names one literal key is testing a filename, so these read every physical outbox
+// key and say what is actually there. Nothing here collapses two operations for one path
+// into one: a caller that wants the winner asks for it.
+function outboxKeys(device) {
+    return Object.keys(device.dump()).filter(key => key.indexOf('farkad:outbox') === 0);
+}
+
+function physicalOps(device) {
+    const dump = device.dump();
+    const out = [];
+    outboxKeys(device).forEach(key => {
+        if (key.indexOf(':damaged') !== -1) return;
+        let parsed;
+        try { parsed = JSON.parse(dump[key]); } catch (error) { return; }
+        if (!parsed || typeof parsed !== 'object') return;
+        if (Array.isArray(parsed.ops)) {
+            parsed.ops.forEach(op => out.push({
+                key, opId: String(op.opId || ''), path: String(op.path || ''),
+                value: op.value, seq: op.seq
+            }));
+            return;
+        }
+        if (parsed.items && typeof parsed.items === 'object') {
+            Object.keys(parsed.items).forEach(path => out.push({
+                key, opId: '', path,
+                value: parsed.items[path].value, seq: parsed.items[path].seq
+            }));
+        }
+    });
+    return out;
+}
+
+// Every byte of every queue key, for the one question "is this edit written down at all".
+function queueBytes(device, slot) {
+    const dump = device.dump();
+    return outboxKeys(device)
+        .filter(key => key.indexOf(':damaged') === -1)
+        .filter(key => slot === undefined || key === slot || key.indexOf(slot + ':') === 0)
+        .map(key => dump[key])
+        .join('\n');
 }
 
 function connected(device, cloud) {
@@ -448,7 +494,7 @@ function record(device, date, workerId, placeId, rate) {
     check('a write that failed is still waiting',
         device.Sync.pendingCount() > 0, String(device.Sync.pendingCount()));
     check('and it is still on disk',
-        device.dump()['farkad:outbox'].includes('2026-08-12'));
+        queueBytes(device).includes('2026-08-12'));
 
     // Closing the app here is the case the whole outbox exists for.
     const reopened = makeDevice({ storage: device.dump() });
@@ -534,8 +580,15 @@ function record(device, date, workerId, placeId, rate) {
     given('the queue is bigger than one write', device.Sync.pendingCount() > 300);
 
     await connected(device, cloud);
-    // Long enough for several rounds of the debounce.
-    await settle(TICK * 60);
+    // The queue drains over SEVERAL rounds of the debounce, and how many milliseconds
+    // that takes is a fact about the host, not about the app. Waited out as a sleep it
+    // was three red checks on a loaded machine and four green ones on an idle one. So the
+    // barrier is the CONDITION, and the budget is only there so a genuine hang is still a
+    // failure - reported as a check of its own, named, rather than as three unrelated
+    // ones failing about whatever the sleep happened to catch.
+    check('the queue drained inside the budget',
+        await settleUntil(() => device.Sync.pendingCount() === 0, 5000),
+        String(device.Sync.pendingCount()));
 
     check('no single write exceeded the batch size',
         cloud.writes.filter(w => w.patch).every(w => Object.keys(w.patch).length <= 302),
@@ -1054,11 +1107,25 @@ function record(device, date, workerId, placeId, rate) {
     seed(device);
     await connected(device, cloud);
     record(device, '2026-08-12', 'w_01', 'p_01');
-    await wait();
+
+    // A BARRIER ON THE CONDITION, not a count of milliseconds. `wait()` is TICK * 5, and
+    // TICK * 5 on an idle host is not TICK * 5 on one running a release gate: measured
+    // once, under load, the write had not reached the fake cloud when this line read it,
+    // so `cloud.doc` had no day, workerDay answered null, and the suite died on
+    // `null.rates` - taking the eight hundred checks below it with it. See settleUntil
+    // in tests/harness.mjs, which exists for exactly this and says so.
+    //
+    // And a `given`, so that a write which genuinely never lands REPORTS rather than
+    // throwing a TypeError three lines later.
+    const landed = await settleUntil(() =>
+        Boolean(((cloud.doc || {}).days || {})['2026-08-12']), 5000);
+    given('the day reached the cloud', landed,
+        JSON.stringify(Object.keys((cloud.doc || {}).days || {})));
 
     const remote = device.call('normaliseSchedule', cloud.doc);
     check('the rate a day was recorded at reaches the cloud with it',
-        (device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual').rates || {}).daily === 400,
+        ((device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual') || {}).rates
+            || {}).daily === 400,
         JSON.stringify(device.call('workerDay', remote, '2026-08-12', 'w_01', 'actual')));
 
     // And through a backup file.
@@ -1444,19 +1511,28 @@ function record(device, date, workerId, placeId, rate) {
 {
     suite('a queue that did not reach the disk is not reported as queued');
 
+    // The queue is written when the edit is MADE, so this is asked of the write that
+    // actually happens: queueing an operation onto a disk with no room for it.
+    const entry = [{ path: 'days.2026-08-12.actual.w_01',
+        value: { entries: [{ placeId: 'p_01' }] } }];
+
     const device = makeDevice();
     seed(device);
-    device.setQuota(key => key === 'farkad:outbox');
+    device.setQuota(key => key.startsWith('farkad:outbox'));
 
-    check('saveOutbox says it did not land',
-        device.Sync.saveOutbox() === false);
+    check('queueing says it did not land',
+        device.Sync.queueBatch(entry.slice()) === false);
+    check('and the journal failure is on the record',
+        device.Sync.journalFailed === true);
 
     // The one that matters: the disk accepts the write and gives back something else.
     const liar = makeDevice();
     seed(liar);
-    liar.corruptOnWrite('farkad:outbox');
+    liar.corruptWhen(key => key.startsWith('farkad:outbox'));
     check('nor does a write that comes back changed',
-        liar.Sync.saveOutbox() === false);
+        liar.Sync.queueBatch(entry.slice()) === false);
+    check('and nothing readable was left claiming to be queued',
+        physicalOps(liar).length === 0, JSON.stringify(physicalOps(liar)));
 }
 
 {
@@ -1498,7 +1574,11 @@ function record(device, date, workerId, placeId, rate) {
         const device = makeDevice();
         const cloud = makeCloud();
         seed(device);
-        device.setQuota(key => key === failing);
+        // The queue is a family of keys since v87 - the mark, the batches, the
+        // acknowledgements - so "this key is too big for the space that is left" is a
+        // statement about all of them. Naming only the mark left the batches landing
+        // happily and proved nothing about a full disk.
+        device.setQuota(key => key === failing || key.startsWith(failing + ':'));
 
         let threw = null;
         let committed = null;
@@ -1599,7 +1679,7 @@ function record(device, date, workerId, placeId, rate) {
     const done = record(device, '2026-08-12', 'w_01', 'p_01');
     check('the commit reports success, because something durable holds it', done === true);
     check('and the journal is what holds it',
-        (device.raw('farkad:outbox') || '').includes('2026-08-12'));
+        queueBytes(device).includes('2026-08-12'));
 
     // No cloud anywhere. The journal has to rebuild the edit by itself.
     const reopened = makeDevice({ storage: device.dump() });
@@ -1931,10 +2011,10 @@ function record(device, date, workerId, placeId, rate) {
     check('the new day is accepted', committed === true, String(committed));
     check('and it went into a NEW queue, not over the damaged one',
         device.raw('farkad:outbox') === broken
-        && (device.raw('farkad:outbox:active1') || '').includes('2026-08-12'),
+        && queueBytes(device, 'farkad:outbox:active1').includes('2026-08-12'),
         JSON.stringify({
             original: (device.raw('farkad:outbox') || '').slice(0, 20),
-            active: (device.raw('farkad:outbox:active1') || '').slice(0, 40)
+            active: queueBytes(device, 'farkad:outbox:active1').slice(0, 60)
         }));
 
     // 5-6. closed and reopened
@@ -2007,9 +2087,13 @@ function record(device, date, workerId, placeId, rate) {
         typeof held['scheduleData:v2'] === 'string'
         && held['scheduleData:v2'].includes('2026-08-12'),
         JSON.stringify(Object.keys(held)));
+    // Every key the live queue is written across, not only the slot's mark: the batch
+    // records ARE the queue, and an export that carried the mark alone would hand
+    // somebody a file with the number of the last edit in it and none of the edits.
+    const liveQueue = Object.keys(held)
+        .filter(key => key.indexOf('farkad:outbox:active1') === 0);
     check('and so is the queue that is actually live',
-        typeof held['farkad:outbox:active1'] === 'string'
-        && held['farkad:outbox:active1'].includes('2026-08-12'),
+        liveQueue.some(key => String(held[key]).includes('2026-08-12')),
         JSON.stringify(Object.keys(held)));
 }
 
@@ -2139,11 +2223,15 @@ function record(device, date, workerId, placeId, rate) {
             { path, value: { entries: [{ placeId: 'p_02' }] } }
         ]) === true);
 
-    const stored = JSON.parse(device.raw('farkad:outbox')).items[path];
+    // Both operations are on the disk - a batch record is immutable and nothing is
+    // rewritten - and the queue reports the LATER one for the path. That is the
+    // guarantee: one value goes to the cloud, and the one that goes is the second.
+    const winner = device.Sync.durableJournalEntries().filter(([at]) => at === path);
     check('and the value that survives is the later one',
-        stored.value.entries[0].placeId === 'p_02', JSON.stringify(stored.value));
+        winner.length === 1 && winner[0][1].value.entries[0].placeId === 'p_02',
+        JSON.stringify(winner.map(([, item]) => item.value)));
     check('with one entry, not two',
-        Object.keys(JSON.parse(device.raw('farkad:outbox')).items).length === 1);
+        device.Sync.durableJournalEntries().length === 1);
 }
 
 // ---------------------------------------------------------------- G11: slots
@@ -2205,7 +2293,8 @@ function record(device, date, workerId, placeId, rate) {
     check('there is no active slot',
         device.Sync.activeOutboxKey() === null, String(device.Sync.activeOutboxKey()));
     check('the queue refuses to write rather than choosing a damaged key',
-        device.Sync.saveOutbox() === false);
+        device.Sync.queueBatch([{ path: 'days.2026-08-12.actual.w_01',
+            value: { entries: [{ placeId: 'p_01' }] } }]) === false);
     check('acknowledging does not open recording',
         device.global('Recovery').acknowledge() === false
         && device.call('farkadWritesBlocked') === true);
@@ -2792,6 +2881,18 @@ const diskDays = device => {
     again.State.load();
     again.Sync.pushDelayMs = TICK;
     again.Sync.connect(cloud.adapter);
+    // connect() resumes the transaction WITHOUT being awaited, so there is nothing here
+    // to await - the barrier has to be the outcome. A sleep long enough on an idle host
+    // was four red checks on a loaded one, and at the short end it was not even a red
+    // check: the suite threw on a cloud document that had not been written yet and took
+    // the four hundred checks after it down with it.
+    given('the resumed restore finished',
+        await settleUntil(() => again.Sync.pendingReplace() === null, 5000),
+        JSON.stringify(again.Sync.pendingReplace()));
+    // The transaction is over; the WRITES it released are still in flight. The barrier
+    // above removes the flake - it no longer matters how long the resume took - and this
+    // is the window the checks below sample the cloud over, which is a different thing
+    // and is still a sleep on purpose.
     await settle(TICK * 40);
 
     check('the restore happened',
@@ -2860,8 +2961,10 @@ const diskDays = device => {
     given('there is something to supersede', device.Sync.pendingCount() > 0);
 
     cloud.online = true;
-    // The schedule can be written; the queue cannot.
-    device.setQuota(key => key.startsWith('farkad:outbox'));
+    // The schedule can be written; the queue cannot be FENCED. A restore supersedes what
+    // it names by removing it, and a browser that refuses a removal is the fault that
+    // stops that - a full disk is not, since taking bytes off one never needed room.
+    device.blockRemoval(key => key.startsWith('farkad:outbox'));
     const result = await device.Sync.replaceEverything(restored);
 
     check('the restore is not reported as done',
@@ -2874,9 +2977,8 @@ const diskDays = device => {
         dayKeys(device.State.schedule) === '2026-07-01', dayKeys(device.State.schedule));
     check('and so does the disk', diskDays(device) === '2026-07-01', String(diskDays(device)));
     check('the durable queue still holds the superseded entries - they were not lost',
-        JSON.parse(device.raw(device.Sync.activeOutboxKey())).items['days.2026-08-12.actual.w_01']
-            !== undefined,
-        String(device.raw(device.Sync.activeOutboxKey())));
+        physicalOps(device).some(op => op.path === 'days.2026-08-12.actual.w_01'),
+        JSON.stringify(physicalOps(device).map(op => op.path)));
     check('and nothing reached the cloud',
         cloud.attempts.filter(a => a.kind === 'save').length === 0);
 
@@ -2892,11 +2994,28 @@ const diskDays = device => {
         again.Sync.pendingPaths().includes('days.2026-08-12.actual.w_01'),
         JSON.stringify(again.Sync.pendingPaths()));
 
-    // RECOVERY. Room is made, and the transaction finishes on its own.
+    // RECOVERY. The removals are allowed through, and the transaction finishes on its own.
+    again.blockRemoval(null);
     again.setQuota(null);
     again.Sync.pushDelayMs = TICK;
     again.Sync.connect(cloud.adapter);
-    await settle(TICK * 40);
+    // WAITED FOR, not budgeted for.
+    //
+    // This was `settle(TICK * 40)`, and forty ticks is enough on an idle machine and not
+    // always enough on a loaded one: the restore finishes through a retry with backoff,
+    // and under a full release gate the timers do not get to fire that many times. It
+    // went red once in a clean-worktree run and passed nine times in a row afterwards,
+    // including six concurrent runs - which is the worst kind of red, because it teaches
+    // whoever sees it to press the button again instead of reading it.
+    //
+    // The ceiling is still there and the check still fails if the restore never
+    // finishes; what has gone is the assumption that a fixed number of ticks is a
+    // duration.
+    // Both halves, because the three checks that failed beside this one were the cloud
+    // and the status, and a wait that stops at the local transaction leaves them racing.
+    await settleUntil(() => again.Sync.pendingReplace() === null
+        && again.Sync.pendingPaths().length === 0
+        && again.Sync.status === 'synced', 5000);
 
     check('the restore finishes once there is room',
         again.Sync.pendingReplace() === null,
@@ -2921,20 +3040,56 @@ const diskDays = device => {
 }
 
 {
-    suite('G14.3: a queue write that comes back changed is caught too');
+    suite('G14.3: a fence that only PARTLY lands is not a finished restore');
 
+    // The dangerous version of G15.4, because it looks like success. The restore names
+    // every operation on the disk and takes them off; here one batch record refuses to
+    // go. Half a fence is no fence: the operation left behind is still in the queue, so
+    // the next flush would send a day the restore removed to all three phones, and the
+    // next open would replay it over the restored state.
     const { device, restored } = restoreFixture();
     const cloud = makeCloud({ online: false });
     await connected(device, cloud);
     record(device, '2026-08-18', 'w_02', 'p_02');
     await wait();
-    given('there is something to supersede', device.Sync.pendingCount() > 0);
+    record(device, '2026-08-19', 'w_03', 'p_01');
+    await wait();
+    given('there are two batches to supersede', physicalOps(device).length > 1);
+
+    // One of them, and only one.
+    const stuck = [...new Set(physicalOps(device).map(op => op.key))]
+        .filter(key => key.indexOf(':op:') !== -1)[0];
+    given('one batch record can be named', typeof stuck === 'string');
 
     cloud.online = true;
-    device.corruptOnWrite(device.Sync.activeOutboxKey());
+    device.blockRemoval(key => key === stuck);
     const result = await device.Sync.replaceEverything(restored);
     check('it is not reported as done', result.ok === false, JSON.stringify(result));
     check('and the transaction is still pending', device.Sync.pendingReplace() !== null);
+    check('the operation that would not go is still on the disk, not lost',
+        physicalOps(device).some(op => op.key === stuck),
+        JSON.stringify(physicalOps(device).map(op => op.key)));
+    check('and nothing reached the cloud',
+        cloud.attempts.filter(a => a.kind === 'save').length === 0);
+
+    // And it finishes once the removal is allowed through.
+    device.blockRemoval(null);
+    device.Sync.pushDelayMs = TICK;
+    await device.Sync.resumeReplace();
+    given('the resumed restore finished',
+        await settleUntil(() => device.Sync.pendingReplace() === null
+            && device.Sync.pendingPaths().length === 0, 5000),
+        JSON.stringify(device.Sync.pendingReplace()));
+    // The transaction is over; the WRITES it released are still in flight. The barrier
+    // above removes the flake - it no longer matters how long the resume took - and this
+    // is the window the checks below sample the cloud over, which is a different thing
+    // and is still a sleep on purpose.
+    await settle(TICK * 40);
+    check('the restore finishes once the disk lets go',
+        device.Sync.pendingReplace() === null,
+        JSON.stringify(device.Sync.pendingReplace()));
+    check('with nothing left queued', device.Sync.pendingPaths().length === 0,
+        JSON.stringify(device.Sync.pendingPaths()));
 }
 
 {
@@ -3014,9 +3169,17 @@ const diskDays = device => {
     let answer = null;
     try { answer = device.Sync.forgetReplace(); } catch (error) { threw = true; }
     check('it does not throw out of forgetReplace', threw === false);
+    // Three honest outcomes, and no fourth: the bytes went, a tombstone says the
+    // transaction is over, or the answer is false. A removal that throws is no longer
+    // allowed to declare the whole of storage unavailable - being unable to read a key
+    // was never proof that it is absent - so the tombstone is the route this takes now.
     check('and the answer is honest about whether it is gone',
-        answer === false || device.raw('farkad:pendingReplace') === null,
-        JSON.stringify({ answer, still: device.raw('farkad:pendingReplace') !== null }));
+        answer === false
+        || device.raw('farkad:pendingReplace') === null
+        || (device.Sync.pendingReplace() === null
+            && String(device.raw('farkad:pendingReplace')).includes('"cancelled"')),
+        JSON.stringify({ answer, still: device.raw('farkad:pendingReplace'),
+            pending: device.Sync.pendingReplace() }));
 }
 
 {
@@ -3170,7 +3333,8 @@ const diskDays = device => {
         device.Sync.pendingPaths().includes(path),
         JSON.stringify(device.Sync.pendingPaths()));
     check('and still on the disk in the queue',
-        String(device.raw(device.Sync.activeOutboxKey())).includes(path));
+        physicalOps(device).some(op => op.path === path),
+        JSON.stringify(physicalOps(device).map(op => op.path)));
     check('the retry ladder is armed rather than silent',
         device.Sync.pendingReplace() !== null);
 
@@ -3435,9 +3599,16 @@ const diskDays = device => {
     await settle(TICK * 10);
     given('a stamp-only write is open',
         cloud.attempts.filter(a => a.kind === 'update').length > 0);
+    // No field paths - only the stamp, and the ordering envelope every write carries.
+    // protocol, revision and lastOpId are not edits: they are how the server decides
+    // whether this write may land at all. See docs/sync-protocol.md.
+    // opFingerprint joins them: it says what the operation DOES so a receipt cannot be
+    // re-pointed at different semantics, which is ordering rather than an edit.
+    const ENVELOPE = ['updatedAt', 'updatedBy', 'protocol', 'lastOpId', 'revision',
+        'opFingerprint'];
     given('and it carries no field paths',
         Object.keys(cloud.attempts[cloud.attempts.length - 1].payload)
-            .every(key => key === 'updatedAt' || key === 'updatedBy'),
+            .every(key => ENVELOPE.indexOf(key) !== -1),
         JSON.stringify(Object.keys(cloud.attempts[cloud.attempts.length - 1].payload)));
     given('so the sending map is empty', device.Sync._sending.size === 0,
         String(device.Sync._sending.size));
@@ -3507,7 +3678,8 @@ const diskDays = device => {
 
     for (const [label, arm] of [
         ['refused', device => device.setQuota(key => key.startsWith('farkad:outbox'))],
-        ['written back changed', device => device.corruptOnWrite(device.Sync.activeOutboxKey())]
+        ['written back changed',
+            device => device.corruptWhen(key => key.startsWith('farkad:outbox'))]
     ]) {
         const device = makeDevice({ deviceId: 'd_here' });
         seed(device);
@@ -3565,7 +3737,10 @@ const diskDays = device => {
     given('there is no cloud', device.Sync.adapter === null);
     given('and something to supersede', device.Sync.pendingCount() > 0);
 
-    device.setQuota(key => key.startsWith('farkad:outbox'));
+    // The fence, refused. A restore supersedes what it names by taking it off the disk,
+    // so the fault that stops one is a browser that will not remove - not a full disk,
+    // which never had anything to do with taking bytes away.
+    device.blockRemoval(key => key.startsWith('farkad:outbox'));
     const result = await device.Sync.replaceEverything(restored);
 
     check('it is not reported as done',
@@ -3579,8 +3754,8 @@ const diskDays = device => {
         dayKeys(device.State.schedule) === '2026-07-01', dayKeys(device.State.schedule));
 
     // FIRST REOPEN, still with no room.
-    const stuck = makeDevice({ storage: device.dump(), deviceId: 'd_here',
-        quota: key => key.startsWith('farkad:outbox') });
+    const stuck = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    stuck.blockRemoval(key => key.startsWith('farkad:outbox'));
     stuck.State.load();
     check('reopening does not resurrect the superseded day',
         dayKeys(stuck.State.schedule) === '2026-07-01', dayKeys(stuck.State.schedule));
@@ -3773,7 +3948,16 @@ for (const ending of ['succeeds', 'fails']) {
 
     // A: the day, recorded at one site.
     record(device, '2026-08-12', 'w_01', 'p_01');
-    await wait();
+    // The race this suite is about is spelled with a deferred, which is exact. Getting to
+    // the starting line was left to a sleep, which is not: a debounce that fires late on a
+    // loaded host makes this given() exit the process, and every check below it in this
+    // file is never run. A precondition waits for itself to be true.
+    //
+    // The settle a few lines below is NOT given the same treatment, deliberately. It is
+    // the WINDOW over which the next two checks count what the other tab attempted, and
+    // returning early from it moves the sample: measured, it turns 1944/1944 into
+    // 1942/1944 by catching a retry the fixed window excluded.
+    await settleUntil(() => cloudEntries(cloud, '2026-08-12', 'w_01') === 'p_01', 5000);
     given('A reached the cloud', cloudEntries(cloud, '2026-08-12', 'w_01') === 'p_01',
         cloudEntries(cloud, '2026-08-12', 'w_01'));
 
@@ -3805,8 +3989,10 @@ for (const ending of ['succeeds', 'fails']) {
     check(`${ending}: nothing claims to be synced`,
         device.Sync.status !== 'synced', device.Sync.status);
     check(`${ending}: and B is durable in the journal`,
-        String(device.raw(device.Sync.activeOutboxKey()))
-            .includes('days.2026-08-12.actual.w_01'));
+        physicalOps(device).some(op => op.path === 'days.2026-08-12.actual.w_01'
+            && op.value && op.value.entries
+            && op.value.entries[0] && op.value.entries[0].placeId === 'p_02'),
+        JSON.stringify(physicalOps(device).map(op => op.value)));
 
     if (ending === 'succeeds') gate.release();
     else gate.refuse(new Error('the socket gave up'));
@@ -3865,11 +4051,11 @@ for (const ending of ['succeeds', 'fails']) {
 
     const boundary = device.Sync.pendingReplace().supersedesSeq;
     given('it has a real boundary', boundary > 0, String(boundary));
-    const queue = JSON.parse(device.raw(device.Sync.activeOutboxKey()));
-    given('the queue is pruned down to nothing but the mark',
-        Object.keys(queue.items).length === 0, JSON.stringify(queue));
-    given('and the mark itself is on the disk', queue.seq === boundary,
-        `${queue.seq} vs ${boundary}`);
+    given('the queue is fenced down to nothing at all',
+        physicalOps(device).length === 0, JSON.stringify(physicalOps(device)));
+    const mark = JSON.parse(device.raw(device.Sync.activeOutboxKey()));
+    given('and the mark itself is on the disk', mark.seq === boundary,
+        `${mark.seq} vs ${boundary}`);
 
     // The app closes and opens again. Disconnected first, or the session that is
     // supposedly closed carries on retrying its own restore against the same cloud - two
@@ -3882,10 +4068,11 @@ for (const ending of ['succeeds', 'fails']) {
 
     check('a day recorded now is accepted',
         record(again, '2026-08-20', 'w_02', 'p_02') === true);
-    const entry = JSON.parse(again.raw(again.Sync.activeOutboxKey()))
-        .items['days.2026-08-20.actual.w_02'];
+    const entry = physicalOps(again)
+        .find(op => op.path === 'days.2026-08-20.actual.w_02');
     check('and it is numbered above the boundary, not below it',
-        entry.seq > boundary, `${entry.seq} vs ${boundary}`);
+        Boolean(entry) && entry.seq > boundary,
+        `${entry && entry.seq} vs ${boundary}`);
 
     // The transaction finishes.
     again.blockRemoval(null);
@@ -4731,10 +4918,11 @@ for (const [label, arm] of [
 
     check('a day recorded now is accepted',
         record(half, '2026-08-20', 'w_02', 'p_02') === true);
-    const entry = JSON.parse(half.raw(half.Sync.activeOutboxKey()))
-        .items['days.2026-08-20.actual.w_02'];
-    given('and it is numbered above the boundary', entry.seq > boundary,
-        `${entry.seq} vs ${boundary}`);
+    const entry = physicalOps(half)
+        .find(op => op.path === 'days.2026-08-20.actual.w_02');
+    given('and it is numbered above the boundary',
+        Boolean(entry) && entry.seq > boundary,
+        `${entry && entry.seq} vs ${boundary}`);
 
     // The companion is damaged. The bare v71 primary is untouched.
     const damaged = makeDevice({ storage: half.dump(), deviceId: 'd_here' });
@@ -5027,10 +5215,13 @@ for (const [label, arm] of [
 
     check('a day recorded after the restore is accepted',
         record(half, '2026-08-20', 'w_02', 'p_02') === true);
-    const queueBefore = half.raw(half.Sync.activeOutboxKey());
+    // Every physical byte of the queue, so that "byte-for-byte what it was" below is a
+    // statement about the whole of it and not about one key of several.
+    const queueBefore = queueBytes(half);
+    const queuedAfter = physicalOps(half)
+        .find(op => op.path === 'days.2026-08-20.actual.w_02');
     given('and it is queued above the boundary',
-        JSON.parse(queueBefore).items['days.2026-08-20.actual.w_02'].seq === 2,
-        queueBefore);
+        Boolean(queuedAfter) && queuedAfter.seq === 2, queueBefore);
 
     // The companion is damaged; everything else is left exactly as it is.
     const broken = makeDevice({ storage: half.dump(), deviceId: 'd_here' });
@@ -5058,8 +5249,7 @@ for (const [label, arm] of [
     check('writing is still blocked after acknowledging',
         held.call('farkadWritesBlocked') === true);
     check('the queue is byte-for-byte what it was',
-        held.raw(held.Sync.activeOutboxKey()) === queueBefore,
-        String(held.raw(held.Sync.activeOutboxKey())));
+        queueBytes(held) === queueBefore, queueBytes(held));
 
     // 3. Nothing anybody presses can get past it.
     await held.Sync.flush();
@@ -5073,10 +5263,8 @@ for (const [label, arm] of [
     check('repeated flushes, a reconnect and a retry still send nothing',
         documentWrites(cloud).length === 0, JSON.stringify(documentWrites(cloud)));
     check('and the queue is still byte-for-byte what it was',
-        held.raw(held.Sync.activeOutboxKey()) === queueBefore,
-        String(held.raw(held.Sync.activeOutboxKey())));
-    const waitingBefore = Object.keys(JSON.parse(queueBefore).items)
-        .filter(path => JSON.parse(queueBefore).items[path].sent !== true).length;
+        queueBytes(held) === queueBefore, queueBytes(held));
+    const waitingBefore = new Set(physicalOps(half).map(op => op.path)).size;
     check('and every entry is still waiting - none was marked as sent',
         held.Sync.pendingCount() === waitingBefore,
         `${held.Sync.pendingCount()} vs ${waitingBefore}`);
@@ -5086,8 +5274,7 @@ for (const [label, arm] of [
         record(held, '2026-08-21', 'w_01', 'p_01') === false);
     check('the disk did not change either',
         JSON.parse(held.raw('scheduleData:v2')).days['2026-08-21'] === undefined);
-    check('and the queue STILL has not moved',
-        held.raw(held.Sync.activeOutboxKey()) === queueBefore);
+    check('and the queue STILL has not moved', queueBytes(held) === queueBefore);
 
     // Both raw records, and the copy, are all there to be exported.
     check('the raw v71 record is intact',
@@ -5098,7 +5285,8 @@ for (const [label, arm] of [
     check('the export carries both, and the queue',
         exported['farkad:pendingReplace'] === V71_RECORD
         && exported['farkad:pendingReplace:v71'] === brokenCompanion
-        && exported[held.Sync.activeOutboxKey()] === queueBefore,
+        && held.Sync.activeQueueKeys().every(key =>
+            exported[key] === held.raw(key)),
         JSON.stringify(Object.keys(exported)));
 
     // 5. The companion is repaired, and the transaction finishes properly.
@@ -5316,8 +5504,20 @@ for (const [label, arm] of [
 // against him. Which one is offered is decided by the model, not by the screen.
 
 // A crew, a site, and the dialogs answered for us. `answer` is what the person taps.
+// Permanent deletion is OFF in this build (FARKAD_FLAGS in js/model/schema.js), and the
+// flags are frozen - so a test cannot reach in and set one. It asks for a device built
+// with the gate open instead, which is the same thing a build with the flag on would be,
+// and is therefore testing that build rather than mutating this one.
+//
+// A gate that rots while it is shut is not a gate, so everything it guards goes on being
+// tested exactly as it was - and one suite below reads what a person actually installs.
+const DELETION_ON = { permanentDeletion: true };
+
 function crew(options = {}) {
-    const device = makeDevice({ deviceId: options.deviceId || 'd_here' });
+    const device = makeDevice({
+        deviceId: options.deviceId || 'd_here',
+        flags: options.canDelete === false ? null : DELETION_ON
+    });
     device.State.schedule.workers = [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
         { id: 'w_02', name: 'שרה', active: true, dailyRate: 350, hourlyRate: 0 }
@@ -5368,6 +5568,66 @@ function a_nameInDocument(document, id) {
     if ((doc.workers || []).some(item => item && String(item.id) === id)) return true;
     const map = (doc.roster && doc.roster.workers) || {};
     return Boolean(map[id]);
+}
+
+{
+    suite('permanent deletion is off in this build, and nothing reaches past it');
+
+    // The gate is shut and this is the test that says so. Every suite around it opens it
+    // on purpose to keep the machinery behind it honest; this one is the only reading of
+    // what the build a person actually installs will do.
+    const device = makeDevice({ deviceId: 'd_shut' });
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 }
+    ];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+
+    const said = [];
+    let typingAsked = 0;
+    device.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    device.ctx.askText = () => { typingAsked += 1; return Promise.resolve('דוד'); };
+
+    check('the flag is off', device.global('FARKAD_FLAGS').permanentDeletion === false,
+        String(device.global('FARKAD_FLAGS').permanentDeletion));
+    check('and the app agrees when asked',
+        device.global('permanentDeletionEnabled')() === false);
+
+    // The man the gate would otherwise let through: nothing recorded, nothing queued,
+    // and provably this device's own.
+    const added = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: added, name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0 });
+    given('he was added', device.State.commitRoster() === true);
+    given('nothing is recorded against him',
+        device.call('workerFootprint', device.State.schedule, added).days.length === 0);
+    given('and he is provably this phone\'s own',
+        device.Sync.provenLocalOnly('workers', added) === true);
+
+    check('the screen still refuses, and names the reason',
+        device.call('deletionBlockers', added).includes('מחיקה סופית מושבתת בגרסה הזו'),
+        JSON.stringify(device.call('deletionBlockers', added)));
+
+    // And the write path, called directly - the way a stale screen would call it.
+    await device.call('deleteWorker', added);
+    await wait();
+
+    check('the typing dialog is never opened', typingAsked === 0, String(typingAsked));
+    check('he is still on the screen', workerIds(device).includes(added),
+        workerIds(device));
+    check('and still on the disk',
+        String(device.raw('scheduleData:v2')).includes(added));
+    check('the person is told why rather than watching nothing happen',
+        said.some(message => message.includes('מושבתת')), JSON.stringify(said));
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_shut' });
+    reopened.State.load();
+    check('and the next open has him too', workerIds(reopened).includes(added),
+        workerIds(reopened));
 }
 
 {
@@ -6116,7 +6376,7 @@ for (const [label, act] of [
         { id: added, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
     given('he was added with no connection', device.State.commitRoster() === true);
     given('and the queue does hold roster entries naming him',
-        String(device.raw(device.Sync.activeOutboxKey())).includes(added));
+        queueBytes(device).includes(added));
 
     check('a roster entry alone does not hold the deletion',
         device.Sync.queueNamesWorker(added) === false);
@@ -6126,9 +6386,12 @@ for (const [label, act] of [
     await wait();
     check('so the name typed by mistake can go, cloud or no cloud',
         !workerIds(device).includes(added), workerIds(device));
+    // Of the LIVE queue, not of every byte on the disk. A superseded operation is not
+    // rewritten - the record is immutable - so the question is whether anything that
+    // could still be sent carries him, and the answer has to be no.
     check('and the write that would have carried him was replaced, not queued behind him',
-        !String(device.raw(device.Sync.activeOutboxKey()) || '').includes(`"name":"חדש"`),
-        String(device.raw(device.Sync.activeOutboxKey())));
+        !JSON.stringify(device.Sync.durableJournalEntries()).includes(`"name":"חדש"`),
+        JSON.stringify(device.Sync.durableJournalEntries()));
 
     // A queued DAY is a different thing, and it does hold.
     const second = crew();
@@ -6312,7 +6575,9 @@ for (const [label, act] of [
     given('he was added', device.State.commitRoster() === true);
     given('and nothing was ever handed to an adapter', device.Sync.adapter === null);
 
-    const again = makeDevice({ storage: device.dump(), deviceId: 'd_here' });
+    const again = makeDevice({
+        storage: device.dump(), deviceId: 'd_here', flags: DELETION_ON
+    });
     again.State.load();
     again.ctx.askConfirm = () => Promise.resolve(true);
     again.ctx.askTell = () => Promise.resolve();
@@ -6695,10 +6960,12 @@ for (const [label, act] of [
         { id: doomed, name: 'זמני', active: true, dailyRate: 0, hourlyRate: 0 });
     given('he was queued in the whole array', device.State.commitRoster() === true);
 
+    // The array as the DISK would send it - the live operation for `workers`, read back
+    // off the device rather than out of this session's memory.
     const queuedArray = source => {
-        const raw = JSON.parse(String((source || device).raw(
-            (source || device).Sync.activeOutboxKey())));
-        return JSON.stringify(raw.items.workers.value);
+        const found = ((source || device).Sync.durableJournalEntries() || [])
+            .filter(([path]) => path === 'workers');
+        return JSON.stringify(found.map(([, item]) => item.value));
     };
     given('and the stored queue really does hold him in it',
         queuedArray().includes(doomed), queuedArray());
@@ -6805,13 +7072,11 @@ for (const [label, act] of [
     b.State.commitRoster();
     await wait();
     // Empty once it has been acknowledged and pruned, which is the shape success takes.
-    const queuedNames = () => {
-        const raw = JSON.parse(String(b.raw(b.Sync.activeOutboxKey())) || '{}');
-        const entry = (raw.items || {}).workers;
-        return entry ? JSON.stringify(entry.value) : '';
-    };
+    const queuedNames = () => JSON.stringify((b.Sync.durableJournalEntries() || [])
+        .filter(([path]) => path === 'workers')
+        .map(([, item]) => item.value));
     given('B has him queued in a whole array', queuedNames().includes(doomed));
-    const queuedBefore = String(b.raw(b.Sync.activeOutboxKey()));
+    const queuedBefore = queueBytes(b);
 
     // A removes him. B comes back with no room to rewrite its queue.
     a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
@@ -6841,7 +7106,7 @@ for (const [label, act] of [
     check('and no write ever carried him in a whole array', !everSentHim(),
         JSON.stringify(cloud.writes.map(write => write.kind)));
     check('and the queue is byte for byte what it was',
-        String(b.raw(b.Sync.activeOutboxKey())) === queuedBefore);
+        queueBytes(b) === queuedBefore, queueBytes(b));
     check('the removed man was NOT put back into the cloud',
         !(cloud.doc.workers || []).some(item => item && item.id === doomed),
         JSON.stringify((cloud.doc.workers || []).map(item => item.id)));
@@ -7082,7 +7347,7 @@ function slowFirstSnapshot(cloud) {
     b.State.commitRoster();
     await wait();
     given('B has a whole array queued with him in it',
-        String(b.raw(b.Sync.activeOutboxKey())).includes(doomed));
+        queueBytes(b).includes(doomed));
 
     // A removes him while B is away.
     a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
@@ -7093,9 +7358,8 @@ function slowFirstSnapshot(cloud) {
     // B CLOSES AND REOPENS. The memory hold is gone; the queue is not.
     const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
     reopened.State.load();
-    given('the queue survived the reopen',
-        String(reopened.raw(reopened.Sync.activeOutboxKey())).includes(doomed));
-    const queuedBefore = String(reopened.raw(reopened.Sync.activeOutboxKey()));
+    given('the queue survived the reopen', queueBytes(reopened).includes(doomed));
+    const queuedBefore = queueBytes(reopened);
     const fromWrite = cloud.writes.length;
 
     // Connected to a cloud whose first snapshot is late - much later than the debounce.
@@ -7116,7 +7380,7 @@ function slowFirstSnapshot(cloud) {
     check('nothing carrying a roster went out before the first snapshot',
         !carriedHim(), JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
     check('the queue is byte for byte what it was',
-        String(reopened.raw(reopened.Sync.activeOutboxKey())) === queuedBefore);
+        queueBytes(reopened) === queuedBefore, queueBytes(reopened));
     check('and the device does not call itself synced while it holds data back',
         reopened.Sync.status !== 'synced', reopened.Sync.status);
 
@@ -7131,12 +7395,11 @@ function slowFirstSnapshot(cloud) {
     check('and it reaches the cloud without waiting for the roster',
         JSON.stringify((cloud.doc && cloud.doc.days) || {}).includes('2026-08-13'),
         JSON.stringify(Object.keys((cloud.doc && cloud.doc.days) || {})));
-    const queuedNow = JSON.parse(String(reopened.raw(reopened.Sync.activeOutboxKey())));
+    const rosterOps = reopened.Sync.physicalOperations()
+        .filter(op => op.path === 'workers' || op.path.startsWith('roster.'));
     check('while the held roster entries are not marked as sent',
-        Object.keys(queuedNow.items)
-            .filter(path => path === 'workers' || path.startsWith('roster.'))
-            .every(path => queuedNow.items[path].sent === false),
-        JSON.stringify(Object.keys(queuedNow.items)));
+        rosterOps.length > 0 && rosterOps.every(op => op.sent === false),
+        JSON.stringify(rosterOps.map(op => [op.path, op.sent])));
 
     // The snapshot finally arrives.
     slow.deliver();
@@ -7246,7 +7509,7 @@ function slowFirstSnapshot(cloud) {
 
     const reopened = makeDevice({ storage: b.dump(), deviceId: 'd_b' });
     reopened.State.load();
-    const queuedBefore = String(reopened.raw(reopened.Sync.activeOutboxKey()));
+    const queuedBefore = queueBytes(reopened);
     given('the queue survived the reopen', queuedBefore.includes(doomed));
 
     const fromWrite = cloud.writes.length;
@@ -7270,7 +7533,7 @@ function slowFirstSnapshot(cloud) {
     check('nothing carrying him went out', !carriedHim(),
         JSON.stringify(cloud.writes.slice(fromWrite).map(w => w.kind)));
     check('the queue is byte for byte what it was',
-        String(reopened.raw(reopened.Sync.activeOutboxKey())) === queuedBefore);
+        queueBytes(reopened) === queuedBefore, queueBytes(reopened));
     check('the device does not call itself synced',
         reopened.Sync.status !== 'synced', reopened.Sync.status);
     check('a v78 reader of the document does not see him',
@@ -8176,6 +8439,312 @@ for (const [label, run] of [
         reopened.Sync.provenLocalOnly('workers', mine) === false);
 }
 
+// ================================================================ P4: the rescue file
+//
+// The one file that exists for the worst day: the app has just told somebody it cannot
+// read its own records, and this is how the bytes leave the phone. Everything below goes
+// through the REAL export and the REAL <input type="file"> - a test that hands the app a
+// storage object proves the parser works and nothing about whether a person holding this
+// file can open it.
+
+// A phone whose schedule record is truncated, with an older build's record behind it,
+// unsent edits in the queue, and dialogs that answer.
+function brokenPhone(options = {}) {
+    const damagedV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"ד';
+    // A v1 record the way the old build wrote one: a week start, two names, and a flat
+    // array of cells indexed worker*7 + day. The second cell names a site that is not in
+    // the list, which the migration refuses to guess at - so this phone also has a
+    // decision waiting that has never been written to its disk.
+    const v1 = JSON.stringify({
+        weekStartDate: '2026-08-09',
+        workers: ['דוד', 'שרה'],
+        places: ['הרצליה'],
+        assignments: [
+            { index: 1, value: 'הרצליה' },
+            { index: 9, value: 'מקום שלא ברשימה' }
+        ]
+    });
+
+    const device = makeDevice({
+        deviceId: options.deviceId || 'd_broken',
+        storage: { 'scheduleData:v2': damagedV2, scheduleData: v1 }
+    });
+    const said = [];
+    device.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    device.ctx.askConfirm = () => Promise.resolve(options.answer !== false);
+    device.State.load();
+    return { device, said, damagedV2, v1 };
+}
+
+{
+    suite('P4: the rescue file carries everything, including what was never written down');
+
+    const { device, damagedV2, v1 } = brokenPhone();
+
+    given('the record on disk is the damaged one, untouched',
+        device.raw('scheduleData:v2') === damagedV2);
+    given('and it was quarantined', device.raw('scheduleData:v2:damaged') === damagedV2);
+    given('while the screen shows the migrated week',
+        Object.keys(device.State.schedule.days || {}).length > 0,
+        JSON.stringify(Object.keys(device.State.schedule.days || {})));
+    given('with a decision still waiting', device.State.migrationIssues.length > 0,
+        String(device.State.migrationIssues.length));
+
+    // An edit made on the broken phone. Writing is blocked until the person acknowledges,
+    // which is exactly what they do after exporting - so this is queued afterwards.
+    device.global('Recovery').acknowledge();
+    check('recording resumes once the person has been told',
+        device.call('farkadWritesBlocked') === false);
+    const queued = device.Sync.queueBatch([{
+        path: 'days.2026-08-12.actual.w_01',
+        value: { entries: [{ placeId: 'p_01' }] }
+    }]);
+    given('and an edit is queued', queued === true);
+
+    const before = device.dump();
+    device.call('exportRecoveryData');
+
+    check('a file was handed to the browser', device.downloads.length === 1,
+        JSON.stringify(device.downloads.map(file => file.name)));
+    const file = JSON.parse(device.downloads[0].text);
+    check('it says what it is', file.kind === 'farkad-recovery', String(file.kind));
+
+    check('the damaged bytes are in it',
+        file.records['scheduleData:v2'] === damagedV2,
+        String(file.records['scheduleData:v2']).slice(0, 40));
+    check('so is the quarantine copy',
+        file.records['scheduleData:v2:damaged'] === damagedV2);
+    check('so is the record the old build wrote',
+        file.records.scheduleData === v1, String(file.records.scheduleData).slice(0, 40));
+    check('and the schedule the app was actually holding',
+        Boolean(file.liveSchedule) && Array.isArray(file.liveSchedule.workers)
+        && file.liveSchedule.workers.length === 2,
+        JSON.stringify((file.liveSchedule || {}).workers || []).slice(0, 80));
+    check('the decision nobody has answered yet travels with it',
+        Array.isArray(file.pendingDecisions) && file.pendingDecisions.length > 0,
+        JSON.stringify(file.pendingDecisions));
+
+    const queueKeys = Object.keys(file.records).filter(key => key.indexOf('farkad:outbox') === 0);
+    check('every queue record is in it',
+        device.Sync.activeQueueKeys().every(key => file.records[key] === device.raw(key))
+        && queueKeys.some(key => String(file.records[key]).includes('2026-08-12')),
+        JSON.stringify(queueKeys));
+    check('and every provenance record',
+        device.Store.keys()
+            .filter(key => key === 'farkad:provenance:v1' || key.indexOf('farkad:prov:') === 0)
+            .every(key => file.records[key] === device.raw(key)),
+        JSON.stringify(device.Store.keys().filter(key => key.indexOf('farkad:prov:') === 0)));
+
+    // THE SOURCE KEEPS EVERY BYTE. A complete before/after map, not a spot check on the
+    // two keys the test happened to think of.
+    const after = device.dump();
+    // The fence is not a record: it is what a snapshot is bracketed by, and the export
+    // writes the handover, so it moves by design. It is also EXERCISED before the export
+    // claims anything - written and read back - because a disk can have room for the
+    // record and none for the evidence, and a tab that only ever reads the fence cannot
+    // tell that from a fence that is working.
+    //
+    // That is every farkad:writeTick key: the shared counter a build in the field reads,
+    // and this tab's own counter, which is what the fence actually compares. Everything a
+    // person could lose is still in the comparison.
+    const lost = Object.keys(before)
+        .filter(key => String(key).indexOf('farkad:writeTick') !== 0)
+        .filter(key => after[key] !== before[key]);
+    check('and the phone it came from kept every byte it had',
+        lost.length === 0, JSON.stringify(lost.map(key => ({
+            key, before: String(before[key]).slice(0, 40), after: String(after[key]).slice(0, 40)
+        }))));
+}
+
+{
+    suite('P4: the rescue file opens through the real file input');
+
+    const { device, damagedV2 } = brokenPhone();
+    device.global('Recovery').acknowledge();
+    device.Sync.queueBatch([{
+        path: 'days.2026-08-12.actual.w_01',
+        value: { entries: [{ placeId: 'p_01' }] }
+    }]);
+    device.call('exportRecoveryData');
+    const text = device.downloads[0].text;
+    const name = device.downloads[0].name;
+
+    // A SECOND phone, with troubles of its own that must survive the import.
+    const rescuer = makeDevice({ deviceId: 'd_rescuer' });
+    seed(rescuer);
+    rescuer.putRaw('farkad:outbox:damaged', '{"seq":3,"items":{"days.2026-07-07');
+    const theirWreckage = rescuer.raw('farkad:outbox:damaged');
+    const said = [];
+    const asked = [];
+    rescuer.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    rescuer.ctx.askConfirm = question => { asked.push(question); return Promise.resolve(true); };
+    // Lives in js/ui/migration.js, which the data suite does not load. The import opens
+    // it when the file brought decisions with it, and that it is opened at all is part of
+    // what this checks.
+    let migrationOpened = 0;
+    rescuer.ctx.openMigrationModal = () => { migrationOpened += 1; };
+
+    const mine = rescuer.State.nextWorkerId();
+    rescuer.State.schedule.workers.push(
+        { id: mine, name: 'שלי', active: true, dailyRate: 100, hourlyRate: 0 });
+    rescuer.State.save({ silent: true });
+    given('the rescuer can prove somebody is only ever his',
+        rescuer.Sync.provenLocalOnly('workers', mine) === true);
+
+    // Through the handler the browser calls, with the file on the event.
+    rescuer.call('importBackup', rescuer.fileEvent(name, text));
+    await settle(60);
+
+    check('the app asked before replacing anything', asked.length === 1,
+        JSON.stringify(asked.map(question => question && question.title)));
+    check('and said out loud that this is a rescue file, not a backup',
+        String((asked[0] || {}).title || '').includes('חילוץ'),
+        JSON.stringify((asked[0] || {}).title));
+    check('the week the broken phone was showing arrived',
+        Boolean((rescuer.State.schedule.days || {})['2026-08-10']),
+        JSON.stringify(Object.keys(rescuer.State.schedule.days || {})));
+    check('and so did the edit that never reached its schedule record',
+        rescuer.call('entriesFor', rescuer.State.schedule, '2026-08-12', 'w_01', 'actual')
+            .length === 1,
+        JSON.stringify(Object.keys(rescuer.State.schedule.days || {})));
+    check('the decision nobody answered is still waiting, on this phone now',
+        rescuer.State.migrationIssues.length > 0,
+        String(rescuer.State.migrationIssues.length));
+    check('and it was put in front of the person rather than filed away',
+        migrationOpened === 1, String(migrationOpened));
+
+    // The raw records are EVIDENCE. Importing them would put unreadable bytes under the
+    // keys this app reads, and the next open would quarantine them and stop recording.
+    // Not "does the record look different" - the rescued schedule naturally begins with
+    // the same characters the truncated one did. The question is whether any key on this
+    // device now holds those bytes, and whether what it does hold can be read.
+    const readsBack = (() => {
+        try { return Boolean(JSON.parse(rescuer.raw('scheduleData:v2'))); }
+        catch (error) { return false; }
+    })();
+    const carrying = Object.entries(rescuer.dump())
+        .filter(([, value]) => value === damagedV2)
+        .map(([key]) => key);
+    check('the damaged bytes were not written onto the rescuing phone',
+        readsBack && carrying.length === 0,
+        JSON.stringify({ readsBack, carrying }));
+    check('and its own wreckage is exactly where it was',
+        rescuer.raw('farkad:outbox:damaged') === theirWreckage,
+        String(rescuer.raw('farkad:outbox:damaged')));
+
+    // A roster that arrived in a file has been on two phones. Nobody in it is provably
+    // this device's own any more, and permanent deletion has nothing behind it.
+    check('nobody can be proved local-only after a rescue import',
+        rescuer.Sync.provenLocalOnly('workers', 'w_01') === false
+        && rescuer.Sync.provenLocalOnly('workers', mine) === false);
+    check('so the screen offers the archive instead of the delete',
+        rescuer.call('deletionBlockers', 'w_01').length > 0,
+        JSON.stringify(rescuer.call('deletionBlockers', 'w_01')));
+
+    // And across a close and reopen, which is the only reading that counts.
+    const reopened = makeDevice({ storage: rescuer.dump(), deviceId: 'd_rescuer' });
+    reopened.State.load();
+    check('the reopen holds the rescued week',
+        Boolean((reopened.State.schedule.days || {})['2026-08-10'])
+        && reopened.call('entriesFor', reopened.State.schedule, '2026-08-12', 'w_01',
+            'actual').length === 1,
+        JSON.stringify(Object.keys(reopened.State.schedule.days || {})));
+    check('and still refuses to call anybody its own',
+        reopened.Sync.provenLocalOnly('workers', 'w_01') === false);
+}
+
+{
+    suite('P4: a rescue file cannot hand back the claims its export retired');
+
+    // The ordering bug, stated as the thing it costs. forgetLocalOrigin is what says
+    // "nothing here is provably ours any more", and the records were being snapshotted
+    // BEFORE it ran - so the file carried the very claims it was invalidating, and
+    // opening it on a second phone stood them back up with a delete button beside them.
+    const { device } = crew({ deviceId: 'd_source' });
+    const mine = device.State.nextWorkerId();
+    device.State.schedule.workers.push(
+        { id: mine, name: 'חדש', active: true, dailyRate: 300, hourlyRate: 0 });
+    device.State.save({ silent: true });
+    given('he is provably local before the file leaves',
+        device.Sync.provenLocalOnly('workers', mine) === true);
+
+    device.call('exportRecoveryData');
+    const file = JSON.parse(device.downloads[0].text);
+
+    check('the file says the handover was written down',
+        file.handoverRecorded === true, String(file.handoverRecorded));
+    check('and the provenance records in it are the ones from AFTER the handover',
+        file.records['farkad:prov:gen'] === device.raw('farkad:prov:gen'),
+        `${file.records['farkad:prov:gen']} vs ${device.raw('farkad:prov:gen')}`);
+
+    // The proof: a phone built from the file's own records cannot claim him.
+    const opened = makeDevice({ storage: file.records, deviceId: 'd_source' });
+    opened.State.load();
+    check('so a device holding only those records cannot prove he never left',
+        opened.Sync.provenLocalOnly('workers', mine) === false);
+}
+
+{
+    suite('P4: a rescue file with nothing readable in it is refused, not half-imported');
+
+    const rescuer = makeDevice({ deviceId: 'd_rescuer2' });
+    seed(rescuer);
+    const before = rescuer.raw('scheduleData:v2');
+    const said = [];
+    let asked = 0;
+    rescuer.ctx.askTell = message => {
+        said.push(typeof message === 'string' ? message : JSON.stringify(message));
+        return Promise.resolve();
+    };
+    rescuer.ctx.askConfirm = () => { asked += 1; return Promise.resolve(true); };
+
+    rescuer.call('importBackup', rescuer.fileEvent('farkad-recovery-bad.json',
+        JSON.stringify({
+            kind: 'farkad-recovery',
+            records: { 'scheduleData:v2': '{"workers":[{"id":"w_0' }
+        })));
+    await settle(60);
+
+    check('nothing was replaced', rescuer.raw('scheduleData:v2') === before);
+    check('and nothing was even asked', asked === 0, String(asked));
+    check('the person is told the file could not be read',
+        said.some(message => message.includes('לא נטען')), JSON.stringify(said));
+}
+
+{
+    suite('P4: an ordinary backup still opens through the same door');
+
+    // The rescue path is a branch, not a replacement. A file that is a plain schedule has
+    // to go on behaving exactly as it did.
+    const source = makeDevice({ deviceId: 'd_plain' });
+    seed(source);
+    record(source, '2026-08-15', 'w_01', 'p_01');
+    const text = JSON.stringify(source.State.schedule);
+
+    const target = makeDevice({ deviceId: 'd_target' });
+    seed(target);
+    const asked = [];
+    target.ctx.askTell = () => Promise.resolve();
+    target.ctx.askConfirm = question => { asked.push(question); return Promise.resolve(true); };
+
+    target.call('importBackup', target.fileEvent('farkad-2026-08-15.json', text));
+    await settle(60);
+
+    check('it is offered as a backup, not as a rescue',
+        String((asked[0] || {}).title || '').includes('גיבוי'),
+        JSON.stringify((asked[0] || {}).title));
+    check('and the day arrived',
+        target.call('entriesFor', target.State.schedule, '2026-08-15', 'w_01', 'actual')
+            .length === 1,
+        JSON.stringify(Object.keys(target.State.schedule.days || {})));
+}
+
 {
     suite('the recovery export is never blocked by bookkeeping');
 
@@ -8799,7 +9368,8 @@ function withAdvances(device, rows) {
         { workerId: 'w_02', date: '2026-08-05', amount: 300 }
     ]);
     given('two advances and no entries - this build recorded them the old way, then',
-        device.call('ledgerEntries', device.State.schedule).length >= 0);
+        device.call('ledgerEntries', device.State.schedule).length === 0,
+        String(device.call('ledgerEntries', device.State.schedule).length));
 
     // The reopen IS the migration: nobody calls anything.
     const booted = makeDevice({ storage: device.dump(), deviceId: device.id });
@@ -8979,6 +9549,17 @@ function withAdvances(device, rows) {
 
 // ---------------------------------------------------------------- the vehicles
 //
+// THE FEATURE IS OFF IN THIS BUILD. The owner cancelled it, and FARKAD_FLAGS in
+// js/model/schema.js is where that is said. What follows tests the implementation with
+// the gate OPEN - the same thing a build with the flag on would be - because a gate that
+// rots while it is shut is not a gate, and the day anybody reconsiders this the
+// arithmetic underneath has to still be the arithmetic that was argued over.
+//
+// What a person actually installs is read by the suite after them, and by R8 in
+// tests/recovery.test.mjs: no charge, no control, and every stored vehicle byte intact.
+const VEHICLES_ON = { vehicles: true };
+
+//
 // V1. Five vehicles: one each for two of the men, three for a third. Three hundred a day
 // for a vehicle that went out - not per trip, not per site, and not scaled by whether the
 // man driving it worked a full day. Paid to whoever OWNS it, and paid whether or not he
@@ -8991,7 +9572,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: a vehicle earns for the man who owns it');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = [
@@ -9026,7 +9607,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: three vehicles are three payments');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = ['v_01', 'v_02', 'v_03'].map(id => ({
@@ -9047,7 +9628,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: the ordinary evening writes nothing, the exception writes one field');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
@@ -9080,7 +9661,7 @@ function withAdvances(device, rows) {
     // The one that would have cost real money. The default is "they all went out", so a
     // vehicle with no start date would earn for every day in the record - including the
     // month that was counted, paid and closed.
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     ['2026-07-06', '2026-07-07', '2026-08-12'].forEach(date => record(device, date, 'w_01', 'p_01'));
@@ -9107,7 +9688,7 @@ function withAdvances(device, rows) {
 {
     suite('V1: a day nobody worked is not a day five vehicles earned');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     const s = device.State.schedule;
     s.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
@@ -9130,13 +9711,13 @@ function withAdvances(device, rows) {
 {
     suite('V1: the vehicles survive the app being closed, and reach the other phone');
 
-    const device = makeDevice();
+    const device = makeDevice({ flags: VEHICLES_ON });
     seed(device);
     device.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר לבן', ownerId: 'w_01',
         active: true, rates: [{ from: '2026-08-01', amount: 300 }] }];
     device.State.save();
 
-    const reopened = makeDevice({ storage: device.dump() });
+    const reopened = makeDevice({ storage: device.dump(), flags: VEHICLES_ON });
     reopened.State.load();
     const kept = reopened.State.schedule.vehicles;
     check('a reopened phone still has them', Array.isArray(kept) && kept.length === 1,
@@ -9146,11 +9727,11 @@ function withAdvances(device, rows) {
 
     // A build that has never heard of vehicles must not be handed something it will choke
     // on, and a record written before this feature must not arrive here as a crash.
-    const older = makeDevice();
+    const older = makeDevice({ flags: VEHICLES_ON });
     seed(older);
     delete older.State.schedule.vehicles;
     older.State.save();
-    const upgraded = makeDevice({ storage: older.dump() });
+    const upgraded = makeDevice({ storage: older.dump(), flags: VEHICLES_ON });
     upgraded.State.load();
     same('a record from before vehicles existed reads as none of them',
         upgraded.call('vehiclePayFor', upgraded.State.schedule, 'w_01', '2026-01-01', '2026-12-31'),
@@ -9159,6 +9740,127 @@ function withAdvances(device, rows) {
         upgraded.call('payrollReport', upgraded.State.schedule, '2026-01-01', '2026-12-31')));
 }
 
+
+// ---------------------------------------------------------------- vehicles, as shipped
+//
+// The build a person installs. Everything above this line ran with the gate open; nothing
+// below it does, and nothing below it may pass by accident - each check is a thing the
+// retirement promised.
+{
+    suite('V-off: a cancelled feature does not go on charging anybody');
+
+    const device = makeDevice({ deviceId: 'd_voff' });
+    seed(device);
+    device.State.schedule.vehicles = [
+        { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+            rates: [{ from: '2026-01-01', amount: 300 }] },
+        { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: true,
+            rates: [{ from: '2026-01-01', amount: 300 }] }
+    ];
+    device.State.save({ silent: true });
+    record(device, '2026-08-12', 'w_01', 'p_01');
+
+    given('the feature is off in this build',
+        device.global('FARKAD_FLAGS').vehicles === false);
+
+    same('nothing went out, because nothing is asked any more',
+        device.call('vehiclesOutOn', device.State.schedule, '2026-08-12'), []);
+    same('so nobody is paid for one',
+        device.call('vehiclePayFor', device.State.schedule, 'w_01', '2026-08-01', '2026-08-31'),
+        { days: 0, amount: 0 });
+    same('not even the owner who was nowhere near a site',
+        device.call('vehiclePayFor', device.State.schedule, 'w_02', '2026-08-01', '2026-08-31'),
+        { days: 0, amount: 0 });
+
+    const rows = device.call('payrollReport', device.State.schedule, '2026-08-01', '2026-08-31');
+    const his = rows.find(row => row.workerId === 'w_01');
+    check('the pay sheet counts no vehicle days',
+        his.vehicleDays === 0 && his.vehicleAmount === 0, JSON.stringify(his));
+    check('and his day is his day, with nothing added to it',
+        his.amount === 400 && his.netAmount === 400, JSON.stringify(his));
+
+    // The write path, called the way a stale screen or a queued edit from another build
+    // would call it.
+    const change = device.call('setVehicleOut', device.State.schedule, '2026-08-12', 'v_01', false);
+    check('marking a vehicle off the road writes nothing',
+        !change || change.path === null, JSON.stringify(change));
+    check('and no day record grew a vehicle field',
+        (device.State.schedule.days['2026-08-12'] || {}).vehiclesOff === undefined,
+        JSON.stringify(device.State.schedule.days['2026-08-12']));
+}
+
+{
+    suite('V-off: every vehicle byte survives load, sync, backup and restore');
+
+    // The bytes are somebody's history. Retiring a feature is not a licence to lose them,
+    // and the day anybody turns it back on the rates have to still be the rates.
+    const cloud = makeCloud();
+    const device = makeDevice({ deviceId: 'd_vbytes' });
+    seed(device);
+    device.State.schedule.vehicles = [
+        { id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+            rates: [{ from: '2026-01-01', amount: 300 }, { from: '2026-06-01', amount: 350 }] },
+        { id: 'v_02', name: 'טרנזיט', ownerId: 'w_02', active: false,
+            rates: [{ from: '2026-03-01', amount: 280 }] }
+    ];
+    // A day that remembers one of them stayed in the yard - written by a build that still
+    // did vehicles, and still true about that evening.
+    device.State.schedule.days['2026-08-12'] = {
+        plan: {}, actual: { w_01: { entries: [{ placeId: 'p_01' }] } },
+        vehiclesOff: ['v_01']
+    };
+    device.State.save({ silent: true });
+    const before = JSON.stringify(device.State.schedule.vehicles);
+
+    const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_vbytes' });
+    reopened.State.load();
+    check('a close and reopen keeps them, rates and all',
+        JSON.stringify(reopened.State.schedule.vehicles) === before,
+        JSON.stringify(reopened.State.schedule.vehicles));
+    check('and the evening that remembered one stayed in still says so',
+        JSON.stringify((reopened.State.schedule.days['2026-08-12'] || {}).vehiclesOff)
+            === '["v_01"]',
+        JSON.stringify(reopened.State.schedule.days['2026-08-12']));
+
+    await connected(reopened, cloud);
+    await settle(TICK * 40);
+    check('the cloud has them too',
+        JSON.stringify(cloud.doc.vehicles) === before, JSON.stringify(cloud.doc.vehicles));
+
+    const other = makeDevice({ deviceId: 'd_vother' });
+    await connected(other, cloud);
+    await settle(TICK * 40);
+    check('and the second phone reads them back unchanged',
+        JSON.stringify(other.State.schedule.vehicles) === before,
+        JSON.stringify(other.State.schedule.vehicles));
+
+    // Through a backup file and back.
+    const target = makeDevice({ deviceId: 'd_vtarget' });
+    seed(target);
+    target.ctx.askTell = () => Promise.resolve();
+    target.ctx.askConfirm = () => Promise.resolve(true);
+    target.call('importBackup',
+        target.fileEvent('farkad.json', JSON.stringify(reopened.State.schedule)));
+    await settle(80);
+    check('a backup round trip keeps them',
+        JSON.stringify(target.State.schedule.vehicles) === before,
+        JSON.stringify(target.State.schedule.vehicles));
+
+    // And a whole-document restore.
+    const restored = makeDevice({ deviceId: 'd_vrestore' });
+    seed(restored);
+    const result = await restored.Sync.replaceEverything(
+        restored.call('normaliseSchedule', reopened.State.schedule));
+    given('the restore happened', result.ok === true, JSON.stringify(result));
+    check('a restore keeps them',
+        JSON.stringify(restored.State.schedule.vehicles) === before,
+        JSON.stringify(restored.State.schedule.vehicles));
+
+    // A schedule carrying vehicle fields is still a schedule this build will open.
+    check('and none of it makes the record unreadable',
+        restored.global('Recovery').problems.length === 0,
+        JSON.stringify(restored.global('Recovery').problems.map(problem => problem.key)));
+}
 
 {
     suite('two phones mirror the same advance into the same entry');
