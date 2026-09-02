@@ -92,7 +92,7 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the forty-two node suites; no browser, runs in a few minutes
+    npm test                # the forty-three node suites; no browser, runs in a few minutes
     npm run test:all        # adds smoke, print, mobile, update, forms, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
@@ -194,6 +194,7 @@ written down so it cannot happen twice.
     tests/quarantine.test.mjs  a damaged APPROVAL, through every door a record arrives by
     tests/correction.test.mjs  a correction is all of a transaction, dated on the transaction
     tests/closure.test.mjs     the frozen fortnight: what it records, what it refuses, who may have one
+    tests/closure.echo.test.mjs an entry is its own wire copy; the closer is not held by its own closure landing first
     tests/wording.test.mjs     every figure called what it is, and an overpaid account stopped
     tests/samefact.test.mjs    one fact written by two phones is one fact, not a conflict
     tests/snapshot.poison.test.mjs a poisoned name arriving from the cloud, from every family

@@ -512,6 +512,91 @@ const reopen = (device, id) => {
         JSON.stringify([saidAtClose.slice(0, 240), statement().slice(0, 240)]));
 }
 
+// ------------------------------------------- the hours a frozen day was priced with
+{
+    suite('a closed fortnight\'s frozen days carry the extra hours they were priced with');
+
+    // The frozen day list is the evidence for the man's statement, and it froze without
+    // its hours. closureFacts read `one.hours` off the live entries workerDaysReport
+    // handed it, and the live field is `extraHours` - makeEntry writes it, entryExtraHours
+    // reads it - so every frozen entry lost its hours, the frozen branch summed them to
+    // nothing, and a statement printed after the close showed a day priced at
+    // 610 + 2 × 50 = 710 beside a work-units line with no hours in it. Not money: the wage
+    // and the day's amount are frozen whole. The reason for the number, on the one
+    // document the man is asked to agree with, and it went missing at the very moment the
+    // number stopped being recomputable.
+    const HOURLY = 50;
+    const HOURS = 2;
+    const PRICED = RATE + HOURLY * HOURS;
+    const device = makeDevice({ deviceId: 'd_hours',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    device.setToday('2026-08-26');
+    device.ctx.askTell = () => Promise.resolve();
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: RATE, hourlyRate: HOURLY }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+    DAYS.forEach(date => device.State.commit(device.call('assignPlace',
+        device.State.schedule, date, 'w_01', 'actual', 'p_01', undefined,
+        date === '2026-08-12' ? HOURS : undefined)));
+    const detail = () => device.call('workerDaysReport', device.State.schedule,
+        device.State.schedule.workers[0], A.from, A.to);
+    const onThe12th = () => detail().find(day => day.date === '2026-08-12') || {};
+    given('the live day carries its two hours and is priced with them',
+        onThe12th().extraHours === HOURS && onThe12th().amount === PRICED
+            && onThe12th().entries[0].extraHours === HOURS,
+        JSON.stringify(onThe12th()));
+    // The statement's own wording for the hours, from the function that writes it.
+    const run = reportsIn(device);
+    const hoursLine = run(`countedIn(${HOURS}, 'שעה נוספת אחת', 'שעות נוספות')`);
+    const statement = () => run(`workerStatementText('w_01')`);
+    given('and the statement says so', statement().indexOf(hoursLine) !== -1,
+        JSON.stringify([hoursLine, statement().slice(0, 240)]));
+
+    const changes = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-20T18:00:00.000Z', 'd_hours');
+    given('the fortnight closes', changes.length > 0 && device.State.commitMany(changes) !== false,
+        JSON.stringify(changes.map(change => change && change.value && change.value.kind)));
+    const closure = closureIn(device);
+    given('and the closure carries its days', closure !== null && Array.isArray(closure.days)
+        && closure.days.length === DAYS.length, JSON.stringify(closure && closure.days));
+
+    // THE RECORD. Hours where they were worked, no key where they were not - the shape
+    // the frozen reader asks for, and the shape that is its own JSON.
+    const frozen12th = closure.days.find(day => day.date === '2026-08-12') || {};
+    check('the frozen day carries the hours it was priced with',
+        Array.isArray(frozen12th.entries) && frozen12th.entries.length === 1
+            && frozen12th.entries[0].hours === HOURS,
+        JSON.stringify(frozen12th));
+    check('and the frozen amount is the priced one', frozen12th.amount === PRICED,
+        JSON.stringify(frozen12th));
+    check('a day with no extra hours carries no hours key at all',
+        closure.days.filter(day => day.date !== '2026-08-12')
+            .every(day => day.entries.every(entry =>
+                !Object.prototype.hasOwnProperty.call(entry, 'hours'))),
+        JSON.stringify(closure.days.map(day => day.entries)));
+    check('nor a rate key for an ordinary day',
+        closure.days.every(day => day.entries.every(entry =>
+            !Object.prototype.hasOwnProperty.call(entry, 'rate'))),
+        JSON.stringify(closure.days.map(day => day.entries)));
+
+    // THE READER. The frozen branch of workerDaysReport is what the statement and the
+    // detail screen print from now on.
+    check('the frozen detail shows the hours', onThe12th().extraHours === HOURS
+        && onThe12th().entries[0].hours === HOURS, JSON.stringify(onThe12th()));
+    check('and the statement still says so', statement().indexOf(hoursLine) !== -1,
+        JSON.stringify([hoursLine, statement().slice(0, 240)]));
+
+    // THE EVIDENCE OUTLIVES THE DAY. The live day goes; the frozen one keeps its hours.
+    device.State.commit(device.call('clearWorkerDay', device.State.schedule,
+        '2026-08-12', 'w_01', 'actual'));
+    check('after the live day is cleared the frozen day still carries its hours',
+        onThe12th().extraHours === HOURS && onThe12th().amount === PRICED,
+        JSON.stringify(onThe12th()));
+    check('and the statement he is handed still explains the number',
+        statement().indexOf(hoursLine) !== -1, JSON.stringify(statement().slice(0, 240)));
+}
+
 // ------------------------------------------------- a fortnight with no advances in it
 {
     suite('a fortnight can be closed whether or not anybody took an advance');
