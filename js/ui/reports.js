@@ -583,11 +583,17 @@ function renderInvoiceTable() {
         : all.dates;
 
     const headers = ['תאריך'].concat(places.map(place => place.name)).concat(['סה״כ']);
+    // Weekday and dd/mm, no year: the person asked for it off a screenshot of this
+    // column. The year is on the period line above the grid, once, and repeated down
+    // every row it was the widest thing in the narrowest cell, saying nothing the line
+    // above had not said. This grid is the paper too (the print stylesheet shows the
+    // same DOM), so the paper follows; the exported sheets do NOT - a file is read out
+    // of context and keeps its full date (detailRows, invoiceSheetRows).
     const body = dates.map(date => {
         const parsed = parseLocalDate(date);
         const counts = places.map(place => all.countAt(place.placeId, date));
         const dayTotal = counts.reduce((sum, n) => sum + n, 0);
-        return [`${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatFullDate(parsed)}`]
+        return [`${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`]
             .concat(counts).concat([dayTotal]);
     });
 
