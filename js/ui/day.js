@@ -27,12 +27,60 @@ function setDayMode(mode) {
     render();
 }
 
+// ---------------------------------------------------------------- the header on scroll
+//
+// Above ON the header is one row; back below OFF it is two. Two numbers rather than one,
+// because collapsing the header takes about fifty pixels out of the page and everything
+// under it moves up by that much - with a single threshold the page can land back on the
+// wrong side of it and toggle again on the next frame, which is a header that flickers
+// while a thumb is trying to hit something. The gap between them is wider than the height
+// the collapse removes.
+const COMPACT_ON = 72;
+const COMPACT_OFF = 12;
+
+// THE STATE COMES FROM scrollY AND FROM NOTHING ELSE.
+//
+// v99 spent a whole round taking a viewport measurement out of the bottom bars: on a
+// home-screen iPhone the two viewports can disagree with no resize event to say so, and
+// the app read that disagreement as "a keyboard is up" and hid both bars until it was
+// killed. A scroll position is not that kind of number - it is reported directly, it is
+// never stale, and it comes back down. Nothing here reads a layout, measures a box, or
+// asks the visual viewport anything; adding one would be re-opening that fault by
+// another door.
+function readDayScroll() {
+    if (typeof document === 'undefined' || !document.body) return;
+    const body = document.body;
+    const compact = body.classList.contains('day-compact');
+    const y = typeof window.scrollY === 'number' ? window.scrollY
+        : (document.documentElement ? document.documentElement.scrollTop : 0);
+    // Idempotent on purpose: this runs on every scroll event, and a classList write per
+    // frame is style work the list does not need. Only a crossing changes anything.
+    if (!compact && y > COMPACT_ON) body.classList.add('day-compact');
+    else if (compact && y < COMPACT_OFF) body.classList.remove('day-compact');
+}
+
+let dayScrollWatched = false;
+
+function watchDayScroll() {
+    if (dayScrollWatched || typeof window === 'undefined' || !window.addEventListener) return;
+    dayScrollWatched = true;
+    // passive: this listener never calls preventDefault, and saying so keeps the scroll
+    // off the main thread's critical path on a phone.
+    window.addEventListener('scroll', readDayScroll, { passive: true });
+}
+
 function renderDay() {
     const root = document.getElementById('dayView');
     if (!root) return;
 
     root.innerHTML = '';
     root.appendChild(renderDayHeader());
+    watchDayScroll();
+    // Asked again on every render, not only on scroll: a render can arrive with the page
+    // already scrolled - coming back to the day from the week, a snapshot landing under a
+    // scrolled list - and a header drawn full under a scrolled page is a header that
+    // stays full until the next flick.
+    readDayScroll();
 
     // The empty states carry the button that fixes them. Sending someone to another
     // screen to find it is how a first evening ends with a worker added, nothing on the
@@ -67,12 +115,18 @@ function renderDay() {
     // under the header - same top, lower z - and a tap where the count appeared to be
     // landed on "יום הבא". One box cannot bury itself; and one row rather than two is
     // what keeps the header inside the 96-112px the list was promised above it.
-    root.querySelector('.day-tools').appendChild(renderProgress());
-    // The bulk row is built first because the switcher row carries its disclosure
-    // button: the fold used to be a 44px row of its own above the list, which on a
-    // 320px screen was the difference between three whole names and two.
+    const tools = root.querySelector('.day-tools');
+    // The bulk row is built first because its disclosure button lives on the tools row:
+    // the fold used to be a 44px row of its own above the list, which on a 320px screen
+    // was the difference between three whole names and two.
     const bulk = renderBulkRow();
-    root.appendChild(renderModeToggle(bulk));
+    // The switcher joins the tools row rather than keeping a row of its own above the
+    // list (v101). It costs the header the switcher's height and gives the crew back a
+    // whole 48px row plus its margin - and, because the tools row is what compacts away
+    // on scroll, it also stops being on the screen at all once the list is moving. That
+    // is the right place for it: a way of working is chosen once, not consulted every row.
+    if (typeof appendModeSwitch === 'function') appendModeSwitch(tools, bulk);
+    tools.appendChild(renderProgress());
     root.appendChild(bulk);
 
     if (dayMode === 'workers') {
@@ -315,8 +369,8 @@ function renderBulkRow() {
 
     const row = el('div', bulkOpen ? 'bulk-row' : 'bulk-row bulk-closed');
     row.id = 'bulkRow';
-    // The disclosure control is on the switcher row (bulkToggle, below): this row is the
-    // chips alone, and folded it costs the list nothing at all.
+    // The disclosure control is on the header's tools row (bulkToggle, below): this row
+    // is the chips alone, and folded it costs the list nothing at all.
 
     // Closed is display:none, never out of the DOM. The chips' behaviour is pinned by
     // tests that drive them with element.click(), and a hidden button still clicks - only
@@ -336,7 +390,7 @@ function renderBulkRow() {
     return row;
 }
 
-// The disclosure button, on the switcher row: a checklist glyph and the count, labelled
+// The disclosure button, on the tools row beside the switcher: a checklist glyph and the count, labelled
 // in full for a screen reader. Only the class changes on tap - no render() - so the list
 // under it does not rebuild and the scroll position stays where the thumb left it.
 function bulkToggle(row) {
@@ -644,22 +698,35 @@ function renderDayHeader() {
     return header;
 }
 
-// The two ways of looking at one day, as the first thing in the SCROLLING content. On
-// the header it wrapped to a second line at 320px and the whole pinned block paid for
-// it on every scroll; a way of working is chosen once, not consulted every row.
+// The two ways of looking at one day, and the bulk fold's disclosure button, on the
+// header's tools row.
 //
-// The bulk fold's button shares the row, at its end: one 44px row for both, where the
-// fold used to have a row of its own.
-function renderModeToggle(bulkRow) {
-    const row = el('div', 'day-mode-row');
+// They had a row of their own above the list until v101. The reason for that was real -
+// on the header the pair wrapped to a second line at 320px, and the whole pinned block
+// paid for the extra line on every scroll - so this is not a free move: the stylesheet
+// lets the tools row WRAP at 320 rather than shrink a segment below the 44px floor, and
+// the header is measured in that state by tests/mobile.test.mjs. Even wrapped it is
+// cheaper than the separate row was, because the tools row exists either way.
+//
+// Appended rather than returned: the tools row is built by renderDayHeader and the bulk
+// row it points at is built after it, so there is one caller and it is renderDay.
+function appendModeSwitch(tools, bulkRow) {
+    if (!tools) return;
+    // A line of their own inside the wrapping row, and a real element rather than a
+    // flex-basis trick. Asking the pair to claim a line by refusing to be narrower than
+    // its own labels works until the labels are bigger than the phone: at 200% text on a
+    // 320px screen that pushed the whole page six pixels sideways, which the mobile suite
+    // measures at exactly that size. A wrapper takes the line by being one item, and what
+    // is inside it is free to shrink.
+    const line = el('div', 'day-switch');
     const modes = el('div', 'layer-toggle mode-toggle mode-quiet');
     modes.appendChild(modeButton('workers', 'לפי עובדים'));
     modes.appendChild(modeButton('sites', 'לפי אתרים'));
-    row.appendChild(modes);
+    line.appendChild(modes);
     if (bulkRow && bulkRow.classList && bulkRow.classList.contains('bulk-row')) {
-        row.appendChild(bulkToggle(bulkRow));
+        line.appendChild(bulkToggle(bulkRow));
     }
-    return row;
+    tools.appendChild(line);
 }
 
 function openDayPicker() {
@@ -723,7 +790,33 @@ function renderSiteCard(place) {
     const title = el('h3');
     appendSiteName(title, place.id, place.name);
     head.appendChild(title);
-    head.appendChild(el('span', 'site-count', String(workerIds.length)));
+
+    // The count and the two things done to a card, on the head itself. They used to be a
+    // footer row under the list, and a row per card is five rows on a screen that shows
+    // five cards - room the list wanted more than the labels did. The labels go with the
+    // row: a glyph is the whole button now, so the accessible name is the ONLY thing that
+    // says what it does, and there are four of these cards on the screen at once - it has
+    // to say which site as well.
+    const tools = el('div', 'site-head-tools');
+    tools.appendChild(el('span', 'site-count', String(workerIds.length)));
+
+    tools.appendChild(button('＋', 'btn-icon site-head-btn',
+        () => openWorkerPicker(place.id),
+        `הוסף עובד ל${isolate(place.name)}`));
+
+    // The seder for THIS gate. It goes to the man driving there, who needs to know who is
+    // with him tomorrow and cannot act on the other four sites - and sending him all of
+    // them is how somebody reads the wrong line and turns up at the wrong place.
+    //
+    // Only once there is somebody to name: a message saying an empty site is empty is a
+    // message nobody sends.
+    if (workerIds.length > 0) {
+        tools.appendChild(button('💬', 'btn-icon site-head-btn',
+            () => showDayMessage(place.id),
+            `שלח את סידור ${isolate(place.name)} בלבד`));
+    }
+
+    head.appendChild(tools);
     paintSite(head, place.id);
     card.appendChild(head);
 
@@ -735,21 +828,6 @@ function renderSiteCard(place) {
     }
     card.appendChild(list);
 
-    const actions = el('div', 'site-card-actions');
-    actions.appendChild(button('+ הוסף עובד', 'btn-add', () => openWorkerPicker(place.id)));
-
-    // The seder for THIS gate. It goes to the man driving there, who needs to know who is
-    // with him tomorrow and cannot act on the other four sites - and sending him all of
-    // them is how somebody reads the wrong line and turns up at the wrong place.
-    //
-    // Only once there is somebody to name: a message saying an empty site is empty is a
-    // message nobody sends.
-    if (workerIds.length > 0) {
-        actions.appendChild(button('💬 שלח את האתר הזה', 'btn-secondary',
-            () => showDayMessage(place.id),
-            `שלח את סידור ${isolate(place.name)} בלבד`));
-    }
-    card.appendChild(actions);
     return card;
 }
 

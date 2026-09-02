@@ -438,6 +438,7 @@ for (const [width, height, atLeast] of [[430, 932, 6], [390, 844, 5], [320, 667,
             banner: box('#accountBanner'),
             header: box('.day-header'),
             mode: box('.day-mode-row'),
+            switcher: box('.day-header .mode-toggle'),
             rows: rows.map(b => Math.round(b.height)),
             complete: rows.filter(b => b.bottom <= dock + 0.5).length
         };
@@ -448,8 +449,27 @@ for (const [width, height, atLeast] of [[430, 932, 6], [390, 844, 5], [320, 667,
         m.bannerShown && m.folded === true);
     check(`${label}: the strip above the day is 52px or less`, m.topbar <= 52, `${m.topbar}px`);
     check(`${label}: the folded warning is 56-64px`, m.banner >= 56 && m.banner <= 64, `${m.banner}px`);
-    check(`${label}: the day header is 96-112px`, m.header >= 96 && m.header <= 112, `${m.header}px`);
-    check(`${label}: the switcher row is 44-48px`, m.mode >= 44 && m.mode <= 48, `${m.mode}px`);
+    // MOVED DELIBERATELY at v101, and the reason is worth more than the number.
+    //
+    // Until v100 the header was 96-112 and the switcher had a 48px row of its own under
+    // it, with 6px of margin: 157px of chrome between the warning and the first name. The
+    // switcher is inside the header now, so a band on the header alone no longer measures
+    // what the crew feels. What they feel is the SUM, and the sum is what is held here.
+    //
+    // The sum barely moved - 157 to 154 - and that is the honest result of item 2 of
+    // features/day-room/contract.md, measured rather than hoped for: a 44px segmented pair
+    // costs a 44px line wherever it is put, and moving a line from below the header to
+    // inside it does not give a line back. What item 2 actually buys is the state below:
+    // scrolled, the switcher is not on the screen at all, which a separate row could never
+    // do. The pair is still checked at its floor, and the header is still checked - just
+    // against a ceiling that admits the line it has taken in.
+    const chrome = m.header + (m.mode === null ? 0 : m.mode);
+    check(`${label}: the chrome above the list is no worse than v100's 157px`,
+        chrome <= 157, `${chrome}px (header ${m.header}, switcher row ${m.mode})`);
+    check(`${label}: the day header is 96-160px`, m.header >= 96 && m.header <= 160, `${m.header}px`);
+    check(`${label}: the switcher is inside the header and 44-48px tall`,
+        m.mode === null && m.switcher >= 44 && m.switcher <= 48,
+        `${m.switcher}px, own row ${m.mode}`);
     check(`${label}: every worker row is 64-72px`,
         m.rows.length > 0 && m.rows.every(h => h >= 64 && h <= 72), JSON.stringify(m.rows.slice(0, 8)));
     check(`${label}: at least ${atLeast} whole names above the dock, unscrolled`,
@@ -1429,6 +1449,63 @@ for (const width of WIDTHS) {
             remove.w >= 52 && remove.h >= 44, JSON.stringify(remove));
     }
 
+    // Item 3 of features/day-room/contract.md: the card's two actions moved off a footer
+    // row of their own and onto the coloured header. The row IS what the change buys -
+    // five sites on a screen, five rows back - so its absence is the assertion rather
+    // than a side effect of one. Drawn again by any hand, this goes red.
+    const footers = await page.evaluate(() =>
+        document.querySelectorAll('.site-card-actions').length);
+    check('no site card draws a footer row of its own', footers === 0, String(footers));
+
+    // The two buttons now sit ON the site's colour, beside its name and its count.
+    const head = await page.evaluate(() => {
+        const card = [...document.querySelectorAll('.site-card')]
+            .find(node => node.querySelectorAll('.assign-row').length > 0);
+        if (!card) return null;
+        const named = card.querySelector('.site-head .site-name');
+        if (!named) return null;
+        const name = named.textContent.trim();
+        return {
+            name,
+            count: (card.querySelector('.site-head .site-count') || {}).textContent,
+            buttons: [...card.querySelectorAll('.site-head button')].map(node => {
+                const box = node.getBoundingClientRect();
+                const label = (node.getAttribute('aria-label') || node.textContent || '').trim();
+                return {
+                    label,
+                    // isolate() wraps the site's name in invisible bidi marks, so the
+                    // name inside an aria-label never matches as plain text. Stripping
+                    // U+2066..U+2069 is what makes the comparison the one a person makes.
+                    names: label.replace(/[\u2066-\u2069]/g, '').includes(name),
+                    w: Math.round(box.width), h: Math.round(box.height)
+                };
+            })
+        };
+    });
+    given('a site card with somebody on it drew a head with the site name in it',
+        Boolean(head), JSON.stringify(head));
+    check('the card head carries both actions', head.buttons.length === 2,
+        JSON.stringify(head.buttons));
+    check('each of them is a finger\'s size in BOTH dimensions',
+        head.buttons.length === 2 && head.buttons.every(b => b.w >= 44 && b.h >= 44),
+        JSON.stringify(head.buttons));
+    // A glyph alone says nothing to a screen reader, and there are four cards on this
+    // screen: the name has to say which site as well as what the button does.
+    check('and each says what it does and which site it is for',
+        head.buttons.length === 2 && head.buttons.every(b => b.label.length > 0 && b.names),
+        JSON.stringify(head.buttons.map(b => ({ label: b.label, names: b.names }))));
+    check('and the count is still on the head', String(head.count || '').trim().length > 0,
+        JSON.stringify(head.count));
+
+    // An empty site keeps the way IN and loses the way out: a message saying an empty
+    // site is empty is a message nobody sends.
+    const empty = await page.evaluate(() => {
+        const card = [...document.querySelectorAll('.site-card')]
+            .find(node => node.querySelectorAll('.assign-row').length === 0);
+        return card ? card.querySelectorAll('.site-head button').length : -1;
+    });
+    check('a site with nobody on it offers only the one that adds', empty === 1, String(empty));
+
     await page.context().close();
 }
 
@@ -2374,6 +2451,123 @@ for (const width of WIDTHS) {
     check(`${width}px: and the page itself still does not scroll sideways`,
         seen.page <= seen.client + 1,
         JSON.stringify({ page: seen.page, client: seen.client }));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the header compacts (v101)
+//
+// Room without moving a bar. The day header is two rows at the top of the page and one
+// row once the page has been scrolled: the day name, its date and the two arrows stay,
+// because the entry that costs real money is a day recorded against the wrong date and
+// halfway down a list of names nothing else says what day this is. Undo, redo, "היום" and
+// the progress line's TEXT go; the 4px track stays, because it is the header's own bottom
+// edge and costs no row.
+//
+// The state comes from a scroll threshold and from nothing else. v99 spent a round pulling
+// a viewport measurement out of the bottom bars - a phone that reports a stale viewport
+// left both bars hidden until the app was killed - and this must not be a second door into
+// the same fault. The check for that is below: the class follows scrollY back down again.
+for (const width of [430, 390, 320]) {
+    const label = `${width}px: the day header compacts on scroll`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+
+    const m = await page.evaluate(async () => {
+        const settle = () => new Promise(done => setTimeout(done, 260));
+        const read = () => {
+            const header = document.querySelector('.day-header');
+            const steps = document.querySelector('.day-steps');
+            const track = document.querySelector('.day-header .progress-bar');
+            const seen = node => {
+                if (!node) return false;
+                const box = node.getBoundingClientRect();
+                return box.width > 0 && box.height > 0;
+            };
+            return {
+                header: Math.round(header.getBoundingClientRect().height),
+                steps: seen(steps),
+                track: seen(track),
+                label: seen(document.querySelector('.day-label')),
+                compact: document.body.classList.contains('day-compact'),
+                page: document.documentElement.scrollWidth,
+                client: document.documentElement.clientWidth
+            };
+        };
+        window.scrollTo(0, 0);
+        await settle();
+        const top = read();
+        window.scrollTo(0, 400);
+        await settle();
+        const down = read();
+        window.scrollTo(0, 0);
+        await settle();
+        const back = read();
+        return { top, down, back };
+    });
+
+    given(`${label}: at the top it is the full header, with undo on it`,
+        m.top.compact === false && m.top.steps === true, JSON.stringify(m.top));
+    check(`${label}: scrolled, the header is shorter than it was at the top`,
+        m.down.header < m.top.header,
+        JSON.stringify({ top: m.top.header, scrolled: m.down.header }));
+    check(`${label}: scrolled, the tools row is not drawn`, m.down.steps === false,
+        JSON.stringify(m.down));
+    check(`${label}: scrolled, the day name and date are still there`,
+        m.down.label === true, JSON.stringify(m.down));
+    check(`${label}: scrolled, the progress track is still there`,
+        m.down.track === true, JSON.stringify(m.down));
+    // The half that matters: a class that goes on at a threshold and never comes off is
+    // the v99 fault wearing a different name.
+    check(`${label}: back at the top, the full header returns`,
+        m.back.compact === false && m.back.steps === true && m.back.header === m.top.header,
+        JSON.stringify({ back: m.back, top: m.top.header }));
+    check(`${label}: neither state scrolls the page sideways`,
+        m.top.page <= m.top.client + 1 && m.down.page <= m.down.client + 1,
+        JSON.stringify({ top: m.top.page, down: m.down.page, client: m.top.client }));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the switcher, in the header
+//
+// "לפי עובדים / לפי אתרים" had a 48px row of its own above the list. A way of working is
+// chosen once and not consulted every row, so it belongs with the chrome that compacts
+// away rather than with the list - and the row it used to occupy goes back to the crew.
+// 44px in BOTH dimensions is the floor (iron law 9), and it is the floor here too: a
+// segmented pair squeezed into a row it does not fit is a mis-tap on somebody's pay.
+for (const width of [430, 390, 320]) {
+    const label = `${width}px: the switcher is in the header`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+
+    const m = await page.evaluate(() => {
+        const modes = [...document.querySelectorAll('.mode-toggle button')];
+        const header = document.querySelector('.day-header');
+        return {
+            row: Boolean(document.querySelector('.day-mode-row')),
+            count: modes.length,
+            inHeader: modes.length > 0 && modes.every(b => header.contains(b)),
+            boxes: modes.map(b => {
+                const box = b.getBoundingClientRect();
+                return { w: Math.round(box.width), h: Math.round(box.height),
+                    text: (b.textContent || '').trim() };
+            })
+        };
+    });
+
+    check(`${label}: it has no row of its own any more`, m.row === false, String(m.row));
+    given(`${label}: both ways of looking at the day are still offered`, m.count === 2,
+        JSON.stringify(m.boxes));
+    check(`${label}: both segments are inside the header`, m.inHeader === true,
+        JSON.stringify(m.boxes));
+    check(`${label}: both segments are 44px in both dimensions`,
+        m.boxes.length === 2 && m.boxes.every(b => b.w >= 44 && b.h >= 44),
+        JSON.stringify(m.boxes));
 
     await page.context().close();
 }

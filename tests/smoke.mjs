@@ -140,7 +140,12 @@ async function seedRoster(page) {
     (await page.textContent('.progress-line')).includes('0 מתוך 3'));
 
   // assign through the site picker, which stays open for a run of names
-  await page.locator('.site-card').first().getByText('+ הוסף עובד').click();
+  // The add is an icon on the card's coloured head now, so it is reached by what it
+  // says it does rather than by a label that is no longer written on it. Matched on the
+  // verb only: isolate() wraps the site's name in invisible bidi marks, so the name
+  // inside an aria-label never matches as plain text.
+  await page.locator('.site-card').first()
+    .getByRole('button', { name: /הוסף עובד ל/ }).click();
   await page.waitForTimeout(200);
   check('the picker lists every active worker',
     (await page.locator('#workerPickerList .picker-row').count()) === 3);
@@ -184,7 +189,8 @@ async function seedRoster(page) {
     (await page.textContent('.progress-line')).includes('2 מתוך 3'));
 
   // the whole point of the model: a second site ADDS, it does not replace
-  await page.locator('.site-card').nth(1).getByText('+ הוסף עובד').click();
+  await page.locator('.site-card').nth(1)
+    .getByRole('button', { name: /הוסף עובד ל/ }).click();
   await page.waitForTimeout(200);
   await page.locator('#workerPickerList .picker-row').filter({ hasText: 'דוד' }).getByRole('button').click();
   await page.waitForTimeout(200);

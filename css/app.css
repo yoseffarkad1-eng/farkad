@@ -945,12 +945,62 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    rather than a theme surface that would clash with ten different backgrounds. */
 .site-head-color {
     border-radius: var(--radius);
-    padding: 8px 12px;
+    /* Was 8px top and bottom, for a head that held only text. It now holds two 44px
+       buttons, and 8px around them is 60px of head on every card - which is the row the
+       footer gave back, spent again. The buttons set the height; the padding only keeps
+       the name off the edge. Written the RTL way round: the name starts at the right, so
+       that is the side that gets the 12px, and the buttons take the tighter left. */
+    padding: 4px 12px 4px 6px;
     border-bottom: none;
     margin-bottom: 10px;
 }
 .site-head-color .site-count { background: rgba(255, 255, 255, .22); color: #fff; }
-.site-head-color h3 { margin: 0; display: flex; align-items: center; gap: 6px; }
+/* The name takes the room that is left and the tools keep theirs: a long site name used
+   to have the whole head to itself, and without min-width:0 a flex item refuses to go
+   under its content's width - it would push the two buttons off the end of a 320px card
+   instead of wrapping. */
+.site-head-color h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.site-head-color .site-name { overflow-wrap: anywhere; }
+.site-head-tools { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+
+/* The two actions, ON the site's colour.
+
+   .btn-icon is --ink-3 on a transparent background: a theme ink over ten saturated
+   backgrounds is a glyph that disappears on the dark blue and the indigo, in both schemes,
+   and NOTHING here would say so - the head's colour is an inline style off
+   js/ui/sitecolor.js, so no stylesheet knows which of the ten it is sitting on. So the
+   button brings its own surface.
+
+   A DARK scrim, and that word is the whole rule. The first version used the translucent
+   WHITE the count beside it uses, and tests/smoke.mjs refused it. It was right to: a white
+   overlay only ever LIGHTENS, so what the glyph is written on depends on the colour
+   underneath, and on the lightest of the ten (--site-5, the ochre) white ink over an 18%
+   white wash is about 3.2:1 - under the 4.5 floor, on one site out of ten, and invisible
+   to anybody reading the stylesheet. A dark scrim can only ever darken, so white ink on it
+   clears the floor on every colour in the palette and on any colour added later. The
+   border stays translucent white: that is edge definition, not contrast.
+
+   44px in BOTH dimensions, written here and not left to the phone media block - a floor
+   that only applies under a media query is not a floor. */
+.site-head-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 4px;
+    font-size: 17px;
+    line-height: 1;
+    color: #fff;
+    background: rgba(0, 0, 0, .22);
+    border: 1px solid rgba(255, 255, 255, .34);
+    border-radius: 10px;
+}
+.site-head-btn:hover { background: rgba(0, 0, 0, .34); color: #fff; }
 
 .site-count {
     background: var(--surface-2);
@@ -963,10 +1013,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .site-empty { color: var(--ink-3); font-size: 14px; margin: 4px 0; }
 .site-list { display: flex; flex-direction: column; gap: 4px; }
-/* The two things done to a site card: put somebody on it, and send it to whoever is
-   driving there. Side by side on a wide phone, stacked when the labels stop fitting. */
-.site-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.site-card-actions > * { flex: 1 1 auto; min-height: 44px; }
 
 .assign-row {
     display: flex;
@@ -3195,7 +3241,46 @@ body.reorder-dragging .reorder-list::after {
     clip-path: inset(50%);
     white-space: nowrap;
 }
-.day-mode-row { margin: 0 0 10px; }
+/* ---------------------------------------------------------------- the header on scroll (v101)
+
+   Two rows at the top of the page, one row once it has been scrolled. What stays is the
+   day name, its date and the two arrows, because the one input error that actually costs
+   money is a day recorded against the wrong date, and halfway down a list of names nothing
+   else on screen says what day this is. What goes is undo, redo, "היום", the switcher, the
+   fold's button and the progress line's TEXT.
+
+   The 4px track stays. It is already the header's own bottom edge (absolute - see
+   `.day-header .progress-bar` above), so it costs no row and still says how much of the
+   day is done without a word.
+
+   Not `display: none` on `.day-tools`: the track lives inside it, and hiding the row would
+   take the track with it. The row's CONTENTS go and the row collapses to nothing.
+
+   What this costs, and it is a real cost: the header's undo is a flick away while the list
+   is scrolled. The undo BAR (js/ui/undo.js) is untouched and still appears at the moment of
+   the edit, which is the case this pair was never for - the pair is for the mistake noticed
+   a name or two later. The landscape block at the end of this file makes the opposite trade
+   for the opposite reason: there the page is 320px TALL and there is no room to scroll back
+   to. */
+body.day-compact .day-header .day-steps,
+body.day-compact .day-header .mode-toggle,
+body.day-compact .day-header .bulk-toggle { display: none; }
+body.day-compact .day-header .day-tools { margin-top: 0; }
+body.day-compact .day-header .progress { flex: 0 0 auto; margin: 0; padding: 0; }
+/* The count is a button. Clipped to the live region's 1px it would still be a 6px-wide
+   target the mobile suite rightly refuses; with no box of its own it is text the region
+   reads and nothing a finger is asked to hit. Same treatment as the landscape bar. */
+body.day-compact .day-header .progress-line .now-count { display: contents; }
+/* Off the eyes, kept for the live region - the climbing count is still worth hearing. */
+body.day-compact .day-header .progress .progress-line {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------- the compact day (v93)
 
    The measured facts this block exists for, at 430/390/320 on first open with the account
@@ -3212,10 +3297,37 @@ body.reorder-dragging .reorder-list::after {
     .btn-today { padding: 6px 7px; }
     button.now-count { padding: 0 3px; }
 
-    /* The switcher: one 48px row (2+44+2), the fold's button at its end. */
-    .day-mode-row { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; }
-    .day-mode-row .layer-toggle {
-        flex: 1;
+    /* The switcher, on the header's tools row (v101).
+   
+       It does NOT get a line of its own by declaration. `.day-tools .layer-toggle` above
+       already says `flex: 1 1 auto; min-width: max-content`, and that is exactly right
+       here: the pair asks for the width its two labels actually need, so the wrapping row
+       carries it and the fold's button on the first line and drops undo, redo and the
+       count to the second - at 430, at 390 and at 320 alike. Measured, because the
+       arrangement is the whole point: two lines inside the header at 137px, against 103
+       of header plus a 48px row and its 6px margin below it. Twenty pixels, and the whole
+       thing goes away on scroll, which the separate row never did.
+
+       Giving it `flex-basis: 100%` instead was measured too and is why this comment
+       exists: it forced the fold's button down onto the steps' line, that line then
+       could not hold the progress as well, and the header came out at 154 - three pixels
+       better than the arrangement it replaced, and at 320 forty-six pixels WORSE, which
+       cost the smallest phone a whole name. */
+    /* The switcher's line: the pair and the fold's button, taking a line of the wrapping
+       tools row and leaving undo, redo and the count the line below. flex-basis 100% on
+       the WRAPPER rather than on the pair itself - see appendModeSwitch in day.js for the
+       320px-at-200% failure that distinction fixes - and min-width: 0 so everything in it
+       may shrink when the text is bigger than the phone. */
+    .day-tools .day-switch {
+        order: 1;
+        flex: 1 1 100%;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .day-tools .mode-toggle {
+        flex: 1 1 auto;
         min-width: 0;
         margin: 0;
         padding: 2px;
@@ -3223,16 +3335,23 @@ body.reorder-dragging .reorder-list::after {
         background: var(--surface-2);
         border-radius: 12px;
     }
-    .day-mode-row .layer-toggle button {
+    .day-tools .mode-toggle button {
         flex: 1;
         min-width: 0;
         min-height: 44px;
         font-size: 15px;
         padding: 5px 6px;
         border-radius: 10px;
-        white-space: nowrap;
+        /* Not nowrap. At ordinary sizes neither label ever wraps - they are 75px of text
+           in a button of at least 86 - and at 200% wrapping to a second line is how the
+           pair stays inside a 320px screen instead of pushing the page sideways. */
+        white-space: normal;
     }
-    .day-mode-row .mode-quiet .layer-on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+    .day-tools .mode-quiet .layer-on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+    /* The switcher's line first - which is the pair that used to be the row above the
+       list, in the order it was in - then undo, redo, "היום" and the count under it. */
+    .day-tools .day-steps { order: 2; }
+    .day-tools .progress { order: 3; }
     .bulk-toggle { display: inline-flex; }
     .bulk-row { margin: 6px 0 0; }
     /* Folded, the row is not on the page at all - its button is on the switcher row. */
@@ -3262,7 +3381,6 @@ body.reorder-dragging .reorder-list::after {
        narrowest phone the rows sit at 66px (inside 64-72) and the three seams above the
        list at 4px, and the third name clears the dock by a finger's worth rather than
        by rounding. */
-    .day-mode-row { margin-top: 4px; }
     .worker-list { margin-top: 4px; }
     .wrow-main { min-height: 66px; }
     .day-steps:has(.btn-today) .step-word { display: none; }
