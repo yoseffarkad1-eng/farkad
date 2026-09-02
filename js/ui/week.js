@@ -222,11 +222,13 @@ function renderWeekHeader() {
     const dates = weekDates();
     const first = parseLocalDate(dates[0]);
     const last = parseLocalDate(dates[6]);
-    // Each date is one LTR run and the pair sits in an RTL element: without isolation
-    // the bidi algorithm keeps the dates readable but swaps their ORDER, so the range
-    // showed its end first. FSI/PDI around each keeps start before end.
+    // Each date is one LTR run and the pair sits in an RTL element: the bidi algorithm
+    // keeps each date readable but lays the two out right to left, so the range showed
+    // its end first. Isolating EACH date (FSI/PDI around each, which is what this did)
+    // does not change that - two isolates are still two runs, ordered by the paragraph.
+    // dateRange (js/ui/dom.js) wraps the pair as ONE left-to-right run.
     header.appendChild(el('strong', 'week-range',
-        `\u2068${formatFullDate(first)}\u2069 - \u2068${formatFullDate(last)}\u2069`));
+        dateRange(formatFullDate(first), formatFullDate(last))));
 
     const fwd = button('שבוע הבא', 'btn-secondary btn-nav nav-fwd', () => stepWeek(7));
     fwd.appendChild(chevronIcon('fwd'));

@@ -143,8 +143,10 @@ function renderRangePicker() {
     }
 
     const actions = el('div', 'range-actions');
+    // One left-to-right run (dateRange, js/ui/dom.js): as two runs in this RTL line the
+    // later date landed on the left and the range read backwards.
     actions.appendChild(el('strong', 'range-current',
-        `${formatFullDate(parseLocalDate(REPORT_RANGE.from))} - ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`));
+        dateRange(formatFullDate(parseLocalDate(REPORT_RANGE.from)), formatFullDate(parseLocalDate(REPORT_RANGE.to)))));
     // Not window.print() bare - see renderWeekHeader in js/ui/week.js and
     // js/ui/printout.js: where the print sheet does not open, the sheet on screen is
     // offered as a picture instead, and the picture has its own button beside it.
@@ -239,8 +241,13 @@ function reportPeriod() {
     const length = wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)
         ? 'שישי–חמישי'
         : `${days} ימים`;
+    // The range is one left-to-right run (dateRange, js/ui/dom.js) and the length after
+    // it is Hebrew, so a Hebrew reader meets the range first and its length to the left
+    // of it; inside the run the earlier date is on the left, where an eye that reads a
+    // date left to right expects it. This text is also the picture's subtitle and the
+    // paper's period line.
     return el('div', 'report-period',
-        `${formatFullDate(from)} - ${formatFullDate(to)} · ${length}`);
+        `${dateRange(formatFullDate(from), formatFullDate(to))} · ${length}`);
 }
 
 // Exactly one account, whole: it starts on an account's opening Friday and runs its

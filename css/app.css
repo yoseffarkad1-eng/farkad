@@ -2019,6 +2019,13 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     overscroll-behavior: contain;
 }
 .modal-wide { max-width: 680px; }
+/* The line under the worker's name holds ONLY the report's range, "07/08/2026 -
+   20/08/2026". In this RTL modal the two dates are two left-to-right runs laid out
+   right to left, so the later one landed on the left and the range read backwards.
+   The paragraph itself is left-to-right, kept at the right edge where it sat; the
+   other ranges go through dateRange() in js/ui/dom.js, this one is set by
+   openWorkerDays as bare text and is turned by the stylesheet instead. */
+#workerDaysMeta { direction: ltr; text-align: right; }
 
 /* The app's own prompt is asked FROM other dialogs - a duplicate name while the worker
    form is open, a confirmation over the migration list. Same z-index as those and it
