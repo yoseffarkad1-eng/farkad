@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v96';
+const APP_VERSION = 'v97';
 
 // Is the page in front of us from the same build as these scripts?
 //

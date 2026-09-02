@@ -12,10 +12,58 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v96 (`366e5ad`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+**`main` is at v96 (`366e5ad`).** The build at the top of this file is a candidate on a
+branch: verified, stamped, and NOT served. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## v97 — CANDIDATE, not served — the tip of `cd-work`
+
+The first round answered from an iPhone: one phone on v96, two screenshots, four
+sentences (`features/iphone/findings.md`). Nothing on a phone runs it.
+
+**What it would give the crew that v96 does not have**
+
+- A print button that does something on the home-screen app. `window.print()` there has
+  for years either opened nothing or an empty sheet; the button now prints where the
+  sheet opens and, where nothing opened within a second and a half, offers the table as a
+  picture through the share sheet. Beside it, always: «🖼️ שיתוף כתמונה» — the week grid
+  or the report drawn exactly as the screen shows it, right to left in every viewer the
+  phone has, which no spreadsheet flag can promise (`js/ui/printout.js`; law 12).
+- The arrows step over an empty Saturday and land on one with a record.
+- Two taps do not zoom the page; pinch still does.
+- The chip beside the app's name says «שגיאת סנכרון» when the cloud refuses the queue,
+  and «השליחה תקועה» when the claim is stuck, instead of counting the queue as if it
+  were on its way.
+- The export dialog tells the truth: the sheet is flagged right-to-left for Excel, the
+  phone's own previews may lay it out from the left, and the picture is the door that
+  reads right everywhere; a backdrop tap no longer writes a second file; the files are
+  named ASCII-first so an RTL list does not swap their dates.
+- A date range reads from→to left to right on every surface; the worker modal opens at
+  its top; a by-site print no longer begins with a blank page.
+
+**Checked before it was stamped**: the release gate on the stamped commit is in
+`features/iphone/handoff.md` beside the commit it ran on. No number is copied here.
+
+**What this build is NOT known to do**
+
+- **It is not on `main`.** No phone has it.
+- **No iPhone has run it.** The print heuristic (does Safari fire `beforeprint` or the
+  print-media change when its sheet opens?), the share sheet inside the offer, and the
+  touch-action rule are argued from the platform and measured in Chromium with
+  `window.print()` stubbed both ways. If Safari opens the sheet and fires neither event,
+  the person gets one harmless offer behind it.
+- **"Reversed" was not found in Chromium on any surface**, and every surface is identical
+  to v86. What was found and fixed is the export path above. If the person's reversed
+  table is the .xlsx in the Files preview or Numbers, that is those viewers ignoring the
+  sheet's own flag — v86 did the same — and the picture is the answer.
+- The 38 queued records on the reporting phone are a rollout fact, not a code one: the
+  rules deploy (`firebase deploy --only firestore:rules`) is by hand, and the chip now
+  says whether the cloud is refusing.
+- Everything v96 lists, unchanged: both money gates shut; the create-race hold; the
+  week strip at 390 shows five days and scrolls, by design.
 
 ---
 
