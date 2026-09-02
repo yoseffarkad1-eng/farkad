@@ -12,9 +12,42 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v86 (`880d7bb`).** The three builds at the top of this file are candidates
+**`main` is at v86 (`880d7bb`).** The four builds at the top of this file are candidates
 on a branch: verified, stamped, and NOT served. They are here so that the day one of them
 reaches `main` the entry already exists and only its heading has to change.
+
+---
+
+## v95 — CANDIDATE, not served — the tip of `cd-work`
+
+v94 reviewed a second time and repaired a second time: the seven findings of
+`features/core-repairs/findings-round2.md` (one P1 - the create race's loser replacing the
+winner's day on a project with no document yet - four P2, two P3), each a fail-first test
+followed by its fix and each verified again before merging (`27549c5` the send path,
+`6303660` the poison doors, `cabcb27` the chip and this file). Nothing on a phone runs it.
+
+**What it would give the crew that v94 does not have**
+
+- Two phones' first-ever evening on a new project, same worker, same day: the second
+  phone's half is held and said, not written over the first's.
+- A phone whose cloud listener has died never says «מסונכרן» on the strength of its own
+  writes; it says so, resubscribes on its own ladder, and is synced only when a listener
+  delivers again.
+- A poisoned map in the cloud document is one sighting, not a new one at every sibling
+  edit: the phone that acknowledged it keeps adopting the crew's work on that day.
+- The rescue door reads a file without holding the phone for it; the hold is raised only
+  once the person has confirmed and the rescue is on the disk.
+- A poisoned snapshot acknowledged mid-session is adopted then and there, not at the next
+  change in the cloud.
+- The chip beside the app's name says «דורש הכרעה» for a held edit and «הסנכרון מושהה»
+  for a suspended sync, instead of «ממתין לשליחה» for both.
+
+**Checked before it was stamped**: the release gate ran on this commit; the counts, per
+suite and verbatim, are in `features/core-repairs/handoff.md` beside the commit they were
+measured on. No number is copied here.
+
+**What this build is NOT known to do**: everything v94 lists below, unchanged - above all,
+no iPhone has run it.
 
 ---
 
