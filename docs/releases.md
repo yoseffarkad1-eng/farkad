@@ -12,19 +12,75 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v86 (`880d7bb`).** The four builds at the top of this file are candidates
-on a branch: verified, stamped, and NOT served. They are here so that the day one of them
-reaches `main` the entry already exists and only its heading has to change.
+**`main` is at v95 (`109502c`).** The build at the top of this file is a candidate on a
+branch: verified, stamped, and NOT served. It is here so that the day it reaches `main`
+the entry already exists and only its heading has to change. v91, v93 and v94 below were
+never served on their own: each was the base the next was repaired from, and v95 is the
+first of the line to reach `main`.
 
 ---
 
-## v95 — CANDIDATE, not served — the tip of `cd-work`
+## v96 — CANDIDATE, not served — the tip of `cd-work`
+
+v95 with the advances ledger merged onto it and the week grid at its pitch. Two branches,
+each reviewed before it was taken: `d11ef3c` takes the ledger branch (`v96/ledger`, the
+v92 branch Opus left with the note "must not be merged yet", brought onto the repaired
+send path with BOTH money gates closed again at the merge - `LEDGER_WRITES` in
+`js/model/ledger.js` and `carryAdvances` in `js/model/schema.js` are `false`, and the
+suites that measure the open build open it through the harness seam); `ed9bede` takes
+the week grid (`v96/weekpitch`). Nothing on a phone runs it.
+
+**What it would give the crew that v95 does not have**
+
+- The advances ledger as code, shut: entries, the fold, the approval boundary (a
+  financial migration nobody has approved on THIS record is not read the new way), the
+  frozen fortnight (a closed payslip reports the wage, the counts and the days it was
+  closed on, whatever the live schedule does afterwards), a repayment or a correction
+  dated into a closed period moving the live debt and not the payslip, and one fact
+  written by two phones at once landing once. All of it behind the two gates: this
+  build's phones still read and write advances exactly as v95 does. Flipping either gate
+  is a person's decision, taken only once all three phones show v95 or later.
+- A fortnight closed on a phone whose gate is open is frozen on a phone whose gate is
+  still shut, so the two never print different money for one payday - pinned this round,
+  not changed.
+- The week grid at a 48px pitch in both directions, edge to edge inside its own
+  scrolling strip: a 430 phone shows the names and all seven days with nothing to push,
+  and the narrower phones keep the names pinned and scroll the days under them. Before
+  this the columns came out 45px at 430 because the strip sat inside the page padding,
+  and the test asked for the 44px floor rather than the pitch.
+- A part of the ledger container this build does not name is carried through a load
+  once, by one guarded loop, instead of twice by two - the two merges had each brought
+  their own copy.
+
+**Checked before it was stamped**: the ledger merge was measured at `f0cca08` and
+reviewed; the week grid at `42097f8`; the release gate on the stamped commit is in
+`features/ledger/handoff.md` beside the commit it ran on. No number is copied here.
+
+**What this build is NOT known to do**
+
+- **It is not on `main`.** No phone has it.
+- **Both money gates are shut**, so nothing above the first bullet is exercised on a
+  phone: no entry is appended, no migration approved, no fortnight closed. The suites
+  that prove those open the gates through the harness seam; a phone cannot.
+- The create-race hold (v95, finding R1) holds the loser's contested paths but does not
+  ask the same-fact rule of them, so two phones writing the identical fact into a
+  project with no document yet end in a hold that a person clears, not a silent merge -
+  the safe direction, and still a tap somebody has to make.
+- Everything v95 lists, unchanged: no iPhone has run it; `firestore.rules` is deployed
+  by hand before any phone updates.
+
+---
+
+## v95 — 2 September 2026 — `109502c` (PR #3, the tree at `021254f`)
 
 v94 reviewed a second time and repaired a second time: the seven findings of
 `features/core-repairs/findings-round2.md` (one P1 - the create race's loser replacing the
 winner's day on a project with no document yet - four P2, two P3), each a fail-first test
 followed by its fix and each verified again before merging (`27549c5` the send path,
-`6303660` the poison doors, `cabcb27` the chip and this file). Nothing on a phone runs it.
+`6303660` the poison doors, `cabcb27` the chip and this file). Served from `main` since
+2 September 2026; whether any phone has taken the update is not known from here, and
+the rules file this build needs (`firestore.rules`) is deployed by hand, not by the merge -
+see the rollout note under v91.
 
 **What it would give the crew that v94 does not have**
 
@@ -47,7 +103,7 @@ suite and verbatim, are in `features/core-repairs/handoff.md` beside the commit 
 measured on. No number is copied here.
 
 **What this build is NOT known to do**: everything v94 lists below, unchanged - above all,
-no iPhone has run it.
+no iPhone has run it, and being on `main` does not change that.
 
 ---
 
