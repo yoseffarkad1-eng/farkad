@@ -286,4 +286,59 @@ function afterAdopting(device, ledger, label) {
     check('and is still held', again.call('farkadWritesBlocked') === true);
 }
 
+// ------------------------------------------- and it is the RECORD that carries it
+{
+    suite('a reopened phone carries the evidence on the schedule itself');
+
+    // The check above this one reads the reopened schedule AND the dump together, so it
+    // passes while the schedule holds nothing and only the quarantine copy has the bytes.
+    // That is not the guarantee. The record is supposed to carry its own evidence: the
+    // held-aside map is carried across a boot by keepUnder in normaliseSchedule, and the
+    // guard in front of keepUnder asked `map[id] === undefined` - which for `__proto__`
+    // reads Object.prototype off a plain object and is never undefined. So keepUnder
+    // never ran for the one id it was written for, the reopened schedule lost the entry,
+    // and the first ordinary save after an acknowledgement wrote a record without it
+    // over the record that had it.
+    const device = phone('d_poison_disk');
+    device.State.schedule.ledger = JSON.parse('{"advances":{},"unreadable":'
+        + '{"__proto__":{"id":"le_EVIDENCE_500","amount":500},'
+        + '"le_bad":{"id":"le_bad","amount":"abc"}},'
+        + '"migrations":{},"unreadableMigrations":{}}');
+    device.State.save({ silent: true });
+    given('the record on the disk carries the evidence',
+        String(device.raw('scheduleData:v2')).indexOf('le_EVIDENCE_500') !== -1);
+
+    const again = makeDevice({ deviceId: 'd_poison_disk_r', storage: device.dump() });
+    again.setToday('2026-08-26');
+    again.ctx.askTell = () => Promise.resolve();
+    again.State.load();
+
+    const held = again.State.schedule.ledger.unreadable;
+    check('the reopened schedule owns the poisoned name, on the schedule and not in a copy',
+        owns(held, '__proto__'), JSON.stringify(Object.keys(held || {})));
+    check('and the schedule itself carries the bytes',
+        JSON.stringify(again.State.schedule.ledger || {}).indexOf('le_EVIDENCE_500') !== -1,
+        JSON.stringify(again.State.schedule.ledger));
+    check('the ordinary held-aside entry beside it is still there',
+        owns(held, 'le_bad'), JSON.stringify(Object.keys(held || {})));
+    // Against a plain object from the same realm: the harness runs the app in its own
+    // V8 context, whose Object.prototype is not this file's.
+    check('and nothing was reparented by carrying it',
+        Object.getPrototypeOf(held) === Object.getPrototypeOf(again.State.schedule.ledger.advances)
+        && held.amount === undefined && held.id === undefined,
+        JSON.stringify([held && held.amount, held && held.id]));
+
+    // The person exports, acknowledges, and records a day - the ordinary way out of a
+    // hold. That save is the one that used to delete the evidence from the disk.
+    given('the hold is acknowledged', again.global('Recovery').acknowledge() === true);
+    const change = again.call('assignPlace', again.State.schedule,
+        '2026-08-12', 'w_01', 'actual', 'p_01');
+    given('and a day is recorded', again.State.commit(change) === true);
+    check('the record on the disk still carries the evidence after that save',
+        String(again.raw('scheduleData:v2')).indexOf('le_EVIDENCE_500') !== -1,
+        String(again.raw('scheduleData:v2')).slice(0, 200));
+    check('and the ordinary held-aside entry too',
+        String(again.raw('scheduleData:v2')).indexOf('le_bad') !== -1);
+}
+
 report();

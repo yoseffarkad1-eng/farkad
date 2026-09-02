@@ -652,6 +652,10 @@ function normaliseSchedule(raw, hints) {
     Object.keys(advances).forEach(id => {
         const item = advances[id];
         if (!item || typeof item !== 'object') return;
+        // Never assigned under a poison name: `schedule.advances.__proto__ = advance`
+        // reparents the map rather than adding to it. The map's bytes were reported and
+        // quarantined above; here the name is simply not written.
+        if (POISON_SEGMENTS.indexOf(String(id)) !== -1) return;
         if (!item.workerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(item.date))) return;
         const advance = {
             id: String(id),
@@ -722,8 +726,13 @@ function normaliseSchedule(raw, hints) {
     // as it arrived rather than described. Writing is blocked for the same reason it is
     // blocked for an unreadable entry: what could not be read is somebody's day or
     // somebody's money, and this device must not write over it.
-    const poisoned = typeof poisonedContainers === 'function'
-        ? poisonedContainers(raw) : [];
+    // AND EVERY DAY UNDER A NAME THAT IS NOT A DATE, held the same way. The loop over
+    // `days` further down adopts only YYYY-MM-DD keys and used to skip the rest without
+    // a word: a whole day arriving under a key this app cannot read was simply gone,
+    // with nothing reported and the device still writing.
+    const poisoned = (typeof poisonedContainers === 'function'
+        ? poisonedContainers(raw) : [])
+        .concat(typeof unreadableDays === 'function' ? unreadableDays(raw) : []);
     // CARRIED ON THE SCHEDULE, under a name nothing reads for arithmetic, exactly as the
     // unreadable ledger entries are. The quarantined copy is on the disk either way, but
     // Recovery's problems live in one session's memory: without this the next boot found a
@@ -736,9 +745,15 @@ function normaliseSchedule(raw, hints) {
     const POISON_KEY = 'scheduleData:v2:poison:';
     const POISON_SAID = 'הגיע רישום עם שם שאי אפשר להשתמש בו כמפתח. שום דבר לא נמחק - '
         + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי.';
+    // Through Recovery.evidence, not Recovery.damaged: damaged is keyed and says one
+    // trouble once per session, which for a map quarantined as it arrived meant that
+    // DIFFERENT bytes under the same poisoned name, arriving after the person had
+    // acknowledged the first sighting, were never copied and never mentioned. Here the
+    // bytes are the evidence, so identical bytes are the same sighting and anything
+    // else is a new one.
     if (typeof Recovery !== 'undefined') {
         poisoned.forEach(found => {
-            Recovery.damaged(POISON_KEY + found.at, found.json, POISON_SAID);
+            Recovery.evidence(POISON_KEY + found.at, found.json, POISON_SAID);
         });
         // AND WHATEVER AN EARLIER SESSION ALREADY HELD ASIDE.
         //
@@ -753,7 +768,7 @@ function normaliseSchedule(raw, hints) {
             ? Store.keys().filter(key => String(key).indexOf(POISON_KEY) === 0) : [];
         kept.forEach(key => {
             const at = String(key).slice(POISON_KEY.length).replace(/:damaged.*$/, '');
-            Recovery.damaged(POISON_KEY + at, Store.get(key), POISON_SAID);
+            Recovery.evidence(POISON_KEY + at, Store.get(key), POISON_SAID);
         });
     }
 
@@ -822,9 +837,16 @@ function normaliseSchedule(raw, hints) {
     };
 
     // Anything an older or newer build left under ledger.unreadable stays there too.
+    //
+    // Asked as an OWN key, not with `map[id] === undefined`. For `__proto__` that lookup
+    // reads Object.prototype off a plain object and is never undefined, so keepUnder
+    // below never ran for the one id it was written for: the reopened schedule came
+    // back without the entry, and the first ordinary save after the person acknowledged
+    // wrote that record over the one that had the evidence. Measured: the quarantine
+    // copy was the only trace left, and the sweep did not know its name either.
     const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {
-        if (schedule.ledger.unreadable[id] === undefined) {
+        if (!Object.prototype.hasOwnProperty.call(schedule.ledger.unreadable, id)) {
             keepUnder(schedule.ledger.unreadable, id, held[id]);
         }
     });
@@ -850,6 +872,9 @@ function normaliseSchedule(raw, hints) {
     // this app trades everything else to avoid.
     Object.keys(ledger).forEach(key => {
         if (key === 'advances' || key === 'unreadable') return;
+        // See normaliseLayer: a bare assignment under a poison name reparents the
+        // container instead of carrying a field.
+        if (POISON_SEGMENTS.indexOf(key) !== -1) return;
         if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
     });
 
@@ -941,6 +966,14 @@ function normaliseLayer(side) {
     Object.keys(side).forEach(workerId => {
         const record = side[workerId];
         if (!record || typeof record !== 'object') return;
+        // NOT COPIED under a poison name. `out.__proto__ = kept` is not a copy - it
+        // makes the poisoned record the layer's prototype, so `layer.entries` answers
+        // that worker's entries and the row itself is nowhere. It did not show at the
+        // first sighting, which Recovery holds before adoption; it showed when the
+        // person acknowledged and the same document arrived again. The map's bytes are
+        // reported and quarantined by poisonedContainers; this only refuses to write
+        // the name into an ordinary object.
+        if (POISON_SEGMENTS.indexOf(String(workerId)) !== -1) return;
 
         const entries = (Array.isArray(record.entries) ? record.entries : [])
             .filter(entry => entry && entry.placeId)

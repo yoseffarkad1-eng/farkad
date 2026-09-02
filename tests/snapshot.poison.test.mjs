@@ -79,6 +79,21 @@ const cases = [
     ['the approvals', 'prototype', (raw, poison) => {
         raw.ledger = JSON.parse(`{"advances":{},"unreadable":{},"migrations":{"${poison}":`
             + `{"id":"${MARKER}","kind":"carry","rows":1,"at":"","by":"d_x"}}}`);
+    }],
+    // THE DAYS MAP ITSELF, one level up from the layer cases above. poisonedContainers
+    // looked inside every day and never at the map holding them, and normaliseSchedule
+    // drops any key that is not YYYY-MM-DD without a word - so a whole day arrived,
+    // vanished, and the status said synced. Measured before the check existed:
+    // problems [], writes not blocked, the marker nowhere on the device.
+    ['the days map', '__proto__', (raw, poison) => {
+        raw.days = JSON.parse(`{"${poison}":{"actual":{"w_01":`
+            + `{"entries":[{"placeId":"${MARKER}"}],"rates":{"daily":400,"hourly":0}}}}}`);
+    }],
+    // And not only the three poison names: ANY key this app cannot read as a date was
+    // dropped the same way, and a day nobody can find is somebody's pay either way.
+    ['the days map, under a name that is not a date', 'not-a-date', (raw, poison) => {
+        raw.days = JSON.parse(`{"${poison}":{"actual":{"w_01":`
+            + `{"entries":[{"placeId":"${MARKER}"}],"rates":{"daily":400,"hourly":0}}}}}`);
     }]
 ];
 
@@ -149,6 +164,194 @@ for (const [what, poison, build] of cases) {
         JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
     check('and the device is still writing',
         device.call('farkadWritesBlocked') === false);
+}
+
+// ------------------------------------------------- and the twenty-first open still opens
+{
+    suite('a phone that once heard a poisoned snapshot is still released after many reopens');
+
+    // The hold is re-derived at every boot from the quarantine copy, which is right: the
+    // record carrying the marker was never saved, so the copy is the only durable thing.
+    // But re-deriving it called Recovery.damaged again, and Recovery never writes over
+    // an existing quarantine, so every boot minted one more copy - :damaged:2, :3 ... -
+    // until the ladder ran out at twenty. From then on quarantineRecord answered null,
+    // the problem was pushed with mustHold, acknowledge() answered false, and the
+    // banner said there was no room for a copy. Twenty identical copies were on the
+    // disk. Freeing space changed nothing, and every later boot did the same.
+    //
+    // A phone that ever heard one such document stopped being able to record after
+    // about twenty app opens, and was told the wrong reason.
+    const first = phone('d_many');
+    first.Sync.receive(arriving(first, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+    }));
+    await settle(40);
+    given('the first sighting holds the device', first.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        first.global('Recovery').acknowledge() === true);
+
+    const copiesOn = device => Object.keys(device.dump())
+        .filter(key => key.indexOf('scheduleData:v2:poison:') === 0);
+
+    let storage = first.dump();
+    const boots = [];
+    for (let n = 1; n <= 22; n += 1) {
+        const again = phone(`d_many_${n}`, storage);
+        const heldAtBoot = again.call('farkadWritesBlocked') === true;
+        const released = again.global('Recovery').acknowledge() === true;
+        boots.push({ n, heldAtBoot, released, copies: copiesOn(again).length,
+            problems: again.global('Recovery').problems.map(problem =>
+                ({ key: problem.key, copy: problem.copy, mustHold: problem.mustHold })) });
+        storage = again.dump();
+    }
+
+    check('every reopen is held at boot until the person is told',
+        boots.every(boot => boot.heldAtBoot),
+        JSON.stringify(boots.filter(boot => !boot.heldAtBoot).map(boot => boot.n)));
+    check('and every one of them, the twenty-second included, is released by acknowledging',
+        boots.every(boot => boot.released),
+        JSON.stringify(boots.filter(boot => !boot.released)
+            .map(boot => [boot.n, boot.problems])));
+    check('the bytes were kept once, not once per boot',
+        boots[boots.length - 1].copies === 1,
+        JSON.stringify(boots.map(boot => boot.copies)));
+    check('and the one copy still carries them',
+        JSON.stringify(storage).indexOf(MARKER) !== -1);
+    check('no boot ever claimed a copy could not be kept',
+        boots.every(boot => boot.problems.every(problem => problem.copy !== null
+            && problem.mustHold === false)),
+        JSON.stringify(boots.filter(boot => boot.problems.some(problem =>
+            problem.copy === null)).map(boot => boot.n)));
+}
+
+{
+    suite('and so is a phone whose own record carries the poisoned name');
+
+    // The other road to the same ladder. Here the evidence IS on the record - held under
+    // ledger.unreadable, which the writer round-trips - so every boot reads it off the
+    // disk, reports it, and quarantined one more copy of the very same bytes.
+    const first = phone('d_own');
+    first.State.schedule.ledger = JSON.parse('{"advances":{},"unreadable":'
+        + `{"__proto__":{"id":"${MARKER}","amount":500}},`
+        + '"migrations":{},"unreadableMigrations":{}}');
+    first.State.save({ silent: true });
+
+    let storage = first.dump();
+    const boots = [];
+    for (let n = 1; n <= 22; n += 1) {
+        const again = phone(`d_own_${n}`, storage);
+        boots.push({ n,
+            heldAtBoot: again.call('farkadWritesBlocked') === true,
+            released: again.global('Recovery').acknowledge() === true,
+            copies: Object.keys(again.dump()).filter(key =>
+                key.indexOf(':damaged') !== -1).length });
+        storage = again.dump();
+    }
+    check('every reopen is held at boot', boots.every(boot => boot.heldAtBoot),
+        JSON.stringify(boots.filter(boot => !boot.heldAtBoot).map(boot => boot.n)));
+    check('and every one is released by acknowledging',
+        boots.every(boot => boot.released),
+        JSON.stringify(boots.filter(boot => !boot.released).map(boot => boot.n)));
+    check('identical bytes are quarantined once per record they were held under',
+        boots[boots.length - 1].copies <= 2,
+        JSON.stringify(boots.map(boot => boot.copies)));
+    check('and the evidence is still on the record itself',
+        String(storage['scheduleData:v2']).indexOf(MARKER) !== -1);
+}
+
+// ----------------------------------------------- and the second time it arrives
+{
+    suite('after an acknowledgement, the same poison arriving again reparents nothing');
+
+    // The first sighting is held and reported - the case table above proves it. Then
+    // the person exports, acknowledges, and the same cloud document arrives again,
+    // because nobody has repaired the cloud. Recovery.damaged is keyed, so nothing is
+    // said the second time, and this time the document is ADOPTED - which is fine for
+    // every readable part of it and was not fine for the poisoned layer: normaliseLayer
+    // copied it with a bare `out[workerId] = kept`, and for `__proto__` that is not a
+    // copy, it is a reparenting. The in-memory layer's prototype became the poisoned
+    // record: `layer.entries` answered that worker's entries, a for-in over the layer
+    // walked into them, and the record was persisted with the row missing.
+    const device = phone('d_again');
+    const document = arriving(device, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+    });
+    device.Sync.receive(document);
+    await settle(40);
+    given('the first sighting holds the device', device.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        device.global('Recovery').acknowledge() === true);
+
+    const again = JSON.parse(JSON.stringify(document));
+    again.updatedAt = '2026-08-26T11:00:00.000Z';
+    device.Sync.receive(again);
+    await settle(40);
+
+    const day = (device.State.schedule.days || {})['2026-08-12'];
+    given('the readable part of the document was adopted this time',
+        Boolean(day && day.actual && day.actual.w_01), JSON.stringify(day));
+    const actual = day.actual;
+    // Against a plain object from the same realm: the harness runs the app in its own
+    // V8 context, whose Object.prototype is not this file's.
+    check('the adopted layer is an ordinary map, not a child of the poisoned record',
+        Object.getPrototypeOf(actual) === Object.getPrototypeOf(day.plan),
+        String(Object.getPrototypeOf(actual) === Object.getPrototypeOf(day.plan)));
+    check('so it answers nothing for entries or rates of its own',
+        actual.entries === undefined && actual.rates === undefined,
+        JSON.stringify([actual.entries, actual.rates]));
+    check('and no ordinary map answers to the poisoned name',
+        Object.prototype.hasOwnProperty.call(actual, '__proto__') === false,
+        JSON.stringify(Object.keys(actual)));
+    check('the record on the disk is an ordinary record',
+        JSON.parse(device.raw('scheduleData:v2')).days['2026-08-12'].actual.entries
+            === undefined);
+}
+
+{
+    suite('and different bytes under the poisoned name are new evidence, told again');
+
+    // The sharper case. The name is the same, the bytes are not: whoever or whatever
+    // is writing the poisoned row has written something else under it. Recovery.damaged
+    // answered from the first sighting's entry, so the new bytes were never quarantined,
+    // never reported, never in the rescue file - dropped after one acknowledgement,
+    // which is iron law 9 inverted for everything that arrives after the first time.
+    const device = phone('d_again2');
+    const document = arriving(device, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+    });
+    device.Sync.receive(document);
+    await settle(40);
+    given('the first sighting holds the device', device.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        device.global('Recovery').acknowledge() === true);
+
+    const SECOND = 'p_POISONED_EVIDENCE_V2';
+    const changed = JSON.parse(JSON.stringify(document).split(MARKER).join(SECOND));
+    changed.updatedAt = '2026-08-26T12:00:00.000Z';
+    given('the second document carries different bytes under the same name',
+        JSON.stringify(changed).indexOf(SECOND) !== -1
+        && JSON.stringify(changed).indexOf('"__proto__"') !== -1);
+    device.Sync.receive(changed);
+    await settle(40);
+
+    const held = JSON.stringify(device.dump())
+        + JSON.stringify(device.global('Recovery').problems)
+        + JSON.stringify(device.global('Recovery').rawRecords());
+    check('the new bytes are recoverable', held.indexOf(SECOND) !== -1,
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('poison') !== -1)));
+    check('and the first bytes still are', held.indexOf(MARKER) !== -1);
+    check('the person is told again', device.call('farkadWritesBlocked') === true);
+    check('and never hears synced over it', device.Sync.status !== 'synced',
+        device.Sync.status);
+    check('the second sighting has a copy of its own, beside the first',
+        Object.keys(device.dump()).filter(key =>
+            key.indexOf('scheduleData:v2:poison:days.2026-08-12.actual') === 0).length === 2,
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('poison') !== -1)));
+    check('and acknowledging the second releases the device again',
+        device.global('Recovery').acknowledge() === true);
 }
 
 report();

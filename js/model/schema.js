@@ -387,6 +387,11 @@ function poisonedContainers(raw) {
     };
 
     const days = raw && raw.days;
+    // THE MAP OF DAYS ITSELF, not only each day inside it. This looked into every day and
+    // never at the container holding them, so a days map with an own `__proto__` passed,
+    // and normaliseSchedule dropped the key without a word - a whole day gone, one level
+    // up from the layer this was written to catch.
+    look(days, 'days');
     if (isPlainObject(days)) {
         Object.keys(days).forEach(date => {
             const day = days[date];
@@ -406,6 +411,29 @@ function poisonedContainers(raw) {
         ['advances', 'migrations', 'unreadable', 'unreadableMigrations'].forEach(family =>
             look(ledger[family], `ledger.${family}`));
     }
+    return out;
+}
+
+// EVERY DAY UNDER A NAME THIS APP CANNOT READ AS A DATE - the rest of the same question.
+//
+// normaliseSchedule adopts a day only under a YYYY-MM-DD key and used to skip anything
+// else in silence. The three poison names are one way a key can be unreadable;
+// `not-a-date`, `2026-8-12` and `constructor` are others, and a snapshot carrying any
+// of them lost that day on the way in with nothing reported, nothing quarantined, the
+// device still writing and the status saying synced. A day nobody can find is somebody's
+// pay either way, so each one is named here, with its own bytes, for Recovery to hold.
+//
+// The poison names are left to poisonedContainers, which reports the whole map for them;
+// the entries here are the OTHER keys, one per day, so the two never say one thing twice.
+function unreadableDays(raw) {
+    const days = raw && raw.days;
+    if (!isPlainObject(days)) return [];
+    const out = [];
+    Object.keys(days).forEach(key => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+        if (POISON_SEGMENTS.indexOf(key) !== -1) return;
+        out.push({ at: 'days.' + key, name: key, json: JSON.stringify(days[key]) });
+    });
     return out;
 }
 
@@ -491,6 +519,21 @@ function fullScheduleProblems(raw) {
     if (typeof ledgerContainerProblem === 'function' && ledgerContainerProblem(raw) !== null) {
         problems.push('היסטוריית המקדמות בקובץ אינה בצורה שאפשר לקרוא.');
     }
+    // A NAME NOBODY CAN USE AS A KEY is deliberately NOT asked here.
+    //
+    // It was, for one commit. The refusal is right at the doors where a document is
+    // about to REPLACE this phone's record - see poisonedMapProblems below - and this
+    // gate looked like the place to put it, because every one of those doors runs it.
+    // So does the rescue rebuild in js/ui/share.js, which reads every candidate in a
+    // rescue file through readReplacementDocument: scheduleData:v2, its quarantined
+    // copies, the legacy record, the liveSchedule fallback. A phone holding a poisoned
+    // map keeps the map on its record on purpose, so that the hold outlives the session
+    // that found it - and its rescue file, the one door it has left, was refused for
+    // the very key the hold exists to carry: "no usable schedule in the rescue file".
+    //
+    // The rescue door opens such a file and holds what it carries; the replacement
+    // doors ask the extra question themselves. This gate answers whether the document
+    // is a whole schedule, and a held map does not make it less of one.
     return problems;
 }
 
@@ -874,6 +917,16 @@ function advanceProblems(raw, known, wire) {
 
 // The gate the four restore doors and the sync layer share: the narrow migration first,
 // then the complete check. Returns the document to use, and why not.
+//
+// It does NOT ask poisonedMapProblems, and the rescue door depends on that. The rescue
+// rebuild reads every candidate in a rescue file through this function, and then reads
+// its own answer through it again after the queue replay - a schedule that legitimately
+// carries held evidence under ledger.unreadable, because normaliseSchedule keeps the
+// key there so the hold survives the session. The sync layer's own re-check in
+// replaceEverything reads that same rebuilt schedule on its way to the disk, after the
+// person has acknowledged the hold. A poison refusal in here would turn the rescue
+// file into a wall and stop an acknowledged rescue from landing; the doors that must
+// refuse ask the question one line after this one.
 function readReplacementDocument(raw) {
     const upgraded = upgradeStoredSchedule(raw);
     if (!upgraded) {
@@ -881,6 +934,30 @@ function readReplacementDocument(raw) {
     }
     const problems = fullScheduleProblems(upgraded);
     return { document: problems.length === 0 ? upgraded : null, problems };
+}
+
+// A name nobody can use as a key, asked at the doors where a document is about to
+// REPLACE this phone's record - and only there.
+//
+// The doors are acceptRestoreSource and the backup half of readBackupFile in
+// js/ui/share.js: the cloud copy, the restore point, the way back, the imported backup.
+// Before this existed they passed such a file through fullScheduleProblems, and the door
+// then ran normaliseSchedule on it, which - correctly, for a document that is being READ
+// - handed the map to Recovery: a quarantine copy was written and writing was blocked on
+// the phone, before replaceEverything had run. replaceEverything then refused because
+// writing was blocked, and the door reported THAT as no room on the device to record the
+// restore. The device was not full, freeing space changed nothing, and the phone somebody
+// was recording on stayed held, across a reopen, by a file they had only tried to
+// restore.
+//
+// A replacement is refused with its own sentence and touches nothing. The rescue door
+// never asks this: a rescue file is the evidence of a phone that could not read its own
+// records, and a poisoned map inside it is carried as held evidence through Recovery -
+// see scheduleFromRecoveryRecords in js/ui/share.js.
+function poisonedMapProblems(raw) {
+    if (typeof poisonedContainers !== 'function') return [];
+    return poisonedContainers(raw).map(found =>
+        'ברישום יש שם שאי אפשר להשתמש בו כמפתח (' + found.at + ').');
 }
 
 // ---------------------------------------------------------------- the journal, exactly

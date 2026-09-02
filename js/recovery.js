@@ -26,6 +26,10 @@ const Recovery = {
     //   mustHold - writes cannot be resumed for this one, at all
     problems: [],
     acknowledged: false,
+    // True once js/app.js has drawn the app for the first time. Until then nothing in
+    // here may call render(): the one caller that did, evidence(), is reached from
+    // State.load, which boot() runs BEFORE its first render - see the note there.
+    onScreen: false,
 
     // A raw record that would not parse. Returns the quarantine key, or null.
     //
@@ -58,6 +62,47 @@ const Recovery = {
         });
 
         this.paint();
+        return copy;
+    },
+
+    // The same trouble under the same key, where the BYTES are the identity.
+    //
+    // damaged() above is keyed: the second report of one trouble in one session says
+    // nothing, which is right when two callers describe the same record in different
+    // words. It is wrong for a map quarantined as it arrived - a poisoned layer from
+    // the cloud - because there the bytes ARE the evidence. Measured: the person
+    // acknowledged the first sighting, the same document arrived again with different
+    // bytes under the poisoned name, damaged() answered from the first entry, and the
+    // new bytes were never copied, never reported and never in the rescue file.
+    //
+    // Identical bytes are the same sighting and are answered from it. Different bytes
+    // are a new problem: quarantined beside the earlier copy, never over it, and told -
+    // an acknowledgement covers the problems the person was shown, not this one.
+    evidence(key, raw, message) {
+        const same = this.problems.find(problem => problem.key === key && problem.raw === raw);
+        if (same) return same.copy;
+
+        const copy = quarantineRecord(key, raw);
+        this.problems.push({
+            key,
+            raw,
+            copy,
+            message: message || `הרישום "\u2068${key}\u2069" לא נקרא.`,
+            mustHold: !copy
+        });
+        this.acknowledged = false;
+        this.paint();
+        // Redrawn only once the app is on screen. This is reached from State.load -
+        // normaliseSchedule reports a poisoned map through it - and boot() runs
+        // State.load before the app's first render. A redraw there drew every view
+        // over a State that was half read, the schedule still the empty one from
+        // definition time; and it ran inside loadRecord's try, so anything render()
+        // threw while drawing that half-state was caught as "the stored record cannot
+        // be read" - a readable record quarantined and the phone held for a fault in
+        // the drawing. Before the first render the boot's own render shows the hold,
+        // exactly as it does for damaged(); after it, the redraw is what makes a map
+        // heard from the cloud worn by the whole screen the moment it is held.
+        if (this.onScreen && typeof render === 'function') render();
         return copy;
     },
 
@@ -395,6 +440,14 @@ const FARKAD_RECORD_KEYS = [
 function isFarkadRecordKey(key) {
     if (FARKAD_RECORD_KEYS.indexOf(key) !== -1) return true;
     if (key.indexOf('farkad:prov:') === 0) return true;
+    // THE POISON FAMILY, for the same reason the ledger's quarantine is on the list.
+    //
+    // js/state.js hands Recovery a map whose name it cannot use as a key under
+    // scheduleData:v2:poison:<where>, and there is no live record by that name: only
+    // the :damaged copies exist. A copy from an earlier session, whose original has
+    // since been written over by an ordinary save, was the only trace of somebody's
+    // day - and this predicate walked straight past it.
+    if (key.indexOf('scheduleData:v2:poison:') === 0) return true;
     return typeof FarkadSync !== 'undefined' && FarkadSync.isQueueKey
         ? FarkadSync.isQueueKey(key)
         : false;
@@ -456,8 +509,20 @@ function quarantineRecord(key, raw) {
     // Bounded. A device with twenty damaged copies of one record has a different problem,
     // and an unbounded loop on a full disk would spin.
     for (let n = 2; Store.get(target) !== null && n <= 20; n += 1) {
+        // A copy on the ladder that already holds these exact bytes IS the copy. It has
+        // just been read back, which is the whole test a fresh one would have to pass.
+        //
+        // Without this, the hold that js/state.js re-derives at every boot from a
+        // quarantined poisoned map - the same bytes, every session - minted one more
+        // copy per open until the ladder ran out at twenty. From then on this answered
+        // null, the problem was held with mustHold, acknowledging did nothing, and the
+        // banner told the person there was no room for a copy while twenty identical
+        // copies sat on the disk. Different bytes still go beside the earlier ones,
+        // never over them.
+        if (Store.get(target) === raw) return target;
         target = key + ':damaged:' + n;
     }
+    if (Store.get(target) === raw) return target;
     if (Store.get(target) !== null) return null;
 
     // NOT optional. An optional write is one the app can live without, and this is the
