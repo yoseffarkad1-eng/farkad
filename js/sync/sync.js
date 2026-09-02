@@ -139,27 +139,8 @@ const ACK_VALUE = '1';
 // reopen quarantined the quarantine.
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
-// A stable id for a record that has none - an item an older build left inside a slot.
-// The same bytes must always produce the same id, or the item would look like a new
-// operation at every open and never be superseded by anything.
-function hashedId(text) {
-    let value = 0;
-    for (let i = 0; i < text.length; i += 1) {
-        value = (Math.imul(value, 31) + text.charCodeAt(i)) | 0;
-    }
-    return (value >>> 0).toString(36);
-}
-
 function outboxOpKey(slotKey, batchId) { return slotKey + OP_MARK + batchId; }
 function outboxAckKey(slotKey, opId) { return slotKey + ACK_MARK + opId; }
-
-// The id in `key` if it is EXACTLY one of this slot's `mark` keys, else null.
-function outboxIdIn(slotKey, mark, key) {
-    const prefix = slotKey + mark;
-    if (key.indexOf(prefix) !== 0) return null;
-    const id = key.slice(prefix.length);
-    return SAFE_ID.test(id) ? id : null;
-}
 
 // Unique, and ordered by when it was made - the millisecond first, base-36 and fixed
 // width, so a plain string comparison of two ids is a comparison of two moments. The

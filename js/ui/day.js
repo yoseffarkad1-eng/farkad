@@ -774,12 +774,6 @@ function anyRecordOnRestDay(date) {
         entriesFor(State.schedule, date, worker.id, layer).length > 0));
 }
 
-function renderUnrecordedBanner(unrecorded) {
-    const banner = el('div', 'banner banner-warn');
-    banner.textContent = `⚠️ ${unrecorded.length} עובדים לא נרשמו ביום הזה`;
-    return banner;
-}
-
 function renderSiteCard(place) {
     const card = el('div', 'site-card');
     const workerIds = workersAtPlace(State.schedule, State.date, place.id, State.layer);

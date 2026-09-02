@@ -389,7 +389,8 @@ Object.assign(FarkadSync, {
     // second edit. A fresh id per attempt would turn one edit into two.
     // AND THE VALUE, which it did not carry.
     //
-    // legacyOpId two hundred lines up already digests the value, with a comment explaining
+    // legacyOpId (js/sync/sync.js - it was two hundred lines up until v102 split this file
+    // out) already digests the value, with a comment explaining
     // that a value-blind name once wore the name of the value it replaced and suppressed a
     // correction. The batch name never got the same treatment: two different values for one
     // path at one sequence produced the identical name, so a disk handing a batch record
