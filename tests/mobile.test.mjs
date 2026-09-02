@@ -229,6 +229,47 @@ for (const width of WIDTHS) {
             check(`${label}: the page does not scroll sideways`,
                 across.doc <= across.client + 1, JSON.stringify(across));
 
+            // Two taps on the same spot must not zoom. Reported from the phone this app is
+            // for, added to the home screen, v96: "when I tap twice it zooms and I do not
+            // want zoom". iOS Safari's double-tap-to-zoom fires on any element whose
+            // touch-action does not rule it out, and a man marking a crew of thirty taps
+            // twice in a row all evening. The rule is touch-action: manipulation on the
+            // body - panning and pinch stay, the double-tap gesture goes - and it is NOT
+            // the viewport lock: user-scalable=no takes pinch away from everybody, and the
+            // smoke suite pins that it is not there. Both halves are one fact.
+            //
+            // touch-action is not inherited: a button's OWN computed value stays 'auto'
+            // under a body that says 'manipulation'. What the browser applies is the
+            // intersection of every value from the element up to the root, so the fact is
+            // read the way the browser reads it - double-tap zoom survives on a button
+            // only if every element from it to the root still says 'auto'. Read on the
+            // things a finger actually lands on, a tab and a dock button, where a rule
+            // placed too low would have left the day screen itself zooming.
+            const zoom = await page.evaluate(() => {
+                const viewport = document.querySelector('meta[name="viewport"]');
+                const content = viewport ? viewport.getAttribute('content') : '';
+                const doubleTapZooms = node => {
+                    for (; node; node = node.parentElement) {
+                        if (getComputedStyle(node).touchAction !== 'auto') return false;
+                    }
+                    return true;
+                };
+                const tab = document.querySelector('.tabs .tab');
+                const dock = document.querySelector('.day-actions button');
+                return {
+                    body: getComputedStyle(document.body).touchAction,
+                    tabZooms: tab ? doubleTapZooms(tab) : 'missing',
+                    dockZooms: dock ? doubleTapZooms(dock) : 'missing',
+                    pinchKept: !content.includes('user-scalable=no')
+                        && !content.includes('maximum-scale')
+                };
+            });
+            check(`${label}: two taps do not zoom the page`,
+                zoom.body === 'manipulation' && zoom.pinchKept, JSON.stringify(zoom));
+            check(`${label}: and neither do two taps on a button`,
+                zoom.tabZooms === false && zoom.dockZooms === false,
+                JSON.stringify(zoom));
+
             const small = await undersized(page);
             check(`${label}: everything a finger lands on is a finger's size`,
                 small.length === 0, JSON.stringify(small).slice(0, 200));
@@ -1056,6 +1097,19 @@ for (const width of [320, 390]) {
         panning.rows === 0 && panning.ancestors === 0, JSON.stringify(panning));
     check(`${width}px: and the handle still owns the drag`, panning.handles > 0,
         JSON.stringify(panning));
+
+    // The two rules meet here. The body's touch-action: manipulation (no double-tap
+    // zoom, anywhere) and the handle's touch-action: none (no browser pan while a row
+    // is carried) are on different elements, and touch-action is not inherited - the
+    // browser intersects the two down the tree. The handle's own value must still read
+    // 'none' with the body's rule above it, or a drag starts scrolling the list again.
+    const handleTouch = await page.evaluate(() => ({
+        body: getComputedStyle(document.body).touchAction,
+        handle: getComputedStyle(document.querySelector('.reorder-handle')).touchAction
+    }));
+    check(`${width}px: no double-tap zoom on the body, and the handle still says none`,
+        handleTouch.body === 'manipulation' && handleTouch.handle === 'none',
+        JSON.stringify(handleTouch));
 
     // The list scrolls inside the panel now, between the fixed head and the fixed
     // foot - so the last man is reached by scrolling the panel's own box, and he must
