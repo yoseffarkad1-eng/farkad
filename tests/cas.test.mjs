@@ -501,6 +501,119 @@ function tunnel(cloud) {
         JSON.stringify(one.call('entriesFor', one.State.schedule, DAY, 'w_01', 'actual')));
 }
 
+// ============================================================ two phones, one path, no document yet
+for (const [timing, wire] of [
+    ['a prompt listener', cloud => cloud.adapter],
+    ['a listener 150 ms behind the transaction', cloud => Object.assign({}, cloud.adapter, {
+        subscribe: (onSnapshot, onError) => {
+            let first = true;
+            return cloud.adapter.subscribe(snapshot => {
+                if (first) { first = false; onSnapshot(snapshot); return; }
+                setTimeout(() => onSnapshot(snapshot), 150);
+            }, onError);
+        }
+    })]
+]) {
+    suite('two phones adding to the same worker\'s day on a project with no document yet, '
+        + timing);
+
+    // The third timing of the same collision. 'same moment' meets it in the conflict
+    // branch; 'coming back later' meets it at the pre-send hold. Here there is no
+    // document at all: both phones open with no signal, record the same worker on the
+    // same day differently, and their first flush is a CREATE. Exactly one wins. The
+    // loser is handed 'already-exists', reads the winner's document to learn its
+    // revision, and sends its queued patch as an ordinary update - and the pre-send hold
+    // ran earlier against nothing heard and deliberately decided nothing, while the
+    // learned revision makes the update valid, so no conflict follows. The winner's
+    // day is replaced whole, the winner adopts the replacement, and both phones say
+    // synced. Measured on both timings before the check existed: cloud p_02 at revision
+    // 2, writes [create, update], nothing held, no line.
+    //
+    // The document the loser has just read is the document to ask. The question is the
+    // pre-send one, and it is held the same way.
+    const cloud = makeCloud();
+    const a = phone(null, 'd_a_empty');
+    const b = phone(null, 'd_b_empty');
+    // Before either has heard anything - the open with no signal.
+    a.State.commit(a.call('assignPlace', a.State.schedule, DAY, 'w_01', 'actual', 'p_01'));
+    b.State.commit(b.call('assignPlace', b.State.schedule, DAY, 'w_01', 'actual', 'p_02'));
+
+    // Both creates are held open on the wire, so the race is decided by the test.
+    const holds = [];
+    cloud.hold = (kind, payload) => (kind === 'create'
+        ? new Promise(resolve => { holds.push({ by: payload.updatedBy, payload, resolve }); })
+        : null);
+    a.Sync.connect(cloud.adapter);
+    b.Sync.connect(wire(cloud));
+    await settleUntil(() => holds.length === 2, 5000);
+    const carries = held => Boolean((((held.payload.days || {})[DAY] || {}).actual || {}).w_01);
+    given('both phones sent a create carrying the day',
+        holds.length === 2 && holds.every(carries),
+        JSON.stringify(holds.map(held => `${held.by}:${carries(held)}`)));
+
+    const seen = [];
+    const original = b.Sync.setStatus;
+    b.Sync.setStatus = function (status, error) {
+        original.call(this, status, error);
+        seen.push(this.status);
+    };
+
+    const winner = holds.find(held => held.by === 'd_a_empty');
+    const loser = holds.find(held => held.by === 'd_b_empty');
+    given('one create from each phone', Boolean(winner) && Boolean(loser),
+        JSON.stringify(holds.map(held => held.by)));
+    winner.resolve();
+    await settle(TICK);
+    loser.resolve();
+    cloud.hold = null;
+    await settleUntil(() => b.Sync.status === 'contested' || b.Sync.status === 'synced', 5000);
+    // The late listener's 150 ms, and whatever the flush after it does.
+    await settle(300);
+
+    const placesOf = () => {
+        const day = ((cloud.doc || {}).days || {})[DAY];
+        const held = day && day.actual && day.actual.w_01;
+        return ((held && held.entries) || []).map(entry => entry.placeId).sort();
+    };
+    const shownOn = device => device.call('entriesFor', device.State.schedule, DAY, 'w_01', 'actual')
+        .map(entry => entry.placeId).sort().join();
+    const path = `days.${DAY}.actual.w_01`;
+    const sentByLoser = () => cloud.writes.filter(write => !write.replayed
+        && write.kind === 'update' && write.patch.updatedBy === 'd_b_empty'
+        && Object.prototype.hasOwnProperty.call(write.patch, path)).length;
+
+    check('exactly one create landed',
+        cloud.writes.filter(write => write.kind === 'create' && !write.replayed).length === 1,
+        JSON.stringify(cloud.writes.map(write => write.kind)));
+    check('the winner\'s day is not silently replaced',
+        placesOf().join() === 'p_01', placesOf().join());
+    check('and the loser\'s half never left it', sentByLoser() === 0,
+        `${sentByLoser()} update(s) carrying ${path}`);
+    check('the loser still owes its own half, held',
+        b.Sync.pendingCount() > 0 && b.Sync.holdingContested(),
+        `${b.Sync.pendingCount()} owed, holding ${b.Sync.holdingContested()}`);
+    check('and says the record moved, not that it is synced',
+        b.Sync.status === 'contested', b.Sync.status);
+    check('and never showed a sync error on the way',
+        seen.indexOf('error') === -1, JSON.stringify(seen));
+    check('the winner still shows the day it recorded', shownOn(a) === 'p_01', shownOn(a));
+    check('and the loser still shows its own half', shownOn(b) === 'p_02', shownOn(b));
+
+    // THE REST OF THE BATCH STILL GOES. The hold is on one path; the roster the loser
+    // was sending beside it is an ordinary merge, and the ladder carries it.
+    clearTimeout(b.Sync._retryTimer);
+    b.Sync._retryTimer = null;
+    b.Sync._retryAt = 0;
+    await b.Sync.flush();
+    await settle(TICK * 20);
+    check('after the ladder, only the held half is owed',
+        b.Sync.pendingCount() === 1 && b.Sync.status === 'contested',
+        `${b.Sync.pendingCount()} owed, status ${b.Sync.status}`);
+    check('and the winner\'s day is still the winner\'s',
+        placesOf().join() === 'p_01' && shownOn(a) === 'p_01' && sentByLoser() === 0,
+        `${placesOf().join()} / ${shownOn(a)} / ${sentByLoser()} sent`);
+}
+
 // ============================================================ the claim moving is harmless
 {
     suite('a held write replayed after the claim moved to another tab');
