@@ -13,10 +13,59 @@ commit is worse than no count at all, so a build whose run was not written down 
 time says so rather than borrowing a neighbour's.
 
 **`main` is at v100 (`e4aa66b`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
-v91, v93 and v94 below were
+a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## CANDIDATE — v101 — room on the day screen, and the change that could not give any
+
+Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v100 as served
+(`e4aa66b`). One screen's chrome, three changes, nothing behind either money gate and
+nothing touching the record, sync or the arithmetic. Both gates stay shut.
+
+**What it would give the crew that v100 does not have**
+
+- **The day header shrinks to one row as soon as the list is scrolled.** The day name, its
+  date and the two arrows stay — halfway down a list of names, nothing else on screen says
+  what day this is, and a day recorded against the wrong date is the one input error that
+  actually costs money. Undo, redo, «היום», the switcher and the progress line's words go;
+  the thin progress track stays. Scrolled, the chrome above the first name goes from 157
+  pixels to about 57. **No bar moves** — that decision is v99's and this build does not
+  reopen it.
+- **The two buttons under every site card move onto its coloured heading**, as a ＋ and a
+  💬. Five sites on a screen is five rows back for the names.
+- **The «לפי עובדים / לפי אתרים» switcher no longer has a row of its own.** It is on the
+  header now, which means it goes away with the header once the list is moving — something
+  a row below the header could never do.
+
+**What it does NOT give them, and this is measured, not estimated**
+
+- **Moving the switcher into the header gives back three pixels, not a row.** A 44px
+  segmented pair costs a 44px line wherever it is put; moving a line from below the header
+  to inside it moves the line, it does not remove it. The chrome above the first name goes
+  from 157px to 154px. The room in this build comes from the scroll behaviour and from the
+  site cards — not from that move. `features/day-room/handoff.md` has the table.
+
+**What it is known NOT to cover**
+
+- **No phone has run any of it, and this is the round where that matters most.** It is a
+  round about how a screen feels under a thumb, and every measurement in it is headless
+  Chromium. The scroll threshold's behaviour under iOS rubber-band scrolling and momentum
+  is NOT covered — Chromium emulates neither, and a bounce past the top on a real iPhone is
+  the first thing to look at. Every row of `docs/iphone-acceptance.md` is still NOT RUN.
+- **The header's «בטל» is a flick away while the list is scrolled.** The undo BAR still
+  appears at the moment of the edit and is untouched; the header's pair is for the mistake
+  noticed a name or two later, and reaching it now costs a scroll back to the top. That is
+  the trade this build makes on purpose.
+- The two findings v100's re-audit left OPEN are still open and untouched here.
+- `firestore.rules` has changed since v86 and is still not deployed. Unchanged by this
+  build, still the owner's to run; `docs/rollout-checklist.md` has the steps.
+- The mobile suite is Chromium, not Safari, and its 2× text pass is not Dynamic Type.
+
+**Checked before it was stamped**: `features/day-room/handoff.md`, with both gates' output
+verbatim on the commit they ran on.
 
 ---
 
