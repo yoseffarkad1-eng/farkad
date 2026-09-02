@@ -1445,13 +1445,15 @@ function pendingReplacementIn(records, tried) {
 // the one door a held phone has left answered "no usable schedule in the rescue file"
 // to that phone's own file, naming the evidence as the reason.
 //
-// So the gate does not ask. The map reaches normaliseSchedule, which hands its bytes to
-// Recovery on the phone doing the reading: quarantined as they arrived, the hold raised
-// and the person told, the key kept on the rebuilt schedule under ledger.unreadable so
-// it lands with the rescue once the hold is acknowledged. Carried as held evidence,
-// never dropped, and never a reason to call the whole file unusable. The doors a
-// document REPLACES the record through ask the question themselves - see
-// poisonedMapProblems in js/model/schema.js.
+// So the gate does not ask. The map reaches normaliseSchedule, which reports its bytes
+// as evidence - and readBackupFile COLLECTS that report rather than letting it land on
+// the phone doing the reading, because reading is not loading: the person has not yet
+// said yes, and a phone held for a file it only previewed stayed held across every
+// reopen. The key is kept on the rebuilt schedule under ledger.unreadable so it lands
+// with the rescue, and the report is delivered to Recovery once the rescue is on the
+// disk - see importBackup. Carried as held evidence, never dropped, and never a reason
+// to call the whole file unusable. The doors a document REPLACES the record through ask
+// the question themselves - see poisonedMapProblems in js/model/schema.js.
 function scheduleFromRecoveryRecords(records, fallback) {
     const tried = [];
     const parse = key => {
@@ -1720,7 +1722,27 @@ function readRecoveryFile(parsed) {
     };
 }
 
+// Opens the file and describes it, holding nobody for it.
+//
+// Everything below runs normaliseSchedule on a document that is not this phone's
+// record, and normaliseSchedule reports what it cannot read to Recovery - which, from
+// here, quarantined another phone's bytes on THIS disk and blocked writing before the
+// person had answered the dialog. The reports are collected instead and returned on
+// the result as `evidence`; importBackup delivers them once the file has actually
+// become the record, and a cancel delivers nothing. On the exception path there is no
+// result to carry them on and nothing to deliver: the file was refused.
 function readBackupFile(parsed) {
+    if (typeof Recovery === 'undefined' || typeof Recovery.collect !== 'function') {
+        const loaded = openBackupFile(parsed);
+        loaded.evidence = [];
+        return loaded;
+    }
+    const collected = Recovery.collect(() => openBackupFile(parsed));
+    collected.answer.evidence = collected.reports;
+    return collected.answer;
+}
+
+function openBackupFile(parsed) {
     if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
 
     // A rescue file, through its own door. It used to fall straight through to the check
@@ -1865,7 +1887,14 @@ function importBackup(event) {
         // here would leave work in the old file that the app now claims to have imported.
         State.migrationIssues = loaded.issues;
 
-        const result = await FarkadSync.replaceEverything(incoming);
+        // The restore transaction normalises the replacement on its way to the disk,
+        // and that run reports to Recovery too - before the write, which the report
+        // would then refuse. Collected around the SYNCHRONOUS part of the call: the
+        // local stage runs to completion before replaceEverything returns its promise,
+        // and only the cloud push waits. Everything collected here and at the read is
+        // delivered below, once the record has changed.
+        const replacing = Recovery.collect(() => FarkadSync.replaceEverything(incoming));
+        const result = await replacing.answer;
         event.target.value = '';
 
         // EXPLICITLY, and after the replacement rather than instead of it.
@@ -1910,6 +1939,14 @@ function importBackup(event) {
 
         const decisionsKept = writeIssues(loaded.issues,
             { bound: loaded.issuesBound !== false });
+
+        // NOW the phone is told, and held: the file's unreadable parts are on this disk,
+        // exactly as the phone that exported them kept them, and the hold that stops
+        // anybody recording over them belongs here from this moment. Not before the
+        // dialog - a preview is not a load - and not before the write, which the hold
+        // would have refused. After the decisions are written for the same reason.
+        Recovery.deliver((loaded.evidence || []).concat(replacing.reports));
+
         if (!decisionsKept && loaded.issues.length > 0) {
             State.migrationIssues = loaded.issues;
             render();
