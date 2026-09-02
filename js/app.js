@@ -260,6 +260,12 @@ function boot() {
     // Before the first edit of the day, and only ever from the state as it was found.
     takeDailySnapshot();
     render();
+    // From here on, Recovery may redraw the app itself when it holds new evidence. Not
+    // before: State.load above reports a poisoned map through Recovery.evidence, and a
+    // redraw from inside that read drew every view over a half-read State and turned a
+    // fault in the drawing into a quarantined record - see evidence() in js/recovery.js.
+    // The render just above is what shows a hold found by the read.
+    if (typeof Recovery !== 'undefined') Recovery.onScreen = true;
 
     // The recovery banner, painted here rather than only where the damage is found.
     //

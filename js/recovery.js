@@ -26,6 +26,10 @@ const Recovery = {
     //   mustHold - writes cannot be resumed for this one, at all
     problems: [],
     acknowledged: false,
+    // True once js/app.js has drawn the app for the first time. Until then nothing in
+    // here may call render(): the one caller that did, evidence(), is reached from
+    // State.load, which boot() runs BEFORE its first render - see the note there.
+    onScreen: false,
 
     // A raw record that would not parse. Returns the quarantine key, or null.
     //
@@ -88,7 +92,17 @@ const Recovery = {
         });
         this.acknowledged = false;
         this.paint();
-        if (typeof render === 'function') render();
+        // Redrawn only once the app is on screen. This is reached from State.load -
+        // normaliseSchedule reports a poisoned map through it - and boot() runs
+        // State.load before the app's first render. A redraw there drew every view
+        // over a State that was half read, the schedule still the empty one from
+        // definition time; and it ran inside loadRecord's try, so anything render()
+        // threw while drawing that half-state was caught as "the stored record cannot
+        // be read" - a readable record quarantined and the phone held for a fault in
+        // the drawing. Before the first render the boot's own render shows the hold,
+        // exactly as it does for damaged(); after it, the redraw is what makes a map
+        // heard from the cloud worn by the whole screen the moment it is held.
+        if (this.onScreen && typeof render === 'function') render();
         return copy;
     },
 
