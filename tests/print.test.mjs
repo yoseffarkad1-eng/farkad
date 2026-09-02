@@ -801,6 +801,59 @@ for (const scenario of [
         ranges.length >= 1, JSON.stringify(ranges));
     check('and every one of them has the earlier date at the smaller x - on the left',
         ranges.length >= 1 && ranges.every(found => found.fromX < found.toX), JSON.stringify(ranges));
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- no blank first page
+//
+// The invoice starts on a fresh page so that it never shares a sheet with the pay sheet
+// in front of it. With «לפי אתר» chosen there is no pay sheet on the paper - it is set
+// aside with .report-offscreen - but it is still the invoice's preceding sibling in the
+// document, so the invoice was not :first-child and the break stayed. The client's
+// report came out of the printer behind an empty sheet, and on a phone's print preview
+// the first page shown was a blank one.
+{
+    suite('the client\'s report does not start behind a blank page');
+
+    const page = await open();
+    await seed(page, 8);
+
+    // The person's route: the real toggle, not the variable behind it.
+    const paged = async () => {
+        const { pages } = readPdf(await page.pdf({ format: 'A4', printBackground: true }));
+        return pages.map(item => pageText(item).replace(/\s+/g, ' ').trim());
+    };
+
+    const workers = await paged();
+    given('the pay sheet prints with text on its first page',
+        workers.length >= 1 && workers[0].length > 0, JSON.stringify(workers.map(t => t.slice(0, 24))));
+    check('and no page of it is blank', workers.every(text => text.length > 0),
+        JSON.stringify(workers.map(t => t.length)));
+
+    await page.locator('.report-section-toggle button', { hasText: 'לפי אתר' }).click();
+    await page.waitForTimeout(300);
+    given('«לפי אתר» is now the section on screen',
+        await page.evaluate(() => REPORT_SECTION === 'sites'
+            && getComputedStyle(document.querySelector('.report-payroll')).display === 'none'), '');
+
+    const sites = await paged();
+    check('the client\'s report starts on the first page',
+        sites.length >= 1 && says(sites[0], 'לפי אתר'), JSON.stringify(sites.map(t => t.slice(0, 24))));
+    check('and no page of it is blank', sites.every(text => text.length > 0),
+        JSON.stringify(sites.map(t => t.length)));
+    // One report, one sheet: the page that used to be empty is gone, and nothing else
+    // moved - the pay sheet's own count is what the client's report is measured against.
+    check('one report is one sheet, the same as the pay sheet',
+        sites.length === workers.length, `${sites.length} vs ${workers.length}`);
+
+    // Back the same way, and the pay sheet is what it was.
+    await page.locator('.report-section-toggle button', { hasText: 'לפי עובד' }).click();
+    await page.waitForTimeout(300);
+    const again = await paged();
+    check('switching back changes nothing on the pay sheet',
+        again.length === workers.length && again.every(text => text.length > 0)
+            && says(again[0], 'לפי עובד'),
+        JSON.stringify(again.map(t => t.slice(0, 24))));
 
     await page.context().close();
 }

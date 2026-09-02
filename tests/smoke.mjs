@@ -8246,6 +8246,86 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---- the worker modal opens at its top
+{
+  // A worker's account is read from its head: the name, the fortnight, the chips that
+  // say WHICH days, then the rows, then the money. On a 390x844 phone the whole thing is
+  // taller than the screen, and the first button in it is «+ מקדמה» at the very foot -
+  // so entering the dialog at its first button scrolled .modal-content to its end, and
+  // the person who tapped a name to see the days saw the advances block and two money
+  // buttons instead. The dialog is entered at its heading, the way the settings sheet
+  // and the reorder panel are, and it opens at the top.
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3,
+    isMobile: true, hasTouch: true });
+  await seedRoster(page);
+  await page.evaluate(() => {
+    ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14']
+      .forEach(d => assignPlace(State.schedule, d, 'w_01', 'actual', 'p_01'));
+    addAdvance(State.schedule, 'w_01', '2026-08-12', 500, '');
+    State.save();
+    REPORT_RANGE.from = '2026-08-07';
+    REPORT_RANGE.to = '2026-08-20';
+    REPORT_SECTION = 'workers';
+    showView('reports');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  // A finger on the name in the pay sheet, not a call.
+  const name = page.locator('#reportsView .report-payroll tbody button.link-cell', { hasText: 'דוד' }).first();
+  await name.tap();
+  await page.waitForTimeout(400);
+
+  const opened = await page.evaluate(() => {
+    const modal = document.getElementById('workerDaysModal');
+    const content = modal.querySelector('.modal-content');
+    const title = document.getElementById('workerDaysTitle');
+    const t = title.getBoundingClientRect();
+    const c = content.getBoundingClientRect();
+    const ae = document.activeElement;
+    return {
+      open: modal.style.display,
+      scrollTop: content.scrollTop,
+      scrollMax: content.scrollHeight - content.clientHeight,
+      titleInView: t.top >= c.top && t.bottom <= c.bottom && t.top >= 0 && t.bottom <= innerHeight,
+      titleTop: Math.round(t.top),
+      focused: { id: ae.id, text: ae.textContent.trim().slice(0, 20), inModal: modal.contains(ae) }
+    };
+  });
+  check('the account is taller than the phone, so where it opens matters',
+    opened.open === 'flex' && opened.scrollMax > 0, JSON.stringify(opened));
+  check('it opens at its top', opened.scrollTop === 0, JSON.stringify(opened));
+  check('and the worker\'s name is on the screen', opened.titleInView, JSON.stringify(opened));
+  check('the money button at the foot is not what a tap on a name focuses',
+    opened.focused.text !== '+ מקדמה', JSON.stringify(opened.focused));
+  check('focus lands on the heading, so a reader says where it is',
+    opened.focused.id === 'workerDaysTitle', JSON.stringify(opened.focused));
+
+  // The heading is inside the trap like everything else: backwards from it is the last
+  // control of the dialog, not the page behind.
+  await page.keyboard.press('Shift+Tab');
+  await page.waitForTimeout(150);
+  const back = await page.evaluate(() => ({
+    inModal: document.getElementById('workerDaysModal').contains(document.activeElement),
+    text: document.activeElement.textContent.trim()
+  }));
+  check('shift-tab from the heading stays inside the dialog',
+    back.inModal && back.text === 'סגור', JSON.stringify(back));
+
+  // Escape is unchanged: the dialog closes and the keyboard goes back to the name.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const closed = await page.evaluate(() => ({
+    open: document.getElementById('workerDaysModal').style.display,
+    cls: document.activeElement.className,
+    text: document.activeElement.textContent.trim()
+  }));
+  check('Escape still closes it', closed.open === 'none', JSON.stringify(closed));
+  check('and focus goes back to the name that opened it',
+    closed.cls === 'link-cell' && closed.text === 'דוד', JSON.stringify(closed));
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
