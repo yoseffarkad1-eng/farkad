@@ -452,6 +452,18 @@ function fragile(cloud) {
         JSON.stringify({ text: deaf.__reason.textContent, hidden: deaf.__reason.hidden,
             lastError: String(deaf.Sync.lastError) }));
 
+    // The line exists to be read aloud, so what it holds is a sentence or nothing: an
+    // error with no message is not "[object Object]", and a stuck claim - already
+    // explained in Hebrew by the line above it - adds nothing unless the cloud gave a code.
+    check('an error with no message is an unrecorded reason, not an object',
+        deaf.call('syncFailureReason', { status: 'error', lastError: {} }) === 'הסיבה לא נרשמה.',
+        JSON.stringify(deaf.call('syncFailureReason', { status: 'error', lastError: {} })));
+    check('a stuck claim with an internal message adds no line of its own',
+        deaf.call('syncFailureReason', { status: 'claimstuck',
+            lastError: new Error('the send claim is held by another window') }) === '',
+        JSON.stringify(deaf.call('syncFailureReason', { status: 'claimstuck',
+            lastError: new Error('the send claim is held by another window') })));
+
     // AND IT IS NOT A GAG. The rules are fixed; the phone subscribes again on its own,
     // hears the correction, and only then is the claim true and allowed.
     wire.repair();

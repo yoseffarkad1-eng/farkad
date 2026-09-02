@@ -262,7 +262,14 @@ function syncFailureReason(sync) {
         return sync._listenerDead ? SYNC_REASON_DEAF : SYNC_REASON_UNRECORDED;
     }
     const code = typeof error.code === 'string' ? error.code : '';
-    const message = String(error.message || error || '').trim();
+    // The message as a string or nothing: a bare object here read "[object Object]"
+    // on the line that exists to be read aloud.
+    const message = (typeof error === 'string' ? error
+        : typeof error.message === 'string' ? error.message : '').trim();
+    // A stuck claim is already explained by the line above this one, in Hebrew; its
+    // error is an internal sentence about windows, and only a cloud code adds anything.
+    if (sync.status === 'claimstuck' && code !== 'permission-denied'
+        && code !== 'unauthenticated') return '';
     const suffix = code ? ` ${isolateLtr(`(${code})`)}` : '';
 
     if (code === 'permission-denied') return SYNC_REASON_REFUSED + suffix;
