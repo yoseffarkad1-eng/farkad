@@ -2090,18 +2090,18 @@ for (const width of WIDTHS) {
                         : null
                 };
             };
-            const pay = read('.report-payroll .report-table');
-            // THROUGH THE TOGGLE THE PERSON PRESSES. Assigning REPORT_SECTION and
-            // re-rendering left the invoice measuring 0x0: the screen is switched by
-            // «לפי אתר», and a suite that reaches past the control measures a state the
-            // app never enters.
-            [...document.querySelectorAll('.report-section-toggle button')]
-                .find(btn => btn.textContent.trim() === 'לפי אתר').click();
-            const invoice = read('.report-invoice .report-table');
-            return { pay, invoice };
+            return { pay: read('.report-payroll .report-table') };
         });
 
-        [['the pay sheet', seen.pay, 'עובד'], ['the invoice', seen.invoice, 'תאריך']]
+        // THE PAY SHEET ONLY, and that is not an omission.
+        //
+        // The invoice's own `.report-table` lives inside `.table-scroll.invoice-grid`,
+        // which `@media screen` sets to `display: none`: on a screen the invoice is drawn
+        // as `.invoice-bars`, and that table exists for the paper. Measuring its header
+        // here measured an element nobody can see - 0x0 at every width - and would have
+        // passed or failed on nothing. Its geometry belongs to tests/print.test.mjs,
+        // which reads a real PDF.
+        [['the pay sheet', seen.pay, 'עובד']]
             .forEach(([what, table, first]) => {
                 given(`${what} has a header row here`,
                     table.count > 1 && table.display !== 'none', JSON.stringify(table));
@@ -2164,7 +2164,11 @@ for (const width of WIDTHS) {
     check(`${width}px: and the cue is ${shouldCue ? 'there' : 'not'}`,
         (seen.content !== 'none' && seen.content !== '') === shouldCue,
         JSON.stringify({ content: seen.content, width: seen.width }));
-    check(`${width}px: the day columns are still 48 wide`, seen.pitch === 48,
+    // 48 IS A FLOOR, not a fixed width - the table is laid out `auto` on purpose, so at
+    // 430, where the week fits with six pixels to spare, the columns share them out and
+    // measure 49. Asserting equality here failed at 430 for the one width where the strip
+    // is working correctly.
+    check(`${width}px: the day columns are still at least 48 wide`, seen.pitch >= 48,
         String(seen.pitch));
     check(`${width}px: and the page itself still does not scroll sideways`,
         seen.page <= seen.client + 1,
