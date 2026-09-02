@@ -955,16 +955,123 @@ function rebuild(device, payload) {
         && Object.prototype.hasOwnProperty.call(unreadable, '__proto__')
         && JSON.stringify(read.schedule).indexOf(MARKER) !== -1,
         unreadable ? JSON.stringify(Object.getOwnPropertyNames(unreadable)) : 'no schedule');
-    const evidence = fresh.global('Recovery').problems.find(problem =>
-        problem.key === 'scheduleData:v2:poison:ledger.unreadable.__proto__');
-    check('and is held on the reading phone, with its own bytes quarantined there',
-        Boolean(evidence) && Boolean(evidence.copy)
-        && String(fresh.raw(evidence.copy)).indexOf(MARKER) !== -1
-        && fresh.call('farkadWritesBlocked') === true,
+    // The findings ride on the RESULT. Reporting them to Recovery at the read held the
+    // reading phone for a file it had only previewed: importBackup reads before it asks,
+    // so a person who cancelled at the dialog was left with another phone's bytes
+    // quarantined on their disk, writing blocked, and the hold re-derived at every
+    // reopen for the rest of the phone's life. The hold belongs to the phone that
+    // LOADS the rescue - the suite below drives that door - and it is raised only once
+    // the replacement is on the disk.
+    const finding = read && Array.isArray(read.evidence) && read.evidence.find(item =>
+        item.key === 'scheduleData:v2:poison:ledger.unreadable.__proto__');
+    check('the evidence is returned on the result, bytes and all',
+        Boolean(finding) && String(finding.raw).indexOf(MARKER) !== -1,
+        read ? JSON.stringify(read.evidence) : 'not opened');
+    check('and the reading phone is not held for a file it only read',
+        fresh.call('farkadWritesBlocked') === false
+        && fresh.global('Recovery').problems.length === 0
+        && Object.keys(fresh.dump()).every(key => key.indexOf(':poison:') === -1),
         JSON.stringify(fresh.global('Recovery').problems.map(problem => [problem.key, problem.copy])));
     check('nothing in the file is reported unreadable because of the name',
         read !== null && read.unread.every(line => line.indexOf('כמפתח') === -1),
         read ? JSON.stringify(read.unread) : 'not opened');
+}
+
+{
+    suite('E8: the rescue door holds the phone once the rescue is loaded, and not for a preview');
+
+    // The reading phone is a healthy phone with its own recorded days. It opens the
+    // file, reads the dialog, and cancels - wrong file. Measured before this existed:
+    // the record was unchanged, and the phone was held anyway - the other phone's
+    // poisoned bytes quarantined on this disk under the poison family, State.commit
+    // refused until acknowledged, and since the hold is re-derived at every boot from
+    // every scheduleData:v2:poison:* copy, held again at every reopen for life; its own
+    // rescue file then carried the other phone's evidence as if it were its own.
+    //
+    // The same staging as the suite above: a held phone's real export, opened on a
+    // second phone through the real import handler, with the dialog answered.
+    const MARKER = 'le_POISON_PREVIEW';
+    const source = seed(makeDevice({ deviceId: 'd_e8p_src' }));
+    source.setToday('2026-08-26');
+    given('a day is recorded on the source phone', put(source, 'days.2026-08-12.actual.w_01', 'p_01'));
+    const record = JSON.parse(source.raw('scheduleData:v2'));
+    record.ledger = JSON.parse('{"advances":{},"unreadable":{"__proto__":'
+        + `{"id":"${MARKER}","amount":500}}}`);
+    const disk = source.dump();
+    disk['scheduleData:v2'] = JSON.stringify(record);
+    const held = makeDevice({ deviceId: 'd_e8p_held', storage: disk });
+    held.setToday('2026-08-26');
+    held.State.load();
+    held.ctx.askTell = () => Promise.resolve();
+    held.call('exportRecoveryData');
+    given('the held phone hands over a rescue file carrying the name',
+        held.downloads.length === 1 && held.downloads[0].text.indexOf(MARKER) !== -1);
+    const file = held.downloads[0];
+
+    // ---- cancelled at the dialog
+    const reader = seed(makeDevice({ deviceId: 'd_e8p_reader' }));
+    reader.setToday('2026-08-26');
+    given('the reading phone has a day of its own',
+        put(reader, 'days.2026-08-20.actual.w_02', 'p_02'));
+    const before = JSON.stringify(reader.dump());
+    const cancelling = answering(reader, { answer: false });
+    reader.call('importBackup', reader.fileEvent(file.name, file.text));
+    await settle(80);
+    given('the dialog was asked and answered no', cancelling.asked.length === 1);
+
+    check('on cancel nothing on the disk changed',
+        JSON.stringify(reader.dump()) === before,
+        JSON.stringify(Object.keys(reader.dump()).filter(key =>
+            before.indexOf(JSON.stringify(key)) === -1)));
+    check('and the phone is not held for a file it only previewed',
+        reader.call('farkadWritesBlocked') === false
+        && reader.global('Recovery').problems.length === 0,
+        JSON.stringify(reader.global('Recovery').problems.map(problem => problem.key)));
+    check('it can still record a day',
+        put(reader, 'days.2026-08-21.actual.w_02', 'p_02') === true);
+    const reopened = makeDevice({ deviceId: 'd_e8p_reader', storage: reader.dump() });
+    reopened.setToday('2026-08-26');
+    reopened.State.load();
+    check('and a reopened phone is not held either',
+        reopened.call('farkadWritesBlocked') === false,
+        JSON.stringify(reopened.global('Recovery').problems.map(problem => problem.key)));
+    reopened.ctx.askTell = () => Promise.resolve();
+    reopened.call('exportRecoveryData');
+    check('its own rescue file does not carry the other phone’s evidence',
+        reopened.downloads.length === 1 && reopened.downloads[0].text.indexOf(MARKER) === -1);
+
+    // ---- confirmed
+    const loader = seed(makeDevice({ deviceId: 'd_e8p_loader' }));
+    loader.setToday('2026-08-26');
+    given('the loading phone has a day of its own',
+        put(loader, 'days.2026-08-20.actual.w_02', 'p_02'));
+    const loading = answering(loader, { answer: true });
+    loader.call('importBackup', loader.fileEvent(file.name, file.text));
+    await settle(120);
+    given('the dialog was asked and answered yes', loading.asked.length === 1);
+
+    const landed = JSON.parse(loader.raw('scheduleData:v2'));
+    check('the rescue replaced the record on the disk',
+        Boolean(landed.days['2026-08-12'])
+        && placeOf(landed.days['2026-08-12'].actual.w_01) === 'p_01'
+        && !landed.days['2026-08-20'],
+        JSON.stringify(Object.keys(landed.days || {})));
+    check('carrying the evidence exactly as the held phone kept it',
+        loader.raw('scheduleData:v2').indexOf(MARKER) !== -1);
+    const evidence = loader.global('Recovery').problems.find(problem =>
+        problem.key === 'scheduleData:v2:poison:ledger.unreadable.__proto__');
+    check('and only then is the phone held, with the bytes quarantined there',
+        Boolean(evidence) && Boolean(evidence.copy)
+        && String(loader.raw(evidence.copy)).indexOf(MARKER) !== -1
+        && loader.call('farkadWritesBlocked') === true,
+        JSON.stringify(loader.global('Recovery').problems.map(problem => [problem.key, problem.copy])));
+    check('the person is told the rescue loaded, not that the device is full',
+        loading.said.some(line => line.indexOf('קובץ החילוץ נטען') !== -1)
+        && loading.said.every(line => line.indexOf('אין מקום') === -1),
+        JSON.stringify(loading.said));
+    check('acknowledging releases the phone to record on the rescued schedule',
+        loader.global('Recovery').acknowledge() === true
+        && put(loader, 'days.2026-08-21.actual.w_01', 'p_01') === true);
 }
 
 {
