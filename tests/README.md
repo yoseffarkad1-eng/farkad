@@ -52,24 +52,30 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
-    At 847560c (v100: the holds nobody disagreed about - one arithmetic for a closure's
+    At 14eeb8d (v100: the holds nobody disagreed about - one arithmetic for a closure's
     writer and its judge, a clock that is behind refusing rather than moving money
     quietly, the same-fact rule asked at every gate that can hold a write, every name in
-    the day message isolated, and the week strip showing where it is cut off), a clean
+    the day message isolated, the week strip showing where it is cut off - plus the
+    data-safety re-audit's five pairs: a closure frozen for its own period and no other, a
+    deaf phone that stopped saying synced, a refused edit taken off the screen with nothing
+    durable behind it, and the undo stack quarantined rather than written over), a clean
     detached worktree at that commit, Node v22.22.2, git diff --check clean, copied from
     no other run - BOTH GATES, run separately, on the tree that carries v99 as well:
-    npm test           43 suites   4366/4366   exit 0
-                       (closure 117, samefact 37, exports 73, status 33, smoke's node half
-                       unchanged)
+    npm test           43 suites   4380/4380   exit 0
+                       (closure 122, data 1949, status 37, samefact 37, exports 73,
+                       smoke's node half unchanged)
     npm run test:release
-                       59 suites   6747/6747   exit 0
+                       59 suites   6761/6761   exit 0
                        (smoke 1130, print 78, mobile 752, update 30, forms-browser 10,
                        recovery-browser 25, handover 26, swrestart 31, swidentity 55,
                        sendclaim 43; rules 59, cas.emulator 24, rollout 17,
                        bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
-    No suite was added by either round, so the counts stay 43 and 59.
+    No suite was added or removed by either round, so the counts stay 43 and 59; the
+    fourteen extra checks are the re-audit's pairs. An earlier pair of runs at 847560c -
+    the same round before the re-audit - was 43/4366 and 59/6747, and is superseded.
     The storm suite beside it: ten serial runs against the real emulator on an idle
-    machine, 50/50 every one. Two earlier attempts came back 43/50 and 46/50 and were
+    machine, 50/50 every one, measured at 847560c; once more at 14eeb8d inside the release
+    gate, 50/50. Two earlier attempts came back 43/50 and 46/50 and were
     self-inflicted - two loops running the suite at once share the emulator that
     `firebase emulators:exec` binds from firebase.json, and reseed() wipes the shared
     document, so each run was deleting the other's record. Passing --config with a private

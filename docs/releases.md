@@ -19,12 +19,13 @@ first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v100 — the holds nobody disagreed about
+## CANDIDATE — v100 — the holds nobody disagreed about, and a day priced twice
 
 Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v98 as served
 (`4a4d277`) and merged with the v99 that was served from this same branch while it was
 being built (`5650235`). The four items v98 left open, closed, plus the two pins and the one product
-change the same list asked for. It carries v99 whole - the bottom bars and the reason
+change the same list asked for — and then a re-audit of the whole data-safety path, which
+found five more and closed them. It carries v99 whole - the bottom bars and the reason
 line - and adds to it. Both money gates stay shut.
 
 **What it would give the crew that v99 does not have**
@@ -49,6 +50,26 @@ line - and adds to it. Both money gates stay shut.
 - **Behind the gate:** two phones that each approved the same carry plan and reach a
   project with no document both end synced. One of them used to hold the other's approval
   for ever and report a conflict about money that nobody was having.
+- **On the phone, today — and this is the one that was costing money:** a closed
+  fortnight was being applied to any report range that merely STARTED on its opening
+  Friday, whatever it ended on. In any month whose first day is an account start, the
+  ordinary «החודש» preset showed ten days and 5,000 where the crew had worked twenty for
+  10,000 — while the invoice in the same workbook still billed all twenty. Read as two
+  ranges that do not overlap, one day was priced in both. A closure now freezes the
+  fortnight it names and no other range.
+- **On the phone, today:** a phone whose pending restore will not parse no longer says
+  «מסונכרן». It had stopped adopting anything the other two sent, permanently, while its
+  own writes still went out — so all three screens looked healthy and only one of them
+  was. It says «שגיאת סנכרון» now and names the one thing that clears it.
+- **On the phone, today:** an edit the app refuses comes off the screen even when nothing
+  durable stands behind it — which is exactly the session that opened onto a damaged
+  record, and exactly when somebody re-types the week they can see is missing. Those
+  re-typed days used to reach the disk with no journal behind them and the next snapshot
+  deleted them.
+- **On the phone, today:** the undo stack is quarantined rather than written over when it
+  will not parse. It holds up to three whole schedules; it was the one record family
+  exempt from law 10, by accident. And a restore no longer reports a way back that the
+  next snapshot from another phone erases.
 
 **What it is known NOT to cover**
 
@@ -65,6 +86,14 @@ line - and adds to it. Both money gates stay shut.
   and closed. Whether the emulator run that failed once took this path cannot be known
   from its log; `features/false-holds/handoff.md` records how many times the storm suite
   was run against the real emulator after the fix and what each run returned.
+- **The re-audit left two findings OPEN, and this build does not fix them.** A restore is
+  undone on the phone that did NOT ask for it, in the ledger only, with both phones
+  reporting synced; and a roster edit made before the first snapshot arrives reverts
+  another phone's rate change on all three devices, silently. Both have runnable
+  reproductions in `docs/data-safety-audit.md`. Neither is a regression of this build —
+  they predate it — and neither was fixed here, because each needs a rule about what a
+  restore and a rosterless phone may do to somebody's pay, and that is not a rule to pick
+  quietly inside a round. The first is behind the money gates; the second is not.
 
 **Checked before it was stamped**: `features/false-holds/handoff.md`, with both gates'
 output verbatim on the commit they ran on.
