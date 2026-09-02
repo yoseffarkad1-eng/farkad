@@ -1999,6 +1999,175 @@ for (const width of WIDTHS) {
     }
 }
 
+// ============================================ the report header, both sides of the breakpoint
+//
+// Nothing measured the reports screen's header geometry, and the two halves of it are
+// different facts. Below 701px the stylesheet hides `thead` outright and the row becomes
+// a card whose first cell is its heading; above it the table stays a table, which is what
+// tests/print.test.mjs depends on for an A4 page.
+{
+    const seedReports = () => {
+        State.schedule.workers = [{ id: 'w_01', name: 'עובד 1', active: true,
+            dailyRate: 400, hourlyRate: 50 }];
+        State.schedule.places = [{ id: 'p_1', name: 'אתר 1', active: true }];
+        State.save();
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
+        State.commit(addAdvance(State.schedule, 'w_01', '2026-08-11', 100, ''));
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        showView('reports');
+        render();
+    };
+
+    for (const width of [390, 430]) {
+        suite(`${width}px: the pay sheet is a card, and its heading is the rightmost cell`);
+
+        const page = await open({ width, height: HEIGHTS[width] });
+        await page.evaluate(seedReports);
+        await page.waitForTimeout(300);
+
+        const seen = await page.evaluate(() => {
+            const table = document.querySelector('.report-payroll .report-table');
+            const head = table ? table.querySelector('thead') : null;
+            const row = table ? table.querySelector('tbody tr') : null;
+            const cells = row ? [...row.children] : [];
+            const rect = node => node.getBoundingClientRect();
+            return {
+                found: Boolean(table && row && cells.length > 1),
+                headDisplay: head ? getComputedStyle(head).display : null,
+                firstRight: cells[0] ? Math.round(rect(cells[0]).right) : null,
+                otherRights: cells.slice(1).map(c => Math.round(rect(c).right)),
+                rowRight: row ? Math.round(rect(row).right) : null,
+                firstText: cells[0] ? cells[0].textContent.trim() : null
+            };
+        });
+
+        given(`${width}px: the sheet drew a row with cells`, seen.found === true,
+            JSON.stringify(seen));
+        // THE HEADER ROW IS DELIBERATELY NOT THERE. The card carries each cell's name in
+        // `data-label` instead, and a header above a stack of cards would be a column
+        // heading for columns that no longer exist.
+        check(`${width}px: the column header row is not rendered at all`,
+            seen.headDisplay === 'none', String(seen.headDisplay));
+        check(`${width}px: the card's heading is the man's name`,
+            seen.firstText === 'עובד 1', String(seen.firstText));
+        // RIGHTMOST, which in an RTL card is where a heading begins. Measured rather than
+        // assumed: `td:first-child` is given `order: 1` in a flex row, and an order that
+        // stopped working would put the name in the middle of his own card.
+        check(`${width}px: and it reaches the right edge of the card`,
+            seen.firstRight !== null && Math.abs(seen.firstRight - seen.rowRight) <= 14,
+            JSON.stringify({ first: seen.firstRight, row: seen.rowRight }));
+        check(`${width}px: no cell of the card starts further right than the heading`,
+            seen.otherRights.every(right => right <= seen.firstRight + 1),
+            JSON.stringify({ first: seen.firstRight, others: seen.otherRights }));
+
+        await page.context().close();
+    }
+
+    {
+        suite('above the breakpoint the header reads right to left, first column first');
+
+        // 900px, the same width tests/print.test.mjs works at: an A4 page is about 794px
+        // and the table has to still be a table there.
+        const page = await open({ width: 900, height: 800, touch: false });
+        await page.evaluate(seedReports);
+        await page.waitForTimeout(300);
+
+        const seen = await page.evaluate(() => {
+            const read = selector => {
+                const table = document.querySelector(selector);
+                const ths = table ? [...table.querySelectorAll('thead th')] : [];
+                return {
+                    count: ths.length,
+                    texts: ths.map(th => th.textContent.trim()),
+                    rights: ths.map(th => Math.round(th.getBoundingClientRect().right)),
+                    display: table ? getComputedStyle(table.querySelector('thead')).display
+                        : null
+                };
+            };
+            const pay = read('.report-payroll .report-table');
+            // THROUGH THE TOGGLE THE PERSON PRESSES. Assigning REPORT_SECTION and
+            // re-rendering left the invoice measuring 0x0: the screen is switched by
+            // «לפי אתר», and a suite that reaches past the control measures a state the
+            // app never enters.
+            [...document.querySelectorAll('.report-section-toggle button')]
+                .find(btn => btn.textContent.trim() === 'לפי אתר').click();
+            const invoice = read('.report-invoice .report-table');
+            return { pay, invoice };
+        });
+
+        [['the pay sheet', seen.pay, 'עובד'], ['the invoice', seen.invoice, 'תאריך']]
+            .forEach(([what, table, first]) => {
+                given(`${what} has a header row here`,
+                    table.count > 1 && table.display !== 'none', JSON.stringify(table));
+                check(`${what}: the first column's header is the rightmost`,
+                    table.rights.length > 1
+                    && table.rights.every((right, at) => at === 0 || right < table.rights[0]),
+                    JSON.stringify({ texts: table.texts.slice(0, 3), rights: table.rights }));
+                check(`${what}: and the headers step leftward in order`,
+                    table.rights.every((right, at) => at === 0 || right < table.rights[at - 1]),
+                    JSON.stringify(table.rights));
+                check(`${what}: starting with the column it starts with`,
+                    table.texts[0] === first, JSON.stringify(table.texts.slice(0, 2)));
+            });
+
+        await page.context().close();
+    }
+}
+
+// ================================================ the week strip says that it scrolls
+for (const width of WIDTHS) {
+    suite(`${width}px: the week strip shows where it is cut off`);
+
+    // 88px of names and seven 48px days are 424px. A 430 phone gives the strip the whole
+    // screen (the negative margin gives back `.app`'s padding) and the week fits with
+    // nothing to push. At 390 and below it does not fit: Thursday hangs off the LEFT edge
+    // at rest, because the strip is right-to-left and overflow goes that way - and there
+    // was nothing at all to say the strip could be pushed.
+    //
+    // The 48px pitch stays. It is deliberate and pinned elsewhere in this file, and
+    // shrinking the columns to make the week fit is what the fix already rejected once.
+    const page = await open({ width, height: HEIGHTS[width] });
+    await page.evaluate(() => { showView('week'); render(); });
+    await page.waitForTimeout(300);
+
+    const seen = await page.evaluate(() => {
+        const strip = document.querySelector('#weekView .week-strip');
+        const scroll = document.querySelector('#weekView .table-scroll');
+        if (!strip || !scroll) return { found: false };
+        const cue = getComputedStyle(strip, '::after');
+        const cell = document.querySelector('#weekView .week-cell');
+        return {
+            found: true,
+            content: cue.content,
+            width: cue.width,
+            overflows: scroll.scrollWidth > scroll.clientWidth + 1,
+            scrollWidth: scroll.scrollWidth,
+            clientWidth: scroll.clientWidth,
+            pitch: cell ? Math.round(cell.getBoundingClientRect().width) : null,
+            page: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth
+        };
+    });
+
+    check(`${width}px: the strip has a box the cue can hang on`, seen.found === true,
+        JSON.stringify(seen));
+    const shouldCue = width < 424;
+    check(`${width}px: the strip ${shouldCue ? 'does' : 'does not'} overflow its box`,
+        seen.overflows === shouldCue,
+        JSON.stringify({ scrollWidth: seen.scrollWidth, clientWidth: seen.clientWidth }));
+    check(`${width}px: and the cue is ${shouldCue ? 'there' : 'not'}`,
+        (seen.content !== 'none' && seen.content !== '') === shouldCue,
+        JSON.stringify({ content: seen.content, width: seen.width }));
+    check(`${width}px: the day columns are still 48 wide`, seen.pitch === 48,
+        String(seen.pitch));
+    check(`${width}px: and the page itself still does not scroll sideways`,
+        seen.page <= seen.client + 1,
+        JSON.stringify({ page: seen.page, client: seen.client }));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();
