@@ -520,6 +520,11 @@ function csvRows(text) {
     check('every worker-day in the detail sheet is billed on the invoice sheet',
         countable(cleanDetail) === billed(cleanBill),
         `${countable(cleanDetail)} worked rows, ${billed(cleanBill)} billed`);
+    // The screen's grid shows dd/mm now; a file read out of context keeps the year.
+    const detailDates = csvRows(cleanDetail).slice(1).map(row => row[0]);
+    check('and every row of the detail file still carries its year',
+        detailDates.length > 0 && detailDates.every(date => /^2026-\d{2}-\d{2}$/.test(date)),
+        detailDates.join(','));
 
     // A day naming a site this phone's roster has not got. Not exotic: days and roster
     // entries travel as separate field paths, so an edit made on another phone can land
