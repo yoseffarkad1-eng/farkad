@@ -2633,6 +2633,14 @@ const FarkadSync = {
     // is cleared by exactly one thing: a snapshot delivered by a listener - which is the
     // only proof there is that this phone hears again.
     _listenerDead: false,
+    // The error the listener died ON, kept until a listener delivers again. lastError is
+    // overwritten by every setStatus - a write of this phone's own that lands asks for
+    // 'synced', honestStatusFor answers 'error' for the dead listener, and the refusal
+    // that killed it is replaced with null. The status stayed right and the reason was
+    // gone: the panel could say the sync had failed and nothing about the cloud
+    // refusing this phone, one write after it had said so. Measured in
+    // tests/status.test.mjs.
+    _listenerError: null,
     _relistenTimer: null,
     _relistenAt: 0,
 
@@ -2641,6 +2649,7 @@ const FarkadSync = {
             snapshot => {
                 if (this._listenerDead) {
                     this._listenerDead = false;
+                    this._listenerError = null;
                     this._relistenAt = 0;
                     clearTimeout(this._relistenTimer);
                     this._relistenTimer = null;
@@ -2654,6 +2663,7 @@ const FarkadSync = {
 
     listenerFailed(error) {
         this._listenerDead = true;
+        this._listenerError = error || null;
         this.fail(error);
         this.scheduleRelisten();
     },

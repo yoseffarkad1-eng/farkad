@@ -223,6 +223,79 @@ function renderSettingsSyncLine() {
     if (!line) return;
     const foot = document.getElementById('storageNotice');
     line.textContent = foot ? foot.textContent : '';
+    renderSettingsSyncReason();
+}
+
+// WHY the line above says the sync failed - the one thing it does not say.
+//
+// The person's phone, v98, on the home screen: the chip read «שגיאת סנכרון» and this
+// panel read «שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (38 ממתינים לשליחה)», and
+// nothing on the screen said whether the tunnel had gone or the cloud was refusing them.
+// Those are different evenings. A dead network is wait; a refusal is a rules deploy
+// that has not happened (docs/releases.md, the v91 rollout note - the rules go out by
+// hand, after the app has updated itself) or a sign-in that has lapsed, and neither is
+// done by anyone while the screen names neither. fail() (js/sync/sync.js) has kept the
+// answer in FarkadSync.lastError all along; this reads it.
+//
+// The sentences are the app's own, one each, and pinned (tests/smoke.mjs,
+// tests/status.test.mjs). The code the cloud used stays on the line after the Hebrew,
+// as its own left-to-right run, because it is what the person reads out over the phone
+// to whoever deploys the rules - and an English message the app has no sentence for is
+// shown as itself, isolated, rather than swallowed.
+const SYNC_REASON_REFUSED = 'הענן מסרב לקבל רישומים מהמכשיר הזה. '
+    + 'אם האפליקציה עודכנה זה עתה, כללי הענן עדיין לא פורסמו.';
+const SYNC_REASON_SIGNIN = 'הענן אינו מזהה את המכשיר הזה - התחבר שוב.';
+const SYNC_REASON_UNREACHABLE = 'אין כרגע גישה לענן - הניסיון יחזור מעצמו.';
+const SYNC_REASON_DEAF = 'החיבור לענן נותק - מנסה להאזין מחדש.';
+const SYNC_REASON_UNRECORDED = 'הסיבה לא נרשמה.';
+const SYNC_REASON_MESSAGE_MAX = 100;
+
+// The sentence for a sync object's state, or '' when the state is not a failure. Pure,
+// over the fields it names, so the harness can ask it without a screen.
+function syncFailureReason(sync) {
+    if (!sync) return '';
+    if (sync.status !== 'error' && sync.status !== 'claimstuck') return '';
+    // lastError is written by every setStatus, and a dead listener outlives several of
+    // them: the refusal it died on is the reason that stands until it hears again.
+    const error = sync.lastError || (sync._listenerDead ? sync._listenerError : null);
+    if (!error) {
+        return sync._listenerDead ? SYNC_REASON_DEAF : SYNC_REASON_UNRECORDED;
+    }
+    const code = typeof error.code === 'string' ? error.code : '';
+    const message = String(error.message || error || '').trim();
+    const suffix = code ? ` ${isolateLtr(`(${code})`)}` : '';
+
+    if (code === 'permission-denied') return SYNC_REASON_REFUSED + suffix;
+    if (code === 'unauthenticated') return SYNC_REASON_SIGNIN + suffix;
+    // The SDK's word for a cloud it cannot reach, and the browser's: a failed fetch
+    // is a TypeError whose message names the network and carries no code at all.
+    const unreachable = code === 'unavailable' || code === 'deadline-exceeded'
+        || code === 'auth/network-request-failed'
+        || error.name === 'TypeError'
+        || /network|fetch|load failed|offline|connection|timed out/i.test(message);
+    if (unreachable) return SYNC_REASON_UNREACHABLE + suffix;
+
+    if (!message) return SYNC_REASON_UNRECORDED + suffix;
+    const shown = message.length > SYNC_REASON_MESSAGE_MAX
+        ? message.slice(0, SYNC_REASON_MESSAGE_MAX - 1) + '…'
+        : message;
+    return `הודעת השגיאה: ${isolateLtr(shown)}${suffix}`;
+}
+
+function renderSettingsSyncReason() {
+    const line = document.getElementById('settingsSyncReason');
+    if (!line) return;
+    let reason = '';
+    if (typeof FarkadSync !== 'undefined') {
+        // The same precedence as the foot: the browser's offline word, and a save that
+        // failed on the disk, both replace the error sentence up there - and a reason for
+        // a sentence that is not on the screen is a reason for nothing.
+        const offlineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
+        const diskFailed = typeof State !== 'undefined' && Boolean(State.saveFailed);
+        reason = offlineNow || diskFailed ? '' : syncFailureReason(FarkadSync);
+    }
+    line.textContent = reason;
+    line.hidden = reason === '';
 }
 
 // Installed to the home screen, or visiting in a tab. On an iPhone that difference is
