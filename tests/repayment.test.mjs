@@ -26,6 +26,7 @@
 // carry is a flag, off, with a plan function that says exactly what flipping it would do -
 // the same treatment planRateStamping gives to stamping old days, and for the same reason.
 
+import { readFileSync } from 'node:fs';
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { makeNode } from './nodes.mjs';
@@ -199,7 +200,11 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         const row = rows.find(line => line[0] === 'דוד');
         return {
             gross: row[head.indexOf('נצבר')],
-            advances: row[head.indexOf('מקדמות')],
+            // Headed by what is in it: with the account being read this cell is the
+            // deduction and the column says so. See deductionColumnName in
+            // js/ui/reports.js and tests/wording.test.mjs.
+            advances: row[head.indexOf(head.indexOf('נוכה מהשכר') !== -1
+                ? 'נוכה מהשכר' : 'מקדמות')],
             net: row[head.indexOf('לתשלום')],
             note: row[head.indexOf('הערה')]
         };
@@ -213,6 +218,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     work(one, B_DAYS);
     one.State.commit(one.call('addAdvance', one.State.schedule,
         'w_01', '2026-08-10', 5000, ''));
+    approveCarry(one);
     const a = sheetFor(one, A);
     same('account A: 3,200 earned, 3,200 deducted, nothing to pay',
         [a.gross, a.advances, a.net], [3200, -3200, 0]);
@@ -225,6 +231,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
     work(two, B_DAYS);
     two.State.commit(two.call('addAdvance', two.State.schedule,
         'w_01', '2026-08-10', 5000, ''));
+    approveCarry(two);
     const b = sheetFor(two, B);
     same('account B: 2,800 earned, the 1,800 it inherited deducted, 1,000 to pay',
         [b.gross, b.advances, b.net], [2800, -1800, 1000]);
@@ -344,10 +351,30 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
             .filter(id => (shipped.device.State.schedule.ledger.advances[id] || {})
                 .kind === 'repaid').length === 0);
 
-    // AND WITH IT OPEN, which is the build somebody eventually ships.
+    // AND WITH IT OPEN - which is NOT yet enough, and that is the L3 gate.
+    //
+    // A device whose accounts the carry would restate has money on the line nobody has
+    // looked at. Both flags open and the migration unapproved, there is still no control:
+    // financialWritingEnabled refuses, and the review screen in the ⋯ panel is what a
+    // person answers first.
+    const pending = await screenFor({ deviceId: 'd_ui_pending',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    given('this record has accounts the carry would restate',
+        pending.device.call('planCarryMigration', pending.device.State.schedule).needed === true,
+        JSON.stringify(pending.device.call('planCarryMigration',
+            pending.device.State.schedule).rows.length));
+    check('both flags open and the migration unapproved, there is still no control',
+        pending.reportsView.textContent.indexOf('החזר') === -1,
+        pending.reportsView.textContent.slice(0, 200));
+
+    // APPROVED, and only now.
     const open = await screenFor({ deviceId: 'd_ui_on',
         flags: { carryAdvances: true, ledgerWrites: true } });
-    check('the control is there, on the advance it settles',
+    const approvalPlan = open.device.call('planCarryMigration', open.device.State.schedule);
+    open.device.State.commit(open.device.call('recordCarryApproval',
+        open.device.State.schedule, approvalPlan, '2026-08-26T09:00:00.000Z', 'd_ui_on'));
+    open.run('openWorkerDays("w_01")');
+    check('once the migration is approved the control is there, on the advance it settles',
         open.reportsView.textContent.indexOf('החזר') !== -1,
         open.reportsView.textContent.slice(0, 300));
 
@@ -439,6 +466,17 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
             createElement: tag => makeNode(tag),
             createElementNS: (ns, tag) => makeNode(tag)
         };
+        // The carry migration approved where the build could write at all, because this
+        // suite is about the two GATES and not about the review screen - see the L3
+        // block, which measures the refusal before approval on its own.
+        if (flags.ledgerWrites && flags.carryAdvances) {
+            const plan = device.call('planCarryMigration', device.State.schedule);
+            if (plan.needed) {
+                device.State.commit(device.call('recordCarryApproval', device.State.schedule,
+                    plan, '2026-08-18T08:00:00.000Z', deviceId));
+            }
+        }
+
         const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
         run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
         run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
@@ -483,6 +521,26 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
 //   the debt line: 0 ← 5,000 ← 1,950 ← 1,750
 const OMER_A = { from: '2026-08-07', to: '2026-08-20' };
 const OMER_B = { from: '2026-08-21', to: '2026-09-03' };
+
+// APPROVING THE MIGRATION, which is now a precondition for READING an account and not
+// only for writing to one.
+//
+// Until tests/approval.test.mjs landed, every surface in this app showed the carried
+// arithmetic the moment the build flag was open, whether or not anybody had approved
+// restating the fortnights already printed and paid. It does not any more:
+// carryReportingEnabled(schedule) is the flag AND this record's own migration being
+// settled, and payrollSheetRows, workerAccountFor and openAdvanceBalance all ask it.
+//
+// The fixtures below are about the ARITHMETIC of the carry, not about the gate in front
+// of it, so they approve the migration the way a person would and then measure. A fixture
+// that reads the model directly - advanceAccount and the rest - needs none of this: the
+// gate is on the surfaces, not on the fold.
+function approveCarry(device) {
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    if (!plan.needed) return true;
+    return device.State.commit(device.call('recordCarryApproval', device.State.schedule,
+        plan, '2026-08-06T09:00:00.000Z', 'd_person'));
+}
 
 function omer(flags) {
     const device = makeDevice({ deviceId: 'd_omer', flags });
@@ -590,6 +648,7 @@ function omer(flags) {
     const { readFileSync } = await import('node:fs');
 
     const device = omer({ carryAdvances: true, ledgerWrites: true });
+    approveCarry(device);
     const advanceId = Object.keys(device.State.schedule.advances)[0];
     device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
         advanceId, 'w_01', OMER_A.from, OMER_A.to, 3050,
@@ -694,11 +753,1540 @@ function omer(flags) {
     check('a reversal with no reason is refused',
         device.call('ledgerEntryProblems', 'le_x', noReason).length > 0,
         JSON.stringify(device.call('ledgerEntryProblems', 'le_x', noReason)));
-    check('and one that gives back more than was ever given is refused too',
+    // WHAT THIS CHECK ACTUALLY MEASURES, said correctly. It was named "one that gives
+    // back more than was ever given is refused too" and passed an amount of -5, which
+    // ledgerEntryProblems refuses for being NEGATIVE. That validator is handed a single
+    // record and never sees the advance behind it, so it would have accepted 301 against
+    // a 300 without blinking, and the check would have gone on passing. The bound by the
+    // advance is reversalProblems, and it is measured in the D5 suite below with 301, 500
+    // and a concurrent duplicate. Here the name matches the amount.
+    check('a reversal of a negative amount is refused',
         device.call('ledgerEntryProblems', 'le_x', Object.assign({}, noReason,
             { reason: 'למה', amount: -5 })).length > 0,
         JSON.stringify(device.call('ledgerEntryProblems', 'le_x',
             Object.assign({}, noReason, { reason: 'למה', amount: -5 }))));
+}
+
+
+// ------------------------------------------------- one answer to "what is still owed"
+{
+    suite('D1: the outstanding balance counts every kind of entry that reduces it');
+
+    // The defect, in one line: the screen computed `given - repaid`, and three kinds of
+    // entry reduce a debt. A 500 advance with 400 already taken off his WAGE read
+    // "חוב פתוח 500" and offered a repayment ceiling of 500 - so a man could hand back
+    // 500 in cash against a debt of 100, and the app would take it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+
+    same('nothing has happened to it yet',
+        device.call('advanceOutstanding', device.State.schedule, id),
+        { id, given: 5000, repaid: 0, reversed: 0, deducted: 0,
+            givenGross: 5000, repaidGross: 0, deductedGross: 0,
+            settled: 0, left: 5000, overpaid: 0 });
+
+    // 3,050 came off his wage when account A closed. That is not a repayment and it is
+    // not a reversal; it is the third kind, and it was the one nobody counted.
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 3050,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 1950));
+    const afterWage = device.call('advanceOutstanding', device.State.schedule, id);
+    check('money taken off the wage comes off the balance', afterWage.deducted === 3050
+        && afterWage.left === 1950, JSON.stringify(afterWage));
+
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 200, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash'));
+    device.State.commit(device.call('recordAdvanceReversed', device.State.schedule,
+        id, 50, '2026-08-24', 'נרשם 50 בטעות', '2026-08-24T10:00:00.000Z', 'd_omer'));
+
+    const all = device.call('advanceOutstanding', device.State.schedule, id);
+    // WHERE THE CORRECTION LANDS, which moved with L4 and is the point of it.
+    //
+    // This reversal names no transaction, so it means what such an entry has always
+    // meant - the ADVANCE was recorded in error - and it now reduces what was given
+    // rather than adding to what was settled. The money is identical either way: 1,700
+    // left, before and after. The decomposition is not, and it is the decomposition that
+    // lets a reversal of a REPAYMENT push the debt up instead of down.
+    same('and cash, wage and correction each land where they belong',
+        { repaid: all.repaid, deducted: all.deducted, reversed: all.reversed,
+            given: all.given, settled: all.settled, left: all.left, overpaid: all.overpaid },
+        { repaid: 200, deducted: 3050, reversed: 50, given: 4950, settled: 3250,
+            left: 1700, overpaid: 0 });
+    check('and the gross figures still say what the history says happened',
+        all.givenGross === 5000 && all.repaidGross === 200 && all.deductedGross === 3050,
+        JSON.stringify({ given: all.givenGross, repaid: all.repaidGross,
+            deducted: all.deductedGross }));
+
+    // The old arithmetic, written out so the difference is on the record: given - repaid
+    // alone would have said 4,800 was still owed on an advance with 1,700 left on it.
+    // Read off the GROSS, because that is the number the screen used to work from.
+    check('the number the screen used to print was 4,800 on this advance',
+        all.givenGross - all.repaidGross === 4800,
+        String(all.givenGross - all.repaidGross));
+}
+
+{
+    suite('D1: the repayment ceiling is the same number the screen prints');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 4900,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 100));
+
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    given('4,900 of the 5,000 came off his wage', state.deducted === 4900);
+    check('so 100 is what is left, on every surface that asks',
+        state.left === 100, JSON.stringify(state));
+    // The form's ceiling is `settled.left`, and `settled` is now this same call - see
+    // advanceSettled in js/ui/reports.js. The check that matters is that there is no
+    // second arithmetic anywhere that could answer 5,000.
+    check('and the old answer, 5,000, is not reachable from this record',
+        state.given - state.repaid - state.reversed - state.deducted === 100,
+        JSON.stringify(state));
+}
+
+// ------------------------------------------------- two phones, one repayment, twice
+{
+    suite('D2: more settled than was ever given is a state, not a clamp');
+
+    // Both phones are offline, both are told the man handed back 500 against the same
+    // advance, and both record it. Both entries are true records of something somebody
+    // said, and an append-only ledger that dropped one would be losing exactly the
+    // evidence needed to work out which. So both stay - and the app stops deducting.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 4600,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 400));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', 'מזומן', '2026-08-24T09:00:00.000Z', 'd_a', 'cash'));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', 'מזומן', '2026-08-24T09:00:01.000Z', 'd_b', 'cash'));
+
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    check('both repayments are still on the record', state.repaid === 800,
+        JSON.stringify(state));
+    check('the debt is zero and not a negative number', state.left === 0,
+        JSON.stringify(state));
+    check('and the surplus is named rather than swallowed', state.overpaid === 400,
+        JSON.stringify(state));
+
+    const flagged = device.call('overpaidAdvances', device.State.schedule, 'w_01');
+    check('the worker has an advance flagged for review',
+        flagged.length === 1 && flagged[0].id === id && flagged[0].overpaid === 400,
+        JSON.stringify(flagged));
+
+    // The pay sheet stops deducting while it stands. Nothing is lost - the balance is
+    // carried, not written off - and the row says why.
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to);
+    check('nothing is deducted from his wage while the account does not add up',
+        walk.deducted === 0, JSON.stringify(walk));
+    check('the row says it is holding, and by how much',
+        walk.review === true && walk.overpaid === 400, JSON.stringify(walk));
+    check('and the balance is carried rather than written off',
+        walk.carriedForward === walk.carriedIn + walk.given - walk.repaid - walk.reversed
+        || walk.carriedForward >= 0, JSON.stringify(walk));
+
+    // A CLOSED period is not revised by a surplus noticed today. That is the whole rule
+    // this feature rests on, and it holds here too.
+    const closedWalk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('the payslip that was already handed over is untouched',
+        closedWalk.deducted === 4600 && closedWalk.carriedOut === 400
+        && closedWalk.review === false, JSON.stringify(closedWalk));
+}
+
+// ------------------------------------------------- the reversal, bounded by its advance
+{
+    suite('D5: a reversal cannot exceed, or repeat, what it corrects');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    // A separate, small advance so the numbers are the brief's own: 300 given.
+    const wrong = device.call('addAdvance', device.State.schedule,
+        'w_01', '2026-08-25', 300, '');
+    device.State.commit(wrong);
+    const id = wrong.value.id;
+
+    // THE CHECK THAT USED TO BE WRONG. It was named "one that gives back more than was
+    // ever given is refused too" and it passed an amount of -5 to ledgerEntryProblems,
+    // which refuses -5 for being negative and would have accepted 301 without blinking:
+    // that validator is handed one record and never sees the advance behind it. So the
+    // check proved a rule nobody had written. These are the amounts the name claims.
+    check('301 against a 300 advance is refused',
+        device.call('reversalProblems', device.State.schedule, id, 301, 'למה').length > 0,
+        JSON.stringify(device.call('reversalProblems', device.State.schedule, id, 301, 'למה')));
+    check('and so is 500', device.call('reversalProblems',
+        device.State.schedule, id, 500, 'למה').length > 0,
+        JSON.stringify(device.call('reversalProblems', device.State.schedule, id, 500, 'למה')));
+    check('300 exactly is allowed', device.call('reversalProblems',
+        device.State.schedule, id, 300, 'נרשם פעמיים בטעות').length === 0);
+    check('a reversal with no reason is refused whatever the amount',
+        device.call('reversalProblems', device.State.schedule, id, 300, '   ').length > 0);
+    check('and a reversal of nothing is refused',
+        device.call('reversalProblems', device.State.schedule, id, 0, 'למה').length > 0);
+
+    device.State.commit(device.call('recordAdvanceReversed', device.State.schedule,
+        id, 300, '2026-08-25', 'נרשם פעמיים בטעות', '2026-08-25T10:00:00.000Z', 'd_omer'));
+
+    check('once reversed in full there is nothing left to reverse',
+        device.call('reversalRoom', device.State.schedule, id) === 0,
+        String(device.call('reversalRoom', device.State.schedule, id)));
+    check('so a second reversal of the same advance is refused',
+        device.call('reversalProblems', device.State.schedule, id, 300,
+            'שוב').length > 0,
+        JSON.stringify(device.call('reversalProblems', device.State.schedule, id, 300, 'שוב')));
+    check('even a small one', device.call('reversalProblems',
+        device.State.schedule, id, 1, 'שוב').length > 0);
+
+    // TWO PHONES REVERSING THE SAME MISTAKE. Each one's guard passed when it was asked,
+    // because each was offline and each saw an unreversed advance. Both entries land and
+    // both stay - and the result is the visible overpayment state, not a silent debt of
+    // the opposite sign.
+    //
+    // THE SECOND ONE IS MINTED ON A SECOND PHONE, and it has to be: this device can see
+    // the first reversal, and recordAdvanceReversed now refuses to write a second - which
+    // is the rule three lines above this one, asked of the recorder instead of only of
+    // the validator. Asking THIS device for it would be asking it to do the thing the
+    // suite has just proved it must not. So the other phone is a real other phone: it
+    // never saw the first reversal, its guard passes, and its entry arrives here the way
+    // one does - at its own field path, under its own id.
+    const other = omer({ carryAdvances: true, ledgerWrites: true });
+    other.State.commit(other.call('addAdvance', other.State.schedule,
+        'w_01', '2026-08-25', 300, ''));
+    const theirs = Object.keys(other.State.schedule.advances)
+        .find(key => other.State.schedule.advances[key].date === '2026-08-25');
+    const second = other.call('recordAdvanceReversed', other.State.schedule,
+        theirs, 300, '2026-08-25', 'נרשם פעמיים בטעות', '2026-08-25T10:00:05.000Z', 'd_b');
+    given('the other phone, which saw no reversal, wrote one', second !== null,
+        JSON.stringify(second));
+
+    // Arriving on this phone: the entry as the other device minted it, pointed at the
+    // advance this device knows, under its own id - which is why the union keeps both.
+    const arriving = Object.assign({}, second.value, { advanceId: id });
+    device.State.commit({ path: `ledger.advances.${arriving.id}`, value: arriving });
+    device.State.schedule.ledger.advances[arriving.id] = arriving;
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    check('both reversals are still on the record', state.reversed === 600,
+        JSON.stringify(state));
+    check('the debt is zero, never negative', state.left === 0, JSON.stringify(state));
+    check('and the duplicate is visible as a surplus to be looked at',
+        state.overpaid === 300, JSON.stringify(state));
+    check('the advance itself was never removed',
+        Boolean(device.State.schedule.advances[id])
+        && device.State.schedule.advances[id].amount === 300,
+        JSON.stringify(device.State.schedule.advances[id]));
+}
+
+{
+    suite('D3: nothing in this build deletes an advance');
+
+    // removeAdvance still EXISTS in the model - a `null` at an advance path has to be
+    // understood when it arrives from a phone that has not updated - but no screen may
+    // send one. The check is on the shipped source, because a button is easy to add back
+    // and this is the rule it would break.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('the ✕ that deleted an advance is gone from the advance row',
+        reports.indexOf('מחק מקדמה') === -1);
+    check('and nothing in the reports screen calls removeAdvance',
+        /removeAdvance\s*\(/.test(reports) === false);
+    check('the correction that replaces it is there instead',
+        reports.indexOf('openReversalForm') !== -1
+        && reports.indexOf('recordAdvanceReversed') !== -1);
+    check('and it asks for a reason before it writes anything',
+        reports.indexOf('סיבה (חובה)') !== -1);
+
+    // The five words, in one place, on every surface.
+    const labels = ['ניתנה מקדמה', 'הוחזר במזומן', 'נוכה מהשכר', 'תיקון-היפוך',
+        'החשבון נסגר'];
+    labels.forEach(word => check(`the statement says ${word} in its own words`,
+        reports.indexOf(word) !== -1));
+}
+
+
+// ------------------------------------------------- closing an account, exactly once
+{
+    suite('D4: a closure is identified by what it closes, not by when it was pressed');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+
+    const plan = device.call('planPeriodClosure', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('the plan says what would come off, before anything is written',
+        plan.canClose === true && plan.deducted === 3050 && plan.rows.length === 1
+        && plan.rows[0].advanceId === id && plan.rows[0].amount === 3050
+        && plan.rows[0].balanceAfter === 1950, JSON.stringify(plan));
+    check('and nothing has been written by planning it',
+        device.call('ledgerEntries', device.State.schedule)
+            .filter(e => e.kind === 'deducted').length === 0);
+
+    const first = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_a');
+    device.State.commitMany(first);
+    const closures = () => device.call('ledgerEntries', device.State.schedule)
+        .filter(e => e.kind === 'deducted');
+    check('closing it writes exactly one closure', closures().length === 1,
+        JSON.stringify(closures()));
+    check('whose id names the advance and the period it closed',
+        closures()[0].id === device.call('closureId', id, OMER_A.from),
+        closures()[0].id);
+
+    // THE DOUBLE-CLOSE, ON ONE PHONE. A second press writes nothing.
+    const second = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:05:00.000Z', 'd_a');
+    check('a second press produces no changes at all', second.length === 0,
+        JSON.stringify(second));
+    device.State.commitMany(second);
+    check('and the ledger still holds one closure', closures().length === 1,
+        JSON.stringify(closures()));
+
+    const folded = device.call('closedPeriods', device.State.schedule, 'w_01')[OMER_A.from];
+    // The two SUMMED figures, which is what this check is about - one close, one
+    // deduction, one balance, however many times the button was pressed. The fold also
+    // carries the fortnight's own facts now (see closureFacts in js/model/ledger.js);
+    // those are per-period rather than per-advance and are proved in
+    // tests/closure.test.mjs, so they are read past here rather than pinned twice.
+    same('the fold reads one closure, not two',
+        { deducted: folded.deducted, balanceAfter: folded.balanceAfter },
+        { deducted: 3050, balanceAfter: 1950 });
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('and the payslip says 3,050 off and 1,950 left, once',
+        walk.deducted === 3050 && walk.carriedOut === 1950 && walk.closed === true,
+        JSON.stringify(walk));
+}
+
+{
+    suite('D4: two phones cannot close the same account twice');
+
+    // Both are offline, both press סגור, both write. This is the case a random entry id
+    // could not survive: two entries, both real, and closedPeriods adding them up - 6,100
+    // off a wage of 3,050 and a carried balance of 3,900, from one closure pressed twice.
+    //
+    // ONE schedule, copied before either write, because the two phones are two copies of
+    // the same record - which is the whole situation. Two freshly built devices would
+    // have minted two different advance ids and measured nothing.
+    const a = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(a.State.schedule.advances)[0];
+    const asPhoneB = JSON.parse(JSON.stringify(a.State.schedule));
+
+    const fromA = a.call('closePeriodChanges', a.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_a');
+    // Phone B is asked against ITS copy, which has not seen A's closure - so it is not
+    // being helped by knowing the answer.
+    const fromB = a.call('closePeriodChanges', asPhoneB, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:03.000Z', 'd_b');
+    // TWO ENTRIES EACH: the fortnight, and the deduction against the advance. Both have
+    // to be idempotent across two phones, because both are written by both.
+    check('each phone, alone, believed it was closing the account',
+        fromA.length === 2 && fromB.length === 2,
+        JSON.stringify([fromA.length, fromB.length]));
+    const pathsOf = list => list.map(one => one.path).sort().join(' | ');
+    check('and both wrote to the same field paths',
+        pathsOf(fromA) === pathsOf(fromB), `${pathsOf(fromA)} || ${pathsOf(fromB)}`);
+
+    // The union, which is what Firestore does with two writes to one field path: the
+    // later one stands, and there is ONE entry either way.
+    a.State.commitMany(fromA);
+    fromB.forEach(one => { a.State.schedule.ledger.advances[one.value.id] = one.value; });
+    const closures = a.call('ledgerEntries', a.State.schedule)
+        .filter(e => e.kind === 'deducted');
+    check('the record holds one closure after both landed', closures.length === 1,
+        JSON.stringify(closures));
+    check('carrying the same money whichever phone wrote it',
+        closures[0].amount === 3050 && closures[0].balanceAfter === 1950,
+        JSON.stringify(closures[0]));
+    // Read off the map rather than through ledgerEntries: that function's subject is
+    // entries ABOUT AN ADVANCE, and the artifact deliberately names none.
+    const artifacts = Object.keys(a.State.schedule.ledger.advances)
+        .map(id => a.State.schedule.ledger.advances[id])
+        .filter(e => e.kind === 'closed');
+    check('and one fortnight, not two', artifacts.length === 1,
+        JSON.stringify(artifacts.map(one => one.id)));
+    check('saying the same wage whichever phone wrote it',
+        artifacts[0].gross === 3050 && artifacts[0].carriedIn === 0,
+        JSON.stringify(artifacts[0]));
+
+    const walk = a.call('advanceAccount', a.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('so the payslip is 3,050 off and 1,950 left, not 6,100 and 3,900',
+        walk.deducted === 3050 && walk.carriedOut === 1950, JSON.stringify(walk));
+}
+
+{
+    suite('D4: a closure is a decision, not a side effect of looking');
+
+    // Reading an account must never seal it. Every one of these is a person LOOKING at
+    // a number - a preview, a print, a workbook, a message - and a closure cannot be
+    // taken back, so none of them may write one.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    const share = readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8');
+    const callers = (reports + share).split('closePeriodChanges').length - 1;
+    check('closePeriodChanges is called from exactly one place in the whole app',
+        callers === 1, String(callers));
+    check('and that place is the account-closing button, behind a confirmation',
+        /closeAccountFor[\s\S]{0,900}askConfirm/.test(reports));
+    check('nothing that prints, previews or exports closes anything',
+        share.indexOf('closePeriodChanges') === -1
+        && share.indexOf('recordPeriodClosed') === -1);
+    // THREE conditions now, not two: the two flags and the record's own readiness. A
+    // device whose accounts the carry would restate has money nobody has looked at, and
+    // financialWritingEnabled is what refuses to write against it - see the migration
+    // review in js/ui/settings.js.
+    check('and the button is behind the writing gate, which is all three',
+        /renderPeriodClosure[\s\S]{0,400}financialWritingEnabled\(/.test(reports));
+
+    // An account that does not add up cannot be sealed. Freezing a wrong number is
+    // exactly the thing a closure makes permanent.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 5000, '2026-08-12', '', '2026-08-12T09:00:00.000Z', 'd_a', 'cash'));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 5000, '2026-08-12', '', '2026-08-12T09:00:01.000Z', 'd_b', 'cash'));
+    const blocked = device.call('planPeriodClosure', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    check('a period with an unexplained surplus refuses to close',
+        blocked.canClose === false && blocked.reasons.indexOf('overpaid') !== -1,
+        JSON.stringify(blocked.reasons));
+    check('and closing it produces no changes',
+        device.call('closePeriodChanges', device.State.schedule, 'w_01',
+            OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_a').length === 0);
+}
+
+
+// ------------------------------------------------- an advance without its own origin
+{
+    suite('L1: creating an advance writes the record every phone reads AND its origin');
+
+    // openAdvanceForm called addAdvance and nothing else, and recordAdvanceGiven had no
+    // production caller anywhere. So an advance made today exists in schedule.advances -
+    // which is what every phone reads, and is right - and NOT in the ledger, which is
+    // what the money is supposed to be folded from once the writer opens.
+    //
+    // It does not stay invisible. A repayment recorded against it before the app is next
+    // closed writes a 'repaid' entry standing on nothing:
+    //
+    //   history:        repaid only
+    //   given entry:    missing
+    //   foldAdvance:    undefined
+    //
+    // and the fold answers undefined for the whole advance, because foldAdvance builds
+    // its state from the 'given' and ignores everything that arrives before one.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+        '2026-08-25', 300, 'מזומן', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+    check('creating an advance produces two changes, not one',
+        Array.isArray(made) && made.length === 2, JSON.stringify(made && made.length));
+    check('one of them is the record every phone still reads',
+        made.some(change => String(change.path).indexOf('advances.') === 0
+            && String(change.path).indexOf('ledger.') !== 0),
+        JSON.stringify(made.map(c => c.path)));
+    check('and the other is the immutable origin in the ledger',
+        made.some(change => String(change.path).indexOf('ledger.advances.') === 0
+            && change.value.kind === 'given'),
+        JSON.stringify(made.map(c => `${c.path}#${c.value && c.value.kind}`)));
+
+    device.State.commitMany(made);
+    const id = made[0].value.id;
+    const history = device.call('advanceHistory', device.State.schedule, id);
+    check('the origin is on the record before anything else happens',
+        history.length === 1 && history[0].kind === 'given' && history[0].amount === 300,
+        JSON.stringify(history.map(e => [e.kind, e.amount])));
+
+    // AND NOW THE REPAYMENT, in the same session, with no reboot and no migration.
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 100, '2026-08-26', '', '2026-08-26T09:00:00.000Z', 'd_omer', 'cash'));
+    const folded = device.call('foldLedger', device.State.schedule)[id];
+    check('the fold knows the advance, because it has an origin to stand on',
+        Boolean(folded) && folded.amount === 300 && folded.repaid === 100,
+        JSON.stringify(folded));
+    same('and what is owed on it is the ordinary arithmetic',
+        (({ given, repaid, left }) => ({ given, repaid, left }))(
+            device.call('advanceOutstanding', device.State.schedule, id)),
+        { given: 300, repaid: 100, left: 200 });
+}
+
+{
+    suite('L1: no repayment, reversal or deduction may stand on no origin');
+
+    // The check the model owes: an entry about an advance that has no 'given' behind it is
+    // an event about money nobody recorded giving. It is not repaired here - nothing is
+    // invented - it is NAMED, so a screen can say so and a fold can refuse to price it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+        '2026-08-25', 300, '', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commitMany(made);
+    const id = made[0].value.id;
+
+    check('an advance created properly has its origin',
+        device.call('advanceHasOrigin', device.State.schedule, id) === true);
+
+    // One that arrived from somewhere else with only a repayment against it.
+    device.State.schedule.advances.a_orphan = {
+        id: 'a_orphan', workerId: 'w_01', date: '2026-08-20', amount: 500, note: ''
+    };
+    device.State.schedule.ledger.advances.le_orphan = {
+        id: 'le_orphan', advanceId: 'a_orphan', kind: 'repaid', date: '2026-08-22',
+        amount: 200, at: '2026-08-22T09:00:00.000Z', by: 'd_b'
+    };
+    check('and one carrying only a repayment does not',
+        device.call('advanceHasOrigin', device.State.schedule, 'a_orphan') === false);
+    const orphans = device.call('advancesWithoutOrigin', device.State.schedule);
+    check('the orphan is named, and only the orphan',
+        orphans.length === 1 && orphans[0] === 'a_orphan', JSON.stringify(orphans));
+}
+
+{
+    suite('L1: migration asks for a valid origin, not for any entry at all');
+
+    // THE DEFECT THIS CLOSES. migrateAdvancesToLedger built its "already done" set from
+    // every entry's advanceId, whatever the entry was. So an advance whose only entry was
+    // a repayment looked migrated, the migration skipped it, and the origin was never
+    // written - by the one mechanism that exists to write it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    // An advance from a build that wrote no entries, with a repayment recorded against it
+    // by a phone that did.
+    device.State.schedule.advances.a_legacy = {
+        id: 'a_legacy', workerId: 'w_01', date: '2026-08-20', amount: 500, note: ''
+    };
+    device.State.schedule.ledger.advances.le_repay = {
+        id: 'le_repay', advanceId: 'a_legacy', kind: 'repaid', date: '2026-08-22',
+        amount: 200, at: '2026-08-22T09:00:00.000Z', by: 'd_b'
+    };
+
+    const plan = device.call('migrateAdvancesToLedger', device.State.schedule, 'd_omer');
+    check('the migration writes the origin the repayment was standing on',
+        plan.added.indexOf('a_legacy') !== -1, JSON.stringify(plan.added));
+    const history = device.call('advanceHistory', device.State.schedule, 'a_legacy');
+    check('and the history now reads origin first, repayment after',
+        history.length === 2 && history[0].kind === 'given' && history[1].kind === 'repaid',
+        JSON.stringify(history.map(e => [e.kind, e.amount])));
+    check('the fold prices it, which it could not do before',
+        device.call('advanceOutstanding', device.State.schedule, 'a_legacy').left === 300,
+        JSON.stringify(device.call('advanceOutstanding', device.State.schedule, 'a_legacy')));
+
+    // AND NOT TWICE. An advance that already has a real origin is left alone.
+    const again = device.call('migrateAdvancesToLedger', device.State.schedule, 'd_omer');
+    check('running it again writes nothing', again.added.length === 0,
+        JSON.stringify(again.added));
+
+    // A MALFORMED origin is not an origin. An entry of kind 'given' that the validator
+    // refuses cannot be what stops the migration writing a real one.
+    device.State.schedule.advances.a_bad = {
+        id: 'a_bad', workerId: 'w_01', date: '2026-08-20', amount: 400, note: ''
+    };
+    device.State.schedule.ledger.advances.le_bad_given = {
+        id: 'le_bad_given', advanceId: 'a_bad', kind: 'given', workerId: 'w_01',
+        date: '2026-08-20', amount: 'abc'
+    };
+    const third = device.call('migrateAdvancesToLedger', device.State.schedule, 'd_omer');
+    check('an unreadable given does not count as an origin',
+        third.added.indexOf('a_bad') !== -1, JSON.stringify(third.added));
+}
+
+{
+    suite('L1: a refused write cannot leave half an advance');
+
+    // The two halves are one logical operation. If the disk takes one and refuses the
+    // other, the record is a repayment waiting to happen against money nobody recorded -
+    // or an origin for an advance no phone reads. Neither may exist.
+    const FAULTS = [
+        ['the disk is full', device => device.setQuota(() => true)],
+        ['the browser refuses the write', device => device.failWrite(() => true)]
+    ];
+    FAULTS.forEach(([label, breakIt]) => {
+        const device = omer({ carryAdvances: true, ledgerWrites: true });
+        breakIt(device);
+        const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+            '2026-08-25', 300, '', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+        const newId = made[0].value.id;
+        device.State.commitMany(made);
+
+        // BY ID, not by counting. The reopen below runs the boot mirror, which writes an
+        // origin for the advance this crew already had - correct, and it moves the count.
+        // What is being asked here is about THIS advance and nothing else.
+        const reopened = makeDevice({ deviceId: 'd_half', storage: device.dump(),
+            flags: { carryAdvances: true, ledgerWrites: true } });
+        reopened.State.load();
+        const legacy = Boolean(reopened.State.schedule.advances[newId]);
+        const origin = reopened.call('advanceHasOrigin', reopened.State.schedule, newId);
+        // EITHER BOTH OR NEITHER, and that is the whole of it. A disk that took one half
+        // would leave an advance no fold can price, or an origin for money no phone reads.
+        check(`${label}: the two halves landed together or not at all`,
+            legacy === origin, JSON.stringify({ legacy, origin }));
+        check(`${label}: and nothing anywhere is standing on no origin`,
+            reopened.call('advancesWithoutOrigin', reopened.State.schedule).length === 0,
+            JSON.stringify(reopened.call('advancesWithoutOrigin', reopened.State.schedule)));
+    });
+}
+
+{
+    suite('L1: the origin survives a close and reopen, without the migration');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const made = device.call('recordNewAdvance', device.State.schedule, 'w_01',
+        '2026-08-25', 300, '', '2026-08-25T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commitMany(made);
+    const id = made[0].value.id;
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 100, '2026-08-26', '', '2026-08-26T09:00:00.000Z', 'd_omer', 'cash'));
+
+    const again = makeDevice({ deviceId: 'd_reopen1', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    const history = again.call('advanceHistory', again.State.schedule, id);
+    check('the origin is still first on the record after a reopen',
+        history.length === 2 && history[0].kind === 'given',
+        JSON.stringify(history.map(e => [e.kind, e.amount])));
+    check('and the migration finds nothing left to do',
+        again.call('migrateAdvancesToLedger', again.State.schedule, 'd_reopen1')
+            .added.length === 0);
+    same('the money reads the same on the far side of the reopen',
+        (({ given, repaid, left }) => ({ given, repaid, left }))(
+            again.call('advanceOutstanding', again.State.schedule, id)),
+        { given: 300, repaid: 100, left: 200 });
+
+    // TWO PHONES MIRRORING ONE ADVANCE mint the SAME origin id, or the union keeps both
+    // and the man is recorded as having been handed the money twice.
+    const mirror = device.call('originEntryId', id);
+    check('the origin id is derived from the advance, so two phones write one entry',
+        typeof mirror === 'string' && mirror.indexOf(id) !== -1
+        && again.State.schedule.ledger.advances[mirror] !== undefined,
+        JSON.stringify({ mirror, present: Boolean(again.State.schedule.ledger.advances[mirror]) }));
+}
+
+{
+    suite('L1: the form is what writes it, and it writes both halves');
+
+    // The source, because a button is easy to change back and this is the rule it would
+    // break. openAdvanceForm called addAdvance directly; it must go through the one
+    // function that writes the origin beside it, and commit them together.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('the advance form calls recordNewAdvance',
+        reports.indexOf('recordNewAdvance(') !== -1);
+    check('and commits both halves in one operation',
+        /recordNewAdvance\([\s\S]{0,400}commitMany/.test(reports));
+    check('nothing in the reports screen calls addAdvance on its own',
+        /(^|[^a-zA-Z])addAdvance\s*\(/m.test(reports) === false,
+        JSON.stringify((reports.match(/.{0,40}addAdvance\s*\(.{0,20}/g) || []).slice(0, 3)));
+}
+
+
+// ------------------------------------------------- one account, read by every surface
+{
+    suite('L2: the same fortnight reads the same on every surface');
+
+    // FOUR SURFACES, ONE MAN, ONE PERIOD. The payroll row, the printed sheet, the
+    // exported workbook and the message the worker himself is sent are four different
+    // functions, and three of them did their own arithmetic:
+    //
+    //   renderNetRow          earned - sum(advances in range)
+    //   workerStatementText   earned - sum(advances in range)
+    //   openAdvanceBalance    sum(every advance ever), ignoring every repayment
+    //
+    // while payrollRows priced the same fortnight through advanceAccount, which knows
+    // about the opening balance, the cash that came back and the money already taken off
+    // his wage. So a man could be told 1,950 on the screen, 5,000 in the archive warning
+    // and 3,050 on WhatsApp, about the same fortnight, on the same evening.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    approveCarry(device);
+    const id = Object.keys(device.State.schedule.advances)[0];
+    device.State.commit(device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 3050,
+        '2026-08-20T18:00:00.000Z', 'd_omer', 1950));
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 200, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash'));
+
+    // THE ONE ANSWER, which every surface below must agree with.
+    const account = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_B.from, OMER_B.to);
+    given('the account opens owing what the closed period carried out',
+        account.carriedIn === 1950, String(account.carriedIn));
+
+    const vm = await import('node:vm');
+    const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:l2' });
+    run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(`REPORT_RANGE.from = '${OMER_B.from}'; REPORT_RANGE.to = '${OMER_B.to}';`
+        + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+
+    // Every surface, asked for the same man and the same fortnight.
+    const surfaces = run(`(function () {
+        const worker = State.worker('w_01');
+        const sheet = payrollSheetRows();
+        const head = sheet[0];
+        const row = sheet.find(r => r[0] === worker.name) || [];
+        return {
+            account: workerAccountFor(worker.id),
+            sheetNet: row[head.indexOf('לתשלום')],
+            sheetAdvances: row[head.indexOf(head.indexOf('נוכה מהשכר') !== -1
+                ? 'נוכה מהשכר' : 'מקדמות')],
+            statement: workerStatementText(worker.id),
+            openBalance: openAdvanceBalance(State.schedule, worker.id)
+        };
+    })()`);
+
+    // The payroll row and the export are the same function and always agreed; the point
+    // here is that the OTHERS now agree with them.
+    check('the pay sheet deducts what the account says was deducted',
+        Math.abs(Number(surfaces.sheetAdvances)) === account.deducted,
+        JSON.stringify({ sheet: surfaces.sheetAdvances, account: account.deducted }));
+
+    // THE STATEMENT the man himself receives.
+    check('the statement names the opening balance the account opened on',
+        surfaces.statement.indexOf('1,950') !== -1 || surfaces.statement.indexOf('1950') !== -1,
+        JSON.stringify(surfaces.statement.split('\n').filter(l => l.indexOf('1,950') !== -1
+            || l.indexOf('1950') !== -1)));
+    check('and it names the cash he handed back',
+        surfaces.statement.indexOf('200') !== -1
+        && surfaces.statement.indexOf('הוחזר במזומן') !== -1,
+        JSON.stringify(surfaces.statement.split('\n').filter(l => l.indexOf('200') !== -1)));
+    check('the statement never prints a number the account does not hold',
+        surfaces.statement.indexOf('5,000') === -1 && surfaces.statement.indexOf('5000') === -1,
+        JSON.stringify(surfaces.statement.split('\n').filter(l => l.indexOf('5') !== -1)));
+
+    // THE ARCHIVE WARNING, which decides whether a man may be put away.
+    check('the archive warning reports what is still owed, not what was ever handed over',
+        surfaces.openBalance !== null && surfaces.openBalance.total === account.carriedForward,
+        JSON.stringify({ warning: surfaces.openBalance, owed: account.carriedForward }));
+    check('and it is not the gross 5,000 any more',
+        surfaces.openBalance === null || surfaces.openBalance.total !== 5000,
+        JSON.stringify(surfaces.openBalance));
+
+    // AND ONE FUNCTION BEHIND ALL OF THEM. The check that keeps it that way.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('every surface goes through the one account reader',
+        (reports.match(/workerAccountFor\(/g) || []).length >= 3,
+        String((reports.match(/workerAccountFor\(/g) || []).length));
+}
+
+{
+    suite('L2: with the gates shut every surface still agrees, the old way');
+
+    // The other half of the promise. With the writer closed there is no account to read,
+    // and the surfaces must still say ONE thing - the thing this build has always said.
+    //
+    // Shut EXPLICITLY. This branch ships both gates open, so `omer({})` here would have
+    // measured the open build twice and called one of them closed.
+    const device = omer({ carryAdvances: false, ledgerWrites: false });
+    const vm = await import('node:vm');
+    const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:l2b' });
+    run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
+    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(`REPORT_RANGE.from = '${OMER_A.from}'; REPORT_RANGE.to = '${OMER_A.to}';`
+        + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
+
+    const shut = run(`(function () {
+        const sheet = payrollSheetRows();
+        const head = sheet[0];
+        const row = sheet.find(r => r[0] === 'עומר סעד') || [];
+        return {
+            sheetAdvances: Math.abs(Number(row[head.indexOf('מקדמות')])),
+            openBalance: openAdvanceBalance(State.schedule, 'w_01'),
+            statement: workerStatementText('w_01')
+        };
+    })()`);
+    check('the sheet deducts the whole advance, as this build always has',
+        shut.sheetAdvances === 5000, String(shut.sheetAdvances));
+    check('and the archive warning says the same number',
+        shut.openBalance && shut.openBalance.total === 5000,
+        JSON.stringify(shut.openBalance));
+    check('and so does the statement',
+        shut.statement.indexOf('5,000') !== -1 || shut.statement.indexOf('5000') !== -1,
+        JSON.stringify(shut.statement.split('\n').filter(l => l.indexOf('5') !== -1).slice(0, 3)));
+}
+
+
+// ------------------------------------------------- the migration nobody had to approve
+{
+    suite('L3: switching the carry on is a decision, laid out before it is taken');
+
+    // planAdvanceCarry has always been able to say which accounts and which men would
+    // move. Nothing called it. So the switch was a constant in a file, and flipping it
+    // would have restated fortnights that had already been printed and paid - silently,
+    // on every phone, at the next open.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const plan = device.call('planCarryMigration', device.State.schedule);
+
+    check('the plan names every row that would move', plan.needed === true
+        && plan.rows.length > 0, JSON.stringify(plan.rows.length));
+    check('and each row carries both numbers, not just the new one',
+        plan.rows.every(row => Number.isFinite(row.now) && Number.isFinite(row.after)),
+        JSON.stringify(plan.rows.map(r => [r.now, r.after])));
+    check('the numbers actually differ, or there would be nothing to approve',
+        plan.rows.some(row => row.now !== row.after),
+        JSON.stringify(plan.rows.map(r => [r.now, r.after])));
+
+    // WHAT THIS APP CANNOT KNOW, reported instead of guessed. v88 wrote no closure
+    // records, so a period with no closure entry is not a period that was never paid -
+    // absence says nothing at all, and only a person knows which it was.
+    check('every row says whether a closure was actually recorded for it',
+        plan.rows.every(row => typeof row.closureRecorded === 'boolean'),
+        JSON.stringify(plan.rows.map(r => r.closureRecorded)));
+    check('and on this record none of them was, which is the honest answer',
+        plan.rows.every(row => row.closureRecorded === false),
+        JSON.stringify(plan.rows.map(r => r.closureRecorded)));
+
+    // NOTHING IS WRITTEN BY PLANNING IT.
+    check('planning writes nothing',
+        Object.keys((device.State.schedule.ledger || {}).migrations || {}).length === 0);
+
+    // AND NOTHING MAY BE WRITTEN UNTIL IT IS ANSWERED.
+    check('financial writing is shut while the migration is unapproved',
+        device.call('financialWritingEnabled', device.State.schedule) === false);
+    check('even though both flags are open',
+        device.call('ledgerWritesEnabled') === true
+        && device.call('advanceCarryEnabled') === true);
+
+    device.State.commit(device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer'));
+    check('once approved, financial writing opens',
+        device.call('financialWritingEnabled', device.State.schedule) === true);
+    check('and the approval is on the record, where the other phones will read it',
+        Boolean(device.State.schedule.ledger.migrations[plan.id]),
+        JSON.stringify(Object.keys(device.State.schedule.ledger.migrations)));
+}
+
+{
+    suite('L3: cancel changes nothing, and a refused save keeps the draft');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const before = JSON.stringify(device.State.schedule);
+    const plan = device.call('planCarryMigration', device.State.schedule);
+
+    // CANCEL. The screen computes the plan every time it draws; not approving is simply
+    // not committing, and the record must be untouched byte for byte.
+    check('planning and walking away leaves the record exactly as it was',
+        JSON.stringify(device.State.schedule) === before);
+    check('and the migration is still waiting',
+        device.call('carryMigrationSettled', device.State.schedule) === false);
+
+    // A REFUSED SAVE. The approval is a write like any other and the disk can refuse it.
+    // What must not happen is a device that believes it approved something it did not.
+    device.setQuota(() => true);
+    const change = device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer');
+    const ok = device.State.commit(change);
+    check('the commit reports the refusal', ok === false, String(ok));
+
+    const reopened = makeDevice({ deviceId: 'd_draft', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    reopened.State.load();
+    check('nothing was approved on the disk',
+        Object.keys((reopened.State.schedule.ledger || {}).migrations || {}).length === 0,
+        JSON.stringify((reopened.State.schedule.ledger || {}).migrations));
+    check('so financial writing is still shut',
+        reopened.call('financialWritingEnabled', reopened.State.schedule) === false);
+    // AND THE REVIEW IS STILL THERE TO ANSWER. A failed save that lost the rows would
+    // leave a person with a gate they cannot open and no screen explaining why.
+    const again = reopened.call('planCarryMigration', reopened.State.schedule);
+    check('and the review still has the same rows to show',
+        again.needed === true && again.id === plan.id,
+        JSON.stringify({ needed: again.needed, same: again.id === plan.id }));
+}
+
+{
+    suite('L3: two phones cannot approve the same migration twice');
+
+    // One schedule, copied before either approves - which is what two phones are.
+    const a = omer({ carryAdvances: true, ledgerWrites: true });
+    const asPhoneB = JSON.parse(JSON.stringify(a.State.schedule));
+
+    const planA = a.call('planCarryMigration', a.State.schedule);
+    const planB = a.call('planCarryMigration', asPhoneB);
+    check('both phones compute the same plan, because the record is the same',
+        planA.id === planB.id, `${planA.id} / ${planB.id}`);
+
+    const fromA = a.call('recordCarryApproval', a.State.schedule, planA,
+        '2026-08-26T09:00:00.000Z', 'd_a');
+    const fromB = a.call('recordCarryApproval', asPhoneB, planB,
+        '2026-08-26T09:00:05.000Z', 'd_b');
+    check('and they write to the same field path',
+        fromA.path === fromB.path, `${fromA.path} | ${fromB.path}`);
+
+    a.State.commitMany([fromA]);
+    // The union, which is what Firestore does with two writes to one field path.
+    a.State.schedule.ledger.migrations[fromB.value.id] = fromB.value;
+    check('the record holds one approval, not two',
+        Object.keys(a.State.schedule.ledger.migrations).length === 1,
+        JSON.stringify(Object.keys(a.State.schedule.ledger.migrations)));
+    check('and the other phone is not asked to approve it again',
+        a.call('carryMigrationSettled', a.State.schedule) === true);
+
+    // APPROVING AGAIN ON ONE PHONE IS NOT A SECOND APPROVAL EITHER. The first decision
+    // keeps its own `at` and `by`, because that is who actually decided.
+    const third = a.call('recordCarryApproval', a.State.schedule, planA,
+        '2026-08-27T09:00:00.000Z', 'd_a');
+    check('a second press returns the approval that is already there',
+        third.already === true && third.value.by === fromB.value.by,
+        JSON.stringify({ already: third.already, by: third.value.by }));
+}
+
+{
+    suite('L3: a record with nothing to restate needs no approval at all');
+
+    // A device that has never had an advance the carry would move must not be shown a
+    // screen asking it to approve nothing - and must not be held shut by one.
+    const device = makeDevice({ deviceId: 'd_nothing',
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    device.setToday('2026-08-26');
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    device.State.save({ silent: true });
+
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    check('there is nothing to approve', plan.needed === false,
+        JSON.stringify(plan.rows));
+    check('so the migration is settled',
+        device.call('carryMigrationSettled', device.State.schedule) === true);
+    check('and financial writing is open on the flags alone',
+        device.call('financialWritingEnabled', device.State.schedule) === true);
+}
+
+{
+    suite('L3: an approval survives the read that follows it');
+
+    // FOUND BY L6, on the emulator, and it is not a concurrency bug at all.
+    //
+    // Two phones, one approving the migration while the other recorded a day. The
+    // approval reached the cloud - it is in the document - and the phone that WROTE it
+    // was asked to approve again the moment it adopted the next snapshot.
+    //
+    // normaliseSchedule rebuilt `schedule.ledger` out of `advances` and `unreadable` and
+    // nothing else. `migrations` was never copied across, so every read - boot, snapshot,
+    // backup import, restore - dropped it. Every route in this app goes through that
+    // function, which means the approval was durable in localStorage and invisible
+    // everywhere after, and the financial gate shut itself again on the next render.
+    //
+    // The same hole ate an approval made on another phone entirely, which is exactly what
+    // recordCarryApproval's comment promises cannot happen: "the approval is saved in the
+    // record and reaches the other devices - they will not be asked to approve again".
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    given('there is something to approve', plan.needed === true);
+    device.State.commit(device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer'));
+    check('the approval is on this phone',
+        device.call('carryMigrationSettled', device.State.schedule) === true);
+
+    const reopened = makeDevice({ deviceId: 'd_omer', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    reopened.State.load();
+    check('and it is still there after a close and reopen',
+        reopened.call('carryMigrationSettled', reopened.State.schedule) === true,
+        JSON.stringify((reopened.State.schedule.ledger || {}).migrations || {}));
+    check('so the gate does not shut itself on the next boot',
+        reopened.call('financialWritingEnabled', reopened.State.schedule) === true);
+
+    // AND ARRIVING FROM ANOTHER PHONE. A snapshot is the same read, and it is the one
+    // that made the promise: the other devices are not asked to approve it again.
+    const other = omer({ carryAdvances: true, ledgerWrites: true });
+    // updatedAt and updatedBy, because receive() reads a document with neither as one
+    // nobody has ever written to - it seeds the cloud from the device instead of adopting
+    // it, and a snapshot that was never adopted proves nothing about what adoption keeps.
+    const fromA = Object.assign(JSON.parse(JSON.stringify(device.State.schedule)),
+        { updatedAt: '2026-08-26T09:00:00.000Z', updatedBy: 'd_omer_a' });
+    other.Sync.receive(fromA);
+    check('a phone that never pressed the button reads the approval off the record',
+        other.call('carryMigrationSettled', other.State.schedule) === true,
+        JSON.stringify((other.State.schedule.ledger || {}).migrations || {}));
+    const otherAgain = makeDevice({ deviceId: 'd_omer2', storage: other.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    otherAgain.State.load();
+    check('and it survives that phone being closed and reopened too',
+        otherAgain.call('carryMigrationSettled', otherAgain.State.schedule) === true,
+        JSON.stringify((otherAgain.State.schedule.ledger || {}).migrations || {}));
+
+    // AN APPROVAL THAT IS NOT ONE is held aside like anything else this build cannot
+    // read - never coerced into a decision nobody made, and never dropped either.
+    const source = omer({ carryAdvances: true, ledgerWrites: true });
+    const raw = JSON.parse(source.dump()['scheduleData:v2']);
+    raw.ledger.migrations = { cm_carry: { id: 'cm_carry', kind: 'carry', rows: 'לא מספר' } };
+    const bad = makeDevice({ deviceId: 'd_bad_approval',
+        flags: { carryAdvances: true, ledgerWrites: true },
+        storage: Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) }) });
+    bad.State.load();
+    check('a malformed approval does not open the gate',
+        bad.call('carryMigrationSettled', bad.State.schedule) === false,
+        JSON.stringify((bad.State.schedule.ledger || {}).migrations || {}));
+    check('and its bytes are held, not thrown away',
+        JSON.stringify((bad.State.schedule.ledger || {}).unreadableMigrations || {})
+            .indexOf('לא מספר') !== -1,
+        JSON.stringify((bad.State.schedule.ledger || {}).unreadableMigrations || {}));
+    check('and the person is told before anything else is written',
+        bad.global('Recovery').problems.length > 0
+        && bad.call('farkadWritesBlocked') === true,
+        JSON.stringify(bad.global('Recovery').problems.map(problem => problem.key)));
+    check('and the rescue export still carries it out',
+        JSON.stringify(bad.global('Recovery').rawRecords()).indexOf('לא מספר') !== -1,
+        JSON.stringify(Object.keys(bad.global('Recovery').rawRecords())));
+
+    // THROUGH THE CLOUD DOOR the same bytes are refused rather than adopted, which is
+    // what every other unreadable thing does at that door: the local record is left
+    // exactly as it was and the person is told before anything overwrites it.
+    const arriving = omer({ carryAdvances: true, ledgerWrites: true });
+    const before = JSON.stringify(arriving.State.schedule);
+    arriving.Sync.receive(Object.assign(JSON.parse(JSON.stringify(arriving.State.schedule)), {
+        updatedAt: '2026-08-26T09:00:00.000Z', updatedBy: 'd_other',
+        ledger: Object.assign({}, arriving.State.schedule.ledger,
+            { migrations: { cm_carry: { id: 'cm_carry', kind: 'carry', rows: 'לא מספר' } } })
+    }));
+    check('the snapshot is not adopted', arriving.Sync.status !== 'synced',
+        arriving.Sync.status);
+    check('the gate stays shut',
+        arriving.call('carryMigrationSettled', arriving.State.schedule) === false);
+    check('and this phone\'s own record is untouched',
+        JSON.stringify(arriving.State.schedule) === before);
+}
+
+{
+    suite('L3: an approval waiting in the queue survives a snapshot landing on top of it');
+
+    // The other half of the same hole. A queued edit is re-applied onto an adopted
+    // snapshot by path, and the re-application knew `ledger.advances.<id>` and nothing
+    // else - so an approval still on its way out was dropped by the arrival of an
+    // ordinary day from another phone, and the person was asked to approve again while
+    // their own approval was sitting in the outbox.
+    //
+    // The same gap made the queue unable to say the approval had landed, which is what
+    // clears it: an edit nothing can see as held is retried against a document that
+    // already has it.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const plan = device.call('planCarryMigration', device.State.schedule);
+    device.State.commit(device.call('recordCarryApproval', device.State.schedule, plan,
+        '2026-08-26T09:00:00.000Z', 'd_omer'));
+    const queued = device.Sync.pendingCount();
+    given('the approval is in the queue', queued > 0, String(queued));
+
+    // Another phone's document, one day newer, knowing nothing of the approval.
+    const elsewhere = JSON.parse(JSON.stringify(device.State.schedule));
+    delete elsewhere.ledger.migrations;
+    elsewhere.days['2026-08-17'] = { plan: {}, actual: {} };
+    elsewhere.updatedAt = '2026-08-26T09:00:05.000Z';
+    elsewhere.updatedBy = 'd_other';
+    device.Sync.receive(elsewhere);
+
+    check('the day from the other phone landed',
+        Boolean(device.State.schedule.days['2026-08-17']));
+    check('and the approval this phone has not finished sending is still here',
+        device.call('carryMigrationSettled', device.State.schedule) === true,
+        JSON.stringify((device.State.schedule.ledger || {}).migrations || {}));
+
+    // AND THE QUEUE CAN SEE IT LAND. Pruning a sent edit asks the stored schedule whether
+    // it holds what was written; an approval nothing could recognise stayed in the queue
+    // against a document that already had it, and the device retried it for as long as it
+    // was open. Asked of scheduleHoldsEntry directly, which is the function that decides.
+    const path = 'ledger.migrations.cm_carry';
+    const value = device.State.schedule.ledger.migrations.cm_carry;
+    check('the record holds the approval that is in it',
+        device.call('scheduleHoldsEntry', device.State.schedule, path, value) === true);
+    const without = JSON.parse(JSON.stringify(device.State.schedule));
+    delete without.ledger.migrations;
+    check('and does not hold one it has never been given',
+        device.call('scheduleHoldsEntry', without, path, value) === false);
+}
+
+{
+    suite('L3: the screen exists, and it is the only thing that approves');
+
+    const settings = readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8');
+    check('the review screen is drawn from the plan',
+        settings.indexOf('planCarryMigration(') !== -1
+        && settings.indexOf('renderCarryMigration') !== -1);
+    check('and it asks before it writes',
+        /approveCarryMigration[\s\S]{0,600}askConfirm/.test(settings));
+    // The id no longer moves - it names ONE decision, so that two phones approving the
+    // same migration write the same path and the second is the first. That makes it
+    // useless as a staleness test, and the guard compares the rows themselves instead.
+    check('it re-plans against the record as it is, not the plan it was drawn from',
+        /askConfirm[\s\S]{0,900}planCarryMigration\(State\.schedule\)[\s\S]{0,600}carryPlanFingerprint\(live\) !== carryPlanFingerprint\(plan\)/
+            .test(settings));
+    // A count would wave through the case that matters most: the same men, the same
+    // periods, different money.
+    check('and the comparison is of the numbers, not of how many rows there are',
+        /function carryPlanFingerprint[\s\S]{0,600}row\.deducted[\s\S]{0,200}row\.carriedOut/
+            .test(settings));
+    check('recordCarryApproval is called from exactly one place in the app',
+        ((readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8')
+            + readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8')
+            + readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8'))
+            .split('recordCarryApproval(').length - 1) === 1);
+    check('and the row that has no recorded closure says so on the screen',
+        settings.indexOf('אין רישום סגירה לתקופה הזו') !== -1);
+}
+
+
+// ------------------------------------------------- correcting the wrong transaction
+{
+    suite('L4: a wrongly recorded REPAYMENT pushes the debt back up');
+
+    // THE CASE THE OLD SHAPE COULD NOT EXPRESS. recordAdvanceReversed targets the
+    // ADVANCE, so the only sentence it can say is "this advance was recorded in error".
+    // A cash repayment entered twice, or for the wrong amount, is at least as common -
+    // and reversing it with the old shape reduced the debt, which credited the man twice
+    // for money that was never there.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    const repay = device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', 'מזומן', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commit(repay);
+    const repayId = repay.value.id;
+
+    given('the record says he handed back 400',
+        device.call('advanceOutstanding', device.State.schedule, id).left === 4600,
+        JSON.stringify(device.call('advanceOutstanding', device.State.schedule, id)));
+
+    // He did not. It was typed against the wrong man's advance.
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        repayId, 400, '2026-08-25', 'נרשם על המקדמה הלא נכונה',
+        '2026-08-25T09:00:00.000Z', 'd_omer'));
+
+    const after = device.call('advanceOutstanding', device.State.schedule, id);
+    check('the debt goes back UP, because the cash never came back',
+        after.left === 5000, JSON.stringify(after));
+    check('and the repayment nets to nothing rather than counting twice',
+        after.repaid === 0 && after.repaidGross === 400, JSON.stringify(after));
+    check('the correction does not create an overpayment out of nothing',
+        after.overpaid === 0, JSON.stringify(after));
+
+    // BOTH ROWS STAY. The repayment that stopped being true is still the row a person is
+    // looking for when they ask what happened here.
+    const history = device.call('advanceHistory', device.State.schedule, id);
+    const rows = history.map(entry => [entry.kind, entry.amount, entry.targetId || null]);
+    check('the repayment is still on the record', rows.some(r => r[0] === 'repaid' && r[1] === 400),
+        JSON.stringify(rows));
+    check('and the correction stands beside it, naming the exact transaction',
+        rows.some(r => r[0] === 'reversed' && r[1] === 400 && r[2] === repayId),
+        JSON.stringify(rows));
+    check('with the reason it was made for',
+        history.filter(e => e.kind === 'reversed')[0].reason === 'נרשם על המקדמה הלא נכונה',
+        JSON.stringify(history.filter(e => e.kind === 'reversed')[0]));
+}
+
+{
+    suite('L4: a wrongly recorded DEDUCTION does the same, in the same direction');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    const closure = device.call('recordPeriodClosed', device.State.schedule,
+        id, 'w_01', OMER_A.from, OMER_A.to, 3050, '2026-08-20T18:00:00.000Z', 'd_omer', 1950);
+    device.State.commit(closure);
+    given('3,050 came off his wage',
+        device.call('advanceOutstanding', device.State.schedule, id).left === 1950,
+        JSON.stringify(device.call('advanceOutstanding', device.State.schedule, id)));
+
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        closure.value.id, 3050, '2026-08-21', 'נסגר על תקופה שגויה',
+        '2026-08-21T09:00:00.000Z', 'd_omer'));
+    const after = device.call('advanceOutstanding', device.State.schedule, id);
+    check('the debt is back to the whole advance', after.left === 5000, JSON.stringify(after));
+    check('and the deduction nets to nothing',
+        after.deducted === 0 && after.deductedGross === 3050, JSON.stringify(after));
+}
+
+{
+    suite('L4: what a correction refuses');
+
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(device.State.schedule.advances)[0];
+    const repay = device.call('recordAdvanceRepaid', device.State.schedule,
+        id, 400, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commit(repay);
+    const repayId = repay.value.id;
+    const problems = (target, amount, reason) =>
+        device.call('eventReversalProblems', device.State.schedule, target, amount, reason);
+
+    check('a transaction that is not there', problems('le_nope', 100, 'למה').length > 0);
+    check('more than the transaction it corrects', problems(repayId, 401, 'למה').length > 0,
+        JSON.stringify(problems(repayId, 401, 'למה')));
+    check('exactly the transaction is allowed', problems(repayId, 400, 'למה').length === 0);
+    // CHANGED DELIBERATELY, and this line is where it is written down. A correction used
+    // to accept any amount up to its target, so 100 against a 400 repayment was legal and
+    // the record then said 300 of that repayment still happened. It did not - there is no
+    // event here for part of a payment - and the remaining 300 was unreachable ever after,
+    // because the correction's id is derived from the target and a second attempt is
+    // refused as a double correction. See tests/correction.test.mjs, which is the whole
+    // rule; this line is the L4 suite agreeing with it.
+    check('part of it is refused, because a partial strands the rest',
+        problems(repayId, 100, 'למה').length > 0,
+        JSON.stringify(problems(repayId, 100, 'למה')));
+    check('nothing at all is refused', problems(repayId, 0, 'למה').length > 0);
+    check('and no reason is refused', problems(repayId, 400, '   ').length > 0);
+
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        repayId, 400, '2026-08-25', 'טעות', '2026-08-25T09:00:00.000Z', 'd_omer'));
+
+    // ONCE. After a second the record says the money moved in a direction nobody chose.
+    check('the same transaction cannot be corrected twice',
+        problems(repayId, 400, 'שוב').length > 0, JSON.stringify(problems(repayId, 400, 'שוב')));
+    check('and there is no room left on it',
+        device.call('eventReversalRoom', device.State.schedule, repayId) === 0);
+    check('a second call writes nothing at all',
+        device.call('recordEventReversed', device.State.schedule, repayId, 400,
+            '2026-08-26', 'שוב', '2026-08-26T09:00:00.000Z', 'd_omer') === null);
+
+    // A CORRECTION OF A CORRECTION is a second story about the same money.
+    const reversalId = device.call('eventReversalId', repayId);
+    check('a correction cannot be corrected',
+        problems(reversalId, 400, 'למה').length > 0,
+        JSON.stringify(problems(reversalId, 400, 'למה')));
+}
+
+{
+    suite('L4: two phones correcting the same mistake correct it once');
+
+    const a = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(a.State.schedule.advances)[0];
+    const repay = a.call('recordAdvanceRepaid', a.State.schedule,
+        id, 400, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_a', 'cash');
+    a.State.commit(repay);
+    const repayId = repay.value.id;
+    const asPhoneB = JSON.parse(JSON.stringify(a.State.schedule));
+
+    const fromA = a.call('recordEventReversed', a.State.schedule, repayId, 400,
+        '2026-08-25', 'טעות', '2026-08-25T09:00:00.000Z', 'd_a');
+    const fromB = a.call('recordEventReversed', asPhoneB, repayId, 400,
+        '2026-08-25', 'טעות', '2026-08-25T09:00:05.000Z', 'd_b');
+    check('each phone, alone, believed it was correcting it',
+        Boolean(fromA) && Boolean(fromB));
+    check('and both wrote to the same field path', fromA.path === fromB.path,
+        `${fromA.path} | ${fromB.path}`);
+
+    a.State.commit(fromA);
+    a.State.schedule.ledger.advances[fromB.value.id] = fromB.value;
+    const corrections = a.call('advanceHistory', a.State.schedule, id)
+        .filter(entry => entry.kind === 'reversed');
+    check('the record holds one correction after both landed',
+        corrections.length === 1, JSON.stringify(corrections.map(c => [c.amount, c.by])));
+    const after = a.call('advanceOutstanding', a.State.schedule, id);
+    check('and the money moved once, not twice', after.left === 5000 && after.repaid === 0,
+        JSON.stringify(after));
+}
+
+{
+    suite('L4: the correction is reachable, and its reason travels');
+
+    // The screen: a correction is offered against a TRANSACTION in the history, not
+    // against the advance - which is the only place the id it needs is on the page.
+    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    check('the history offers a correction per transaction',
+        reports.indexOf('openEventReversalForm') !== -1
+        && reports.indexOf('recordEventReversed(') !== -1);
+    check('and it asks for a reason before it writes',
+        /openEventReversalForm[\s\S]{0,3000}סיבה \(חובה\)/.test(reports));
+    check('the reason is drawn in the history, beside the row it corrects',
+        reports.indexOf('ledger-reason') !== -1);
+
+    // And it leaves the phone: print and export are the two places a person reads this
+    // away from the screen, and a correction with no reason on the paper is an
+    // unexplained movement of money.
+    const share = readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8');
+    check('the exported history carries the reason too',
+        share.indexOf('reason') !== -1 || reports.indexOf('reason') !== -1);
+}
+
+
+// ------------------------------------------------- a closure that cannot be true
+{
+    suite('L5: a closure is checked against the record, not taken on trust');
+
+    // ledgerEntryProblems checks the SHAPE of a closure. Every one of these passes it,
+    // and every one of them is a lie - and each arrives the same way, from another phone
+    // or an import, carrying an amount and a balance somebody else's device computed.
+    const base = () => {
+        const device = omer({ carryAdvances: true, ledgerWrites: true });
+        return { device, id: Object.keys(device.State.schedule.advances)[0] };
+    };
+    const closure = (extra) => Object.assign({
+        id: 'le_close_test', kind: 'deducted', workerId: 'w_01',
+        date: OMER_A.to, periodFrom: OMER_A.from, periodTo: OMER_A.to,
+        amount: 3050, balanceAfter: 1950, at: '2026-08-20T18:00:00.000Z', by: 'd_x'
+    }, extra);
+
+    {
+        const { device, id } = base();
+        const good = closure({ advanceId: id });
+        check('the honest closure passes, or nothing below means anything',
+            device.call('closureProblems', device.State.schedule, good).length === 0,
+            JSON.stringify(device.call('closureProblems', device.State.schedule, good)));
+        check('and its shape passes the entry check too',
+            device.call('ledgerEntryProblems', good.id, good).length === 0);
+    }
+
+    const BAD = [
+        ['deducting more than the advance had left on it',
+            { amount: 6000, balanceAfter: 0 }],
+        ['deducting more than the wage it came off',
+            { amount: 4000, balanceAfter: 1000 }],
+        ['a carried balance that is not what the record leaves',
+            { amount: 3050, balanceAfter: 400 }],
+        ['a period that does not start an account',
+            { periodFrom: '2026-08-09', periodTo: '2026-08-22' }],
+        ['a last day that is not its own account\'s',
+            { periodTo: '2026-08-31' }]
+    ];
+    BAD.forEach(([label, extra]) => {
+        const { device, id } = base();
+        const entry = closure(Object.assign({ advanceId: id }, extra));
+        // Every one of them is well-formed. That is the point.
+        given(`${label}: the shape check passes it`,
+            device.call('ledgerEntryProblems', entry.id, entry).length === 0,
+            JSON.stringify(device.call('ledgerEntryProblems', entry.id, entry)));
+        check(`refused: ${label}`,
+            device.call('closureProblems', device.State.schedule, entry).length > 0,
+            JSON.stringify(device.call('closureProblems', device.State.schedule, entry)));
+    });
+}
+
+{
+    suite('L5: an impossible closure arriving from another phone is held aside');
+
+    // THROUGH THE DOOR IT ACTUALLY COMES THROUGH. A closure is not typed on this phone;
+    // it arrives in a document, and normaliseSchedule is where every door meets.
+    const source = omer({ carryAdvances: true, ledgerWrites: true });
+    const id = Object.keys(source.State.schedule.advances)[0];
+    const raw = JSON.parse(JSON.stringify(source.State.schedule));
+    raw.ledger = raw.ledger || { advances: {}, unreadable: {} };
+    raw.ledger.advances.le_close_lie = {
+        id: 'le_close_lie', advanceId: id, kind: 'deducted', workerId: 'w_01',
+        date: OMER_A.to, periodFrom: OMER_A.from, periodTo: OMER_A.to,
+        amount: 4000, balanceAfter: 1000, at: '2026-08-20T18:00:00.000Z', by: 'd_other'
+    };
+
+    const device = makeDevice({ deviceId: 'd_lie',
+        flags: { carryAdvances: true, ledgerWrites: true },
+        storage: Object.assign({}, source.dump(),
+            { 'scheduleData:v2': JSON.stringify(raw) }) });
+    device.State.load();
+
+    check('the record still opens', device.State.schedule.workers.length === 1);
+    check('the closure is not in the fold',
+        device.State.schedule.ledger.advances.le_close_lie === undefined,
+        JSON.stringify(Object.keys(device.State.schedule.ledger.advances)));
+    check('its bytes are held aside, exactly as they arrived',
+        JSON.stringify(device.State.schedule.ledger.unreadable.le_close_lie)
+            === JSON.stringify(raw.ledger.advances.le_close_lie),
+        JSON.stringify(device.State.schedule.ledger.unreadable.le_close_lie));
+    check('the person is told', device.global('Recovery').problems.length > 0,
+        JSON.stringify(device.global('Recovery').problems.map(p => p.key)));
+    check('and the device stops writing while the money is uncertain',
+        device.call('farkadWritesBlocked') === true);
+
+    // AND NOTHING WAS DEDUCTED ON ITS SAY-SO. That is the whole of what it would have
+    // cost: 4,000 off a wage of 3,050, frozen forever, from a number this phone never
+    // computed.
+    const state = device.call('advanceOutstanding', device.State.schedule, id);
+    check('the advance still stands at what this device can actually verify',
+        state.deducted === 0 && state.left === 5000, JSON.stringify(state));
+
+    // Close and reopen: a device that forgot would fold the lie at the next boot.
+    const again = makeDevice({ deviceId: 'd_lie2', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    check('it is still held aside after a close and reopen',
+        again.State.schedule.ledger.advances.le_close_lie === undefined
+        && Boolean(again.State.schedule.ledger.unreadable.le_close_lie));
+    check('and the rescue export still carries it out',
+        JSON.stringify(again.global('Recovery').rawRecords()).indexOf('le_close_lie') !== -1
+        || JSON.stringify(again.global('Recovery').rawRecords()).indexOf('4000') !== -1,
+        JSON.stringify(Object.keys(again.global('Recovery').rawRecords())));
+}
+
+{
+    suite('L4: a correction moves the money in the direction its target did');
+
+    // FOUND BY THE EXPORT SUITE, and it is the L2 question - one authoritative account -
+    // asked of the two folds that actually exist.
+    //
+    // L4 changed a correction from something aimed at the ADVANCE to something aimed at a
+    // TRANSACTION, because a reversal aimed at the advance cannot correct a repayment that
+    // never happened. advanceOutstanding was taught to read the target's kind: undoing a
+    // repayment puts the debt back up, undoing the money handed over takes it down.
+    //
+    // advanceWalk - which is what every SCREEN, the statement, the pay sheet and the
+    // workbook read - was not. It subtracted every correction from the balance whatever it
+    // corrected, so a repayment of 400 written down against the wrong man and then
+    // corrected took 800 off his debt: 400 for the repayment that did not happen, and 400
+    // again for saying so. Two folds of one record, disagreeing by twice the money.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    const repay = device.call('recordAdvanceRepaid', device.State.schedule, advanceId,
+        400, '2026-08-16', '', '2026-08-16T09:00:00.000Z', 'd_omer', 'cash');
+    device.State.commit(repay);
+    device.State.commit(device.call('recordEventReversed', device.State.schedule,
+        repay.value.id, 400, '2026-08-17', 'נרשם על האדם הלא נכון',
+        '2026-08-17T09:00:00.000Z', 'd_omer'));
+
+    const owed = device.call('advanceOutstanding', device.State.schedule, advanceId);
+    same('the ledger fold: the repayment was undone, so the whole advance is owed',
+        [owed.repaid, owed.left], [0, 5000]);
+
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    same('and the walk every screen reads says the same thing',
+        [walk.deducted, walk.carriedForward], [3050, 1950], JSON.stringify(walk));
+    // BOTH EVENTS ARE STILL NAMED. He did hand back 400 and it was corrected away; a
+    // statement that showed neither would leave him unable to follow his own account.
+    same('with both events still reported, apart, in their own words',
+        [walk.repaid, walk.reversed], [400, 400], JSON.stringify(walk));
+
+    // THE OTHER DIRECTION. Correcting the money handed over is money that never left the
+    // tin, and it reduces the debt - which is what a correction meant before L4 and still
+    // means when that is what it points at.
+    // Reopened, because the boot mirror is what writes the origin entry for an advance
+    // recorded by the legacy form - and a correction needs a transaction to point at.
+    const source = omer({ carryAdvances: true, ledgerWrites: true });
+    const back = makeDevice({ deviceId: 'd_undo', storage: source.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    back.State.load();
+    back.setToday('2026-08-26');
+    const backId = Object.keys(back.State.schedule.advances)[0];
+    const origin = back.call('originEntryId', backId);
+    given('the origin entry is there to correct',
+        Boolean(back.State.schedule.ledger.advances[origin]),
+        JSON.stringify(Object.keys(back.State.schedule.ledger.advances)));
+    // The WHOLE origin entry, which is the only correction of it there can be: the advance
+    // was handed over or it was not. This asked for 1,000 of the 5,000 back when a
+    // partial was legal - see the L4 refusals above and tests/correction.test.mjs.
+    back.State.commit(back.call('recordEventReversed', back.State.schedule,
+        origin, 5000, '2026-08-17', 'נרשם פעמיים', '2026-08-17T09:00:00.000Z', 'd_omer'));
+    const undone = back.call('advanceOutstanding', back.State.schedule, backId);
+    const undoneWalk = back.call('advanceAccount', back.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    // Nothing left on either fold: the whole advance is undone, so there is no debt to
+    // carry and nothing for the fortnight to deduct. With the partial gone these are the
+    // only numbers the record can produce - 4,000 and 950 were 5,000 and 1,950 minus a
+    // 1,000 the model no longer lets anybody take back on its own.
+    same('correcting the advance itself takes it off, on both folds',
+        [undone.left, undoneWalk.carriedForward], [0, 0],
+        JSON.stringify([undone, undoneWalk]));
+}
+
+{
+    suite('L5: a late repayment does not turn an honest closure into a lie');
+
+    // FOUND BY L6, on the emulator, and it cost a phone its whole record.
+    //
+    // One phone closes the fortnight; the other, at the same moment, records 400 handed
+    // back on the 18th - a day INSIDE the fortnight that just closed. Both are ordinary,
+    // both land, and the whole of advanceWalk's two-balance design exists for exactly
+    // this: the payslip is frozen at 1,950 and the live balance moves to 1,550.
+    //
+    // closureProblems judged the closure against every entry DATED in the period, whenever
+    // it was recorded. So the repayment that arrived second made the closure's 1,950 look
+    // like arithmetic that does not add up, the closure was held aside as impossible, the
+    // device was put into recovery, and it then refused the snapshot carrying the
+    // repayment - leaving the two phones holding different records with no way back.
+    //
+    // A closure freezes what the record said WHEN IT WAS WRITTEN. An entry recorded after
+    // it cannot make it false; that is what lateSinceClose is for.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const advanceId = Object.keys(device.State.schedule.advances)[0];
+    device.State.commitMany(device.call('closePeriodChanges', device.State.schedule,
+        'w_01', OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_close'));
+    const closure = Object.values(device.State.schedule.ledger.advances)
+        .find(entry => entry.kind === 'deducted');
+    given('the closure is there and honest', Boolean(closure)
+        && device.call('closureProblems', device.State.schedule, closure).length === 0);
+
+    // Dated into the closed fortnight, recorded after it closed.
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 400, '2026-08-18', '', '2026-08-20T19:30:00.000Z', 'd_pay', 'cash'));
+
+    check('the closure is still true',
+        device.call('closureProblems', device.State.schedule, closure).length === 0,
+        JSON.stringify(device.call('closureProblems', device.State.schedule, closure)));
+    check('and nothing is held aside',
+        device.call('impossibleClosures', device.State.schedule).length === 0,
+        JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+
+    const walk = device.call('advanceAccount', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to);
+    same('the payslip is what it was closed on, and the money still moved',
+        [walk.closed, walk.carriedOut, walk.carriedForward, walk.lateSinceClose],
+        [true, 1950, 1550, -400]);
+
+    // Reopened from the disk, because a boot is where the hold-aside runs.
+    const again = makeDevice({ deviceId: 'd_late', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    check('and a reopen folds it rather than quarantining the device',
+        again.State.schedule.ledger.advances[closure.id] !== undefined
+        && again.call('farkadWritesBlocked') === false,
+        JSON.stringify(Object.keys(again.State.schedule.ledger.unreadable || {})));
+
+    // AND THE LIE IS STILL A LIE. The entries a closure is judged against are the ones
+    // that were on the record before it - not fewer, or a phone could send any figure it
+    // liked by dating its own repayment a second later.
+    const liar = omer({ carryAdvances: true, ledgerWrites: true });
+    const liarAdvance = Object.keys(liar.State.schedule.advances)[0];
+    liar.State.commit(liar.call('recordAdvanceRepaid', liar.State.schedule,
+        liarAdvance, 400, '2026-08-18', '', '2026-08-19T09:00:00.000Z', 'd_pay', 'cash'));
+    liar.State.schedule.ledger.advances.le_close_lie = {
+        id: 'le_close_lie', advanceId: liarAdvance, kind: 'deducted', workerId: 'w_01',
+        date: '2026-08-20', periodFrom: OMER_A.from, periodTo: OMER_A.to,
+        amount: 3050, balanceAfter: 1950, at: '2026-08-20T18:00:00.000Z', by: 'd_other'
+    };
+    check('a closure ignoring a repayment already on the record is still refused',
+        liar.call('closureProblems', liar.State.schedule,
+            liar.State.schedule.ledger.advances.le_close_lie).length > 0,
+        JSON.stringify(liar.call('closureProblems', liar.State.schedule,
+            liar.State.schedule.ledger.advances.le_close_lie)));
+}
+
+{
+    suite('L5: the closure this build writes itself is always true');
+
+    // The other side of it. Everything above is about a closure somebody else computed;
+    // this asks whether the one this build writes can ever fail its own check.
+    const device = omer({ carryAdvances: true, ledgerWrites: true });
+    const changes = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        OMER_A.from, OMER_A.to, '2026-08-20T18:00:00.000Z', 'd_omer');
+    // TWO ENTRIES NOW: the period artifact - the payslip, naming the man and the
+    // fortnight and moving no money - and the deduction against the advance. A man with
+    // no advance gets the first alone, which is the whole reason it exists.
+    given('there is a closure to write', changes.length === 2, String(changes.length));
+    device.State.commitMany(changes);
+
+    const written = changes.map(one => one.value)
+        .find(value => String(value.kind) === 'deducted');
+    const artifact = changes.map(one => one.value)
+        .find(value => String(value.kind) === 'closed');
+    given('one of them is the deduction and one is the fortnight',
+        Boolean(written) && Boolean(artifact),
+        JSON.stringify(changes.map(one => one.value.kind)));
+    check('it passes the accounting check it will be judged by',
+        device.call('closureProblems', device.State.schedule, written).length === 0,
+        JSON.stringify(device.call('closureProblems', device.State.schedule, written)));
+    check('and so does the fortnight beside it',
+        device.call('closureProblems', device.State.schedule, artifact).length === 0,
+        JSON.stringify(device.call('closureProblems', device.State.schedule, artifact)));
+    check('both are readable by the validator every door applies',
+        device.call('ledgerEntryProblems', written.id, written).length === 0
+        && device.call('ledgerEntryProblems', artifact.id, artifact).length === 0,
+        JSON.stringify([device.call('ledgerEntryProblems', written.id, written),
+            device.call('ledgerEntryProblems', artifact.id, artifact)]));
+    check('and nothing on this device is held aside',
+        device.call('impossibleClosures', device.State.schedule).length === 0,
+        JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+
+    // And it survives its own reopen, which is the path an imported one takes.
+    const again = makeDevice({ deviceId: 'd_true', storage: device.dump(),
+        flags: { carryAdvances: true, ledgerWrites: true } });
+    again.State.load();
+    check('a reopen folds it rather than holding it aside',
+        Boolean(again.State.schedule.ledger.advances[written.id]),
+        JSON.stringify(Object.keys(again.State.schedule.ledger.advances)));
+    check('and the payslip reads what it was closed on',
+        again.call('advanceAccount', again.State.schedule, 'w_01',
+            OMER_A.from, OMER_A.to).carriedOut === 1950,
+        JSON.stringify(again.call('advanceAccount', again.State.schedule, 'w_01',
+            OMER_A.from, OMER_A.to)));
 }
 
 report();

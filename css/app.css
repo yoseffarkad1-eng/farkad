@@ -380,8 +380,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     /* Icon-only buttons are square: a ✕ with a 15px glyph in it is 20px wide otherwise. */
     .btn-icon { min-width: 44px; }
 
-    /* The week grid is a table of tap targets, and the row height is set by the cell. */
-    .week-cell { height: 44px; }
+    /* The week grid is a table of tap targets, and the row height is set by the cell.
+       48, not 44: 44 is the floor everything in this block is held to, and this is a
+       pitch. The grid is the one screen made of nothing but targets, edge to edge, with
+       no padding between them - a finger 3px over on a chip lands on air, and here it
+       lands on the next man's day. The width half of the same number is in the phone
+       block (`min-width: 48px`), and tests/mobile.test.mjs pins both at 48, not at the
+       floor, so that dropping either back to 44 goes red. */
+    .week-cell { height: 48px; }
 
     /* These carry their own padding and would otherwise stay short inside a flex row. */
     .chip-main, .chip-side, .tab, .step-btn, .btn-today, .btn-add { min-height: 44px; }
@@ -1599,6 +1605,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wday-date span { color: var(--ink-3); font-size: 13px; }
 .wday-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wday-note { color: var(--ink-3); font-size: 12px; }
+/* The reason a correction was made, on the row it corrects. An adjustment to money
+   with no reason beside it is the thing the ledger exists to refuse. */
+.ledger-reason { grid-column: 1 / -1; color: var(--ink-2); font-size: 12px; }
+/* Sealing an account is the last thing on this screen and the only irreversible one
+   on it, so it is set apart above the line rather than sitting among the rows. */
+.period-closure { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.period-closure button { min-height: 44px; width: 100%; }
+/* An account that does not add up is not a quiet note. It is the reason nothing was
+   deducted from this man's wage, and somebody has to read it before payday. */
+.wday-note.wday-review { color: var(--warn); font-weight: 700; }
 .wday-money { text-align: start; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wday-absent .wday-date strong { color: var(--ink-3); }
 .wday-total {
@@ -1712,6 +1728,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     background: var(--surface-2);
 }
 .advance-form-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+/* The correction form's amount is a STATEMENT, not a field: a correction takes the whole
+   transaction or none of it, so there is nothing to type. 16px like every input beside
+   it - it sits in the same column and reads as part of the same form. */
+.advance-form-amount {
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+    padding: 10px 0;
+    color: var(--ink);
+}
 .advance-form input[type="text"],
 .advance-form input[type="date"] {
     width: 100%;
@@ -1773,6 +1798,17 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         border-radius: var(--radius-sm);
         /* Room for the momentum bar iOS draws over the last row. */
         padding-bottom: 2px;
+        /* EDGE TO EDGE. The page keeps 12px of padding each side (`.app`, below) and
+           the strip gives it back: 88px of names and seven 48px days are 424px, and a
+           430px phone offers 406 inside its padding. So the box is as wide as the screen
+           and the whole week is on the big phone with nothing to push - the alternative
+           was 45px columns, which is what 406 divides into, and which the test that
+           should have caught it accepted for a round because it asked for the floor
+           rather than the pitch. On 390 and below the strip is still wider than the box
+           and scrolls, with the names pinned. The number is `.app`'s own --page-pad, read
+           here rather than written twice; the print block sets it back to 0 because
+           paper has no padding to give back. */
+        margin-inline: calc(-1 * var(--page-pad, 12px));
     }
     /* NOT table-layout: fixed. Fixed layout divides the container's width between the
        columns and ignores min-width entirely - which is how `min-width: 44px` sat two
@@ -1798,21 +1834,24 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
        70px rather than 78, which buys the day columns 8px each and ellipsizes no name
        that was not already being ellipsized.
 
-       70 + 7 x 44 is 378px and a 320px screen offers 296, so the seven days and the names
+       66 + 7 x 48 is 402px and a 320px screen is 320, so the seven days and the names
        do NOT fit across the narrowest phone. That arithmetic was used twice to argue for
        32px columns - a target a thumb misses, on a grid where a mis-tap opens the wrong
        day. The arithmetic is right and the conclusion was wrong: what does not fit on the
-       screen fits in the box, and the box scrolls. Six and a bit days are visible at 320px
-       and the seventh is one short push away, with the names pinned to the edge so the row
-       is still legible while it moves. From 375px up more of the week is on screen at once
-       and by 430px all of it is. Nothing here shrinks below 44 to make a number work.
-       tests/mobile.test.mjs measures both dimensions at every width, with no exemption -
-       it used to carry one, which is how the wrong conclusion survived here. */
+       screen fits in the box, and the box scrolls. Five days are visible at 320px and the
+       other two are one short push away, with the names pinned to the edge so the row is
+       still legible while it moves. From 375px up more of the week is on screen at once
+       and at 430px all of it is: 88 + 7 x 48 = 424, in a strip that runs edge to edge.
+       Nothing here shrinks below the pitch to make a number work. tests/mobile.test.mjs
+       measures both dimensions at every width, with no exemption - it used to carry one,
+       which is how the wrong conclusion survived here. */
     /* THE WIDTH OF THE NAME COLUMN, in one place, because two numbers that must agree
-       are one number written twice. Responsive rather than fixed: 70px is what a 320px
+       are one number written twice. Responsive rather than fixed: 66px is what a 320px
        screen can spare and a 430px screen can spare more, so a name that would be cut on
-       the small phone is whole on the big one. */
-    #weekView { --week-name-w: clamp(66px, 21vw, 104px); }
+       the small phone is whole on the big one. Capped at 88, which is the design's name
+       column and the number that makes 88 + 7 x 48 fit a 430px screen: the cap used to be
+       104, and at 430 the names took 90 and the seventh day paid for it. */
+    #weekView { --week-name-w: clamp(66px, 21vw, 88px); }
     .week-table .corner {
         width: var(--week-name-w);
         min-width: var(--week-name-w);
@@ -1836,11 +1875,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    /* 44 in both dimensions, on every phone, with no exemption. The height comes from
-       .week-cell { height: 44px } in the coarse-pointer block; this is the other half,
-       and it is a floor rather than a share of the width - see the note on table-layout
-       above for why it used to be neither. */
-    .week-table td.week-cell, .week-table th:not(.corner) { min-width: 44px; }
+    /* 48 in both dimensions, on every phone, with no exemption. The height comes from
+       .week-cell { height: 48px } in the coarse-pointer block; this is the other half,
+       and it is a pitch rather than a share of the width - see the note on table-layout
+       above for why it used to be neither. 48 and not the 44 floor: the note on the
+       height says why. */
+    .week-table td.week-cell, .week-table th:not(.corner) { min-width: 48px; }
     .week-table .name-cell {
         font-size: 14px;
         padding: 4px 6px;
@@ -2058,10 +2098,19 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
    `.hint.hint-warn` is two classes and wins wherever it sits, so reordering this file
    cannot quietly take the warning off somebody's pay sheet again. */
 @media print { .hint.hint-warn { display: block !important; color: #000; } }
+/* A hint that is MONEY, and money belongs on the paper. .hint is hidden in print
+   because most of them explain the screen; these two - the advance that was not fully
+   deducted and the correction that moved shekels inside a column - are statements about
+   somebody's pay, and the printed sheet is the document the argument happens over. Kept
+   apart from hint-warn because neither is a warning: nothing is wrong, and a red line
+   saying so on every carried advance would train the reader to skip it. */
+@media print { .hint.hint-money { display: block !important; color: #000; } }
 .empty-hint { color: var(--ink-3); font-size: 15px; padding: 14px 0; margin: 0; }
 
 @media (max-width: 700px) {
-    .app { padding-inline: 12px; }
+    /* --page-pad is the ONE place the phone's page padding is written; the week strip
+       gives it back with the same property, so the two cannot drift apart. */
+    .app { --page-pad: 12px; padding-inline: var(--page-pad); }
     .site-grid { grid-template-columns: 1fr; }
     /* min-width, because the buttons inside are flex: 1 from a zero basis - so the
        toggle's own natural size collapses to almost nothing. It never looks too big for
@@ -2101,7 +2150,7 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
        would CLIP the last days off the sheet and stack the names over Thursday. So the
        three rules that make it a strip are undone here, at the same specificity that set
        them, and the week prints as a table again. */
-    #weekView .table-scroll { overflow: visible; padding-bottom: 0; }
+    #weekView .table-scroll { overflow: visible; padding-bottom: 0; margin-inline: 0; }
     .week-table td.week-cell, .week-table th:not(.corner) { min-width: 0; }
     .week-table .corner, .week-table .name-cell { position: static; }
     .week-table th, .week-table td { border-color: #999; }

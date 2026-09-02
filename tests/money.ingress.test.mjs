@@ -520,9 +520,13 @@ function surfaces(device) {
         model: { gross: row.amount, advances: row.advances, net: row.netAmount },
         screen: {
             headers,
-            hasAdvanceColumn: at('מקדמות') !== -1,
+            // Headed by what it holds: with the account being read this cell is the
+            // deduction and the column says נוכה מהשכר. See deductionColumnName in
+            // js/ui/reports.js and tests/wording.test.mjs.
+            hasAdvanceColumn: at('מקדמות') !== -1 || at('נוכה מהשכר') !== -1,
             gross: at('נצבר') === -1 ? null : body[at('נצבר')],
-            advance: at('מקדמות') === -1 ? null : body[at('מקדמות')],
+            advance: at('מקדמות') !== -1 ? body[at('מקדמות')]
+                : (at('נוכה מהשכר') !== -1 ? body[at('נוכה מהשכר')] : null),
             net: at('לתשלום') === -1 ? null : body[at('לתשלום')],
             footer: foot
         },
@@ -666,7 +670,11 @@ suite('5b. the same record, read back out of a real .xlsx');
     const heads = book.sheets['שכר'].values[0];
     const values = book.sheets['שכר'].values[1];
     const GROSS = heads.indexOf('נצבר');
-    const ADV = heads.indexOf('מקדמות');
+    // The workbook heads this column by what is in it - see deductionColumnName in
+    // js/ui/reports.js. This suite is about the NUMBER surviving a real .xlsx, so it
+    // takes whichever heading the file carries.
+    const ADV = heads.indexOf('נוכה מהשכר') !== -1
+        ? heads.indexOf('נוכה מהשכר') : heads.indexOf('מקדמות');
     const NET = heads.indexOf('לתשלום');
     console.log(`    xlsx    שכר, row one       ${JSON.stringify(values)}`);
 

@@ -743,6 +743,16 @@ function normaliseSchedule(raw, hints) {
     //
     // Anything an earlier read held aside stays held: a second reading is not a licence to
     // drop it.
+    // An own property, whatever the name is. `map[id] = value` for an id of `__proto__`
+    // writes the PROTOTYPE and creates nothing - which is how the map that keeps
+    // unreadable evidence lost it and came back reparented. See putKey in
+    // js/model/ledger.js, which is the same rule for the merge.
+    const keepUnder = (map, id, value) => {
+        Object.defineProperty(map, id, {
+            value, writable: true, enumerable: true, configurable: true
+        });
+    };
+
     const POISON_KEY = 'scheduleData:v2:poison:';
     const POISON_SAID = 'הגיע רישום עם שם שאי אפשר להשתמש בו כמפתח. שום דבר לא נמחק - '
         + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי.';
@@ -827,15 +837,73 @@ function normaliseSchedule(raw, hints) {
         }
         schedule.ledger.advances[id] = Object.assign({}, entry, { id: String(id) });
     });
-    // An own property, whatever the name is. `map[id] = value` for an id of `__proto__`
-    // writes the PROTOTYPE and creates nothing - which is how the map that keeps
-    // unreadable evidence lost it and came back reparented. See putKey in
-    // js/model/ledger.js, which is the same rule for the merge.
-    const keepUnder = (map, id, value) => {
-        Object.defineProperty(map, id, {
-            value, writable: true, enumerable: true, configurable: true
+    // A CLOSURE THAT CANNOT BE TRUE, held aside like anything else this build cannot use.
+    //
+    // The entry check above is about SHAPE, and every closure here has already passed it.
+    // This is the other question: is it true against the record it claims to be about. A
+    // closure deducting more than the advance had left, or more than the man earned, or
+    // carrying a balance that is not what the arithmetic leaves, is a well-formed entry
+    // that is a lie - and the amount and the balance are numbers somebody else's phone
+    // computed, which this device has no reason to believe.
+    //
+    // Run after the entries are in, because judging one closure needs all the others.
+    // Held aside rather than corrected: nothing here invents a number to replace it, and
+    // the bytes stay exactly as they arrived.
+    if (typeof impossibleClosures === 'function') {
+        impossibleClosures(schedule).forEach(id => {
+            keepUnder(schedule.ledger.unreadable, id, schedule.ledger.advances[id]);
+            delete schedule.ledger.advances[id];
         });
-    };
+    }
+
+    // THE APPROVALS, which this function used to drop on the floor.
+    //
+    // Found by the emulator suite, and it was never a concurrency bug: `schedule.ledger`
+    // is rebuilt here out of `advances` and `unreadable`, and `migrations` was simply not
+    // copied across. Every route into this app goes through this function, so an approval
+    // was durable on the disk and invisible to everything that read it back - the gate
+    // shut itself on the next boot, and an approval made on another phone never arrived
+    // at all, which is the one thing recordCarryApproval promises.
+    //
+    // Checked the same way an entry is, and held aside rather than coerced: an approval
+    // this build cannot read is not an approval, and it is not an absence either. It goes
+    // into a map of its own because its ids and an entry's ids share no namespace and
+    // putting them in one map would make a collision decide which record survives.
+    // emptySchedule() carries the two maps every build has always had. These two are
+    // newer than some of the records this function will be handed, so they are made here
+    // rather than assumed - a schedule read off an older disk has neither.
+    schedule.ledger.migrations = schedule.ledger.migrations || {};
+    schedule.ledger.unreadableMigrations = schedule.ledger.unreadableMigrations || {};
+    const approvals = isPlainObject(ledger.migrations) ? ledger.migrations : {};
+    Object.keys(approvals).forEach(id => {
+        const approval = approvals[id];
+        // THE APPROVAL AS IT ARRIVED, and the key it arrived under, asked separately -
+        // the same rule the entries above take, and for a worse reason.
+        //
+        // This handed the validator `Object.assign({}, approval, { id: String(id) })`:
+        // the body's id overwritten with the path's id BEFORE the check that the two
+        // agree, so migrationApprovalProblems' own `value.id !== id` could never be
+        // false. An approval stored under cm_carry with a body claiming cm_WRONG was
+        // read as an approval of cm_carry, written back under that name, and the
+        // disagreement destroyed.
+        //
+        // An approval is not a cosmetic id. carryMigrationApproved asks whether one
+        // exists under THIS plan's id, and that answer is what opens
+        // financialWritingEnabled - so an approval of something else, from a build that
+        // named its migrations differently or a byte that flipped, restated every
+        // account on three phones with nobody having approved anything.
+        //
+        // And the key is checked at all: an id this build cannot safely store would
+        // re-parent the map on the way in, exactly as it would for an entry.
+        const readable = isSafeId(String(id))
+            && (typeof migrationApprovalProblems !== 'function'
+                || migrationApprovalProblems(String(id), approval).length === 0);
+        if (!readable) {
+            keepUnder(schedule.ledger.unreadableMigrations, id, approval);
+            return;
+        }
+        schedule.ledger.migrations[id] = Object.assign({}, approval, { id: String(id) });
+    });
 
     // Anything an older or newer build left under ledger.unreadable stays there too.
     //
@@ -851,9 +919,19 @@ function normaliseSchedule(raw, hints) {
             keepUnder(schedule.ledger.unreadable, id, held[id]);
         }
     });
+    // And the approvals held aside on an earlier read: they were kept because nothing may
+    // decide on this device's behalf what they meant, and a second read is not a licence
+    // to drop them either.
+    const heldApprovals = isPlainObject(ledger.unreadableMigrations)
+        ? ledger.unreadableMigrations : {};
+    Object.keys(heldApprovals).forEach(id => {
+        if (schedule.ledger.unreadableMigrations[id] === undefined) {
+            keepUnder(schedule.ledger.unreadableMigrations, id, heldApprovals[id]);
+        }
+    });
 
-    // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns two of
-    // them and the record is not two of them.
+    // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns four of
+    // them and the record is not four of them.
     //
     // The object being built here IS State.schedule and save() serialises exactly that,
     // so a part of `ledger` this build does not name was read off the disk, left out, and
@@ -861,18 +939,25 @@ function normaliseSchedule(raw, hints) {
     // block above this one exists to have stopped, one level up: it was fixed for an
     // ENTRY and left in place for the container's own fields.
     //
-    // It is not hypothetical. The next build adds `ledger.migrations` - a person's
-    // approval of a financial migration, which decides whether their phones may write
-    // money at all - and three phones do not update together. A phone on this build,
-    // sharing the record, would have deleted that approval on every save: silently, with
-    // the load reporting clean, nothing quarantined, and the parity check blessing it.
+    // It is not hypothetical. `ledger.migrations` - a person's approval of a financial
+    // migration, which decides whether their phones may write money at all - arrived one
+    // build after this loop was first written, and three phones do not update together.
+    // A phone without this loop, sharing the record, would have deleted that approval on
+    // every save: silently, with the load reporting clean, nothing quarantined, and the
+    // parity check blessing it. Naming `migrations` fixed the case that existed and left
+    // the next one open; this carries whatever the next one is.
     //
     // Carried, not quarantined and not a reason to stop. "This build has no opinion about
     // it" is not "it cannot be read": a device that went into recovery over a field a
     // later build added is a device nobody can record a day on, and that is the failure
     // this app trades everything else to avoid.
+    //
+    // The four this build owns were each read above, on their own terms, and are not
+    // carried again here - a second, unguarded copy of `migrations` would put an approval
+    // the validator refused back beside the ones it accepted.
     Object.keys(ledger).forEach(key => {
-        if (key === 'advances' || key === 'unreadable') return;
+        if (['advances', 'unreadable', 'migrations', 'unreadableMigrations']
+            .indexOf(key) !== -1) return;
         // See normaliseLayer: a bare assignment under a poison name reparents the
         // container instead of carrying a field.
         if (POISON_SEGMENTS.indexOf(key) !== -1) return;
@@ -906,9 +991,26 @@ function normaliseSchedule(raw, hints) {
     }
 
     if (typeof Recovery !== 'undefined'
-        && Object.keys(schedule.ledger.unreadable).length > 0) {
+        && (Object.keys(schedule.ledger.unreadable).length > 0
+            || Object.keys(schedule.ledger.unreadableMigrations).length > 0)) {
+        // BOTH FAMILIES, because either one alone can be the whole trouble.
+        //
+        // This passed schedule.ledger.unreadable and nothing else. A record whose only
+        // damaged part was an APPROVAL therefore raised its problem with a payload of
+        // "{}", Recovery quarantined "{}", and the rescue export - the one way those
+        // bytes have of leaving the phone - carried an empty object where somebody's
+        // approval of a money migration used to be. The person was told to export a
+        // backup before they could carry on, and the backup did not contain the thing
+        // that stopped them.
+        //
+        // Named rather than merged into one map: the two have separate id namespaces
+        // and putting them in one object would let a collision decide which record
+        // survives, which is the fault the two maps exist to prevent.
         Recovery.damaged('scheduleData:v2:ledger',
-            JSON.stringify(schedule.ledger.unreadable),
+            JSON.stringify({
+                unreadable: schedule.ledger.unreadable,
+                unreadableMigrations: schedule.ledger.unreadableMigrations
+            }),
             'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
             + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
     }

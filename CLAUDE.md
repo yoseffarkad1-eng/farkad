@@ -43,6 +43,9 @@ different from what was done.
    `js/model/ledger.js` is `false` and only a person who knows all three phones are
    past v79 may flip it. The boot-time mirror in `state.js` is the ONE sanctioned
    write; ledger entries are never edited, never deleted, and merged by union.
+   `carryAdvances` in `js/model/schema.js` moves with it, in the same commit and the
+   same direction - one gate open without the other ships a lie - and
+   `tests/data.test.mjs` pins the pair.
 2. **Days keep the rate they were worked at.** Rates are stamped onto the day record
    at first write and survive every later edit; reports price each day at its stamp.
    Never restate a stamped day, and never stamp old days retroactively —
@@ -84,12 +87,13 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the thirty-six node suites; no browser, runs in a few minutes
-    npm run test:all        # adds smoke, print, mobile, update, recovery-browser,
+    npm test                # the forty-two node suites; no browser, runs in a few minutes
+    npm run test:all        # adds smoke, print, mobile, update, forms, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
     npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
-                            #   CAS, the rollout and the cutover (needs Java)
+                            #   CAS, the rollout, the cutover and two phones writing
+                            #   money at once (needs Java)
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). NO COUNT IS WRITTEN HERE, deliberately. A
 count belongs to a commit and to nothing else, and one left in a file goes stale the
@@ -106,6 +110,12 @@ The browser suites need Playwright's Chromium once (`npm run browsers`), or poin
 `CHROME_PATH` at a browser that is already installed — see `tests/README.md` before
 downloading anything. The emulator suites need Java and run through
 `firebase emulators:exec`; they never touch the real project.
+
+The suites the ledger branch brought measure the build a person would ship with the
+money gates OPEN. They open them through the test seam and nowhere else - `flags` on a
+harness device, `FARKAD_FLAG_OVERRIDES` set before the page loads in a browser suite -
+so the shipped defaults stay closed and pinned (`tests/data.test.mjs`, `tests/smoke.mjs`)
+while the machinery behind them is still measured on every run.
 
 ## The culture
 
@@ -171,16 +181,24 @@ written down so it cannot happen twice.
     tests/vehicles.test.mjs    the retired feature, from both sides of its flag
     tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx, built by the shipped library
     tests/money.display.test.mjs one day has one price on every surface: screen, WhatsApp, sheet
-    tests/snapshot.poison.test.mjs a poisoned name arriving from the cloud, from every family
     tests/cas.test.mjs         the client half of the ordering protocol: revision, receipt, rebase, hold
     tests/repayment.test.mjs   the advance that outlives its fortnight: carry, repayment, closure, the two labels
+    tests/approval.test.mjs    no surface may read the new arithmetic before somebody approves it
+    tests/quarantine.test.mjs  a damaged APPROVAL, through every door a record arrives by
+    tests/correction.test.mjs  a correction is all of a transaction, dated on the transaction
+    tests/closure.test.mjs     the frozen fortnight: what it records, what it refuses, who may have one
+    tests/wording.test.mjs     every figure called what it is, and an overpaid account stopped
+    tests/samefact.test.mjs    one fact written by two phones is one fact, not a conflict
+    tests/snapshot.poison.test.mjs a poisoned name arriving from the cloud, from every family
     vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
     tests/recovery.browser.mjs the rescue export through the real button
+    tests/forms.browser.mjs    the advance and correction forms, driven in real Chromium
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator
     tests/rollout.test.mjs     publishing the rules over a genuine legacy document, and the cutover
     tests/ledger.ingress.test.mjs malformed ledger data through every door: held aside, never coerced
+    tests/money.concurrency.test.mjs two phones writing MONEY at once, through the production adapter
     tests/poison.test.mjs      a ledger id that would land on a prototype, through every writer
     tests/merge.test.mjs       what adopting somebody else's document takes off this one
     tests/contested.test.mjs   the write that lost a race, and every trigger that must not send it
