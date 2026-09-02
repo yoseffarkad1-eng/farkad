@@ -60,7 +60,12 @@ function dayMessage(date, layer, styleKey, placeId) {
         if (workerIds.length === 0) return;
 
         any = true;
-        lines.push(style.site(place.name));
+        // ISOLATED, because the name starts the line and bidi reads the first strong
+        // character to decide which way the whole line goes. «📍 הרצליה» is an RTL line;
+        // «📍 Rothschild 12» was an LTR one, so its pin flipped to the left edge while
+        // every other line in the message kept it on the right. The statement has
+        // isolated its heading since it was written (workerStatementText); this did not.
+        lines.push(style.site(isolate(place.name)));
         workerIds.forEach(workerId => {
             const worker = State.worker(workerId);
             if (!worker) return;
@@ -77,7 +82,9 @@ function dayMessage(date, layer, styleKey, placeId) {
                 const hours = entryExtraHours(entry);
                 suffix = hours ? ` (${plusAmount(hours)} ש׳)` : ' (שעות נוספות)';
             }
-            lines.push(style.worker(worker.name, suffix));
+            // Same reason, and this one also mixes: «• Dan Levi (‎+2 ש׳)» read as an
+            // LTR line puts the Hebrew suffix on the wrong side of the name.
+            lines.push(style.worker(isolate(worker.name), suffix));
         });
         lines.push('');
     });
@@ -89,12 +96,14 @@ function dayMessage(date, layer, styleKey, placeId) {
     if (!only) {
         // The line is always there, "אין" included: its absence would be ambiguous
         // between nobody-absent and nobody-checked.
-        lines.push(style.absent(absent.length > 0 ? absent.map(w => w.name).join(', ') : 'אין'));
+        lines.push(style.absent(absent.length > 0
+            ? absent.map(w => isolate(w.name)).join(', ')
+            : 'אין'));
     }
 
     if (!any && absent.length === 0) {
         return lines[0] + (only
-            ? `\n\n${only.name}: אין שיבוצים ליום הזה.`
+            ? `\n\n${isolate(only.name)}: אין שיבוצים ליום הזה.`
             : '\n\nאין שיבוצים ליום הזה.');
     }
 

@@ -38,6 +38,12 @@ const FROM = '2026-08-01';
 const TO = '2026-08-31';
 const STAMP = `${FROM}_${TO}`;
 
+// U+2068 FIRST STRONG ISOLATE and U+2069 POP DIRECTIONAL ISOLATE, spelled out so the
+// pins below read as text rather than as two invisible characters somebody might tidy
+// away. isolate() in js/ui/dom.js writes exactly this pair.
+const FSI = '\u2068';
+const PDI = '\u2069';
+
 function run(device, code) {
     return vm.runInContext(code, device.ctx, { filename: 'harness:exports' });
 }
@@ -160,17 +166,25 @@ function csvRows(text) {
     // Pinned whole rather than sampled: a heading, a site marker, a bullet and the
     // absentee line are four separate product decisions and a substring check on one of
     // them would not notice the other three moving.
+    //
+    // MOVED IN v99, and only by the isolates. Every name in this message is now wrapped
+    // in U+2068 FIRST STRONG ISOLATE ... U+2069, because a line whose first strong
+    // character is Latin - a worker or a site with a Latin name - turned the whole line
+    // round; see «a Latin name does not turn a line of the message round» below. The
+    // characters are invisible and the words are the owner's, unchanged. They are written
+    // out here rather than stripped, so that dropping the isolate again fails this pin
+    // instead of passing it.
     same('the whole evening reads exactly as the owner wrote it',
         run(device, `dayMessage('2026-08-10', 'actual', 'pin', null)`),
-        '📅 סידור עבודה – יום שני 10/08/2026\n\n📍 הרצליה\n• דוד\n\n'
-        + '📍 תל אביב\n• דוד (כפול)\n\n🚫 נעדרים: אין');
+        `📅 סידור עבודה – יום שני 10/08/2026\n\n📍 ${FSI}הרצליה${PDI}\n• ${FSI}דוד${PDI}\n\n`
+        + `📍 ${FSI}תל אביב${PDI}\n• ${FSI}דוד${PDI} (כפול)\n\n🚫 נעדרים: אין`);
 
     // One site, because the seder does not go to one group: the man driving to Herzliya
     // must not be reading the other gate's line. And who is away is a fact about the
     // crew, not about a site, so the one-site message leaves it out entirely.
     const oneSite = run(device, `dayMessage('2026-08-10', 'actual', 'pin', 'p_01')`);
-    same('one site is that site alone',
-        oneSite, '📅 סידור עבודה – יום שני 10/08/2026\n\n📍 הרצליה\n• דוד');
+    same('one site is that site alone', oneSite,
+        `📅 סידור עבודה – יום שני 10/08/2026\n\n📍 ${FSI}הרצליה${PDI}\n• ${FSI}דוד${PDI}`);
     check('and it carries no absentee line for the man to act on',
         oneSite.indexOf('נעדרים') === -1, oneSite.split('\n').pop());
 
@@ -178,7 +192,7 @@ function csvRows(text) {
     // between nobody-absent and nobody-checked.
     same('a day with nothing but an absence still says who is away',
         run(device, `dayMessage('2026-08-12', 'actual', 'pin', null)`),
-        '📅 סידור עבודה – יום רביעי 12/08/2026\n\n🚫 נעדרים: דוד');
+        `📅 סידור עבודה – יום רביעי 12/08/2026\n\n🚫 נעדרים: ${FSI}דוד${PDI}`);
 }
 
 // ---------------------------------------------------------------- the worker's statement
