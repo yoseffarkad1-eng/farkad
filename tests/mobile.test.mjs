@@ -438,6 +438,7 @@ for (const [width, height, atLeast] of [[430, 932, 6], [390, 844, 5], [320, 667,
             banner: box('#accountBanner'),
             header: box('.day-header'),
             mode: box('.day-mode-row'),
+            switcher: box('.day-header .mode-toggle'),
             rows: rows.map(b => Math.round(b.height)),
             complete: rows.filter(b => b.bottom <= dock + 0.5).length
         };
@@ -448,8 +449,27 @@ for (const [width, height, atLeast] of [[430, 932, 6], [390, 844, 5], [320, 667,
         m.bannerShown && m.folded === true);
     check(`${label}: the strip above the day is 52px or less`, m.topbar <= 52, `${m.topbar}px`);
     check(`${label}: the folded warning is 56-64px`, m.banner >= 56 && m.banner <= 64, `${m.banner}px`);
-    check(`${label}: the day header is 96-112px`, m.header >= 96 && m.header <= 112, `${m.header}px`);
-    check(`${label}: the switcher row is 44-48px`, m.mode >= 44 && m.mode <= 48, `${m.mode}px`);
+    // MOVED DELIBERATELY at v101, and the reason is worth more than the number.
+    //
+    // Until v100 the header was 96-112 and the switcher had a 48px row of its own under
+    // it, with 6px of margin: 157px of chrome between the warning and the first name. The
+    // switcher is inside the header now, so a band on the header alone no longer measures
+    // what the crew feels. What they feel is the SUM, and the sum is what is held here.
+    //
+    // The sum barely moved - 157 to 154 - and that is the honest result of item 2 of
+    // features/day-room/contract.md, measured rather than hoped for: a 44px segmented pair
+    // costs a 44px line wherever it is put, and moving a line from below the header to
+    // inside it does not give a line back. What item 2 actually buys is the state below:
+    // scrolled, the switcher is not on the screen at all, which a separate row could never
+    // do. The pair is still checked at its floor, and the header is still checked - just
+    // against a ceiling that admits the line it has taken in.
+    const chrome = m.header + (m.mode === null ? 0 : m.mode);
+    check(`${label}: the chrome above the list is no worse than v100's 157px`,
+        chrome <= 157, `${chrome}px (header ${m.header}, switcher row ${m.mode})`);
+    check(`${label}: the day header is 96-160px`, m.header >= 96 && m.header <= 160, `${m.header}px`);
+    check(`${label}: the switcher is inside the header and 44-48px tall`,
+        m.mode === null && m.switcher >= 44 && m.switcher <= 48,
+        `${m.switcher}px, own row ${m.mode}`);
     check(`${label}: every worker row is 64-72px`,
         m.rows.length > 0 && m.rows.every(h => h >= 64 && h <= 72), JSON.stringify(m.rows.slice(0, 8)));
     check(`${label}: at least ${atLeast} whole names above the dock, unscrolled`,
@@ -1428,6 +1448,63 @@ for (const width of WIDTHS) {
         check('and the one that removes gets more room than the rest',
             remove.w >= 52 && remove.h >= 44, JSON.stringify(remove));
     }
+
+    // Item 3 of features/day-room/contract.md: the card's two actions moved off a footer
+    // row of their own and onto the coloured header. The row IS what the change buys -
+    // five sites on a screen, five rows back - so its absence is the assertion rather
+    // than a side effect of one. Drawn again by any hand, this goes red.
+    const footers = await page.evaluate(() =>
+        document.querySelectorAll('.site-card-actions').length);
+    check('no site card draws a footer row of its own', footers === 0, String(footers));
+
+    // The two buttons now sit ON the site's colour, beside its name and its count.
+    const head = await page.evaluate(() => {
+        const card = [...document.querySelectorAll('.site-card')]
+            .find(node => node.querySelectorAll('.assign-row').length > 0);
+        if (!card) return null;
+        const named = card.querySelector('.site-head .site-name');
+        if (!named) return null;
+        const name = named.textContent.trim();
+        return {
+            name,
+            count: (card.querySelector('.site-head .site-count') || {}).textContent,
+            buttons: [...card.querySelectorAll('.site-head button')].map(node => {
+                const box = node.getBoundingClientRect();
+                const label = (node.getAttribute('aria-label') || node.textContent || '').trim();
+                return {
+                    label,
+                    // isolate() wraps the site's name in invisible bidi marks, so the
+                    // name inside an aria-label never matches as plain text. Stripping
+                    // U+2066..U+2069 is what makes the comparison the one a person makes.
+                    names: label.replace(/[\u2066-\u2069]/g, '').includes(name),
+                    w: Math.round(box.width), h: Math.round(box.height)
+                };
+            })
+        };
+    });
+    given('a site card with somebody on it drew a head with the site name in it',
+        Boolean(head), JSON.stringify(head));
+    check('the card head carries both actions', head.buttons.length === 2,
+        JSON.stringify(head.buttons));
+    check('each of them is a finger\'s size in BOTH dimensions',
+        head.buttons.length === 2 && head.buttons.every(b => b.w >= 44 && b.h >= 44),
+        JSON.stringify(head.buttons));
+    // A glyph alone says nothing to a screen reader, and there are four cards on this
+    // screen: the name has to say which site as well as what the button does.
+    check('and each says what it does and which site it is for',
+        head.buttons.length === 2 && head.buttons.every(b => b.label.length > 0 && b.names),
+        JSON.stringify(head.buttons.map(b => ({ label: b.label, names: b.names }))));
+    check('and the count is still on the head', String(head.count || '').trim().length > 0,
+        JSON.stringify(head.count));
+
+    // An empty site keeps the way IN and loses the way out: a message saying an empty
+    // site is empty is a message nobody sends.
+    const empty = await page.evaluate(() => {
+        const card = [...document.querySelectorAll('.site-card')]
+            .find(node => node.querySelectorAll('.assign-row').length === 0);
+        return card ? card.querySelectorAll('.site-head button').length : -1;
+    });
+    check('a site with nobody on it offers only the one that adds', empty === 1, String(empty));
 
     await page.context().close();
 }
