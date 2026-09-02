@@ -12,17 +12,18 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v96 (`366e5ad`).** The build at the top of this file is a candidate on a
-branch: verified, stamped, and NOT served. v91, v93 and v94 below were
+**`main` is at v97 (`4fe7c9a`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## v97 — CANDIDATE, not served — the tip of `cd-work`
+## v97 — 2 September 2026 — `4fe7c9a` (PR #6, the tree at `1853a03`)
 
 The first round answered from an iPhone: one phone on v96, two screenshots, four
-sentences (`features/iphone/findings.md`). Nothing on a phone runs it.
+sentences (`features/iphone/findings.md`). Served from `main` since 2 September 2026;
+whether any phone has taken the update is not known from here.
 
 **What it would give the crew that v96 does not have**
 
@@ -53,7 +54,7 @@ says so in full.
 
 **What this build is NOT known to do**
 
-- **It is not on `main`.** No phone has it.
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - **One emulator suite went red once on this commit** and nobody has yet explained the
   interleaving; it exercises two phones writing money with the gates OPEN through the
   test seam. The hunt is the first follow-up.
