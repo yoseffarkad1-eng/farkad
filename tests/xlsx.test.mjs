@@ -443,7 +443,7 @@ check('and nobody is named, or priced, anywhere in its bytes',
     check('in the words the app pins, naming the file',
         said.chosen[0] && said.chosen[0].title === 'קובץ ה-Excel נמסר לשמירה'
         && said.chosen[0].message
-            === '\u2066דוחות_2026-08-01_2026-08-31.xlsx\u2069 נמסר לדפדפן — '
+            === '\u2066farkad-reports_2026-08-01_2026-08-31.xlsx\u2069 נמסר לדפדפן — '
                 + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
         JSON.stringify(said.chosen[0]));
     // The claim it must never make, and the filename's isolation, which a Hebrew sentence
@@ -589,8 +589,8 @@ offline.failOnFetch();
 await offline.run('exportReports()');
 same('three CSV files, named for the range, in the order the sheets are built',
     offline.downloads.map(file => file.name),
-    ['שכר_2026-08-01_2026-08-31.csv', 'חיוב_2026-08-01_2026-08-31.csv',
-        'פירוט_2026-08-01_2026-08-31.csv']);
+    ['farkad-payroll_2026-08-01_2026-08-31.csv', 'farkad-invoice_2026-08-01_2026-08-31.csv',
+        'farkad-detail_2026-08-01_2026-08-31.csv']);
 // Excel reads a UTF-8 CSV as mojibake without the BOM, and splits rows on CRLF only.
 check('each begins with the byte order mark Excel needs to read Hebrew',
     offline.downloads.every(file => file.text.charCodeAt(0) === 0xfeff));
@@ -613,7 +613,7 @@ const scopedCsv = phone(FORTNIGHT + `REPORT_SECTION = 'sites'; INVOICE_PLACE = '
 scopedCsv.failOnFetch();
 await scopedCsv.run('exportReports()');
 same("the client's fallback is still the client's file alone",
-    scopedCsv.downloads.map(file => file.name), ['חיוב_2026-08-01_2026-08-31.csv']);
+    scopedCsv.downloads.map(file => file.name), ['farkad-invoice_2026-08-01_2026-08-31.csv']);
 same('and its own sentence, not the other one', scopedCsv.told,
     ['חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
         + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.']);

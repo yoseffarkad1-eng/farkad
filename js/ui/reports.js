@@ -2395,9 +2395,9 @@ async function exportReports() {
     //
     // The client-scoped export stays scoped: only the billing sheet exists to fall back to.
     if (typeof XLSX === 'undefined') {
-        if (sheets.payroll) downloadCsv(sheets.payroll, `שכר_${stamp}.csv`);
-        downloadCsv(sheets.invoice, `חיוב_${stamp}.csv`);
-        if (sheets.detail) downloadCsv(sheets.detail, `פירוט_${stamp}.csv`);
+        if (sheets.payroll) downloadCsv(sheets.payroll, `farkad-payroll_${stamp}.csv`);
+        downloadCsv(sheets.invoice, `farkad-invoice_${stamp}.csv`);
+        if (sheets.detail) downloadCsv(sheets.detail, `farkad-detail_${stamp}.csv`);
         askTell(client
             ? 'חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
                 + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.'
@@ -2429,7 +2429,16 @@ async function exportReports() {
         if (sheets.detail) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');
         }
-        const name = client ? `חיוב_${stamp}.xlsx` : `דוחות_${stamp}.xlsx`;
+        // NAMED LATIN-FIRST, like the backup (farkad-<date>.json) and the picture
+        // (farkad-דוח-…png). The names were דוחות_<from>_<to>.xlsx and שכר_/חיוב_/פירוט_
+        // <from>_<to>.csv, and a name that opens with a Hebrew word is laid out by a list
+        // that runs right to left - the iPhone's Files app, a WhatsApp chat - as
+        // xlsx.2026-08-20_2026-08-07_דוחות: the two dates swapped, the extension on the
+        // far left, a name the person reads as "backwards". A name that begins in Latin
+        // and stays Latin to its extension is one directional run, and one run is never
+        // reordered, whichever way the list runs. The Hebrew stays where it is read as
+        // Hebrew: the sheet names inside the workbook, and the columns.
+        const name = client ? `farkad-invoice_${stamp}.xlsx` : `farkad-reports_${stamp}.xlsx`;
         XLSX.writeFile(wb, name);
 
         // SAID OUT LOUD, on the same pattern as the backup above it.

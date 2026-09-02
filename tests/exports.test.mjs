@@ -243,7 +243,7 @@ function csvRows(text) {
 
     same('three files go out, named for the period they cover',
         device.downloads.map(item => item.name),
-        [`שכר_${STAMP}.csv`, `חיוב_${STAMP}.csv`, `פירוט_${STAMP}.csv`]);
+        [`farkad-payroll_${STAMP}.csv`, `farkad-invoice_${STAMP}.csv`, `farkad-detail_${STAMP}.csv`]);
     // A name that begins with a Hebrew word is laid out by an RTL list (the Files app,
     // WhatsApp) with its two dates swapped and the extension on the far left. The backup
     // is farkad-<date>.json and reads in order everywhere; these have to be too.
@@ -254,7 +254,7 @@ function csvRows(text) {
         device.ctx.told, 'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
         + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
 
-    const payroll = fileNamed(device, `שכר_${STAMP}.csv`);
+    const payroll = fileNamed(device, `farkad-payroll_${STAMP}.csv`);
     given('the pay sheet is one of the files handed over', typeof payroll === 'string');
 
     // Without the BOM Excel reads a UTF-8 CSV as mojibake and the whole sheet is Hebrew
@@ -308,7 +308,7 @@ function csvRows(text) {
     seed(odd);
     odd.State.commit(odd.call('addAdvance', odd.State.schedule, 'w_01', '2026-08-15', 0.5, ''));
     await run(odd, 'exportReports()');
-    const oddRows = csvRows(fileNamed(odd, `שכר_${STAMP}.csv`));
+    const oddRows = csvRows(fileNamed(odd, `farkad-payroll_${STAMP}.csv`));
     // -500.5, not -501. The agora is no longer rounded away on the way into the file:
     // six surfaces used to round gross, advance and net independently, from the exact
     // value, and produced six answers to one question. See moneyOf in js/ui/reports.js.
@@ -333,8 +333,8 @@ function csvRows(text) {
     run(risky, `REPORT_RANGE.from='${FROM}'; REPORT_RANGE.to='${TO}';`);
     await run(risky, 'exportReports()');
 
-    const riskyPay = csvRows(fileNamed(risky, `שכר_${STAMP}.csv`));
-    const riskyBill = csvRows(fileNamed(risky, `חיוב_${STAMP}.csv`));
+    const riskyPay = csvRows(fileNamed(risky, `farkad-payroll_${STAMP}.csv`));
+    const riskyBill = csvRows(fileNamed(risky, `farkad-invoice_${STAMP}.csv`));
     check('a name that begins with a dash is text in the file, not a formula',
         riskyPay[1][0] === "'-חדש", JSON.stringify(riskyPay[1][0]));
     check('and a site that begins with an equals sign is too',
@@ -364,8 +364,8 @@ function csvRows(text) {
     seed(device);
     await run(device, 'exportReports()');
 
-    const payroll = fileNamed(device, `שכר_${STAMP}.csv`);
-    const detail = fileNamed(device, `פירוט_${STAMP}.csv`);
+    const payroll = fileNamed(device, `farkad-payroll_${STAMP}.csv`);
+    const detail = fileNamed(device, `farkad-detail_${STAMP}.csv`);
 
     // Two columns of zeroes in a file that reaches a bookkeeper are not neutral: they are
     // a heading saying this app still accounts for vehicles, beside a number saying it
@@ -386,7 +386,7 @@ function csvRows(text) {
     const on = phone({ flags: { vehicles: true } });
     seed(on);
     await run(on, 'exportReports()');
-    const onRows = csvRows(fileNamed(on, `שכר_${STAMP}.csv`));
+    const onRows = csvRows(fileNamed(on, `farkad-payroll_${STAMP}.csv`));
     check('the van in this fixture is real: with the feature on the file bills for it',
         onRows[0][6] === 'ימי רכב' && onRows[0][7] === 'שכר רכב'
         && onRows[1][6] === '3' && onRows[1][7] === '900',
@@ -413,12 +413,12 @@ function csvRows(text) {
     await run(device, 'exportReports()');
 
     same('one file goes out, not three',
-        device.downloads.map(item => item.name), [`חיוב_${STAMP}.csv`]);
+        device.downloads.map(item => item.name), [`farkad-invoice_${STAMP}.csv`]);
     same('and the person is told it is the billing file alone that fell back',
         device.ctx.told, 'חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
         + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
 
-    const bill = fileNamed(device, `חיוב_${STAMP}.csv`);
+    const bill = fileNamed(device, `farkad-invoice_${STAMP}.csv`);
     same('the grid is his site, his dates and his totals',
         csvRows(bill),
         [['תאריך', 'הרצליה', 'סה״כ'],
@@ -513,8 +513,8 @@ function csvRows(text) {
     const device = phone();
     seed(device);
     await run(device, 'exportReports()');
-    const cleanDetail = fileNamed(device, `פירוט_${STAMP}.csv`);
-    const cleanBill = fileNamed(device, `חיוב_${STAMP}.csv`);
+    const cleanDetail = fileNamed(device, `farkad-detail_${STAMP}.csv`);
+    const cleanBill = fileNamed(device, `farkad-invoice_${STAMP}.csv`);
     given('both sheets came out of the same export',
         typeof cleanDetail === 'string' && typeof cleanBill === 'string');
     check('every worker-day in the detail sheet is billed on the invoice sheet',
@@ -534,9 +534,9 @@ function csvRows(text) {
     orphan.State.save({ silent: true });
     await run(orphan, 'exportReports()');
 
-    const detail = fileNamed(orphan, `פירוט_${STAMP}.csv`);
-    const bill = fileNamed(orphan, `חיוב_${STAMP}.csv`);
-    const payroll = fileNamed(orphan, `שכר_${STAMP}.csv`);
+    const detail = fileNamed(orphan, `farkad-detail_${STAMP}.csv`);
+    const bill = fileNamed(orphan, `farkad-invoice_${STAMP}.csv`);
+    const payroll = fileNamed(orphan, `farkad-payroll_${STAMP}.csv`);
     given('the day was paid for, so the disagreement is about billing and not about it',
         csvRows(payroll)[1][7] === '1700');
 
@@ -651,7 +651,7 @@ function csvRows(text) {
 
     // ------------------------------------------------------------ the bookkeeper's file
     await run(device, 'exportReports()');
-    const payroll = fileNamed(device, `שכר_${A_STAMP}.csv`);
+    const payroll = fileNamed(device, `farkad-payroll_${A_STAMP}.csv`);
     given('the pay sheet came out', typeof payroll === 'string');
     const row = csvRows(payroll).find(cells => cells[0] === 'עומר סעד');
     given('his row is in it', Array.isArray(row), JSON.stringify(csvRows(payroll)[0]));
@@ -773,7 +773,7 @@ function csvRows(text) {
 
     // The three files as they were handed over.
     await run(device, 'exportReports()');
-    const beforeSheet = latest(`שכר_${A_STAMP}.csv`);
+    const beforeSheet = latest(`farkad-payroll_${A_STAMP}.csv`);
     const beforeSaid = run(device, `workerStatementText('w_01')`);
     given('the sheet came out', typeof beforeSheet === 'string');
     const headOf = text => csvRows(text)[0];
@@ -787,7 +787,7 @@ function csvRows(text) {
     device.State.commit(device.call('clearWorkerDay', device.State.schedule,
         '2026-08-14', 'w_01', 'actual'));
     await run(device, 'exportReports()');
-    const afterSheet = latest(`שכר_${A_STAMP}.csv`);
+    const afterSheet = latest(`farkad-payroll_${A_STAMP}.csv`);
     const afterSaid = run(device, `workerStatementText('w_01')`);
 
     check('the pay sheet is the sheet he was paid from, unchanged',

@@ -564,7 +564,7 @@ async function csvOf(device) {
     } finally {
         device.ctx.document = rich;
     }
-    const payroll = device.downloads.slice(before).find(f => f.name.startsWith('שכר'));
+    const payroll = device.downloads.slice(before).find(f => f.name.startsWith('farkad-payroll'));
     return payroll ? payroll.text.replace(/^﻿/, '').split('\r\n') : null;
 }
 
