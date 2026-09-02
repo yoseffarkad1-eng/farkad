@@ -12,15 +12,14 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v95 (`109502c`).** The build at the top of this file is a candidate on a
-branch: verified, stamped, and NOT served. It is here so that the day it reaches `main`
-the entry already exists and only its heading has to change. v91, v93 and v94 below were
+**`main` is at v96 (`366e5ad`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## v96 — CANDIDATE, not served — the tip of `cd-work`
+## v96 — 2 September 2026 — `366e5ad` (PR #4, the tree at `dbbaa6e`)
 
 v95 with the advances ledger merged onto it and the week grid at its pitch. Two branches,
 each reviewed before it was taken: `d11ef3c` takes the ledger branch (`v96/ledger`, the
@@ -28,7 +27,8 @@ v92 branch Opus left with the note "must not be merged yet", brought onto the re
 send path with BOTH money gates closed again at the merge - `LEDGER_WRITES` in
 `js/model/ledger.js` and `carryAdvances` in `js/model/schema.js` are `false`, and the
 suites that measure the open build open it through the harness seam); `ed9bede` takes
-the week grid (`v96/weekpitch`). Nothing on a phone runs it.
+the week grid (`v96/weekpitch`). Served from `main` since 2 September 2026; whether any
+phone has taken the update is not known from here.
 
 **What it would give the crew that v95 does not have**
 
@@ -58,7 +58,7 @@ reviewed; the week grid at `42097f8`; the release gate on the stamped commit is 
 
 **What this build is NOT known to do**
 
-- **It is not on `main`.** No phone has it.
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - **Both money gates are shut**, so nothing above the first bullet is exercised on a
   phone: no entry is appended, no migration approved, no fortnight closed. The suites
   that prove those open the gates through the harness seam; a phone cannot.
