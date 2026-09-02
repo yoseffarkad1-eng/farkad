@@ -6869,6 +6869,15 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('and the browser was handed exactly the files that were written, no more',
     downloads.length === now.writes.length,
     `${downloads.length} downloads, ${now.writes.length} writes`);
+
+  // The name. דוחות_2026-08-07_2026-08-20.xlsx begins with a Hebrew word, so a list that
+  // runs right to left (the Files app, WhatsApp) lays the two dates out swapped and the
+  // extension on the far left - a name a person reads as backwards. The backup already
+  // names itself farkad-<date>.json and reads the same in either direction.
+  check('the file is named Latin-first, so a list in either direction reads its dates in order',
+    /^farkad-[a-z]+_[\x20-\x7e]*\.xlsx$/.test(now.writes[0])
+    && downloads.every(name => name === now.writes[0]),
+    JSON.stringify({ written: now.writes[0], downloaded: downloads[0] }));
   await page.context().close();
 }
 

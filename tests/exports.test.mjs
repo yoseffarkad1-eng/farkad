@@ -244,6 +244,12 @@ function csvRows(text) {
     same('three files go out, named for the period they cover',
         device.downloads.map(item => item.name),
         [`שכר_${STAMP}.csv`, `חיוב_${STAMP}.csv`, `פירוט_${STAMP}.csv`]);
+    // A name that begins with a Hebrew word is laid out by an RTL list (the Files app,
+    // WhatsApp) with its two dates swapped and the extension on the far left. The backup
+    // is farkad-<date>.json and reads in order everywhere; these have to be too.
+    check('and each is named Latin-first, so a list in either direction reads its dates in order',
+        device.downloads.every(item => /^farkad-[a-z]+_[\x20-\x7e]*\.csv$/.test(item.name)),
+        device.downloads.map(item => item.name).join(', '));
     same('and the person is told why they are CSV and not a workbook',
         device.ctx.told, 'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
         + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');

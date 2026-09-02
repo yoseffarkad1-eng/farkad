@@ -509,6 +509,46 @@ check('and nobody is named, or priced, anywhere in its bytes',
         `${again.caught.length} workbooks, asked ${again.chosen.length} times`);
 }
 
+// ------------------------------------------------ the name reads in order in every list
+//
+// דוחות_2026-08-07_2026-08-20.xlsx begins with a Hebrew word. In a list that runs right
+// to left - the iPhone's Files app, a WhatsApp chat - the bidi algorithm lays that name
+// out as xlsx.2026-08-20_2026-08-07_דוחות: the two dates swapped, the extension on the
+// far left, the name a person reads as "backwards" (derived with python-bidi under
+// UAX#9 and measured against Chromium's glyph rectangles; both agree). The backup already
+// names itself farkad-2026-09-02.json and reads in file order whichever way the list
+// runs: a name that begins in Latin and stays Latin to its extension is one run, and one
+// run is never reordered. The Hebrew sheet NAMES inside the workbook stay - שכר, חיוב,
+// פירוט are pinned above - it is the file the phone lists that has to read in order.
+{
+    suite('the file is named so a list reads it in order, whichever way the list runs');
+
+    const latin = name => /^[a-z][\x20-\x7e]*$/.test(String(name));
+
+    const named = phone(FORTNIGHT);
+    await named.run('exportReports()');
+    const workbook = named.caught[0] && named.caught[0].filename;
+    check('the workbook name begins in Latin and stays Latin to the extension',
+        latin(workbook) && /\.xlsx$/.test(workbook), String(workbook));
+    check('carrying the same prefix as the backup, so the phone lists them together',
+        /^farkad-/.test(String(workbook)), String(workbook));
+    check('and the dialog names that file, isolated',
+        named.chosen[0] && named.chosen[0].message.indexOf('\u2066' + workbook + '\u2069') !== -1,
+        JSON.stringify(named.chosen[0] && named.chosen[0].message));
+
+    const scoped = phone(FORTNIGHT + `REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
+    await scoped.run('exportReports()');
+    const clients = scoped.caught[0] && scoped.caught[0].filename;
+    check("the client's file too", latin(clients) && /^farkad-/.test(String(clients)), String(clients));
+
+    const csvs = phone(FORTNIGHT, { sheetjs: false });
+    csvs.failOnFetch();
+    await csvs.run('exportReports()');
+    check('and every CSV the fallback hands over',
+        csvs.downloads.length === 3 && csvs.downloads.every(file => latin(file.name) && /^farkad-/.test(file.name)),
+        JSON.stringify(csvs.downloads.map(file => file.name)));
+}
+
 // ---------------------------------------------------------------- the fallback
 
 suite('the library does not load, which now means the build is incomplete');
