@@ -10034,4 +10034,121 @@ const VEHICLES_ON = { vehicles: true };
             String(device.dump()[key]).indexOf('2026-08-10') !== -1)));
 }
 
+
+{
+    suite('a queued legacy roster array never lays itself over a newer snapshot');
+
+    // editRoster queues BOTH legacy whole arrays on every roster edit - `workers` and
+    // `places` - because a phone still on an older build reads only those. They are a
+    // compatibility payload for the WIRE, and they are this device's opinion of the
+    // roster from before it heard anything.
+    //
+    // reapplyPending lays the queue back over an adopted snapshot, and the legacy branch
+    // is skipped only when a per-entity edit is queued for that SAME list. So a phone
+    // whose edit touched only places carries a stale whole `workers` array - and puts it
+    // back over the arriving one. Measured: B raises a man's day rate to 600 and it
+    // lands; A, returning from a stairwell with a new site queued, adopts B's snapshot
+    // and then reverts the rate to 500 on its own screen and disk. A's next ordinary
+    // roster edit sees its own 500 differ from what it last heard and queues
+    // roster.workers.w_01 with it, so 500 goes back to the cloud and to B. B's
+    // deliberate change is gone from all three, with nothing owed, nothing held and no
+    // line on any screen.
+    //
+    // Worse, a day recorded on A in between is STAMPED at 500 - a rate the roster had
+    // already moved off. That is iron law 2 reached from the wrong end.
+    //
+    // The tombstone guard below already refuses the array over a REMOVAL. An addition or
+    // a change is the same kind of statement and gets the same answer: the per-entity
+    // paths are the truth on this device, and the legacy array is only ever for the wire.
+    const cloud = makeCloud();
+    const shared = null;
+    const phone = id => {
+        const device = makeDevice({ deviceId: id });
+        device.Sync.pushDelayMs = 6;
+        device.setToday('2026-08-20');
+        device.ctx.askTell = () => Promise.resolve();
+        device.State.schedule.workers = [
+            { id: 'w_01', name: 'עומר', active: true, dailyRate: 500, hourlyRate: 50 }];
+        device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+        device.State.save({ silent: true });
+        return device;
+    };
+    // A phone that can write but cannot hear, so the race is real - the same shape
+    // tests/cas.test.mjs and tests/contested.test.mjs use.
+    const gate = (function (from) {
+        const held = { open: true, waiting: [], adapter: {} };
+        const noSignal = () => {
+            const error = new Error('client is offline');
+            error.code = 'unavailable';
+            return error;
+        };
+        // JAMMED, not merely deaf: A must be unable to SEND while it is away, so its
+        // roster edit is still in the queue when it comes back and hears B. A phone that
+        // can still write has nothing left to reapply.
+        Object.keys(from.adapter).forEach(name => {
+            held.adapter[name] = (...args) => (held.open
+                ? from.adapter[name](...args)
+                : Promise.reject(noSignal()));
+        });
+        held.adapter.subscribe = (onNext, onError) => from.adapter.subscribe(
+            snapshot => {
+                if (held.open) onNext(snapshot);
+                else held.waiting.push([onNext, snapshot]);
+            }, onError);
+        held.close = () => { held.open = false; };
+        held.release = () => {
+            held.open = true;
+            const waiting = held.waiting.slice();
+            held.waiting = [];
+            waiting.forEach(([onNext, snapshot]) => onNext(snapshot));
+        };
+        return held;
+    }(cloud));
+    const a = phone('d_ra');
+    const b = phone('d_rb');
+    a.Sync.connect(gate.adapter);
+    b.Sync.connect(cloud.adapter);
+    await settleUntil(() => a.Sync.pendingCount() === 0 && b.Sync.pendingCount() === 0, 6000);
+
+    // A loses signal with a NEW SITE queued - an edit that touches places and not workers.
+    gate.close();
+    a.State.schedule.places.push({ id: 'p_new', name: 'רמת גן', active: true });
+    a.State.commitRoster();
+
+    // B raises the rate, and it lands.
+    b.State.schedule.workers[0].dailyRate = 600;
+    b.State.commitRoster();
+    await settleUntil(() => (((cloud.doc || {}).roster || {}).workers || {}).w_01
+        && cloud.doc.roster.workers.w_01.dailyRate === 600, 6000);
+    given('the new rate is on the cloud',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        String(cloud.doc.roster.workers.w_01.dailyRate));
+
+    // A comes back the ordinary way: the snapshot first, then its own flush.
+    gate.release();
+    await settleUntil(() => a.Sync.pendingCount() === 0, 8000);
+    await settle(300);
+
+    const rateOn = device => (device.State.schedule.workers
+        .find(one => one.id === 'w_01') || {}).dailyRate;
+    check('the phone that was away does not put the old rate back on its own screen',
+        rateOn(a) === 600, String(rateOn(a)));
+    check('and its new site is there too, which is what it actually edited',
+        a.State.schedule.places.some(one => one.id === 'p_new'),
+        JSON.stringify(a.State.schedule.places.map(one => one.id)));
+
+    // The push-back: one more ordinary roster edit on A.
+    a.State.schedule.places[0].name = 'הרצליה מערב';
+    a.State.commitRoster();
+    await settleUntil(() => a.Sync.pendingCount() === 0, 6000);
+    await settle(300);
+    check('and its next roster edit does not send the old rate back to everybody',
+        (((cloud.doc || {}).roster || {}).workers || {}).w_01.dailyRate === 600,
+        String(cloud.doc.roster.workers.w_01.dailyRate));
+    check('so all three still agree on what the man is paid',
+        rateOn(a) === 600 && rateOn(b) === 600
+            && cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify([rateOn(a), rateOn(b), cloud.doc.roster.workers.w_01.dailyRate]));
+}
+
 report();
