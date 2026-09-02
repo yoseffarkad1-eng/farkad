@@ -543,6 +543,10 @@
 <script src="js/model/migrate.js"></script>
 <script src="js/model/ledger.js"></script>
 <script src="js/sync/sync.js"></script>
+<script src="js/sync/restore.js"></script>
+<!-- boot.js is last of the sync group and must stay last: its two lines RUN at load
+     time. Any further split of this group goes ABOVE it. -->
+<script src="js/sync/boot.js"></script>
 <script src="js/state.js"></script>
 <script src="js/ui/dom.js"></script>
 <script src="js/ui/bars.js"></script>
