@@ -19,6 +19,56 @@ first of the line to reach `main`.
 
 ---
 
+## CANDIDATE — v99 — the holds nobody disagreed about
+
+Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v98 as served
+(`4a4d277`). The four items v98 left open, closed, plus the two pins and the one product
+change the same list asked for. Both money gates stay shut.
+
+**What it would give the crew that v98 does not have**
+
+- **On the phone, today:** the WhatsApp message no longer turns a line round when a
+  worker or a site has a Latin name. «📍 Rothschild 12» used to paint its pin on the left
+  while every other line kept it on the right, and «• Dan Levi (‎+2 ש׳)» laid its Hebrew
+  out on the wrong side of the name. Every name in the message is isolated now, the way
+  the worker's own statement has always isolated its heading. The words are unchanged and
+  the marks are invisible.
+- **On the phone, today:** the week strip shows where it is cut off. At 390 and below the
+  week is wider than the screen and Thursday sits off the left edge at rest; there is now
+  a fade at that edge. The 48px pitch is unchanged — the week still has to be pushed, it
+  just says so. At 430, where it fits, there is no fade.
+- **Behind the carry gate, so nothing a phone can reach until somebody opens it:** a
+  fortnight closed after the man has already repaid no longer puts the phone into
+  recovery. This one needed no race and no clock skew — a repayment on the 24th and a
+  close of the 07–20 fortnight on the 26th was enough — and it is the reason this build
+  exists.
+- **Behind the gate:** a phone whose clock is behind another's is told it cannot close
+  yet, instead of quietly moving a payment into the next fortnight.
+- **Behind the gate:** two phones that each approved the same carry plan and reach a
+  project with no document both end synced. One of them used to hold the other's approval
+  for ever and report a conflict about money that nobody was having.
+
+**What it is known NOT to cover**
+
+- No phone has run any of it. Nothing since v86 has, and `docs/iphone-acceptance.md` now
+  carries twelve rows for v97 and v98 and none of them is ticked.
+- The two gates are still shut, so four of the six items above cannot be reached by any
+  phone in the field. `features/gate-flip/contract.md` is what opening them requires; it
+  is a checklist, not a decision, and the decision is the owner's.
+- `firestore.rules` has changed since v86 and is still not deployed. That is unchanged by
+  this build and is still the owner's to run.
+- The emulator's own 1-in-28 flake is not proven gone by a deterministic reproduction.
+  What was measured here is a defect with exactly that end state — one operation held at
+  `ledger.migrations.<id>`, status `contested` — reproduced every time on the fake cloud
+  and closed. Whether the emulator run that failed once took this path cannot be known
+  from its log; `features/false-holds/handoff.md` records how many times the storm suite
+  was run against the real emulator after the fix and what each run returned.
+
+**Checked before it was stamped**: `features/false-holds/handoff.md`, with both gates'
+output verbatim on the commit they ran on.
+
+---
+
 ## v98 — 2 September 2026 — `5dd5a83` (PR #8, the tree at `7603b45`)
 
 The storm explained and closed (`features/storm/findings.md`). v97's release note said one
