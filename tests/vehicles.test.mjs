@@ -362,8 +362,8 @@ async function staged(options = {}) {
     await csv.run('exportReports()');
     same('with the spreadsheet library unreachable, three CSV files go out',
         csv.files.map(file => file.name),
-        ['שכר_2026-08-01_2026-08-31.csv', 'חיוב_2026-08-01_2026-08-31.csv',
-            'פירוט_2026-08-01_2026-08-31.csv']);
+        ['farkad-payroll_2026-08-01_2026-08-31.csv', 'farkad-invoice_2026-08-01_2026-08-31.csv',
+            'farkad-detail_2026-08-01_2026-08-31.csv']);
     check('and not one of them has a vehicle column',
         csv.files.every(file => file.text.indexOf('רכב') === -1),
         csv.files.map(f => f.text.split('\r\n')[0]).join(' | ').slice(0, 160));
@@ -398,7 +398,7 @@ async function staged(options = {}) {
     // Named so a run where the library stub was never reached - and the CSV road taken
     // instead - cannot pass as a workbook with no vehicle column in it.
     same('and the file handed over is the ordinary workbook', wrote,
-        ['דוחות_2026-08-01_2026-08-31.xlsx']);
+        ['farkad-reports_2026-08-01_2026-08-31.xlsx']);
 }
 
 // ---------------------------------------------------------------- nothing is lost

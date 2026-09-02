@@ -2370,6 +2370,11 @@ function loadXlsx(timeoutMs = 8000) {
     return xlsxLoading;
 }
 
+// THE TWO ANSWERS to the hand-over dialog, written once. Pinned verbatim by
+// tests/xlsx.test.mjs and tests/smoke.mjs.
+const EXPORT_CHOICE_DONE = 'הבנתי';
+const EXPORT_CHOICE_AGAIN = 'שמירה חוזרת';
+
 async function exportReports() {
     const stamp = `${REPORT_RANGE.from}_${REPORT_RANGE.to}`;
     const client = scopedExportPlace();
@@ -2390,9 +2395,9 @@ async function exportReports() {
     //
     // The client-scoped export stays scoped: only the billing sheet exists to fall back to.
     if (typeof XLSX === 'undefined') {
-        if (sheets.payroll) downloadCsv(sheets.payroll, `שכר_${stamp}.csv`);
-        downloadCsv(sheets.invoice, `חיוב_${stamp}.csv`);
-        if (sheets.detail) downloadCsv(sheets.detail, `פירוט_${stamp}.csv`);
+        if (sheets.payroll) downloadCsv(sheets.payroll, `farkad-payroll_${stamp}.csv`);
+        downloadCsv(sheets.invoice, `farkad-invoice_${stamp}.csv`);
+        if (sheets.detail) downloadCsv(sheets.detail, `farkad-detail_${stamp}.csv`);
         askTell(client
             ? 'חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
                 + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.'
@@ -2424,7 +2429,16 @@ async function exportReports() {
         if (sheets.detail) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');
         }
-        const name = client ? `חיוב_${stamp}.xlsx` : `דוחות_${stamp}.xlsx`;
+        // NAMED LATIN-FIRST, like the backup (farkad-<date>.json) and the picture
+        // (farkad-דוח-…png). The names were דוחות_<from>_<to>.xlsx and שכר_/חיוב_/פירוט_
+        // <from>_<to>.csv, and a name that opens with a Hebrew word is laid out by a list
+        // that runs right to left - the iPhone's Files app, a WhatsApp chat - as
+        // xlsx.2026-08-20_2026-08-07_דוחות: the two dates swapped, the extension on the
+        // far left, a name the person reads as "backwards". A name that begins in Latin
+        // and stays Latin to its extension is one directional run, and one run is never
+        // reordered, whichever way the list runs. The Hebrew stays where it is read as
+        // Hebrew: the sheet names inside the workbook, and the columns.
+        const name = client ? `farkad-invoice_${stamp}.xlsx` : `farkad-reports_${stamp}.xlsx`;
         XLSX.writeFile(wb, name);
 
         // SAID OUT LOUD, on the same pattern as the backup above it.
@@ -2439,15 +2453,42 @@ async function exportReports() {
         // exactly where the backup does: the browser was HANDED the file. It is never
         // "נשמר בהצלחה", because this app cannot see the Files app and must not claim to.
         // The filename is Latin inside a Hebrew sentence, so it travels wrapped in
-        // LRI…PDI - askConfirm writes textContent, so the isolation has to be in the
+        // LRI…PDI - askChoice writes textContent, so the isolation has to be in the
         // string or the bidi algorithm folds the date backwards.
-        askConfirm({
+        //
+        // WHAT IT SAYS ABOUT THE FILE has to be true in every viewer that opens it. It
+        // used to end «הקובץ נפתח מימין לשמאל.» - true in Excel, where the sheetView flag
+        // above is honoured, and false in the viewers an iPhone opens first: the Files
+        // preview, WhatsApp's document preview and Numbers ignore the flag and lay עובד
+        // out on the left, so the person who took the sentence at its word opened the
+        // file and read the table backwards under a promise that it would not be. No way
+        // of writing the file satisfies both kinds of viewer. So the sentence says where
+        // right-to-left is true, admits the preview - with the numbers unchanged, which
+        // is what matters - and points at the one door that reads right everywhere: the
+        // picture beside the export button, drawn off the screen (js/ui/printout.js).
+        //
+        // ASKED AS A CHOICE, NOT A CONFIRM. «שמירה חוזרת» was askConfirm's cancel button,
+        // and the export ran again whenever the promise came back false - which is also
+        // what Escape and a tap beside the dialog resolve to on that path (askCancel in
+        // js/ui/ask.js; js/ui/modal.js sends the backdrop there). Measured on v96 at
+        // 390x844: one press, three taps beside the dialog, four workbooks - three copies
+        // nobody asked for, on their way to a bookkeeper. askChoice resolves the label
+        // that was pressed and null for every other way out, so only the named press
+        // exports again and closing the dialog, however it is closed, writes nothing.
+        //
+        // A device with no dialogs (the harness's stub document, the same seam the
+        // backup dialog in js/ui/share.js allows for) has nothing to ask through; the
+        // file is already written and nothing here can undo that.
+        if (typeof askChoice !== 'function') return;
+        askChoice({
             title: 'קובץ ה-Excel נמסר לשמירה',
             message: '\u2066' + name + '\u2069 נמסר לדפדפן — '
-                + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
-            ok: 'הבנתי',
-            cancel: 'שמירה חוזרת'
-        }).then(again => { if (!again) exportReports(); });
+                + 'פתח את "קבצים" וודא שהוא מופיע. '
+                + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) '
+                + 'עשויה להציג אותה משמאל לימין, עם אותם מספרים. '
+                + 'טבלה שנקראת נכון בכל מקום יוצאת מהכפתור «🖼️ שיתוף כתמונה».',
+            choices: [EXPORT_CHOICE_DONE, EXPORT_CHOICE_AGAIN]
+        }).then(answer => { if (answer === EXPORT_CHOICE_AGAIN) exportReports(); });
     } catch (error) {
         console.error('Report export failed:', error);
         // Named, the way the crash banner does it: which file failed, that the record
