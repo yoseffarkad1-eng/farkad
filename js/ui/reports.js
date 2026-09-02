@@ -47,9 +47,14 @@ function renderReports() {
     root.appendChild(renderSectionToggle());
     renderOverCapNotice(root);
 
-    // Both sections are built and both are in the DOM, whichever is chosen: the print
-    // stylesheet prints the record, not the screen's current answer to it. The one not
-    // being looked at is set aside on screen only.
+    // Both sections are built and both are in the DOM, whichever is chosen; the one not
+    // being looked at carries .report-offscreen, which the print block hides as well.
+    // Only the section on screen reaches the paper, on purpose: a client's report leaves
+    // the crew out of it, and the pay sheet does not carry the client's invoice behind
+    // it - tests/print.test.mjs pins both directions. (This comment used to say the
+    // hidden section stayed on paper. It does not, and must not.) The invoice's page
+    // break keys on the pay sheet being printed in front of it, so the order these two
+    // are appended in is what the stylesheet reads.
     // With one client's site chosen, the printer follows the same rule as the export
     // button beside it: the pay sheet stays out of the client's hands. The body class
     // is what the print stylesheet keys on.

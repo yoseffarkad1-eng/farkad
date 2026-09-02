@@ -2994,6 +2994,13 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
     .report:last-child { margin-bottom: 0 !important; }
     .report:first-child { page-break-before: auto !important; }
     .report-invoice:first-child { page-break-before: auto !important; }
+    /* :first-child was not enough. With «לפי אתר» chosen the pay sheet is not on the
+       paper (.report-offscreen, above) but it is still the invoice's preceding sibling
+       in the document, so the invoice was never :first-child and the break stayed: the
+       client's report came out behind an EMPTY first page, and a phone's print preview
+       opened on a blank sheet. The break is conditional on a pay sheet that is actually
+       printed in front of it - renderReports appends the two back to back. */
+    .report-payroll.report-offscreen + .report-invoice { page-break-before: auto !important; }
     main > section:last-child > *:last-child { margin-bottom: 0 !important; }
 }
 
