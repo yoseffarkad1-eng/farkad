@@ -444,7 +444,10 @@ check('and nobody is named, or priced, anywhere in its bytes',
         said.chosen[0] && said.chosen[0].title === 'קובץ ה-Excel נמסר לשמירה'
         && said.chosen[0].message
             === '\u2066farkad-reports_2026-08-01_2026-08-31.xlsx\u2069 נמסר לדפדפן — '
-                + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
+                + 'פתח את "קבצים" וודא שהוא מופיע. '
+                + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) '
+                + 'עשויה להציג אותה משמאל לימין, עם אותם מספרים. '
+                + 'טבלה שנקראת נכון בכל מקום יוצאת מהכפתור «🖼️ שיתוף כתמונה».',
         JSON.stringify(said.chosen[0]));
     // The claim it must never make, and the filename's isolation, which a Hebrew sentence
     // around a Latin name needs or the date folds backwards.

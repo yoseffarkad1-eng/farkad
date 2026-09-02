@@ -6842,6 +6842,13 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     /Excel[^.;]*מימין לשמאל/.test(now.message) && now.message.includes('משמאל לימין')
     && door !== null && now.message.includes(door),
     now.message);
+  check('in the words the app pins, naming the file it wrote',
+    now.message === '\u2066' + now.writes[0] + '\u2069 נמסר לדפדפן — '
+      + 'פתח את "קבצים" וודא שהוא מופיע. '
+      + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) '
+      + 'עשויה להציג אותה משמאל לימין, עם אותם מספרים. '
+      + 'טבלה שנקראת נכון בכל מקום יוצאת מהכפתור «🖼️ שיתוף כתמונה».',
+    now.message);
 
   // (a) a tap beside the dialog
   const point = await beside();

@@ -2456,6 +2456,17 @@ async function exportReports() {
         // LRI…PDI - askChoice writes textContent, so the isolation has to be in the
         // string or the bidi algorithm folds the date backwards.
         //
+        // WHAT IT SAYS ABOUT THE FILE has to be true in every viewer that opens it. It
+        // used to end «הקובץ נפתח מימין לשמאל.» - true in Excel, where the sheetView flag
+        // above is honoured, and false in the viewers an iPhone opens first: the Files
+        // preview, WhatsApp's document preview and Numbers ignore the flag and lay עובד
+        // out on the left, so the person who took the sentence at its word opened the
+        // file and read the table backwards under a promise that it would not be. No way
+        // of writing the file satisfies both kinds of viewer. So the sentence says where
+        // right-to-left is true, admits the preview - with the numbers unchanged, which
+        // is what matters - and points at the one door that reads right everywhere: the
+        // picture beside the export button, drawn off the screen (js/ui/printout.js).
+        //
         // ASKED AS A CHOICE, NOT A CONFIRM. «שמירה חוזרת» was askConfirm's cancel button,
         // and the export ran again whenever the promise came back false - which is also
         // what Escape and a tap beside the dialog resolve to on that path (askCancel in
@@ -2472,7 +2483,10 @@ async function exportReports() {
         askChoice({
             title: 'קובץ ה-Excel נמסר לשמירה',
             message: '\u2066' + name + '\u2069 נמסר לדפדפן — '
-                + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
+                + 'פתח את "קבצים" וודא שהוא מופיע. '
+                + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) '
+                + 'עשויה להציג אותה משמאל לימין, עם אותם מספרים. '
+                + 'טבלה שנקראת נכון בכל מקום יוצאת מהכפתור «🖼️ שיתוף כתמונה».',
             choices: [EXPORT_CHOICE_DONE, EXPORT_CHOICE_AGAIN]
         }).then(answer => { if (answer === EXPORT_CHOICE_AGAIN) exportReports(); });
     } catch (error) {
