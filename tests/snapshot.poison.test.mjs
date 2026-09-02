@@ -354,4 +354,144 @@ for (const [what, poison, build] of cases) {
         device.global('Recovery').acknowledge() === true);
 }
 
+// ---------------------------------------- and the edits BESIDE it, for the rest of time
+{
+    suite('after an acknowledgement, a sibling edit on the poisoned map is the same sighting');
+
+    // Nothing ever removes a poisoned layer from the cloud document, and the crew keeps
+    // recording. Every ordinary edit to the OTHER rows of that layer changes the bytes of
+    // the map the poisoned name sits in, while the bytes under the poisoned name itself
+    // do not move. A sighting whose identity is the whole map calls each of those edits
+    // new evidence: a new quarantine copy, the acknowledgement withdrawn, writing blocked,
+    // the persist refused and the snapshot not adopted - so the phone never sees the other
+    // phones' work on that day, and after twenty such edits the quarantine ladder is
+    // exhausted, the entry is mustHold, acknowledging answers false and the banner blames
+    // a full disk. The failure the 'many reopens' suite above was written for, reopened
+    // one edit at a time.
+    //
+    // The identity of a sighting is the bytes UNDER the poisoned name. A sibling edit is
+    // the same sighting, answered from the first copy, and the snapshot is adopted.
+    const device = phone('d_sibling');
+    const document = arriving(device, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+    });
+    device.Sync.receive(document);
+    await settle(40);
+    given('the first sighting holds the device', device.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        device.global('Recovery').acknowledge() === true);
+
+    const copiesOn = dev => Object.keys(dev.dump())
+        .filter(key => key.indexOf('scheduleData:v2:poison:') === 0);
+
+    const rounds = [];
+    for (let n = 1; n <= 21; n += 1) {
+        const edited = JSON.parse(JSON.stringify(document));
+        edited.days['2026-08-12'].actual.w_01.entries[0].extraHours = n;
+        edited.updatedAt = `2026-08-26T12:${String(n).padStart(2, '0')}:00.000Z`;
+        device.Sync.receive(edited);
+        await settle(40);
+        const day = (device.State.schedule.days || {})['2026-08-12'] || {};
+        const row = day.actual && day.actual.w_01;
+        rounds.push({
+            n,
+            blocked: device.call('farkadWritesBlocked'),
+            adopted: row && row.entries && row.entries[0] ? row.entries[0].extraHours : null,
+            copies: copiesOn(device).length,
+            status: device.Sync.status,
+            acknowledged: device.global('Recovery').acknowledged,
+            problems: device.global('Recovery').problems.length
+        });
+    }
+    const last = rounds[rounds.length - 1];
+
+    check('no sibling edit holds the device again',
+        rounds.every(round => round.blocked === false && round.acknowledged === true),
+        JSON.stringify(rounds.filter(round => round.blocked).map(round => round.n)));
+    check('every one of them is adopted, the twenty-first included',
+        rounds.every(round => round.adopted === round.n),
+        JSON.stringify(rounds.map(round => round.adopted)));
+    check('the poisoned bytes were quarantined once, not once per edit',
+        last.copies === 1, JSON.stringify(rounds.map(round => round.copies)));
+    check('and the person was told once', last.problems === 1, String(last.problems));
+    check('the status never says error over a document it adopted',
+        rounds.every(round => round.status !== 'error'),
+        JSON.stringify(rounds.map(round => round.status)));
+    check('and the one copy still carries the bytes',
+        JSON.stringify(device.dump()).indexOf(MARKER) !== -1);
+    check('the phone is still recording',
+        device.State.commit(device.call('assignPlace', device.State.schedule,
+            '2026-08-13', 'w_01', 'actual', 'p_01')) === true);
+}
+
+{
+    suite('and a poisoned days map does not hold the phone for every later day');
+
+    // The same failure one level up, where it is worst: for a poisoned DAYS map the
+    // container's bytes change whenever anybody records ANY day, so the phone re-held on
+    // every evening the crew recorded and adopted none of them.
+    const device = phone('d_sibling_days');
+    const document = arriving(device, target => {
+        target.days = JSON.parse('{"__proto__":{"actual":{"w_01":'
+            + `{"entries":[{"placeId":"${MARKER}"}],"rates":{"daily":400,"hourly":0}}}}}`);
+    });
+    device.Sync.receive(document);
+    await settle(40);
+    given('the first sighting holds the device', device.call('farkadWritesBlocked') === true);
+    given('and the person acknowledges it',
+        device.global('Recovery').acknowledge() === true);
+
+    const later = JSON.parse(JSON.stringify(document));
+    later.days['2026-08-13'] = { actual: { w_01: {
+        entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } } } };
+    later.updatedAt = '2026-08-26T13:00:00.000Z';
+    device.Sync.receive(later);
+    await settle(40);
+
+    check('another phone recording another day does not hold this one',
+        device.call('farkadWritesBlocked') === false,
+        JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
+    check('and that day is adopted',
+        Boolean(((device.State.schedule.days || {})['2026-08-13'] || {}).actual
+            && device.State.schedule.days['2026-08-13'].actual.w_01),
+        JSON.stringify(Object.keys(device.State.schedule.days || {})));
+    check('with the poisoned bytes quarantined once',
+        Object.keys(device.dump()).filter(key =>
+            key.indexOf('scheduleData:v2:poison:') === 0).length === 1,
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('poison') !== -1)));
+}
+
+{
+    suite('two poisoned names in one map are two sightings, each under its own name');
+
+    // The other half of "the bytes under the name": a map carrying both `__proto__` and
+    // `constructor` is two problems with two sets of bytes, and a person acknowledging
+    // one of them has not been shown the other. Under the whole-map identity the two
+    // collapsed into one entry under one key.
+    const device = phone('d_two_names');
+    const document = arriving(device, target => {
+        target.days = {};
+        target.days['2026-08-12'] = JSON.parse('{"actual":{'
+            + `"__proto__":{"entries":[{"placeId":"${MARKER}_A"}],"rates":{"daily":400,"hourly":0}},`
+            + `"constructor":{"entries":[{"placeId":"${MARKER}_B"}],"rates":{"daily":400,"hourly":0}},`
+            + '"w_01":{"entries":[{"placeId":"p_01"}],"rates":{"daily":400,"hourly":0}}}}');
+    });
+    device.Sync.receive(document);
+    await settle(40);
+
+    const keys = device.global('Recovery').problems.map(problem => problem.key);
+    check('each name is held under a key of its own',
+        keys.indexOf('scheduleData:v2:poison:days.2026-08-12.actual.__proto__') !== -1
+        && keys.indexOf('scheduleData:v2:poison:days.2026-08-12.actual.constructor') !== -1,
+        JSON.stringify(keys));
+    check('and each copy carries the bytes under its name and not the other’s',
+        device.global('Recovery').problems.every(problem => problem.copy
+            && String(device.raw(problem.copy)).indexOf(
+                problem.key.endsWith('.__proto__') ? MARKER + '_A' : MARKER + '_B') !== -1
+            && String(device.raw(problem.copy)).indexOf('"w_01"') === -1),
+        JSON.stringify(device.global('Recovery').problems.map(problem =>
+            [problem.key, device.raw(problem.copy)])));
+}
+
 report();
