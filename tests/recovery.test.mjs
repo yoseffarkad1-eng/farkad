@@ -1054,4 +1054,62 @@ function rebuild(device, payload) {
         JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
 }
 
+// ================================================================ E9
+//
+// Evidence found while the disk is being read, and the screen.
+//
+// Recovery.evidence redraws the app so that a poisoned map arriving from the cloud is
+// worn by the whole screen the moment it is held. It is also reached from State.load -
+// normaliseSchedule runs it for a record that carries the map - and State.load runs
+// inside boot() in js/app.js BEFORE the app's first render(). A redraw there draws every
+// view over a State that is half read: the schedule still the empty one from definition
+// time, the journal not yet replayed, the questions not yet read. And it runs inside
+// loadRecord's try: anything render() throws while drawing that half-state is caught as
+// "the stored record cannot be read", the readable record is quarantined and the phone
+// held for a fault in the drawing, not in the data. damaged() never redrew; halt() redraws
+// only after the boot render. This is the one path that redrew before it.
+//
+// The harness runs no boot, so a device here is exactly "before the app's first render":
+// what boot() does after that first render is done by hand below, on the seam it uses.
+{
+    suite('E9: evidence found while the disk is read does not redraw the app before its first render');
+
+    const MARKER = 'le_POISON_EARLY_RENDER';
+    const source = seed(makeDevice({ deviceId: 'd_e9_src' }));
+    source.setToday('2026-08-26');
+    given('a day is recorded on the source phone', put(source, 'days.2026-08-12.actual.w_01', 'p_01'));
+    const record = JSON.parse(source.raw('scheduleData:v2'));
+    record.ledger = JSON.parse('{"advances":{},"unreadable":{"__proto__":'
+        + `{"id":"${MARKER}","amount":500}}}`);
+    const disk = source.dump();
+    disk['scheduleData:v2'] = JSON.stringify(record);
+
+    const device = makeDevice({ deviceId: 'd_e9', storage: disk });
+    device.setToday('2026-08-26');
+    given('nothing has been drawn on this device yet', device.renders.count === 0);
+    device.State.load();
+    const recovery = device.global('Recovery');
+    given('the record is held and its map quarantined by the read',
+        device.call('farkadWritesBlocked') === true
+        && recovery.problems.some(problem =>
+            problem.key === 'scheduleData:v2:poison:ledger.unreadable' && problem.copy),
+        JSON.stringify(recovery.problems.map(problem => problem.key)));
+    check('and the read did not redraw the app on its way through the disk',
+        device.renders.count === 0, `${device.renders.count} render(s) during State.load`);
+    check('the day the record held is on the schedule the boot will draw',
+        placeOf(device.State.schedule.days['2026-08-12'].actual.w_01) === 'p_01');
+
+    // What boot() does once the app has drawn itself for the first time.
+    recovery.onScreen = true;
+    const before = device.renders.count;
+    recovery.evidence('scheduleData:v2:poison:days.2026-08-13.actual',
+        '{"__proto__":{"entries":[{"placeId":"p_02"}]}}', 'x');
+    check('once the app is on screen, new evidence is worn by the whole screen at once',
+        device.renders.count === before + 1, `${before} -> ${device.renders.count}`);
+    recovery.evidence('scheduleData:v2:poison:days.2026-08-13.actual',
+        '{"__proto__":{"entries":[{"placeId":"p_02"}]}}', 'x');
+    check('and the same bytes again are the same sighting, not another redraw',
+        device.renders.count === before + 1, `${before} -> ${device.renders.count}`);
+}
+
 report();
