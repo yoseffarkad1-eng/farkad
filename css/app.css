@@ -129,6 +129,17 @@ body {
        runaway wide table makes it think. */
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    /* Two taps do not zoom. iOS Safari's double-tap-to-zoom fires on any element whose
+       touch-action does not rule it out, and a man marking a crew of thirty taps twice in
+       a row all evening - reported from the home-screen app on v96 as "when I tap twice
+       it zooms". 'manipulation' keeps panning and pinch (the smoke suite refuses
+       user-scalable=no for that reason) and takes only the double-tap gesture away. It
+       is not inherited - a button's own computed value still reads 'auto' - but the
+       browser applies the intersection of every value from the element to the root,
+       and a descendant can only narrow that, never widen it back: the one rule on the
+       body covers every button below, and .reorder-handle's touch-action: none still
+       wins on the handle, which is where the drag starts. */
+    touch-action: manipulation;
     background: var(--paper);
     color: var(--ink);
     font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif;

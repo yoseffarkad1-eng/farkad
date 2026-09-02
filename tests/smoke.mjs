@@ -3063,7 +3063,19 @@ async function seedRoster(page) {
       // the lie 63b7776 took off the line, back on the chip.
       contested: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (רישום אחד ממתין לשליחה)'),
       contestedTwo: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (2 ממתינים לשליחה)'),
-      blocked: read('הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד. (רישום אחד ממתין לשליחה)')
+      blocked: read('הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד. (רישום אחד ממתין לשליחה)'),
+      // The same fault, two more lines. The person's phone, v96, 5G, the app on the home
+      // screen: the chip beside the name read «38 ממתינים לשליחה» while the line under it
+      // began with the error sentence - the cloud was REFUSING the queue (permission-
+      // denied under the legacy rules, docs/sync-protocol.md) and the chip called it a
+      // queue on its way. 'error' and 'claimstuck' are composed by updateSyncNotice with
+      // the same count suffix as everything else, so the sentence has to come first
+      // here too. The error line is chip-danger: nothing in that queue moves until
+      // somebody acts, and warn is the colour of "wait", which is the wrong instruction.
+      error: read('שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (38 ממתינים לשליחה)'),
+      errorOne: read('שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (רישום אחד ממתין לשליחה)'),
+      errorClean: read('שגיאת סנכרון - הנתונים שמורים במכשיר הזה.'),
+      stuck: read('הרישום שמור במכשיר. השליחה תקועה - סגור את שאר החלונות של האפליקציה, ואם זה נמשך ייצא גיבוי ופתח מחדש. (38 ממתינים לשליחה)')
     };
     updateSyncNotice();
     renderSyncChip();
@@ -3088,6 +3100,18 @@ async function seedRoster(page) {
   check('a suspended sync says so on the chip in the line\'s own words, not "waiting to send"',
     chips.blocked.text === 'הסנכרון מושהה' && chips.blocked.cls.includes('chip-warn'),
     JSON.stringify(chips.blocked));
+  check('a cloud that refuses the queue is a sync error on the chip, not "38 waiting to send"',
+    chips.error.text === 'שגיאת סנכרון' && chips.error.cls.includes('chip-danger'),
+    JSON.stringify(chips.error));
+  check('with one held back as much as with thirty-eight',
+    chips.errorOne.text === 'שגיאת סנכרון' && chips.errorOne.cls.includes('chip-danger'),
+    JSON.stringify(chips.errorOne));
+  check('and with nothing queued the error is still the state, not a blank chip',
+    chips.errorClean.hidden === false && chips.errorClean.text === 'שגיאת סנכרון'
+    && chips.errorClean.cls.includes('chip-danger'), JSON.stringify(chips.errorClean));
+  check('a stuck claim says stuck on the chip, in the line\'s own words',
+    chips.stuck.text === 'השליחה תקועה' && chips.stuck.cls.includes('chip-warn'),
+    JSON.stringify(chips.stuck));
 
   // the crash banner: it names the error, and it closes
   await page.evaluate(() => {
