@@ -133,6 +133,20 @@ function renderSyncChip() {
         // A change that was NOT written down - the one state the chip must never soften.
         state = 'chip-danger';
         label = 'לא נשמר';
+    } else if (text.startsWith('הנתונים השתנו במכשיר אחר')) {
+        // THE SENTENCE BEFORE THE COUNT. A held edit is still counted by pendingCount(),
+        // so this line never arrives without a queue suffix - and read count-first the
+        // chip called it "waiting to send", which is the one thing a held edit is not:
+        // nothing goes until a person decides. That is the lie 63b7776 took off the
+        // status line, and the chip had put it back beside the app's name.
+        state = 'chip-warn';
+        label = 'דורש הכרעה';
+    } else if (text.startsWith('הסנכרון מושהה')) {
+        // Same precedence, same reason: the queue behind a suspended sync is not on its
+        // way anywhere until the poisoned record is exported. The chip repeats the
+        // line's own first words rather than inventing a shorter one.
+        state = 'chip-warn';
+        label = 'הסנכרון מושהה';
     } else if (waiting) {
         state = 'chip-warn';
         label = `${waiting[1]} ממתינים לשליחה`;
@@ -148,9 +162,6 @@ function renderSyncChip() {
     } else if (text.startsWith('מחובר') || text.startsWith('מתחבר')) {
         state = 'chip-warn';
         label = 'שולח…';
-    } else if (text.startsWith('הנתונים השתנו במכשיר אחר')) {
-        state = 'chip-warn';
-        label = 'דורש הכרעה';
     }
     chip.textContent = label;
     chip.className = 'sync-chip' + (state ? ' ' + state : '');

@@ -3055,7 +3055,15 @@ async function seedRoster(page) {
       synced: read('מסונכרן בין המכשירים. · עודכן: 19:42'),
       waiting: read('מחובר. יש רישומים שעדיין נשלחים. (3 ממתינים לשליחה)'),
       one: read('אין חיבור - השינויים יישלחו כשהחיבור יחזור. (רישום אחד ממתין לשליחה)'),
-      failed: read('⚠️ השינוי האחרון לא נשמר במכשיר. ייצא קובץ גיבוי עכשיו.')
+      failed: read('⚠️ השינוי האחרון לא נשמר במכשיר. ייצא קובץ גיבוי עכשיו.'),
+      // The three lines below are the ones updateSyncNotice actually composes - a held
+      // edit is still counted by pendingCount(), so the contested and blocked sentences
+      // NEVER appear without the queue suffix. The chip must read the sentence first:
+      // "waiting to send" on an edit that will not be sent until a person decides is
+      // the lie 63b7776 took off the line, back on the chip.
+      contested: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (רישום אחד ממתין לשליחה)'),
+      contestedTwo: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (2 ממתינים לשליחה)'),
+      blocked: read('הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד. (רישום אחד ממתין לשליחה)')
     };
     updateSyncNotice();
     renderSyncChip();
@@ -3071,6 +3079,15 @@ async function seedRoster(page) {
   check('one waits in the singular there too', chips.one.text === 'ממתין לשליחה', JSON.stringify(chips.one));
   check('a save that failed is never softened on the chip',
     chips.failed.text === 'לא נשמר' && chips.failed.cls.includes('chip-danger'), JSON.stringify(chips.failed));
+  check('a held edit is a decision on the chip, not a queue',
+    chips.contested.text === 'דורש הכרעה' && chips.contested.cls.includes('chip-warn'),
+    JSON.stringify(chips.contested));
+  check('however many are held',
+    chips.contestedTwo.text === 'דורש הכרעה' && chips.contestedTwo.cls.includes('chip-warn'),
+    JSON.stringify(chips.contestedTwo));
+  check('a suspended sync says so on the chip in the line\'s own words, not "waiting to send"',
+    chips.blocked.text === 'הסנכרון מושהה' && chips.blocked.cls.includes('chip-warn'),
+    JSON.stringify(chips.blocked));
 
   // the crash banner: it names the error, and it closes
   await page.evaluate(() => {
