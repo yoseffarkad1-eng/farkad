@@ -12,10 +12,44 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v98 (`5dd5a83`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+**`main` is at v98 (`5dd5a83`).** The build at the top of this file is a candidate on a
+branch: verified, stamped, and NOT served. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## v99 — CANDIDATE, not served — the tip of `cd-work`
+
+The second round answered from the iPhone: one screenshot on v98, the bottom bars gone
+and the chip red. Nothing on a phone runs it.
+
+**What it would give the crew that v98 does not have**
+
+- The bottom bars come back. The app took a viewport measurement alone as "a keyboard is
+  up" and hid both bars under it; on the home-screen app iOS can leave the two viewports
+  disagreeing with no resize event — the share sheet, the print sheet, a keyboard
+  dismissed while scrolled, backgrounding, rotation — and the bars stayed gone until the
+  app was killed. A keyboard needs a focused editable now: nothing focused, no keyboard,
+  whatever the viewport says; re-measured on focus, blur, return to the app, and on the
+  first touch while the class stands (`js/ui/bars.js`).
+- The ⋯ panel says WHY the cloud refused, under the line that says it did: «הענן מסרב
+  לקבל רישומים מהמכשיר הזה. אם האפליקציה עודכנה זה עתה, כללי הענן עדיין לא פורסמו.» for
+  a refusal, «הענן אינו מזהה את המכשיר הזה - התחבר שוב.» for a lost sign-in, «אין כרגע
+  גישה לענן - הניסיון יחזור מעצמו.» for no reach, else the error's own message, with the
+  code readable left to right. A dead listener's refusal is kept until a listener
+  delivers again, so the reason survives the next write.
+
+**Checked before it was stamped**: the release gate on the stamped commit is in
+`features/bars-reason/handoff.md`. No number is copied here.
+
+**What this build is NOT known to do**
+
+- **It is not on `main`.** No phone has it.
+- No iPhone has run it: the bars fix is measured in Chromium with a stubbed viewport; the
+  share-sheet and stale-viewport paths on a real home-screen iPhone are the acceptance the
+  person's phone gives.
+- Everything v98 lists, unchanged; the open items are `features/next/opus-closeout.md`.
 
 ---
 

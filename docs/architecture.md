@@ -294,7 +294,13 @@ MEASURES: `--nav-h`, `--day-actions-h`, `--topbar-h` are read off the live boxes
 every layout change, and the stylesheet adds them up. A hidden bar measures zero, so
 reserved space collapses on its own. The keyboard is measured the same way
 (`visualViewport`), with a 150px floor so browser chrome sliding around does not read
-as a keyboard, and a zoom guard so pinch-zoom does not hide the bars.
+as a keyboard, and a zoom guard so pinch-zoom does not hide the bars - and it is read
+ONLY while something a keyboard opens for has focus (a text-like input, a textarea,
+contenteditable; not a select). A home-screen iPhone reports a short viewport for
+things that are not a keyboard and that end without a resize event - the share sheet,
+the print sheet, coming back from the background - and on v98 that left both bottom
+bars hidden until the app was killed. Focus changes, visibility, pageshow, and a touch
+or scroll while `kbd-open` stands all re-measure now.
 
 The safe-area inset comes from `env(safe-area-inset-bottom)` once, as a custom
 property (`css/app.css:145`) — it resolves to 0 everywhere it does not apply, which is

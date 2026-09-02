@@ -42,6 +42,22 @@ function dateRange(from, to) {
     return `\u2066${from} - ${to}\u2069`;
 }
 
+// A piece of Latin text - an error code, a message from the SDK, a file name - as ONE
+// left-to-right run inside a Hebrew sentence, whatever it happens to contain. A STRING,
+// for a sentence that travels through textContent; ltr() in js/ui/roster.js is the node
+// for the same job, and on one global scope the two cannot share a name - the later
+// script wins, silently, and the sentence read "[object Object]".
+//
+// isolate() lets the text choose its own direction, which is right for a name and wrong
+// for "(permission-denied)": the bracket and the hyphen are neutral, so a first-strong
+// isolate closes the bracket on the wrong side and a person reading the code out over
+// the phone reads ")permission-denied(". The same U+2066…U+2069 pair as dateRange, for
+// the same reason.
+function isolateLtr(text) {
+    const said = text === null || text === undefined ? '' : String(text);
+    return `\u2066${said}\u2069`;
+}
+
 function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;

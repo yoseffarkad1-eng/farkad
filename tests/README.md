@@ -52,6 +52,15 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 55bfa00 (v99: the bottom bars come back - a keyboard needs a focused editable - and
+    the ⋯ panel names the sync failure's reason), the cd-work worktree, clean at that commit,
+    Node v22.22.2, .gate-release.log there, copied from no other run - the WHOLE release gate:
+    npm test           43 suites   4336/4336   (status 33: four pins added)
+    npm run test:all   + 9 suites  + 2106      (smoke 1130, print 78, mobile 721, update 30, forms-browser 10, recovery-browser 25, handover 26, swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244      (sendclaim 43; rules 59, cas.emulator 24, rollout 17, bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    the whole gate     59 suites   6686/6686   exit 0
+    Per suite and verbatim: features/bars-reason/handoff.md.
+
     At 1e3f092 (v98: the storm closed - a ledger entry is its own JSON round-trip - the
     frozen hours, and the by-site grid's short dates), the cd-work worktree, clean at that
     commit, Node v22.22.2, .gate-release.log there, copied from no other run - the WHOLE

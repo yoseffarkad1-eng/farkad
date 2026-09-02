@@ -19,6 +19,7 @@
 // check cannot see a claim that was made and withdrawn, and that claim is the defect.
 
 import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
 import { makeDevice, makeCloud, settle, settleUntil } from './harness.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
@@ -422,6 +423,46 @@ function fragile(cloud) {
     check('and the words on the line do not promise it',
         deaf.__notice.textContent.indexOf('מסונכרן') === -1,
         JSON.stringify(deaf.__notice.textContent));
+
+    // AND THE PANEL SAYS WHY - one write later. The listener died on permission-denied;
+    // the phone's own write then landed and asked for 'synced', honestStatusFor said
+    // 'error' instead, and setStatus wrote lastError = null over the refusal. The
+    // status is right and the reason is gone: a person opening ⋯ now is told the sync
+    // failed and nothing about the cloud refusing this phone, which is the one thing
+    // they could act on. js/ui/settings.js is not in the harness's load order (it draws a
+    // sheet), so it is loaded here, over a stub of the three nodes it writes.
+    vm.runInContext(readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8'),
+        deaf.ctx, { filename: 'js/ui/settings.js' });
+    deaf.__mirror = { textContent: '', hidden: false };
+    deaf.__reason = { textContent: '', hidden: true };
+    deaf.ctx.document.getElementById = id => ({
+        storageNotice: deaf.__notice,
+        settingsSyncStatus: deaf.__mirror,
+        settingsSyncReason: deaf.__reason
+    })[id] || null;
+    deaf.call('renderSettingsSyncLine');
+    check('the panel mirrors the line',
+        deaf.__mirror.textContent === deaf.__notice.textContent
+        && deaf.__notice.textContent.indexOf('שגיאת סנכרון') === 0,
+        JSON.stringify([deaf.__mirror.textContent, deaf.__notice.textContent]));
+    check('and names the refusal the listener died on, after a write of its own has landed',
+        deaf.__reason.hidden === false
+        && deaf.__reason.textContent === 'הענן מסרב לקבל רישומים מהמכשיר הזה. '
+            + 'אם האפליקציה עודכנה זה עתה, כללי הענן עדיין לא פורסמו. \u2066(permission-denied)\u2069',
+        JSON.stringify({ text: deaf.__reason.textContent, hidden: deaf.__reason.hidden,
+            lastError: String(deaf.Sync.lastError) }));
+
+    // The line exists to be read aloud, so what it holds is a sentence or nothing: an
+    // error with no message is not "[object Object]", and a stuck claim - already
+    // explained in Hebrew by the line above it - adds nothing unless the cloud gave a code.
+    check('an error with no message is an unrecorded reason, not an object',
+        deaf.call('syncFailureReason', { status: 'error', lastError: {} }) === 'הסיבה לא נרשמה.',
+        JSON.stringify(deaf.call('syncFailureReason', { status: 'error', lastError: {} })));
+    check('a stuck claim with an internal message adds no line of its own',
+        deaf.call('syncFailureReason', { status: 'claimstuck',
+            lastError: new Error('the send claim is held by another window') }) === '',
+        JSON.stringify(deaf.call('syncFailureReason', { status: 'claimstuck',
+            lastError: new Error('the send claim is held by another window') })));
 
     // AND IT IS NOT A GAG. The rules are fixed; the phone subscribes again on its own,
     // hears the correction, and only then is the claim true and allowed.
