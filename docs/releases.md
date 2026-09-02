@@ -46,10 +46,17 @@ sentences (`features/iphone/findings.md`). Nothing on a phone runs it.
 
 **Checked before it was stamped**: the release gate on the stamped commit is in
 `features/iphone/handoff.md` beside the commit it ran on. No number is copied here.
+The gate was run twice on that commit: the first run was red in one emulator suite
+(the money-concurrency storm, a path no shipped phone can take with the gates shut),
+the second was green, and nine isolated runs of that suite were green; the handoff
+says so in full.
 
 **What this build is NOT known to do**
 
 - **It is not on `main`.** No phone has it.
+- **One emulator suite went red once on this commit** and nobody has yet explained the
+  interleaving; it exercises two phones writing money with the gates OPEN through the
+  test seam. The hunt is the first follow-up.
 - **No iPhone has run it.** The print heuristic (does Safari fire `beforeprint` or the
   print-media change when its sheet opens?), the share sheet inside the offer, and the
   touch-action rule are argued from the platform and measured in Chromium with
