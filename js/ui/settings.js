@@ -248,6 +248,13 @@ const SYNC_REASON_SIGNIN = 'הענן אינו מזהה את המכשיר הזה 
 const SYNC_REASON_UNREACHABLE = 'אין כרגע גישה לענן - הניסיון יחזור מעצמו.';
 const SYNC_REASON_DEAF = 'החיבור לענן נותק - מנסה להאזין מחדש.';
 const SYNC_REASON_UNRECORDED = 'הסיבה לא נרשמה.';
+// A pending restore this device cannot read. The connection is fine; the phone is the
+// problem, and it will not adopt anything the other two write until the record is
+// replaced. Says the one thing that fixes it - load a backup, which writes a new pending
+// record over the unreadable one - rather than "try again", which never will.
+const SYNC_REASON_BLIND = 'שחזור שממתין במכשיר הזה אינו קריא, ולכן המכשיר אינו קולט '
+    + 'עדכונים מהטלפונים האחרים. מה שנרשם כאן נשלח כרגיל. טען קובץ גיבוי דרך ⋯ ← שחזור '
+    + 'כדי לצאת מהמצב הזה.';
 const SYNC_REASON_MESSAGE_MAX = 100;
 
 // The sentence for a sync object's state, or '' when the state is not a failure. Pure,
@@ -257,6 +264,11 @@ function syncFailureReason(sync) {
     if (sync.status !== 'error' && sync.status !== 'claimstuck') return '';
     // lastError is written by every setStatus, and a dead listener outlives several of
     // them: the refusal it died on is the reason that stands until it hears again.
+    // ASKED FIRST, because this one is not a failure of the connection and has its own
+    // way out. A phone held on an unreadable pending restore reports 'error' with no
+    // error object at all - honestStatusFor decides it from the flag - so without this it
+    // would read «הסיבה לא נרשמה», which is the least useful true sentence available.
+    if (sync.replaceDamaged) return SYNC_REASON_BLIND;
     const error = sync.lastError || (sync._listenerDead ? sync._listenerError : null);
     if (!error) {
         return sync._listenerDead ? SYNC_REASON_DEAF : SYNC_REASON_UNRECORDED;

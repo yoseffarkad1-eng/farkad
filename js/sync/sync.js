@@ -2778,6 +2778,26 @@ const FarkadSync = {
         // 'error' is what the listener's own failure set, and it stays until a listener
         // delivers again - see listen().
         if (this._listenerDead) return 'error';
+        // THE SAME DEAFNESS, REACHED BY THE OTHER ROAD.
+        //
+        // receive() refuses every arriving snapshot while a pending restore will not
+        // parse: nobody can say what that restore was meant to replace, so adopting
+        // anything over it could undo it. That is right, and it is permanent - law 10
+        // means the unreadable record is never deleted, so this state survives every
+        // reopen.
+        //
+        // What was wrong is that it said nothing. It sets no status, and it is
+        // deliberately NOT the _heldSnapshot the recovery release re-runs; pendingReplace()
+        // answers null while it stands, so the restore guard above is satisfied too. So
+        // the person acknowledged the quarantine, writing resumed, and the phone's own
+        // next write put «מסונכרן» under a device that had stopped adopting anything at
+        // all. Its own writes still land, so the other two phones look healthy - only
+        // this one is blind, and it is the one vouching for itself.
+        //
+        // The listener is alive here, which is why this is not 'offline': the connection
+        // is fine and the phone is the problem. tests/status.test.mjs, «a phone whose
+        // pending restore will not parse is not finished either».
+        if (this.replaceDamaged) return 'error';
         return 'synced';
     },
 
