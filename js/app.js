@@ -147,6 +147,22 @@ function renderSyncChip() {
         // line's own first words rather than inventing a shorter one.
         state = 'chip-warn';
         label = 'הסנכרון מושהה';
+    } else if (text.startsWith('שגיאת סנכרון')) {
+        // And the same again, found on a real phone: v96, 5G, thirty-eight edits the
+        // cloud was REFUSING (permission-denied under rules the server had not yet
+        // caught up with), and the chip read «38 ממתינים לשליחה» - a queue on its way -
+        // over a line that began with the error. Danger, not warn: nothing in that queue
+        // moves until somebody acts, and warn is the colour of "wait".
+        state = 'chip-danger';
+        label = 'שגיאת סנכרון';
+    } else if (text.startsWith('הרישום שמור במכשיר. השליחה תקועה')) {
+        // The claim that will not clear: the queue exists and the sender is stuck behind
+        // another window. Its own words, ahead of its own count. Warn rather than danger
+        // because the line itself names the remedy - close the other windows - and the
+        // data is on this phone; the full stop after במכשיר keeps this from catching the
+        // suspended line, which also opens with הרישום שמור.
+        state = 'chip-warn';
+        label = 'השליחה תקועה';
     } else if (waiting) {
         state = 'chip-warn';
         label = `${waiting[1]} ממתינים לשליחה`;
