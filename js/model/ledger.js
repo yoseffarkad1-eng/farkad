@@ -1126,6 +1126,18 @@ function closedPeriods(schedule, workerId) {
             // Append, never replace: two advances can each be deducted at one close, and
             // a fold that kept the last would report half of what came off his wage.
             const at = out[key] || { deducted: 0, balanceAfter: undefined };
+            // AND THE DAY IT CLOSED ON, carried rather than thrown away.
+            //
+            // This folded under periodFrom alone, so a reader could only ask "was a
+            // fortnight starting on this Friday closed?" - and the three that ask
+            // (payrollReport, workerDaysReport, advanceWalk) then applied the frozen
+            // payslip to any range beginning on that date, whatever it ended on. A
+            // closure is a record of [periodFrom, periodTo]; half of that is not an
+            // account. See tests/closure.test.mjs, «a closed fortnight is frozen for its
+            // own period and no other».
+            if (at.periodTo === undefined && entry.periodTo !== undefined) {
+                at.periodTo = String(entry.periodTo);
+            }
             // The artifact carries no amount and no balance - it is the payslip, not a
             // movement - so only the deductions add up here.
             if (entry.kind === 'deducted') at.deducted += Number(entry.amount) || 0;
