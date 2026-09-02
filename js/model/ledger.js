@@ -829,7 +829,15 @@ function closureFacts(schedule, workerId, from, to, carriedIn) {
                 // tests/closure.echo.test.mjs.
                 const entry = { placeId: String(one.placeId || '') };
                 if (one.rate !== undefined) entry.rate = String(one.rate);
-                if (one.hours !== undefined) entry.hours = Number(one.hours) || 0;
+                // THE LIVE FIELD IS `extraHours`. This read `one.hours`, which no live
+                // entry has (makeEntry writes extraHours, entryExtraHours reads it), so
+                // every frozen day lost the hours it was priced with: the 12th froze at
+                // 710 beside a statement with no hours line, and once the live day was
+                // corrected off nothing could explain the number. `hours` is what the
+                // frozen reader asks for, so a day list that is already frozen - handed
+                // back through workerDaysReport's frozen branch - is read by that name.
+                const hours = one.extraHours !== undefined ? one.extraHours : one.hours;
+                if (hours !== undefined) entry.hours = Number(hours) || 0;
                 return entry;
             })
         }))
