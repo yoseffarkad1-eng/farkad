@@ -7566,6 +7566,249 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---- printing where window.print() does not open
+//
+// On an iPhone with the app on the home screen, window.print() has for years either not
+// opened the print sheet or opened an empty one. There is no error and nothing on the
+// screen: the person taps «🖨️ הדפסה» on the week and nothing happens. "Open it in Safari"
+// is not an answer there - the home-screen app's storage is its own partition, and the
+// phone that reported this held thirty-eight unsent records in it.
+//
+// The rule: window.print() is still called, and the page listens for the two signals a
+// browser gives when the sheet really opened - 'beforeprint' on the window, and the
+// print media query changing. Neither within 1.5 seconds means the sheet did not open,
+// and THEN the person is offered the same table as a PNG through the share sheet. The
+// image is drawn off the DOM the screen is showing - not off the schedule - so it says
+// what the screen says; and it goes out through navigator.share, or a download where
+// there is no share sheet.
+//
+// print is stubbed here in both directions. Chromium headless has no print sheet to
+// open, so a no-op that fires nothing IS the phone; a stub that dispatches beforeprint
+// synchronously is a desktop where the sheet opened. The heuristic is what is measured.
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-13', 'w_02', 'actual', 'p_02', RATE_EXTRA, 2);
+    markAbsent(State.schedule, '2026-08-13', 'w_03', 'actual');
+    State.save();
+    State.date = '2026-08-12';
+    showView('week');
+  });
+  await page.waitForTimeout(400);
+  check('the week is on screen with a chip in it',
+    (await page.locator('.week-table tbody .cell-line').count()) > 0);
+
+  const OFFER = 'ההדפסה לא נפתחה במסך הזה. לשתף את הטבלה כתמונה?';
+  const IMAGE = 'שיתוף כתמונה';
+
+  const readOffer = () => page.evaluate(() => ({
+    shown: document.getElementById('askModal').style.display === 'flex',
+    message: document.getElementById('askMessage').textContent,
+    choices: [...document.querySelectorAll('#askChoices button')]
+      .filter(node => node.offsetParent !== null).map(node => node.textContent),
+    printed: window.__printCalls
+  }));
+  // Answered through the DOM rather than a locator: on a build with no dialog a locator
+  // waits thirty seconds and then throws, and the failure this block exists to record
+  // would take the rest of the suite down with it.
+  const choose = label => page.evaluate(text => {
+    const found = [...document.querySelectorAll('#askChoices button')]
+      .find(node => node.textContent === text);
+    if (!found) return false;
+    found.click();
+    return true;
+  }, label);
+
+  // (a) THE PHONE: print is called, nothing answers, and within two seconds the offer
+  // is on screen. The share sheet is a stub that keeps the File it was handed.
+  await page.evaluate(() => {
+    window.__printCalls = 0;
+    window.print = () => { window.__printCalls += 1; };
+    window.__shared = [];
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: data => {
+        window.__shared.push({
+          title: data && data.title,
+          files: ((data && data.files) || []).map(file => ({
+            name: file.name, type: file.type, size: file.size
+          }))
+        });
+        return Promise.resolve();
+      }
+    });
+  });
+  await page.locator('#weekView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  let offer = await readOffer();
+  check('print is still called first', offer.printed === 1, JSON.stringify(offer));
+  check('and when nothing answers it, the image is offered within two seconds',
+    offer.shown && offer.message === OFFER, JSON.stringify(offer));
+  check('with the two answers, in the app\'s own dialog',
+    JSON.stringify(offer.choices) === JSON.stringify([IMAGE, 'ביטול']),
+    JSON.stringify(offer.choices));
+
+  const chosen = await choose(IMAGE);
+  await page.waitForTimeout(600);
+  const shared = await page.evaluate(() => window.__shared);
+  const file = shared.length > 0 && shared[0].files.length > 0 ? shared[0].files[0] : null;
+  check('choosing the image hands the share sheet one PNG',
+    chosen && Boolean(file) && file.type === 'image/png' && file.size > 0, JSON.stringify(shared));
+  check('named for the week it shows',
+    Boolean(file) && /^farkad-שבוע-2026-08-07-2026-08-13\.png$/.test(file.name),
+    file ? file.name : 'no file');
+  check('and the dialog is gone', (await readOffer()).shown === false);
+
+  // The same, with no share sheet at all: a download, of an image/png blob URL. The
+  // anchor's click is stubbed on the prototype so Chromium does not actually save it.
+  await page.evaluate(() => {
+    delete navigator.share;
+    delete navigator.canShare;
+    window.__clicks = [];
+    window.__blobs = [];
+    HTMLAnchorElement.prototype.click = function () {
+      window.__clicks.push({ href: this.href, download: this.download });
+    };
+    const real = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => { window.__blobs.push({ type: blob.type, size: blob.size }); return real(blob); };
+    window.__printCalls = 0;
+  });
+  await page.locator('#weekView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  offer = await readOffer();
+  check('with no share sheet the offer is still made', offer.shown && offer.message === OFFER,
+    JSON.stringify(offer));
+  const chosenAgain = await choose(IMAGE);
+  await page.waitForTimeout(600);
+  const download = await page.evaluate(() => ({ clicks: window.__clicks, blobs: window.__blobs }));
+  check('and the image goes out as a download instead',
+    chosenAgain && download.clicks.length === 1 && download.clicks[0].href.startsWith('blob:')
+    && /^farkad-שבוע-2026-08-07-2026-08-13\.png$/.test(download.clicks[0].download),
+    JSON.stringify(download.clicks));
+  check('of a PNG with bytes in it',
+    download.blobs.some(blob => blob.type === 'image/png' && blob.size > 0),
+    JSON.stringify(download.blobs));
+
+  // (b) THE DESKTOP: the sheet opened - beforeprint fired - and nothing is asked.
+  await page.evaluate(() => {
+    window.__printCalls = 0;
+    window.print = () => {
+      window.__printCalls += 1;
+      window.dispatchEvent(new Event('beforeprint'));
+    };
+  });
+  await page.locator('#weekView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  offer = await readOffer();
+  check('where the print sheet opens, print is called and nothing else happens',
+    offer.printed === 1 && offer.shown === false, JSON.stringify(offer));
+
+  // (c) THE PICTURE IS THE GRID, measured off its pixels. The PNG the helper produced is
+  // drawn onto a canvas in the page and sampled: the first man's first chip is his site's
+  // colour as the screen computes it, the title row has ink in it, and the image is not
+  // a white rectangle with a name on it.
+  const sample = async kind => page.evaluate(async which => {
+    if (typeof printoutImage !== 'function') return { helper: false };
+    const out = printoutImage(which);
+    const url = URL.createObjectURL(out.blob);
+    const img = await new Promise((ok, no) => {
+      const node = new Image();
+      node.onload = () => ok(node);
+      node.onerror = () => no(new Error('the PNG did not decode'));
+      node.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const dark = box => {
+      const data = ctx.getImageData(box.x, box.y, box.w, box.h).data;
+      let count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] + data[i + 1] + data[i + 2] < 3 * 128) count += 1;
+      }
+      return count;
+    };
+    const whole = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let nonWhite = 0;
+    for (let i = 0; i < whole.length; i += 4) {
+      if (whole[i] < 250 || whole[i + 1] < 250 || whole[i + 2] < 250) nonWhite += 1;
+    }
+    const chip = out.layout.chips && out.layout.chips[0];
+    const at = chip
+      ? ctx.getImageData(Math.round(chip.x + chip.w / 2), Math.round(chip.y + chip.h / 2), 1, 1).data
+      : null;
+    const first = document.querySelector('.week-table tbody tr .week-cell .cell-line');
+    return {
+      helper: true,
+      name: out.name,
+      width: canvas.width,
+      height: canvas.height,
+      nonWhite,
+      titleDark: dark(out.layout.title),
+      headerDark: out.layout.header ? dark(out.layout.header) : null,
+      firstRowDark: out.layout.rows && out.layout.rows[0] ? dark(out.layout.rows[0]) : null,
+      chipPixel: at ? [at[0], at[1], at[2]] : null,
+      chipWants: first && which === 'week' ? getComputedStyle(first).backgroundColor : null,
+      chips: out.layout.chips ? out.layout.chips.length : 0
+    };
+  }, kind);
+
+  const rgb = text => (String(text || '').match(/\d+/g) || []).slice(0, 3).map(Number);
+  const near = (a, b) => a.length === 3 && b.length === 3
+    && a.every((value, i) => Math.abs(value - b[i]) <= 2);
+
+  const week = await sample('week');
+  check('the helper draws the week off the DOM', week.helper === true);
+  check('the picture is not blank', week.helper && week.nonWhite > 2000, JSON.stringify(week));
+  check('its title row has ink in it', week.helper && week.titleDark > 40, JSON.stringify(week));
+  check('the first man\'s first chip is painted in his site\'s colour, as the screen computes it',
+    week.helper && week.chips > 0 && near(week.chipPixel || [], rgb(week.chipWants)),
+    JSON.stringify({ got: week.chipPixel, want: week.chipWants }));
+  check('and the file is named for the week',
+    week.helper && week.name === 'farkad-שבוע-2026-08-07-2026-08-13.png', String(week.name));
+
+  // The pay sheet, the same way.
+  await page.evaluate(() => {
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    REPORT_SECTION = 'workers';
+    showView('reports');
+  });
+  await page.waitForTimeout(400);
+  check('the pay sheet is on screen with a row in it',
+    (await page.locator('.report-payroll tbody tr').count()) > 0);
+  const report = await sample('report');
+  check('the pay sheet draws too', report.helper === true);
+  check('and it is not blank', report.helper && report.nonWhite > 2000, JSON.stringify(report));
+  check('its title row has ink in it', report.helper && report.titleDark > 40, JSON.stringify(report));
+  check('so does its header row', report.helper && report.headerDark > 40, JSON.stringify(report));
+  check('and its first row', report.helper && report.firstRowDark > 40, JSON.stringify(report));
+  check('named for the sheet and the period',
+    report.helper && report.name === 'farkad-דוח-שכר-2026-08-01-2026-08-31.png', String(report.name));
+
+  // The report's own print button walks the same road.
+  await page.evaluate(() => {
+    window.__printCalls = 0;
+    window.print = () => { window.__printCalls += 1; };
+  });
+  await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  offer = await readOffer();
+  check('the reports\' print button offers the image the same way',
+    offer.printed === 1 && offer.shown && offer.message === OFFER, JSON.stringify(offer));
+  const declined = await choose('ביטול');
+  await page.waitForTimeout(200);
+  check('and a no leaves nothing behind', declined && (await readOffer()).shown === false);
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);

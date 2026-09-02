@@ -145,7 +145,11 @@ function renderRangePicker() {
     const actions = el('div', 'range-actions');
     actions.appendChild(el('strong', 'range-current',
         `${formatFullDate(parseLocalDate(REPORT_RANGE.from))} - ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`));
-    actions.appendChild(button('🖨️ הדפסה', 'btn-success', () => window.print()));
+    // Not window.print() bare - see renderWeekHeader in js/ui/week.js and
+    // js/ui/printout.js: where the print sheet does not open, the sheet on screen is
+    // offered as a picture instead, and the picture has its own button beside it.
+    actions.appendChild(button('🖨️ הדפסה', 'btn-success', () => printWithFallback('report')));
+    actions.appendChild(button('🖼️ שיתוף כתמונה', 'btn-info', () => sharePrintout('report')));
     // The button says what will come out of it. With one client's site chosen the file
     // is that client's billing sheet and nothing else (see reportSheets), and a button
     // still reading "יצוא" would promise the usual workbook and quietly hand over less.

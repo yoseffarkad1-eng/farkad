@@ -233,7 +233,14 @@ function renderWeekHeader() {
     header.appendChild(fwd);
     header.appendChild(button('השבוע', 'btn-secondary', () => { setWeekFromDate(todayStr()); render(); }));
 
-    header.appendChild(button('🖨️ הדפסה', 'btn-success', () => window.print()));
+    // Not window.print() bare. On the home-screen app on an iPhone that call opens
+    // nothing and says nothing; printWithFallback (js/ui/printout.js) still makes it,
+    // listens for the sheet, and offers the grid as a picture when no sheet came.
+    header.appendChild(button('🖨️ הדפסה', 'btn-success', () => printWithFallback('week')));
+    // And the picture on its own button, always. The person on a site sends pictures on
+    // WhatsApp, not PDFs, and the print button's offer arrives a second and a half after
+    // a tap that did nothing - this is the door for somebody who already knows that.
+    header.appendChild(button('🖼️ שיתוף כתמונה', 'btn-secondary', () => sharePrintout('week')));
 
     return header;
 }

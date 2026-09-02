@@ -81,6 +81,11 @@ different from what was done.
     person is told. A record that will not parse is still the only record of work.
 11. **No `prompt`/`confirm`/`alert`, ever** — they are silently ignored in embedded
     frames. Use `askText`/`askConfirm`/`askTell` from `js/ui/ask.js`.
+12. **`window.print()` is never called bare.** On the home-screen app on an iPhone it
+    opens nothing and says nothing. `printWithFallback` in `js/ui/printout.js` makes
+    the call, listens for the sheet, and offers the table as a picture when none came;
+    the picture is drawn off the DOM, never off the schedule, so it shows what the
+    screen shows.
 
 ## Running it, and what green means
 
@@ -154,6 +159,8 @@ written down so it cannot happen twice.
     js/ui/roster.js            workers and sites; archive vs delete; the reorder mode
     js/ui/reports.js           pay and invoice reports; the advance form
     js/ui/share.js             the WhatsApp message, backups, snapshots, the four restore doors, exports
+    js/ui/printout.js          the table as a PNG, read off the DOM, for the phone where window.print()
+                               opens nothing: the 1.5s heuristic, the share sheet, the download
     js/ui/migration.js         the cells the migration refused to guess, put to a person
     js/ui/offline.js           SW registration, the update banner, midEdit(), checkForUpdate(); the other window's catch-up
     js/ui/install.js           the add-to-home-screen warning (iOS evicts browser-tab storage)

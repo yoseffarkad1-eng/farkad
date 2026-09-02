@@ -48,6 +48,7 @@ const SHELL = [
     './js/ui/roster.js',
     './js/ui/reports.js',
     './js/ui/share.js',
+    './js/ui/printout.js',
     './js/ui/migration.js',
     './js/ui/offline.js',
     './js/ui/install.js',
