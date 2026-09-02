@@ -304,6 +304,18 @@ BOTH dimensions for anything a finger lands on (a 44×31 target is not a floor),
 16px for every input, because below that iOS magnifies the page on focus — which is
 also why zoom is left enabled rather than locked away (`index.html:5`).
 
+Printing is a road with a fallback, not a call. On an iPhone with the app on the home
+screen `window.print()` opens nothing and says nothing, and Safari's own storage is a
+different partition from the app's, so "open it in Safari" loses the record. So
+`printWithFallback` (`js/ui/printout.js`) makes the call with `beforeprint` and the
+print media query listened for first; if neither answers within 1.5 seconds the
+table on screen is offered as a PNG, drawn on a canvas OFF THE DOM - the cell texts,
+the chip colours the screen computed, the marks the classes carry - so the picture
+cannot price a day differently from the screen. It leaves through `navigator.share`
+with a File, or an anchor download where there is no share sheet, and the whole
+drawing is synchronous because the share sheet needs the tap's gesture and an await
+would spend it. The picture also has its own button beside every print button.
+
 ## The update road
 
 Three strings name a build: the `farkad-build` meta in `index.html`, `APP_VERSION` in
