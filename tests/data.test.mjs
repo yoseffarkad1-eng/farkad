@@ -9921,4 +9921,71 @@ const VEHICLES_ON = { vehicles: true };
         JSON.stringify(verdict));
 }
 
+
+// ================================================== the way back a restore promises
+{
+    suite('a way back the next snapshot erases is not a way back');
+
+    // THE SLOT IS NOT A ROUTE HOME, and pushUndoState counted it as one.
+    //
+    // Two records carry the state before a restore: the stack (up to three, with the
+    // migration questions beside them) and the single slot scheduleData:v2backup, which
+    // is what an older build left behind and what restoreLocalBackup still reads.
+    // pushUndoState returned `stacked || slotted`, so a phone with room for the slot and
+    // not for the stack reported a confirmed way back - and the restore went ahead on
+    // the strength of it.
+    //
+    // The slot is not durable in the way that answer claims. js/sync/sync.js's receive()
+    // writes that same key on EVERY snapshot it adopts, to keep what was on screen. So
+    // the way back survives exactly until the other phone records an evening: the person
+    // reopens the app the next morning, presses «לשחזר את המצב שלפני הטעינה האחרונה»,
+    // and is restored to the state they were trying to escape - and told «שוחזר.».
+    //
+    // Room between the two is the ordinary end of a season of records, which is what the
+    // reclaim ladder exists for; and the ladder spends restore points to pay for the
+    // write that then fails.
+    const device = makeDevice();
+    seed(device);
+    device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    device.State.save({ silent: true });
+
+    // Room for the slot, none for the stack.
+    device.setQuota(key => key === 'scheduleData:undoStack');
+    const answer = device.call('pushUndoState', device.State.schedule);
+    given('the slot landed and the stack did not',
+        device.raw('scheduleData:v2backup') !== null
+            && device.raw('scheduleData:undoStack') === null,
+        JSON.stringify([device.raw('scheduleData:v2backup') !== null,
+            device.raw('scheduleData:undoStack') === null]));
+    check('pushing the way back does not report one', answer === false, String(answer));
+}
+
+{
+    suite('an undo stack that will not parse is held, not written over');
+
+    // Law 10, and this is the one record family that was exempt from it by accident.
+    // The catch here starts from [] under a comment that says "The raw value is left
+    // where it is" - and the next line writes over that same key. The bytes held two
+    // whole schedules, both still legible inside them, and after one ordinary restore
+    // they are on no device.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    const broken = '[{"at":"2026-07-01T00:00:00.000Z","schedule":"{\\"marker\\":\\"JULY-WAY-BACK\\"}"';
+    device.putRaw('scheduleData:undoStack', broken);
+    given('the stack on disk will not parse and holds a way back',
+        device.raw('scheduleData:undoStack').indexOf('JULY-WAY-BACK') !== -1,
+        device.raw('scheduleData:undoStack').slice(0, 40));
+
+    device.call('pushUndoState', device.State.schedule);
+    check('the bytes are still on the device somewhere',
+        Object.keys(device.dump()).some(key =>
+            String(device.dump()[key]).indexOf('JULY-WAY-BACK') !== -1),
+        JSON.stringify(Object.keys(device.dump()).filter(key =>
+            String(device.dump()[key]).indexOf('JULY-WAY-BACK') !== -1)));
+    check('and a copy was put aside under its own name',
+        Object.keys(device.dump()).some(key => key.indexOf('scheduleData:undoStack:damaged') === 0),
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('undoStack') !== -1)));
+}
+
 report();
