@@ -22,6 +22,26 @@ function isolate(name) {
     return `\u2068${text}\u2069`;
 }
 
+// A date range - "07/08/2026 - 20/08/2026" - as ONE left-to-right run, wherever the
+// sentence around it goes.
+//
+// Each date is a left-to-right run of its own, and the hyphen between them is neutral;
+// in a right-to-left paragraph the bidi algorithm keeps each date whole but lays the
+// two RUNS out right to left, so the later date lands on the left and an eye that reads
+// a date left to right reads the range backwards: "20/08/2026 - 07/08/2026". That is
+// what the person saw on the phone as "the reports come out reversed". Isolating each
+// date on its own (FSI…PDI, which is what isolate() does for a name) does not help -
+// two isolates are still two runs, ordered by the paragraph.
+//
+// U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE makes the pair a
+// single left-to-right run: the earlier date on the left, the later on the right,
+// whether the range stands alone or a Hebrew word follows it. It is invisible, it
+// travels through textContent, and the canvas in js/ui/printout.js honours it too
+// (measured, in tests/smoke.mjs).
+function dateRange(from, to) {
+    return `\u2066${from} - ${to}\u2069`;
+}
+
 function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;

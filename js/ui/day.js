@@ -676,12 +676,35 @@ function modeButton(mode, text) {
     return btn;
 }
 
+// One tap of הבא from a Friday used to land on «יום שבת», while the drawer skips
+// Saturday as "not a working row", the blank-days count skips it and the week grid
+// shades it as rest - the arrows were the one place the rest day was a stop. So an EMPTY
+// Saturday is stepped over, in both directions. A Saturday with anything recorded on it
+// is landed on: that is somebody's pay, and it must stay one tap away and never be
+// hidden. Nothing else skips - the picker, the drawer, «היום», the midnight follow and
+// State.date itself all still show a Saturday when asked for one, so an empty Saturday
+// can be opened on purpose to record the work that was done on it.
 function stepDay(days) {
     hideUndo();
     const date = parseLocalDate(State.date);
     date.setDate(date.getDate() + days);
+    if (date.getDay() === 6 && !anyRecordOnRestDay(toLocalDateStr(date))) {
+        date.setDate(date.getDate() + (days < 0 ? -1 : 1));
+    }
     State.date = toLocalDateStr(date);
     render();
+}
+
+// Anything at all on the day: an entry or an absence, for ANY worker on the roster -
+// an archived man's Saturday is still his Saturday - in ANY layer the record carries.
+// The wider net than anyRecordOn is deliberate: the cost of stepping over a Saturday that
+// held something is a day of pay nobody can reach with the arrows, and a planned-layer
+// entry from an older document is still something.
+function anyRecordOnRestDay(date) {
+    const layers = Object.keys((State.schedule.days && State.schedule.days[date]) || {});
+    return State.schedule.workers.some(worker => layers.some(layer =>
+        isAbsent(State.schedule, date, worker.id, layer) ||
+        entriesFor(State.schedule, date, worker.id, layer).length > 0));
 }
 
 function renderUnrecordedBanner(unrecorded) {

@@ -195,13 +195,27 @@ function phone(seed, options = {}) {
     };
     const told = [];
     device.ctx.askTell = message => { told.push(message); };
-    // The workbook hand-over dialog. Captured separately from askTell because it is a
-    // CONFIRM - it offers "שמירה חוזרת" - and answering true is what stops the export
-    // re-running forever in a test that never presses anything.
+    // askConfirm, kept as a tripwire. The hand-over dialog used to be asked through it -
+    // «שמירה חוזרת» as the cancel button - and its cancel path is also what a tap beside
+    // the dialog takes, so the export must not ask through it any more (see the block on
+    // closing the dialog). Answering true keeps a build that still does from re-running
+    // the export forever in a test that never presses anything.
     const confirmed = [];
     device.ctx.askConfirm = options => {
         confirmed.push(options);
         return Promise.resolve(true);
+    };
+    // The same dialog asked as a CHOICE - «הבנתי» or «שמירה חוזרת» - which is the only
+    // shape in ask.js whose dismissal is its own answer: Escape and a tap beside the
+    // dialog resolve null there, not the cancel button's value. Answers come off a
+    // queue, and an empty queue answers null - the dismissal - so a test that never
+    // presses anything is a test that closed the dialog, and a second file after it is
+    // the fault this stub exists to see.
+    const chosen = [];
+    const answers = [];
+    device.ctx.askChoice = options => {
+        chosen.push(options);
+        return Promise.resolve(answers.length ? answers.shift() : null);
     };
 
     device.State.schedule.workers = options.workers || [
@@ -234,7 +248,7 @@ function phone(seed, options = {}) {
              };`);
     }
     return {
-        device, run, caught, fetched, told, confirmed,
+        device, run, caught, fetched, told, confirmed, chosen, answers,
         downloads: device.downloads,
         hangOnFetch: () => { onAppend = null; },
         failOnFetch: () => { onAppend = tag => tag.onerror(); },
@@ -424,24 +438,144 @@ check('and nobody is named, or priced, anywhere in its bytes',
 
     given('a workbook really was written', said.caught.length === 1,
         String(said.caught.length));
-    check('the person is told, once', said.confirmed.length === 1,
-        String(said.confirmed.length));
+    check('the person is told, once', said.chosen.length === 1 && said.confirmed.length === 0,
+        `asked ${said.chosen.length} times as a choice, ${said.confirmed.length} as a confirm`);
     check('in the words the app pins, naming the file',
-        said.confirmed[0] && said.confirmed[0].title === 'קובץ ה-Excel נמסר לשמירה'
-        && said.confirmed[0].message
-            === '\u2066דוחות_2026-08-01_2026-08-31.xlsx\u2069 נמסר לדפדפן — '
-                + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
-        JSON.stringify(said.confirmed[0]));
+        said.chosen[0] && said.chosen[0].title === 'קובץ ה-Excel נמסר לשמירה'
+        && said.chosen[0].message
+            === '\u2066farkad-reports_2026-08-01_2026-08-31.xlsx\u2069 נמסר לדפדפן — '
+                + 'פתח את "קבצים" וודא שהוא מופיע. '
+                + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) '
+                + 'עשויה להציג אותה משמאל לימין, עם אותם מספרים. '
+                + 'טבלה שנקראת נכון בכל מקום יוצאת מהכפתור «🖼️ שיתוף כתמונה».',
+        JSON.stringify(said.chosen[0]));
     // The claim it must never make, and the filename's isolation, which a Hebrew sentence
     // around a Latin name needs or the date folds backwards.
     check('it never claims the file was saved, only that it was handed over',
-        said.confirmed[0].title.indexOf('נשמר') === -1
-        && said.confirmed[0].message.indexOf('\u2066') !== -1
-        && said.confirmed[0].message.indexOf('\u2069') !== -1,
-        JSON.stringify(said.confirmed[0].title));
+        said.chosen[0].title.indexOf('נשמר') === -1
+        && said.chosen[0].message.indexOf('\u2066') !== -1
+        && said.chosen[0].message.indexOf('\u2069') !== -1,
+        JSON.stringify(said.chosen[0].title));
+    // Named answers, the way out first: a choice is the one dialog whose dismissal is
+    // not one of its buttons.
     check('and it offers the second press rather than leaving somebody guessing',
-        said.confirmed[0].ok === 'הבנתי' && said.confirmed[0].cancel === 'שמירה חוזרת',
-        JSON.stringify([said.confirmed[0].ok, said.confirmed[0].cancel]));
+        JSON.stringify(said.chosen[0].choices) === JSON.stringify(['הבנתי', 'שמירה חוזרת']),
+        JSON.stringify(said.chosen[0].choices));
+}
+
+// --------------------------------------- closing that dialog is not a second press
+//
+// «שמירה חוזרת» was the CANCEL button of an askConfirm, and the export ran again
+// whenever the promise came back false - which is also what Escape and a tap beside
+// the dialog resolve to on that path (js/ui/ask.js askCancel; js/ui/modal.js routes
+// the backdrop there). Measured in Chromium on the v96 tree, 390x844: one press, three
+// taps beside the dialog, four workbooks. A person closing a dialog they have read is
+// not asking the bookkeeper to hold a fourth copy. The second file has to be a NAMED
+// answer, and closing the dialog any other way has to write nothing.
+{
+    suite('closing the hand-over dialog is not a request for another file');
+
+    // The microtask that re-runs the export is queued by the dialog's promise, after
+    // exportReports itself has returned; a moment is left for it to do its damage.
+    const settle = () => new Promise(resolve => setTimeout(resolve, 40));
+
+    const closed = phone(FORTNIGHT);
+    // What the backdrop does on the confirm path: the promise comes back false. Once -
+    // a stub that said false forever would prove the loop by never coming back.
+    let confirms = 0;
+    closed.device.ctx.askConfirm = options => {
+        closed.confirmed.push(options);
+        confirms += 1;
+        return Promise.resolve(confirms > 1);
+    };
+    await closed.run('exportReports()');
+    await settle();
+    check('the hand-over is asked as a choice: the way out first, the second file named',
+        closed.chosen.length === 1
+        && JSON.stringify(closed.chosen[0].choices) === JSON.stringify(['הבנתי', 'שמירה חוזרת']),
+        JSON.stringify(closed.chosen.map(options => options.choices)));
+    check('never through a confirm, whose cancel path a slipped finger takes',
+        closed.confirmed.length === 0, String(closed.confirmed.length));
+    check('and closing it writes no second file',
+        closed.caught.length === 1, `${closed.caught.length} workbooks`);
+
+    // The explicit press, and then the way out.
+    const again = phone(FORTNIGHT);
+    again.answers.push('שמירה חוזרת', 'הבנתי');
+    await again.run('exportReports()');
+    await settle();
+    check('«שמירה חוזרת» writes exactly one more, and asks again over it',
+        again.caught.length === 2 && again.chosen.length === 2,
+        `${again.caught.length} workbooks, asked ${again.chosen.length} times`);
+    await settle();
+    check('and «הבנתי» ends it', again.caught.length === 2 && again.chosen.length === 2,
+        `${again.caught.length} workbooks, asked ${again.chosen.length} times`);
+}
+
+// ------------------------------------------------ the name reads in order in every list
+//
+// דוחות_2026-08-07_2026-08-20.xlsx begins with a Hebrew word. In a list that runs right
+// to left - the iPhone's Files app, a WhatsApp chat - the bidi algorithm lays that name
+// out as xlsx.2026-08-20_2026-08-07_דוחות: the two dates swapped, the extension on the
+// far left, the name a person reads as "backwards" (derived with python-bidi under
+// UAX#9 and measured against Chromium's glyph rectangles; both agree). The backup already
+// names itself farkad-2026-09-02.json and reads in file order whichever way the list
+// runs: a name that begins in Latin and stays Latin to its extension is one run, and one
+// run is never reordered. The Hebrew sheet NAMES inside the workbook stay - שכר, חיוב,
+// פירוט are pinned above - it is the file the phone lists that has to read in order.
+{
+    suite('the file is named so a list reads it in order, whichever way the list runs');
+
+    const latin = name => /^[a-z][\x20-\x7e]*$/.test(String(name));
+
+    const named = phone(FORTNIGHT);
+    await named.run('exportReports()');
+    const workbook = named.caught[0] && named.caught[0].filename;
+    check('the workbook name begins in Latin and stays Latin to the extension',
+        latin(workbook) && /\.xlsx$/.test(workbook), String(workbook));
+    check('carrying the same prefix as the backup, so the phone lists them together',
+        /^farkad-/.test(String(workbook)), String(workbook));
+    check('and the dialog names that file, isolated',
+        named.chosen[0] && named.chosen[0].message.indexOf('\u2066' + workbook + '\u2069') !== -1,
+        JSON.stringify(named.chosen[0] && named.chosen[0].message));
+
+    const scoped = phone(FORTNIGHT + `REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
+    await scoped.run('exportReports()');
+    const clients = scoped.caught[0] && scoped.caught[0].filename;
+    check("the client's file too", latin(clients) && /^farkad-/.test(String(clients)), String(clients));
+
+    const csvs = phone(FORTNIGHT, { sheetjs: false });
+    csvs.failOnFetch();
+    await csvs.run('exportReports()');
+    check('and every CSV the fallback hands over',
+        csvs.downloads.length === 3 && csvs.downloads.every(file => latin(file.name) && /^farkad-/.test(file.name)),
+        JSON.stringify(csvs.downloads.map(file => file.name)));
+}
+
+// ------------------------------------------- what the dialog says about the file is true
+//
+// «הקובץ נפתח מימין לשמאל.» is true in Excel - every sheet carries rightToLeft="1", read
+// back off the bytes above - and false in the viewers an iPhone opens first: the Files
+// preview, WhatsApp's document preview and Numbers ignore the flag and lay עובד out on
+// the left, with the same numbers in it. No way of writing the file satisfies both. The
+// picture the reports row offers beside the export («🖼️ שיתוף כתמונה», drawn off the
+// screen by js/ui/printout.js) reads right in every viewer, so the sentence says where
+// right-to-left is true, admits the preview, and names that door. The exact words are
+// pinned above; what is pinned here is what they have to say.
+{
+    suite('what the dialog says about the file is true in every viewer that opens it');
+
+    const said = phone(FORTNIGHT);
+    await said.run('exportReports()');
+    const message = said.chosen[0] ? said.chosen[0].message : '';
+    check('it does not promise, of the file, that it opens right to left',
+        message.indexOf('הקובץ נפתח מימין לשמאל') === -1, message);
+    check('right to left is said of Excel, which honours the flag',
+        /Excel[^.;]*מימין לשמאל/.test(message), message);
+    check('a preview that ignores it is admitted, with the numbers unchanged',
+        message.indexOf('משמאל לימין') !== -1 && message.indexOf('מספרים') !== -1, message);
+    check('and the door that reads right in every viewer is named, by its label on the reports row',
+        message.indexOf('🖼️ שיתוף כתמונה') !== -1, message);
 }
 
 // ---------------------------------------------------------------- the fallback
@@ -484,8 +618,8 @@ offline.failOnFetch();
 await offline.run('exportReports()');
 same('three CSV files, named for the range, in the order the sheets are built',
     offline.downloads.map(file => file.name),
-    ['שכר_2026-08-01_2026-08-31.csv', 'חיוב_2026-08-01_2026-08-31.csv',
-        'פירוט_2026-08-01_2026-08-31.csv']);
+    ['farkad-payroll_2026-08-01_2026-08-31.csv', 'farkad-invoice_2026-08-01_2026-08-31.csv',
+        'farkad-detail_2026-08-01_2026-08-31.csv']);
 // Excel reads a UTF-8 CSV as mojibake without the BOM, and splits rows on CRLF only.
 check('each begins with the byte order mark Excel needs to read Hebrew',
     offline.downloads.every(file => file.text.charCodeAt(0) === 0xfeff));
@@ -508,7 +642,7 @@ const scopedCsv = phone(FORTNIGHT + `REPORT_SECTION = 'sites'; INVOICE_PLACE = '
 scopedCsv.failOnFetch();
 await scopedCsv.run('exportReports()');
 same("the client's fallback is still the client's file alone",
-    scopedCsv.downloads.map(file => file.name), ['חיוב_2026-08-01_2026-08-31.csv']);
+    scopedCsv.downloads.map(file => file.name), ['farkad-invoice_2026-08-01_2026-08-31.csv']);
 same('and its own sentence, not the other one', scopedCsv.told,
     ['חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
         + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.']);

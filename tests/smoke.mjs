@@ -3063,7 +3063,19 @@ async function seedRoster(page) {
       // the lie 63b7776 took off the line, back on the chip.
       contested: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (רישום אחד ממתין לשליחה)'),
       contestedTwo: read('הנתונים השתנו במכשיר אחר. הפעולה שלך לא אבדה - רענן, בדוק את המסך, ואשר שוב. (2 ממתינים לשליחה)'),
-      blocked: read('הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד. (רישום אחד ממתין לשליחה)')
+      blocked: read('הסנכרון מושהה עד שהנתונים הפגומים ייוצאו. הרישום שמור במכשיר הזה בלבד. (רישום אחד ממתין לשליחה)'),
+      // The same fault, two more lines. The person's phone, v96, 5G, the app on the home
+      // screen: the chip beside the name read «38 ממתינים לשליחה» while the line under it
+      // began with the error sentence - the cloud was REFUSING the queue (permission-
+      // denied under the legacy rules, docs/sync-protocol.md) and the chip called it a
+      // queue on its way. 'error' and 'claimstuck' are composed by updateSyncNotice with
+      // the same count suffix as everything else, so the sentence has to come first
+      // here too. The error line is chip-danger: nothing in that queue moves until
+      // somebody acts, and warn is the colour of "wait", which is the wrong instruction.
+      error: read('שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (38 ממתינים לשליחה)'),
+      errorOne: read('שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (רישום אחד ממתין לשליחה)'),
+      errorClean: read('שגיאת סנכרון - הנתונים שמורים במכשיר הזה.'),
+      stuck: read('הרישום שמור במכשיר. השליחה תקועה - סגור את שאר החלונות של האפליקציה, ואם זה נמשך ייצא גיבוי ופתח מחדש. (38 ממתינים לשליחה)')
     };
     updateSyncNotice();
     renderSyncChip();
@@ -3088,6 +3100,18 @@ async function seedRoster(page) {
   check('a suspended sync says so on the chip in the line\'s own words, not "waiting to send"',
     chips.blocked.text === 'הסנכרון מושהה' && chips.blocked.cls.includes('chip-warn'),
     JSON.stringify(chips.blocked));
+  check('a cloud that refuses the queue is a sync error on the chip, not "38 waiting to send"',
+    chips.error.text === 'שגיאת סנכרון' && chips.error.cls.includes('chip-danger'),
+    JSON.stringify(chips.error));
+  check('with one held back as much as with thirty-eight',
+    chips.errorOne.text === 'שגיאת סנכרון' && chips.errorOne.cls.includes('chip-danger'),
+    JSON.stringify(chips.errorOne));
+  check('and with nothing queued the error is still the state, not a blank chip',
+    chips.errorClean.hidden === false && chips.errorClean.text === 'שגיאת סנכרון'
+    && chips.errorClean.cls.includes('chip-danger'), JSON.stringify(chips.errorClean));
+  check('a stuck claim says stuck on the chip, in the line\'s own words',
+    chips.stuck.text === 'השליחה תקועה' && chips.stuck.cls.includes('chip-warn'),
+    JSON.stringify(chips.stuck));
 
   // the crash banner: it names the error, and it closes
   await page.evaluate(() => {
@@ -6728,6 +6752,160 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- closing the hand-over is not a second press
+{
+  // The workbook dialog offers «שמירה חוזרת» for the person who looked in "קבצים" and
+  // did not find the file. Asked through askConfirm that was the CANCEL button, and the
+  // export ran again whenever the promise came back false - which is also what Escape
+  // and a tap beside the dialog resolve to (modal.js routes the backdrop to askCancel).
+  // Measured on the v96 tree at 390x844: one press, three taps beside the dialog, four
+  // workbooks. Here the shipped library writes the real file, and what is counted is the
+  // write and the download the browser saw - the two copies a person would actually find.
+  const page = await open({ acceptDownloads: true });
+  const downloads = [];
+  page.on('download', d => downloads.push(d.suggestedFilename()));
+  await seedRoster(page);
+  await page.evaluate(async () => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    State.save();
+    showView('reports');
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    render();
+    await loadXlsx();
+    window.__writes = [];
+    const real = XLSX.writeFile;
+    XLSX.writeFile = function (wb, name) {
+      window.__writes.push(name);
+      return real.apply(this, arguments);
+    };
+  });
+  await page.waitForTimeout(300);
+
+  const state = () => page.evaluate(() => ({
+    writes: window.__writes.slice(),
+    shown: document.getElementById('askModal').style.display === 'flex',
+    title: document.getElementById('askTitle').textContent,
+    message: document.getElementById('askMessage').textContent,
+    // Every visible button on the dialog, and whether it is one of askChoice's named
+    // answers or the confirm pair underneath.
+    buttons: [...document.querySelectorAll('#askModal button')]
+      .filter(node => node.offsetParent !== null)
+      .map(node => ({ text: node.textContent, choice: Boolean(node.closest('#askChoices')) }))
+  }));
+  // Pressed through the DOM rather than a locator: on a build without the button a
+  // locator waits thirty seconds and throws, taking the rest of the suite with it.
+  // Returns whether the button pressed was a named answer, null when there was none.
+  const press = label => page.evaluate(text => {
+    const found = [...document.querySelectorAll('#askModal button')]
+      .find(node => node.offsetParent !== null && node.textContent === text);
+    if (!found) return null;
+    found.click();
+    return Boolean(found.closest('#askChoices'));
+  }, label);
+  // A point beside the dialog: the first pixel that hit-tests to the backdrop itself.
+  const beside = () => page.evaluate(() => {
+    for (let y = 4; y < innerHeight; y += 8) {
+      for (let x = 2; x < innerWidth; x += 8) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && hit.id === 'askModal') return { x, y };
+      }
+    }
+    return null;
+  });
+
+  await page.evaluate(() => exportReports());
+  await page.waitForTimeout(500);
+  let now = await state();
+  check('one press, one workbook, and the dialog that says so',
+    now.writes.length === 1 && now.shown && now.title === 'קובץ ה-Excel נמסר לשמירה',
+    JSON.stringify({ writes: now.writes, shown: now.shown, title: now.title }));
+  check('its answers are named - the way out first, then the second file',
+    now.buttons.length === 2 && now.buttons.every(b => b.choice)
+    && now.buttons.map(b => b.text).join(',') === 'הבנתי,שמירה חוזרת',
+    JSON.stringify(now.buttons));
+
+  // What the sentence says about the file. Excel honours the sheet's rightToLeft flag;
+  // the viewers an iPhone opens first - the Files preview, WhatsApp's document preview,
+  // Numbers - ignore it and lay עובד out on the left, and no way of writing the file
+  // satisfies both. So the sentence says where right-to-left is true, admits the
+  // preview, and points at the one door that reads right in every viewer: the picture,
+  // drawn off the screen, whose button is on the same row as the export - named by that
+  // button's own label, read off the row, so the sentence cannot point at a door that
+  // is not there.
+  const door = await page.evaluate(() => [...document.querySelectorAll('#reportsView .range-actions button')]
+    .map(node => node.textContent).find(text => text.includes('שיתוף כתמונה')) || null);
+  check('the picture door is on the reports row', door !== null, String(door));
+  check('the sentence does not promise, of the file, that it opens right to left',
+    !now.message.includes('הקובץ נפתח מימין לשמאל'), now.message);
+  check('it says right to left of Excel, admits the preview, and names the picture door by its label',
+    /Excel[^.;]*מימין לשמאל/.test(now.message) && now.message.includes('משמאל לימין')
+    && door !== null && now.message.includes(door),
+    now.message);
+  check('in the words the app pins, naming the file it wrote',
+    now.message === '\u2066' + now.writes[0] + '\u2069 נמסר לדפדפן — '
+      + 'פתח את "קבצים" וודא שהוא מופיע. '
+      + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) '
+      + 'עשויה להציג אותה משמאל לימין, עם אותם מספרים. '
+      + 'טבלה שנקראת נכון בכל מקום יוצאת מהכפתור «🖼️ שיתוף כתמונה».',
+    now.message);
+
+  // (a) a tap beside the dialog
+  const point = await beside();
+  check('there is a backdrop beside it to tap', point !== null, JSON.stringify(point));
+  if (point) await page.mouse.click(point.x, point.y);
+  await page.waitForTimeout(500);
+  now = await state();
+  check('a tap beside the dialog closes it', !now.shown, JSON.stringify(now.buttons));
+  check('and writes nothing', now.writes.length === 1, `${now.writes.length} writes`);
+  // A build that answered the tap with another file has the dialog open again; it is
+  // closed the ordinary way so the checks below still describe that build.
+  if (now.shown) await press('הבנתי');
+  await page.waitForTimeout(200);
+
+  // (b) Escape
+  await page.evaluate(() => exportReports());
+  await page.waitForTimeout(500);
+  const before = (await state()).writes.length;
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  now = await state();
+  check('escape closes it too', !now.shown);
+  check('without a file', now.writes.length === before, `${now.writes.length} writes, was ${before}`);
+  if (now.shown) await press('הבנתי');
+  await page.waitForTimeout(200);
+
+  // (c) the explicit press, then the way out
+  await page.evaluate(() => exportReports());
+  await page.waitForTimeout(500);
+  const base = (await state()).writes.length;
+  const named = await press('שמירה חוזרת');
+  await page.waitForTimeout(500);
+  now = await state();
+  check('«שמירה חוזרת» is a named answer, not the cancel button', named === true, String(named));
+  check('and writes exactly one more, then asks again over it',
+    now.writes.length === base + 1 && now.shown && now.title === 'קובץ ה-Excel נמסר לשמירה',
+    `${now.writes.length} writes, was ${base}; shown ${now.shown}`);
+  await press('הבנתי');
+  await page.waitForTimeout(600);
+  now = await state();
+  check('«הבנתי» ends it', !now.shown && now.writes.length === base + 1,
+    `${now.writes.length} writes, was ${base}; shown ${now.shown}`);
+  check('and the browser was handed exactly the files that were written, no more',
+    downloads.length === now.writes.length,
+    `${downloads.length} downloads, ${now.writes.length} writes`);
+
+  // The name. דוחות_2026-08-07_2026-08-20.xlsx begins with a Hebrew word, so a list that
+  // runs right to left (the Files app, WhatsApp) lays the two dates out swapped and the
+  // extension on the far left - a name a person reads as backwards. The backup already
+  // names itself farkad-<date>.json and reads the same in either direction.
+  check('the file is named Latin-first, so a list in either direction reads its dates in order',
+    /^farkad-[a-z]+_[\x20-\x7e]*\.xlsx$/.test(now.writes[0])
+    && downloads.every(name => name === now.writes[0]),
+    JSON.stringify({ written: now.writes[0], downloaded: downloads[0] }));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------- room on the device
 {
   // C1. Every message this app had about space arrived at the moment a write was refused
@@ -7563,6 +7741,588 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const guarded = await page.evaluate(() => plusAmount(2));
   check('a plus-hours token leads with the LTR mark', guarded === '\u200E+2',
     JSON.stringify(guarded));
+  await page.context().close();
+}
+
+// ---- printing where window.print() does not open
+//
+// On an iPhone with the app on the home screen, window.print() has for years either not
+// opened the print sheet or opened an empty one. There is no error and nothing on the
+// screen: the person taps «🖨️ הדפסה» on the week and nothing happens. "Open it in Safari"
+// is not an answer there - the home-screen app's storage is its own partition, and the
+// phone that reported this held thirty-eight unsent records in it.
+//
+// The rule: window.print() is still called, and the page listens for the two signals a
+// browser gives when the sheet really opened - 'beforeprint' on the window, and the
+// print media query changing. Neither within 1.5 seconds means the sheet did not open,
+// and THEN the person is offered the same table as a PNG through the share sheet. The
+// image is drawn off the DOM the screen is showing - not off the schedule - so it says
+// what the screen says; and it goes out through navigator.share, or a download where
+// there is no share sheet.
+//
+// print is stubbed here in both directions. Chromium headless has no print sheet to
+// open, so a no-op that fires nothing IS the phone; a stub that dispatches beforeprint
+// synchronously is a desktop where the sheet opened. The heuristic is what is measured.
+{
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_02', RATE_DOUBLE);
+    assignPlace(State.schedule, '2026-08-13', 'w_02', 'actual', 'p_02', RATE_EXTRA, 2);
+    markAbsent(State.schedule, '2026-08-13', 'w_03', 'actual');
+    State.save();
+    State.date = '2026-08-12';
+    showView('week');
+  });
+  await page.waitForTimeout(400);
+  check('the week is on screen with a chip in it',
+    (await page.locator('.week-table tbody .cell-line').count()) > 0);
+
+  const OFFER = 'ההדפסה לא נפתחה במסך הזה. לשתף את הטבלה כתמונה?';
+  const IMAGE = 'שיתוף כתמונה';
+
+  const readOffer = () => page.evaluate(() => ({
+    shown: document.getElementById('askModal').style.display === 'flex',
+    message: document.getElementById('askMessage').textContent,
+    choices: [...document.querySelectorAll('#askChoices button')]
+      .filter(node => node.offsetParent !== null).map(node => node.textContent),
+    printed: window.__printCalls
+  }));
+  // Answered through the DOM rather than a locator: on a build with no dialog a locator
+  // waits thirty seconds and then throws, and the failure this block exists to record
+  // would take the rest of the suite down with it.
+  const choose = label => page.evaluate(text => {
+    const found = [...document.querySelectorAll('#askChoices button')]
+      .find(node => node.textContent === text);
+    if (!found) return false;
+    found.click();
+    return true;
+  }, label);
+
+  // (a) THE PHONE: print is called, nothing answers, and within two seconds the offer
+  // is on screen. The share sheet is a stub that keeps the File it was handed.
+  await page.evaluate(() => {
+    window.__printCalls = 0;
+    window.print = () => { window.__printCalls += 1; };
+    window.__shared = [];
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: data => {
+        window.__shared.push({
+          title: data && data.title,
+          files: ((data && data.files) || []).map(file => ({
+            name: file.name, type: file.type, size: file.size
+          }))
+        });
+        return Promise.resolve();
+      }
+    });
+  });
+  await page.locator('#weekView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  let offer = await readOffer();
+  check('print is still called first', offer.printed === 1, JSON.stringify(offer));
+  check('and when nothing answers it, the image is offered within two seconds',
+    offer.shown && offer.message === OFFER, JSON.stringify(offer));
+  check('with the two answers, in the app\'s own dialog',
+    JSON.stringify(offer.choices) === JSON.stringify([IMAGE, 'ביטול']),
+    JSON.stringify(offer.choices));
+
+  const chosen = await choose(IMAGE);
+  await page.waitForTimeout(600);
+  const shared = await page.evaluate(() => window.__shared);
+  const file = shared.length > 0 && shared[0].files.length > 0 ? shared[0].files[0] : null;
+  check('choosing the image hands the share sheet one PNG',
+    chosen && Boolean(file) && file.type === 'image/png' && file.size > 0, JSON.stringify(shared));
+  check('named for the week it shows',
+    Boolean(file) && /^farkad-שבוע-2026-08-07-2026-08-13\.png$/.test(file.name),
+    file ? file.name : 'no file');
+  check('and the dialog is gone', (await readOffer()).shown === false);
+
+  // The same, with no share sheet at all: a download, of an image/png blob URL. The
+  // anchor's click is stubbed on the prototype so Chromium does not actually save it.
+  await page.evaluate(() => {
+    delete navigator.share;
+    delete navigator.canShare;
+    window.__clicks = [];
+    window.__blobs = [];
+    HTMLAnchorElement.prototype.click = function () {
+      window.__clicks.push({ href: this.href, download: this.download });
+    };
+    const real = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => { window.__blobs.push({ type: blob.type, size: blob.size }); return real(blob); };
+    window.__printCalls = 0;
+  });
+  await page.locator('#weekView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  offer = await readOffer();
+  check('with no share sheet the offer is still made', offer.shown && offer.message === OFFER,
+    JSON.stringify(offer));
+  const chosenAgain = await choose(IMAGE);
+  await page.waitForTimeout(600);
+  const download = await page.evaluate(() => ({ clicks: window.__clicks, blobs: window.__blobs }));
+  check('and the image goes out as a download instead',
+    chosenAgain && download.clicks.length === 1 && download.clicks[0].href.startsWith('blob:')
+    && /^farkad-שבוע-2026-08-07-2026-08-13\.png$/.test(download.clicks[0].download),
+    JSON.stringify(download.clicks));
+  check('of a PNG with bytes in it',
+    download.blobs.some(blob => blob.type === 'image/png' && blob.size > 0),
+    JSON.stringify(download.blobs));
+
+  // (b) THE DESKTOP: the sheet opened - beforeprint fired - and nothing is asked.
+  await page.evaluate(() => {
+    window.__printCalls = 0;
+    window.print = () => {
+      window.__printCalls += 1;
+      window.dispatchEvent(new Event('beforeprint'));
+    };
+  });
+  await page.locator('#weekView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  offer = await readOffer();
+  check('where the print sheet opens, print is called and nothing else happens',
+    offer.printed === 1 && offer.shown === false, JSON.stringify(offer));
+
+  // (c) THE PICTURE IS THE GRID, measured off its pixels. The PNG the helper produced is
+  // drawn onto a canvas in the page and sampled: the first man's first chip is his site's
+  // colour as the screen computes it, the title row has ink in it, and the image is not
+  // a white rectangle with a name on it.
+  const sample = async kind => page.evaluate(async which => {
+    if (typeof printoutImage !== 'function') return { helper: false };
+    const out = printoutImage(which);
+    const url = URL.createObjectURL(out.blob);
+    const img = await new Promise((ok, no) => {
+      const node = new Image();
+      node.onload = () => ok(node);
+      node.onerror = () => no(new Error('the PNG did not decode'));
+      node.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const dark = box => {
+      const data = ctx.getImageData(box.x, box.y, box.w, box.h).data;
+      let count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] + data[i + 1] + data[i + 2] < 3 * 128) count += 1;
+      }
+      return count;
+    };
+    const whole = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let nonWhite = 0;
+    for (let i = 0; i < whole.length; i += 4) {
+      if (whole[i] < 250 || whole[i + 1] < 250 || whole[i + 2] < 250) nonWhite += 1;
+    }
+    const chip = out.layout.chips && out.layout.chips[0];
+    const at = chip
+      ? ctx.getImageData(Math.round(chip.x + chip.w / 2), Math.round(chip.y + chip.h / 2), 1, 1).data
+      : null;
+    const first = document.querySelector('.week-table tbody tr .week-cell .cell-line');
+    return {
+      helper: true,
+      name: out.name,
+      width: canvas.width,
+      height: canvas.height,
+      nonWhite,
+      titleDark: dark(out.layout.title),
+      headerDark: out.layout.header ? dark(out.layout.header) : null,
+      firstRowDark: out.layout.rows && out.layout.rows[0] ? dark(out.layout.rows[0]) : null,
+      chipPixel: at ? [at[0], at[1], at[2]] : null,
+      chipWants: first && which === 'week' ? getComputedStyle(first).backgroundColor : null,
+      chips: out.layout.chips ? out.layout.chips.length : 0
+    };
+  }, kind);
+
+  const rgb = text => (String(text || '').match(/\d+/g) || []).slice(0, 3).map(Number);
+  const near = (a, b) => a.length === 3 && b.length === 3
+    && a.every((value, i) => Math.abs(value - b[i]) <= 2);
+
+  const week = await sample('week');
+  check('the helper draws the week off the DOM', week.helper === true);
+  check('the picture is not blank', week.helper && week.nonWhite > 2000, JSON.stringify(week));
+  check('its title row has ink in it', week.helper && week.titleDark > 40, JSON.stringify(week));
+  check('the first man\'s first chip is painted in his site\'s colour, as the screen computes it',
+    week.helper && week.chips > 0 && near(week.chipPixel || [], rgb(week.chipWants)),
+    JSON.stringify({ got: week.chipPixel, want: week.chipWants }));
+  check('and the file is named for the week',
+    week.helper && week.name === 'farkad-שבוע-2026-08-07-2026-08-13.png', String(week.name));
+
+  // The pay sheet, the same way.
+  await page.evaluate(() => {
+    REPORT_RANGE.from = '2026-08-01';
+    REPORT_RANGE.to = '2026-08-31';
+    REPORT_SECTION = 'workers';
+    showView('reports');
+  });
+  await page.waitForTimeout(400);
+  check('the pay sheet is on screen with a row in it',
+    (await page.locator('.report-payroll tbody tr').count()) > 0);
+  const report = await sample('report');
+  check('the pay sheet draws too', report.helper === true);
+  check('and it is not blank', report.helper && report.nonWhite > 2000, JSON.stringify(report));
+  check('its title row has ink in it', report.helper && report.titleDark > 40, JSON.stringify(report));
+  check('so does its header row', report.helper && report.headerDark > 40, JSON.stringify(report));
+  check('and its first row', report.helper && report.firstRowDark > 40, JSON.stringify(report));
+  check('named for the sheet and the period',
+    report.helper && report.name === 'farkad-דוח-שכר-2026-08-01-2026-08-31.png', String(report.name));
+
+  // The report's own print button walks the same road.
+  await page.evaluate(() => {
+    window.__printCalls = 0;
+    window.print = () => { window.__printCalls += 1; };
+  });
+  await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
+  await page.waitForTimeout(2000);
+  offer = await readOffer();
+  check('the reports\' print button offers the image the same way',
+    offer.printed === 1 && offer.shown && offer.message === OFFER, JSON.stringify(offer));
+  const declined = await choose('ביטול');
+  await page.waitForTimeout(200);
+  check('and a no leaves nothing behind', declined && (await readOffer()).shown === false);
+
+  await page.context().close();
+}
+
+// ---- the arrows and the rest day
+{
+  // The person's screenshot: «יום שבת 05/09/2026», reached with one tap of הבא from
+  // Friday. The drawer skips Saturday ("not a working row"), the blank-days count skips
+  // it, the week grid shades it as rest - and the two arrows walked the calendar one day
+  // at a time and landed on it. So: an EMPTY Saturday is stepped over, in both
+  // directions; a Saturday anybody has a record on - an entry or an absence, an archived
+  // man's included - is landed on, because that is somebody's pay and it must stay one
+  // tap away. The picker, the drawer, State.date itself and «היום» do not skip: an empty
+  // Saturday can still be opened on purpose, and if today IS Saturday the screen shows it.
+  const page = await open({ timezoneId: 'Asia/Jerusalem' });
+  await seedRoster(page);
+  const backBtn = page.getByRole('button', { name: 'יום קודם', exact: true });
+  const fwdBtn = page.getByRole('button', { name: 'יום הבא', exact: true });
+  const shown = () => page.evaluate(() => ({
+    date: State.date,
+    name: document.querySelector('.day-nav .day-label strong')?.textContent || ''
+  }));
+
+  // 2026-09-04 is a Friday, 09-05 the Saturday in the screenshot, 09-06 a Sunday.
+  await page.evaluate(() => { State.date = '2026-09-04'; render(); });
+  await fwdBtn.click();
+  await page.waitForTimeout(250);
+  let at = await shown();
+  check('from a Friday, הבא lands on Sunday, not on the empty Saturday',
+    at.date === '2026-09-06' && at.name === 'יום ראשון', JSON.stringify(at));
+
+  // Set explicitly, so this direction is measured on its own and not from wherever
+  // the tap above ended up.
+  await page.evaluate(() => { State.date = '2026-09-06'; render(); });
+  await backBtn.click();
+  await page.waitForTimeout(250);
+  at = await shown();
+  check('from a Sunday, קודם lands on Friday',
+    at.date === '2026-09-04' && at.name === 'יום שישי', JSON.stringify(at));
+
+  // A Saturday somebody worked - and he is in the archive, so the day screen's own
+  // crew list would not have him. 2026-09-12 is a Saturday.
+  await page.evaluate(() => {
+    State.worker('w_03').active = false;
+    assignPlace(State.schedule, '2026-09-12', 'w_03', 'actual', 'p_01', 400);
+    State.save();
+    State.date = '2026-09-11';
+    render();
+  });
+  await fwdBtn.click();
+  await page.waitForTimeout(250);
+  at = await shown();
+  check('a Saturday with an archived man\'s work on it is landed on from Friday',
+    at.date === '2026-09-12' && at.name === 'יום שבת', JSON.stringify(at));
+  await fwdBtn.click();
+  await page.waitForTimeout(250);
+  check('and the next tap goes on to Sunday',
+    (await page.evaluate(() => State.date)) === '2026-09-13');
+  await backBtn.click();
+  await page.waitForTimeout(250);
+  check('and it is landed on from Sunday too',
+    (await page.evaluate(() => State.date)) === '2026-09-12');
+
+  // An absence is a record as well: the man was marked not there on a Saturday, and that
+  // mark must not be hidden either. 2026-09-19 is a Saturday.
+  await page.evaluate(() => {
+    markAbsent(State.schedule, '2026-09-19', 'w_01', 'actual');
+    State.save();
+    State.date = '2026-09-20';
+    render();
+  });
+  await backBtn.click();
+  await page.waitForTimeout(250);
+  check('a Saturday holding only an absence is still landed on',
+    (await page.evaluate(() => State.date)) === '2026-09-19');
+
+  // The arrows skip; nothing else does. A Saturday set directly still renders Saturday.
+  await page.evaluate(() => { State.date = '2026-09-05'; render(); });
+  await page.waitForTimeout(200);
+  at = await shown();
+  check('State.date set to an empty Saturday still shows Saturday',
+    at.date === '2026-09-05' && at.name === 'יום שבת', JSON.stringify(at));
+  await page.context().close();
+}
+
+{
+  // Today is a Saturday: «היום» goes to it, and the boot lands on it - the arrows are
+  // the only thing that steps over the rest day.
+  const page = await open({ timezoneId: 'Asia/Jerusalem' });
+  await page.clock.install({ time: new Date('2026-09-05T06:00:00Z') }); // 09:00 Saturday
+  await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  check('a boot on a Saturday opens on Saturday',
+    (await page.evaluate(() => State.date)) === '2026-09-05');
+
+  await page.evaluate(() => { State.date = '2026-09-01'; render(); });
+  await page.getByRole('button', { name: 'היום', exact: true }).click();
+  await page.waitForTimeout(250);
+  const today = await page.evaluate(() => ({
+    date: State.date,
+    name: document.querySelector('.day-nav .day-label strong')?.textContent || ''
+  }));
+  check('and «היום» lands on the Saturday when the Saturday is today',
+    today.date === '2026-09-05' && today.name === 'יום שבת', JSON.stringify(today));
+  await page.context().close();
+}
+
+// ---------------------------------------------------------------- a range reads from left to right
+//
+// "07/08/2026 - 20/08/2026" in a right-to-left paragraph is two left-to-right runs with a
+// neutral hyphen between them, and the bidi algorithm lays the RUNS out right to left: the
+// later date lands on the LEFT, and an eye that reads a date left to right reads the range
+// backwards - "20/08/2026 - 07/08/2026" - on the reports' range line, under each report's
+// heading, in the worker's days, on the week header, and in the picture the print button
+// hands the share sheet. Isolating EACH date does not help (the week header did that):
+// the pair has to be ONE left-to-right run. So it is measured, never inferred from the
+// string: the glyph rectangle of the earlier date must end left of where the later date's
+// begins, on every surface, at the phone's width.
+{
+  const page = await open({
+    viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true
+  });
+  await seedRoster(page);
+  await page.evaluate(() => {
+    for (const d of ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14']) {
+      assignPlace(State.schedule, d, 'w_01', 'actual', 'p_01');
+    }
+    State.save();
+    showView('reports');
+    REPORT_RANGE.from = '2026-08-07';
+    REPORT_RANGE.to = '2026-08-20';
+    render();
+  });
+  await page.waitForTimeout(400);
+
+  // Where each date's glyphs landed, off a Range over the text node that holds it.
+  const runsOf = (selector, needles) => page.evaluate(([sel, wanted]) => {
+    const root = document.querySelector(sel);
+    if (!root) return { missing: sel };
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const out = { text: root.textContent, runs: [] };
+    for (const needle of wanted) {
+      let found = null;
+      for (const node of nodes) {
+        const at = node.data.indexOf(needle);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + needle.length);
+        const box = range.getBoundingClientRect();
+        found = { needle, left: Math.round(box.left), right: Math.round(box.right) };
+        break;
+      }
+      out.runs.push(found);
+    }
+    return out;
+  }, [selector, needles]);
+  // The earlier date's box ends before the later date's begins - from on the left.
+  const fromLeft = got => Boolean(got && got.runs && got.runs[0] && got.runs[1])
+    && got.runs[0].right <= got.runs[1].left;
+  const show = got => JSON.stringify(got && got.runs ? got.runs : got);
+
+  const reportDates = ['07/08/2026', '20/08/2026'];
+  let got = await runsOf('.range-current', reportDates);
+  check('the reports\' range line puts the earlier date on the left', fromLeft(got), show(got));
+  got = await runsOf('.report-payroll .report-period', reportDates);
+  check('and so does the period under the pay sheet\'s heading', fromLeft(got), show(got));
+  // The length after the range - "· שישי–חמישי" - is Hebrew, and stays where a Hebrew
+  // reader goes next: to the LEFT of the whole range, not slid between its dates.
+  got = await runsOf('.report-payroll .report-period', ['07/08/2026', '20/08/2026', 'שישי–חמישי']);
+  check('with the period\'s length still to the left of the whole range',
+    Boolean(got.runs && got.runs[2]) && fromLeft(got)
+    && got.runs[2].right <= Math.min(got.runs[0].left, got.runs[1].left), show(got));
+
+  await page.evaluate(() => openWorkerDays('w_01'));
+  await page.waitForTimeout(300);
+  got = await runsOf('#workerDaysMeta', reportDates);
+  check('the worker\'s days say their period from left to right too', fromLeft(got), show(got));
+  await page.evaluate(() => closeWorkerDays());
+  await page.waitForTimeout(200);
+
+  await page.evaluate(() => { showView('week'); setWeekFromDate('2026-08-12'); render(); });
+  await page.waitForTimeout(300);
+  const weekDates = ['07/08/2026', '13/08/2026'];
+  got = await runsOf('.week-range', weekDates);
+  check('the week header puts Friday on the left of Thursday', fromLeft(got), show(got));
+
+  // THE PICTURE. The canvas is drawn right-to-left in one switch (ctx.direction), and
+  // the title carries the same range; a left-to-right isolate inside it is honoured by
+  // the canvas text engine or it is not, and only pixels can say which. Every fillText
+  // the helper makes is recorded, the range in each is drawn again under the same font
+  // and direction, and it must match the same digits drawn under a plain LTR context
+  // pixel for pixel - and NOT match the plain RTL drawing, which is the backwards one.
+  const picture = async kind => page.evaluate(which => {
+    const proto = CanvasRenderingContext2D.prototype;
+    const real = proto.fillText;
+    const calls = [];
+    proto.fillText = function (text, x, y, max) {
+      calls.push({ text: String(text), font: this.font, direction: this.direction });
+      return real.call(this, text, x, y, max);
+    };
+    let out = null;
+    try { out = printoutImage(which); } finally { proto.fillText = real; }
+    const draw = (text, font, direction) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 900;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.font = font;
+      ctx.direction = direction;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.fillText(text, 890, 32);
+      return { png: canvas.toDataURL(), width: ctx.measureText(text).width };
+    };
+    const ranged = calls.filter(call => /\d{2}\/\d{2}\/\d{4}.*\d{2}\/\d{2}\/\d{4}/.test(call.text));
+    return {
+      name: out ? out.name : null,
+      lines: ranged.map(call => {
+        const isolated = /⁦[^⁦-⁩]*\d{2}\/\d{2}\/\d{4}[^⁦-⁩]*⁩/.exec(call.text);
+        const range = isolated ? isolated[0] : /\d{2}\/\d{2}\/\d{4} - \d{2}\/\d{2}\/\d{4}/.exec(call.text)[0];
+        const plain = range.replace(/[⁦-⁩]/g, '');
+        const asDrawn = draw(range, call.font, call.direction);
+        const ltr = draw(plain, call.font, 'ltr');
+        const rtl = draw(plain, call.font, 'rtl');
+        return {
+          text: call.text.replace(/[⁦-⁩]/g, m => `<U+${m.codePointAt(0).toString(16).toUpperCase()}>`),
+          direction: call.direction,
+          isolated: Boolean(isolated),
+          readsLeftToRight: asDrawn.png === ltr.png && asDrawn.png !== rtl.png,
+          marksDrawNothing: asDrawn.width === ltr.width
+        };
+      })
+    };
+  }, kind);
+
+  let shot = await picture('week');
+  check('the week picture\'s title carries its range as one left-to-right run',
+    shot.lines.length === 1 && shot.lines[0].isolated && shot.lines[0].direction === 'rtl',
+    JSON.stringify(shot.lines));
+  check('and on the canvas the earlier date is drawn on the left',
+    shot.lines.length === 1 && shot.lines[0].readsLeftToRight, JSON.stringify(shot.lines));
+  check('with the isolate marks drawing nothing',
+    shot.lines.length === 1 && shot.lines[0].marksDrawNothing, JSON.stringify(shot.lines));
+  check('and the file is still named from-to',
+    shot.name === 'farkad-שבוע-2026-08-07-2026-08-13.png', String(shot.name));
+
+  await page.evaluate(() => { showView('reports'); render(); });
+  await page.waitForTimeout(300);
+  shot = await picture('report');
+  check('the pay sheet picture\'s period is one left-to-right run',
+    shot.lines.length === 1 && shot.lines[0].isolated && shot.lines[0].direction === 'rtl',
+    JSON.stringify(shot.lines));
+  check('drawn with the earlier date on the left',
+    shot.lines.length === 1 && shot.lines[0].readsLeftToRight, JSON.stringify(shot.lines));
+  check('and named from-to',
+    shot.name === 'farkad-דוח-שכר-2026-08-07-2026-08-20.png', String(shot.name));
+  await page.context().close();
+}
+
+// ---- the worker modal opens at its top
+{
+  // A worker's account is read from its head: the name, the fortnight, the chips that
+  // say WHICH days, then the rows, then the money. On a 390x844 phone the whole thing is
+  // taller than the screen, and the first button in it is «+ מקדמה» at the very foot -
+  // so entering the dialog at its first button scrolled .modal-content to its end, and
+  // the person who tapped a name to see the days saw the advances block and two money
+  // buttons instead. The dialog is entered at its heading, the way the settings sheet
+  // and the reorder panel are, and it opens at the top.
+  const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3,
+    isMobile: true, hasTouch: true });
+  await seedRoster(page);
+  await page.evaluate(() => {
+    ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14']
+      .forEach(d => assignPlace(State.schedule, d, 'w_01', 'actual', 'p_01'));
+    addAdvance(State.schedule, 'w_01', '2026-08-12', 500, '');
+    State.save();
+    REPORT_RANGE.from = '2026-08-07';
+    REPORT_RANGE.to = '2026-08-20';
+    REPORT_SECTION = 'workers';
+    showView('reports');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  // A finger on the name in the pay sheet, not a call.
+  const name = page.locator('#reportsView .report-payroll tbody button.link-cell', { hasText: 'דוד' }).first();
+  await name.tap();
+  await page.waitForTimeout(400);
+
+  const opened = await page.evaluate(() => {
+    const modal = document.getElementById('workerDaysModal');
+    const content = modal.querySelector('.modal-content');
+    const title = document.getElementById('workerDaysTitle');
+    const t = title.getBoundingClientRect();
+    const c = content.getBoundingClientRect();
+    const ae = document.activeElement;
+    return {
+      open: modal.style.display,
+      scrollTop: content.scrollTop,
+      scrollMax: content.scrollHeight - content.clientHeight,
+      titleInView: t.top >= c.top && t.bottom <= c.bottom && t.top >= 0 && t.bottom <= innerHeight,
+      titleTop: Math.round(t.top),
+      focused: { id: ae.id, text: ae.textContent.trim().slice(0, 20), inModal: modal.contains(ae) }
+    };
+  });
+  check('the account is taller than the phone, so where it opens matters',
+    opened.open === 'flex' && opened.scrollMax > 0, JSON.stringify(opened));
+  check('it opens at its top', opened.scrollTop === 0, JSON.stringify(opened));
+  check('and the worker\'s name is on the screen', opened.titleInView, JSON.stringify(opened));
+  check('the money button at the foot is not what a tap on a name focuses',
+    opened.focused.text !== '+ מקדמה', JSON.stringify(opened.focused));
+  check('focus lands on the heading, so a reader says where it is',
+    opened.focused.id === 'workerDaysTitle', JSON.stringify(opened.focused));
+
+  // The heading is inside the trap like everything else: backwards from it is the last
+  // control of the dialog, not the page behind.
+  await page.keyboard.press('Shift+Tab');
+  await page.waitForTimeout(150);
+  const back = await page.evaluate(() => ({
+    inModal: document.getElementById('workerDaysModal').contains(document.activeElement),
+    text: document.activeElement.textContent.trim()
+  }));
+  check('shift-tab from the heading stays inside the dialog',
+    back.inModal && back.text === 'סגור', JSON.stringify(back));
+
+  // Escape is unchanged: the dialog closes and the keyboard goes back to the name.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const closed = await page.evaluate(() => ({
+    open: document.getElementById('workerDaysModal').style.display,
+    cls: document.activeElement.className,
+    text: document.activeElement.textContent.trim()
+  }));
+  check('Escape still closes it', closed.open === 'none', JSON.stringify(closed));
+  check('and focus goes back to the name that opened it',
+    closed.cls === 'link-cell' && closed.text === 'דוד', JSON.stringify(closed));
   await page.context().close();
 }
 

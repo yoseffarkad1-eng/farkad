@@ -222,18 +222,27 @@ function renderWeekHeader() {
     const dates = weekDates();
     const first = parseLocalDate(dates[0]);
     const last = parseLocalDate(dates[6]);
-    // Each date is one LTR run and the pair sits in an RTL element: without isolation
-    // the bidi algorithm keeps the dates readable but swaps their ORDER, so the range
-    // showed its end first. FSI/PDI around each keeps start before end.
+    // Each date is one LTR run and the pair sits in an RTL element: the bidi algorithm
+    // keeps each date readable but lays the two out right to left, so the range showed
+    // its end first. Isolating EACH date (FSI/PDI around each, which is what this did)
+    // does not change that - two isolates are still two runs, ordered by the paragraph.
+    // dateRange (js/ui/dom.js) wraps the pair as ONE left-to-right run.
     header.appendChild(el('strong', 'week-range',
-        `\u2068${formatFullDate(first)}\u2069 - \u2068${formatFullDate(last)}\u2069`));
+        dateRange(formatFullDate(first), formatFullDate(last))));
 
     const fwd = button('שבוע הבא', 'btn-secondary btn-nav nav-fwd', () => stepWeek(7));
     fwd.appendChild(chevronIcon('fwd'));
     header.appendChild(fwd);
     header.appendChild(button('השבוע', 'btn-secondary', () => { setWeekFromDate(todayStr()); render(); }));
 
-    header.appendChild(button('🖨️ הדפסה', 'btn-success', () => window.print()));
+    // Not window.print() bare. On the home-screen app on an iPhone that call opens
+    // nothing and says nothing; printWithFallback (js/ui/printout.js) still makes it,
+    // listens for the sheet, and offers the grid as a picture when no sheet came.
+    header.appendChild(button('🖨️ הדפסה', 'btn-success', () => printWithFallback('week')));
+    // And the picture on its own button, always. The person on a site sends pictures on
+    // WhatsApp, not PDFs, and the print button's offer arrives a second and a half after
+    // a tap that did nothing - this is the door for somebody who already knows that.
+    header.appendChild(button('🖼️ שיתוף כתמונה', 'btn-secondary', () => sharePrintout('week')));
 
     return header;
 }

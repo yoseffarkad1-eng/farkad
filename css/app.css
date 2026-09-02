@@ -120,6 +120,13 @@
 
 * { box-sizing: border-box; }
 
+/* AND THE ROOT ITSELF. The rule on body covers everything body contains, and a screen
+   shorter than the viewport - the reports tab on a 390 phone, an empty week - leaves a
+   band below the content that hit-tests to <html>, which is not inside body. Two taps
+   there zoomed the page with the body rule alone; a verifier's elementFromPoint sweep
+   found it. touch-action is not inherited, so the root is named on its own. */
+html { touch-action: manipulation; }
+
 body {
     direction: rtl;
     margin: 0;
@@ -129,6 +136,17 @@ body {
        runaway wide table makes it think. */
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    /* Two taps do not zoom. iOS Safari's double-tap-to-zoom fires on any element whose
+       touch-action does not rule it out, and a man marking a crew of thirty taps twice in
+       a row all evening - reported from the home-screen app on v96 as "when I tap twice
+       it zooms". 'manipulation' keeps panning and pinch (the smoke suite refuses
+       user-scalable=no for that reason) and takes only the double-tap gesture away. It
+       is not inherited - a button's own computed value still reads 'auto' - but the
+       browser applies the intersection of every value from the element to the root,
+       and a descendant can only narrow that, never widen it back: the one rule on the
+       body covers every button below, and .reorder-handle's touch-action: none still
+       wins on the handle, which is where the drag starts. */
+    touch-action: manipulation;
     background: var(--paper);
     color: var(--ink);
     font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif;
@@ -605,6 +623,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* The heading takes focus when the sheet opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
 .settings-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+/* The worker's account is entered at its heading too (modal.js). */
+#workerDaysTitle:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 
 .settings-body {
     flex: 1;
@@ -2001,6 +2021,13 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     overscroll-behavior: contain;
 }
 .modal-wide { max-width: 680px; }
+/* The line under the worker's name holds ONLY the report's range, "07/08/2026 -
+   20/08/2026". In this RTL modal the two dates are two left-to-right runs laid out
+   right to left, so the later one landed on the left and the range read backwards.
+   The paragraph itself is left-to-right, kept at the right edge where it sat; the
+   other ranges go through dateRange() in js/ui/dom.js, this one is set by
+   openWorkerDays as bare text and is turned by the stylesheet instead. */
+#workerDaysMeta { direction: ltr; text-align: right; }
 
 /* The app's own prompt is asked FROM other dialogs - a duplicate name while the worker
    form is open, a confirmation over the migration list. Same z-index as those and it
@@ -2974,6 +3001,13 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
     .report:last-child { margin-bottom: 0 !important; }
     .report:first-child { page-break-before: auto !important; }
     .report-invoice:first-child { page-break-before: auto !important; }
+    /* :first-child was not enough. With «לפי אתר» chosen the pay sheet is not on the
+       paper (.report-offscreen, above) but it is still the invoice's preceding sibling
+       in the document, so the invoice was never :first-child and the break stayed: the
+       client's report came out behind an EMPTY first page, and a phone's print preview
+       opened on a blank sheet. The break is conditional on a pay sheet that is actually
+       printed in front of it - renderReports appends the two back to back. */
+    .report-payroll.report-offscreen + .report-invoice { page-break-before: auto !important; }
     main > section:last-child > *:last-child { margin-bottom: 0 !important; }
 }
 

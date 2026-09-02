@@ -52,6 +52,22 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At f718367 (v97: the first iPhone round - the print fallback and the picture, the
+    Saturday step, touch-action, the chip, the export path told the truth, ranges from
+    left to right, the worker modal, the by-site print), the cd-work worktree, clean at
+    that commit, Node v22.22.2, .gate-release-2.log there, copied from no other run - the
+    WHOLE release gate, SECOND run:
+    npm test           42 suites   4243/4243
+    npm run test:all   + 9 suites  + 2083      (smoke 1121, print 76, mobile 709, update 30, forms-browser 10, recovery-browser 25, handover 26, swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244      (sendclaim 43; rules 59, cas.emulator 24, rollout 17, bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    the whole gate     58 suites   6570/6570   exit 0
+    The FIRST run of the same gate on the same commit (.gate-release.log, kept as
+    gate-v97-run1 beside the handoff's evidence) was 6563/6570: money.concurrency 43/50,
+    all seven in «an interleaved storm»; nine isolated runs of that suite (six on this
+    commit, three on 71ed815) were 50/50. Named in features/iphone/handoff.md; the hunt
+    for the interleaving is the first follow-up.
+    Per suite and verbatim: features/iphone/handoff.md.
+
     At 40d5004 (v96: the ledger merge, the week grid at its pitch, the four review notes
     folded, the stamps), the cd-work worktree, clean at that commit, Node v22.22.2,
     .gate-release.log there, copied from no other run - the WHOLE release gate:
