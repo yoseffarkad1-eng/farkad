@@ -3754,10 +3754,60 @@ const FarkadSync = {
                     // knows, exactly as before.
                     const learn = this.adapter && typeof this.adapter.read === 'function'
                         ? Promise.resolve(this.adapter.read()).then(fresh => {
-                            if (fresh && typeof fresh === 'object') this.noteRevision(fresh);
-                        }, () => undefined)
-                        : Promise.resolve();
-                    return learn.then(() => {
+                            if (!fresh || typeof fresh !== 'object') return null;
+                            this.noteRevision(fresh);
+                            return fresh;
+                        }, () => null)
+                        : Promise.resolve(null);
+                    return learn.then(fresh => {
+                        // AND ASKED THE PRE-SEND QUESTION, of the document just read.
+                        //
+                        // Learning the revision made the update VALID, which is the
+                        // whole of the trouble. The pre-send hold in sendClaimed ran
+                        // before the create left, against nothing heard, and decided
+                        // nothing - "the conflict branch asks this question of that
+                        // answer" - and then no conflict followed: the update went out
+                        // at the revision it had just learned, the server had no
+                        // reason to refuse it, and the winner's day was replaced whole
+                        // by a phone that had never seen it. Two phones opening with no
+                        // signal on a new project, the same worker on the same day
+                        // recorded differently: the winner's half gone from the cloud,
+                        // then from the winner, both phones saying synced. Measured on
+                        // both listener timings in tests/cas.test.mjs.
+                        //
+                        // So the document the refusal made this device read is the
+                        // document the queued values are held against - the same
+                        // question, the same families, the same hold as the pre-send
+                        // pass, and reported the same way. A day or a ledger entry the
+                        // winner holds a different value at, one this device has neither
+                        // seen nor produced, is somebody's record; it is held for a
+                        // person, and the rest of the batch goes on down the ladder as
+                        // the merge it is. A read that failed compares nothing, exactly
+                        // as before: the update then meets the conflict branch, which
+                        // carries the server's own document.
+                        const moved = [];
+                        if (fresh) {
+                            Object.keys(patch).forEach(path => {
+                                if (!replacesWhole(path)) return;
+                                const item = this._outbox.get(path);
+                                if (!item || item.held || this._heldNow.has(String(path))) return;
+                                if (this.movedUnder(item, path, fresh)) moved.push(String(path));
+                            });
+                        }
+                        if (moved.length > 0) {
+                            const wrote = this.holdContested(moved);
+                            if (!wrote.durable) {
+                                moved.forEach(path => this._heldNow.add(String(path)));
+                                console.error('a contested write could not be held on the '
+                                    + 'disk; it is held in memory for this session');
+                            }
+                            const held = new Error('another device created the document '
+                                + 'while this write was on its way, and it holds a different '
+                                + 'value at a path this write replaces; the edit is held '
+                                + 'until a person looks');
+                            held.contested = moved.slice();
+                            throw held;
+                        }
                         const follow = Promise.resolve(this.adapter.update(
                             this.stampProtocol(patch, this._sendOpId
                                 || this.operationIdFor(this._sending))));
