@@ -1,21 +1,22 @@
 # The suites
 
-Fifty suites at `10a40a5`, thirty-six of which need no browser at all. (Counted off
-package.json at that commit, which is the only place a suite count is true: `npm test`
-names the node suites, `test:all` adds the eight browser suites, `test:release` adds
-sendclaim and the five emulator suites.) From a clean clone:
+Fifty-eight suites, forty-two of which need no browser at all. (Counted off
+package.json, which is the only place a suite count is true: `npm test` names the node
+suites, `test:all` adds the nine browser suites, `test:release` adds sendclaim and the
+six emulator suites.) From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
-    npm run test:all        # adds smoke, print, mobile, update, recovery-browser, handover,
-                            #   swrestart, swidentity
+    npm run test:all        # adds smoke, print, mobile, update, forms, recovery-browser,
+                            #   handover, swrestart, swidentity
     npm run test:release    # the RELEASE gate: test:all plus sendclaim and the emulator suites
-    npm run test:emulator   # rules, the adapter's CAS, the rollout, the cutover (needs Java)
+    npm run test:emulator   # rules, the adapter's CAS, the rollout, the cutover, and two
+                            #   phones writing money at once (needs Java)
 
 `npm test` and `npm run test:all` are DEVELOPMENT gates. Neither one is permission to
 ship, and a green run of either must never be reported as a release gate.
 
-`npm run test:release` is the release gate. It adds `test:sendclaim` and the five
+`npm run test:release` is the release gate. It adds `test:sendclaim` and the six
 emulator suites, and at the commit this line was written it is GREEN.
 
 It was not. This paragraph used to say the gate was red on purpose: `test:sendclaim`
@@ -108,6 +109,11 @@ poisoned-name repair; the gate at 10a40a5 is 50 suites, and its browser and emul
 halves have not been run on that tree - the first tree they ran on after cf8b9e5 is
 9f11abf, above.
 
+The ledger merge adds eight more: six node suites (`approval`, `quarantine`,
+`correction`, `closure`, `wording`, `samefact`), one browser suite (`forms`) and one
+emulator suite (`money-concurrency`). No count for them stands here until a run is made
+on a commit that carries them, and that run names its commit like every other.
+
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers
 per build are recorded in `docs/releases.md`. (The count in the root README predates
@@ -142,6 +148,14 @@ several waves of tests and is stale.)
 | rules | `rules.test.mjs` | The real `firestore.rules` against the Firestore emulator. The web config is public by design, so these rules are the only thing between the schedule and anyone with the URL. Never touches the real project. |
 | cas-emulator | `cas.emulator.test.mjs` | The PRODUCTION adapter's write path against the real emulator, not the harness: a conflict carries the authoritative document, disjoint field edits still merge, a receipt makes a retry idempotent, and the harness and the adapter refuse in the same shape. The client half alone is `cas.test.mjs`; a green harness-only run would prove only that the harness and the client agree with each other. |
 | bootstrap | `bootstrap.emulator.test.mjs` | THE CUTOVER, through the production write path. The real js/sync/sync.js against the real js/sync/firebase-adapter.js against the emulator, asking what `rollout` and `cas.emulator` fall between: the live document is legacy and holds a day another phone corrected, and this phone has an older value for that same day in its outbox. Before it, the queued value won at revision 1 with nothing refused and nothing said. Five scenarios: the reproduction, the bootstrap touching five fields and no other, a disjoint edit still merging, two phones racing to exactly one revision-1 receipt, and process death mid-flight. |
+| money-concurrency | `money.concurrency.test.mjs` | TWO PHONES WRITING MONEY AT ONCE, through the production write path. Two devices, each with the real js/sync/sync.js talking to the real js/sync/firebase-adapter.js against the emulator, both recording against one man's advance at the same moment. tests/concurrency.test.mjs races two tabs over one disk and tests/repayment.test.mjs merges two in-memory copies by hand; neither is two phones. Seven races - two repayments, two that over-settle, a repayment against the closure, two closures, two corrections, the migration approval against a day, and a close-and-reopen on the phone that lost - each asking the same three things: every immutable event survives, an over-settled advance is surfaced rather than clamped, and both phones end up holding the same record. It found the dropped migration approval, the sync layer's blindness to `ledger.migrations.<id>`, and the honest closure a late repayment turned into a lie. |
+| approval | `approval.test.mjs` | No surface may read the new arithmetic before somebody approves the migration. With both gates opened by the test seam and a record whose migration is needed and unapproved, the sheet, the statement, the message and the archive warning keep the legacy answer - 3,050 earned, 5,000 handed over, -1,950 on the sheet - and one durable approval moves every one of them at once, arriving at the other phones through the record, never through a preference. |
+| quarantine | `quarantine.test.mjs` | A damaged APPROVAL, through every door a record arrives by. Held aside under its own map, never coerced into "nobody approved" or "approved", the gate shut while it stands, the person told, the bytes kept - and the rescue file carrying them rather than the empty object it used to. |
+| correction | `correction.test.mjs` | A correction undoes a transaction - all of it, or none of it - and is dated on the transaction it corrects. A partial correction stranded the rest for ever under an id nothing could reach, and it is the writer, not the form, that refuses it. |
+| closure | `closure.test.mjs` | The frozen fortnight: what a closure records (the wage it closed on, the opening balance, the counts and the days it was paid for), what it refuses (a closure that cannot be true against the record), and who may have one (every man, debt or no debt). A payslip somebody was handed prints the same numbers after a historical day moves. |
+| wording | `wording.test.mjs` | Every figure called what it is: the third money column is headed by what it holds - מקדמות until the migration is approved, נוכה מהשכר after - on the screen, in the CSV and in the workbook alike; the statement's opening balance is יתרת פתיחה, not an advance; and an overpaid account stops the automatic deduction and says so instead of printing a quiet zero. |
+| samefact | `samefact.test.mjs` | One fact written by two phones - the same approval, the same closure, the same correction, under one deterministic id with two names on it - is one fact: dropped from the second write as already done, kept by the merge as one body, never a conflict held for ever. |
+| forms | `forms.browser.mjs` | The advance and correction forms, driven by real clicks in real Chromium: open the history, press תיקון, type a reason, press שמור, read the record. A ReferenceError in a save handler is invisible to every node suite, and this is where one shipped from. |
 | status | `status.test.mjs` | What the line is ALLOWED to say. Asserts transitions rather than final states, because a claim made and withdrawn is invisible to a final-state check and that claim is the defect: it wraps setStatus and records what was asked for, what was said, and what was owed at that moment. A queue larger than one write, a restore the cloud will not take, a record Recovery could not read, and a close-and-reopen. |
 | rollout | `rollout.test.mjs` | Publishing the rules, from a GENUINE legacy document — roster, days and an advance, no `protocol`, no `revision`, no receipt. The first protocol write preserves every legacy byte; a bootstrap without its receipt is refused; two phones racing produce exactly one bootstrap and the loser rebases; the exception is one write wide; an un-updated phone works before cutover and is refused after; and a missing document is a different road from a legacy one. |
 | ledger-ingress | `ledger.ingress.test.mjs` | Thirteen shapes of malformed ledger data through every door — boot, load, cloud snapshot, restore, JSON import, raw recovery, migration, full replacement. Each is named by the check that catches it, held aside rather than folded, never normalised or coerced to zero; the record still opens, the bytes are kept, the person is told, writes are blocked, and the rescue export still carries the bytes. |

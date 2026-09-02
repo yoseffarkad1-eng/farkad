@@ -7,9 +7,9 @@
 >
 > | suite | runs on |
 > |---|---|
-> | smoke, print, mobile, update, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
+> | smoke, print, mobile, update, forms, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
 > | every other suite in `npm test` | **Node**, with V8 contexts and a fake localStorage - no browser at all |
-> | rules, bootstrap-rules, cas-emulator, rollout, bootstrap | **Node** against the local **Firestore emulator** |
+> | rules, bootstrap-rules, cas-emulator, rollout, bootstrap, money-concurrency | **Node** against the local **Firestore emulator** |
 >
 > None of them is Safari and none of them is a phone. Where a suite sets an iPhone
 > user-agent string it is still Chromium: that proves the app's own branch runs, not that

@@ -17,7 +17,7 @@
 
 import { serve } from './serve.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
-import { suite, check, given, report } from './runner.mjs';
+import { suite, check, same, given, report } from './runner.mjs';
 import { readPdf, pageText, heavyFills } from './pdf.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -630,6 +630,115 @@ for (const scenario of [
     check('the warning is on the printed page, not only on the screen',
         texts.some(text => says(text, 'שעות נוספות בלי שכר שעה')),
         texts.map(t => t.replace(/\s+/g, ' ').slice(0, 80)).join(' | '));
+
+    await page.context().close();
+}
+
+{
+    suite('a carried debt and a correction, on the paper');
+
+    // The pay sheet is what somebody is handed and paid from, and paper wins every
+    // argument. Two numbers on it are only ever right on this branch: a deduction capped
+    // at the wage, with the rest of a real advance carrying to the next account, and money
+    // returned by a CORRECTION rather than by a man handing cash back. Both are read off a
+    // real PDF here, printed by the real page.
+    const page = await open();
+    await page.evaluate(() => {
+        State.schedule.workers = [{ id: 'w_1', name: 'Worker 01', active: true,
+            dailyRate: 500, hourlyRate: 50 }];
+        State.schedule.places = [{ id: 'p_01', name: 'Site A', active: true }];
+        State.commitMany(recordNewAdvance(State.schedule, 'w_1', '2026-08-10', 5000, '',
+            '2026-08-10T09:00:00.000Z', 'd_print', 'cash'));
+        ['2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13']
+            .forEach(date => State.commit(assignPlace(State.schedule, date, 'w_1',
+                'actual', 'p_01')));
+        State.commit(assignPlace(State.schedule, '2026-08-14', 'w_1', 'actual', 'p_01',
+            RATE_EXTRA, 1));
+        const plan = planCarryMigration(State.schedule);
+        if (plan.needed) {
+            State.commit(recordCarryApproval(State.schedule, plan,
+                '2026-08-15T08:00:00.000Z', 'd_print'));
+        }
+        const repay = recordAdvanceRepaid(State.schedule,
+            Object.keys(State.schedule.advances)[0], 400, '2026-08-16', '',
+            '2026-08-16T09:00:00.000Z', 'd_print', 'cash');
+        State.commit(repay);
+        State.commit(recordEventReversed(State.schedule, repay.value.id, 400,
+            '2026-08-17', 'wrong man', '2026-08-17T09:00:00.000Z', 'd_print'));
+        REPORT_RANGE.from = '2026-08-07';
+        REPORT_RANGE.to = '2026-08-20';
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(300);
+
+    const account = await page.evaluate(() =>
+        advanceAccount(State.schedule, 'w_1', '2026-08-07', '2026-08-20'));
+    given('the record the page is drawing: 3,050 off, 1,950 carried, 400 corrected',
+        account.deducted === 3050 && account.carriedForward === 1950
+        && account.reversed === 400,
+        JSON.stringify(account));
+
+    // THE THREE MONEY CELLS, off the rendered table rather than out of the PDF's text
+    // stream, because what has to hold is that they RECONCILE and a bag of numbers in
+    // reading order cannot say which cell is which.
+    const table = await page.evaluate(() => {
+        const head = [...document.querySelectorAll('#reportsView thead th')]
+            .map(th => th.textContent.trim());
+        const cells = tr => [...tr.children].map(td => td.textContent.trim());
+        const body = [...document.querySelectorAll('#reportsView tbody tr')].map(cells);
+        const foot = [...document.querySelectorAll('#reportsView tfoot tr')].map(cells);
+        return { head, body, foot: foot.length ? foot : body.slice(-1) };
+    });
+    const number = text => Number(String(text).replace(/[^0-9.-]/g, '')) || 0;
+    const at = name => table.head.indexOf(name);
+    // THE COLUMN IS NAMED AFTER WHAT IS IN IT, which is C6's decision and is why this
+    // no longer looks for מקדמות. This fixture approves the carry migration - the given
+    // above it reads 3,050 deducted, which only happens once somebody has - so the cell
+    // holds the DEDUCTION and the heading says so. Before approval it would be the
+    // advances and would be called מקדמות; see deductionColumnName in js/ui/reports.js
+    // and tests/wording.test.mjs for the rule, and tests/smoke.mjs for both sides of it.
+    const DEDUCTED = 'נוכה מהשכר';
+    given('the sheet drew its three money columns',
+        at('נצבר') !== -1 && at(DEDUCTED) !== -1 && at('לתשלום') !== -1,
+        JSON.stringify(table.head));
+    given('and named the money column after the deduction it holds, not the advance',
+        at('מקדמות') === -1, JSON.stringify(table.head));
+
+    const worker = table.body.find(cells => cells[0].indexOf('Worker 01') !== -1);
+    given('his row is on the sheet', Array.isArray(worker), JSON.stringify(table.body));
+    // The column holds a DEDUCTION, and the deduction and the advance are the same
+    // number only while an advance is smaller than the wage. Printed as the 5,000 handed
+    // over, beside a net of 0 computed from the 3,050 actually taken, the row said
+    // 3050 − 5000 = 0 - and the band under it then totalled -1,950 as לתשלום: a negative
+    // wage, on the sheet the man is paid from, for a fortnight in which he was owed
+    // nothing and paid nothing.
+    same('the row reconciles: נצבר less the deduction is לתשלום',
+        number(worker[at('נצבר')]) + number(worker[at(DEDUCTED)]),
+        number(worker[at('לתשלום')]),
+        JSON.stringify(worker));
+    same('and it is the deduction in the column, as it is in the exported file',
+        [number(worker[at('נצבר')]), number(worker[at(DEDUCTED)]),
+            number(worker[at('לתשלום')])], [3050, -3050, 0]);
+    const band = table.foot[table.foot.length - 1];
+    same('the band under it adds up the same way',
+        number(band[at('נצבר')]) + number(band[at(DEDUCTED)]),
+        number(band[at('לתשלום')]), JSON.stringify(band));
+
+    const buffer = await page.pdf({ format: 'A4', printBackground: true });
+    const pdf = readPdf(buffer);
+    const texts = pdf.pages.map(pageText);
+    given('the print produced a real PDF', buffer.length > 2000, `${buffer.length} bytes`);
+
+    // THE NUMBER THAT WOULD OTHERWISE VANISH. 1,950 of an advance he was handed is still
+    // owed, this fortnight's paper is the last document that mentions it, and the column
+    // it used to sit in now correctly shows something else.
+    check('the paper says what is still owed after the deduction',
+        texts.some(text => says(text, 'ועוברות לחשבון הבא')),
+        texts.map(t => t.replace(/\s+/g, ' ').slice(0, 300)).join(' | '));
+    check('and names the correction, so 400 is not read as cash he settled',
+        texts.some(text => says(text, 'תיקון-היפוך')),
+        texts.map(t => t.replace(/\s+/g, ' ').slice(0, 300)).join(' | '));
 
     await page.context().close();
 }

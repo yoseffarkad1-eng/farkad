@@ -1599,6 +1599,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wday-date span { color: var(--ink-3); font-size: 13px; }
 .wday-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wday-note { color: var(--ink-3); font-size: 12px; }
+/* The reason a correction was made, on the row it corrects. An adjustment to money
+   with no reason beside it is the thing the ledger exists to refuse. */
+.ledger-reason { grid-column: 1 / -1; color: var(--ink-2); font-size: 12px; }
+/* Sealing an account is the last thing on this screen and the only irreversible one
+   on it, so it is set apart above the line rather than sitting among the rows. */
+.period-closure { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.period-closure button { min-height: 44px; width: 100%; }
+/* An account that does not add up is not a quiet note. It is the reason nothing was
+   deducted from this man's wage, and somebody has to read it before payday. */
+.wday-note.wday-review { color: var(--warn); font-weight: 700; }
 .wday-money { text-align: start; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wday-absent .wday-date strong { color: var(--ink-3); }
 .wday-total {
@@ -1712,6 +1722,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     background: var(--surface-2);
 }
 .advance-form-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+/* The correction form's amount is a STATEMENT, not a field: a correction takes the whole
+   transaction or none of it, so there is nothing to type. 16px like every input beside
+   it - it sits in the same column and reads as part of the same form. */
+.advance-form-amount {
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+    padding: 10px 0;
+    color: var(--ink);
+}
 .advance-form input[type="text"],
 .advance-form input[type="date"] {
     width: 100%;
@@ -2058,6 +2077,13 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
    `.hint.hint-warn` is two classes and wins wherever it sits, so reordering this file
    cannot quietly take the warning off somebody's pay sheet again. */
 @media print { .hint.hint-warn { display: block !important; color: #000; } }
+/* A hint that is MONEY, and money belongs on the paper. .hint is hidden in print
+   because most of them explain the screen; these two - the advance that was not fully
+   deducted and the correction that moved shekels inside a column - are statements about
+   somebody's pay, and the printed sheet is the document the argument happens over. Kept
+   apart from hint-warn because neither is a warning: nothing is wrong, and a red line
+   saying so on every carried advance would train the reader to skip it. */
+@media print { .hint.hint-money { display: block !important; color: #000; } }
 .empty-hint { color: var(--ink-3); font-size: 15px; padding: 14px 0; margin: 0; }
 
 @media (max-width: 700px) {

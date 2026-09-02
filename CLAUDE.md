@@ -84,20 +84,31 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the thirty-six node suites; no browser, runs in a few minutes
-    npm run test:all        # adds smoke, print, mobile, update, recovery-browser,
+    npm test                # the forty-two node suites; no browser, runs in a few minutes
+    npm run test:all        # adds smoke, print, mobile, update, forms, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
     npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
-                            #   CAS, the rollout and the cutover (needs Java)
+                            #   CAS, the rollout, the cutover and two phones writing
+                            #   money at once (needs Java)
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). NO COUNT IS WRITTEN HERE, deliberately. A
 count belongs to a commit and to nothing else, and one left in a file goes stale the
 moment the next suite lands - at which point it is worse than no count, because it reads
-as a fact, and the paragraph below already says so about counts carried between commits.
-Run the gate on the commit you are asking about, from one clean detached worktree, and
-say which commit you ran it on. Anything less than every check passing is a stop, not a
-warning. `npm test`
+as a fact. Run the gate on the commit you are asking about and say which commit you ran
+it on. This branch's numbers are not the core branch's either: it runs the same suites
+with both money gates open, so several of them assert more.
+
+**THIS BRANCH IS NOT MAIN.** `claude/farkad-ledger-enable-ready` is the build with
+`LEDGER_WRITES` and `carryAdvances` both OPEN, so that what somebody eventually ships can
+be run end to end before anybody commits to it. Merging it is the decision iron law 1
+reserves for a person, and it is only theirs to make once all three phones are known to
+be past v79 AND they have read every row of `planAdvanceCarry`. It carries its own build
+stamp, because it is not the same bytes as the core branch's and two builds sharing a
+cache name serve a mixture. It has always moved UP rather than sideways when the core
+branch took a number, because it is built from that line and supersedes it.
+
+Anything less than every check passing is a stop, not a warning. `npm test`
 and `npm run test:release` are different gates and are reported separately; neither is
 wrapped in anything that turns a nonzero exit into a success. A count carried over from
 another commit is worse than no count: re-measure, or say you did not.
@@ -171,16 +182,24 @@ written down so it cannot happen twice.
     tests/vehicles.test.mjs    the retired feature, from both sides of its flag
     tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx, built by the shipped library
     tests/money.display.test.mjs one day has one price on every surface: screen, WhatsApp, sheet
-    tests/snapshot.poison.test.mjs a poisoned name arriving from the cloud, from every family
     tests/cas.test.mjs         the client half of the ordering protocol: revision, receipt, rebase, hold
     tests/repayment.test.mjs   the advance that outlives its fortnight: carry, repayment, closure, the two labels
+    tests/approval.test.mjs    no surface may read the new arithmetic before somebody approves it
+    tests/quarantine.test.mjs  a damaged APPROVAL, through every door a record arrives by
+    tests/correction.test.mjs  a correction is all of a transaction, dated on the transaction
+    tests/closure.test.mjs     the frozen fortnight: what it records, what it refuses, who may have one
+    tests/wording.test.mjs     every figure called what it is, and an overpaid account stopped
+    tests/samefact.test.mjs    one fact written by two phones is one fact, not a conflict
+    tests/snapshot.poison.test.mjs a poisoned name arriving from the cloud, from every family
     vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
     tests/recovery.browser.mjs the rescue export through the real button
+    tests/forms.browser.mjs    the advance and correction forms, driven in real Chromium
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator
     tests/rollout.test.mjs     publishing the rules over a genuine legacy document, and the cutover
     tests/ledger.ingress.test.mjs malformed ledger data through every door: held aside, never coerced
+    tests/money.concurrency.test.mjs two phones writing MONEY at once, through the production adapter
     tests/poison.test.mjs      a ledger id that would land on a prototype, through every writer
     tests/merge.test.mjs       what adopting somebody else's document takes off this one
     tests/contested.test.mjs   the write that lost a race, and every trigger that must not send it

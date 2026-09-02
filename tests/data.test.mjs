@@ -9273,13 +9273,24 @@ function withAdvances(device, rows) {
 }
 
 {
-    suite('the writer is off, and the app writes what the other phones read');
+    suite('the writer gate on this branch, and what the app writes either way');
 
     const { device } = crew();
     device.State.commit(
         device.call('addAdvance', device.State.schedule, 'w_01', '2026-08-03', 500, ''));
 
-    check('the gate is closed', device.call('ledgerWritesEnabled') === false);
+    // INVERTED ON THIS BRANCH, deliberately, and this is the only check in the node gate
+    // that had to move. On main this reads `=== false` and pins the shipped default;
+    // claude/farkad-ledger-enable-ready exists to run the build with it open, so here it
+    // pins the opposite. If this branch is ever merged, THIS is the line that has to be
+    // argued about - it is left loud rather than quietly deleted.
+    check('the gate is open, because this branch is the one that opens it',
+        device.call('ledgerWritesEnabled') === true);
+    // And the two gates move together. The repayment control needs both, because with the
+    // carry shut nothing reads a repayment and a man who hands back 200 is still deducted
+    // 500 - see tests/repayment.test.mjs. A branch that opened one would ship that.
+    check('and the carry moved with it, because one without the other ships a lie',
+        device.call('advanceCarryEnabled') === true);
     check('so recording an advance the ordinary way writes no entry',
         device.call('ledgerEntries', device.State.schedule).length === 0,
         JSON.stringify(device.call('ledgerEntries', device.State.schedule)));
