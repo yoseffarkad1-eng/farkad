@@ -10027,10 +10027,11 @@ const VEHICLES_ON = { vehicles: true };
     check('and it is not left standing on the screen',
         device.State.schedule.days['2026-08-10'] === undefined,
         JSON.stringify(Object.keys(device.State.schedule.days || {})));
-    check('the journal holds nothing for it either',
-        JSON.stringify(device.call('FarkadSync').journalPaths
-            ? device.call('FarkadSync').journalPaths() : []) .indexOf('2026-08-10') === -1,
-        'no journal entry');
+    check('and nothing on the disk mentions it either',
+        Object.keys(device.dump()).every(key =>
+            String(device.dump()[key]).indexOf('2026-08-10') === -1),
+        JSON.stringify(Object.keys(device.dump()).filter(key =>
+            String(device.dump()[key]).indexOf('2026-08-10') !== -1)));
 }
 
 report();
