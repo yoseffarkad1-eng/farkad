@@ -34,6 +34,7 @@ const FILES = [
     'js/sync/restore.js',
     'js/sync/receive.js',
     'js/sync/send.js',
+    'js/sync/status.js',
     // Last of the sync group, and last for a reason - see the file's own header.
     'js/sync/boot.js',
     // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls

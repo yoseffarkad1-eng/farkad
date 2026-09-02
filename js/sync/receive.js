@@ -23,6 +23,60 @@
 //     that happens to contain the same value.
 
 Object.assign(FarkadSync, {
+    // Moved here from js/sync/sync.js at v102, with the code it describes. It is the
+    // receive path's own state and the prose that explains it, and it was left behind
+    // by the first pass of the split - forty-odd lines of reasoning about adopting a
+    // snapshot, sitting above a queue file that does not adopt anything. A comment
+    // that has drifted away from its code is worse than no comment: it is read as
+    // describing whatever it now sits above.
+    // retryReplace lived here, and it is where G13 was. It pushed the pending document to
+    // the cloud from wherever the app happened to be, without ever asking whether THIS
+    // device held it - so a crash between preparing a restore and storing it left the
+    // cloud holding the restore, the phone holding the old schedule, the record deleted
+    // and the status reading "synced". resumeReplace replaces it and puts this device
+    // first.
+
+    // An update arrived from the server - either another device wrote, or this is the
+    // first read after connecting.
+    //
+    // The server document is the truth, because every write is a field-level merge into
+    // it: it already contains everyone's edits, including this device's once they have
+    // been sent. So it is adopted, and the edits still sitting in the queue here are
+    // re-applied on top of it.
+    //
+    // It is deliberately NOT decided by comparing timestamps. Those stamps come from
+    // three separate phones' clocks, and a device running a few minutes fast would judge
+    // every incoming snapshot "older than mine" and quietly stop showing the other two
+    // people's work - with no error, and nothing on screen to suggest it.
+    // ---------------------------------------------------------------- the ordering protocol
+    //
+    // The server orders the writes; this is the client's side of the same contract. See
+    // docs/sync-protocol.md, firestore.rules which enforces it, and tests/cas.test.mjs
+    // which measures this half.
+    //
+    // The base is READ, never assumed. It comes from the last snapshot the server sent -
+    // the only revision this device can honestly claim to have seen - so a write built
+    // against a base that has moved is refused rather than landing on somebody's evening.
+    PROTOCOL: 1,
+    _revision: null,
+    _sendOpId: null,
+    _rebases: 0,
+    // The base values, per field path, that the write currently in flight was built on.
+    // See stampProtocol for why it is frozen rather than read.
+    _sendBase: null,
+
+    // Every snapshot carries the revision it is. A document written by a build that
+    // predates the protocol carries none, and null is the honest answer for "this device
+    // has not been told" - it is not zero, and it is not a licence to guess.
+    // The document this device's writes are built on, kept beside the revision.
+    //
+    // Without it a conflict cannot be told apart from a contest. Two people filling in one
+    // evening write different field paths and both should land; two people correcting the
+    // SAME entry must not both land, and the one built on the older base must not be
+    // rebased on top of the correction. The only way to know which is which is to know
+    // what the path held when this write was built.
+    _baseDoc: null,
+
     // What the base document holds at a field path, or undefined.
     baseValueAt(path) {
         let node = this._baseDoc;
