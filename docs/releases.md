@@ -64,8 +64,11 @@ nothing touching the record, sync or the arithmetic. Both gates stay shut.
   build, still the owner's to run; `docs/rollout-checklist.md` has the steps.
 - The mobile suite is Chromium, not Safari, and its 2× text pass is not Dynamic Type.
 
-**Checked before it was stamped**: `features/day-room/handoff.md`, with both gates' output
-verbatim on the commit they ran on.
+**Checked before it was stamped**: both gates on `991ced4` from one clean detached worktree,
+run separately — `npm test` 43 suites 4380/4380 exit 0, `npm run test:release` 59 suites
+6816/6816 exit 0. Per suite and verbatim in `features/day-room/handoff.md`, which also
+records that three earlier attempts at the release gate were killed by container restarts
+and that none of their partial counts is written down anywhere.
 
 ---
 

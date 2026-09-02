@@ -120,22 +120,133 @@ None. Nothing on a disk or on the wire is touched. Rollback is a plain revert.
 
 ## Test output (verbatim, on the final commit)
 
-**NOT YET COMPLETE, and this file says so rather than carrying a number from somewhere
-else.** At the time this was written the release gate was still running on `991ced4` in a
-clean detached worktree. What HAS been measured on this exact tree, separately and each
-reported here only because it was actually run:
+```
+=== npm test on 991ced4a8bd3b30f4536699f63137e27a65ef237 at 22:05:00 v22.22.2
+18/18 checks passed
+11/11 checks passed
+29/29 checks passed
+37/37 checks passed
+28/28 checks passed
+73/73 checks passed
+28/28 checks passed
+1949/1949 checks passed
+75/75 checks passed
+116/116 checks passed
+35/35 checks passed
+44/44 checks passed
+46/46 checks passed
+73/73 checks passed
+35/35 checks passed
+43/43 checks passed
+21/21 checks passed
+9/9 checks passed
+21/21 checks passed
+17/17 checks passed
+4/4 checks passed
+82/82 checks passed
+37/37 checks passed
+36/36 checks passed
+122/122 checks passed
+79/79 checks passed
+33/33 checks passed
+82/82 checks passed
+72/72 checks passed
+240/240 checks passed
+151/151 checks passed
+88/88 checks passed
+37/37 checks passed
+40/40 checks passed
+206/206 checks passed
+51/51 checks passed
+51/51 checks passed
+48/48 checks passed
+61/61 checks passed
+74/74 checks passed
+23/23 checks passed
+23/23 checks passed
+32/32 checks passed
+EXIT=0
+43 suites · 4380/4380 checks
 
-    npm test            43 suites   4380/4380   exit 0
-    tests/mobile.test.mjs           807/807     (21 checks added by this round)
-    npm run test:smoke              1130/1130
-    npm run test:print              78/78
-    npm run test:forms              10/10
+=== npm run test:release on 991ced4a8bd3b30f4536699f63137e27a65ef237 at 22:19:59 v22.22.2
+18/18 checks passed
+11/11 checks passed
+29/29 checks passed
+37/37 checks passed
+28/28 checks passed
+73/73 checks passed
+28/28 checks passed
+1949/1949 checks passed
+75/75 checks passed
+116/116 checks passed
+35/35 checks passed
+44/44 checks passed
+46/46 checks passed
+73/73 checks passed
+35/35 checks passed
+43/43 checks passed
+21/21 checks passed
+9/9 checks passed
+21/21 checks passed
+17/17 checks passed
+4/4 checks passed
+82/82 checks passed
+37/37 checks passed
+36/36 checks passed
+122/122 checks passed
+79/79 checks passed
+33/33 checks passed
+82/82 checks passed
+72/72 checks passed
+240/240 checks passed
+151/151 checks passed
+88/88 checks passed
+37/37 checks passed
+40/40 checks passed
+206/206 checks passed
+51/51 checks passed
+51/51 checks passed
+48/48 checks passed
+61/61 checks passed
+74/74 checks passed
+23/23 checks passed
+23/23 checks passed
+32/32 checks passed
+1130/1130 checks passed
+78/78 checks passed
+807/807 checks passed
+30/30 checks passed
+10/10 checks passed
+25/25 checks passed
+26/26 checks passed
+31/31 checks passed
+55/55 checks passed
+43/43 checks passed
+59/59 checks passed
+24/24 checks passed
+17/17 checks passed
+23/23 checks passed
+28/28 checks passed
+50/50 checks passed
+EXIT=0
+59 suites · 6816/6816 checks
+```
 
-`npm run test:release` — the gate that adds sendclaim and the six emulator suites — is the
-one still outstanding, and **this build is not published until it comes back green on this
-commit**. Its verbatim per-suite output replaces this section in the commit that publishes
-the build. Two container restarts killed earlier attempts at it partway through the browser
-suites; a killed run is not a result and none of its partial counts is recorded anywhere.
+Both from one clean detached worktree at `991ced4`, `git diff --check` clean, Node v22.22.2,
+run separately and reported separately, neither wrapped in anything that turns a nonzero exit
+into a success. `npm test` contains no emulator suite, which is why it is not the evidence for
+the six that need one — and nothing in this round touches sync or the ledger, so those six are
+here as a guard rather than as the point.
+
+The 55 checks over v100's 6761 are this round's own: 21 added to `tests/mobile.test.mjs` (the
+compact header at three widths, the switcher's place and floor at three widths, and the site
+card's head), and the rest are the mobile suite's existing per-width checks now running against
+a by-site view that has an extra button on every card.
+
+**Three earlier attempts at this gate were killed by container restarts**, at 45, 11 and 5
+suites. None of their partial counts is written down here or anywhere else: a killed run is
+not a result, and a number carried out of one would be exactly the kind of borrowed count
+`tests/README.md` forbids.
 
 ## Contract items NOT completed
 None of items 1–3 is open. Item 2 is complete as specified and did not produce the room the

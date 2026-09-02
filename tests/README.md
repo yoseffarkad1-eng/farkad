@@ -52,6 +52,27 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 991ced4 (v101: room on the day screen - the header compacts to one row past a
+    scroll threshold and returns at the top, the switcher moves into it, and the site
+    card's two footer buttons become icon buttons on its coloured head), a clean detached
+    worktree at that commit, Node v22.22.2, git diff --check clean, copied from no other
+    run - BOTH GATES, run separately:
+    npm test           43 suites   4380/4380   exit 0
+                       (unchanged from v100: this round touches no node suite)
+    npm run test:release
+                       59 suites   6816/6816   exit 0
+                       (smoke 1130, print 78, mobile 807, update 30, forms-browser 10,
+                       recovery-browser 25, handover 26, swrestart 31, swidentity 55,
+                       sendclaim 43; rules 59, cas.emulator 24, rollout 17,
+                       bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    No suite was added or removed; the 55 checks over v100 are 21 new ones in
+    tests/mobile.test.mjs plus that suite's existing per-width checks now running against
+    a by-site view with one more button on every card.
+    THREE earlier attempts at this gate were killed by container restarts, at 45, 11 and 5
+    suites. None of their partial counts is recorded anywhere - a killed run is not a
+    result, and a number carried out of one is exactly the borrowed count this file forbids.
+    Per suite and verbatim: features/day-room/handoff.md.
+
     At 14eeb8d (v100: the holds nobody disagreed about - one arithmetic for a closure's
     writer and its judge, a clock that is behind refusing rather than moving money
     quietly, the same-fact rule asked at every gate that can hold a write, every name in
