@@ -1240,7 +1240,8 @@ for (const width of WIDTHS) {
         JSON.stringify(grid));
 
     // WHERE THE WEEK FITS AND WHERE IT SCROLLS, pinned per width rather than left to the
-    // arithmetic. 88 + 7 x 48 is 424: a 430px phone shows the whole week without a push,
+    // arithmetic - the pitch check above proves every cell's size, this one proves which
+    // of them are on the screen. 88 + 7 x 48 is 424: a 430px phone shows the whole week without a push,
     // and every narrower phone shows the names and as many days as it has room for, with
     // the rest one push away. The first half is the one that had no test - the box at 430
     // was 406px wide, 12px of page padding each side, and 424 does not go into 406; the
@@ -1256,14 +1257,22 @@ for (const width of WIDTHS) {
         return {
             days: days.length,
             shown: days.filter(b => b.left >= edge.left - 0.5 && b.right <= edge.right + 0.5).length,
+            // The narrowest day the box shows: seven days squeezed to fit is not the week
+            // fitting, it is the defect this check exists for.
+            narrowest: Math.round(Math.min(...days.map(b => b.width))),
             boxClient: box.clientWidth,
             boxScroll: box.scrollWidth,
             screen: document.documentElement.clientWidth
         };
     });
     if (width >= 430) {
+        // One assertion for one fact: seven days, every one of them at the pitch, every
+        // one of them inside the box, and nothing left to push. Split four ways, the
+        // 45px columns passed the `shown` count while a separate check failed the
+        // pitch, and the failure read as two unrelated facts.
         check('a 430px phone shows all seven days at the pitch, with nothing to push',
-            fit.days === 7 && fit.shown === 7 && fit.boxScroll <= fit.boxClient + 1,
+            fit.days === 7 && fit.shown === 7 && fit.narrowest >= 48
+                && fit.boxScroll <= fit.boxClient + 1,
             JSON.stringify(fit));
     } else {
         // Strictly wider than its box, not "at least": on these phones the week MUST

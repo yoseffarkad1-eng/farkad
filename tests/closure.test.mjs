@@ -757,4 +757,59 @@ const reopen = (device, id) => {
         JSON.stringify(other.call('closureProblems', other.State.schedule, wrong)));
 }
 
+// ------------------------------------- the phone that never wrote a closure still reads it
+{
+    suite('a fortnight closed on one phone is frozen on a phone whose gate is shut');
+
+    // THREE PHONES DO NOT UPDATE TOGETHER, and the flip is per phone. The day the first
+    // phone closes a fortnight with the gate open, the other two are still reading the
+    // same record with both flags off - which is what a person installs today - and the
+    // sheet they print is the sheet the crew is paid from. closedPeriods is read by the
+    // walk with no gate in front of it, deliberately: the closure is a fact about the
+    // record, not about this build, and a phone that recomputed the live wage where the
+    // closing phone printed the frozen one would be two phones printing different money
+    // for one fortnight. Pinned here so that gating it later is a decision, not a drift.
+    const closer = closed('d_gate_open');
+    const disk = closer.dump();
+
+    const shut = makeDevice({ deviceId: 'd_gate_shut', storage: disk });
+    shut.setToday('2026-08-26');
+    shut.ctx.askTell = () => Promise.resolve();
+    shut.State.load();
+    given('the shut phone is what a person installs',
+        shut.call('advanceCarryEnabled') === false
+            && shut.call('ledgerWritesEnabled') === false,
+        JSON.stringify([shut.call('advanceCarryEnabled'), shut.call('ledgerWritesEnabled')]));
+    given('and it read the closure off the shared record', closureIn(shut) !== null,
+        JSON.stringify(Object.keys(shut.State.schedule.ledger.advances)));
+
+    const row = () => shut.call('payrollReport', shut.State.schedule, A.from, A.to)
+        .find(line => line.workerId === 'w_01') || {};
+    const days = () => shut.call('workerDaysReport', shut.State.schedule,
+        shut.State.schedule.workers[0], A.from, A.to);
+    given('the closed fortnight starts as it was closed',
+        Number(row().amount) === GROSS && days().length === DAYS.length,
+        JSON.stringify([row().amount, days().length]));
+
+    // The same day removed that moves the open build's payslip 3,050 -> 2,440.
+    shut.State.commit(shut.call('clearWorkerDay', shut.State.schedule,
+        '2026-08-14', 'w_01', 'actual'));
+    check('the wage stays the wage it was closed on', Number(row().amount) === GROSS,
+        JSON.stringify(row()));
+    check('and the days are the days it was closed on',
+        days().length === DAYS.length
+            && days().map(day => day.date).join(',') === DAYS.join(','),
+        JSON.stringify(days().map(day => day.date)));
+
+    // And across a reopen with the gate still shut - the ordinary next morning.
+    const morning = makeDevice({ deviceId: 'd_gate_shut2', storage: shut.dump() });
+    morning.setToday('2026-08-27');
+    morning.ctx.askTell = () => Promise.resolve();
+    morning.State.load();
+    check('the next morning, still', Number((morning.call('payrollReport',
+        morning.State.schedule, A.from, A.to).find(line => line.workerId === 'w_01')
+        || {}).amount) === GROSS,
+        JSON.stringify(morning.call('payrollReport', morning.State.schedule, A.from, A.to)));
+}
+
 report();

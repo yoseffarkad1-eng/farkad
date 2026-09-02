@@ -2726,6 +2726,13 @@ function payrollReport(schedule, fromDate, toDate) {
         //
         // Only where the closure RECORDED them: a closure from before this carries no
         // basis and nothing is invented for it. See closedPeriods, which never coerces.
+        //
+        // AND WITH NO GATE IN FRONT OF IT, deliberately. The carry flag says what this
+        // build may write and how it reads an account; a closure is a fact on the shared
+        // record, and a phone whose gate is still shut recomputing a fortnight that the
+        // phone with the gate open closed is two phones printing different money for
+        // one payday. Pinned in tests/closure.test.mjs, «a fortnight closed on one
+        // phone is frozen on a phone whose gate is shut».
         const frozen = typeof closedPeriods === 'function'
             ? closedPeriods(schedule, worker.id)[fromDate] : undefined;
         if (frozen !== undefined) {

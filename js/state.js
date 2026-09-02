@@ -933,42 +933,31 @@ function normaliseSchedule(raw, hints) {
     // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns four of
     // them and the record is not four of them.
     //
-    // The general form of the fault the approvals above are one instance of: the object
-    // built here IS State.schedule and save() serialises exactly that, so a part of
-    // `ledger` this build does not name is read off the disk, left out, and written over
-    // by the next ordinary save. Naming `migrations` fixed the case that exists today and
-    // left the next one open.
-    //
-    // Carried, not quarantined and not a reason to stop: "this build has no opinion about
-    // it" is not "it cannot be read", and a device that went into recovery over a field a
-    // later build added is a device nobody can record a day on.
-    Object.keys(ledger).forEach(key => {
-        if (['advances', 'unreadable', 'migrations', 'unreadableMigrations']
-            .indexOf(key) !== -1) return;
-        if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
-    });
-
-    // AND EVERY OTHER PART OF THE CONTAINER, verbatim, because this build owns two of
-    // them and the record is not two of them.
-    //
     // The object being built here IS State.schedule and save() serialises exactly that,
     // so a part of `ledger` this build does not name was read off the disk, left out, and
     // written over by the next ordinary save. That is the same deletion-by-reading the
     // block above this one exists to have stopped, one level up: it was fixed for an
     // ENTRY and left in place for the container's own fields.
     //
-    // It is not hypothetical. The next build adds `ledger.migrations` - a person's
-    // approval of a financial migration, which decides whether their phones may write
-    // money at all - and three phones do not update together. A phone on this build,
-    // sharing the record, would have deleted that approval on every save: silently, with
-    // the load reporting clean, nothing quarantined, and the parity check blessing it.
+    // It is not hypothetical. `ledger.migrations` - a person's approval of a financial
+    // migration, which decides whether their phones may write money at all - arrived one
+    // build after this loop was first written, and three phones do not update together.
+    // A phone without this loop, sharing the record, would have deleted that approval on
+    // every save: silently, with the load reporting clean, nothing quarantined, and the
+    // parity check blessing it. Naming `migrations` fixed the case that existed and left
+    // the next one open; this carries whatever the next one is.
     //
     // Carried, not quarantined and not a reason to stop. "This build has no opinion about
     // it" is not "it cannot be read": a device that went into recovery over a field a
     // later build added is a device nobody can record a day on, and that is the failure
     // this app trades everything else to avoid.
+    //
+    // The four this build owns were each read above, on their own terms, and are not
+    // carried again here - a second, unguarded copy of `migrations` would put an approval
+    // the validator refused back beside the ones it accepted.
     Object.keys(ledger).forEach(key => {
-        if (key === 'advances' || key === 'unreadable') return;
+        if (['advances', 'unreadable', 'migrations', 'unreadableMigrations']
+            .indexOf(key) !== -1) return;
         // See normaliseLayer: a bare assignment under a poison name reparents the
         // container instead of carrying a field.
         if (POISON_SEGMENTS.indexOf(key) !== -1) return;

@@ -1805,9 +1805,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
            was 45px columns, which is what 406 divides into, and which the test that
            should have caught it accepted for a round because it asked for the floor
            rather than the pitch. On 390 and below the strip is still wider than the box
-           and scrolls, with the names pinned. The number is `.app`'s, written twice;
-           the print block sets it back to 0 because paper has no padding to give back. */
-        margin-inline: -12px;
+           and scrolls, with the names pinned. The number is `.app`'s own --page-pad, read
+           here rather than written twice; the print block sets it back to 0 because
+           paper has no padding to give back. */
+        margin-inline: calc(-1 * var(--page-pad, 12px));
     }
     /* NOT table-layout: fixed. Fixed layout divides the container's width between the
        columns and ignores min-width entirely - which is how `min-width: 44px` sat two
@@ -2107,7 +2108,9 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 .empty-hint { color: var(--ink-3); font-size: 15px; padding: 14px 0; margin: 0; }
 
 @media (max-width: 700px) {
-    .app { padding-inline: 12px; }
+    /* --page-pad is the ONE place the phone's page padding is written; the week strip
+       gives it back with the same property, so the two cannot drift apart. */
+    .app { --page-pad: 12px; padding-inline: var(--page-pad); }
     .site-grid { grid-template-columns: 1fr; }
     /* min-width, because the buttons inside are flex: 1 from a zero basis - so the
        toggle's own natural size collapses to almost nothing. It never looks too big for
