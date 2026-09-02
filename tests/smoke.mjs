@@ -7936,6 +7936,162 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---------------------------------------------------------------- a range reads from left to right
+//
+// "07/08/2026 - 20/08/2026" in a right-to-left paragraph is two left-to-right runs with a
+// neutral hyphen between them, and the bidi algorithm lays the RUNS out right to left: the
+// later date lands on the LEFT, and an eye that reads a date left to right reads the range
+// backwards - "20/08/2026 - 07/08/2026" - on the reports' range line, under each report's
+// heading, in the worker's days, on the week header, and in the picture the print button
+// hands the share sheet. Isolating EACH date does not help (the week header did that):
+// the pair has to be ONE left-to-right run. So it is measured, never inferred from the
+// string: the glyph rectangle of the earlier date must end left of where the later date's
+// begins, on every surface, at the phone's width.
+{
+  const page = await open({
+    viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true
+  });
+  await seedRoster(page);
+  await page.evaluate(() => {
+    for (const d of ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14']) {
+      assignPlace(State.schedule, d, 'w_01', 'actual', 'p_01');
+    }
+    State.save();
+    showView('reports');
+    REPORT_RANGE.from = '2026-08-07';
+    REPORT_RANGE.to = '2026-08-20';
+    render();
+  });
+  await page.waitForTimeout(400);
+
+  // Where each date's glyphs landed, off a Range over the text node that holds it.
+  const runsOf = (selector, needles) => page.evaluate(([sel, wanted]) => {
+    const root = document.querySelector(sel);
+    if (!root) return { missing: sel };
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const out = { text: root.textContent, runs: [] };
+    for (const needle of wanted) {
+      let found = null;
+      for (const node of nodes) {
+        const at = node.data.indexOf(needle);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + needle.length);
+        const box = range.getBoundingClientRect();
+        found = { needle, left: Math.round(box.left), right: Math.round(box.right) };
+        break;
+      }
+      out.runs.push(found);
+    }
+    return out;
+  }, [selector, needles]);
+  // The earlier date's box ends before the later date's begins - from on the left.
+  const fromLeft = got => Boolean(got && got.runs && got.runs[0] && got.runs[1])
+    && got.runs[0].right <= got.runs[1].left;
+  const show = got => JSON.stringify(got && got.runs ? got.runs : got);
+
+  const reportDates = ['07/08/2026', '20/08/2026'];
+  let got = await runsOf('.range-current', reportDates);
+  check('the reports\' range line puts the earlier date on the left', fromLeft(got), show(got));
+  got = await runsOf('.report-payroll .report-period', reportDates);
+  check('and so does the period under the pay sheet\'s heading', fromLeft(got), show(got));
+  // The length after the range - "· שישי–חמישי" - is Hebrew, and stays where a Hebrew
+  // reader goes next: to the LEFT of the whole range, not slid between its dates.
+  got = await runsOf('.report-payroll .report-period', ['07/08/2026', '20/08/2026', 'שישי–חמישי']);
+  check('with the period\'s length still to the left of the whole range',
+    Boolean(got.runs && got.runs[2]) && fromLeft(got)
+    && got.runs[2].right <= Math.min(got.runs[0].left, got.runs[1].left), show(got));
+
+  await page.evaluate(() => openWorkerDays('w_01'));
+  await page.waitForTimeout(300);
+  got = await runsOf('#workerDaysMeta', reportDates);
+  check('the worker\'s days say their period from left to right too', fromLeft(got), show(got));
+  await page.evaluate(() => closeWorkerDays());
+  await page.waitForTimeout(200);
+
+  await page.evaluate(() => { showView('week'); setWeekFromDate('2026-08-12'); render(); });
+  await page.waitForTimeout(300);
+  const weekDates = ['07/08/2026', '13/08/2026'];
+  got = await runsOf('.week-range', weekDates);
+  check('the week header puts Friday on the left of Thursday', fromLeft(got), show(got));
+
+  // THE PICTURE. The canvas is drawn right-to-left in one switch (ctx.direction), and
+  // the title carries the same range; a left-to-right isolate inside it is honoured by
+  // the canvas text engine or it is not, and only pixels can say which. Every fillText
+  // the helper makes is recorded, the range in each is drawn again under the same font
+  // and direction, and it must match the same digits drawn under a plain LTR context
+  // pixel for pixel - and NOT match the plain RTL drawing, which is the backwards one.
+  const picture = async kind => page.evaluate(which => {
+    const proto = CanvasRenderingContext2D.prototype;
+    const real = proto.fillText;
+    const calls = [];
+    proto.fillText = function (text, x, y, max) {
+      calls.push({ text: String(text), font: this.font, direction: this.direction });
+      return real.call(this, text, x, y, max);
+    };
+    let out = null;
+    try { out = printoutImage(which); } finally { proto.fillText = real; }
+    const draw = (text, font, direction) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 900;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.font = font;
+      ctx.direction = direction;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.fillText(text, 890, 32);
+      return { png: canvas.toDataURL(), width: ctx.measureText(text).width };
+    };
+    const ranged = calls.filter(call => /\d{2}\/\d{2}\/\d{4}.*\d{2}\/\d{2}\/\d{4}/.test(call.text));
+    return {
+      name: out ? out.name : null,
+      lines: ranged.map(call => {
+        const isolated = /⁦[^⁦-⁩]*\d{2}\/\d{2}\/\d{4}[^⁦-⁩]*⁩/.exec(call.text);
+        const range = isolated ? isolated[0] : /\d{2}\/\d{2}\/\d{4} - \d{2}\/\d{2}\/\d{4}/.exec(call.text)[0];
+        const plain = range.replace(/[⁦-⁩]/g, '');
+        const asDrawn = draw(range, call.font, call.direction);
+        const ltr = draw(plain, call.font, 'ltr');
+        const rtl = draw(plain, call.font, 'rtl');
+        return {
+          text: call.text.replace(/[⁦-⁩]/g, m => `<U+${m.codePointAt(0).toString(16).toUpperCase()}>`),
+          direction: call.direction,
+          isolated: Boolean(isolated),
+          readsLeftToRight: asDrawn.png === ltr.png && asDrawn.png !== rtl.png,
+          marksDrawNothing: asDrawn.width === ltr.width
+        };
+      })
+    };
+  }, kind);
+
+  let shot = await picture('week');
+  check('the week picture\'s title carries its range as one left-to-right run',
+    shot.lines.length === 1 && shot.lines[0].isolated && shot.lines[0].direction === 'rtl',
+    JSON.stringify(shot.lines));
+  check('and on the canvas the earlier date is drawn on the left',
+    shot.lines.length === 1 && shot.lines[0].readsLeftToRight, JSON.stringify(shot.lines));
+  check('with the isolate marks drawing nothing',
+    shot.lines.length === 1 && shot.lines[0].marksDrawNothing, JSON.stringify(shot.lines));
+  check('and the file is still named from-to',
+    shot.name === 'farkad-שבוע-2026-08-07-2026-08-13.png', String(shot.name));
+
+  await page.evaluate(() => { showView('reports'); render(); });
+  await page.waitForTimeout(300);
+  shot = await picture('report');
+  check('the pay sheet picture\'s period is one left-to-right run',
+    shot.lines.length === 1 && shot.lines[0].isolated && shot.lines[0].direction === 'rtl',
+    JSON.stringify(shot.lines));
+  check('drawn with the earlier date on the left',
+    shot.lines.length === 1 && shot.lines[0].readsLeftToRight, JSON.stringify(shot.lines));
+  check('and named from-to',
+    shot.name === 'farkad-דוח-שכר-2026-08-07-2026-08-20.png', String(shot.name));
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);

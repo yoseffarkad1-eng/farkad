@@ -755,6 +755,56 @@ for (const scenario of [
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- a range on the paper
+
+{
+    suite('a range on the paper reads from left to right');
+
+    // "01/08/2026 - 31/08/2026" is two left-to-right runs around a neutral hyphen, and in
+    // a right-to-left paragraph the RUNS lay out right to left: the later date lands on
+    // the left, and the period printed under the report's heading reads backwards to an
+    // eye that reads a date left to right. The PDF keeps every glyph's x, so the paper
+    // is measured, not the stylesheet: the earlier date's digits sit at the smaller x.
+    const page = await open();
+    await seed(page);
+    const buffer = await page.pdf({ format: 'A4', printBackground: true });
+    const pdf = readPdf(buffer);
+    given('the print produced a real PDF', buffer.length > 2000, `${buffer.length} bytes`);
+
+    // Each baseline's digits in x order, with where each digit starts. The slashes come
+    // back as their own runs or not at all, depending on the font; the digits are what
+    // tells the two dates apart and they always do.
+    const digitLines = page0 => {
+        const rows = new Map();
+        page0.texts.forEach(item => {
+            const key = Math.round(item.y / 3);
+            if (!rows.has(key)) rows.set(key, []);
+            rows.get(key).push(item);
+        });
+        return [...rows.values()].map(items => {
+            const sorted = items.sort((a, b) => a.x - b.x);
+            let digits = '';
+            const xs = [];
+            sorted.forEach(item => {
+                for (const ch of item.text) {
+                    if (/\d/.test(ch)) { digits += ch; xs.push(item.x); }
+                }
+            });
+            return { digits, xs };
+        });
+    };
+    const ranges = pdf.pages.flatMap(digitLines)
+        .map(line => ({ from: line.digits.indexOf('01082026'), to: line.digits.indexOf('31082026'), line }))
+        .filter(found => found.from >= 0 && found.to >= 0)
+        .map(found => ({ fromX: Math.round(found.line.xs[found.from]), toX: Math.round(found.line.xs[found.to]) }));
+    given('the paper carries the period, under each report\'s heading',
+        ranges.length >= 1, JSON.stringify(ranges));
+    check('and every one of them has the earlier date at the smaller x - on the left',
+        ranges.length >= 1 && ranges.every(found => found.fromX < found.toX), JSON.stringify(ranges));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();
