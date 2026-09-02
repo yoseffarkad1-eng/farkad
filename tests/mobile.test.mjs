@@ -2378,6 +2378,123 @@ for (const width of WIDTHS) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- the header compacts (v101)
+//
+// Room without moving a bar. The day header is two rows at the top of the page and one
+// row once the page has been scrolled: the day name, its date and the two arrows stay,
+// because the entry that costs real money is a day recorded against the wrong date and
+// halfway down a list of names nothing else says what day this is. Undo, redo, "היום" and
+// the progress line's TEXT go; the 4px track stays, because it is the header's own bottom
+// edge and costs no row.
+//
+// The state comes from a scroll threshold and from nothing else. v99 spent a round pulling
+// a viewport measurement out of the bottom bars - a phone that reports a stale viewport
+// left both bars hidden until the app was killed - and this must not be a second door into
+// the same fault. The check for that is below: the class follows scrollY back down again.
+for (const width of [430, 390, 320]) {
+    const label = `${width}px: the day header compacts on scroll`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+
+    const m = await page.evaluate(async () => {
+        const settle = () => new Promise(done => setTimeout(done, 260));
+        const read = () => {
+            const header = document.querySelector('.day-header');
+            const steps = document.querySelector('.day-steps');
+            const track = document.querySelector('.day-header .progress-bar');
+            const seen = node => {
+                if (!node) return false;
+                const box = node.getBoundingClientRect();
+                return box.width > 0 && box.height > 0;
+            };
+            return {
+                header: Math.round(header.getBoundingClientRect().height),
+                steps: seen(steps),
+                track: seen(track),
+                label: seen(document.querySelector('.day-label')),
+                compact: document.body.classList.contains('day-compact'),
+                page: document.documentElement.scrollWidth,
+                client: document.documentElement.clientWidth
+            };
+        };
+        window.scrollTo(0, 0);
+        await settle();
+        const top = read();
+        window.scrollTo(0, 400);
+        await settle();
+        const down = read();
+        window.scrollTo(0, 0);
+        await settle();
+        const back = read();
+        return { top, down, back };
+    });
+
+    given(`${label}: at the top it is the full header, with undo on it`,
+        m.top.compact === false && m.top.steps === true, JSON.stringify(m.top));
+    check(`${label}: scrolled, the header is shorter than it was at the top`,
+        m.down.header < m.top.header,
+        JSON.stringify({ top: m.top.header, scrolled: m.down.header }));
+    check(`${label}: scrolled, the tools row is not drawn`, m.down.steps === false,
+        JSON.stringify(m.down));
+    check(`${label}: scrolled, the day name and date are still there`,
+        m.down.label === true, JSON.stringify(m.down));
+    check(`${label}: scrolled, the progress track is still there`,
+        m.down.track === true, JSON.stringify(m.down));
+    // The half that matters: a class that goes on at a threshold and never comes off is
+    // the v99 fault wearing a different name.
+    check(`${label}: back at the top, the full header returns`,
+        m.back.compact === false && m.back.steps === true && m.back.header === m.top.header,
+        JSON.stringify({ back: m.back, top: m.top.header }));
+    check(`${label}: neither state scrolls the page sideways`,
+        m.top.page <= m.top.client + 1 && m.down.page <= m.down.client + 1,
+        JSON.stringify({ top: m.top.page, down: m.down.page, client: m.top.client }));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the switcher, in the header
+//
+// "לפי עובדים / לפי אתרים" had a 48px row of its own above the list. A way of working is
+// chosen once and not consulted every row, so it belongs with the chrome that compacts
+// away rather than with the list - and the row it used to occupy goes back to the crew.
+// 44px in BOTH dimensions is the floor (iron law 9), and it is the floor here too: a
+// segmented pair squeezed into a row it does not fit is a mis-tap on somebody's pay.
+for (const width of [430, 390, 320]) {
+    const label = `${width}px: the switcher is in the header`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+
+    const m = await page.evaluate(() => {
+        const modes = [...document.querySelectorAll('.mode-toggle button')];
+        const header = document.querySelector('.day-header');
+        return {
+            row: Boolean(document.querySelector('.day-mode-row')),
+            count: modes.length,
+            inHeader: modes.length > 0 && modes.every(b => header.contains(b)),
+            boxes: modes.map(b => {
+                const box = b.getBoundingClientRect();
+                return { w: Math.round(box.width), h: Math.round(box.height),
+                    text: (b.textContent || '').trim() };
+            })
+        };
+    });
+
+    check(`${label}: it has no row of its own any more`, m.row === false, String(m.row));
+    given(`${label}: both ways of looking at the day are still offered`, m.count === 2,
+        JSON.stringify(m.boxes));
+    check(`${label}: both segments are inside the header`, m.inHeader === true,
+        JSON.stringify(m.boxes));
+    check(`${label}: both segments are 44px in both dimensions`,
+        m.boxes.length === 2 && m.boxes.every(b => b.w >= 44 && b.h >= 44),
+        JSON.stringify(m.boxes));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();
