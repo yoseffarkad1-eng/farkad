@@ -52,13 +52,21 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
-    At V100_SHA (v100: the holds nobody disagreed about - one arithmetic for a closure's
+    At 847560c (v100: the holds nobody disagreed about - one arithmetic for a closure's
     writer and its judge, a clock that is behind refusing rather than moving money
     quietly, the same-fact rule asked at every gate that can hold a write, every name in
     the day message isolated, and the week strip showing where it is cut off), a clean
     detached worktree at that commit, Node v22.22.2, git diff --check clean, copied from
     no other run - BOTH GATES, run separately, on the tree that carries v99 as well:
-V100_COUNTS
+    npm test           43 suites   4366/4366   exit 0
+                       (closure 117, samefact 37, exports 73, status 33, smoke's node half
+                       unchanged)
+    npm run test:release
+                       59 suites   6747/6747   exit 0
+                       (smoke 1130, print 78, mobile 752, update 30, forms-browser 10,
+                       recovery-browser 25, handover 26, swrestart 31, swidentity 55,
+                       sendclaim 43; rules 59, cas.emulator 24, rollout 17,
+                       bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
     No suite was added by either round, so the counts stay 43 and 59.
     The storm suite beside it: ten serial runs against the real emulator on an idle
     machine, 50/50 every one. Two earlier attempts came back 43/50 and 46/50 and were

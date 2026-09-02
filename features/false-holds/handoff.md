@@ -1,8 +1,9 @@
 # Handoff — v100: the holds nobody disagreed about
 
 - Branch: `claude/farkad-mobile-design-review-odl8ue`
-- SHA: `3990de007fb83f0eb0915b7e2f54ef552f9e59fb`
-- Base: `4a4d277` (v98 as served, `5dd5a83`, plus the brief this round was given)
+- SHA: `847560c77f9713e8d611d1f40b3e8960123a469b`
+- Base: `4a4d277` (v98 as served), merged with `5650235` — the v99 that was served from
+  this same branch while this round was being built
 - Build stamps at that SHA: `farkad-build` v100 · `APP_VERSION` v100 · `VERSION` farkad-v100
 - Gates: `LEDGER_WRITES` false, `carryAdvances` false. Neither moved.
 - Contracts: `features/false-holds/contract.md` (items 1–4), `features/gate-flip/contract.md`
@@ -103,7 +104,7 @@ change.
 ## Test output (verbatim, on the final commit)
 
 ```
-=== npm test on 3990de007fb83f0eb0915b7e2f54ef552f9e59fb at 19:04:55 v22.22.2
+=== npm test on 847560c77f9713e8d611d1f40b3e8960123a469b at 19:28:34 v22.22.2
 18/18 checks passed
 11/11 checks passed
 29/29 checks passed
@@ -136,7 +137,7 @@ change.
 240/240 checks passed
 151/151 checks passed
 88/88 checks passed
-29/29 checks passed
+33/33 checks passed
 40/40 checks passed
 206/206 checks passed
 51/51 checks passed
@@ -148,9 +149,9 @@ change.
 23/23 checks passed
 32/32 checks passed
 EXIT=0
-43 suites · 4362/4362 checks
+43 suites · 4366/4366 checks
 
-=== npm run test:release on 3990de007fb83f0eb0915b7e2f54ef552f9e59fb at 19:08:04 v22.22.2
+=== npm run test:release on 847560c77f9713e8d611d1f40b3e8960123a469b at 19:31:40 v22.22.2
 18/18 checks passed
 11/11 checks passed
 29/29 checks passed
@@ -183,7 +184,7 @@ EXIT=0
 240/240 checks passed
 151/151 checks passed
 88/88 checks passed
-29/29 checks passed
+33/33 checks passed
 40/40 checks passed
 206/206 checks passed
 51/51 checks passed
@@ -194,9 +195,9 @@ EXIT=0
 23/23 checks passed
 23/23 checks passed
 32/32 checks passed
-1124/1124 checks passed
+1130/1130 checks passed
 78/78 checks passed
-740/740 checks passed
+752/752 checks passed
 30/30 checks passed
 10/10 checks passed
 25/25 checks passed
@@ -211,13 +212,17 @@ EXIT=0
 28/28 checks passed
 50/50 checks passed
 EXIT=0
-59 suites · 6725/6725 checks
+59 suites · 6747/6747 checks
 ```
 
-Both from one clean detached worktree at `3990de0`, `git diff --check` clean, Node
-v22.22.2, neither wrapped in anything that turns a nonzero exit into a success. The two
-gates were run separately and are reported separately; `npm test` contains no emulator
-suite, which is why it is not evidence about the six that matter most here.
+Both from one clean detached worktree at `847560c`, `git diff --check` clean, Node
+v22.22.2, run separately and reported separately, neither wrapped in anything that turns
+a nonzero exit into a success. `npm test` contains no emulator suite, which is why it is
+not evidence about the six that matter most here.
+
+An earlier pair of runs on `3990de0` — this round's work WITHOUT the v99 that was served
+from the same branch — was 43/4362 and 59/6725, also green. The numbers above supersede
+them: they were measured on a tree that does not exist any more.
 
 ## The storm suite, repeatedly
 
@@ -253,3 +258,23 @@ Nothing of items 1–8 is open.
   log.
 - The mobile suite is Chromium, not Safari, and its 2× text pass is not Dynamic Type. Row
   18 of the acceptance list remains the only Dynamic Type coverage there is.
+
+## Where this sits in the other plan
+
+`features/next/opus-closeout.md` was written by the session that shipped v99 from this same
+branch, and it lays the same ground out as waves. This round is not that plan and did not
+follow it — its own brief was `features/next/brief-for-opus.md`, the eight items — but they
+overlap, so plainly:
+
+- **Wave 1, items 1–4: done here.** The data-safety re-audit that wave also asks for is
+  NOT done; `docs/data-safety-audit.md` still predates the send-path repairs, the ledger
+  merge and the storm.
+- **Wave 2: the week strip's scroll cue and both hardening pins are done here.** The three
+  day-screen changes that wave asks for — the header compacting on scroll, the mode
+  switcher joining that row, the site cards' footer buttons becoming icons in the header —
+  are NOT done.
+- **Wave 5: the gate-flip contract is done here** (`features/gate-flip/contract.md`).
+- **Waves 0, 3 and 4** are untouched by this round.
+
+That plan numbers its publishes v100, v101 and so on. This build is v100 because v99 was
+taken while it was being written, not because it is that plan's Wave 1.
