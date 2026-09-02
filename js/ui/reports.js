@@ -772,8 +772,10 @@ function renderPeriodClosure(worker) {
     if (!financialWritingEnabled(State.schedule)) return null;
     if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)) return null;
 
+    // Planned at the moment this screen is drawn, and re-planned at the moment the button
+    // is pressed - the clock reason below is a question about NOW, not about the record.
     const plan = planPeriodClosure(State.schedule, worker.id,
-        REPORT_RANGE.from, REPORT_RANGE.to);
+        REPORT_RANGE.from, REPORT_RANGE.to, new Date().toISOString());
 
     const box = el('div', 'period-closure');
     if (plan.reasons.indexOf('closed') !== -1) {
@@ -785,6 +787,14 @@ function renderPeriodClosure(worker) {
         box.appendChild(el('p', 'hint hint-warn',
             'יש עודף בהחזרי המקדמות של העובד הזה. אי אפשר לסגור חשבון שלא מסתדר - '
             + 'תקן קודם, ואז סגור.'));
+        return box;
+    }
+    // THE PHONE'S OWN CLOCK, said out loud. A closure written from here would be sound
+    // arithmetic and wrong about the world: a movement recorded before it, on a phone
+    // whose clock is ahead of this one, would be pushed into the next fortnight - on
+    // somebody's payslip, silently. The button is not offered; the sentence is.
+    if (plan.reasons.indexOf('clock') !== -1) {
+        box.appendChild(el('p', 'hint hint-warn', CLOSURE_CLOCK_BEHIND));
         return box;
     }
     if (!plan.canClose) return null;
@@ -811,11 +821,23 @@ async function closeAccountFor(worker, plan) {
     // Re-planned against the record as it is NOW, not against the plan this screen was
     // drawn from: the other phone may have closed it while this dialog was open. An empty
     // list is the right answer to that, not an error - the account is closed either way.
+    //
+    // ONE MOMENT for the plan and the write, because the clock reason is a question about
+    // that moment: planning at one `at` and writing at another asks two questions.
+    const at = new Date().toISOString();
     const changes = closePeriodChanges(State.schedule, worker.id,
-        REPORT_RANGE.from, REPORT_RANGE.to, new Date().toISOString(), syncDeviceId());
+        REPORT_RANGE.from, REPORT_RANGE.to, at, syncDeviceId());
     if (changes.length === 0) {
+        // AND SAID FOR THE RIGHT REASON. Nothing written now has two causes - it was
+        // already closed, or this phone's clock is behind something on the record - and
+        // «נסגר כבר» told a person the fortnight was done when it was not. The plan is
+        // asked, at the same moment, which one it was.
+        const why = planPeriodClosure(State.schedule, worker.id,
+            REPORT_RANGE.from, REPORT_RANGE.to, at);
         if (typeof askTell === 'function') {
-            await askTell(`${LEDGER_KIND_LABELS.closed} כבר. לא נרשם דבר נוסף.`);
+            await askTell(why.reasons.indexOf('clock') !== -1
+                ? CLOSURE_CLOCK_BEHIND
+                : `${LEDGER_KIND_LABELS.closed} כבר. לא נרשם דבר נוסף.`);
         }
         openWorkerDays(worker.id);
         return;
@@ -1450,6 +1472,16 @@ function deductionColumnName() {
         ? LEDGER_KIND_LABELS.deducted
         : 'מקדמות';
 }
+
+// WHY A CLOSE IS REFUSED FOR A REASON THAT IS NOT ABOUT THE MONEY.
+//
+// Said in one place because it is said in two: on the block instead of the button, and
+// in the dialog when the clock went behind between drawing the screen and pressing.
+// It names what would happen rather than the mechanism - a person holding a phone does
+// not care which timestamp lost, they care that a payment would move fortnight.
+const CLOSURE_CLOCK_BEHIND = 'השעון של הטלפון הזה מפגר אחרי תנועה שכבר רשומה בחשבון. '
+    + 'סגירה מהטלפון הזה תעביר את התנועה הזאת לתקופה הבאה - לכן היא חסומה עכשיו. '
+    + 'נסה שוב בעוד כמה דקות, או סגור מטלפון אחר.';
 
 const LEDGER_KIND_LABELS = {
     given: 'ניתנה מקדמה',

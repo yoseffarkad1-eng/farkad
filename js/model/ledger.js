@@ -974,7 +974,30 @@ function recordPeriodArtifact(schedule, workerId, from, to, at, by, facts) {
     }));
 }
 
-function planPeriodClosure(schedule, workerId, from, to) {
+// Every entry of this advance that the closure's own cut-off would drop for having been
+// RECORDED after it - not for its date. See planPeriodClosure's `clock` reason.
+function recordedAfter(schedule, advanceId, to, at) {
+    if (!at) return [];
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    return Object.keys(held).filter(id => {
+        const entry = held[id];
+        if (!entry || String(entry.advanceId) !== String(advanceId)) return false;
+        // The origin is never dropped by either half of the cut-off: it is what the
+        // advance IS. Nor is an entry with no `at` - it predates the stamp and there is
+        // nothing to order it by, so outstandingWithout counts it and so does this.
+        if (String(entry.kind) === 'given') return false;
+        if (String(entry.at || '') === '') return false;
+        // Dropped for its DATE instead? That is ordinary late money - advanceWalk carries
+        // it into the next account and names it lateSinceClose - and it refuses nothing.
+        if (to && String(entry.date || '') > String(to)) return false;
+        return String(entry.at) > String(at);
+    });
+}
+
+// `at` is the moment the closure would carry. It is optional only so that a caller that
+// has not decided yet can still draw the screen; the one caller that WRITES passes it,
+// and closePeriodChanges hands it straight through.
+function planPeriodClosure(schedule, workerId, from, to, at) {
     const walk = advanceAccount(schedule, workerId, from, to);
     const reasons = [];
     if (walk.closed) reasons.push('closed');
@@ -983,13 +1006,36 @@ function planPeriodClosure(schedule, workerId, from, to) {
 
     const advances = (schedule && schedule.advances) || {};
     const folded = foldLedger(schedule);
+    // THE RECORD THE CLOSURE WILL BE JUDGED AGAINST, not the whole of it.
+    //
+    // This asked advanceOutstanding - everything on the record, whenever it was dated and
+    // whenever it was written down. closureProblems asks outstandingWithout with the
+    // period's end and the closure's own moment, because a closure freezes the arithmetic
+    // as it stood when it was written. So the writer and the judge did the sum from two
+    // different records, and when the two answers differed the closure was written,
+    // accepted, and then condemned by this app's own reader: impossibleClosures named it
+    // and the phone blocked its own writes on the next boot.
+    //
+    // It needed no race and no clock skew. A man repays 400 on the 24th; the boss closes
+    // the 07-20 fortnight on the 26th - which is when a fortnight actually gets closed.
+    // The rule saw 5,000 left, the plan computed from 4,600, and the man's phone went
+    // into recovery over a fortnight nobody disagreed about. Measured on 4a4d277,
+    // tests/closure.test.mjs «a fortnight closed after the man has already repaid
+    // something».
+    //
+    // The cut-off itself is not the bug and is not touched: it is what stops a repayment
+    // that lands AFTER a closure condemning it, which is a bug this file already fixed
+    // once (see outstandingWithout). The writer is the half that was wrong.
+    const leftOf = id => (at
+        ? outstandingWithout(schedule, id, null, to, at)
+        : advanceOutstanding(schedule, id));
     const ids = Object.keys(advances).concat(Object.keys(folded))
         .filter((id, at, all) => all.indexOf(id) === at)
         .filter(id => {
             const of = folded[id] || advances[id];
             return Boolean(of) && String(of.workerId) === String(workerId);
         })
-        .map(id => ({ id, state: advanceOutstanding(schedule, id),
+        .map(id => ({ id, state: leftOf(id),
             date: String((folded[id] || advances[id]).date || '') }))
         .filter(row => row.state.left > 0)
         .sort((a, b) => (a.date < b.date ? -1 : (a.date > b.date ? 1 : (a.id < b.id ? -1 : 1))));
@@ -1009,6 +1055,25 @@ function planPeriodClosure(schedule, workerId, from, to) {
         });
     });
 
+    // A CLOCK THAT IS BEHIND SAYS SO, rather than moving money quietly.
+    //
+    // With the writer and the judge agreeing (above), a closure written on a phone whose
+    // clock is behind another's is arithmetically sound - and wrong about the world. An
+    // entry recorded BEFORE it in real time is excluded for having a later `at`, so the
+    // money lands in the next fortnight instead of this one, on somebody's payslip,
+    // because a phone is wrong about the time. No money is lost either way, which is
+    // exactly why nobody would ever notice.
+    //
+    // So it is refused and named. Refusing is reversible and the person can act on it -
+    // wait, or fix the phone's clock. A frozen payslip is not: «סגירה היא סופית».
+    //
+    // Only what the `at` half of the cut-off drops, and only on the advances this close
+    // would touch. Late money - dropped for its DATE - refuses nothing.
+    if (rows.length > 0 && rows.some(row =>
+        recordedAfter(schedule, row.advanceId, to, at).length > 0)) {
+        reasons.push('clock');
+    }
+
     // A FORTNIGHT WITH NOTHING TO DEDUCT IS STILL A FORTNIGHT. `rows.length > 0` meant
     // the artifact could only be written for a man who owed money, so everybody else's
     // payslip stayed live for ever. The rows decide what money MOVES; whether the period
@@ -1022,7 +1087,10 @@ function planPeriodClosure(schedule, workerId, from, to) {
 // The changes that close it. An empty list means nothing to do - which is what a second
 // press must produce, and what a second PHONE must produce once the first has landed.
 function closePeriodChanges(schedule, workerId, from, to, at, by) {
-    const plan = planPeriodClosure(schedule, workerId, from, to);
+    // PLANNED AT THE MOMENT IT WILL BE WRITTEN. The rows are computed as of `at`, and the
+    // clock reason is asked of `at`, so what this writes is what closureProblems will
+    // judge - see planPeriodClosure.
+    const plan = planPeriodClosure(schedule, workerId, from, to, at);
     if (!plan.canClose) return [];
     // Worked out ONCE, from the record as it stands before any of these land, and handed
     // to every entry: the artifact and the deductions describe one fortnight and must not
