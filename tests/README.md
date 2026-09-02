@@ -52,6 +52,18 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 1e3f092 (v98: the storm closed - a ledger entry is its own JSON round-trip - the
+    frozen hours, and the by-site grid's short dates), the cd-work worktree, clean at that
+    commit, Node v22.22.2, .gate-release.log there, copied from no other run - the WHOLE
+    release gate:
+    npm test           43 suites   4332/4332   (closure-echo 79 is new; closure 103)
+    npm run test:all   + 9 suites  + 2088      (smoke 1124, print 78, mobile 709, update 30, forms-browser 10, recovery-browser 25, handover 26, swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244      (sendclaim 43; rules 59, cas.emulator 24, rollout 17, bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    the whole gate     59 suites   6664/6664   exit 0
+    The storm suite beside it, on the fix commit b306931: twelve shipped runs and three
+    forced-order runs, all 50/50 (features/storm/handoff.md).
+    Per suite and verbatim: features/storm/handoff.md.
+
     At f718367 (v97: the first iPhone round - the print fallback and the picture, the
     Saturday step, touch-action, the chip, the export path told the truth, ranges from
     left to right, the worker modal, the by-site print), the cd-work worktree, clean at
