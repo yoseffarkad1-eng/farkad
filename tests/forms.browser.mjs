@@ -43,6 +43,15 @@ const noise = [];       // console errors, filtered: see below
 async function open() {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
+    // BOTH MONEY GATES, opened before the app loads and only for this page, through the
+    // one seam js/model/schema.js reads at definition time. The shipped defaults are
+    // closed - a phone offers neither form - and this suite drives the build a person
+    // would ship with them open. An init script survives the reload below, which an
+    // assignment into the frozen FARKAD_FLAGS never did: that line was a silent no-op
+    // that only looked like it worked because the branch shipped the flag open.
+    await page.addInitScript(() => {
+        window.FARKAD_FLAG_OVERRIDES = { carryAdvances: true, ledgerWrites: true };
+    });
     // An UNCAUGHT PAGE ERROR is the thing this file exists to catch. Console errors are
     // not: this origin cannot reach the Firebase SDK at all, so every run logs several
     // ERR_TUNNEL_CONNECTION_FAILED lines, and treating those as failures would make the
@@ -65,7 +74,6 @@ async function open() {
     // A man, a fortnight, an advance he was handed, and a repayment recorded against it -
     // which is the record both forms are offered on.
     await page.evaluate(async () => {
-        FARKAD_FLAGS.carryAdvances = true;
         State.schedule.workers = [{ id: 'w_01', name: 'עומר', active: true,
             dailyRate: 500, hourlyRate: 0 }];
         State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];

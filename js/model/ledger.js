@@ -40,12 +40,13 @@
 // The compatibility gate. False while any device may still be on a build that cannot read
 // ledger entries. Nothing but a person deciding all three phones have updated may flip it.
 //
-// ON THIS BRANCH IT IS TRUE, and this branch is not main and has not been merged.
-// claude/farkad-ledger-enable-ready exists so that the build somebody eventually ships
-// can be run end to end before anybody commits to it - see the commit that flipped it.
-// Merging this is the decision iron law 1 reserves for a person, and it is only theirs to
-// make once all three phones are known to be past v79.
-const LEDGER_WRITES = true;
+// CLOSED AGAIN AT THE MERGE. claude/farkad-ledger-enable-ready opened it - and
+// carryAdvances in js/model/schema.js with it - so the build somebody eventually ships
+// could be run end to end before anybody committed to it. Taking that branch onto the
+// core is not that decision: the flip is a person's, and only somebody who knows all
+// three phones are past v79 AND has read every row of planAdvanceCarry may make it. The
+// suites that measure the open build open it through the seam below, never here.
+const LEDGER_WRITES = false;
 
 // THE ONE SEAM, and it is the same seam every other gate in this app has.
 //

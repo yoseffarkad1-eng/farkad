@@ -43,6 +43,9 @@ different from what was done.
    `js/model/ledger.js` is `false` and only a person who knows all three phones are
    past v79 may flip it. The boot-time mirror in `state.js` is the ONE sanctioned
    write; ledger entries are never edited, never deleted, and merged by union.
+   `carryAdvances` in `js/model/schema.js` moves with it, in the same commit and the
+   same direction - one gate open without the other ships a lie - and
+   `tests/data.test.mjs` pins the pair.
 2. **Days keep the rate they were worked at.** Rates are stamped onto the day record
    at first write and survive every later edit; reports price each day at its stamp.
    Never restate a stamped day, and never stamp old days retroactively —
@@ -95,20 +98,10 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
 Node 20 or 22 (`engines` says `>=20.11 <23`). NO COUNT IS WRITTEN HERE, deliberately. A
 count belongs to a commit and to nothing else, and one left in a file goes stale the
 moment the next suite lands - at which point it is worse than no count, because it reads
-as a fact. Run the gate on the commit you are asking about and say which commit you ran
-it on. This branch's numbers are not the core branch's either: it runs the same suites
-with both money gates open, so several of them assert more.
-
-**THIS BRANCH IS NOT MAIN.** `claude/farkad-ledger-enable-ready` is the build with
-`LEDGER_WRITES` and `carryAdvances` both OPEN, so that what somebody eventually ships can
-be run end to end before anybody commits to it. Merging it is the decision iron law 1
-reserves for a person, and it is only theirs to make once all three phones are known to
-be past v79 AND they have read every row of `planAdvanceCarry`. It carries its own build
-stamp, because it is not the same bytes as the core branch's and two builds sharing a
-cache name serve a mixture. It has always moved UP rather than sideways when the core
-branch took a number, because it is built from that line and supersedes it.
-
-Anything less than every check passing is a stop, not a warning. `npm test`
+as a fact, and the paragraph below already says so about counts carried between commits.
+Run the gate on the commit you are asking about, from one clean detached worktree, and
+say which commit you ran it on. Anything less than every check passing is a stop, not a
+warning. `npm test`
 and `npm run test:release` are different gates and are reported separately; neither is
 wrapped in anything that turns a nonzero exit into a success. A count carried over from
 another commit is worse than no count: re-measure, or say you did not.
@@ -117,6 +110,12 @@ The browser suites need Playwright's Chromium once (`npm run browsers`), or poin
 `CHROME_PATH` at a browser that is already installed — see `tests/README.md` before
 downloading anything. The emulator suites need Java and run through
 `firebase emulators:exec`; they never touch the real project.
+
+The suites the ledger branch brought measure the build a person would ship with the
+money gates OPEN. They open them through the test seam and nowhere else - `flags` on a
+harness device, `FARKAD_FLAG_OVERRIDES` set before the page loads in a browser suite -
+so the shipped defaults stay closed and pinned (`tests/data.test.mjs`, `tests/smoke.mjs`)
+while the machinery behind them is still measured on every run.
 
 ## The culture
 

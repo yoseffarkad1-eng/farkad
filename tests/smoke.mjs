@@ -5851,20 +5851,22 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('the export carries the same money columns as the screen',
     head.includes('נצבר') && head.includes('מקדמות') && head.includes('לתשלום'),
     JSON.stringify(head));
-  // MOVED AGAIN, and this time it is the RECORD that decides rather than the build.
+  // MEASURED WITH THE GATES SHUT, which is the build this page ships.
   //
-  // On main an advance from another account is not deducted from this one, so w_01's
-  // column is 0 and he is paid the whole 1,600. That guarantee is what the carry is
-  // built to overturn: this man took 900 in accounts where he worked nothing, so
-  // nothing could come off it there, and it comes off here - 1,600 earned, 900
-  // deducted, 700 to pay.
+  // The ledger branch measured this file twice: the old arithmetic before anybody
+  // approved the carry migration, and לתשלום net of the carry - 1,600 earned, 900
+  // deducted, 700 to pay - once somebody had. That second half needs the carry gate
+  // OPEN, and at the merge both money gates were closed again: the flip is a person's
+  // decision (iron law 1), and a merge is not a person. The open build is still
+  // measured, through the seam: tests/approval.test.mjs reads these same surfaces on a
+  // harness device with `flags`, and tests/print.test.mjs prints the carried debt off a
+  // page whose gates were opened before it loaded.
   //
-  // When this check was written, opening the two flags was enough to make that happen.
-  // C1 took that away: no surface may read the new arithmetic until a person has read
-  // the rows and approved the migration, because a fortnight already printed and paid
-  // must not restate itself at the next open. So the file below is measured TWICE, and
-  // the pair is the whole rule.
-  check('before anybody approves the migration the file is the old arithmetic',
+  // What THIS page has to prove is the other half of the same rule. With the gates
+  // shut no surface reads the new arithmetic - and an approval ON THE RECORD, which a
+  // phone with the gates open may well have written, moves nothing here. The screen
+  // that asks for approval is not even drawn, because there is nothing to approve FOR.
+  check('with the gates shut the file is the old arithmetic, under the old heading',
     w1[head.indexOf('לתשלום')] === 1600 && w1[head.indexOf('מקדמות')] === 0
     && head.includes('מקדמות') && !head.includes('נוכה מהשכר'),
     JSON.stringify([head, w1]));
@@ -5875,23 +5877,25 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
       State.commit(recordCarryApproval(State.schedule, plan,
         new Date().toISOString(), syncDeviceId()));
     }
+    renderCarryMigration();
     const sheet = reportSheets().payroll;
-    return { head: sheet[0], row: sheet.find(line => line[0] === 'דוד') };
+    return { head: sheet[0], row: sheet.find(line => line[0] === 'דוד'),
+             needed: plan.needed,
+             approved: carryMigrationApproved(State.schedule, plan),
+             reading: carryReportingEnabled(State.schedule),
+             box: getComputedStyle(document.getElementById('carryMigrationBox')).display };
   });
-  check('and once somebody has, its לתשלום is net of the carry',
-    approved.row[approved.head.indexOf('לתשלום')] === 700
-    && approved.row[approved.head.indexOf('נוכה מהשכר')] === -900,
-    JSON.stringify([approved.head, approved.row]));
-  // The column is named after what is IN it, which is the other half of the same
-  // decision: before approval that cell is the advances, after it the deduction.
-  check('under a heading that says which of the two it is',
-    approved.head.includes('נוכה מהשכר') && !approved.head.includes('מקדמות'),
-    JSON.stringify(approved.head));
+  check('an approval on the record moves nothing while the carry gate is shut',
+    approved.needed === true && approved.approved === true && approved.reading === false
+    && approved.row[approved.head.indexOf('לתשלום')] === 1600
+    && approved.head.includes('מקדמות') && !approved.head.includes('נוכה מהשכר'),
+    JSON.stringify([approved.head, approved.row, approved.needed, approved.reading]));
+  check('and the review screen is not drawn, because there is nothing to approve for',
+    approved.box === 'none', JSON.stringify(approved.box));
 
   // The check further up - "an advance from another account is not deducted from this
-  // one" - still passes, because row.advances is the legacy in-range total and the carry
-  // does not touch it. That is worth knowing rather than tidying away: the two numbers
-  // answer different questions, and only the column is what somebody is paid on.
+  // one" - is the same guarantee from the other side: row.advances is the legacy
+  // in-range total, and with the carry shut it is the only number anybody is paid on.
 
   // The minus sign in Hebrew text lays out on the wrong side of the digits without a
   // direction mark - the worker read "500-" on the one number that says money was taken.
@@ -6592,34 +6596,23 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     JSON.stringify(fold.entries));
   check('and says where the entry came from',
     fold.entries[0].includes('הועתק מהרישום הקיים'), JSON.stringify(fold.entries));
-  // MOVED ON THIS BRANCH, deliberately, and this is the third check in the whole gate
-  // that had to.
+  // BACK TO THE SHIPPED ANSWER, deliberately, with the gate.
   //
-  // It read `fold.controls === 0`, and on main it still would: with the writer gate shut
-  // nothing in this app can write a ledger entry, so a control inside the history would
-  // be a button that cannot do anything. This branch opens that gate, and a correction
-  // has to name the immutable transaction it corrects - which means the control belongs
-  // beside the transaction, and the history is the only place each one is shown.
-  //
-  // So the guarantee is narrowed rather than dropped, because what it was protecting is
-  // still true: nothing in the history EDITS or DELETES anything. The one control appends
-  // a correction, with a reason, leaving both rows on the record - see recordEventReversed
-  // in js/model/ledger.js and the L4 suites in tests/repayment.test.mjs.
-  check('the history appends, and offers nothing that edits or deletes',
-    fold.buttons.every(text => text === 'תיקון'),
-    JSON.stringify(fold.buttons));
-  check('one correction control, on the one transaction that can be corrected',
-    fold.controls === 1 && fold.buttons.length === 1,
+  // The ledger branch narrowed this to "one correction control, on the one transaction
+  // that can be corrected": with the writer open, a correction has to name the immutable
+  // transaction it corrects, and the history is the only place each one is shown. That
+  // control is still measured - tests/forms.browser.mjs presses it in a real browser on
+  // a page whose gates were opened before it loaded - but it is not what this page
+  // ships. With the writer gate shut nothing in this app can write a ledger entry, so a
+  // control inside the history would be a button that cannot do anything, and the fold
+  // holds none. financialWritingEnabled is the gate every one of those buttons asks.
+  check('read-only means read only: no control of any kind inside the fold',
+    fold.controls === 0 && fold.buttons.length === 0,
     JSON.stringify({ controls: fold.controls, buttons: fold.buttons }));
-  check('the gate is open, because this branch is the one that opens it',
-    (await page.evaluate(() => ledgerWritesEnabled())) === true);
-  // And it is drawn for a reason this page can state: financial writing is open here.
-  // What happens to it when that is shut - the case main ships - is measured against the
-  // record rather than the browser, in tests/repayment.test.mjs; this record has nothing
-  // for the carry to restate, so emptying its approvals would not shut anything.
-  check('and it is drawn because this record may be written to',
-    (await page.evaluate(() => financialWritingEnabled(State.schedule))) === true);
-  // Left loud rather than deleted.
+  check('because the gate itself is still closed',
+    (await page.evaluate(() => ledgerWritesEnabled())) === false);
+  check('and so nothing financial may be written on this record',
+    (await page.evaluate(() => financialWritingEnabled(State.schedule))) === false);
 
   await page.evaluate(() => openWorkerDays('w_02'));
   await page.waitForTimeout(200);

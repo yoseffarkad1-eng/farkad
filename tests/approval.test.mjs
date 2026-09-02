@@ -2,8 +2,8 @@
 //
 //   node tests/approval.test.mjs
 //
-// This branch is the one with both money gates open, and opening them changes what every
-// account on it says. planCarryMigration exists precisely because that change is not the
+// With both money gates open - the shipped defaults are closed, and this suite opens them
+// through the harness seam - what every account says changes. planCarryMigration exists precisely because that change is not the
 // app's to make: a fortnight that was already printed and paid must not silently restate
 // itself the next time somebody opens the app. So there is a review screen, an approval
 // that lives in the record, and a gate - financialWritingEnabled - that stays shut until
@@ -51,8 +51,15 @@ const ADVANCE = 5000;
 const LEGACY_PAYABLE = GROSS - ADVANCE;      // -1950
 const CARRIED_DEBT = ADVANCE - GROSS;        //  1950
 
+// THE GATES, opened through the harness's seam and nowhere else. The shipped defaults are
+// closed - tests/data.test.mjs pins both - and this suite measures the build a person
+// would ship by opening them the way a build with the flags on would: before the app
+// loads, into the frozen FARKAD_FLAGS.
+const GATES = { carryAdvances: true, ledgerWrites: true };
+
 function phone(deviceId, storage) {
-    const device = makeDevice(storage ? { deviceId, storage } : { deviceId });
+    const device = makeDevice(storage
+        ? { deviceId, storage, flags: GATES } : { deviceId, flags: GATES });
     device.setToday('2026-08-20');
     device.ctx.askTell = () => Promise.resolve();
     device.ctx.askConfirm = () => Promise.resolve(true);
@@ -166,7 +173,7 @@ const approve = device => {
 
     // THE PRECONDITIONS, asserted rather than assumed. A green run of this suite against
     // a record that needed no migration would prove nothing at all.
-    given('both build gates are open on this branch',
+    given('both gates are open, through the seam',
         device.call('advanceCarryEnabled') === true
         && device.call('ledgerWritesEnabled') === true);
     given('the migration is genuinely needed',

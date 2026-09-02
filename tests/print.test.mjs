@@ -66,8 +66,17 @@ function linesOf(page) {
 }
 
 async function open(options = {}) {
-    const context = await browser.newContext(options);
+    // `flags` opens a shut feature gate for THIS page, before the app loads, through the
+    // one seam js/model/schema.js reads at definition time - the same thing a build with
+    // the flag on would do. The shipped defaults are closed and pinned elsewhere; a suite
+    // that prints the carried debt is printing the build somebody would ship with the
+    // gates open, and says so by asking for them.
+    const { flags, ...contextOptions } = options;
+    const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
+    if (flags) {
+        await page.addInitScript(held => { window.FARKAD_FLAG_OVERRIDES = held; }, flags);
+    }
     page.on('dialog', dialog => dialog.accept());
     await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
     await page.waitForTimeout(350);
@@ -638,11 +647,14 @@ for (const scenario of [
     suite('a carried debt and a correction, on the paper');
 
     // The pay sheet is what somebody is handed and paid from, and paper wins every
-    // argument. Two numbers on it are only ever right on this branch: a deduction capped
-    // at the wage, with the rest of a real advance carrying to the next account, and money
-    // returned by a CORRECTION rather than by a man handing cash back. Both are read off a
-    // real PDF here, printed by the real page.
-    const page = await open();
+    // argument. Two numbers on it are only ever right with the gates open: a deduction
+    // capped at the wage, with the rest of a real advance carrying to the next account,
+    // and money returned by a CORRECTION rather than by a man handing cash back. Both are
+    // read off a real PDF here, printed by the real page.
+    //
+    // Both money gates are opened for this page through the seam: the shipped defaults
+    // are closed, and this is the build a person would ship by opening them.
+    const page = await open({ flags: { carryAdvances: true, ledgerWrites: true } });
     await page.evaluate(() => {
         State.schedule.workers = [{ id: 'w_1', name: 'Worker 01', active: true,
             dailyRate: 500, hourlyRate: 50 }];
