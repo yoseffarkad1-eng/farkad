@@ -5095,6 +5095,101 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     mirrored.panel.length > 0 && mirrored.panel === mirrored.foot,
     JSON.stringify(mirrored));
 
+  // AND WHY. The person's phone, v98, the app on the home screen: the chip read «שגיאת
+  // סנכרון», the panel's line read «שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (38
+  // ממתינים לשליחה)», and neither said whether the tunnel had gone or the cloud was
+  // refusing them - which are different evenings: one is wait, the other is a rules
+  // deploy or a sign-in that nobody will do while the line says nothing about it.
+  // FarkadSync.lastError has held the answer since fail() was written; this is the one
+  // line that reads it, under the mirror, only while the status is an error. Each
+  // sentence is pinned verbatim, and the code the cloud used stays on the line, in its
+  // own left-to-right run, for the person to read out over the phone.
+  const REASON_REFUSED = 'הענן מסרב לקבל רישומים מהמכשיר הזה. אם האפליקציה עודכנה זה עתה, כללי הענן עדיין לא פורסמו.';
+  const REASON_SIGNIN = 'הענן אינו מזהה את המכשיר הזה - התחבר שוב.';
+  const REASON_UNREACHABLE = 'אין כרגע גישה לענן - הניסיון יחזור מעצמו.';
+  const readReason = () => page.evaluate(() => {
+    const line = document.getElementById('settingsSyncReason');
+    return line ? { text: line.textContent, hidden: line.hidden, shown: line.offsetParent !== null }
+      : { text: null, hidden: null, shown: false };
+  });
+
+  // The cloud refusing this phone: the line a rules deploy that has not happened
+  // produces. Through the sheet being opened, which is the way most people reach it.
+  await page.evaluate(() => {
+    FarkadSync.status = 'error';
+    FarkadSync.lastError = Object.assign(new Error('Missing or insufficient permissions.'),
+      { code: 'permission-denied' });
+    updateSyncNotice();
+    closeSettings();
+    openSettings();
+  });
+  await page.waitForTimeout(200);
+  let reason = await readReason();
+  check('a cloud that refuses this phone says so under the sync line, with its code',
+    reason.shown === true && reason.hidden === false
+    && reason.text === `${REASON_REFUSED} \u2066(permission-denied)\u2069`,
+    JSON.stringify(reason));
+
+  // Signed out: the sheet is already open, and the status changes UNDER it - the line
+  // has to follow the foot the way the chip does, without the sheet being reopened.
+  await page.evaluate(() => {
+    FarkadSync.status = 'error';
+    FarkadSync.lastError = Object.assign(new Error('Missing or insufficient permissions.'),
+      { code: 'unauthenticated' });
+    updateSyncNotice();
+  });
+  await page.waitForTimeout(200);
+  reason = await readReason();
+  check('a phone the cloud does not recognise is told to sign in again, while the sheet is open',
+    reason.shown === true && reason.text === `${REASON_SIGNIN} \u2066(unauthenticated)\u2069`,
+    JSON.stringify(reason));
+
+  // A dead network: a plain Error, no code - what a failed fetch throws - through the
+  // real setStatus, which is the door every failure in js/sync/sync.js arrives by.
+  await page.evaluate(() => {
+    FarkadSync.setStatus('error', new Error('Failed to fetch'));
+  });
+  await page.waitForTimeout(200);
+  reason = await readReason();
+  check('a dead network is "no reach right now", with no code to read out',
+    reason.shown === true && reason.text === REASON_UNREACHABLE,
+    JSON.stringify(reason));
+
+  // And the SDK's own word for the same thing.
+  await page.evaluate(() => {
+    FarkadSync.setStatus('error', Object.assign(new Error('The service is currently unavailable.'),
+      { code: 'unavailable' }));
+  });
+  await page.waitForTimeout(200);
+  reason = await readReason();
+  check('and so is the cloud saying unavailable, with its code',
+    reason.shown === true && reason.text === `${REASON_UNREACHABLE} \u2066(unavailable)\u2069`,
+    JSON.stringify(reason));
+
+  // Anything else: the error's own words, as one left-to-right run inside the Hebrew,
+  // so a message the app has no sentence for is still on the screen and still legible.
+  await page.evaluate(() => {
+    FarkadSync.setStatus('error', Object.assign(new Error('The query requires an index.'),
+      { code: 'failed-precondition' }));
+  });
+  await page.waitForTimeout(200);
+  reason = await readReason();
+  check('an error the app has no sentence for shows its own message, isolated, with its code',
+    reason.shown === true
+    && reason.text === 'הודעת השגיאה: \u2066The query requires an index.\u2069 \u2066(failed-precondition)\u2069',
+    JSON.stringify(reason));
+
+  // Synced again: the reason goes with the error. A stale reason under a green line is
+  // the same lie as the chip's old «38 ממתינים לשליחה», the other way round.
+  await page.evaluate(() => { FarkadSync.setStatus('synced'); });
+  await page.waitForTimeout(200);
+  reason = await readReason();
+  check('once synced the reason line is empty and gone',
+    reason.text === '' && reason.hidden === true && reason.shown === false,
+    JSON.stringify(reason));
+  await page.evaluate(() => { FarkadSync.setStatus('off'); });
+  await page.waitForTimeout(100);
+
   check('the device group says whether the app is installed',
     (await page.textContent('#installState')).includes('בדפדפן'),
     await page.textContent('#installState'));

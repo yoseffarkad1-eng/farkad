@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v99">
+<meta name="farkad-build" content="v100">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -175,6 +175,13 @@
                  #storageNotice; renderSettingsSyncLine copies them here on every render
                  rather than composing a second version that could drift. -->
             <p class="hint" id="settingsSyncStatus"></p>
+            <!-- WHY, when the line above says the sync failed. Hidden until it does.
+                 The line above says the same thing for a dead tunnel and for a cloud
+                 that refuses this phone, and those are different evenings: one is wait,
+                 the other is a rules deploy or a sign-in that nobody will do while
+                 nothing on the screen names it. renderSettingsSyncLine reads
+                 FarkadSync.lastError into this; textContent only. -->
+            <p class="hint" id="settingsSyncReason" hidden></p>
             <!-- Ships hidden and is shown by the adapter once a project actually answers:
                  with no Firebase behind it, a "connect to the cloud" button is a door
                  onto nothing. It lived in the header, where it was the widest thing on a

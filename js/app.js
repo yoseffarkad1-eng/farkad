@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v99';
+const APP_VERSION = 'v100';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -187,8 +187,15 @@ function renderSyncChip() {
 function watchSyncNotice() {
     const notice = document.getElementById('storageNotice');
     if (!notice || typeof MutationObserver !== 'function') return;
-    new MutationObserver(renderSyncChip)
-        .observe(notice, { childList: true, characterData: true, subtree: true });
+    // The chip AND the ⋯ panel's two lines. The panel is redrawn with render(), which
+    // follows a commit, not a status: a listener that died or a cloud that refused a
+    // batch under an open sheet changed the foot and the chip and left the sheet
+    // reading the previous status, with the previous reason under it. The foot is
+    // written by every setStatus, so following it is following the status.
+    new MutationObserver(() => {
+        renderSyncChip();
+        if (typeof renderSettingsSyncLine === 'function') renderSettingsSyncLine();
+    }).observe(notice, { childList: true, characterData: true, subtree: true });
 }
 
 // A crash on a phone looks like nothing: half a screen, no console, no clue whether what

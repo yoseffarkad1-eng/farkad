@@ -1,9 +1,9 @@
-# Handoff — v99: the holds nobody disagreed about
+# Handoff — v100: the holds nobody disagreed about
 
 - Branch: `claude/farkad-mobile-design-review-odl8ue`
 - SHA: `3990de007fb83f0eb0915b7e2f54ef552f9e59fb`
 - Base: `4a4d277` (v98 as served, `5dd5a83`, plus the brief this round was given)
-- Build stamps at that SHA: `farkad-build` v99 · `APP_VERSION` v99 · `VERSION` farkad-v99
+- Build stamps at that SHA: `farkad-build` v100 · `APP_VERSION` v100 · `VERSION` farkad-v100
 - Gates: `LEDGER_WRITES` false, `carryAdvances` false. Neither moved.
 - Contracts: `features/false-holds/contract.md` (items 1–4), `features/gate-flip/contract.md`
   (item 8 — a checklist, no code)
