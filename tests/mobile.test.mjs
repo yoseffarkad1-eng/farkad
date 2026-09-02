@@ -258,6 +258,9 @@ for (const width of WIDTHS) {
                 const dock = document.querySelector('.day-actions button');
                 return {
                     body: getComputedStyle(document.body).touchAction,
+                    // The root on its own: a screen shorter than the viewport leaves a
+                    // band below the content that hit-tests to <html>, outside body.
+                    rootZooms: doubleTapZooms(document.documentElement),
                     tabZooms: tab ? doubleTapZooms(tab) : 'missing',
                     dockZooms: dock ? doubleTapZooms(dock) : 'missing',
                     pinchKept: !content.includes('user-scalable=no')
@@ -265,7 +268,8 @@ for (const width of WIDTHS) {
                 };
             });
             check(`${label}: two taps do not zoom the page`,
-                zoom.body === 'manipulation' && zoom.pinchKept, JSON.stringify(zoom));
+                zoom.body === 'manipulation' && zoom.rootZooms === false && zoom.pinchKept,
+                JSON.stringify(zoom));
             check(`${label}: and neither do two taps on a button`,
                 zoom.tabZooms === false && zoom.dockZooms === false,
                 JSON.stringify(zoom));

@@ -120,6 +120,13 @@
 
 * { box-sizing: border-box; }
 
+/* AND THE ROOT ITSELF. The rule on body covers everything body contains, and a screen
+   shorter than the viewport - the reports tab on a 390 phone, an empty week - leaves a
+   band below the content that hit-tests to <html>, which is not inside body. Two taps
+   there zoomed the page with the body rule alone; a verifier's elementFromPoint sweep
+   found it. touch-action is not inherited, so the root is named on its own. */
+html { touch-action: manipulation; }
+
 body {
     direction: rtl;
     margin: 0;
