@@ -1200,34 +1200,78 @@ for (const width of WIDTHS) {
     check('nothing in the grid is too small to read', faint.length === 0,
         JSON.stringify(faint.slice(0, 5)));
 
-    // 44 x 44, at every width, with nothing exempted.
+    // 48 x 48, at every width, with nothing exempted.
     //
     // Seven columns at 44px is 308px on its own and a 320px screen offers 296, so the week
     // and the names cannot BOTH be on screen at once on the smallest phone. That was read
     // for a long time as "then the cells are 32px there", and this check was written to
     // expect 32 - which is a test agreeing with the defect it exists to find. What does not
-    // fit on the screen fits in a box that scrolls; the cells are 44 everywhere and the
-    // week is reached by pushing it, with the names pinned so the row stays legible.
+    // fit on the screen fits in a box that scrolls; the cells are the same size everywhere
+    // and the week is reached by pushing it, with the names pinned so the row stays legible.
+    //
+    // THE PITCH IS 48, NOT 44. 44 is the floor every control in the app is held to and it
+    // is still the floor here (`undersized`, below, asks for it with no exemption). The
+    // week grid is asked for more because it is the one screen made of nothing but tap
+    // targets, edge to edge, with no gap between them: a finger that lands 3px over on a
+    // chip lands on padding, and on this grid it lands on the next man's day. The design
+    // settled on 88px of names and seven 48px days - 424px, which is what a 430px phone
+    // can show whole - and this check was written to 44 before that, which is how a 45px
+    // column at 430 passed for a round. Pinned at the pitch, deliberately: a pitch a test
+    // cannot tell from the floor is not protected.
     const cells = await page.evaluate(() => {
         const boxes = [...document.querySelectorAll('.week-cell')]
             .map(node => node.getBoundingClientRect());
         return { min: Math.round(Math.min(...boxes.map(b => b.width))),
             height: Math.round(Math.min(...boxes.map(b => b.height))) };
     });
-    check(`a cell on a ${width}px screen is 44px in both directions`,
-        cells.min >= 44 && cells.height >= 44, JSON.stringify(cells));
+    check(`a cell on a ${width}px screen is at the 48px pitch in both directions`,
+        cells.min >= 48 && cells.height >= 48, JSON.stringify(cells));
 
-    // Widths, not just a minimum: a floor met by one column and missed by six would pass
+    // Widths, not just a minimum: a pitch met by one column and missed by six would pass
     // the check above if the minimum were taken per-column. It is taken across every cell
     // in the grid, so this is the count that proves the whole week is tappable.
     const grid = await page.evaluate(() => {
         const boxes = [...document.querySelectorAll('.week-cell')]
             .map(node => node.getBoundingClientRect());
         return { total: boxes.length,
-            ok: boxes.filter(b => b.width >= 44 && b.height >= 44).length };
+            ok: boxes.filter(b => b.width >= 48 && b.height >= 48).length };
     });
     check('and so is every other cell in the grid', grid.total > 0 && grid.ok === grid.total,
         JSON.stringify(grid));
+
+    // WHERE THE WEEK FITS AND WHERE IT SCROLLS, pinned per width rather than left to the
+    // arithmetic. 88 + 7 x 48 is 424: a 430px phone shows the whole week without a push,
+    // and every narrower phone shows the names and as many days as it has room for, with
+    // the rest one push away. The first half is the one that had no test - the box at 430
+    // was 406px wide, 12px of page padding each side, and 424 does not go into 406; the
+    // columns came out 45px because that is what 406 divides into, and nothing asked
+    // whether the seven were the size the design said. Measured against the box's own
+    // rectangle: a day whose right edge is past the box's is a day that is not on the
+    // screen, whatever scrollWidth says.
+    const fit = await page.evaluate(() => {
+        const box = document.querySelector('#weekView .table-scroll');
+        const edge = box.getBoundingClientRect();
+        const row = document.querySelector('.week-table tbody tr');
+        const days = [...row.querySelectorAll('.week-cell')].map(node => node.getBoundingClientRect());
+        return {
+            days: days.length,
+            shown: days.filter(b => b.left >= edge.left - 0.5 && b.right <= edge.right + 0.5).length,
+            boxClient: box.clientWidth,
+            boxScroll: box.scrollWidth,
+            screen: document.documentElement.clientWidth
+        };
+    });
+    if (width >= 430) {
+        check('a 430px phone shows all seven days at the pitch, with nothing to push',
+            fit.days === 7 && fit.shown === 7 && fit.boxScroll <= fit.boxClient + 1,
+            JSON.stringify(fit));
+    } else {
+        // Strictly wider than its box, not "at least": on these phones the week MUST
+        // scroll, because the alternative is columns narrower than the pitch.
+        check(`a ${width}px phone keeps the names and scrolls the days under them`,
+            fit.days === 7 && fit.shown < 7 && fit.shown >= 4 && fit.boxScroll > fit.boxClient,
+            JSON.stringify(fit));
+    }
 
     // No exemption on this side either: .week-cell is in the helper's selector and no
     // longer filtered out of its answer.
