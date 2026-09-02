@@ -104,6 +104,19 @@ function focusFirst(modal) {
     // the cursor in its field, and moving it to the first button would undo that.
     if (modal.contains(document.activeElement) && document.activeElement !== document.body) return;
 
+    // A dialog that made its heading focusable (tabindex="-1") is entered at the heading,
+    // the way the settings sheet and the reorder panel are: a reader is told where it has
+    // arrived before the controls are named, and the dialog opens where it is read from.
+    // Entering the worker's account at its first BUTTON scrolled it to its foot on a phone
+    // - that button is «+ מקדמה», the last thing in a dialog taller than the screen - so
+    // the person who tapped a name to see the days was shown the money buttons instead.
+    // preventScroll: the heading is at the top, and a focus that scrolls is the bug.
+    const heading = modal.querySelector('.modal-content > h3[tabindex="-1"]');
+    if (heading) {
+        heading.focus({ preventScroll: true });
+        return;
+    }
+
     const target = modal.querySelector(FOCUSABLE);
     if (target) target.focus();
 }
@@ -119,6 +132,14 @@ function trapTab(event, modal) {
     if (!modal.contains(document.activeElement)) {
         event.preventDefault();
         first.focus();
+        return;
+    }
+    // Inside the dialog but not one of its controls - the heading it was entered at.
+    // Tab goes on to the first control in document order by itself; shift-tab would
+    // walk backwards OUT of the dialog, so it is sent to the last control instead.
+    if (items.indexOf(document.activeElement) === -1) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
         return;
     }
     if (event.shiftKey && document.activeElement === first) {

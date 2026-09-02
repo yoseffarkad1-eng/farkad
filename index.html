@@ -424,7 +424,9 @@
      my pay this number". -->
 <div class="modal" id="workerDaysModal">
     <div class="modal-content modal-wide">
-        <h3 id="workerDaysTitle"></h3>
+        <!-- Focusable so the dialog is entered at its heading (js/ui/modal.js, focusFirst):
+             the first BUTTON in this dialog is the last thing in it. -->
+        <h3 id="workerDaysTitle" tabindex="-1"></h3>
         <p class="hint" id="workerDaysMeta"></p>
         <div id="workerDaysBody"></div>
         <div class="modal-actions">

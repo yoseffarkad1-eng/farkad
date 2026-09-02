@@ -623,6 +623,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* The heading takes focus when the sheet opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
 .settings-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+/* The worker's account is entered at its heading too (modal.js). */
+#workerDaysTitle:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 
 .settings-body {
     flex: 1;

@@ -722,7 +722,14 @@ function openWorkerDays(workerId) {
     if (ledger) body.appendChild(ledger);
 
     body.appendChild(renderAdvanceAdd(worker));
-    document.getElementById('workerDaysModal').style.display = 'flex';
+    const modal = document.getElementById('workerDaysModal');
+    modal.style.display = 'flex';
+    // Read from the top: the name, the fortnight, the chips that say WHICH days. The
+    // dialog is entered at its heading (modal.js) so nothing scrolls it on the way in,
+    // and the scroll position is set rather than assumed - whatever the last look left.
+    // (The Node harness's elements have no children to find: guarded, not assumed.)
+    const content = modal.querySelector('.modal-content');
+    if (content) content.scrollTop = 0;
 }
 
 // SEALING THE ACCOUNT, and the only place in this app that does it.
