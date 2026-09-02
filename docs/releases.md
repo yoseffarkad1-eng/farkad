@@ -12,18 +12,19 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v97 (`4fe7c9a`).** The build at the top of this file is a candidate on a
-branch: verified, stamped, and NOT served. v91, v93 and v94 below were
+**`main` is at v98 (`5dd5a83`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## v98 — CANDIDATE, not served — the tip of `cd-work`
+## v98 — 2 September 2026 — `5dd5a83` (PR #8, the tree at `7603b45`)
 
 The storm explained and closed (`features/storm/findings.md`). v97's release note said one
 emulator suite had gone red once on its commit and nobody had explained the interleaving;
-this build is the explanation and the fix. Nothing on a phone runs it.
+this build is the explanation and the fix. Served from `main` since 2 September 2026;
+whether any phone has taken the update is not known from here.
 
 **What it would give the crew that v97 does not have**
 
@@ -44,7 +45,7 @@ No number is copied here.
 
 **What this build is NOT known to do**
 
-- **It is not on `main`.** No phone has it.
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - Two things found on the way to the cause are written down and not fixed: a closure
   judged impossible under clock skew, and a refused approval write leaving a phone
   'contested' once in twenty-eight runs. Both behind the shut gates; each its own round.
