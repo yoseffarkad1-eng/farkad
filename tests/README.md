@@ -52,6 +52,25 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At f0cca08 (the ledger merge onto v95, both money gates CLOSED), from the v96-gate
+    worktree, detached, Node v22.22.2, .gate.log in that worktree, copied from no other run:
+    npm test           42 suites   4225/4225
+      isolation 18, blobs 11, build 29, poison 37, merge 28, contested 73, receipt 28,
+      data 1944, recovery 75, adversarial 116, probes 35, capacity 44, concurrency 46,
+      exports 68, fence 35, fence-ingress 43, fence-legacy 21, money-history 9,
+      money-units 21, money-cloud 17, money-display 4, snapshot-poison 82, samefact 24,
+      wording 36, closure 92, correction 33, quarantine 82, approval 72, repayment 240,
+      ledger-ingress 151, cas 88, status 29, money 40, money-ingress 206, method 51,
+      restore 51, upgrade 48, vehicles 61, xlsx 59, nonassertions 23, labels 23,
+      labelcache 32
+    browser, four of nine:        smoke 1047, mobile 671, print 70, forms 10 - all green
+    NOT run on this tree: update, recovery-browser, handover, swrestart, swidentity,
+      sendclaim, and the six emulator suites (money-concurrency among them). Until they
+      are, this tree's release gate is unmeasured, not green.
+    At d9fcdb1, the merge commit itself with both gates still OPEN as the ledger branch
+      left them: npm test 42 suites 4225/4225, the same number in every suite - the
+      gate close that followed moved two pins in data and changed no count.
+
     At 10a40a5 (v93), from the fix/docs worktree, Node v22.22.2, copied from no other run:
     npm test           36 suites   3493/3493
       isolation 18, blobs 11, build 29, poison 37, merge 22, contested 54, receipt 18,
@@ -111,8 +130,8 @@ halves have not been run on that tree - the first tree they ran on after cf8b9e5
 
 The ledger merge adds eight more: six node suites (`approval`, `quarantine`,
 `correction`, `closure`, `wording`, `samefact`), one browser suite (`forms`) and one
-emulator suite (`money-concurrency`). No count for them stands here until a run is made
-on a commit that carries them, and that run names its commit like every other.
+emulator suite (`money-concurrency`). Seven of them are in the f0cca08 block above;
+`money-concurrency` needs the emulator and has not been run on this tree.
 
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers

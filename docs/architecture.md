@@ -72,14 +72,14 @@ never removed. What the screens would read is a FOLD over the entries
 (`foldAdvance`/`foldLedger`), derived and never stored, with every entry that produced
 it still there to be read out loud.
 
-But the ledger is **off**. `LEDGER_WRITES = false` (`js/model/ledger.js:42`), and only
+But the ledger is **off**. `LEDGER_WRITES = false` (`js/model/ledger.js:49`), and only
 a person who knows all three phones are past v79 may flip it — a v79 phone writes
 `advances.<id>` and cannot read entries, so a v80 phone that stopped writing the old
 field would make its advances invisible on the other two. Until the flip:
 
 - **The screens still read the legacy field.** Nothing in the UI depends on the fold;
   the only ledger consumer on screen is the parity line in settings.
-- **The mirror** (`State.migrateLedger`, `js/state.js:164`) runs at every boot: every
+- **The mirror** (`State.migrateLedger`, `js/state.js:170`) runs at every boot: every
   advance already on the record gets a `given` entry, once, with a **deterministic id**
   `le_mig_<advanceId>` — two phones mirroring the same advance mint the same key, so
   the union collapses to one entry instead of letting a random id decide the fold. The
