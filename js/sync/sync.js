@@ -2557,16 +2557,19 @@ const FarkadSync = {
             this._watchingConnection = true;
             window.addEventListener('online', () => {
                 this._retryAt = 0;
+                // A listener that died while the signal was gone is tried again the
+                // moment it is back, rather than left to its own ladder.
+                if (this._listenerDead) this.relisten();
                 if (this.pendingReplace()) this.resumeReplace();
                 else this.flush();
             });
         }
 
-        const stop = adapter.subscribe(
-            snapshot => this.receive(snapshot),
-            error => this.fail(error)
-        );
-        this._unsubscribe = typeof stop === 'function' ? stop : null;
+        // A fresh subscription; whatever an earlier one was going back for is moot.
+        clearTimeout(this._relistenTimer);
+        this._relistenTimer = null;
+        this._relistenAt = 0;
+        this.listen();
 
         // Anything left over from a previous session goes out as soon as there is
         // somewhere to send it. The replacement goes first: the queued field edits
@@ -2583,8 +2586,10 @@ const FarkadSync = {
         this._archivedOn = null;
         clearTimeout(this._timer);
         clearTimeout(this._retryTimer);
+        clearTimeout(this._relistenTimer);
         this._timer = null;
         this._retryTimer = null;
+        this._relistenTimer = null;
         this._sending = new Map();
         this._stamp = null;
         // The outbox and any pending replacement are deliberately NOT cleared. Signing
@@ -2608,6 +2613,72 @@ const FarkadSync = {
         } catch (error) {
             console.error('Could not stop the previous subscription:', error);
         }
+    },
+
+    // A LISTENER THAT HAS DIED, and why it is a fact the status has to know.
+    //
+    // A Firestore onSnapshot listener whose error callback has fired delivers nothing
+    // further: the subscription is over, and only a new one hears again. The adapter's
+    // onError used to be routed into fail() and left there - 'error' on the line, which
+    // was right, and nothing subscribing again, which meant the line stayed right only
+    // until this phone's next send. A send that lands is the recovery from whatever the
+    // line was showing, so the status went to 'synced' - over a phone that could not
+    // hear the other two. Mis-deployed rules, an address dropped and restored, any
+    // terminal listener error mid-evening: the phone keeps recording, each write lands,
+    // the line says «מסונכרן», and a day the other phone corrected is priced here at the
+    // old site with the status vouching for it. Measured in tests/status.test.mjs.
+    //
+    // So the death is written down, the status refuses 'synced' while it stands (see
+    // honestStatusFor), a new subscription is tried on a ladder of its own, and the flag
+    // is cleared by exactly one thing: a snapshot delivered by a listener - which is the
+    // only proof there is that this phone hears again.
+    _listenerDead: false,
+    _relistenTimer: null,
+    _relistenAt: 0,
+
+    listen() {
+        const stop = this.adapter.subscribe(
+            snapshot => {
+                if (this._listenerDead) {
+                    this._listenerDead = false;
+                    this._relistenAt = 0;
+                    clearTimeout(this._relistenTimer);
+                    this._relistenTimer = null;
+                }
+                this.receive(snapshot);
+            },
+            error => this.listenerFailed(error)
+        );
+        this._unsubscribe = typeof stop === 'function' ? stop : null;
+    },
+
+    listenerFailed(error) {
+        this._listenerDead = true;
+        this.fail(error);
+        this.scheduleRelisten();
+    },
+
+    // Its own ladder, not the send ladder. The send ladder is cleared by a send that
+    // lands - correctly, there is nothing left to go back for - and it is the one thing
+    // honestStatusFor reads as "still sending": a dead listener riding on it would have
+    // been cancelled by the very write that made the line lie, or would have had the
+    // line say something was being sent when nothing was.
+    scheduleRelisten() {
+        if (!this.adapter) return;
+        this._relistenAt = this._relistenAt
+            ? Math.min(this._relistenAt * 2, RETRY_MAX_MS)
+            : RETRY_FIRST_MS;
+        clearTimeout(this._relistenTimer);
+        this._relistenTimer = setTimeout(() => {
+            this._relistenTimer = null;
+            this.relisten();
+        }, this._relistenAt);
+    },
+
+    relisten() {
+        if (!this.adapter) return;
+        this.stopListening();
+        this.listen();
     },
 
     // ------------------------------------------------------- held back by Recovery
@@ -2634,7 +2705,34 @@ const FarkadSync = {
         // configured never does - "מתחבר לענן…" for ever would be a worse lie than the
         // one this replaces.
         if (this.status === 'blocked') this.setStatus('off');
+
+        // AND THE SNAPSHOT THE HOLD REFUSED, run again now that it may be adopted.
+        //
+        // A sighting that arrives mid-session - a poisoned layer in another phone's
+        // document, beside that phone's perfectly readable evening - blocks writing
+        // inside normaliseSchedule, so receive() cannot persist and rolls back. Right.
+        // Then the person exported and acknowledged, and nothing happened: this method
+        // reset a status, connectCloudLater found the cloud already started, the
+        // listener does not fire again for a document that has not changed, and the
+        // snapshot receive() had already been handed sat in _latestRaw unread. The
+        // readable day stayed off the screen and the disk, the line said error, until
+        // another phone happened to write - and with the other phones idle, never.
+        // Measured in tests/snapshot.poison.test.mjs.
+        //
+        // The same bytes are the same sighting: Recovery.evidence answers a second
+        // report of them from the first copy and does not block again, so the re-run
+        // lands, the status is re-derived, and anything owed is scheduled - exactly
+        // what readoptAfter does with the same snapshot after an acknowledgement.
+        if (this._heldSnapshot && this._latestRaw && typeof this._latestRaw === 'object') {
+            this._heldSnapshot = false;
+            this.receive(this._latestRaw);
+        }
     },
+
+    // True while the last snapshot heard was refused because writing was blocked - by
+    // a record this device could not read, or by one it had just been handed. Cleared
+    // by the next snapshot, and by the re-run above.
+    _heldSnapshot: false,
 
     // WHAT 'synced' ACTUALLY CLAIMS, and why it is checked at one door.
     //
@@ -2665,6 +2763,11 @@ const FarkadSync = {
         if (this.pendingCount() > 0) return 'sending';
         // And work the ladder is still going back for.
         if (this._retryTimer) return 'sending';
+        // A phone that cannot hear. Everything it recorded may well be on the other two
+        // phones; what they corrected is not on this one, and 'synced' claims both.
+        // 'error' is what the listener's own failure set, and it stays until a listener
+        // delivers again - see listen().
+        if (this._listenerDead) return 'error';
         return 'synced';
     },
 
@@ -3754,10 +3857,60 @@ const FarkadSync = {
                     // knows, exactly as before.
                     const learn = this.adapter && typeof this.adapter.read === 'function'
                         ? Promise.resolve(this.adapter.read()).then(fresh => {
-                            if (fresh && typeof fresh === 'object') this.noteRevision(fresh);
-                        }, () => undefined)
-                        : Promise.resolve();
-                    return learn.then(() => {
+                            if (!fresh || typeof fresh !== 'object') return null;
+                            this.noteRevision(fresh);
+                            return fresh;
+                        }, () => null)
+                        : Promise.resolve(null);
+                    return learn.then(fresh => {
+                        // AND ASKED THE PRE-SEND QUESTION, of the document just read.
+                        //
+                        // Learning the revision made the update VALID, which is the
+                        // whole of the trouble. The pre-send hold in sendClaimed ran
+                        // before the create left, against nothing heard, and decided
+                        // nothing - "the conflict branch asks this question of that
+                        // answer" - and then no conflict followed: the update went out
+                        // at the revision it had just learned, the server had no
+                        // reason to refuse it, and the winner's day was replaced whole
+                        // by a phone that had never seen it. Two phones opening with no
+                        // signal on a new project, the same worker on the same day
+                        // recorded differently: the winner's half gone from the cloud,
+                        // then from the winner, both phones saying synced. Measured on
+                        // both listener timings in tests/cas.test.mjs.
+                        //
+                        // So the document the refusal made this device read is the
+                        // document the queued values are held against - the same
+                        // question, the same families, the same hold as the pre-send
+                        // pass, and reported the same way. A day or a ledger entry the
+                        // winner holds a different value at, one this device has neither
+                        // seen nor produced, is somebody's record; it is held for a
+                        // person, and the rest of the batch goes on down the ladder as
+                        // the merge it is. A read that failed compares nothing, exactly
+                        // as before: the update then meets the conflict branch, which
+                        // carries the server's own document.
+                        const moved = [];
+                        if (fresh) {
+                            Object.keys(patch).forEach(path => {
+                                if (!replacesWhole(path)) return;
+                                const item = this._outbox.get(path);
+                                if (!item || item.held || this._heldNow.has(String(path))) return;
+                                if (this.movedUnder(item, path, fresh)) moved.push(String(path));
+                            });
+                        }
+                        if (moved.length > 0) {
+                            const wrote = this.holdContested(moved);
+                            if (!wrote.durable) {
+                                moved.forEach(path => this._heldNow.add(String(path)));
+                                console.error('a contested write could not be held on the '
+                                    + 'disk; it is held in memory for this session');
+                            }
+                            const held = new Error('another device created the document '
+                                + 'while this write was on its way, and it holds a different '
+                                + 'value at a path this write replaces; the edit is held '
+                                + 'until a person looks');
+                            held.contested = moved.slice();
+                            throw held;
+                        }
                         const follow = Promise.resolve(this.adapter.update(
                             this.stampProtocol(patch, this._sendOpId
                                 || this.operationIdFor(this._sending))));
@@ -4943,6 +5096,7 @@ const FarkadSync = {
         // against a stale base is refused by the rules, which is a worse way to find out.
         this.noteRevision(raw);
         this._latestRaw = raw;
+        this._heldSnapshot = false;
 
         // A restore is waiting to go out. Everything arriving right now is, by
         // definition, the state the person asked to replace - adopting it would undo
@@ -4951,7 +5105,13 @@ const FarkadSync = {
         // A restore that has not landed, or a note about one that cannot be read. Either
         // way what is arriving is the state somebody asked to replace, and adopting it
         // would undo their restore on the device that asked for it.
-        if (this.replaceDamaged || farkadWritesBlocked()) return;
+        //
+        // A snapshot dropped here for a hold is remembered as dropped, so the
+        // acknowledgement that lifts the hold can run it - see releaseRecoveryHold.
+        if (this.replaceDamaged || farkadWritesBlocked()) {
+            if (farkadWritesBlocked()) this._heldSnapshot = true;
+            return;
+        }
 
         // The journal cannot be written. Local edits are then held by the schedule alone,
         // and the journal is the only thing that puts them back on top of an arriving
@@ -5136,6 +5296,18 @@ const FarkadSync = {
         if (!State.persist()) {
             State.schedule = previous;
             if (typeof render === 'function') render();
+            // HELD IS NOT FULL. normaliseSchedule has just reported what this snapshot
+            // carries, and Recovery blocked writing the moment it was told - so the
+            // refusal is the hold, not the disk, and the disk is not what the next
+            // attempt is waiting for. It is waiting for the person: written down as
+            // such, and re-run when they acknowledge. Named as a full disk it was
+            // waited out by nobody, and told nobody the truth.
+            if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+                this._heldSnapshot = true;
+                this.fail(new Error('the arriving record is held until a person has '
+                    + 'looked at it; it was not adopted'));
+                return;
+            }
             // Not 'synced'. Nothing about this device is up to date, and the storage
             // notice already names the actual problem. The next snapshot - or the next
             // reconnect - tries again, by which time there may be room.
@@ -5194,6 +5366,7 @@ const FarkadSync = {
             // refuses 'synced' while writes are blocked; the return is for that case
             // alone. Measured in tests/status.test.mjs.
             if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+                this._heldSnapshot = true;
                 this.fail(new Error('part of the advances history could not be read'));
                 return;
             }

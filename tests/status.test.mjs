@@ -66,6 +66,42 @@ const record = (device, date, workerId) => device.State.commit(device.call('assi
 const dishonest = seen => seen.filter(item =>
     item.said === 'synced' && (item.pending > 0 || item.replace));
 
+// A listener the rules can refuse. Firestore's onSnapshot delivers its error once and
+// nothing further - the subscription is over - and while the rules still refuse, a new
+// subscription errors the same way. `kill()` is the refusal arriving; `repair()` is the
+// rules being fixed, after which only a NEW subscribe hears anything.
+function fragile(cloud) {
+    const wire = { broken: false, subscribes: 0, live: null, adapter: Object.assign({}, cloud.adapter) };
+    const denied = () => {
+        const error = new Error('Missing or insufficient permissions.');
+        error.code = 'permission-denied';
+        return error;
+    };
+    wire.adapter.subscribe = (onNext, onError) => {
+        wire.subscribes += 1;
+        if (wire.broken) {
+            Promise.resolve().then(() => onError(denied()));
+            return () => {};
+        }
+        const stop = cloud.adapter.subscribe(onNext, onError);
+        wire.live = { stop, onError };
+        return () => {
+            if (wire.live && wire.live.stop === stop) wire.live = null;
+            stop();
+        };
+    };
+    wire.kill = () => {
+        wire.broken = true;
+        const live = wire.live;
+        wire.live = null;
+        if (!live) return;
+        live.stop();
+        live.onError(denied());
+    };
+    wire.repair = () => { wire.broken = false; };
+    return wire;
+}
+
 // ============================================================ a partial send
 {
     suite('one write goes out, the rest is still owed, and the line does not lie');
@@ -315,6 +351,90 @@ const dishonest = seen => seen.filter(item =>
         device.__notice.textContent.indexOf('מסונכרן') !== -1
         && device.__notice.textContent.indexOf('שגיאת סנכרון') === -1,
         JSON.stringify(device.__notice.textContent));
+}
+
+// ============================================================ a listener that has died
+{
+    suite('a phone whose listener has died is not finished when its own write lands');
+
+    // A Firestore listener that has delivered its error delivers nothing further; only
+    // a new subscription hears again. So a phone whose listener the rules refused -
+    // mis-deployed rules, an address dropped and restored - keeps recording, and each
+    // of its own sends lands, while the cloud holds the other phone's corrections it
+    // will never hear. 'synced' is then the opposite of the truth: the day the other
+    // phone corrected is priced here at the old site with the line vouching for it.
+    //
+    // Measured: the listener error put the phone on 'error', its next write landed,
+    // and the line read «מסונכרן» - the one sticky signal that this phone was deaf,
+    // cleared by any write of its own.
+    const cloud = makeCloud();
+    const wire = fragile(cloud);
+    const deaf = crew(null, 'd_deaf');
+    deaf.Sync.connect(wire.adapter);
+    const other = crew(cloud, 'd_hears');
+    await settleUntil(() => deaf.Sync.status === 'synced' && other.Sync.status === 'synced', 5000);
+    record(deaf, '2026-08-12', 'w_01');
+    const shown = device => device.call('entriesFor', device.State.schedule, '2026-08-12', 'w_01', 'actual')
+        .map(entry => entry.placeId).sort().join();
+    await settleUntil(() => shown(other) === 'p_01' && deaf.Sync.status === 'synced', 5000);
+    given('both phones are finished and hold the day',
+        deaf.Sync.status === 'synced' && other.Sync.status === 'synced'
+        && shown(deaf) === 'p_01' && shown(other) === 'p_01',
+        `${deaf.Sync.status} / ${other.Sync.status}`);
+
+    const seen = watchStatus(deaf);
+    wire.kill();
+    await settle(TICK * 5);
+    given('the listener error reached the phone', deaf.Sync.status === 'error', deaf.Sync.status);
+
+    // The evening goes on. A day is recorded, and the write lands.
+    record(deaf, '2026-08-13', 'w_01');
+    await settleUntil(() => Boolean(((cloud.doc || {}).days || {})['2026-08-13'])
+        && deaf.Sync.pendingCount() === 0, 5000);
+    await settle(TICK * 10);
+    given('the deaf phone\'s own write landed',
+        Boolean(((cloud.doc || {}).days || {})['2026-08-13']) && deaf.Sync.pendingCount() === 0,
+        `${deaf.Sync.pendingCount()} owed`);
+    check('and the line does not say synced over a listener that is dead',
+        deaf.Sync.status !== 'synced', deaf.Sync.status);
+
+    // The other phone corrects the first day. The deaf phone will never hear it.
+    other.State.commit(other.call('assignPlace', other.State.schedule,
+        '2026-08-12', 'w_01', 'actual', 'p_02'));
+    const inCloud = () => {
+        const day = ((cloud.doc || {}).days || {})['2026-08-12'];
+        const held = day && day.actual && day.actual.w_01;
+        return ((held && held.entries) || []).map(entry => entry.placeId).sort().join();
+    };
+    await settleUntil(() => inCloud() === 'p_01,p_02', 5000);
+    await settle(TICK * 20);
+    check('the correction is in the cloud and not on the deaf phone',
+        inCloud() === 'p_01,p_02' && shown(deaf) === 'p_01',
+        `cloud ${inCloud()}, deaf phone ${shown(deaf)}`);
+    check('and the line still does not say synced',
+        deaf.Sync.status !== 'synced', deaf.Sync.status);
+    check('nor did it at any moment since the listener died',
+        seen.every(item => item.said !== 'synced'),
+        JSON.stringify(seen.map(i => `${i.asked}->${i.said}@${i.pending}`)));
+    deaf.ctx.document.getElementById = id => (id === 'storageNotice' ? deaf.__notice : null);
+    deaf.__notice = { textContent: '' };
+    deaf.call('updateSyncNotice');
+    check('and the words on the line do not promise it',
+        deaf.__notice.textContent.indexOf('מסונכרן') === -1,
+        JSON.stringify(deaf.__notice.textContent));
+
+    // AND IT IS NOT A GAG. The rules are fixed; the phone subscribes again on its own,
+    // hears the correction, and only then is the claim true and allowed.
+    wire.repair();
+    await settleUntil(() => shown(deaf) === 'p_01,p_02', 6000);
+    await settle(TICK * 20);
+    check('once it hears again it adopts the correction',
+        shown(deaf) === 'p_01,p_02', shown(deaf));
+    check('and only then says synced',
+        deaf.Sync.status === 'synced' && deaf.Sync.pendingCount() === 0,
+        `${deaf.Sync.status}, ${deaf.Sync.pendingCount()} owed`);
+    check('through a subscription it made itself',
+        wire.subscribes >= 2, `${wire.subscribes} subscribe(s)`);
 }
 
 report();
