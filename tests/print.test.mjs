@@ -493,6 +493,22 @@ for (const scenario of [
     });
     check('and it names nobody', named.length === 0, JSON.stringify(named));
 
+    // The same grid on paper: the printed table is the screen's DOM, so the year the
+    // person asked off the rows is off them here too, and the period line above the
+    // table is where the paper still says which year this was. A PDF stores a Hebrew
+    // row visually, so the weekday arrives reversed and the digits do not.
+    const lines = invoicePages.flatMap(item => linesOf(item).map(line => line.text));
+    const rows = lines.filter(text => says(text, 'שני'));
+    given('the seeded Monday is a row of the printed grid', rows.length >= 1,
+        JSON.stringify(lines));
+    check('its date is dd/mm with no year behind it',
+        rows.every(text => /10\/08(?!\/)/.test(text) && !text.includes('/2026')),
+        JSON.stringify(rows));
+    const yeared = lines.filter(text => text.includes('/2026'));
+    check('the year is on the paper once, on the period line',
+        yeared.length === 1 && yeared[0].includes('01/08/2026 - 31/08/2026'),
+        JSON.stringify(yeared));
+
     await page.context().close();
 }
 

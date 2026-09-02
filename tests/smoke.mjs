@@ -6564,6 +6564,24 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await page.locator('.report-invoice tbody tr').count()) === 2 &&
     !(await page.locator('.report-invoice .invoice-grid').isVisible()));
 
+  // The person's request, off a screenshot of this table: the day, the date and the
+  // weekday are enough. The year is on the period line above the grid, once; repeated
+  // down a column of rows it was the widest thing in the narrowest cell, and it said
+  // nothing the line above had not already said.
+  const dated = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.report-invoice tbody tr')]
+      .map(tr => tr.children[0].textContent),
+    period: document.querySelector('.report-invoice .report-period').textContent
+  }));
+  check('a date row is the weekday and dd/mm, nothing more',
+    dated.rows.length === 2 && dated.rows.every(text => /^\S+ \d\d\/\d\d$/.test(text)),
+    JSON.stringify(dated.rows));
+  check('the seeded Monday and Tuesday read exactly that way',
+    dated.rows[0] === 'שני 10/08' && dated.rows[1] === 'שלישי 11/08',
+    JSON.stringify(dated.rows));
+  check('the year stays on the period line above, where it is read once',
+    dated.period.includes('01/08/2026') && dated.period.includes('31/08/2026'), dated.period);
+
   await page.emulateMedia({ media: 'print' });
   await page.waitForTimeout(200);
   check('paper swaps them: the grid prints',

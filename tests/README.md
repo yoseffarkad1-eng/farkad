@@ -1,6 +1,6 @@
 # The suites
 
-Fifty-eight suites, forty-two of which need no browser at all. (Counted off
+Fifty-nine suites, forty-three of which need no browser at all. (Counted off
 package.json, which is the only place a suite count is true: `npm test` names the node
 suites, `test:all` adds the nine browser suites, `test:release` adds sendclaim and the
 six emulator suites.) From a clean clone:
@@ -51,6 +51,18 @@ test broke, not the app — fix the setup before reading anything into the run.
 
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
+
+    At 1e3f092 (v98: the storm closed - a ledger entry is its own JSON round-trip - the
+    frozen hours, and the by-site grid's short dates), the cd-work worktree, clean at that
+    commit, Node v22.22.2, .gate-release.log there, copied from no other run - the WHOLE
+    release gate:
+    npm test           43 suites   4332/4332   (closure-echo 79 is new; closure 103)
+    npm run test:all   + 9 suites  + 2088      (smoke 1124, print 78, mobile 709, update 30, forms-browser 10, recovery-browser 25, handover 26, swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244      (sendclaim 43; rules 59, cas.emulator 24, rollout 17, bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    the whole gate     59 suites   6664/6664   exit 0
+    The storm suite beside it, on the fix commit b306931: twelve shipped runs and three
+    forced-order runs, all 50/50 (features/storm/handoff.md).
+    Per suite and verbatim: features/storm/handoff.md.
 
     At f718367 (v97: the first iPhone round - the print fallback and the picture, the
     Saturday step, touch-action, the chip, the export path told the truth, ranges from
@@ -202,6 +214,7 @@ several waves of tests and is stale.)
 | quarantine | `quarantine.test.mjs` | A damaged APPROVAL, through every door a record arrives by. Held aside under its own map, never coerced into "nobody approved" or "approved", the gate shut while it stands, the person told, the bytes kept - and the rescue file carrying them rather than the empty object it used to. |
 | correction | `correction.test.mjs` | A correction undoes a transaction - all of it, or none of it - and is dated on the transaction it corrects. A partial correction stranded the rest for ever under an id nothing could reach, and it is the writer, not the form, that refuses it. |
 | closure | `closure.test.mjs` | The frozen fortnight: what a closure records (the wage it closed on, the opening balance, the counts and the days it was paid for), what it refuses (a closure that cannot be true against the record), and who may have one (every man, debt or no debt). A payslip somebody was handed prints the same numbers after a historical day moves. |
+| closure-echo | `closure.echo.test.mjs` | A ledger entry is the same fact as its own wire copy, and the phone that closed a fortnight is not held when its own closure comes back to it beside another phone's write. Found by the emulator storm going red once inside a release gate: closureFacts built day entries with own keys holding `undefined`, the top-level strip in appendLedgerEntry never reached them, and sameLedgerBytes rendered `"rate":undefined` - so the closer held one id with "two bodies", its own, and was blocked by Recovery until a reopen that never ran the mirror. Every writer's entry against its JSON round-trip through both comparators; the storm with the closure landing FIRST, against the fake cloud so the order is told rather than raced; and the usual order still converging. |
 | wording | `wording.test.mjs` | Every figure called what it is: the third money column is headed by what it holds - מקדמות until the migration is approved, נוכה מהשכר after - on the screen, in the CSV and in the workbook alike; the statement's opening balance is יתרת פתיחה, not an advance; and an overpaid account stops the automatic deduction and says so instead of printing a quiet zero. |
 | samefact | `samefact.test.mjs` | One fact written by two phones - the same approval, the same closure, the same correction, under one deterministic id with two names on it - is one fact: dropped from the second write as already done, kept by the merge as one body, never a conflict held for ever. |
 | forms | `forms.browser.mjs` | The advance and correction forms, driven by real clicks in real Chromium: open the history, press תיקון, type a reason, press שמור, read the record. A ReferenceError in a save handler is invisible to every node suite, and this is where one shipped from. |

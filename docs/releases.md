@@ -12,10 +12,43 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v97 (`4fe7c9a`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+**`main` is at v97 (`4fe7c9a`).** The build at the top of this file is a candidate on a
+branch: verified, stamped, and NOT served. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## v98 — CANDIDATE, not served — the tip of `cd-work`
+
+The storm explained and closed (`features/storm/findings.md`). v97's release note said one
+emulator suite had gone red once on its commit and nobody had explained the interleaving;
+this build is the explanation and the fix. Nothing on a phone runs it.
+
+**What it would give the crew that v97 does not have**
+
+- Nothing they can see today: both money gates are shut, and the defect lives behind the
+  carry gate. The day the gates open, a phone that closes a fortnight will no longer be
+  held by its own closure when its write happens to land first — `closureFacts` no longer
+  mints keys holding `undefined`, an appended entry is its own JSON round-trip, and the
+  two comparators compare a record as it travels and rests.
+- A closed fortnight's frozen day list carries the extra hours it was priced with.
+- The by-site grid's date rows read «ראשון 23/08» — the weekday and dd/mm, no year — on
+  paper and in the shared picture (the phone screen shows the section as bars); the year
+  stays on the period line above and in the exported sheets, where a row is read out of
+  context. Asked for from the phone, with a screenshot.
+
+**Checked before it was stamped**: the release gate on the stamped commit is in
+`features/storm/handoff.md`, with the storm suite run repeatedly under load beside it.
+No number is copied here.
+
+**What this build is NOT known to do**
+
+- **It is not on `main`.** No phone has it.
+- Two things found on the way to the cause are written down and not fixed: a closure
+  judged impossible under clock skew, and a refused approval write leaving a phone
+  'contested' once in twenty-eight runs. Both behind the shut gates; each its own round.
+- Everything v97 lists, unchanged: no iPhone has run any of it.
 
 ---
 
@@ -55,9 +88,9 @@ says so in full.
 **What this build is NOT known to do**
 
 - **Being on `main` is not being on a phone.** No phone is known to have taken it.
-- **One emulator suite went red once on this commit** and nobody has yet explained the
-  interleaving; it exercises two phones writing money with the gates OPEN through the
-  test seam. The hunt is the first follow-up.
+- **One emulator suite went red once on this commit**; it exercises two phones writing
+  money with the gates OPEN through the test seam. Explained and closed in v98
+  (`features/storm/findings.md`): a phone held by its own closure.
 - **No iPhone has run it.** The print heuristic (does Safari fire `beforeprint` or the
   print-media change when its sheet opens?), the share sheet inside the offer, and the
   touch-action rule are argued from the platform and measured in Chromium with

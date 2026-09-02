@@ -583,6 +583,25 @@ function overpaidAdvances(schedule, workerId) {
 // already there, and none of them touches schedule.advances - the old field is written by
 // the caller, in the same commit, for as long as the gate below is closed.
 
+// A value as JSON would carry it: an own key holding undefined is dropped from a record,
+// an undefined element of a list becomes null, and nothing else is touched. What
+// appendLedgerEntry keeps in memory has to be what reaches the outbox, the disk and the
+// wire, because every comparator in this file will one day be shown the two side by side.
+function withoutUndefined(value) {
+    if (Array.isArray(value)) {
+        return value.map(item => (item === undefined ? null : withoutUndefined(item)));
+    }
+    if (!isPlainObject(value)) return value;
+    const out = {};
+    Object.keys(value).forEach(key => {
+        if (value[key] === undefined) return;
+        // putKey, not assignment: a nested key reaches this from a rescue import as
+        // well as from this file's own writers, and `__proto__` must land as a key.
+        putKey(out, key, withoutUndefined(value[key]));
+    });
+    return out;
+}
+
 function appendLedgerEntry(schedule, entry) {
     // An entry may bring its own id. The migration must: two phones mirroring the same
     // advance have to mint the SAME key, or the union keeps both and the fold's winner
@@ -595,14 +614,20 @@ function appendLedgerEntry(schedule, entry) {
     // `null` back means no change, no memory mutation, no disk write and no queued
     // operation, which is what State.commit reads as a refusal.
     if (!isSafeId(id)) return null;
-    // Undefined fields are dropped, never stored. `method: undefined` survives
-    // Object.assign as an own property, and an entry that carries the KEY without a
-    // value reads as an entry that was asked how the money moved and answered
+    // Undefined fields are dropped, never stored - AT EVERY DEPTH. `method: undefined`
+    // survives Object.assign as an own property, and an entry that carries the KEY
+    // without a value reads as an entry that was asked how the money moved and answered
     // nothing - which is a different statement from never having been asked.
+    //
+    // And the top level was the only level this reached. A closure whose days carried
+    // `rate: undefined` went into the schedule WITH those keys and onto the outbox, the
+    // disk and the wire WITHOUT them - one record in two shapes, which the merge could
+    // tell apart and did, on the phone that wrote it. The record kept here is now its
+    // own JSON round-trip, so what a phone holds is what it sent.
     const record = { id };
     Object.keys(entry).forEach(field => {
         if (field === 'id' || entry[field] === undefined) return;
-        record[field] = entry[field];
+        record[field] = withoutUndefined(entry[field]);
     });
     // AND THE WHOLE PROPOSED ENTRY, READ BY THE READER THAT WILL HAVE TO READ IT BACK.
     //
@@ -794,11 +819,27 @@ function closureFacts(schedule, workerId, from, to, carriedIn) {
             date: String(day.date),
             amount: Number(day.amount) || 0,
             absent: Boolean(day.absent),
-            entries: (day.entries || []).map(one => ({
-                placeId: String(one.placeId || ''),
-                rate: one.rate === undefined ? undefined : String(one.rate),
-                hours: one.hours === undefined ? undefined : (Number(one.hours) || 0)
-            }))
+            entries: (day.entries || []).map(one => {
+                // ONLY WHAT IS THERE, the way workerDaysReport reads it back. This wrote
+                // `rate: undefined` and `hours: undefined` as OWN keys on every ordinary
+                // day - a fact JSON cannot carry. The schedule held the closure with those
+                // keys; the outbox, the disk and the wire held it without them; and the
+                // phone that wrote it was held by Recovery for "two bodies under one id"
+                // when its own closure came back inside another phone's snapshot. See
+                // tests/closure.echo.test.mjs.
+                const entry = { placeId: String(one.placeId || '') };
+                if (one.rate !== undefined) entry.rate = String(one.rate);
+                // THE LIVE FIELD IS `extraHours`. This read `one.hours`, which no live
+                // entry has (makeEntry writes extraHours, entryExtraHours reads it), so
+                // every frozen day lost the hours it was priced with: the 12th froze at
+                // 710 beside a statement with no hours line, and once the live day was
+                // corrected off nothing could explain the number. `hours` is what the
+                // frozen reader asks for, so a day list that is already frozen - handed
+                // back through workerDaysReport's frozen branch - is read by that name.
+                const hours = one.extraHours !== undefined ? one.extraHours : one.hours;
+                if (hours !== undefined) entry.hours = Number(hours) || 0;
+                return entry;
+            })
         }))
         : undefined;
     return {
@@ -1521,10 +1562,18 @@ function putKey(object, key, value) {
 // after this file and borrowing canonicalJson across that seam works right up until
 // somebody reorders index.html.
 function sameLedgerBytes(one, two) {
+    // AN OWN KEY HOLDING undefined IS NOT A BYTE. JSON.stringify(undefined) is the text
+    // "undefined", so a record whose nested key held it rendered as `"rate":undefined`
+    // here and as nothing at all on the wire - one id, two "bodies", on the phone that
+    // wrote both, and Recovery held it for a disagreement about money that nobody had.
+    // Compared as the record travels and rests: the key is skipped, an undefined element
+    // of a list is the null it becomes, and a key holding null is a byte and stays.
     const stable = value => {
         if (value === null || typeof value !== 'object') return JSON.stringify(value);
-        if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
-        return '{' + Object.keys(value).sort()
+        if (Array.isArray(value)) {
+            return '[' + value.map(item => (item === undefined ? 'null' : stable(item))).join(',') + ']';
+        }
+        return '{' + Object.keys(value).filter(key => value[key] !== undefined).sort()
             .map(key => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';
     };
     return stable(one) === stable(two);
@@ -1558,6 +1607,10 @@ function sameLedgerFact(one, two) {
         const out = {};
         Object.keys(record).forEach(field => {
             if (LEDGER_AUDIT_FIELDS.indexOf(field) !== -1) return;
+            // A key holding undefined is copied across as a key holding undefined, and
+            // the comparison below then sees a field the wire copy never had. Skipped
+            // here as well as there, so the two answers cannot drift apart.
+            if (record[field] === undefined) return;
             out[field] = record[field];
         });
         return out;

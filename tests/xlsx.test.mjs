@@ -379,6 +379,12 @@ same('one row per worker-day-site, worker-major, the day priced once',
     ]);
 
 const detail = book.sheets['פירוט'].values.slice(1);
+// The screen's date-by-site grid dropped its year at the person's request; the file did
+// not. A sheet is opened out of context, months later, from a folder of them, and a row
+// without its year is a row somebody misfiles.
+check('every row of the detail sheet still carries its year',
+    detail.length > 0 && detail.every(row => /^2026-\d{2}-\d{2}$/.test(row[0])),
+    JSON.stringify(detail.map(row => row[0])));
 const earned = detail.reduce((sum, row) => sum + (typeof row[6] === 'number' ? row[6] : 0), 0);
 check('the day column adds up to what the pay sheet says was earned',
     earned === book.sheets['שכר'].values.slice(1)
