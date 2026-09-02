@@ -12,20 +12,22 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v100 (`e4aa66b`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+**`main` is at v101 (`ee50ae4`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
+v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v101 — room on the day screen, and the change that could not give any
+## v101 — 2 September 2026 — `ee50ae4` (PR #13, the tree at `718ee6e`)
 
-Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v100 as served
+On `main` since 2 September 2026; whether any phone has taken the update is not known from
+here. Built on v100 as served
 (`e4aa66b`). One screen's chrome, three changes, nothing behind either money gate and
 nothing touching the record, sync or the arithmetic. Both gates stay shut.
 
-**What it would give the crew that v100 does not have**
+**What it gives the crew that v100 does not have**
 
 - **The day header shrinks to one row as soon as the list is scrolled.** The day name, its
   date and the two arrows stay — halfway down a list of names, nothing else on screen says
@@ -50,6 +52,7 @@ nothing touching the record, sync or the arithmetic. Both gates stay shut.
 
 **What it is known NOT to cover**
 
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - **No phone has run any of it, and this is the round where that matters most.** It is a
   round about how a screen feels under a thumb, and every measurement in it is headless
   Chromium. The scroll threshold's behaviour under iOS rubber-band scrolling and momentum
