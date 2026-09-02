@@ -252,15 +252,24 @@ function printoutScaleLayout(layout, scale) {
 
 // ---------------------------------------------------------------- reading the screen
 
-// textContent with the invisible bidi controls taken out. The app wraps names and
-// dates in FSI…PDI so the page's bidi algorithm keeps them whole; canvas text is laid
-// out by the same algorithm and the marks add nothing there, and a font that lacks a
-// glyph for them draws a box. The LRM before a minus (minusAmount in js/ui/dom.js)
-// STAYS - it is what keeps "-500" from drawing as "500-", on canvas as in the DOM.
+// textContent with the name isolates taken out. The app wraps names in FSI…PDI
+// (isolate in js/ui/dom.js) so the page's bidi algorithm keeps them whole; canvas text
+// is laid out by the same algorithm and those marks add nothing there, and a font that
+// lacks a glyph for them draws a box.
+//
+// Two things STAY. The LRM before a minus (minusAmount in js/ui/dom.js) is what keeps
+// "-500" from drawing as "500-", on canvas as in the DOM. And a date range's LRI…PDI
+// (dateRange in js/ui/dom.js) is what keeps "07/08/2026 - 13/08/2026" from drawing
+// with the later date on the left: the canvas is right-to-left in one switch
+// (ctx.direction, printoutImage), and with the isolate stripped the title and the
+// period drew backwards while the file was named from-to off the same text. The
+// canvas text engine honours the isolate and draws nothing for the marks - measured
+// in tests/smoke.mjs, not assumed.
 function printoutText(node) {
     if (!node) return '';
     return String(node.textContent || '')
-        .replace(/[\u2066-\u2069]/g, '')
+        .replace(/\u2068([^\u2066-\u2069]*)\u2069/g, '$1')
+        .replace(/[\u2067\u2068]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
