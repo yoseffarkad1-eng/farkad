@@ -12,16 +12,84 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v86 (`880d7bb`).** The two builds at the top of this file are candidates on
-a branch: verified, stamped, and NOT served. They are here so that the day one of them
+**`main` is at v86 (`880d7bb`).** The three builds at the top of this file are candidates
+on a branch: verified, stamped, and NOT served. They are here so that the day one of them
 reaches `main` the entry already exists and only its heading has to change.
 
 ---
 
+## v94 — CANDIDATE, not served — `9f11abf`
+
+The compact day of v93 with the core repaired underneath it: two review rounds, the
+first fixed, the second found. Nothing on a phone runs it.
+
+**What it would give the crew that v93 does not have**
+
+The fifteen findings of `features/core-repairs/findings.md`, reviewed at `c744d49` and
+each fixed as a fail-first test followed by the fix (`120c8a8` the send path, `6979fcf`
+the receipt path, `958a21d` the poison doors, `e25cbcb` the documentation):
+
+- An edit queued before the session heard the cloud - a phone opened offline - is no
+  longer sent over another phone's newer value with both phones saying synced. Every
+  `days.`/`ledger.` operation now carries what the device had seen at that path in the
+  same verified write as the operation, and the pre-send question is asked per path,
+  not of the whole document's last writer. Two phones recording the same worker on the
+  same day offline, the second coming back later, end in a hold, not a silent replace.
+- A hold decided before the send says so: status `contested` and its line, instead of
+  «מחובר. יש רישומים שעדיין נשלחים.» for ever with nothing sending.
+- A retry answered from its receipt re-adopts the snapshot, so a correction made
+  meanwhile by another phone is taken; a replay that empties the queue says synced
+  instead of keeping the last error; the loser of a create race whose snapshot arrived
+  late merges without a sync error.
+- Evidence of an unreadable record is kept under its own key: `__proto__` evidence
+  survives a reopen, one quarantine copy is made rather than one per open (the device
+  no longer becomes unwritable after twenty opens with a false "no room"), a non-date
+  key in the `days` map is held and reported instead of dropped, a poisoned layer
+  arriving again is not reparented, an acknowledged record is not an error on every
+  snapshot, and a restore file carrying a poisoned map is refused at the door with its
+  own sentence instead of putting the DEVICE into recovery hold. The rescue door still
+  opens a held phone's own file; only a replacement is refused for it.
+
+**Checked**, at `9f11abf`, the whole release gate from the `farkad-work` worktree on
+Node v22.22.2 (`.gate-release.log` in that worktree, 00:06:59-00:22:19, exit 0):
+
+| suite | |
+|---|---|
+| `npm test`, the 36 node suites | 3602/3602 |
+| the 8 browser suites (smoke 1041, print 65, mobile 671, update 30, recovery-browser 25, handover 26, swrestart 31, swidentity 55) | 1944/1944 |
+| sendclaim | 43/43 |
+| the 5 emulator suites (rules 59, cas-emulator 24, rollout 17, bootstrap 23, bootstrap-rules 28) | 151/151 |
+| the whole gate, 50 suites | 5740/5740 |
+
+This is the first time the browser and emulator halves were run on the compact day; the
+v93 entry below still says its browser half is unmeasured, and that is still true of
+`10a40a5` itself.
+
+**What this build is NOT known to do**
+
+- **It is not on `main`.** No phone has it, and none of the above is a release.
+- **The second review, at `9f11abf`, found seven things**
+  (`features/core-repairs/findings-round2.md`), none refuted, and they are live at that
+  commit - the 5740 above were measured WITH them: the loser of a create race whose
+  document already exists sends its queued patch as an ordinary update without asking
+  the pre-send question of the document it just read, so the winner's day is replaced
+  on every phone with both synced (P1); a phone whose snapshot listener has died says
+  «מסונכרן» after its next successful send (P2); a poison sighting's identity is the
+  bytes of the whole map, so every sibling edit by any phone is a new sighting and the
+  phone never adopts the other phones' work on that day (P2); the rescue door holds the
+  READING phone for a file it only previewed, and on cancel it stays held (P2); a
+  poisoned snapshot acknowledged mid-session is not re-adopted until the cloud changes
+  again (P3); the chip beside the app's name reads the queue count before the sentence,
+  so a contested hold is labelled «ממתין לשליחה», never «דורש הכרעה» (P2); and this
+  file had no v94 entry (P3). The round-two fixes are NOT in the count above; each
+  ships as its own fail-first pair and is measured where it lands.
+- Everything in the v93 and v91 entries below that the fixes above do not name still
+  holds - the vehicles gate, the ledger gate, the iPhone that has never run it.
+
 ## v93 — CANDIDATE, not served — `10a40a5`
 
-The tip of `cd-work`: the v91 core repair with the compact day on top of it. Nothing on a
-phone runs it.
+The v91 core repair with the compact day on top of it; the base v94 was repaired from.
+Nothing on a phone runs it.
 
 **What it would give the crew that v91 does not have**
 

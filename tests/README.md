@@ -63,14 +63,36 @@ does not is a count from some other tree:
     test:sendclaim      1 suite     43/43
     data.test.mjs at seeds 1, 42 and 2026: 1943/1943 every time
 
+    At 9f11abf (v94), the whole release gate from the farkad-work worktree, Node v22.22.2,
+    .gate-release.log in that worktree, exit 0 - the only run of all fifty on one tree
+    since cf8b9e5:
+    npm test           36 suites   3602/3602
+      isolation 18, blobs 11, build 29, poison 37, merge 28, contested 73, receipt 28,
+      data 1943, recovery 64, adversarial 116, probes 35, capacity 44, concurrency 46,
+      exports 42, fence 35, fence-ingress 43, fence-legacy 21, money-history 9,
+      money-units 21, money-cloud 17, money-display 4, snapshot-poison 64, repayment 45,
+      ledger-ingress 151, cas 68, status 21, money 40, money-ingress 206, method 51,
+      restore 51, upgrade 48, vehicles 61, xlsx 54, nonassertions 23, labels 23,
+      labelcache 32
+    npm run test:all   + 8 suites  + 1944   (smoke 1041, print 65, mobile 671,
+                                             update 30, recovery-browser 25,
+                                             handover 26, swrestart 31, swidentity 55)
+    test:release       + 6 suites  + 194    (sendclaim 43, rules 59, cas-emulator 24,
+                                             rollout 17, bootstrap 23,
+                                             bootstrap-rules 28)
+    ------------------------------------------------------------------
+    the whole gate     50 suites   5740/5740
+    The seven round-two findings (features/core-repairs/findings-round2.md) are live in
+    this count; their fixes are measured where they land.
+
     At c744d49, from a clean detached worktree, Node v22.22.2:
     npm test           36 suites   3493/3493
     test:emulator       5 suites    151/151   (rules, cas-emulator, rollout, bootstrap,
                                                bootstrap-rules)
 
-    At cf8b9e5 (v91), from a clean detached worktree - written down in 2f6b6dc, and the
-    last time the WHOLE gate was run and recorded; the eight browser suites have not been
-    counted since, and v93 re-pinned smoke and mobile, so these are not v93's numbers:
+    At cf8b9e5 (v91), from a clean detached worktree - written down in 2f6b6dc; v93
+    re-pinned smoke and mobile between this run and the one at 9f11abf, so these are
+    neither v93's nor v94's numbers:
     npm test           35 suites   3429/3429
     npm run test:all   + 8 suites  + 1893   (smoke 1030, print 65, mobile 631,
                                              update 30, recovery-browser 25,
@@ -83,7 +105,8 @@ does not is a count from some other tree:
 
 The 36th node suite, `tests/snapshot.poison.test.mjs`, arrived after cf8b9e5 with the
 poisoned-name repair; the gate at 10a40a5 is 50 suites, and its browser and emulator
-halves have not been run on that tree.
+halves have not been run on that tree - the first tree they ran on after cf8b9e5 is
+9f11abf, above.
 
 The counts grow with every guarantee, and a count taken from a different commit is
 worse than no count at all — trust a run, not a prose number. The release-time numbers
