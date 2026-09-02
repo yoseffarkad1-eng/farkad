@@ -27,6 +27,7 @@ const FILES = [
     'js/store.js',
     'js/recovery.js',
     'js/model/schema.js',
+    'js/model/money.js',
     'js/model/migrate.js',
     'js/model/ledger.js',
     'js/state.js',
