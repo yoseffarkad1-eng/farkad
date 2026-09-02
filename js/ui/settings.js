@@ -140,7 +140,9 @@ function renderCarryMigration() {
         const worker = State.worker(row.workerId);
         const line = el('div', 'wday');
         line.appendChild(el('div', 'wday-date',
-            `${formatFullDate(parseLocalDate(row.from))} - ${formatFullDate(parseLocalDate(row.to))}`));
+            // One left-to-right run, like every other range on a screen - see dateRange
+            // in js/ui/dom.js: bare, the later date paints on the left.
+            dateRange(formatFullDate(parseLocalDate(row.from)), formatFullDate(parseLocalDate(row.to)))));
         const what = el('div', 'wday-what');
         what.appendChild(el('span', null, worker ? worker.name : row.workerId));
         what.appendChild(el('span', 'wday-note',
