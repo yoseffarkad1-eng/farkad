@@ -2074,8 +2074,13 @@ for (const width of WIDTHS) {
         await page.waitForTimeout(300);
 
         const seen = await page.evaluate(() => {
+            // THE TABLE THAT IS ON THE SCREEN. The invoice carries two - the one a
+            // person reads and `.invoice-grid`, which `@media screen` hides and only the
+            // paper uses - so querySelector took the hidden one and measured 0x0.
             const read = selector => {
-                const table = document.querySelector(selector);
+                const tables = [...document.querySelectorAll(selector)];
+                const table = tables.find(node =>
+                    node.getBoundingClientRect().height > 0) || tables[0] || null;
                 const ths = table ? [...table.querySelectorAll('thead th')] : [];
                 return {
                     count: ths.length,

@@ -1802,6 +1802,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    site's colour block, seven days fit the width of the screen, and a tap still opens
    the day with everything written out. Asking someone to scroll a grid sideways to see
    Thursday is not "seeing the week". */
+@media (max-width: 423px) {
+    /* Sits over the clipped edge, above the cells and under nothing a finger needs -
+       pointer-events: none so a tap at the edge still reaches the day beneath it. The
+       colour is the page's own background fading to nothing, so it reads as the strip
+       running under the edge rather than as a border drawn on top of it. */
+    .week-strip::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: calc(-1 * var(--page-pad, 12px));
+        width: 24px;
+        pointer-events: none;
+        background: linear-gradient(to right, var(--paper), rgba(0, 0, 0, 0));
+    }
+}
+
 @media (max-width: 700px) {
     .week-legend { display: flex; }
 
@@ -1830,6 +1847,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
            paper has no padding to give back. */
         margin-inline: calc(-1 * var(--page-pad, 12px));
     }
+    /* THE STRIP SAYS THAT IT IS CUT OFF.
+       88px of names and seven 48px days are 424. A 430 phone gives the strip the whole
+       screen - the negative margin above hands back `.app`'s padding - and the week fits
+       with nothing to push, so there is nothing to say. Below 424 it does not fit, and
+       because the strip is right-to-left the overflow goes LEFT: Thursday sits off that
+       edge at rest and nothing on the screen suggested the week could be pushed at all.
+       The person reported it as a week with five days in it.
+       A fade at that edge, and nothing else. Not a direction change, not a smaller pitch
+       - shrinking the columns to make the week fit is the answer this file already
+       rejected once, two blocks up. It hangs on .week-strip, which is OUTSIDE the
+       scroller (js/ui/week.js): drawn inside, it would scroll away with the table and
+       mark nothing.
+       The breakpoint is the content's own width, not a device's: at 424 the strip is
+       exactly full and the cue would be a lie. tests/mobile.test.mjs pins it present at
+       320/375/390 and absent at 430. */
+    .week-strip { position: relative; }
+
     /* NOT table-layout: fixed. Fixed layout divides the container's width between the
        columns and ignores min-width entirely - which is how `min-width: 44px` sat two
        lines below here for a year as a rule that did nothing, and how the columns came
