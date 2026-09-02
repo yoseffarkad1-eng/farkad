@@ -60,7 +60,12 @@ function dayMessage(date, layer, styleKey, placeId) {
         if (workerIds.length === 0) return;
 
         any = true;
-        lines.push(style.site(place.name));
+        // ISOLATED, because the name starts the line and bidi reads the first strong
+        // character to decide which way the whole line goes. «📍 הרצליה» is an RTL line;
+        // «📍 Rothschild 12» was an LTR one, so its pin flipped to the left edge while
+        // every other line in the message kept it on the right. The statement has
+        // isolated its heading since it was written (workerStatementText); this did not.
+        lines.push(style.site(isolate(place.name)));
         workerIds.forEach(workerId => {
             const worker = State.worker(workerId);
             if (!worker) return;
@@ -77,7 +82,9 @@ function dayMessage(date, layer, styleKey, placeId) {
                 const hours = entryExtraHours(entry);
                 suffix = hours ? ` (${plusAmount(hours)} ש׳)` : ' (שעות נוספות)';
             }
-            lines.push(style.worker(worker.name, suffix));
+            // Same reason, and this one also mixes: «• Dan Levi (‎+2 ש׳)» read as an
+            // LTR line puts the Hebrew suffix on the wrong side of the name.
+            lines.push(style.worker(isolate(worker.name), suffix));
         });
         lines.push('');
     });
@@ -89,12 +96,14 @@ function dayMessage(date, layer, styleKey, placeId) {
     if (!only) {
         // The line is always there, "אין" included: its absence would be ambiguous
         // between nobody-absent and nobody-checked.
-        lines.push(style.absent(absent.length > 0 ? absent.map(w => w.name).join(', ') : 'אין'));
+        lines.push(style.absent(absent.length > 0
+            ? absent.map(w => isolate(w.name)).join(', ')
+            : 'אין'));
     }
 
     if (!any && absent.length === 0) {
         return lines[0] + (only
-            ? `\n\n${only.name}: אין שיבוצים ליום הזה.`
+            ? `\n\n${isolate(only.name)}: אין שיבוצים ליום הזה.`
             : '\n\nאין שיבוצים ליום הזה.');
     }
 
@@ -559,9 +568,21 @@ function pushUndoState(schedule) {
         stack = raw ? JSON.parse(raw) : [];
         if (!Array.isArray(stack)) stack = [];
     } catch (error) {
-        // Unreadable is not empty, and this one is recoverable without ceremony: the
-        // stack is a convenience over the single slot below, so it starts again rather
-        // than taking the app down with it. The raw value is left where it is.
+        // Unreadable is not empty, and law 10 has no exception for a convenience: this
+        // record holds up to three WHOLE SCHEDULES, and a person reaches for it exactly
+        // when something has already gone wrong. The comment here used to say "The raw
+        // value is left where it is" - and the write four lines down went straight over
+        // it, so two earlier ways back, both still legible inside the broken bytes, were
+        // on no device afterwards.
+        //
+        // A copy is taken under its own name first. Recovery keeps the original, and the
+        // stack starts again rather than taking the app down with it - which is the part
+        // of the old comment that was right: this is not the schedule, and refusing to
+        // record until somebody looks would be a worse trade for a convenience.
+        if (typeof Recovery !== 'undefined' && Recovery && Recovery.damaged) {
+            Recovery.damaged(UNDO_STACK_KEY, Store.get(UNDO_STACK_KEY),
+                'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה.');
+        }
         stack = [];
     }
 
@@ -575,13 +596,25 @@ function pushUndoState(schedule) {
     // what an older build left behind. It carries the SCHEDULE ONLY.
     const slotted = Store.setVerified(UNDO_KEY, entry);
 
-    // Either route home is enough - unless there are questions to carry, and then only
-    // the stack entry can carry them. Returning true because the schedule-only slot
-    // landed reported a way back that would come home with the week and without the
-    // things nobody had answered about it, and the import that read that answer went
-    // ahead on the strength of it.
-    if (JSON.parse(decisions).length > 0) return stacked;
-    return stacked || slotted;
+    // THE STACK IS THE WAY BACK. The slot is not, and counting it as one was a promise
+    // this device cannot keep.
+    //
+    // js/sync/sync.js's receive() writes UNDO_KEY on every snapshot it adopts, to keep
+    // what was on screen before an unexpected remote change. That is a reasonable use of
+    // a key named "the state before the last load" - and it means the slot survives
+    // exactly until the other phone records an evening. A phone with room for the slot
+    // and not for the stack answered true here, the restore went ahead, and the person
+    // who reopened the next morning and pressed «לשחזר את המצב שלפני הטעינה האחרונה» was
+    // put back into the state they had been trying to escape, and told «שוחזר.».
+    //
+    // Room between the two is the ordinary end of a season of records - and the reclaim
+    // ladder spends restore points paying for the stack write that then fails, so the
+    // trade was made twice over.
+    //
+    // The slot is still written, because restoreLocalBackup reads it and an older build
+    // left one behind; it is simply not evidence. False here refuses the restore with
+    // noWayBackNotice(), which is the honest end of a device that has nowhere to put one.
+    return stacked;
 }
 
 function readUndoStack() {

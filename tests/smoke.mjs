@@ -777,18 +777,28 @@ async function seedRoster(page) {
   await page.waitForTimeout(300);
 
   const text = await page.inputValue('#shareText');
+  // U+2068 FIRST STRONG ISOLATE ... U+2069, around every NAME in the message since v99.
+  // A site or a worker with a Latin name used to put a strong Latin character first on
+  // its line, and bidi turned the whole line round - see «a Latin name does not turn a
+  // line of the message round» in tests/exports.test.mjs. The marks are invisible and the
+  // owner's words are unchanged; they are written into these pins rather than stripped
+  // out of them, so dropping the isolates fails here instead of passing.
+  const FSI = '\u2068';
+  const PDI = '\u2069';
+  const named = name => `${FSI}${name}${PDI}`;
   // the owner's own template, character for character: 📅 heading, 📍 per site, 🚫 line
   check('the message opens exactly like the group is used to',
     text.startsWith('📅 סидור עבודה – יום רביעי 12/08/2026'.replace('סидור','סידור')), text.split('\n')[0]);
-  check('it groups workers under their site', text.includes('📍 הרצליה') && text.includes('• דוד'));
-  check('a doubled day is marked', text.includes('שרה (כפול)'), text);
+  check('it groups workers under their site',
+    text.includes(`📍 ${named('הרצליה')}`) && text.includes(`• ${named('דוד')}`));
+  check('a doubled day is marked', text.includes(`${named('שרה')} (כפול)`), text);
   check('extra hours are spelled out', text.includes('+2'), text);
-  check('absences are listed', text.includes('🚫 נעדרים:') && text.includes('עלי'));
+  check('absences are listed', text.includes('🚫 נעדרים:') && text.includes(named('עלי')));
   check('and with nobody absent the line still says so',
     (await page.evaluate(() => {
       State.commit(markAbsent(State.schedule, '2026-08-12', 'w_03', 'actual'));
       return dayMessage('2026-08-12', 'actual', 'pin');
-    })).includes('🚫 נעדרים: עלי'));
+    })).includes(`🚫 נעדרים: ${named('עלי')}`));
 
   // three templates from the owner's own group, switchable and remembered
   check('the share dialog offers all three looks',
@@ -798,14 +808,15 @@ async function seedRoster(page) {
   await page.waitForTimeout(200);
   const crane = await page.inputValue('#shareText');
   check('the builder style opens its own way',
-    crane.startsWith('סидור עובדים ליום'.replace('ид','יד')) && crane.includes('🏗️ הרצליה') && crane.includes('– דוד'),
+    crane.startsWith('סидור עובדים ליום'.replace('ид','יד')) && crane.includes(`🏗️ ${named('הרצליה')}`) && crane.includes(`– ${named('דוד')}`),
     crane.split('\n')[0]);
 
   await page.locator('#shareStyles').getByRole('button', { name: /בוקר טוב/ }).click();
   await page.waitForTimeout(200);
   const morning = await page.inputValue('#shareText');
   check('the morning style greets first and uses the worker emoji',
-    morning.startsWith('בוקר טוב,') && morning.includes('👷 דוד') && morning.includes('❌ נעדרים:'),
+    morning.startsWith('בוקר טוב,') && morning.includes(`👷 ${named('דוד')}`)
+      && morning.includes('❌ נעדרים:'),
     morning.split('\n')[0]);
 
   // the choice survives closing and reopening

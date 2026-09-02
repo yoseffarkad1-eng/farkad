@@ -103,7 +103,18 @@ function renderWeek() {
 
     const wrap = el('div', 'table-scroll');
     wrap.appendChild(table);
-    root.appendChild(wrap);
+
+    // A BOX THE SCROLL CUE CAN HANG ON, and it has to be outside the scroller.
+    //
+    // At 390 and below the week is wider than the screen - 88px of names and seven 48px
+    // days are 424 - so Thursday sits off the LEFT edge at rest, this being a
+    // right-to-left strip. The pitch is deliberate and stays; what was missing was any
+    // sign that the strip could be pushed at all. A fade drawn INSIDE .table-scroll would
+    // scroll away with the table, so the mark lives on a wrapper that does not move.
+    // css/app.css draws it, and only where the strip actually overflows.
+    const strip = el('div', 'week-strip');
+    strip.appendChild(wrap);
+    root.appendChild(strip);
 
     root.appendChild(renderWeekLegend());
     root.appendChild(el('p', 'week-legend-note',

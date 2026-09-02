@@ -9921,4 +9921,118 @@ const VEHICLES_ON = { vehicles: true };
         JSON.stringify(verdict));
 }
 
+
+// ================================================== the way back a restore promises
+{
+    suite('a way back the next snapshot erases is not a way back');
+
+    // THE SLOT IS NOT A ROUTE HOME, and pushUndoState counted it as one.
+    //
+    // Two records carry the state before a restore: the stack (up to three, with the
+    // migration questions beside them) and the single slot scheduleData:v2backup, which
+    // is what an older build left behind and what restoreLocalBackup still reads.
+    // pushUndoState returned `stacked || slotted`, so a phone with room for the slot and
+    // not for the stack reported a confirmed way back - and the restore went ahead on
+    // the strength of it.
+    //
+    // The slot is not durable in the way that answer claims. js/sync/sync.js's receive()
+    // writes that same key on EVERY snapshot it adopts, to keep what was on screen. So
+    // the way back survives exactly until the other phone records an evening: the person
+    // reopens the app the next morning, presses «לשחזר את המצב שלפני הטעינה האחרונה»,
+    // and is restored to the state they were trying to escape - and told «שוחזר.».
+    //
+    // Room between the two is the ordinary end of a season of records, which is what the
+    // reclaim ladder exists for; and the ladder spends restore points to pay for the
+    // write that then fails.
+    const device = makeDevice();
+    seed(device);
+    device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    device.State.save({ silent: true });
+
+    // Room for the slot, none for the stack.
+    device.setQuota(key => key === 'scheduleData:undoStack');
+    const answer = device.call('pushUndoState', device.State.schedule);
+    given('the slot landed and the stack did not',
+        device.raw('scheduleData:v2backup') !== null
+            && device.raw('scheduleData:undoStack') === null,
+        JSON.stringify([device.raw('scheduleData:v2backup') !== null,
+            device.raw('scheduleData:undoStack') === null]));
+    check('pushing the way back does not report one', answer === false, String(answer));
+}
+
+{
+    suite('an undo stack that will not parse is held, not written over');
+
+    // Law 10, and this is the one record family that was exempt from it by accident.
+    // The catch here starts from [] under a comment that says "The raw value is left
+    // where it is" - and the next line writes over that same key. The bytes held two
+    // whole schedules, both still legible inside them, and after one ordinary restore
+    // they are on no device.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    const broken = '[{"at":"2026-07-01T00:00:00.000Z","schedule":"{\\"marker\\":\\"JULY-WAY-BACK\\"}"';
+    device.putRaw('scheduleData:undoStack', broken);
+    given('the stack on disk will not parse and holds a way back',
+        device.raw('scheduleData:undoStack').indexOf('JULY-WAY-BACK') !== -1,
+        device.raw('scheduleData:undoStack').slice(0, 40));
+
+    device.call('pushUndoState', device.State.schedule);
+    check('the bytes are still on the device somewhere',
+        Object.keys(device.dump()).some(key =>
+            String(device.dump()[key]).indexOf('JULY-WAY-BACK') !== -1),
+        JSON.stringify(Object.keys(device.dump()).filter(key =>
+            String(device.dump()[key]).indexOf('JULY-WAY-BACK') !== -1)));
+    check('and a copy was put aside under its own name',
+        Object.keys(device.dump()).some(key => key.indexOf('scheduleData:undoStack:damaged') === 0),
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('undoStack') !== -1)));
+}
+
+
+{
+    suite('a refused edit is taken off the screen even with nothing durable behind it');
+
+    // rollback() answered false and did nothing whenever durableText was not a string -
+    // and durableText is only ever set by a successful save, a successful persist, or a
+    // load that FOUND a readable schedule. The one session where none of those has
+    // happened is the session that opened onto a damaged record, which is exactly the
+    // session where the person is most likely to re-type what they can see missing.
+    //
+    // So every refused edit stayed on the screen under a dialog reading «השינוי בוטל כדי
+    // שלא ייראה כאילו נרשם», with nothing in the journal behind it. Acknowledge the
+    // quarantine, record one ordinary day, and that save carries the re-typed days onto
+    // the disk with no journal entry for any of them - and the first snapshot from
+    // another phone then writes over them, because reapplyPending has nothing to put
+    // back. Three days gone from screen, disk and cloud, with the line reading synced.
+    //
+    // With nothing durable behind it the honest target is the empty schedule and the
+    // journal replayed onto it - which is precisely what a reopen of this device would
+    // produce, and what rollback's own comment already promises.
+    const device = makeDevice({ storage: { 'scheduleData:v2': '{"schemaVersion":2,"workers":[' } });
+    device.State.load();
+    given('the record is damaged and writing is blocked',
+        device.call('farkadWritesBlocked') === true,
+        String(device.call('farkadWritesBlocked')));
+    given('and nothing durable stands behind the screen',
+        device.State.durableText === null, String(device.State.durableText));
+
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    const refused = device.State.commit(device.call('assignPlace', device.State.schedule,
+        '2026-08-10', 'w_01', 'actual', 'p_01'));
+    given('the edit was refused', refused === false, String(refused));
+
+    check('and it is not left standing on the screen',
+        device.State.schedule.days['2026-08-10'] === undefined,
+        JSON.stringify(Object.keys(device.State.schedule.days || {})));
+    check('and nothing on the disk mentions it either',
+        Object.keys(device.dump()).every(key =>
+            String(device.dump()[key]).indexOf('2026-08-10') === -1),
+        JSON.stringify(Object.keys(device.dump()).filter(key =>
+            String(device.dump()[key]).indexOf('2026-08-10') !== -1)));
+}
+
+
 report();

@@ -312,4 +312,162 @@ function tunnel(cloud) {
         b.Sync.status !== 'synced', b.Sync.status);
 }
 
+
+// -------------------------------------------- the same fact, on a project with no document
+{
+    suite('two phones approving one plan reach an empty project');
+
+    // THE CREATE RACE ASKS A DIFFERENT QUESTION FROM THE CONFLICT BRANCH, and that was
+    // the whole of it.
+    //
+    // The conflict branch above settles a path the server already holds as the same fact:
+    // ledgerPathSupersededBy is asked, the path is dropped, the first writer's record
+    // stands. createDocument's already-exists branch decides what to hold with
+    // movedUnder, which compares VALUES - so one approval with a different `by` is a
+    // value nobody here has seen, and it is held for a person.
+    //
+    // Both phones approve before they ever connect, which is what a person does: the
+    // review screen is the first thing a new install shows once the gate is open, and
+    // tests/money.concurrency.test.mjs's phone() approves in its constructor for exactly
+    // that reason. Then both reach a project with no document and race to create it.
+    // Measured on 4a4d277:
+    //
+    //     B outbox paths: ["ledger.migrations.cm_carry"]
+    //     B HELD paths:   ["ledger.migrations.cm_carry"]
+    //     B status: contested        same fact? true        same bytes? false
+    //
+    // That is the end state the storm hunt saw once in twenty-eight emulator runs under
+    // load and could not place - "a refused approval write leaves the phone contested".
+    // It is this, and on the fake cloud it happens every time.
+    const cloud = makeCloud();
+    const a = phone('d_empty_a');
+    const b = phone('d_empty_b');
+    approveOn(a, 'd_a', '2026-08-26T08:00:00.000Z');
+    approveOn(b, 'd_b', '2026-08-26T08:00:07.000Z');
+    given('neither phone has heard of a document yet', cloud.doc === null,
+        JSON.stringify(cloud.doc));
+    given('and each holds its own approval of the same plan',
+        a.State.schedule.ledger.migrations.cm_carry.by === 'd_a'
+        && b.State.schedule.ledger.migrations.cm_carry.by === 'd_b',
+        JSON.stringify([a.State.schedule.ledger.migrations.cm_carry.by,
+            b.State.schedule.ledger.migrations.cm_carry.by]));
+
+    a.Sync.connect(cloud.adapter);
+    b.Sync.connect(cloud.adapter);
+    await settleUntil(() => a.Sync.pendingCount() === 0 && b.Sync.pendingCount() === 0,
+        8000);
+    await settle(600);
+
+    const winner = ((cloud.doc || {}).ledger || {}).migrations || {};
+    given('one of them created the document and its approval is on it',
+        Object.keys(winner).length === 1, JSON.stringify(winner));
+
+    check('neither phone owes anything',
+        a.Sync.pendingCount() === 0 && b.Sync.pendingCount() === 0,
+        `A ${a.Sync.pendingCount()} / B ${b.Sync.pendingCount()}`);
+    check('neither is holding a conflict about money',
+        a.Sync.holdingContested() === false && b.Sync.holdingContested() === false,
+        `A ${a.Sync.status} / B ${b.Sync.status}`);
+    check('and neither says anything but synced',
+        a.Sync.status === 'synced' && b.Sync.status === 'synced',
+        `A ${a.Sync.status} / B ${b.Sync.status}`);
+    check('nothing is held on either disk',
+        Object.keys(a.dump()).every(key => key.indexOf(':hold:') === -1)
+        && Object.keys(b.dump()).every(key => key.indexOf(':hold:') === -1),
+        JSON.stringify(Object.keys(a.dump()).concat(Object.keys(b.dump()))
+            .filter(key => key.indexOf(':hold:') !== -1)));
+
+    // ONE APPROVAL, IN THE FIRST WRITER'S HAND. Settling must not mean the loser sends
+    // its copy anyway and puts its own name over the record - that is what the conflict
+    // branch drops the path for.
+    //
+    // Asked of the DOCUMENT, not of a count of writes carrying the path: the winner's
+    // approval travels inside the create's seed, where it is a nested object and not a
+    // flat `ledger.migrations.cm_carry` key at all, so counting that key would count zero
+    // and pass whatever the loser did afterwards.
+    const signedBy = winner.cm_carry && winner.cm_carry.by;
+    check('the cloud holds exactly one approval', Object.keys(winner).length === 1,
+        JSON.stringify(winner));
+    check('signed by one of the two phones, whichever created the document',
+        signedBy === 'd_a' || signedBy === 'd_b', String(signedBy));
+    check('and the loser never wrote its own name over it',
+        cloud.writes.filter(write => !write.replayed)
+            .filter(write => {
+                const body = write.patch || write.data || {};
+                const flat = body['ledger.migrations.cm_carry'];
+                const nested = ((body.ledger || {}).migrations || {}).cm_carry;
+                const sent = flat || nested;
+                return sent && sent.by !== signedBy;
+            }).length === 0,
+        JSON.stringify(cloud.writes.filter(w => !w.replayed).map(w => w.kind)));
+
+    // AND BOTH PHONES END UP READING THE ONE THE CLOUD KEPT. A phone that settled its own
+    // write but went on holding its own copy locally would be two records again.
+    check('both phones read the approval the cloud kept',
+        a.State.schedule.ledger.migrations.cm_carry.by === signedBy
+        && b.State.schedule.ledger.migrations.cm_carry.by === signedBy,
+        JSON.stringify([a.State.schedule.ledger.migrations.cm_carry.by,
+            b.State.schedule.ledger.migrations.cm_carry.by, signedBy]));
+
+    // AND BOTH PHONES READ THE MIGRATION AS SETTLED, which is what the gate in front of
+    // every financial writer asks before it lets anything through.
+    check('both phones read the plan as approved',
+        a.call('carryMigrationSettled', a.State.schedule) === true
+        && b.call('carryMigrationSettled', b.State.schedule) === true,
+        JSON.stringify([a.call('carryMigrationSettled', a.State.schedule),
+            b.call('carryMigrationSettled', b.State.schedule)]));
+}
+
+// ------------------------------------------- what the same-fact rule must NEVER wave through
+{
+    suite('a closure of one fortnight is the same fact only when the fortnight is');
+
+    // THE DECISION, PINNED. A v97 closure froze its days without the hours they were
+    // priced with; a v98 closure records them. Two phones on those two builds, both with
+    // the gates open - which no build a person can run has - closing one fortnight write
+    // one id with two different bodies, and the second is held.
+    //
+    // It stays held. The frozen basis is not decoration: it is the evidence the payslip
+    // was computed from, and two phones that disagree about which days a fortnight was
+    // priced on disagree about something real. Settling that by "the first one wins"
+    // would discard a record on the strength of who pressed first.
+    //
+    // The case cannot arise on a served build, and features/gate-flip/contract.md
+    // requires all three phones on one build before either gate opens - which is the
+    // reason it cannot arise later either.
+    const device = phone('d_decide');
+    const money = { id: 'le_close_a_omer_20260807', advanceId: 'a_omer', kind: 'deducted',
+        workerId: 'w_01', date: '2026-08-20', periodFrom: '2026-08-07',
+        periodTo: '2026-08-20', amount: 3050, balanceAfter: 1950, gross: 3050,
+        carriedIn: 0, given: 5000, repaid: 0, reversed: 0, net: 0,
+        basis: { normalDays: 5, doubleDays: 0, extraHours: 2, siteVisits: 5, absent: 0 } };
+    const withDays = (hours, at, by) => Object.assign({}, money, {
+        days: [{ date: '2026-08-10', amount: 610, absent: false,
+            entries: [hours === null
+                ? { placeId: 'p_01', rate: 'daily' }
+                : { placeId: 'p_01', rate: 'daily', hours }] }],
+        at, by });
+
+    const asV97 = withDays(null, '2026-08-20T18:00:00.000Z', 'd_one');
+    const asV98 = withDays(2, '2026-08-20T18:04:00.000Z', 'd_two');
+    check('two builds that froze different days are NOT one fact',
+        device.call('sameLedgerFact', asV97, asV98) === false,
+        JSON.stringify([asV97.days, asV98.days]));
+    check('so the sync layer does not settle one over the other',
+        device.call('ledgerPathSupersededBy',
+            'ledger.advances.le_close_a_omer_20260807', asV98, asV97) === false,
+        'held for a person');
+
+    // The two controls, either side of it.
+    const otherHand = Object.assign({}, asV98, { at: '2026-08-20T19:00:00.000Z',
+        by: 'd_three' });
+    check('two hands on ONE build are one fact',
+        device.call('sameLedgerFact', asV98, otherHand) === true,
+        JSON.stringify([asV98.by, otherHand.by]));
+    const otherSum = Object.assign({}, asV98, { amount: 2000, balanceAfter: 3000 });
+    check('and a different sum is never one fact',
+        device.call('sameLedgerFact', asV98, otherSum) === false,
+        JSON.stringify([asV98.amount, otherSum.amount]));
+}
+
 report();

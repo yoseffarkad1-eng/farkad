@@ -21,3 +21,15 @@ js/sync/_adapter-bootstrap-test.mjs
 js/sync/_bootstrap-test-config.mjs
 js/sync/_adapter-money-test.mjs
 js/sync/_money-test-config.mjs
+
+# The gate logs. Every round writes its release-gate output beside the tree it ran in -
+# .gate-release.log, .gate-node.log, .storm-serial.log - and the numbers that matter are
+# copied into the handoff under features/, which is where they belong. A log committed
+# here would be a count with no commit attached to it, which tests/README.md forbids.
+.gate-*.log
+.storm-*.log
+
+# A private emulator config, copied from firebase.json with another port so one emulator
+# suite can run beside another job. See tests/README.md.
+firebase.*.json
+!firebase.json

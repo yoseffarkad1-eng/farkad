@@ -1,3 +1,151 @@
+# Data safety — what is proven now, and the v79 handover behind it
+
+**Two documents in one file, and deliberately so.** The v79 handover below says in its own
+first paragraph that it must not be quietly edited, because a handover changed after the
+fact cannot be checked against what happened. It is kept word for word, under its own
+heading, further down. This section is the current one: what the sync, recovery and storage
+path is proven to do TODAY, by which suite, and what is known to be wrong with it.
+
+Re-audited at v100 (`claude/farkad-mobile-design-review-odl8ue`). The v79 handover predates
+the versioned CAS protocol, the advances ledger, the send-path repairs of v91–v96, the
+closure-echo race closed at v98, and everything in v99 and v100. Nothing in it was
+inaccurate when written; most of what it describes has since been replaced by machinery it
+does not mention.
+
+## How this section was produced
+
+Four independent adversarial reviews, in parallel, each given two of seven lenses and told
+that a finding without a runnable reproduction is not a finding:
+
+| lens | asked |
+|---|---|
+| L1 | a recorded day is lost |
+| L2 | a restore leaves a device with part of a record |
+| L3 | a phone claims synced falsely |
+| L4 | a hold nobody can clear |
+| L5 | a poisoned name through every door |
+| L6 | a day is priced twice |
+| L7 | two phones and the cloud disagree after a storm |
+
+Every finding below was re-run and confirmed independently before anything was changed, and
+every one of them is now either closed with a fail-first pair or listed as open with its
+reproduction. Reports that did not survive that second run were dropped and are not listed;
+the one refuted MECHANISM is named where it belongs, under O2, because a hypothesis that was
+measured and found wrong is evidence about the code and worth as much as a confirmed one to
+whoever picks that item up.
+
+## What was found, and closed
+
+| # | lens | what it was | closed by | pinned by |
+|---|---|---|---|---|
+| 1 | L6 | **A closed fortnight was applied to any range that started on its opening Friday**, whatever it ended on: `closedPeriods` folded under `periodFrom` and discarded `periodTo`. Reachable through the ordinary «החודש» preset in months whose first day is an account start — the sheet showed ten days and 5,000 where the crew worked twenty for 10,000, with the invoice in the same workbook still billing twenty. Read as two halves that do not overlap, one day was priced in both. | `frozenPeriodFor` in `js/model/schema.js` asks both ends, for `payrollReport`, `workerDaysReport` and `advanceWalk` | `tests/closure.test.mjs`, «a closed fortnight is frozen for its own period and no other» |
+| 2 | L3 | **A phone whose pending restore would not parse said «מסונכרן» while permanently deaf.** `receive()` refuses every snapshot while `replaceDamaged`, correctly — but set no status, and `pendingReplace()` answers null, so `honestStatusFor`'s guards were all satisfied. Its own writes still landed, so the other two phones looked healthy. | `honestStatusFor` answers `error`, and the ⋯ panel names the unreadable restore and the one thing that clears it | `tests/status.test.mjs`, «a phone whose pending restore will not parse is not finished either» |
+| 3 | L1 | **A refused edit stayed on the screen when nothing durable stood behind it.** `rollback()` returned false without acting whenever `durableText` was unset — which is precisely the session that opened onto a damaged record, and precisely when somebody re-types the week they can see is missing. The re-typed days reached the disk with no journal behind them and the next snapshot deleted them. | `rollback()` falls back to the empty schedule and the journal, which is what a reopen produces | `tests/data.test.mjs`, «a refused edit is taken off the screen even with nothing durable behind it» |
+| 4 | L2 | **A restore reported a way back it did not have.** `pushUndoState` answered `stacked \|\| slotted`, and the slot is overwritten by `receive()` on every adopted snapshot — so the route home lasted until the other phone recorded an evening. | the answer is the stack alone; the slot is still written but is not evidence | `tests/data.test.mjs`, «a way back the next snapshot erases is not a way back» |
+| 5 | L2 | **An unreadable undo stack was written over**, under a comment claiming the raw value was left where it is. It holds up to three whole schedules. The one record family exempt from law 10, by accident. | quarantined through `Recovery.damaged` before the stack restarts | `tests/data.test.mjs`, «an undo stack that will not parse is held, not written over» |
+
+## What was found and is OPEN
+
+Both are reproducible, both were confirmed independently, and neither is fixed. They are
+here rather than in a commit message because each needs a decision this repository reserves
+for a contract, and one of them I could not diagnose to the line.
+
+### O1 — a restore is undone on the phone that did not ask for it, in the ledger only
+
+Two phones, both online, nothing failing. A takes a backup; B records a repayment of 500,
+which reaches the cloud and A; A restores that backup through the ordinary door. Afterwards
+A and the cloud hold no repayment and B holds it, for ever — B never sends it back, both
+phones report `synced`, and it survives closing and reopening B.
+
+    A money  left 5000   B money  left 4500   cloud  left 5000
+
+Only the ledger diverges; days, advances, workers and places all converge. The cause is
+that `receive()` unions the arriving ledger container with this phone's (`mergeLedgerInto`),
+with no way to tell an ordinary field-merge snapshot from the whole-document replacement a
+restore just wrote — and nothing travels with the document to say which it is.
+
+**Why it is not fixed here.** Two rules would both fix it and they disagree about money.
+Either a restore does not remove ledger entries anywhere (union on the restoring device
+too, which reads straight off law 1 — "entries are never deleted, merged by union") or a
+restore's snapshot replaces the ledger on every phone that adopts it (which is what a
+restore means everywhere else, and what `tests/restore.test.mjs` R1/R2/R5 already pins on
+the restoring device). Picking one silently would decide what a restore does to somebody's
+pay. It needs `features/<name>/contract.md` and a person's answer.
+
+### O2 — a roster edit made before the first snapshot arrives reverts another phone's change
+
+B raises a man's day rate to 600 and it lands. A, returning from a stairwell with a roster
+edit queued, ends up showing 500; A's next ordinary roster edit then sends 500 to the cloud
+and to B. All three converge on the stale value, nothing is owed, nothing is held, and no
+line on any screen says anything. A day recorded on A in between is stamped at 500 — law 2
+reached from the wrong end.
+
+One mechanism is established: `editRoster` sends only the entities that differ from the
+last snapshot this device adopted, and that baseline (`_remoteRoster`) lives in memory and
+starts empty on every app start. A phone that edits the roster before its first snapshot
+arrives therefore sends EVERY entity, stale ones included. That window is ordinary, not
+exotic: open the app, change a site, and the write can leave before the listener delivers.
+
+A second mechanism is NOT established. With the baseline present the divergence still
+reproduces, and the legacy whole array named by the reviewer is not the carrier — guarding
+that branch does not stop it. It was investigated and reverted rather than shipped on a
+hypothesis; `js/sync/sync.js` is the wrong file to change on one.
+
+**What a contract has to answer**: what a phone with no roster baseline may send. Sending
+everything reverts other phones; sending nothing loses the person's own edit; sending only
+tombstones and the legacy array leaves the per-entity map stale on the cloud.
+
+## An observation, not a finding
+
+A three-phone storm with a reopen mid-evening ends with both phones blocked on «חלק
+מהיסטוריית המקדמות לא נקרא» while `ledger.unreadable` and `ledger.unreadableMigrations` are
+empty on both. Nothing claims to be settled — the app is stopping loudly and asking, which
+is its job — so it is outside every lens above. But the sentence on screen sends a person
+to look at a history neither device is holding. The reviewer who found it could not isolate
+it to a line and said so; it is recorded here for whoever picks it up, and the place to
+start is the revert at `receive()`'s persist failure.
+
+## What is proven, and by which suite
+
+The claims below are the ones this path actually rests on. Each names the suite that would
+fail if it stopped being true; none is asserted here on reasoning alone.
+
+| claim | proven by |
+|---|---|
+| An edit is not reported saved until something durable holds it, and a refused one comes off the screen | `data`, `capacity` |
+| Nothing unreadable is deleted, overwritten or treated as empty — through every door | `recovery`, `quarantine`, `ledger-ingress`, `snapshot-poison` |
+| A damaged record blocks writing until a person is told, and the raw bytes stay exportable | `recovery`, `recovery-browser` |
+| The queue is durable, survives a reopen, and is acknowledged by operation and never by path | `data`, `concurrency`, `probes`, `fence` |
+| A whole-document restore is ordered as a transaction, reaches this device before the cloud, and is caught if only part of it lands | `restore`, `data` |
+| Two tabs on one disk cannot acknowledge each other's work away | `probes`, `concurrency` |
+| The server orders every write: revision, receipt, and a receipt bound to its operation | `rules`, `cas`, `cas-emulator`, `receipt`, `bootstrap-rules` |
+| A stale write is refused, rebased when disjoint, and held when contested — durably, across a reopen | `cas`, `contested` |
+| One fact written by two phones is one fact, at every gate that can hold a write | `samefact`, `closure-echo` |
+| The status line never says synced while anything is owed, held, unreadable, or unheard | `status` |
+| A prototype-poisoning id cannot land, through any door | `poison`, `snapshot-poison`, `ledger-ingress` |
+| Money survives a reopen, a second phone, an export and a restore, to the shekel | `money`, `money-ingress`, `money-cloud`, `xlsx` |
+| A closed fortnight is frozen — for its own period, and on a phone whose gate is shut | `closure`, `closure-echo` |
+| Two phones writing money at once converge, against the real emulator | `money-concurrency` |
+
+## What this section does NOT cover
+
+- **No physical device.** Every measurement above is Node or headless Chromium. See
+  `docs/iphone-acceptance.md`, where every row is still NOT RUN.
+- **Real Firestore.** The emulator suites run against the real rules and the production
+  adapter, but not against the service itself, and not against the SDK's own offline
+  persistence.
+- **The two money gates are shut**, so the ledger paths above are exercised by tests that
+  open them and by no phone in the field.
+
+---
+
+---
+
+# The v79 handover, as it was written
+
+Everything below this line is the August 2026 document, unedited. Read it as history: it
+describes the state of the code at v79 and the rounds that produced it.
+
 # Data safety work — handover
 
 > **Read this first, if you are reading it after August 2026.** The statements below about

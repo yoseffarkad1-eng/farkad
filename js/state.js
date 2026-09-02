@@ -276,10 +276,27 @@ const State = {
     // to have nowhere durable to live: the screen must not keep showing something the
     // device cannot produce again.
     rollback() {
-        if (typeof this.durableText !== 'string') return false;
+        // NOTHING DURABLE BEHIND THE SCREEN IS A STATE, not a reason to do nothing.
+        //
+        // durableText is set by a successful save, a successful persist, or a load that
+        // FOUND a readable schedule. The one session where none of those has happened is
+        // the session that opened onto a damaged record - and that is exactly the session
+        // where somebody re-types the week they can see is missing. Answering false here
+        // left every refused edit standing on the screen under a dialog reading «השינוי
+        // בוטל כדי שלא ייראה כאילו נרשם»: the next ordinary save carried those days to
+        // the disk with no journal entry behind them, and the first snapshot from another
+        // phone wrote over them with nothing able to put them back.
+        //
+        // What a reopen of this device would produce is the empty schedule with the
+        // journal replayed onto it - which is what this function promises - so that is
+        // what it does. Nothing is lost by it: durableText being unset means no save has
+        // ever succeeded, so there is no recorded work in memory to throw away.
+        const durable = typeof this.durableText === 'string' ? this.durableText : null;
 
         try {
-            this.schedule = normaliseSchedule(JSON.parse(this.durableText));
+            this.schedule = durable === null
+                ? emptySchedule()
+                : normaliseSchedule(JSON.parse(durable));
         } catch (error) {
             return false;
         }

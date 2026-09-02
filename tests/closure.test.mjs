@@ -897,4 +897,213 @@ const reopen = (device, id) => {
         JSON.stringify(morning.call('payrollReport', morning.State.schedule, A.from, A.to)));
 }
 
+
+// ------------------------------------------- the writer and the judge, one arithmetic
+{
+    suite('a fortnight closed after the man has already repaid something');
+
+    // THE ORDINARY LATE CLOSE, and it needed no race and no clock skew to break.
+    //
+    // The man repays 400 on the 24th. The boss closes the 07-20 fortnight on the 26th,
+    // which is when a fortnight actually gets closed - after it has ended, with a cheque
+    // to write. planPeriodClosure computed the carried balance from the WHOLE record, so
+    // it counted the 400; closureProblems judges a closure as of the period's end, so it
+    // did not. The closure was written, accepted, and then condemned by this app's own
+    // reader: impossibleClosures named it and the phone blocked its own writes on the
+    // next boot. Measured on 4a4d277 - the rule saw 5,000 left, the plan computed from
+    // 4,600.
+    //
+    // Money dated after the period is late money. advanceWalk has carried it into the
+    // next account since v80 and calls it lateSinceClose; it never belonged in the frozen
+    // figure, and the writer is the half that was wrong.
+    const device = crew('d_late');
+    const advanceId = advanceIdIn(device);
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 400, '2026-08-24', '', '2026-08-24T09:00:00.000Z', 'd_late', 'cash'));
+    given('the repayment is on the record before the close, dated after the period',
+        device.call('advanceOutstanding', device.State.schedule, advanceId).repaid === 400,
+        JSON.stringify(device.call('advanceOutstanding', device.State.schedule, advanceId)));
+
+    const plan = device.call('planPeriodClosure', device.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-26T10:00:00.000Z');
+    check('the fortnight can still be closed', plan.canClose === true,
+        JSON.stringify(plan.reasons));
+    check('and the balance it will carry is the period\'s, not the record\'s',
+        plan.rows.length === 1 && plan.rows[0].balanceAfter === CLOSING,
+        JSON.stringify(plan.rows));
+
+    const changes = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-26T10:00:00.000Z', 'd_late');
+    given('the close wrote its entries', changes.length > 0, String(changes.length));
+    given('and they committed', device.State.commitMany(changes) === true, 'commitMany');
+
+    // THE DEDUCTION, by name. closureIn takes whichever entry of this period comes first,
+    // and closureProblems returns from an artifact before it asks the money questions -
+    // so judging the artifact here would pass on a closure nobody had checked.
+    const closure = Object.values(device.State.schedule.ledger.advances)
+        .find(entry => entry.kind === 'deducted' && entry.periodFrom === A.from);
+    given('the deduction is the entry under test', Boolean(closure),
+        JSON.stringify(Object.values(device.State.schedule.ledger.advances)
+            .map(entry => entry.kind)));
+    check('the closure this app wrote is one this app can read',
+        device.call('closureProblems', device.State.schedule, closure).length === 0,
+        JSON.stringify(device.call('closureProblems', device.State.schedule, closure)));
+    check('nothing is impossible about it',
+        device.call('impossibleClosures', device.State.schedule).length === 0,
+        JSON.stringify(device.call('impossibleClosures', device.State.schedule)));
+
+    // AND THE PHONE IS NOT IN RECOVERY THE NEXT MORNING. This is what the defect cost:
+    // not a wrong number on a screen, but a phone that will not record a day.
+    const morning = reopen(device, 'd_late2');
+    check('and the phone that wrote it can still record work tomorrow',
+        morning.call('farkadWritesBlocked') === false,
+        JSON.stringify(morning.call('impossibleClosures', morning.State.schedule)));
+
+    // The 400 is not lost and not in the frozen figure: it is late money, which is the
+    // whole of the two-balance design.
+    const account = morning.call('advanceAccount', morning.State.schedule, 'w_01',
+        A.from, A.to);
+    check('the frozen balance is the period\'s', account.carriedOut === CLOSING,
+        JSON.stringify(account));
+    check('and the 400 is carried as money that arrived after the close',
+        morning.call('advanceOutstanding', morning.State.schedule, advanceId).left
+            === CLOSING - 400,
+        JSON.stringify(morning.call('advanceOutstanding', morning.State.schedule, advanceId)));
+}
+
+// ------------------------------------------------------- a clock that is behind refuses
+{
+    suite('a phone whose clock is behind is told, not allowed to move money quietly');
+
+    // The other phone recorded a repayment INSIDE the fortnight at 19:00. This phone's
+    // clock says 18:00, so the closure it would write excludes an entry that was really
+    // recorded before it - and the 400 would land in the next fortnight instead of this
+    // one, on a payslip, because a phone is wrong about the time. No money is lost either
+    // way, which is exactly why it would never be noticed.
+    //
+    // Refusing is reversible. «סגירה היא סופית» - a frozen payslip is not.
+    const device = crew('d_slow');
+    const advanceId = advanceIdIn(device);
+    device.State.commit(device.call('recordAdvanceRepaid', device.State.schedule,
+        advanceId, 400, '2026-08-12', '', '2026-08-20T19:00:00.000Z', 'd_fast', 'cash'));
+
+    const before = JSON.stringify(device.State.schedule.ledger.advances);
+    const plan = device.call('planPeriodClosure', device.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-20T18:00:00.000Z');
+    check('the close is refused', plan.canClose === false, JSON.stringify(plan.reasons));
+    check('and it says why, in a word the screen can act on',
+        plan.reasons.indexOf('clock') !== -1, JSON.stringify(plan.reasons));
+
+    const changes = device.call('closePeriodChanges', device.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-20T18:00:00.000Z', 'd_slow');
+    check('nothing is written', changes.length === 0, JSON.stringify(changes));
+    check('and the record is exactly as it was',
+        JSON.stringify(device.State.schedule.ledger.advances) === before, 'unchanged');
+
+    // AND THE SAME PHONE, ONCE ITS CLOCK HAS CAUGHT UP, CLOSES NORMALLY. The refusal is
+    // about one moment, not about this phone for ever.
+    //
+    // Asked of a device the refusal never touched: closePeriodChanges APPENDS its entries
+    // to the schedule as it plans them, so the call above has already put this fortnight's
+    // artifact on `device` even though nothing was committed.
+    const caught = crew('d_caught');
+    caught.State.commit(caught.call('recordAdvanceRepaid', caught.State.schedule,
+        advanceIdIn(caught), 400, '2026-08-12', '', '2026-08-20T19:00:00.000Z',
+        'd_fast', 'cash'));
+    const later = caught.call('planPeriodClosure', caught.State.schedule, 'w_01',
+        A.from, A.to, '2026-08-20T19:30:00.000Z');
+    check('with the clock caught up it closes', later.canClose === true,
+        JSON.stringify(later.reasons));
+    check('and the 400 is inside the fortnight it was recorded in',
+        later.rows.length === 1 && later.rows[0].balanceAfter === CLOSING - 400,
+        JSON.stringify(later.rows));
+
+    // An entry excluded for its DATE is ordinary late money and refuses nothing - the
+    // suite above closes on exactly that and must not be caught by this rule.
+    const dated = crew('d_dated');
+    dated.State.commit(dated.call('recordAdvanceRepaid', dated.State.schedule,
+        advanceIdIn(dated), 400, '2026-08-24', '', '2026-08-24T09:00:00.000Z',
+        'd_dated', 'cash'));
+    check('late money does not refuse a close',
+        dated.call('planPeriodClosure', dated.State.schedule, 'w_01', A.from, A.to,
+            '2026-08-26T10:00:00.000Z').canClose === true,
+        JSON.stringify(dated.call('planPeriodClosure', dated.State.schedule, 'w_01',
+            A.from, A.to, '2026-08-26T10:00:00.000Z').reasons));
+}
+
+
+// ------------------------------------- a frozen fortnight belongs to the fortnight, only
+{
+    suite('a closed fortnight is frozen for its own period and no other');
+
+    // KEYED ON THE START DATE ALONE, which is not what a closure is.
+    //
+    // closedPeriods folds its answers under periodFrom and throws periodTo away, and the
+    // three readers - payrollReport, workerDaysReport and advanceWalk - then apply the
+    // frozen payslip to ANY range that happens to begin on that Friday, whatever it ends
+    // on. A closure is a record of [periodFrom, periodTo]; half of that is not an
+    // account.
+    //
+    // It needs no hand-picked range to reach. Some months open on an account start -
+    // 2026-05-01, 2027-10-01, 2028-09-01, 2030-02-01, 2030-03-01, 2031-08-01 - and on
+    // those the ordinary «החודש» preset starts on the same Friday as the fortnight. The
+    // boss closes the first fortnight, presses החודש, and the sheet he prints and exports
+    // shows the man half his month: measured at 10 days and 5,000 where the crew worked
+    // 20 for 10,000, with the invoice in the same workbook still billing all twenty.
+    //
+    // And the same fault prices a day TWICE: read this fortnight as two halves that do
+    // not overlap and the first answers with the whole frozen fortnight while the second
+    // answers live, so the 14th is counted in both and the two add to more than the
+    // fortnight is worth.
+    const device = closed('d_range');
+    const worker = () => device.State.schedule.workers[0];
+    const payrollAt = (from, to) => device.call('payrollReport', device.State.schedule,
+        from, to).find(row => row.workerId === 'w_01') || {};
+    const daysAt = (from, to) => device.call('workerDaysReport', device.State.schedule,
+        worker(), from, to);
+
+    given('the account itself is frozen, which is the behaviour that must not move',
+        payrollAt(A.from, A.to).amount === GROSS
+            && daysAt(A.from, A.to).length === DAYS.length,
+        JSON.stringify([payrollAt(A.from, A.to).amount, daysAt(A.from, A.to).length]));
+
+    // FOUR WEEKS starting on the same Friday, with work in them AFTER the fortnight
+    // closed - which is the ordinary case and the one that makes this check bite. Two
+    // more days at the same rate, outside the closed period entirely.
+    ['2026-08-24', '2026-08-25'].forEach(date => device.State.commit(device.call(
+        'assignPlace', device.State.schedule, date, 'w_01', 'actual', 'p_01')));
+    given('there is work after the closed fortnight',
+        device.State.schedule.days['2026-08-24'] !== undefined, '2026-08-24');
+    const wide = payrollAt(A.from, '2026-09-03');
+    check('a longer range that merely starts on that Friday is not the frozen period',
+        wide.amount === GROSS + 2 * RATE
+            && daysAt(A.from, '2026-09-03').length === DAYS.length + 2,
+        JSON.stringify({ amount: wide.amount, expected: GROSS + 2 * RATE,
+            days: daysAt(A.from, '2026-09-03').length }));
+
+    // ONE WEEK, the first half. Four of the five days are in it; the fifth is not.
+    const half = payrollAt(A.from, '2026-08-13');
+    check('a shorter range that starts on that Friday is priced on its own days',
+        half.amount === 4 * RATE, JSON.stringify(half));
+    check('and it lists only the days inside it',
+        daysAt(A.from, '2026-08-13').map(day => day.date).join(',')
+            === DAYS.slice(0, 4).join(','),
+        JSON.stringify(daysAt(A.from, '2026-08-13').map(day => day.date)));
+
+    // THE TWO HALVES ADD TO THE FORTNIGHT. This is the double-pricing test: they do not
+    // overlap, so their sum is the whole account and not a penny more.
+    const second = payrollAt('2026-08-14', A.to);
+    check('two halves that do not overlap add to exactly the fortnight',
+        half.amount + second.amount === GROSS,
+        JSON.stringify({ first: half.amount, second: second.amount, whole: GROSS }));
+
+    // And the day list does not repeat one day across the two halves.
+    const firstDays = daysAt(A.from, '2026-08-13').map(day => day.date);
+    const secondDays = daysAt('2026-08-14', A.to).map(day => day.date);
+    check('and no day is listed in both halves',
+        firstDays.every(date => secondDays.indexOf(date) === -1)
+            && firstDays.length + secondDays.length === DAYS.length,
+        JSON.stringify([firstDays, secondDays]));
+}
+
 report();

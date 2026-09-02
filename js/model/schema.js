@@ -1937,6 +1937,28 @@ function advanceCarryInto(schedule, workerId, fromDate) {
     return agoraRound(balance);
 }
 
+// The closure that froze EXACTLY this range, or undefined.
+//
+// closedPeriods answers by the day a fortnight opened; a reader also has to ask that it
+// ended on the day this range ends. Without the second half a frozen payslip was applied
+// to every range that merely began on that Friday - a longer one, a shorter one, or the
+// «החודש» preset in a month whose first day is an account start - so days were priced
+// into windows they are not in, dropped out of windows they are in, and counted twice
+// when a fortnight was read as two halves. See tests/closure.test.mjs.
+//
+// An older closure that recorded no periodTo answers as it always did: on the start date
+// alone. There is nothing else to ask it, and refusing to read it would unfreeze a
+// fortnight somebody was already paid from.
+function frozenPeriodFor(schedule, workerId, fromDate, toDate) {
+    if (typeof closedPeriods !== 'function') return undefined;
+    const frozen = closedPeriods(schedule, workerId)[String(fromDate)];
+    if (frozen === undefined) return undefined;
+    if (frozen.periodTo !== undefined && String(frozen.periodTo) !== String(toDate)) {
+        return undefined;
+    }
+    return frozen;
+}
+
 // One account, given what it started out owing. Split out so the walk above and the
 // report below cannot disagree about the order of operations - and the order matters:
 // money handed back reduces what is owed BEFORE the wage is asked to cover the rest, or a
@@ -1965,8 +1987,11 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // See recordPeriodClosed in js/model/ledger.js. With no closure recorded - every
     // device today, since the writer gate is shut - this is absent and the walk below
     // runs exactly as it did.
-    const closed = typeof closedPeriods === 'function'
-        ? closedPeriods(schedule, workerId)[String(fromDate)] : undefined;
+    // The same period-aware lookup the two report readers use: a closure freezes the
+    // fortnight it names, not every range that starts on the same Friday. advanceWalk's
+    // UI callers are behind wholeAccountRange today, so this half was latent rather than
+    // live - which is a reason to close it now and not a reason to leave it.
+    const closed = frozenPeriodFor(schedule, workerId, fromDate, toDate);
 
     const row = payrollReport(schedule, fromDate, toDate)
         .find(item => item.workerId === workerId);
@@ -2733,8 +2758,7 @@ function payrollReport(schedule, fromDate, toDate) {
         // phone with the gate open closed is two phones printing different money for
         // one payday. Pinned in tests/closure.test.mjs, «a fortnight closed on one
         // phone is frozen on a phone whose gate is shut».
-        const frozen = typeof closedPeriods === 'function'
-            ? closedPeriods(schedule, worker.id)[fromDate] : undefined;
+        const frozen = frozenPeriodFor(schedule, worker.id, fromDate, toDate);
         if (frozen !== undefined) {
             if (Number.isFinite(frozen.gross)) {
                 row.amount = frozen.gross;
@@ -2770,8 +2794,7 @@ function workerDaysReport(schedule, worker, fromDate, toDate) {
     //
     // Only where the closure carries them: an older closure has no list and this behaves
     // as it always did.
-    const frozen = typeof closedPeriods === 'function'
-        ? closedPeriods(schedule, worker.id)[fromDate] : undefined;
+    const frozen = frozenPeriodFor(schedule, worker.id, fromDate, toDate);
     if (frozen !== undefined && Array.isArray(frozen.days)) {
         return frozen.days.map(day => ({
             date: String(day.date),
