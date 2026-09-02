@@ -428,12 +428,19 @@ function renderCloudRestorePoints() {
 // wrong with the one they picked. Nothing is changed on the way to a null.
 function acceptRestoreSource(raw, what) {
     const read = readReplacementDocument(raw);
-    if (read.document) return read.document;
+    // AND A NAME NOBODY CAN USE AS A KEY, asked here and not in the shared gate.
+    //
+    // This is a door a document REPLACES the record through, so a poisoned map is
+    // refused before normaliseSchedule can hand it to Recovery and hold the phone for a
+    // file it only tried to restore. The rescue door reads through the same shared gate
+    // and must not be refused for this - see poisonedMapProblems in js/model/schema.js.
+    const problems = read.document ? poisonedMapProblems(read.document) : read.problems;
+    if (read.document && problems.length === 0) return read.document;
 
     askTell({
         title: 'לא בוצע שחזור',
         message: `${what} אינו רישום שלם של לוח עבודה, ולכן לא שינינו כלום. ` +
-            `מה שכבר שמור לא נפגע.\n\n${read.problems.slice(0, 3).join(' ')}`
+            `מה שכבר שמור לא נפגע.\n\n${problems.slice(0, 3).join(' ')}`
     });
     return null;
 }
@@ -1429,6 +1436,22 @@ function pendingReplacementIn(records, tried) {
     return null;
 }
 
+// WHAT THIS DOOR DOES WITH A POISONED MAP inside the file: nothing at the gate.
+//
+// A map with an own `__proto__` - under ledger.unreadable, under a day's layer - is
+// exactly what a held phone's rescue file carries, because the hold keeps the key on
+// the record so that it outlives the session that found it. Every candidate below is
+// read through readReplacementDocument, and for one commit that gate refused the key:
+// the one door a held phone has left answered "no usable schedule in the rescue file"
+// to that phone's own file, naming the evidence as the reason.
+//
+// So the gate does not ask. The map reaches normaliseSchedule, which hands its bytes to
+// Recovery on the phone doing the reading: quarantined as they arrived, the hold raised
+// and the person told, the key kept on the rebuilt schedule under ledger.unreadable so
+// it lands with the rescue once the hold is acknowledged. Carried as held evidence,
+// never dropped, and never a reason to call the whole file unusable. The doors a
+// document REPLACES the record through ask the question themselves - see
+// poisonedMapProblems in js/model/schema.js.
 function scheduleFromRecoveryRecords(records, fallback) {
     const tried = [];
     const parse = key => {
@@ -1747,6 +1770,17 @@ function readBackupFile(parsed) {
     if (!read.document) {
         const error = new Error('not a whole schedule');
         error.problems = read.problems;
+        throw error;
+    }
+    // A name nobody can use as a key is refused HERE, at the backup door, and not by
+    // the shared gate above: this file is about to replace the record, and letting
+    // normaliseSchedule see the map would quarantine it and hold this phone for a file
+    // it only read. The rescue file, through readRecoveryFile above, is the opposite
+    // case and is deliberately not asked - see poisonedMapProblems in js/model/schema.js.
+    const poisoned = poisonedMapProblems(read.document);
+    if (poisoned.length > 0) {
+        const error = new Error('not a whole schedule');
+        error.problems = poisoned;
         throw error;
     }
 

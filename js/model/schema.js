@@ -519,24 +519,21 @@ function fullScheduleProblems(raw) {
     if (typeof ledgerContainerProblem === 'function' && ledgerContainerProblem(raw) !== null) {
         problems.push('היסטוריית המקדמות בקובץ אינה בצורה שאפשר לקרוא.');
     }
-    // AND A NAME NOBODY CAN USE AS A KEY, refused here for the same reason.
+    // A NAME NOBODY CAN USE AS A KEY is deliberately NOT asked here.
     //
-    // This gate said nothing about one, so a restore point carrying a poisoned map
-    // passed it. The door then ran normaliseSchedule on the file, which - correctly, for
-    // a document that is being READ - handed the map to Recovery: a quarantine copy was
-    // written and writing was blocked on the phone, before replaceEverything had run.
-    // replaceEverything then refused because writing was blocked, and the door reported
-    // THAT as no room on the device to record the restore. The device was not full,
-    // freeing space changed nothing, and the phone somebody was recording on stayed
-    // held, across a reopen, by a file they had only tried to restore.
+    // It was, for one commit. The refusal is right at the doors where a document is
+    // about to REPLACE this phone's record - see poisonedMapProblems below - and this
+    // gate looked like the place to put it, because every one of those doors runs it.
+    // So does the rescue rebuild in js/ui/share.js, which reads every candidate in a
+    // rescue file through readReplacementDocument: scheduleData:v2, its quarantined
+    // copies, the legacy record, the liveSchedule fallback. A phone holding a poisoned
+    // map keeps the map on its record on purpose, so that the hold outlives the session
+    // that found it - and its rescue file, the one door it has left, was refused for
+    // the very key the hold exists to carry: "no usable schedule in the rescue file".
     //
-    // A replacement is refused at the door with its own sentence. The rescue file is
-    // still opened and held - that is storedScheduleProblems, which does not ask this.
-    if (typeof poisonedContainers === 'function') {
-        poisonedContainers(raw).forEach(found => {
-            problems.push('ברישום יש שם שאי אפשר להשתמש בו כמפתח (' + found.at + ').');
-        });
-    }
+    // The rescue door opens such a file and holds what it carries; the replacement
+    // doors ask the extra question themselves. This gate answers whether the document
+    // is a whole schedule, and a held map does not make it less of one.
     return problems;
 }
 
@@ -920,6 +917,16 @@ function advanceProblems(raw, known, wire) {
 
 // The gate the four restore doors and the sync layer share: the narrow migration first,
 // then the complete check. Returns the document to use, and why not.
+//
+// It does NOT ask poisonedMapProblems, and the rescue door depends on that. The rescue
+// rebuild reads every candidate in a rescue file through this function, and then reads
+// its own answer through it again after the queue replay - a schedule that legitimately
+// carries held evidence under ledger.unreadable, because normaliseSchedule keeps the
+// key there so the hold survives the session. The sync layer's own re-check in
+// replaceEverything reads that same rebuilt schedule on its way to the disk, after the
+// person has acknowledged the hold. A poison refusal in here would turn the rescue
+// file into a wall and stop an acknowledged rescue from landing; the doors that must
+// refuse ask the question one line after this one.
 function readReplacementDocument(raw) {
     const upgraded = upgradeStoredSchedule(raw);
     if (!upgraded) {
@@ -927,6 +934,30 @@ function readReplacementDocument(raw) {
     }
     const problems = fullScheduleProblems(upgraded);
     return { document: problems.length === 0 ? upgraded : null, problems };
+}
+
+// A name nobody can use as a key, asked at the doors where a document is about to
+// REPLACE this phone's record - and only there.
+//
+// The doors are acceptRestoreSource and the backup half of readBackupFile in
+// js/ui/share.js: the cloud copy, the restore point, the way back, the imported backup.
+// Before this existed they passed such a file through fullScheduleProblems, and the door
+// then ran normaliseSchedule on it, which - correctly, for a document that is being READ
+// - handed the map to Recovery: a quarantine copy was written and writing was blocked on
+// the phone, before replaceEverything had run. replaceEverything then refused because
+// writing was blocked, and the door reported THAT as no room on the device to record the
+// restore. The device was not full, freeing space changed nothing, and the phone somebody
+// was recording on stayed held, across a reopen, by a file they had only tried to
+// restore.
+//
+// A replacement is refused with its own sentence and touches nothing. The rescue door
+// never asks this: a rescue file is the evidence of a phone that could not read its own
+// records, and a poisoned map inside it is carried as held evidence through Recovery -
+// see scheduleFromRecoveryRecords in js/ui/share.js.
+function poisonedMapProblems(raw) {
+    if (typeof poisonedContainers !== 'function') return [];
+    return poisonedContainers(raw).map(found =>
+        'ברישום יש שם שאי אפשר להשתמש בו כמפתח (' + found.at + ').');
 }
 
 // ---------------------------------------------------------------- the journal, exactly
