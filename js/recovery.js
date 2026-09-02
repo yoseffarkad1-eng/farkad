@@ -30,6 +30,9 @@ const Recovery = {
     // here may call render(): the one caller that did, evidence(), is reached from
     // State.load, which boot() runs BEFORE its first render - see the note there.
     onScreen: false,
+    // While a list sits here, damaged() and evidence() put their reports IN IT instead
+    // of on this device - see collect(). Null between collections, which is always.
+    collecting: null,
 
     // A raw record that would not parse. Returns the quarantine key, or null.
     //
@@ -47,6 +50,10 @@ const Recovery = {
     // person recorded after the restore disappears from the screen, the disk and the
     // cloud, hours after they pressed the button that promised the opposite.
     damaged(key, raw, message, alwaysHold) {
+        if (this.collecting) {
+            this.collecting.push({ kind: 'damaged', key, raw, message, alwaysHold });
+            return null;
+        }
         const already = this.problems.find(problem => problem.key === key);
         if (already) return already.copy;
 
@@ -79,6 +86,10 @@ const Recovery = {
     // are a new problem: quarantined beside the earlier copy, never over it, and told -
     // an acknowledgement covers the problems the person was shown, not this one.
     evidence(key, raw, message) {
+        if (this.collecting) {
+            this.collecting.push({ kind: 'evidence', key, raw, message });
+            return null;
+        }
         const same = this.problems.find(problem => problem.key === key && problem.raw === raw);
         if (same) return same.copy;
 
@@ -104,6 +115,57 @@ const Recovery = {
         // heard from the cloud worn by the whole screen the moment it is held.
         if (this.onScreen && typeof render === 'function') render();
         return copy;
+    },
+
+    // READING A FILE IS NOT FINDING DAMAGE ON THIS DEVICE.
+    //
+    // normaliseSchedule reports to Recovery from wherever it runs, on purpose - it is
+    // the one place every door meets, and reporting there is the reason no door can
+    // forget to. But two of the doors run it on a document that is NOT this device's
+    // record: the import reads a backup or a rescue file to describe it in a dialog,
+    // and the restore transaction normalises the replacement before it is written. A
+    // report from either is about the FILE, and telling this device's Recovery at that
+    // moment quarantined another phone's bytes here and blocked writing - before the
+    // person had answered the dialog. Measured: cancel at "wrong file", and the phone
+    // stayed held, re-held at every reopen from the copy on its disk, its own rescue
+    // file carrying the other phone's evidence as its own. Confirm, and the replacement
+    // was refused because writing was blocked, worded as a full disk.
+    //
+    // So a caller that is only READING collects. `fn` runs with every report it causes
+    // put in a list instead of on this device - nothing quarantined, nothing blocked,
+    // nothing painted - and the list comes back beside its answer. Once the document
+    // has actually become this device's record, deliver() puts the reports where they
+    // would have gone, in the same order, through the same two methods, so nothing is
+    // said differently for having waited. A cancelled read delivers nothing: the bytes
+    // stay in the file, which is where they were.
+    //
+    // Synchronous, and only ever around synchronous code: the sink is a device-wide
+    // switch, and a report from anywhere else while it is up would be collected too.
+    // Nested collections are honest - the inner list wins while it is up, the outer
+    // one comes back afterwards.
+    collect(fn) {
+        const outer = this.collecting;
+        const reports = [];
+        this.collecting = reports;
+        try {
+            return { answer: fn(), reports };
+        } finally {
+            this.collecting = outer;
+        }
+    },
+
+    // The reports a collection put aside, told now. Each goes through the method that
+    // would have taken it, so a keyed report is still keyed and bytes are still the
+    // identity - a report already on the list is answered from it, as it always was.
+    deliver(reports) {
+        (reports || []).forEach(report => {
+            if (!report || typeof report.key !== 'string') return;
+            if (report.kind === 'evidence') {
+                this.evidence(report.key, report.raw, report.message);
+            } else {
+                this.damaged(report.key, report.raw, report.message, report.alwaysHold);
+            }
+        });
     },
 
     // A reason to stop writing that is not a damaged record - a build mismatch, where the

@@ -722,8 +722,9 @@ function normaliseSchedule(raw, hints) {
     // vanished, no problem was raised, the device went on writing, and the next save put
     // the emptied record over the one that had it.
     //
-    // The map's own bytes are handed to Recovery, so the evidence is quarantined exactly
-    // as it arrived rather than described. Writing is blocked for the same reason it is
+    // The bytes under the name are handed to Recovery, so the evidence is quarantined
+    // exactly as it arrived rather than described - and ONLY those bytes, because they
+    // are the sighting's identity: see poisonedContainers in js/model/schema.js. Writing is blocked for the same reason it is
     // blocked for an unreadable entry: what could not be read is somebody's day or
     // somebody's money, and this device must not write over it.
     // AND EVERY DAY UNDER A NAME THAT IS NOT A DATE, held the same way. The loop over

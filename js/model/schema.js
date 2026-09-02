@@ -374,15 +374,30 @@ function storedScheduleProblems(raw) {
 // other side with the key simply gone, nobody told, the device still writing, and the
 // normalised schedule written over the record that had it. Iron law 10, exactly inverted.
 //
-// Returns one entry per poisoned map: where it was, and the map's bytes exactly as they
-// arrived, so the evidence can be quarantined rather than described.
+// Returns one entry per poisoned NAME: where it sits, and the bytes UNDER that name
+// exactly as they arrived, so the evidence can be quarantined rather than described.
+//
+// Under the name, not the whole map, because the bytes are the sighting's identity -
+// Recovery.evidence answers identical bytes from the first copy and calls anything else
+// new evidence. The whole map's bytes change whenever anybody edits any OTHER row of it,
+// and nothing ever removes a poisoned layer from the cloud document; so with the map as
+// the identity every ordinary edit beside the poisoned name - for a poisoned days map,
+// every day anybody recorded - was a new sighting: a new copy, the acknowledgement
+// withdrawn, writing blocked, the snapshot refused. The phone never adopted the crew's
+// work on that day and the quarantine ladder ran out at twenty, blaming a full disk.
+// The readable rows are adopted onto the record like any other; only what could not be
+// read is held, and a sibling edit is then the same sighting.
+//
+// `at` names the poisoned key itself (`days.2026-08-12.actual.__proto__`), so two
+// poisoned names in one map are two problems with two sets of bytes rather than one
+// entry that a person acknowledges having seen half of.
 function poisonedContainers(raw) {
     const out = [];
     const look = (map, where) => {
         if (!isPlainObject(map)) return;
         POISON_SEGMENTS.forEach(name => {
             if (!Object.prototype.hasOwnProperty.call(map, name)) return;
-            out.push({ at: where, name, json: JSON.stringify(map) });
+            out.push({ at: where + '.' + name, name, json: JSON.stringify(map[name]) });
         });
     };
 
