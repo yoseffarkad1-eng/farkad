@@ -2705,7 +2705,34 @@ const FarkadSync = {
         // configured never does - "מתחבר לענן…" for ever would be a worse lie than the
         // one this replaces.
         if (this.status === 'blocked') this.setStatus('off');
+
+        // AND THE SNAPSHOT THE HOLD REFUSED, run again now that it may be adopted.
+        //
+        // A sighting that arrives mid-session - a poisoned layer in another phone's
+        // document, beside that phone's perfectly readable evening - blocks writing
+        // inside normaliseSchedule, so receive() cannot persist and rolls back. Right.
+        // Then the person exported and acknowledged, and nothing happened: this method
+        // reset a status, connectCloudLater found the cloud already started, the
+        // listener does not fire again for a document that has not changed, and the
+        // snapshot receive() had already been handed sat in _latestRaw unread. The
+        // readable day stayed off the screen and the disk, the line said error, until
+        // another phone happened to write - and with the other phones idle, never.
+        // Measured in tests/snapshot.poison.test.mjs.
+        //
+        // The same bytes are the same sighting: Recovery.evidence answers a second
+        // report of them from the first copy and does not block again, so the re-run
+        // lands, the status is re-derived, and anything owed is scheduled - exactly
+        // what readoptAfter does with the same snapshot after an acknowledgement.
+        if (this._heldSnapshot && this._latestRaw && typeof this._latestRaw === 'object') {
+            this._heldSnapshot = false;
+            this.receive(this._latestRaw);
+        }
     },
+
+    // True while the last snapshot heard was refused because writing was blocked - by
+    // a record this device could not read, or by one it had just been handed. Cleared
+    // by the next snapshot, and by the re-run above.
+    _heldSnapshot: false,
 
     // WHAT 'synced' ACTUALLY CLAIMS, and why it is checked at one door.
     //
@@ -5069,6 +5096,7 @@ const FarkadSync = {
         // against a stale base is refused by the rules, which is a worse way to find out.
         this.noteRevision(raw);
         this._latestRaw = raw;
+        this._heldSnapshot = false;
 
         // A restore is waiting to go out. Everything arriving right now is, by
         // definition, the state the person asked to replace - adopting it would undo
@@ -5077,7 +5105,13 @@ const FarkadSync = {
         // A restore that has not landed, or a note about one that cannot be read. Either
         // way what is arriving is the state somebody asked to replace, and adopting it
         // would undo their restore on the device that asked for it.
-        if (this.replaceDamaged || farkadWritesBlocked()) return;
+        //
+        // A snapshot dropped here for a hold is remembered as dropped, so the
+        // acknowledgement that lifts the hold can run it - see releaseRecoveryHold.
+        if (this.replaceDamaged || farkadWritesBlocked()) {
+            if (farkadWritesBlocked()) this._heldSnapshot = true;
+            return;
+        }
 
         // The journal cannot be written. Local edits are then held by the schedule alone,
         // and the journal is the only thing that puts them back on top of an arriving
@@ -5262,6 +5296,18 @@ const FarkadSync = {
         if (!State.persist()) {
             State.schedule = previous;
             if (typeof render === 'function') render();
+            // HELD IS NOT FULL. normaliseSchedule has just reported what this snapshot
+            // carries, and Recovery blocked writing the moment it was told - so the
+            // refusal is the hold, not the disk, and the disk is not what the next
+            // attempt is waiting for. It is waiting for the person: written down as
+            // such, and re-run when they acknowledge. Named as a full disk it was
+            // waited out by nobody, and told nobody the truth.
+            if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+                this._heldSnapshot = true;
+                this.fail(new Error('the arriving record is held until a person has '
+                    + 'looked at it; it was not adopted'));
+                return;
+            }
             // Not 'synced'. Nothing about this device is up to date, and the storage
             // notice already names the actual problem. The next snapshot - or the next
             // reconnect - tries again, by which time there may be room.
@@ -5320,6 +5366,7 @@ const FarkadSync = {
             // refuses 'synced' while writes are blocked; the return is for that case
             // alone. Measured in tests/status.test.mjs.
             if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+                this._heldSnapshot = true;
                 this.fail(new Error('part of the advances history could not be read'));
                 return;
             }
