@@ -478,4 +478,82 @@ function fragile(cloud) {
         wire.subscribes >= 2, `${wire.subscribes} subscribe(s)`);
 }
 
+
+// ------------------------------- a phone that has stopped listening for a different reason
+{
+    suite('a phone whose pending restore will not parse is not finished either');
+
+    // THE SAME DEAFNESS, REACHED BY THE OTHER ROAD, and nothing was watching this one.
+    //
+    // receive() has an early return for `replaceDamaged`: a pending-restore record that
+    // will not parse cannot be described, so no arriving snapshot may be adopted over it.
+    // That is right. What is not right is that it changes no status, sets no flag - it is
+    // deliberately NOT the `_heldSnapshot` the recovery release re-runs - and
+    // pendingReplace() answers null while it stands, so honestStatusFor's restore guard is
+    // satisfied too.
+    //
+    // So the person sees the recovery banner, exports the raw copy, presses «הבנתי, המשך
+    // לרשום» - and writing resumes, correctly. From that moment this phone throws away
+    // every snapshot from the other two, for ever, and the first ordinary edit of its own
+    // puts «מסונכרן» under it with a green chip. Its own writes still land, so the other
+    // two phones look healthy; only this one is blind, and it is the one telling its owner
+    // that everything is in order.
+    //
+    // Same condition as a dead listener - a phone that cannot hear - so the same answer.
+    const cloud = makeCloud();
+    const other = crew(cloud, 'd_hears_2');
+    await settleUntil(() => other.Sync.status === 'synced', 5000);
+    record(other, '2026-08-12', 'w_01');
+    await settleUntil(() => Boolean(((cloud.doc || {}).days || {})['2026-08-12']), 5000);
+
+    // A pending-restore record that will not parse, on the disk before this phone boots.
+    const disk = { 'farkad:pendingReplace': '{"phase":"prepared","schedule":{' };
+    const blind = crew(null, 'd_blind', { storage: disk });
+    blind.State.load();
+    blind.Sync.connect(cloud.adapter);
+    await settle(TICK * 20);
+    given('the unreadable restore blocks writing at boot',
+        blind.call('farkadWritesBlocked') === true,
+        String(blind.call('farkadWritesBlocked')));
+
+    // The person acknowledges the quarantine, which is what the banner asks for.
+    blind.global('Recovery').acknowledge();
+    await settle(TICK * 20);
+    given('acknowledging released the device',
+        blind.call('farkadWritesBlocked') === false,
+        String(blind.call('farkadWritesBlocked')));
+
+    const seen = watchStatus(blind);
+    // Its own evening goes on, and its own write lands.
+    record(blind, '2026-08-13', 'w_01');
+    await settleUntil(() => Boolean(((cloud.doc || {}).days || {})['2026-08-13'])
+        && blind.Sync.pendingCount() === 0, 6000);
+    await settle(TICK * 20);
+    given('its own write reached the cloud',
+        Boolean(((cloud.doc || {}).days || {})['2026-08-13'])
+            && blind.Sync.pendingCount() === 0,
+        `${blind.Sync.pendingCount()} owed`);
+
+    const shown = device => device.call('entriesFor', device.State.schedule,
+        '2026-08-12', 'w_01', 'actual').map(entry => entry.placeId).sort().join();
+    check('the other phone\'s day is in the cloud and not on this one',
+        Boolean(((cloud.doc || {}).days || {})['2026-08-12']) && shown(blind) === '',
+        `cloud has it: ${Boolean(((cloud.doc || {}).days || {})['2026-08-12'])}, here: "${shown(blind)}"`);
+    check('and the line does not say synced over a phone that adopts nothing',
+        blind.Sync.status !== 'synced', blind.Sync.status);
+    check('nor did it at any moment since the restore was held',
+        seen.every(item => item.said !== 'synced'),
+        JSON.stringify(seen.map(i => `${i.asked}->${i.said}@${i.pending}`)));
+
+    // AND ACROSS A REOPEN, because the record is still on the disk and always will be -
+    // nothing unreadable is ever deleted.
+    const morning = crew(null, 'd_blind2', { storage: blind.dump() });
+    morning.State.load();
+    morning.global('Recovery').acknowledge();
+    morning.Sync.connect(cloud.adapter);
+    await settle(TICK * 30);
+    check('the next morning it still does not claim to be finished',
+        morning.Sync.status !== 'synced', morning.Sync.status);
+}
+
 report();
