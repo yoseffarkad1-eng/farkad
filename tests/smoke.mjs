@@ -7566,6 +7566,109 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ---- the arrows and the rest day
+{
+  // The person's screenshot: «יום שבת 05/09/2026», reached with one tap of הבא from
+  // Friday. The drawer skips Saturday ("not a working row"), the blank-days count skips
+  // it, the week grid shades it as rest - and the two arrows walked the calendar one day
+  // at a time and landed on it. So: an EMPTY Saturday is stepped over, in both
+  // directions; a Saturday anybody has a record on - an entry or an absence, an archived
+  // man's included - is landed on, because that is somebody's pay and it must stay one
+  // tap away. The picker, the drawer, State.date itself and «היום» do not skip: an empty
+  // Saturday can still be opened on purpose, and if today IS Saturday the screen shows it.
+  const page = await open({ timezoneId: 'Asia/Jerusalem' });
+  await seedRoster(page);
+  const backBtn = page.getByRole('button', { name: 'יום קודם', exact: true });
+  const fwdBtn = page.getByRole('button', { name: 'יום הבא', exact: true });
+  const shown = () => page.evaluate(() => ({
+    date: State.date,
+    name: document.querySelector('.day-nav .day-label strong')?.textContent || ''
+  }));
+
+  // 2026-09-04 is a Friday, 09-05 the Saturday in the screenshot, 09-06 a Sunday.
+  await page.evaluate(() => { State.date = '2026-09-04'; render(); });
+  await fwdBtn.click();
+  await page.waitForTimeout(250);
+  let at = await shown();
+  check('from a Friday, הבא lands on Sunday, not on the empty Saturday',
+    at.date === '2026-09-06' && at.name === 'יום ראשון', JSON.stringify(at));
+
+  // Set explicitly, so this direction is measured on its own and not from wherever
+  // the tap above ended up.
+  await page.evaluate(() => { State.date = '2026-09-06'; render(); });
+  await backBtn.click();
+  await page.waitForTimeout(250);
+  at = await shown();
+  check('from a Sunday, קודם lands on Friday',
+    at.date === '2026-09-04' && at.name === 'יום שישי', JSON.stringify(at));
+
+  // A Saturday somebody worked - and he is in the archive, so the day screen's own
+  // crew list would not have him. 2026-09-12 is a Saturday.
+  await page.evaluate(() => {
+    State.worker('w_03').active = false;
+    assignPlace(State.schedule, '2026-09-12', 'w_03', 'actual', 'p_01', 400);
+    State.save();
+    State.date = '2026-09-11';
+    render();
+  });
+  await fwdBtn.click();
+  await page.waitForTimeout(250);
+  at = await shown();
+  check('a Saturday with an archived man\'s work on it is landed on from Friday',
+    at.date === '2026-09-12' && at.name === 'יום שבת', JSON.stringify(at));
+  await fwdBtn.click();
+  await page.waitForTimeout(250);
+  check('and the next tap goes on to Sunday',
+    (await page.evaluate(() => State.date)) === '2026-09-13');
+  await backBtn.click();
+  await page.waitForTimeout(250);
+  check('and it is landed on from Sunday too',
+    (await page.evaluate(() => State.date)) === '2026-09-12');
+
+  // An absence is a record as well: the man was marked not there on a Saturday, and that
+  // mark must not be hidden either. 2026-09-19 is a Saturday.
+  await page.evaluate(() => {
+    markAbsent(State.schedule, '2026-09-19', 'w_01', 'actual');
+    State.save();
+    State.date = '2026-09-20';
+    render();
+  });
+  await backBtn.click();
+  await page.waitForTimeout(250);
+  check('a Saturday holding only an absence is still landed on',
+    (await page.evaluate(() => State.date)) === '2026-09-19');
+
+  // The arrows skip; nothing else does. A Saturday set directly still renders Saturday.
+  await page.evaluate(() => { State.date = '2026-09-05'; render(); });
+  await page.waitForTimeout(200);
+  at = await shown();
+  check('State.date set to an empty Saturday still shows Saturday',
+    at.date === '2026-09-05' && at.name === 'יום שבת', JSON.stringify(at));
+  await page.context().close();
+}
+
+{
+  // Today is a Saturday: «היום» goes to it, and the boot lands on it - the arrows are
+  // the only thing that steps over the rest day.
+  const page = await open({ timezoneId: 'Asia/Jerusalem' });
+  await page.clock.install({ time: new Date('2026-09-05T06:00:00Z') }); // 09:00 Saturday
+  await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+  await page.waitForTimeout(500);
+  check('a boot on a Saturday opens on Saturday',
+    (await page.evaluate(() => State.date)) === '2026-09-05');
+
+  await page.evaluate(() => { State.date = '2026-09-01'; render(); });
+  await page.getByRole('button', { name: 'היום', exact: true }).click();
+  await page.waitForTimeout(250);
+  const today = await page.evaluate(() => ({
+    date: State.date,
+    name: document.querySelector('.day-nav .day-label strong')?.textContent || ''
+  }));
+  check('and «היום» lands on the Saturday when the Saturday is today',
+    today.date === '2026-09-05' && today.name === 'יום שבת', JSON.stringify(today));
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
