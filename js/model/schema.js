@@ -55,6 +55,11 @@ const FARKAD_SHIPPED_FLAGS = {
     // owner ruled out. So the switch belongs to a person who knows, and planAdvanceCarry
     // tells them exactly which accounts and which men it would move before they touch it
     // - the same courtesy planRateStamping gives before stamping old days.
+    //
+    // AND IT MOVES WITH LEDGER_WRITES (js/model/ledger.js), in the same commit, in the
+    // same direction. The repayment control needs both gates: with the carry shut nothing
+    // reads a repayment, and a man who hands back 200 is still deducted 500. A build that
+    // opened one without the other would ship that, so tests/data.test.mjs pins the pair.
     carryAdvances: false
 };
 
@@ -468,6 +473,22 @@ function ledgerContainerProblem(raw) {
     if (ledger.unreadable !== undefined && ledger.unreadable !== null
         && !isPlainObject(ledger.unreadable)) {
         return 'the held-aside part of the advances history is not a record';
+    }
+    // The approvals are the third map under this container, and they decide whether this
+    // device may write money at all. A `migrations` that is a string or an array read as
+    // no approvals - which is not the same statement as "nobody approved" and would put a
+    // migration screen in front of a person who has already answered it.
+    //
+    // AND NULL IS NOT AN ABSENCE HERE. Everywhere else in this function null is waved
+    // through, and rightly: a device that has never recorded an advance has no ledger and
+    // no entries, and the absent case has to stay cheap. This map is different because of
+    // what reading it wrongly COSTS. An absent `migrations` is a device that was never
+    // asked; a null is a value something wrote, and the only reading available for it is
+    // "nobody approved" - which either re-asks a person who has already answered, or, on
+    // the other side of the same coin, lets a record claim an approval it does not hold.
+    // Neither is a guess this build is entitled to make about somebody's money.
+    if (ledger.migrations !== undefined && !isPlainObject(ledger.migrations)) {
+        return 'the approvals of the advances history are not a record';
     }
     return null;
 }
@@ -1043,11 +1064,18 @@ function journalEntryProblems(path, value) {
     // entry may be created and nothing else, so a null here - a deletion in flight - is
     // refused rather than applied. The ledger's whole value is that nothing leaves it.
     if (parts[0] === 'ledger') {
-        if (parts.length !== 3 || parts[1] !== 'advances') {
-            return ['a ledger path nobody wrote'];
-        }
+        if (parts.length !== 3) return ['a ledger path nobody wrote'];
         if (!isSafeSegment(parts[2])) return ['a ledger path with an unusable id'];
-        return ledgerEntryProblems(parts[2], value);
+        if (parts[1] === 'advances') return ledgerEntryProblems(parts[2], value);
+        // ledger.migrations.<plan id> - somebody's approval of the carry migration.
+        //
+        // Not an entry, and not money: it is a person saying they read the rows and
+        // accepted what would move. It travels because the other two phones must not be
+        // asked to approve the same numbers again - and it is append-only for the same
+        // reason an entry is, because an approval that could be taken back is a decision
+        // nobody made. See planCarryMigration in js/model/ledger.js.
+        if (parts[1] === 'migrations') return migrationApprovalProblems(parts[2], value);
+        return ['a ledger path nobody wrote'];
     }
 
     // advances.<id> - or a deletion of one, which travels as null.
@@ -1198,6 +1226,22 @@ function workerFootprint(schedule, workerId) {
         if (item && String(item.workerId) === id) advances.push(advance);
     });
 
+    // AND THE LEDGER'S OWN ADVANCES, which are not always the same set.
+    //
+    // schedule.advances is what a v79 phone writes and it is still the field every device
+    // reads. It is not the whole record: a correction can move an advance to another man,
+    // and the fold - not the old field - is who it belongs to afterwards. A footprint
+    // taken from the old field alone would say a man has no advances while the ledger
+    // says he owes for one, and this footprint is what stands between him and permanent
+    // deletion. Feature-detected, because the ledger file may not be loaded.
+    if (typeof foldLedger === 'function') {
+        const folded = foldLedger(schedule);
+        Object.keys(folded).forEach(advance => {
+            if (String(folded[advance].workerId) !== id) return;
+            if (advances.indexOf(advance) === -1) advances.push(advance);
+        });
+    }
+
     return { days, advances };
 }
 
@@ -1208,9 +1252,29 @@ function openAdvanceBalance(schedule, workerId) {
     const advances = workerFootprint(schedule, workerId).advances;
     if (advances.length === 0) return null;
 
-    const total = advances.reduce(
-        (sum, id) => sum + (Number((schedule.advances[id] || {}).amount) || 0), 0);
-    return total > 0 ? { count: advances.length, total } : null;
+    // WHAT IS STILL OWED, not what was ever handed over.
+    //
+    // This summed the amount of every advance the man has ever had, and nothing else -
+    // no repayment, no reversal, and no money already taken off his wage. So the sentence
+    // that decides whether somebody may be put away said 5,000 about a man who owed 1,750,
+    // on a screen whose whole purpose is to be the last word before he is archived.
+    //
+    // advanceOutstanding is the one fold; it is feature-detected because the ledger file
+    // may not be loaded, and gated on the carry because with it shut there are no
+    // repayments to read and the gross IS the answer - which is what this build has always
+    // said and what a phone that cannot read entries needs it to keep saying.
+    //
+    // carryReportingEnabled rather than the flag alone: this sentence is the last thing
+    // somebody reads before a man is put away, and until the migration on THIS record has
+    // been approved it must keep saying what it has always said. Feature-detected for the
+    // same reason the fold is - ledger.js loads after this file.
+    const folded = typeof advanceOutstanding === 'function'
+        && typeof carryReportingEnabled === 'function'
+        && carryReportingEnabled(schedule);
+    const total = advances.reduce((sum, id) => (folded
+        ? sum + advanceOutstanding(schedule, id).left
+        : sum + (Number((schedule.advances[id] || {}).amount) || 0)), 0);
+    return total > 0 ? { count: advances.length, total: agoraRound(total) } : null;
 }
 
 // ---------------------------------------------------------------- the wire form
@@ -1500,14 +1564,53 @@ function reinstateReferenced(schedule, remembered) {
 // What is wrong with a ledger entry, said in sentences. Strict on purpose: this is the
 // record that outlives every correction, and an entry nobody can read is an entry that
 // makes the fold below it wrong for ever.
+// An approval of the carry migration, checked at the door like everything else.
+function migrationApprovalProblems(id, value) {
+    if (value === null) return ['an approval cannot be deleted'];
+    if (!isPlainObject(value)) return ['an approval that is not a record'];
+    if (String(value.id || '') !== String(id)) {
+        return ['an approval whose id does not match its path'];
+    }
+    if (String(value.kind) !== 'carry') return ['an approval of a kind nobody wrote'];
+    if (!Number.isInteger(value.rows) || value.rows < 0) {
+        return ['an approval that does not say how much it approved'];
+    }
+    return [];
+}
+
 function ledgerEntryProblems(id, value) {
     if (value === null) return ['a ledger entry cannot be deleted'];
     if (!isPlainObject(value)) return ['a ledger entry that is not a record'];
     if (String(value.id || '') !== String(id)) return ['a ledger entry whose id does not match its path'];
-    if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
+    // THE PERIOD ARTIFACT NAMES NO ADVANCE, and that is what it is for.
+    //
+    // A closed fortnight is a fact about a man and a window, not a movement against a
+    // debt - and most men have no debt. Hanging the record on an advance meant their
+    // payslips could never be frozen at all. So this one kind names a worker and a
+    // period instead, and carries no amount.
+    if (String(value.kind) === 'closed') {
+        if (!value.workerId || !isSafeSegment(String(value.workerId))) {
+            return ['a closed period belonging to nobody'];
+        }
+        if (!isRealDate(String(value.periodFrom)) || !isRealDate(String(value.periodTo))) {
+            return ['a closed period over no period'];
+        }
+        if (String(value.periodTo) < String(value.periodFrom)) {
+            return ['a period that closed before it opened'];
+        }
+        if (!isRealDate(String(value.date))) return ['a closed period on no date'];
+        // It moves no money. An amount here would be a deduction wearing the wrong kind,
+        // and the fold would never see it - which is money that leaves the sum.
+        if (value.amount !== undefined && Number(value.amount) !== 0) {
+            return ['a closed period carrying an amount'];
+        }
+        if (value.advanceId !== undefined && !isSafeSegment(String(value.advanceId))) {
+            return ['a closed period naming an advance id nobody could write'];
+        }
+    } else if (!value.advanceId || !isSafeSegment(String(value.advanceId))) {
         return ['a ledger entry with no advance behind it'];
     }
-    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted', 'reversed']
+    if (!['given', 'corrected', 'cancelled', 'repaid', 'deducted', 'reversed', 'closed']
         .includes(String(value.kind))) {
         return ['a ledger entry of a kind nobody wrote'];
     }
@@ -1564,11 +1667,77 @@ function ledgerEntryProblems(id, value) {
             return ['a deduction finer than an agora'];
         }
     }
+    // THE FROZEN FORTNIGHT, read as money and as counts rather than taken on trust.
+    //
+    // A closure carries the payslip it froze - the wage, what the period opened on, and
+    // what it was priced at. Every one of those numbers came off ANOTHER PHONE, and the
+    // fold read them with `Number(entry.gross)`: `Number("not-money")` is NaN, NaN is not
+    // undefined, so it won the "is it there" test and became the fortnight's wage. A
+    // payslip reading NaN, from a record this validator called clean - while it already
+    // refused an unreadable amount and an unreadable balanceAfter on the same entry.
+    //
+    // Not `|| 0`. A number nobody can read is not zero: zero is a statement about
+    // somebody's wage that no byte on the disk makes. The entry is unreadable, held
+    // aside like any other, and the account falls back to the live figure and says so.
+    const snapshot = ['gross', 'carriedIn', 'given', 'repaid', 'reversed', 'net'];
+    for (let at = 0; at < snapshot.length; at += 1) {
+        const field = snapshot[at];
+        if (value[field] === undefined || value[field] === null) continue;
+        const held = Number(value[field]);
+        if (!Number.isFinite(held)) {
+            return ['a closure whose ' + field + ' is not a number'];
+        }
+        if (Math.abs(held) > ADVANCE_MAX) {
+            return ['a closure whose ' + field + ' is beyond any wage'];
+        }
+    }
+    if (value.basis !== undefined && value.basis !== null) {
+        if (!isPlainObject(value.basis)) return ['a closure whose basis is not a record'];
+        const counts = ['dailyRate', 'hourlyRate', 'payUnits', 'attendanceDays',
+            'normalDays', 'doubleDays', 'extraHours', 'siteVisits', 'absent'];
+        for (let at = 0; at < counts.length; at += 1) {
+            const field = counts[at];
+            if (value.basis[field] === undefined) continue;
+            const held = Number(value.basis[field]);
+            if (!Number.isFinite(held) || held < 0) {
+                return ['a closure whose ' + field + ' is not a count'];
+            }
+        }
+        if (value.basis.workerName !== undefined
+            && typeof value.basis.workerName !== 'string') {
+            return ['a closure naming a worker in something that is not a name'];
+        }
+    }
+    // AND THE DAYS IT WAS PAID FOR, when it carries them. The list is what the man was
+    // asked to agree with, so a list nobody can read is not a list to print beside a
+    // number he was paid.
+    if (value.days !== undefined && value.days !== null) {
+        if (!Array.isArray(value.days)) return ['a closure whose days are not a list'];
+        for (let at = 0; at < value.days.length; at += 1) {
+            const day = value.days[at];
+            if (!isPlainObject(day)) return ['a closure with a day that is not a record'];
+            if (!isRealDate(String(day.date))) return ['a closure with a day on no date'];
+            const paid = Number(day.amount);
+            if (!Number.isFinite(paid) || paid < 0 || paid > ADVANCE_MAX) {
+                return ['a closure with a day priced at nothing readable'];
+            }
+        }
+    }
     // A CORRECTION, and the reason it was made. An unexplained adjustment to money is
     // the thing an append-only ledger exists to refuse, so the reason is not optional -
     // "somebody changed a number and nobody wrote down why" is the state this prevents.
     if (String(value.kind) === 'reversed') {
         if (!isRealDate(String(value.date))) return ['a reversal on no date'];
+        // The transaction it corrects, when it names one. An entry written before
+        // corrections targeted a transaction names none, and means "this advance was
+        // recorded in error" - which is what it has always meant.
+        if (value.targetId !== undefined && !isSafeSegment(String(value.targetId))) {
+            return ['a reversal naming a transaction id nobody could write'];
+        }
+        if (value.targetKind !== undefined
+            && ['given', 'repaid', 'deducted'].indexOf(String(value.targetKind)) === -1) {
+            return ['a reversal of a kind of entry that carries no money'];
+        }
         if (typeof value.reason !== 'string' || value.reason.trim() === '') {
             return ['a reversal with no reason'];
         }
@@ -1679,11 +1848,22 @@ function agoraRound(value) {
 // Read off the LEDGER, because that is where a repayment lives - schedule.advances has
 // one number per advance and no room for a second event about it. A build whose ledger
 // is empty answers zero, which is the truth for every device that has never recorded one.
-// Money that never left the tin: an advance recorded in error and compensated. Netted
-// exactly as a repayment is, and counted apart from it so a statement never tells a man
-// he handed back money he never touched.
-function advanceReversalsFor(schedule, workerId, fromDate, toDate) {
-    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'reversed');
+// Corrections, and WHICH WAY THEY MOVE THE MONEY.
+//
+// This used to be one number that was always subtracted, because a correction used to be
+// aimed at the advance: money recorded in error and never handed over, which is money not
+// owed. Corrections now name the TRANSACTION they correct - a repayment written against
+// the wrong man is the case the whole of L4 exists for - and a correction runs against its
+// target's own direction, not against a fixed sign.
+//
+// Undoing money handed over reduces the debt. Undoing a repayment puts it back: the cash
+// was never handed back, so it is still owed. Undoing a deduction is the same statement
+// about a wage - it did not come off, so the man still owes it.
+//
+// Called with no target kind it answers the total, which is what the statement prints
+// under תיקון-היפוך: both halves of what happened stay on his copy.
+function advanceReversalsFor(schedule, workerId, fromDate, toDate, targetKind) {
+    return advanceLedgerSum(schedule, workerId, fromDate, toDate, 'reversed', targetKind);
 }
 
 function advanceRepaymentsFor(schedule, workerId, fromDate, toDate) {
@@ -1693,12 +1873,25 @@ function advanceRepaymentsFor(schedule, workerId, fromDate, toDate) {
 // The one walk over the ledger both of the above use. Whose entry it is comes from the
 // ADVANCE, not from the entry: a correction that moved the advance to another man would
 // otherwise leave its repayments behind, crediting one person for another's money.
-function advanceLedgerSum(schedule, workerId, fromDate, toDate, kind) {
+function advanceLedgerSum(schedule, workerId, fromDate, toDate, kind, targetKind) {
     const advances = (schedule && schedule.advances) || {};
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
     return Object.keys(held)
         .map(id => held[id])
         .filter(entry => entry && entry.kind === kind && entry.advanceId)
+        // A correction is read by WHAT IT CORRECTS - see advanceReversalsFor. The target
+        // is resolved from the record, exactly as advanceOutstanding resolves it, rather
+        // than trusted from the correction's own denormalised copy: the two have to agree
+        // or the screens and the ledger fold part company again. A correction carrying no
+        // target at all was written before L4, when the only thing one could mean was
+        // "this advance was recorded in error", and it goes on meaning that.
+        .filter(entry => {
+            if (!targetKind) return true;
+            const target = entry.targetId ? held[String(entry.targetId)] : null;
+            const of = target ? String(target.kind)
+                : String(entry.targetKind || 'given');
+            return of === String(targetKind);
+        })
         .filter(entry => {
             const of = advances[entry.advanceId] || foldLedger(schedule)[entry.advanceId];
             return Boolean(of) && of.workerId === workerId;
@@ -1751,9 +1944,13 @@ function advanceCarryInto(schedule, workerId, fromDate) {
 function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     const given = advancesTotal(schedule, workerId, fromDate, toDate);
     const repaid = advanceRepaymentsFor(schedule, workerId, fromDate, toDate);
-    // Reversals net exactly as repayments do - the money is not owed either way - and are
-    // counted apart so a statement never calls a clerical correction "הוחזר במזומן".
+    // Reported whole, so a statement can name the corrections without calling any of them
+    // "הוחזר במזומן" - and applied below by what each of them corrects.
     const reversed = advanceReversalsFor(schedule, workerId, fromDate, toDate);
+    const undoneGiven = advanceReversalsFor(schedule, workerId, fromDate, toDate, 'given');
+    const undoneRepaid = advanceReversalsFor(schedule, workerId, fromDate, toDate, 'repaid');
+    const undoneDeducted = advanceReversalsFor(schedule, workerId, fromDate, toDate,
+        'deducted');
 
     // A CLOSED PERIOD REPORTS ITS RECORD, and does not do the sum again.
     //
@@ -1777,20 +1974,58 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // js/ui/reports.js. Nothing can be deducted from a number nobody knows, so the
     // balance passes through him untouched rather than being written off against a wage
     // this app cannot price.
-    const gross = row && row.amount !== null ? Number(row.amount) : null;
+    // A CLOSED PERIOD REPORTS THE WAGE IT WAS CLOSED ON, not the wage the schedule
+    // happens to price today. Recomputing it meant a day corrected off a paid fortnight,
+    // or a rate fixed, rewrote a payslip somebody was already handed - measured at
+    // 3,050 -> 2,440 on a row whose deduction stayed 3,050, so it stopped adding up.
+    // A closure written before this carries no gross, and then the live figure is the
+    // only answer there is; nothing is invented for it.
+    const liveGross = row && row.amount !== null ? Number(row.amount) : null;
+    const gross = (closed !== undefined && closed.gross !== undefined
+        && closed.gross !== null)
+        ? Number(closed.gross)
+        : liveGross;
 
-    let balance = agoraRound((Number(carriedIn) || 0) + given - repaid - reversed);
+    // ONE fold, and it agrees with advanceOutstanding in js/model/ledger.js entry for
+    // entry. Measured before this: a repayment of 400 recorded against the wrong man and
+    // then corrected took 800 off his debt here - 400 for the repayment that did not
+    // happen and 400 again for saying so - while the ledger fold said the whole advance
+    // was still owed. Two folds of one record, disagreeing by twice the money, on the
+    // screens and the files somebody is paid from.
+    let balance = agoraRound((Number(carriedIn) || 0) + given
+        - agoraRound(repaid - undoneRepaid) - undoneGiven + undoneDeducted);
     // Never below zero: a man who hands back more than he owes has overpaid, and turning
     // that into a negative balance would quietly ADD it to his next wage as though the
     // firm owed him for it. It is his money and he should have it back, but that is a
     // conversation, not an arithmetic result this app may reach on its own.
     if (balance < 0) balance = 0;
 
+    // MORE SETTLED THAN WAS EVER GIVEN, on at least one of this man's advances.
+    //
+    // Two phones, both offline, each recording the same 500 handed back. Both entries
+    // land and both are real records of something; the fold then reads 1,000 settled
+    // against 500 given. Before this, `balance` clamped at zero, the deduction came out
+    // as zero, the pay sheet printed a clean net and nothing on any screen said a word.
+    //
+    // A number that is wrong and silent is worse than one that is wrong and loud, and
+    // this one is somebody's pay. So the automatic deduction STOPS while it stands: the
+    // balance is carried rather than taken, both entries are kept, and the screen says
+    // the account needs looking at. Correcting it is a deliberate act with a reason
+    // attached - see reversalProblems in js/model/ledger.js - not an average this app
+    // takes on its own.
+    const overpaid = typeof overpaidAdvances === 'function'
+        ? agoraRound(overpaidAdvances(schedule, workerId)
+            .reduce((sum, state) => sum + (Number(state.overpaid) || 0), 0))
+        : 0;
+
     // The record wins where there is one. It is what came off that man's wage on the day
-    // the period closed, and no later entry gets to revise it.
+    // the period closed, and no later entry gets to revise it - an overpayment noticed
+    // today does not reach back into a payslip somebody was already handed.
     const deducted = closed !== undefined
         ? agoraRound(closed.deducted)
-        : (gross === null ? 0 : agoraRound(Math.min(balance, Math.max(gross, 0))));
+        : (gross === null || overpaid > 0
+            ? 0
+            : agoraRound(Math.min(balance, Math.max(gross, 0))));
 
     // TWO BALANCES OUT OF A CLOSED PERIOD, and the difference between them is the whole
     // point.
@@ -1810,10 +2045,18 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     const frozen = closed !== undefined && closed.balanceAfter !== undefined
         ? agoraRound(closed.balanceAfter)
         : live;
+    // The opening balance is frozen with the wage, for the same reason: it is a figure
+    // the payslip states. `given`, `repaid` and `reversed` are deliberately NOT frozen -
+    // they are what the record holds for this window today, and the sheet's late-movement
+    // note is built from them. Freezing those would make a repayment that arrived after
+    // the close vanish off the page, which is the money-losing half of this same fault.
+    const openedOn = (closed !== undefined && closed.carriedIn !== undefined)
+        ? agoraRound(Number(closed.carriedIn) || 0)
+        : agoraRound(Number(carriedIn) || 0);
     return {
         from: fromDate,
         to: toDate,
-        carriedIn: agoraRound(Number(carriedIn) || 0),
+        carriedIn: openedOn,
         given: agoraRound(given),
         repaid: agoraRound(repaid),
         reversed: agoraRound(reversed),
@@ -1827,6 +2070,12 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
         // Named so a screen can say "הגיעה תנועה אחרי סגירת התקופה" rather than leaving
         // two numbers on the page with nothing explaining why they differ.
         lateSinceClose: agoraRound(live - frozen),
+        // More has been settled against this man's advances than was ever handed to him.
+        // Named so the screen can say so instead of printing a quiet zero.
+        overpaid,
+        // Whether this row's deduction was HELD rather than computed. Only ever true on
+        // an open period: a closed one reports its record and is not revised.
+        review: overpaid > 0 && closed === undefined,
         net: gross === null ? null : agoraRound(gross - deducted),
         // Whether this row is a record or a reckoning, said out loud - the screen shows
         // "החשבון נסגר ולא ישתנה" only where it is true.
@@ -2467,6 +2716,36 @@ function payrollReport(schedule, fromDate, toDate) {
         const netted = row.advances > 0 ? row.advances : 0;
         row.netAmount = row.amount === null ? null : row.amount - netted;
 
+        // A CLOSED FORTNIGHT REPORTS THE ROW IT WAS CLOSED ON.
+        //
+        // C4 froze the three money columns and left the counts and the day list beside
+        // them live, so removing one historical day from a paid fortnight moved
+        // attendanceDays 5 -> 4, payUnits 5 -> 4 and this amount 3,050 -> 2,440 while the
+        // deduction column stayed 3,050 - a row that no longer adds up, on the sheet the
+        // crew is paid from. Half a frozen payslip is not a payslip.
+        //
+        // Only where the closure RECORDED them: a closure from before this carries no
+        // basis and nothing is invented for it. See closedPeriods, which never coerces.
+        const frozen = typeof closedPeriods === 'function'
+            ? closedPeriods(schedule, worker.id)[fromDate] : undefined;
+        if (frozen !== undefined) {
+            if (Number.isFinite(frozen.gross)) {
+                row.amount = frozen.gross;
+                row.netAmount = frozen.gross - netted;
+            }
+            if (isPlainObject(frozen.basis)) {
+                // Every count the sheet prints, where the closure recorded it. A closure
+                // from before a given field exists carries none, and that column is the
+                // live one - which is the same fallback the wage takes.
+                ['attendanceDays', 'payUnits', 'normalDays', 'doubleDays', 'extraHours',
+                    'siteVisits', 'absent'].forEach(field => {
+                        if (Number.isFinite(Number(frozen.basis[field]))) {
+                            row[field] = Number(frozen.basis[field]);
+                        }
+                    });
+            }
+        }
+
         return row;
     });
 }
@@ -2475,6 +2754,34 @@ function payrollReport(schedule, fromDate, toDate) {
 // question this answers is "why is my pay this number", and an answer computed a second
 // way is not an answer.
 function workerDaysReport(schedule, worker, fromDate, toDate) {
+    // THE DAYS A CLOSED FORTNIGHT WAS PAID FOR, as it recorded them.
+    //
+    // This list is what the man is handed and asked to agree with - it is the answer to
+    // "why is my pay this number" - and it was recomputed from the live schedule on every
+    // read, so a day corrected off a paid fortnight quietly disappeared from a statement
+    // whose total, by then, was frozen. The two halves of one document disagreeing.
+    //
+    // Only where the closure carries them: an older closure has no list and this behaves
+    // as it always did.
+    const frozen = typeof closedPeriods === 'function'
+        ? closedPeriods(schedule, worker.id)[fromDate] : undefined;
+    if (frozen !== undefined && Array.isArray(frozen.days)) {
+        return frozen.days.map(day => ({
+            date: String(day.date),
+            absent: Boolean(day.absent),
+            entries: Array.isArray(day.entries) ? day.entries.map(one => {
+                const entry = { placeId: String(one.placeId || '') };
+                if (one.rate !== undefined) entry.rate = one.rate;
+                if (one.hours !== undefined) entry.hours = one.hours;
+                return entry;
+            }) : [],
+            doubled: Array.isArray(day.entries)
+                && day.entries.some(one => String(one.rate) === String(RATE_DOUBLE)),
+            extraHours: Array.isArray(day.entries)
+                ? day.entries.reduce((sum, one) => sum + (Number(one.hours) || 0), 0) : 0,
+            amount: Number(day.amount) || 0
+        }));
+    }
     return Object.keys(schedule.days || {})
         .filter(date => date >= fromDate && date <= toDate)
         .sort()

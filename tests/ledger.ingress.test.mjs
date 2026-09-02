@@ -525,7 +525,10 @@ function documentWithLedger(device, ledger) {
             { 'scheduleData:v2': JSON.stringify(disk) }) });
     opened.State.load();
     check('the record still opens', opened.State.schedule.workers.length === 1);
-    check('and the part this build never heard of is on the schedule, unchanged',
+    // On THIS branch `migrations` is a map the build owns, so it is kept by the named
+    // path rather than by the catch-all. Both are asserted: the one that exists today,
+    // and the one a build after this one adds.
+    check('the approval this build does know is on the schedule, unchanged',
         JSON.stringify(opened.State.schedule.ledger.migrations)
             === JSON.stringify(disk.ledger.migrations),
         JSON.stringify(opened.State.schedule.ledger));
