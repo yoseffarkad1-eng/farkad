@@ -52,6 +52,30 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 3990de0 (v99: the holds nobody disagreed about - one arithmetic for a closure's
+    writer and its judge, a clock that is behind refusing rather than moving money
+    quietly, the same-fact rule asked at every gate that can hold a write, every name in
+    the day message isolated, and the week strip showing where it is cut off), a clean
+    detached worktree at that commit, Node v22.22.2, git diff --check clean, copied from
+    no other run - BOTH GATES, run separately:
+    npm test           43 suites   4362/4362   (closure 117, samefact 37, exports 73)
+    npm run test:release
+                       59 suites   6725/6725   exit 0   (smoke 1124, print 78, mobile 740,
+                       update 30, forms-browser 10, recovery-browser 25, handover 26,
+                       swrestart 31, swidentity 55, sendclaim 43; rules 59, cas.emulator 24,
+                       rollout 17, bootstrap.emulator 23, bootstrap.rules 28,
+                       money.concurrency 50)
+    No suite was added, so the counts stay 43 and 59; the +30 on npm test is 14 new checks
+    in closure, 13 in samefact and 3 in exports.
+    The storm suite beside it, on the same commit: ten serial runs against the real
+    emulator on an idle machine, 50/50 every one. Two earlier attempts came back 43/50 and
+    46/50 and were self-inflicted - two loops running the suite at once share the emulator
+    that `firebase emulators:exec` binds from firebase.json, and reseed() wipes the shared
+    document, so each run was deleting the other's record. Passing --config with a private
+    port does NOT fix it: the websocket port is not read from that config and still
+    collides. Run them serially.
+    Per suite and verbatim: features/false-holds/handoff.md.
+
     At 1e3f092 (v98: the storm closed - a ledger entry is its own JSON round-trip - the
     frozen hours, and the by-site grid's short dates), the cd-work worktree, clean at that
     commit, Node v22.22.2, .gate-release.log there, copied from no other run - the WHOLE

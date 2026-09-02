@@ -1,7 +1,7 @@
 # Handoff — v99: the holds nobody disagreed about
 
 - Branch: `claude/farkad-mobile-design-review-odl8ue`
-- SHA: FINAL_SHA
+- SHA: `3990de007fb83f0eb0915b7e2f54ef552f9e59fb`
 - Base: `4a4d277` (v98 as served, `5dd5a83`, plus the brief this round was given)
 - Build stamps at that SHA: `farkad-build` v99 · `APP_VERSION` v99 · `VERSION` farkad-v99
 - Gates: `LEDGER_WRITES` false, `carryAdvances` false. Neither moved.
@@ -71,10 +71,17 @@ rightmost and the headers step leftward in order. The invoice is deliberately ex
 measuring it on a screen measures nothing. Its geometry belongs to the print suite.
 
 ## Expectations moved deliberately
-- `tests/exports.test.mjs`, three pins of the WhatsApp message (the owner's template, the
-  one-site message, the absence-only day): every name now carries U+2068…U+2069. Written
-  into the pins rather than stripped from the comparison, so dropping the isolates fails
-  them.
+- Nine pins of the WhatsApp message, in two files, all for the isolates and nothing else:
+  three in `tests/exports.test.mjs` (the owner's template, the one-site message, the
+  absence-only day) and six in `tests/smoke.mjs` (the site and bullet lines, the doubled
+  day, the absentee list, and the other two styles). Written into the pins through a named
+  FSI/PDI pair rather than stripped from the comparison, so dropping the isolates fails
+  them instead of passing.
+
+  The six in `tests/smoke.mjs` were found by the release gate, not by the change: the grep
+  that went with the isolates looked for the heading string and so matched only the file
+  that pins the heading. That cost one full gate run and is the reason the numbers below
+  are from `3990de0` and not from the commit that made the change.
 - Nothing else. `tests/closure.test.mjs`'s existing 103 checks, `tests/cas.test.mjs`'s
   two-phones-one-day hold and `tests/samefact.test.mjs`'s correction control all pass
   unchanged — a different fact is still a contest at every gate.
@@ -95,11 +102,128 @@ change.
 
 ## Test output (verbatim, on the final commit)
 
-GATE_OUTPUT
+```
+=== npm test on 3990de007fb83f0eb0915b7e2f54ef552f9e59fb at 19:04:55 v22.22.2
+18/18 checks passed
+11/11 checks passed
+29/29 checks passed
+37/37 checks passed
+28/28 checks passed
+73/73 checks passed
+28/28 checks passed
+1944/1944 checks passed
+75/75 checks passed
+116/116 checks passed
+35/35 checks passed
+44/44 checks passed
+46/46 checks passed
+73/73 checks passed
+35/35 checks passed
+43/43 checks passed
+21/21 checks passed
+9/9 checks passed
+21/21 checks passed
+17/17 checks passed
+4/4 checks passed
+82/82 checks passed
+37/37 checks passed
+36/36 checks passed
+117/117 checks passed
+79/79 checks passed
+33/33 checks passed
+82/82 checks passed
+72/72 checks passed
+240/240 checks passed
+151/151 checks passed
+88/88 checks passed
+29/29 checks passed
+40/40 checks passed
+206/206 checks passed
+51/51 checks passed
+51/51 checks passed
+48/48 checks passed
+61/61 checks passed
+74/74 checks passed
+23/23 checks passed
+23/23 checks passed
+32/32 checks passed
+EXIT=0
+43 suites · 4362/4362 checks
+
+=== npm run test:release on 3990de007fb83f0eb0915b7e2f54ef552f9e59fb at 19:08:04 v22.22.2
+18/18 checks passed
+11/11 checks passed
+29/29 checks passed
+37/37 checks passed
+28/28 checks passed
+73/73 checks passed
+28/28 checks passed
+1944/1944 checks passed
+75/75 checks passed
+116/116 checks passed
+35/35 checks passed
+44/44 checks passed
+46/46 checks passed
+73/73 checks passed
+35/35 checks passed
+43/43 checks passed
+21/21 checks passed
+9/9 checks passed
+21/21 checks passed
+17/17 checks passed
+4/4 checks passed
+82/82 checks passed
+37/37 checks passed
+36/36 checks passed
+117/117 checks passed
+79/79 checks passed
+33/33 checks passed
+82/82 checks passed
+72/72 checks passed
+240/240 checks passed
+151/151 checks passed
+88/88 checks passed
+29/29 checks passed
+40/40 checks passed
+206/206 checks passed
+51/51 checks passed
+51/51 checks passed
+48/48 checks passed
+61/61 checks passed
+74/74 checks passed
+23/23 checks passed
+23/23 checks passed
+32/32 checks passed
+1124/1124 checks passed
+78/78 checks passed
+740/740 checks passed
+30/30 checks passed
+10/10 checks passed
+25/25 checks passed
+26/26 checks passed
+31/31 checks passed
+55/55 checks passed
+43/43 checks passed
+59/59 checks passed
+24/24 checks passed
+17/17 checks passed
+23/23 checks passed
+28/28 checks passed
+50/50 checks passed
+EXIT=0
+59 suites · 6725/6725 checks
+```
+
+Both from one clean detached worktree at `3990de0`, `git diff --check` clean, Node
+v22.22.2, neither wrapped in anything that turns a nonzero exit into a success. The two
+gates were run separately and are reported separately; `npm test` contains no emulator
+suite, which is why it is not evidence about the six that matter most here.
 
 ## The storm suite, repeatedly
 
-Item 2 asks for the emulator suite at least ten times under load. STORM_SUMMARY
+Item 2 asks for the emulator suite at least ten times under load. Ten runs of `tests/money.concurrency.test.mjs` against the real emulator on the
+final tree, serially, on an idle machine: **50/50 every run, ten out of ten.** The suite
+also ran once more inside the release gate above, 50/50.
 
 **A trap worth writing down.** Two earlier attempts at these runs came back 43/50 and
 46/50 — the exact signature v98 closed — and both were self-inflicted: two of this
