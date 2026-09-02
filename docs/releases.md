@@ -12,23 +12,25 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v99 (`cab12de`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+**`main` is at v100 (`e4aa66b`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
+v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v100 — the holds nobody disagreed about, and a day priced twice
+## v100 — 2 September 2026 — `e4aa66b` (PR #12, the tree at `a3d784b`)
 
-Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v98 as served
+On `main` since 2 September 2026; whether any phone has taken the update is not known from
+here. Built on v98 as served
 (`4a4d277`) and merged with the v99 that was served from this same branch while it was
 being built (`5650235`). The four items v98 left open, closed, plus the two pins and the one product
 change the same list asked for — and then a re-audit of the whole data-safety path, which
 found five more and closed them. It carries v99 whole - the bottom bars and the reason
 line - and adds to it. Both money gates stay shut.
 
-**What it would give the crew that v99 does not have**
+**What it gives the crew that v99 does not have**
 
 - **On the phone, today:** the WhatsApp message no longer turns a line round when a
   worker or a site has a Latin name. «📍 Rothschild 12» used to paint its pin on the left
@@ -73,8 +75,9 @@ line - and adds to it. Both money gates stay shut.
 
 **What it is known NOT to cover**
 
-- No phone has run any of it. Nothing since v86 has, and `docs/iphone-acceptance.md` now
-  carries twelve rows for v97 and v98 and none of them is ticked.
+- **Being on `main` is not being on a phone.** No phone is known to have taken it, and no
+  phone has run any of it: nothing since v86 has, and every row of
+  `docs/iphone-acceptance.md` is still NOT RUN.
 - The two gates are still shut, so four of the six items above cannot be reached by any
   phone in the field. `features/gate-flip/contract.md` is what opening them requires; it
   is a checklist, not a decision, and the decision is the owner's.
