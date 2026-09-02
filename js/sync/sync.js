@@ -2557,16 +2557,19 @@ const FarkadSync = {
             this._watchingConnection = true;
             window.addEventListener('online', () => {
                 this._retryAt = 0;
+                // A listener that died while the signal was gone is tried again the
+                // moment it is back, rather than left to its own ladder.
+                if (this._listenerDead) this.relisten();
                 if (this.pendingReplace()) this.resumeReplace();
                 else this.flush();
             });
         }
 
-        const stop = adapter.subscribe(
-            snapshot => this.receive(snapshot),
-            error => this.fail(error)
-        );
-        this._unsubscribe = typeof stop === 'function' ? stop : null;
+        // A fresh subscription; whatever an earlier one was going back for is moot.
+        clearTimeout(this._relistenTimer);
+        this._relistenTimer = null;
+        this._relistenAt = 0;
+        this.listen();
 
         // Anything left over from a previous session goes out as soon as there is
         // somewhere to send it. The replacement goes first: the queued field edits
@@ -2583,8 +2586,10 @@ const FarkadSync = {
         this._archivedOn = null;
         clearTimeout(this._timer);
         clearTimeout(this._retryTimer);
+        clearTimeout(this._relistenTimer);
         this._timer = null;
         this._retryTimer = null;
+        this._relistenTimer = null;
         this._sending = new Map();
         this._stamp = null;
         // The outbox and any pending replacement are deliberately NOT cleared. Signing
@@ -2608,6 +2613,72 @@ const FarkadSync = {
         } catch (error) {
             console.error('Could not stop the previous subscription:', error);
         }
+    },
+
+    // A LISTENER THAT HAS DIED, and why it is a fact the status has to know.
+    //
+    // A Firestore onSnapshot listener whose error callback has fired delivers nothing
+    // further: the subscription is over, and only a new one hears again. The adapter's
+    // onError used to be routed into fail() and left there - 'error' on the line, which
+    // was right, and nothing subscribing again, which meant the line stayed right only
+    // until this phone's next send. A send that lands is the recovery from whatever the
+    // line was showing, so the status went to 'synced' - over a phone that could not
+    // hear the other two. Mis-deployed rules, an address dropped and restored, any
+    // terminal listener error mid-evening: the phone keeps recording, each write lands,
+    // the line says «מסונכרן», and a day the other phone corrected is priced here at the
+    // old site with the status vouching for it. Measured in tests/status.test.mjs.
+    //
+    // So the death is written down, the status refuses 'synced' while it stands (see
+    // honestStatusFor), a new subscription is tried on a ladder of its own, and the flag
+    // is cleared by exactly one thing: a snapshot delivered by a listener - which is the
+    // only proof there is that this phone hears again.
+    _listenerDead: false,
+    _relistenTimer: null,
+    _relistenAt: 0,
+
+    listen() {
+        const stop = this.adapter.subscribe(
+            snapshot => {
+                if (this._listenerDead) {
+                    this._listenerDead = false;
+                    this._relistenAt = 0;
+                    clearTimeout(this._relistenTimer);
+                    this._relistenTimer = null;
+                }
+                this.receive(snapshot);
+            },
+            error => this.listenerFailed(error)
+        );
+        this._unsubscribe = typeof stop === 'function' ? stop : null;
+    },
+
+    listenerFailed(error) {
+        this._listenerDead = true;
+        this.fail(error);
+        this.scheduleRelisten();
+    },
+
+    // Its own ladder, not the send ladder. The send ladder is cleared by a send that
+    // lands - correctly, there is nothing left to go back for - and it is the one thing
+    // honestStatusFor reads as "still sending": a dead listener riding on it would have
+    // been cancelled by the very write that made the line lie, or would have had the
+    // line say something was being sent when nothing was.
+    scheduleRelisten() {
+        if (!this.adapter) return;
+        this._relistenAt = this._relistenAt
+            ? Math.min(this._relistenAt * 2, RETRY_MAX_MS)
+            : RETRY_FIRST_MS;
+        clearTimeout(this._relistenTimer);
+        this._relistenTimer = setTimeout(() => {
+            this._relistenTimer = null;
+            this.relisten();
+        }, this._relistenAt);
+    },
+
+    relisten() {
+        if (!this.adapter) return;
+        this.stopListening();
+        this.listen();
     },
 
     // ------------------------------------------------------- held back by Recovery
@@ -2665,6 +2736,11 @@ const FarkadSync = {
         if (this.pendingCount() > 0) return 'sending';
         // And work the ladder is still going back for.
         if (this._retryTimer) return 'sending';
+        // A phone that cannot hear. Everything it recorded may well be on the other two
+        // phones; what they corrected is not on this one, and 'synced' claims both.
+        // 'error' is what the listener's own failure set, and it stays until a listener
+        // delivers again - see listen().
+        if (this._listenerDead) return 'error';
         return 'synced';
     },
 
