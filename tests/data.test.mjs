@@ -9988,4 +9988,49 @@ const VEHICLES_ON = { vehicles: true };
         JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('undoStack') !== -1)));
 }
 
+
+{
+    suite('a refused edit is taken off the screen even with nothing durable behind it');
+
+    // rollback() answered false and did nothing whenever durableText was not a string -
+    // and durableText is only ever set by a successful save, a successful persist, or a
+    // load that FOUND a readable schedule. The one session where none of those has
+    // happened is the session that opened onto a damaged record, which is exactly the
+    // session where the person is most likely to re-type what they can see missing.
+    //
+    // So every refused edit stayed on the screen under a dialog reading «השינוי בוטל כדי
+    // שלא ייראה כאילו נרשם», with nothing in the journal behind it. Acknowledge the
+    // quarantine, record one ordinary day, and that save carries the re-typed days onto
+    // the disk with no journal entry for any of them - and the first snapshot from
+    // another phone then writes over them, because reapplyPending has nothing to put
+    // back. Three days gone from screen, disk and cloud, with the line reading synced.
+    //
+    // With nothing durable behind it the honest target is the empty schedule and the
+    // journal replayed onto it - which is precisely what a reopen of this device would
+    // produce, and what rollback's own comment already promises.
+    const device = makeDevice({ storage: { 'scheduleData:v2': '{"schemaVersion":2,"workers":[' } });
+    device.State.load();
+    given('the record is damaged and writing is blocked',
+        device.call('farkadWritesBlocked') === true,
+        String(device.call('farkadWritesBlocked')));
+    given('and nothing durable stands behind the screen',
+        device.State.durableText === null, String(device.State.durableText));
+
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    device.State.schedule.workers = [
+        { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+    device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+    const refused = device.State.commit(device.call('assignPlace', device.State.schedule,
+        '2026-08-10', 'w_01', 'actual', 'p_01'));
+    given('the edit was refused', refused === false, String(refused));
+
+    check('and it is not left standing on the screen',
+        device.State.schedule.days['2026-08-10'] === undefined,
+        JSON.stringify(Object.keys(device.State.schedule.days || {})));
+    check('the journal holds nothing for it either',
+        JSON.stringify(device.call('FarkadSync').journalPaths
+            ? device.call('FarkadSync').journalPaths() : []) .indexOf('2026-08-10') === -1,
+        'no journal entry');
+}
+
 report();
