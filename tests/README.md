@@ -313,8 +313,17 @@ say. Reach globals through `device.call(name, ...)` / `device.global(name)`: top
 `const` in a classic script creates a binding, not a `window` property, so the sandbox
 object does not carry them. (The harness's own file-list comment says it mirrors
 index.html's order; it actually loads `dates.js`/`dom.js` first and `state.js` before
-`sync/sync.js` — both orders satisfy the real definition-time dependencies, and the
+the sync group — both orders satisfy the real definition-time dependencies, and the
 code is the one to trust.)
+
+Since v102 the sync group is six files, not one — `sync.js`, `restore.js`, `receive.js`,
+`send.js`, `status.js`, `boot.js` — and their ORDER is load-bearing in this list exactly
+as it is in `index.html` and in `sw.js`'s SHELL. `boot.js` runs two lines at load time
+and must stay last; anything it reaches has to be above it. A suite that builds a device
+from an OLDER commit must use that commit's file list rather than this one's — see
+`tests/fence.legacy.test.mjs`, which was written against `loadOrder()` and went red the
+first time a file was split, because reading today's file names out of a commit from
+before they existed is a demand that the past contain the present.
 
 The rest of the kit, each modelled on a measured failure:
 

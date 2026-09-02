@@ -187,8 +187,29 @@ can a phone. That is a stronger gate than a bare const, which nothing enforces.
 
 ## Sync
 
-`js/sync/sync.js` is the largest file in the app and nearly all of it is the residue
-of a specific measured failure. The load-bearing ideas:
+Sync was one 6,194-line file until v102, and nearly all of it is the residue of a
+specific measured failure. It is now six, split by concern and loaded in this order —
+the order is load-bearing and `index.html`, `sw.js`'s SHELL and `tests/harness.mjs` all
+carry it:
+
+| file | what it owns |
+|---|---|
+| `js/sync/sync.js` | the durable queue: outbox, journal, replay, receipts, provenance. Holds the object's state and the ONE accessor pair (`get`/`set _outbox`), which is why it declares `FarkadSync` and the others extend it. |
+| `js/sync/restore.js` | the whole-document restore — the one operation allowed to write the whole document instead of one field path. |
+| `js/sync/receive.js` | a document arriving from the server: adoption, merge, the client half of the ordering protocol, and every door a poisoned or unreadable record can arrive by. |
+| `js/sync/send.js` | getting this device's work out: the flush, the send claim, the pre-send hold, the create race, the retry ladder. |
+| `js/sync/status.js` | being connected and saying so truthfully; the sentence in the ⋯ panel and the banner above the board. |
+| `js/sync/boot.js` | two lines that RUN at load time. Loaded last, and every later split of the group goes above it — that is the file's whole job. |
+
+The later five extend the object with `Object.assign(FarkadSync, { … })`, because a
+classic script cannot continue an object literal begun in another file and there is no
+build step here to pretend otherwise. Two facts make that safe and both were checked
+rather than assumed: nothing anywhere iterates or spreads `FarkadSync`, so property
+order is not observable; and `Object.assign` copies VALUES, so the one accessor pair
+must never travel that way — assigning it would invoke the getter and freeze a derived
+queue into a stale snapshot, which is a money bug with no symptom.
+
+The load-bearing ideas:
 
 **Two write patterns, two rules.** The evening roster is built by three people at
 once; the record after work is usually one person. Whole-document newest-wins is fine
@@ -197,7 +218,7 @@ path and the server document — which is a field-level merge of everyone's writ
 adopted whole when it arrives, with this device's still-pending edits re-applied on
 top. Adoption is never decided by comparing `updatedAt`: the stamps come from three
 phone clocks, and a fast clock would silently discard the other two people's work
-(`receive`, `js/sync/sync.js:2434`).
+(`receive`, `js/sync/receive.js`).
 
 **The journal (outbox) is the spine.** Every edit is written to
 `farkad:outbox` — `{seq, items: {path: {value, seq, sent}}}` — BEFORE it is called
@@ -215,9 +236,9 @@ steps later. Damaged queues are never overwritten; recording continues in the ne
 this device can PROVE it minted (`mine`) and PROVE never left (`sent`), each fact its
 own `localStorage` key written at the moment it happens — one key per fact, because a
 read-modify-write blob loses one context's fact to another's write
-(`js/sync/sync.js:100-118`). `sent` is recorded at the HANDOVER, before the payload
+(`markLocallyMinted`, `js/sync/sync.js`). `sent` is recorded at the HANDOVER, before the payload
 leaves, and the payload does not leave if the record cannot be stored (`flush`,
-`js/sync/sync.js:1667`). The question is deliberately "was it made here?", so every
+`js/sync/send.js`). The question is deliberately "was it made here?", so every
 failure mode — unreadable, refused, migrated, imported, restored — answers no, and no
 means archive. A generation counter invalidates every `mine` fact at a stroke when a
 restore or an export makes local origin unprovable (`forgetLocalOrigin`).
@@ -245,7 +266,7 @@ cloud copy, snapshot) is an envelope on disk —
 `{version: 2, phase, transactionId, supersedesSeq, cloud, document}` — and the
 invariant is: **the cloud may be written only once `scheduleData:v2`, read straight
 back off the disk, already contains the replacement** (`localDurableHolds`,
-`js/sync/sync.js:1850`). The phase is a hint; the bytes are the gate. `supersedesSeq`
+`js/sync/restore.js`). The phase is a hint; the bytes are the gate. `supersedesSeq`
 marks the journal position the restore replaces — entries at or below it are dropped
 only once the replacement is durably stored, and replayed never, because replaying
 them puts the pre-restore days straight back. `replaceEverything` runs the four steps
