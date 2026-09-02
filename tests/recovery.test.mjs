@@ -919,7 +919,7 @@ function rebuild(device, payload) {
     given('the reopened phone is held for it, with the bytes quarantined',
         held.call('farkadWritesBlocked') === true
         && held.global('Recovery').problems.some(problem =>
-            problem.key === 'scheduleData:v2:poison:ledger.unreadable' && problem.copy),
+            problem.key === 'scheduleData:v2:poison:ledger.unreadable.__proto__' && problem.copy),
         JSON.stringify(held.global('Recovery').problems.map(problem => problem.key)));
     held.ctx.askTell = () => Promise.resolve();
     held.call('exportRecoveryData');
@@ -956,7 +956,7 @@ function rebuild(device, payload) {
         && JSON.stringify(read.schedule).indexOf(MARKER) !== -1,
         unreadable ? JSON.stringify(Object.getOwnPropertyNames(unreadable)) : 'no schedule');
     const evidence = fresh.global('Recovery').problems.find(problem =>
-        problem.key === 'scheduleData:v2:poison:ledger.unreadable');
+        problem.key === 'scheduleData:v2:poison:ledger.unreadable.__proto__');
     check('and is held on the reading phone, with its own bytes quarantined there',
         Boolean(evidence) && Boolean(evidence.copy)
         && String(fresh.raw(evidence.copy)).indexOf(MARKER) !== -1
@@ -1092,7 +1092,7 @@ function rebuild(device, payload) {
     given('the record is held and its map quarantined by the read',
         device.call('farkadWritesBlocked') === true
         && recovery.problems.some(problem =>
-            problem.key === 'scheduleData:v2:poison:ledger.unreadable' && problem.copy),
+            problem.key === 'scheduleData:v2:poison:ledger.unreadable.__proto__' && problem.copy),
         JSON.stringify(recovery.problems.map(problem => problem.key)));
     check('and the read did not redraw the app on its way through the disk',
         device.renders.count === 0, `${device.renders.count} render(s) during State.load`);
