@@ -195,9 +195,11 @@ function phone(seed, options = {}) {
     };
     const told = [];
     device.ctx.askTell = message => { told.push(message); };
-    // The workbook hand-over dialog. Captured separately from askTell because it is a
-    // CONFIRM - it offers "שמירה חוזרת" - and answering true is what stops the export
-    // re-running forever in a test that never presses anything.
+    // askConfirm, kept as a tripwire. The hand-over dialog used to be asked through it -
+    // «שמירה חוזרת» as the cancel button - and its cancel path is also what a tap beside
+    // the dialog takes, so the export must not ask through it any more (see the block on
+    // closing the dialog). Answering true keeps a build that still does from re-running
+    // the export forever in a test that never presses anything.
     const confirmed = [];
     device.ctx.askConfirm = options => {
         confirmed.push(options);
@@ -436,24 +438,26 @@ check('and nobody is named, or priced, anywhere in its bytes',
 
     given('a workbook really was written', said.caught.length === 1,
         String(said.caught.length));
-    check('the person is told, once', said.confirmed.length === 1,
-        String(said.confirmed.length));
+    check('the person is told, once', said.chosen.length === 1 && said.confirmed.length === 0,
+        `asked ${said.chosen.length} times as a choice, ${said.confirmed.length} as a confirm`);
     check('in the words the app pins, naming the file',
-        said.confirmed[0] && said.confirmed[0].title === 'קובץ ה-Excel נמסר לשמירה'
-        && said.confirmed[0].message
+        said.chosen[0] && said.chosen[0].title === 'קובץ ה-Excel נמסר לשמירה'
+        && said.chosen[0].message
             === '\u2066דוחות_2026-08-01_2026-08-31.xlsx\u2069 נמסר לדפדפן — '
                 + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
-        JSON.stringify(said.confirmed[0]));
+        JSON.stringify(said.chosen[0]));
     // The claim it must never make, and the filename's isolation, which a Hebrew sentence
     // around a Latin name needs or the date folds backwards.
     check('it never claims the file was saved, only that it was handed over',
-        said.confirmed[0].title.indexOf('נשמר') === -1
-        && said.confirmed[0].message.indexOf('\u2066') !== -1
-        && said.confirmed[0].message.indexOf('\u2069') !== -1,
-        JSON.stringify(said.confirmed[0].title));
+        said.chosen[0].title.indexOf('נשמר') === -1
+        && said.chosen[0].message.indexOf('\u2066') !== -1
+        && said.chosen[0].message.indexOf('\u2069') !== -1,
+        JSON.stringify(said.chosen[0].title));
+    // Named answers, the way out first: a choice is the one dialog whose dismissal is
+    // not one of its buttons.
     check('and it offers the second press rather than leaving somebody guessing',
-        said.confirmed[0].ok === 'הבנתי' && said.confirmed[0].cancel === 'שמירה חוזרת',
-        JSON.stringify([said.confirmed[0].ok, said.confirmed[0].cancel]));
+        JSON.stringify(said.chosen[0].choices) === JSON.stringify(['הבנתי', 'שמירה חוזרת']),
+        JSON.stringify(said.chosen[0].choices));
 }
 
 // --------------------------------------- closing that dialog is not a second press

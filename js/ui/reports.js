@@ -2370,6 +2370,11 @@ function loadXlsx(timeoutMs = 8000) {
     return xlsxLoading;
 }
 
+// THE TWO ANSWERS to the hand-over dialog, written once. Pinned verbatim by
+// tests/xlsx.test.mjs and tests/smoke.mjs.
+const EXPORT_CHOICE_DONE = 'הבנתי';
+const EXPORT_CHOICE_AGAIN = 'שמירה חוזרת';
+
 async function exportReports() {
     const stamp = `${REPORT_RANGE.from}_${REPORT_RANGE.to}`;
     const client = scopedExportPlace();
@@ -2439,15 +2444,28 @@ async function exportReports() {
         // exactly where the backup does: the browser was HANDED the file. It is never
         // "נשמר בהצלחה", because this app cannot see the Files app and must not claim to.
         // The filename is Latin inside a Hebrew sentence, so it travels wrapped in
-        // LRI…PDI - askConfirm writes textContent, so the isolation has to be in the
+        // LRI…PDI - askChoice writes textContent, so the isolation has to be in the
         // string or the bidi algorithm folds the date backwards.
-        askConfirm({
+        //
+        // ASKED AS A CHOICE, NOT A CONFIRM. «שמירה חוזרת» was askConfirm's cancel button,
+        // and the export ran again whenever the promise came back false - which is also
+        // what Escape and a tap beside the dialog resolve to on that path (askCancel in
+        // js/ui/ask.js; js/ui/modal.js sends the backdrop there). Measured on v96 at
+        // 390x844: one press, three taps beside the dialog, four workbooks - three copies
+        // nobody asked for, on their way to a bookkeeper. askChoice resolves the label
+        // that was pressed and null for every other way out, so only the named press
+        // exports again and closing the dialog, however it is closed, writes nothing.
+        //
+        // A device with no dialogs (the harness's stub document, the same seam the
+        // backup dialog in js/ui/share.js allows for) has nothing to ask through; the
+        // file is already written and nothing here can undo that.
+        if (typeof askChoice !== 'function') return;
+        askChoice({
             title: 'קובץ ה-Excel נמסר לשמירה',
             message: '\u2066' + name + '\u2069 נמסר לדפדפן — '
                 + 'פתח את "קבצים" וודא שהוא מופיע. הקובץ נפתח מימין לשמאל.',
-            ok: 'הבנתי',
-            cancel: 'שמירה חוזרת'
-        }).then(again => { if (!again) exportReports(); });
+            choices: [EXPORT_CHOICE_DONE, EXPORT_CHOICE_AGAIN]
+        }).then(answer => { if (answer === EXPORT_CHOICE_AGAIN) exportReports(); });
     } catch (error) {
         console.error('Report export failed:', error);
         // Named, the way the crash banner does it: which file failed, that the record
