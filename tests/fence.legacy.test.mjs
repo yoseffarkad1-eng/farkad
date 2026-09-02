@@ -45,9 +45,36 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 suite('the bytes the older device runs are the released build\'s, out of Git');
 
-const FILES = loadOrder();
 given('the released commit is in this repository',
     git(['cat-file', '-t', RELEASED]).toString().trim() === 'commit', RELEASED);
+
+// THE OLDER BUILD'S OWN FILE LIST, not this one's.
+//
+// loadOrder() names the files THIS checkout runs. Reading each of them out of a commit
+// from before they existed is not "the released build" - it is a demand that the past
+// contain the present, and it fails the moment this repository splits a file. v102 split
+// js/sync/sync.js and that is exactly what happened.
+//
+// So the list is filtered to what the released commit actually holds. A file missing from
+// it is not an omission: at that commit its code either lived inside another file (a later
+// split) or did not exist at all (a later feature), and in both cases the device built
+// here is the build that was in the field, which is the only thing this suite is for.
+// Named rather than filtered silently - a list that quietly shrinks is how a suite stops
+// testing without anybody noticing, which is what tests/nonassertions.test.mjs exists for.
+const WANTED = loadOrder();
+const FILES = WANTED.filter(file => {
+    try {
+        git(['cat-file', '-e', `${RELEASED}:${file}`]);
+        return true;
+    } catch (error) {
+        return false;
+    }
+});
+const ABSENT = WANTED.filter(file => !FILES.includes(file));
+given('every file this build runs that the released one also had is in the list',
+    FILES.length > 0 && FILES.length + ABSENT.length === WANTED.length,
+    `${FILES.length} of ${WANTED.length} present; not at ${RELEASED.slice(0, 7)}: ` +
+    (ABSENT.length === 0 ? 'none' : ABSENT.join(' ')));
 
 // Read as BLOBS, and verified as blobs. `git show` renders a file; `git rev-parse
 // <sha>:<path>` names the object Git itself stores, and hashing the bytes we loaded
