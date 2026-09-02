@@ -52,6 +52,20 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 40d5004 (v96: the ledger merge, the week grid at its pitch, the four review notes
+    folded, the stamps), the cd-work worktree, clean at that commit, Node v22.22.2,
+    .gate-release.log there, copied from no other run - the WHOLE release gate:
+    npm test           42 suites   4228/4228   (closure 95: one suite added, a pin;
+                                                every other suite the f0cca08 number)
+    npm run test:all   + 9 suites  + 1969      (smoke 1047, print 70, mobile 675, update 30,
+                                                forms 10, recovery-browser 25, handover 26,
+                                                swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244       (sendclaim 43; rules 59, cas-emulator 24,
+                                                rollout 17, bootstrap-emulator 23,
+                                                bootstrap-rules 28, money-concurrency 50)
+    the whole gate     58 suites   6441/6441   exit 0
+    Per suite and verbatim: features/ledger/handoff.md.
+
     At f0cca08 (the ledger merge onto v95, both money gates CLOSED), from the v96-gate
     worktree, detached, Node v22.22.2, .gate.log in that worktree, copied from no other run:
     npm test           42 suites   4225/4225
