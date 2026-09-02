@@ -3094,9 +3094,50 @@ const FarkadSync = {
         // server holds now is something this device has seen or produced there. Two tabs
         // of one app share a disk, and the disk is in the record - so the person's own
         // later correction still wins, and somebody else's still holds.
+        // THE SAME FACT, ALREADY ON THE RECORD - asked BEFORE the hold, not after.
+        //
+        // A deterministic id under `ledger.` is one decision: `cm_carry` is the carry
+        // approval, `le_close_<advance>_<from>` is one period's closure. Two phones write
+        // it with the same numbers and a different hand, and the model calls that one
+        // fact (sameLedgerFact). The conflict branch has asked that question since v91 -
+        // but a phone whose queued write has not gone out yet never reaches the conflict
+        // branch. It hears the winner's snapshot, adopts it, and then this pass compares
+        // VALUES and holds its own copy as a contest.
+        //
+        // Two phones each approving the carry plan before they connect - which is what a
+        // person does, the review screen being the first thing a new install shows - then
+        // both reaching a project with no document. The loser held
+        // ledger.migrations.cm_carry for ever, said 'contested', and a person was told
+        // there was a conflict about money when both phones had recorded the same
+        // approval of the same plan. It never sent a byte: measured on the fake cloud in
+        // tests/samefact.test.mjs, one create attempted and the loser's write held at
+        // this gate. The emulator hit it once in twenty-eight runs under load and it was
+        // written down as an open item of its own.
+        //
+        // Acknowledged rather than sent. The fact is on the server, under this id, with
+        // the first writer's name on it - which is what the record should say, since they
+        // did decide first. Sending it would replace their hand with this one's for no
+        // change in the money. Any difference in a FINANCIAL field is not the same fact,
+        // is not settled here, and falls through to the hold exactly as before.
+        const settledHere = new Map();
+        if (this._baseDoc && typeof ledgerPathSupersededBy === 'function') {
+            this._outbox.forEach((item, path) => {
+                if (item.sent || item.held || this._heldNow.has(String(path))) return;
+                if (ledgerPathSupersededBy(path, item.value,
+                    readPath(this._baseDoc, path))) {
+                    settledHere.set(String(path), { opId: item.opId, seq: item.seq });
+                }
+            });
+        }
+        if (settledHere.size > 0) this.acknowledge(settledHere);
+
         const movedUnder = [];
         this._outbox.forEach((item, path) => {
             if (item.sent || item.held || this._heldNow.has(String(path))) return;
+            // Settled above: on the server already, under this id, as the same fact.
+            // Collection may not have taken it off the disk yet - it is allowed to fail -
+            // and a settled path must not then be held as a contest on the way past.
+            if (settledHere.has(String(path))) return;
             // A DAY OR A LEDGER ENTRY, and nothing else.
             //
             // Those are the two families where a queued value REPLACES what is there, so
@@ -3145,6 +3186,7 @@ const FarkadSync = {
         });
         [...this._outbox.entries()]
             .filter(([, item]) => !item.sent)
+            .filter(([path]) => !settledHere.has(String(path)))
             .filter(([path, item]) => {
                 if (!item.held && !heldBatches.has(item.batchKey)
                     && !this._heldNow.has(String(path))
@@ -3928,6 +3970,39 @@ const FarkadSync = {
                         // the merge it is. A read that failed compares nothing, exactly
                         // as before: the update then meets the conflict branch, which
                         // carries the server's own document.
+                        // AND THE SAME-FACT RULE, ASKED HERE TOO.
+                        //
+                        // movedUnder compares VALUES, so an approval or a closure the
+                        // winner already holds under the same deterministic id, with the
+                        // same numbers and another hand on it, is a value this device has
+                        // never seen - and it was held for a person as a conflict about
+                        // money that nobody was having. The conflict branch above settles
+                        // exactly that case with ledgerPathSupersededBy; this branch is
+                        // the same situation reached by the other road, and it did not
+                        // ask.
+                        //
+                        // Two phones each approving the carry plan before they ever
+                        // connect - which is what a person does, the review screen being
+                        // the first thing a new install shows - then both reaching a
+                        // project with no document. The loser held
+                        // ledger.migrations.cm_carry for ever and reported 'contested'.
+                        // Measured on the fake cloud in tests/samefact.test.mjs; the
+                        // emulator hit it once in twenty-eight runs under load and it was
+                        // written down as a separate open item.
+                        //
+                        // Settled paths are DROPPED from the patch, as the conflict
+                        // branch drops them: the server's copy stands, first-writer-wins
+                        // with the document as the arbiter, and the loser does not put
+                        // its own name over an approval somebody else made first. A path
+                        // the rule does not settle - any difference in a financial field -
+                        // is held exactly as before.
+                        const settled = (fresh
+                            && typeof ledgerPathSupersededBy === 'function')
+                            ? Object.keys(patch).filter(path => ledgerPathSupersededBy(
+                                path, patch[path], readPath(fresh, path)))
+                            : [];
+                        settled.forEach(path => { delete patch[path]; });
+
                         const moved = [];
                         if (fresh) {
                             Object.keys(patch).forEach(path => {
@@ -3950,6 +4025,20 @@ const FarkadSync = {
                                 + 'until a person looks');
                             held.contested = moved.slice();
                             throw held;
+                        }
+                        // NOTHING LEFT TO SEND. Every fact this operation carried is
+                        // already on the document the winner created, under the same id
+                        // and with the same numbers. Sending the envelope alone would
+                        // bump the revision for a write that changes nothing; resolving
+                        // here takes the batch through the ordinary success path, which
+                        // is the truth. The conflict branch settles the same case the
+                        // same way.
+                        if (settled.length > 0 && Object.keys(patch).every(key =>
+                            ENVELOPE_FIELDS.indexOf(key) !== -1)) {
+                            if (fresh && Number.isInteger(fresh.revision)) {
+                                this._revision = fresh.revision;
+                            }
+                            return;
                         }
                         const follow = Promise.resolve(this.adapter.update(
                             this.stampProtocol(patch, this._sendOpId

@@ -48,20 +48,35 @@ C is the one that matters: **it needs no clock skew and no race.** A man repays,
 closes the fortnight a few days later, and the phone puts itself in recovery. The brief
 named A; A and B and C are one defect with three doors.
 
-**2 and 4 are one defect, not two.** `createDocument`'s already-exists branch decides what
-to hold with `movedUnder`, which compares VALUES; the conflict branch around line 3379
-asks `ledgerPathSupersededBy` — the same-fact rule — and the create branch never does.
+**2 and 4 are one gap in two places, and the place that causes 2 is neither of the two the
+brief guessed at first.** The same-fact rule (`ledgerPathSupersededBy`) is asked in exactly
+one of the three gates a queued write passes. The other two compare VALUES with
+`movedUnder`, so one deterministic id carrying the same numbers in another hand is a value
+this device has never seen, and it is held for a person:
+
+| gate | js/sync/sync.js | asks the same-fact rule? |
+|---|---|---|
+| the conflict branch | ~3379 | yes, since v91 |
+| the pre-send hold, `sendClaimed` | ~3096 | **no** |
+| `createDocument`'s already-exists branch | ~3960 | **no** |
+
 Reproduced deterministically on the fake cloud (`probe/createrace.mjs`): two phones, each
-holding its own approval of the same plan, race to create an empty project. The loser:
+holding its own approval of the same plan, reach a project with no document. The loser:
 
     B outbox paths: ["ledger.migrations.cm_carry"]
     B HELD paths:   ["ledger.migrations.cm_carry"]
     B status: contested      same fact? true      same bytes? false
 
 That is item 2's reported end state — one operation held at `ledger.migrations.<id>`,
-status `contested` — produced by item 4's gap. The emulator saw it once in twenty-eight
-runs because that is how often the create race goes that way under load; the fake cloud
-sees it every time.
+status `contested`. Tracing every call the adapter received shows **one create attempted
+and no write at all from the loser**: it never reached the create-race branch, and it never
+reached the conflict branch either. It heard the winner's snapshot, adopted it, and held
+its own copy at the PRE-SEND gate. A phone whose queued write has not gone out yet cannot
+be refused by anything, so no branch that handles a refusal can see this case.
+
+Item 4's branch is a real second instance of the same gap and is closed with it; item 2 is
+the pre-send gate. The emulator saw it once in twenty-eight runs because that is how often
+the timing lines up under load; the fake cloud sees it every time.
 
 **3 is already correct.** Measured directly: a v97-shaped closure and a v98-shaped closure
 of one fortnight (same money, `hours` recorded only by the second) are `sameLedgerFact:
@@ -95,10 +110,23 @@ Scope: only entries the `at` cut-off would drop, on the advances that close woul
 and only when there is something to deduct. An entry excluded for its DATE is ordinary
 late money and refuses nothing.
 
-**D3 — ask the same-fact rule in the create-race branch**, exactly as the conflict branch
-asks it, and drop what it settles from the patch as that branch does — so the first
-writer's hand stays on the record instead of being replaced by the loser's. A path the
-rule does NOT settle is still held, unchanged.
+**D3 — ask the same-fact rule at every gate that can hold a write**, not only at the one
+that handles a refusal: the pre-send hold in `sendClaimed` and `createDocument`'s
+already-exists branch both ask it now, exactly as the conflict branch does.
+
+What a settled path does differs by gate, because the two gates are at different moments:
+
+- **Pre-send**, nothing has left, so the path is ACKNOWLEDGED rather than sent. The fact
+  is on the server under this id with the first writer's name on it — which is what the
+  record should say, since they did decide first — and sending would replace their hand
+  with this one's for no change in the money.
+- **Create-race**, the write is already in flight, so the path is DROPPED from the patch
+  as the conflict branch drops it; when nothing but the envelope is left the batch
+  resolves through the ordinary success path instead of bumping the revision for a write
+  that changes nothing.
+
+A path the rule does NOT settle — any difference in a financial field — is held at both,
+unchanged.
 
 **D4 — a double close that disagrees about the fortnight stays held.** `sameLedgerFact`
 keeps comparing every financial field including the frozen basis. Two phones that
