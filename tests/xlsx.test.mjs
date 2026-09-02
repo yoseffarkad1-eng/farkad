@@ -549,6 +549,32 @@ check('and nobody is named, or priced, anywhere in its bytes',
         JSON.stringify(csvs.downloads.map(file => file.name)));
 }
 
+// ------------------------------------------- what the dialog says about the file is true
+//
+// «הקובץ נפתח מימין לשמאל.» is true in Excel - every sheet carries rightToLeft="1", read
+// back off the bytes above - and false in the viewers an iPhone opens first: the Files
+// preview, WhatsApp's document preview and Numbers ignore the flag and lay עובד out on
+// the left, with the same numbers in it. No way of writing the file satisfies both. The
+// picture the reports row offers beside the export («🖼️ שיתוף כתמונה», drawn off the
+// screen by js/ui/printout.js) reads right in every viewer, so the sentence says where
+// right-to-left is true, admits the preview, and names that door. The exact words are
+// pinned above; what is pinned here is what they have to say.
+{
+    suite('what the dialog says about the file is true in every viewer that opens it');
+
+    const said = phone(FORTNIGHT);
+    await said.run('exportReports()');
+    const message = said.chosen[0] ? said.chosen[0].message : '';
+    check('it does not promise, of the file, that it opens right to left',
+        message.indexOf('הקובץ נפתח מימין לשמאל') === -1, message);
+    check('right to left is said of Excel, which honours the flag',
+        /Excel[^.;]*מימין לשמאל/.test(message), message);
+    check('a preview that ignores it is admitted, with the numbers unchanged',
+        message.indexOf('משמאל לימין') !== -1 && message.indexOf('מספרים') !== -1, message);
+    check('and the door that reads right in every viewer is named, by its label on the reports row',
+        message.indexOf('🖼️ שיתוף כתמונה') !== -1, message);
+}
+
 // ---------------------------------------------------------------- the fallback
 
 suite('the library does not load, which now means the build is incomplete');

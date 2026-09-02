@@ -6825,6 +6825,24 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     && now.buttons.map(b => b.text).join(',') === 'הבנתי,שמירה חוזרת',
     JSON.stringify(now.buttons));
 
+  // What the sentence says about the file. Excel honours the sheet's rightToLeft flag;
+  // the viewers an iPhone opens first - the Files preview, WhatsApp's document preview,
+  // Numbers - ignore it and lay עובד out on the left, and no way of writing the file
+  // satisfies both. So the sentence says where right-to-left is true, admits the
+  // preview, and points at the one door that reads right in every viewer: the picture,
+  // drawn off the screen, whose button is on the same row as the export - named by that
+  // button's own label, read off the row, so the sentence cannot point at a door that
+  // is not there.
+  const door = await page.evaluate(() => [...document.querySelectorAll('#reportsView .range-actions button')]
+    .map(node => node.textContent).find(text => text.includes('שיתוף כתמונה')) || null);
+  check('the picture door is on the reports row', door !== null, String(door));
+  check('the sentence does not promise, of the file, that it opens right to left',
+    !now.message.includes('הקובץ נפתח מימין לשמאל'), now.message);
+  check('it says right to left of Excel, admits the preview, and names the picture door by its label',
+    /Excel[^.;]*מימין לשמאל/.test(now.message) && now.message.includes('משמאל לימין')
+    && door !== null && now.message.includes(door),
+    now.message);
+
   // (a) a tap beside the dialog
   const point = await beside();
   check('there is a backdrop beside it to tap', point !== null, JSON.stringify(point));
