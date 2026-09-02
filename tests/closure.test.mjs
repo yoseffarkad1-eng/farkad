@@ -1031,4 +1031,79 @@ const reopen = (device, id) => {
             A.from, A.to, '2026-08-26T10:00:00.000Z').reasons));
 }
 
+
+// ------------------------------------- a frozen fortnight belongs to the fortnight, only
+{
+    suite('a closed fortnight is frozen for its own period and no other');
+
+    // KEYED ON THE START DATE ALONE, which is not what a closure is.
+    //
+    // closedPeriods folds its answers under periodFrom and throws periodTo away, and the
+    // three readers - payrollReport, workerDaysReport and advanceWalk - then apply the
+    // frozen payslip to ANY range that happens to begin on that Friday, whatever it ends
+    // on. A closure is a record of [periodFrom, periodTo]; half of that is not an
+    // account.
+    //
+    // It needs no hand-picked range to reach. Some months open on an account start -
+    // 2026-05-01, 2027-10-01, 2028-09-01, 2030-02-01, 2030-03-01, 2031-08-01 - and on
+    // those the ordinary «החודש» preset starts on the same Friday as the fortnight. The
+    // boss closes the first fortnight, presses החודש, and the sheet he prints and exports
+    // shows the man half his month: measured at 10 days and 5,000 where the crew worked
+    // 20 for 10,000, with the invoice in the same workbook still billing all twenty.
+    //
+    // And the same fault prices a day TWICE: read this fortnight as two halves that do
+    // not overlap and the first answers with the whole frozen fortnight while the second
+    // answers live, so the 14th is counted in both and the two add to more than the
+    // fortnight is worth.
+    const device = closed('d_range');
+    const worker = () => device.State.schedule.workers[0];
+    const payrollAt = (from, to) => device.call('payrollReport', device.State.schedule,
+        from, to).find(row => row.workerId === 'w_01') || {};
+    const daysAt = (from, to) => device.call('workerDaysReport', device.State.schedule,
+        worker(), from, to);
+
+    given('the account itself is frozen, which is the behaviour that must not move',
+        payrollAt(A.from, A.to).amount === GROSS
+            && daysAt(A.from, A.to).length === DAYS.length,
+        JSON.stringify([payrollAt(A.from, A.to).amount, daysAt(A.from, A.to).length]));
+
+    // FOUR WEEKS starting on the same Friday, with work in them AFTER the fortnight
+    // closed - which is the ordinary case and the one that makes this check bite. Two
+    // more days at the same rate, outside the closed period entirely.
+    ['2026-08-24', '2026-08-25'].forEach(date => device.State.commit(device.call(
+        'assignPlace', device.State.schedule, date, 'w_01', 'actual', 'p_01')));
+    given('there is work after the closed fortnight',
+        device.State.schedule.days['2026-08-24'] !== undefined, '2026-08-24');
+    const wide = payrollAt(A.from, '2026-09-03');
+    check('a longer range that merely starts on that Friday is not the frozen period',
+        wide.amount === GROSS + 2 * RATE
+            && daysAt(A.from, '2026-09-03').length === DAYS.length + 2,
+        JSON.stringify({ amount: wide.amount, expected: GROSS + 2 * RATE,
+            days: daysAt(A.from, '2026-09-03').length }));
+
+    // ONE WEEK, the first half. Four of the five days are in it; the fifth is not.
+    const half = payrollAt(A.from, '2026-08-13');
+    check('a shorter range that starts on that Friday is priced on its own days',
+        half.amount === 4 * RATE, JSON.stringify(half));
+    check('and it lists only the days inside it',
+        daysAt(A.from, '2026-08-13').map(day => day.date).join(',')
+            === DAYS.slice(0, 4).join(','),
+        JSON.stringify(daysAt(A.from, '2026-08-13').map(day => day.date)));
+
+    // THE TWO HALVES ADD TO THE FORTNIGHT. This is the double-pricing test: they do not
+    // overlap, so their sum is the whole account and not a penny more.
+    const second = payrollAt('2026-08-14', A.to);
+    check('two halves that do not overlap add to exactly the fortnight',
+        half.amount + second.amount === GROSS,
+        JSON.stringify({ first: half.amount, second: second.amount, whole: GROSS }));
+
+    // And the day list does not repeat one day across the two halves.
+    const firstDays = daysAt(A.from, '2026-08-13').map(day => day.date);
+    const secondDays = daysAt('2026-08-14', A.to).map(day => day.date);
+    check('and no day is listed in both halves',
+        firstDays.every(date => secondDays.indexOf(date) === -1)
+            && firstDays.length + secondDays.length === DAYS.length,
+        JSON.stringify([firstDays, secondDays]));
+}
+
 report();
