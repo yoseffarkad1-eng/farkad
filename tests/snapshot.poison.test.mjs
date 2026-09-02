@@ -354,4 +354,65 @@ for (const [what, poison, build] of cases) {
         device.global('Recovery').acknowledge() === true);
 }
 
+{
+    suite('a poisoned snapshot acknowledged mid-session is adopted without waiting for the cloud');
+
+    // The sighting arrives on a connected phone, in the middle of the evening, carrying
+    // one poisoned layer and another phone's perfectly readable day beside it. The first
+    // pass holds the device inside normaliseSchedule, so the persist is refused and the
+    // snapshot is not adopted - correct. Then the person exports and acknowledges, and
+    // nothing re-runs the snapshot: the listener does not fire again for a document that
+    // has not changed, and the hold's release only reset a status. Measured: after
+    // acknowledge() answered true, status 'error', the readable day on neither the screen
+    // nor the disk - until the cloud happened to change again. With the other phones
+    // idle, that is never.
+    const device = phone('d_acked_mid');
+    const document = arriving(device, target => {
+        target.days = {};
+        target.days['2026-08-12'] = poisonedDay('__proto__');
+        target.days['2026-08-13'] = JSON.parse('{"actual":{"w_01":{"entries":[{"placeId":"p_01"}],'
+            + '"rates":{"daily":400,"hourly":0}}}}');
+    });
+    device.Sync.receive(document);
+    await settle(40);
+    const onScreen = date => {
+        const day = (device.State.schedule.days || {})[date];
+        return Boolean(day && day.actual && day.actual.w_01
+            && day.actual.w_01.entries.some(entry => entry.placeId === 'p_01'));
+    };
+    const onDisk = date => {
+        const days = (JSON.parse(device.raw('scheduleData:v2') || '{}') || {}).days || {};
+        return Boolean(days[date] && days[date].actual && days[date].actual.w_01);
+    };
+    given('the sighting holds the device', device.call('farkadWritesBlocked') === true);
+    given('and the snapshot was not adopted while it did',
+        !onScreen('2026-08-13') && !onDisk('2026-08-13') && device.Sync.status === 'error',
+        `${device.Sync.status}, screen ${onScreen('2026-08-13')}, disk ${onDisk('2026-08-13')}`);
+    given('and the person acknowledges it',
+        device.global('Recovery').acknowledge() === true
+        && device.call('farkadWritesBlocked') === false);
+    await settle(40);
+
+    // No further snapshot. The cloud has not changed; nobody else is writing tonight.
+    check('the readable day the snapshot carried is on the screen',
+        onScreen('2026-08-13'), JSON.stringify((device.State.schedule.days || {})['2026-08-13']));
+    check('and on the disk', onDisk('2026-08-13'), String(onDisk('2026-08-13')));
+    check('and so is the readable half of the poisoned day',
+        onScreen('2026-08-12') && onDisk('2026-08-12'),
+        `screen ${onScreen('2026-08-12')}, disk ${onDisk('2026-08-12')}`);
+    check('the line does not say error over a record it has already heard',
+        device.Sync.status !== 'error',
+        `${device.Sync.status}: ${String(device.Sync.lastError
+            && (device.Sync.lastError.message || device.Sync.lastError))}`);
+    const recovery = device.global('Recovery');
+    check('the poisoned name is still held aside, once, and the device is not re-held',
+        recovery.problems.length === 1 && device.call('farkadWritesBlocked') === false,
+        JSON.stringify(recovery.problems.map(problem => problem.key)));
+    const layer = ((device.State.schedule.days || {})['2026-08-12'] || {}).actual;
+    check('the adopted layer is an ordinary map',
+        Boolean(layer) && Object.prototype.hasOwnProperty.call(layer, '__proto__') === false
+        && layer.entries === undefined,
+        JSON.stringify(layer ? Object.keys(layer) : null));
+}
+
 report();
