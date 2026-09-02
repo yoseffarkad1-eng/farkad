@@ -12,17 +12,18 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v98 (`5dd5a83`).** The build at the top of this file is a candidate on a
-branch: verified, stamped, and NOT served. v91, v93 and v94 below were
+**`main` is at v99 (`cab12de`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## v99 — CANDIDATE, not served — the tip of `cd-work`
+## v99 — 2 September 2026 — `cab12de` (PR #10, the tree at `f809c56`)
 
 The second round answered from the iPhone: one screenshot on v98, the bottom bars gone
-and the chip red. Nothing on a phone runs it.
+and the chip red. Served from `main` since 2 September 2026; whether any phone has taken
+the update is not known from here.
 
 **What it would give the crew that v98 does not have**
 
@@ -45,7 +46,7 @@ and the chip red. Nothing on a phone runs it.
 
 **What this build is NOT known to do**
 
-- **It is not on `main`.** No phone has it.
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - No iPhone has run it: the bars fix is measured in Chromium with a stubbed viewport; the
   share-sheet and stale-viewport paths on a real home-screen iPhone are the acceptance the
   person's phone gives.
