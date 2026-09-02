@@ -920,6 +920,207 @@ for (const width of [320, 390]) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- a keyboard needs a focused editable
+
+// The person's phone: an iPhone, the app on the home screen, v98, and a screenshot of
+// the day screen with NEITHER bottom bar - the cards run to the bottom edge, and nothing
+// short of killing the app brings the bars back. keyboardHeight() reads innerHeight
+// minus visualViewport.height, and on iOS standalone the two disagree for reasons that
+// are not a keyboard and that end without a resize event: the share sheet or the print
+// sheet over the page, the app backgrounded and brought back, the keyboard dismissed
+// with the page scrolled, a layout viewport gone stale. Past the 150px floor the bars
+// were hidden, and the only thing that ever un-hid them was another resize event, which
+// never came.
+//
+// One rule: A KEYBOARD NEEDS A FOCUSED EDITABLE. body.kbd-open stands only while the
+// focused element is something a keyboard opens for - a text-like input, a textarea,
+// contenteditable; not a select, not a button - AND the viewport is covered. A short
+// viewport with nothing focused is not a keyboard, whatever the numbers say. Headless
+// Chromium opens no keyboard and no share sheet, so the viewport is stubbed to the shape
+// iOS reports and the SAME measuring path a phone runs (scheduleBarMeasure, and the
+// focus and visibility listeners that feed it) is asked what it makes of it. The block
+// above hands applyKeyboardInset a height directly and must go on being able to: the
+// gate sits upstream of it, where a measurement becomes the class.
+{
+    suite('390px: a keyboard needs a focused editable');
+    const page = await open({ width: 390, height: 844 });
+    await setInset(page, 34);
+
+    // Two frames: scheduleBarMeasure runs on the next frame, and the focusout path waits
+    // one more, because iOS moves the viewport a frame after the field lets go.
+    const settle = () => page.evaluate(() => new Promise(done =>
+        requestAnimationFrame(() => requestAnimationFrame(done))));
+    const bars = () => page.evaluate(() => {
+        const root = getComputedStyle(document.documentElement);
+        const display = selector => {
+            const node = document.querySelector(selector);
+            return node ? getComputedStyle(node).display : 'gone';
+        };
+        const active = document.activeElement;
+        return {
+            kbdOpen: document.body.classList.contains('kbd-open'),
+            kbVar: root.getPropertyValue('--kb-h').trim(),
+            navVar: root.getPropertyValue('--nav-h').trim(),
+            dockVar: root.getPropertyValue('--day-actions-h').trim(),
+            tabs: display('.tabs'),
+            dock: display('.day-actions'),
+            active: active ? active.tagName + (active.type ? ':' + active.type : '') : 'none',
+            covered: window.innerHeight - window.visualViewport.height
+        };
+    });
+    // Both bars on screen, with their measured heights published - not merely "the class
+    // is off": a bar that is back but reserves no room is the last worker under it again.
+    const shown = state => !state.kbdOpen && state.kbVar === '0px'
+        && state.tabs !== 'none' && state.dock !== 'none'
+        && state.navVar !== '0px' && state.dockVar !== '0px';
+    const hidden = state => state.kbdOpen && state.kbVar === '300px'
+        && state.tabs === 'none' && state.dock === 'none';
+
+    // What iOS reports with 300px of something over the bottom of the page - a keyboard,
+    // a share sheet, a number that went stale - and no way for the page to tell which.
+    await page.evaluate(() => {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        Object.defineProperty(window, 'visualViewport', {
+            configurable: true,
+            value: {
+                height: window.innerHeight - 300, scale: 1,
+                addEventListener() {}, removeEventListener() {}
+            }
+        });
+    });
+    const before = await bars();
+    given('the stubbed viewport is 300px short and nothing has focus',
+        before.covered === 300 && before.active === 'BODY', JSON.stringify(before));
+    given('both bars are on screen to begin with', shown(before), JSON.stringify(before));
+
+    // (1) Nothing focused: the measurement says covered, the rule says no keyboard.
+    await page.evaluate(() => scheduleBarMeasure());
+    await settle();
+    const idle = await bars();
+    check('390px: a 300px shortfall with nothing focused leaves both bars where they are',
+        shown(idle), JSON.stringify(idle));
+
+    // (2) The roster form's name field - a text input - focused under the same shortfall
+    // is a keyboard, and the focus alone is enough to say so: no resize event is waited
+    // for, because a viewport that was already short does not send one.
+    await page.evaluate(() => {
+        showAddWorkerModal();
+        document.getElementById('workerFormName').focus();
+    });
+    await settle();
+    const typing = await bars();
+    check('390px: the name field focused under that shortfall IS a keyboard: both bars go',
+        hidden(typing) && typing.active === 'INPUT:text', JSON.stringify(typing));
+
+    // The field let go, the viewport STILL short - the share sheet, the backgrounded app,
+    // the stale number. The bars come back and are measured, not merely unhidden.
+    await page.evaluate(() => document.getElementById('workerFormName').blur());
+    await settle();
+    const letGo = await bars();
+    check('390px: the field let go with the viewport still short: both bars back, measured',
+        shown(letGo), JSON.stringify(letGo));
+    await page.evaluate(() => closeWorkerForm());
+    await page.waitForTimeout(100);
+
+    // (3) The hours field on the assign sheet is type=number - the one editable the day
+    // screen itself opens a keyboard for, so "text-like" has to include it or the sheet's
+    // foot goes back under the keys.
+    await page.evaluate(() => {
+        State.commit(assignPlace(State.schedule, State.date, 'w_01', State.layer,
+            'p_1', RATE_NORMAL));
+        openAssignSheet('w_01');
+    });
+    await page.waitForTimeout(350);
+    await page.locator('.sheet-rate-row').getByText('שעות נוספות').click();
+    await page.waitForTimeout(250);
+    await page.evaluate(() => document.querySelector('.rate-hours').focus());
+    await settle();
+    const hours = await bars();
+    check('390px: the sheet\'s hours field (type=number) counts as a keyboard too',
+        hidden(hours) && hours.active === 'INPUT:number', JSON.stringify(hours));
+    await page.evaluate(() => document.querySelector('.rate-hours').blur());
+    await settle();
+    const hoursGone = await bars();
+    check('390px: and letting go of it brings the bars back under the open sheet',
+        shown(hoursGone), JSON.stringify(hoursGone));
+    await page.evaluate(() => closeAssignSheet());
+    await page.waitForTimeout(100);
+
+    // (4) A select opens a picker, not a keyboard. There is none in the app today; one is
+    // put on the page for the question and taken off after it.
+    await page.evaluate(() => {
+        const pick = document.createElement('select');
+        pick.id = 'kbdProbeSelect';
+        pick.appendChild(document.createElement('option'));
+        document.body.appendChild(pick);
+        pick.focus();
+        scheduleBarMeasure();
+    });
+    await settle();
+    const picker = await bars();
+    check('390px: a select focused under the shortfall is not a keyboard: the bars stay',
+        shown(picker) && picker.active === 'SELECT:select-one', JSON.stringify(picker));
+    await page.evaluate(() => {
+        const pick = document.getElementById('kbdProbeSelect');
+        pick.blur();
+        pick.remove();
+    });
+
+    // (5) The seam the block above uses still hides the bars on its own say-so ...
+    const seam = await page.evaluate(() => {
+        applyKeyboardInset(300);
+        measureBottomBars();
+        return {
+            kbdOpen: document.body.classList.contains('kbd-open'),
+            tabs: getComputedStyle(document.querySelector('.tabs')).display,
+            navVar: getComputedStyle(document.documentElement).getPropertyValue('--nav-h').trim()
+        };
+    });
+    check('390px: applyKeyboardInset(300) still hides the bars by itself - the test seam',
+        seam.kbdOpen && seam.tabs === 'none' && seam.navVar === '0px', JSON.stringify(seam));
+
+    // ... and each of the moments a phone gets to re-ask clears a class with no editable
+    // under it. These are the events that DO arrive on a home-screen iPhone when the
+    // share sheet closes, the app comes back, or the person just touches the page.
+    for (const [what, target, type] of [
+        ['a touch on the page', 'body', 'touchstart'],
+        ['a scroll', 'document', 'scroll'],
+        ['coming back to the app', 'document', 'visibilitychange'],
+        ['the page shown again', 'window', 'pageshow']
+    ]) {
+        await page.evaluate(([target, type]) => {
+            applyKeyboardInset(300);
+            measureBottomBars();
+            const node = target === 'body' ? document.body
+                : target === 'window' ? window : document;
+            node.dispatchEvent(new Event(type, { bubbles: true }));
+        }, [target, type]);
+        await settle();
+        const after = await bars();
+        check(`390px: ${what} while kbd-open stands with nothing focused brings both bars back`,
+            shown(after), JSON.stringify(after));
+    }
+
+    // The failsafe must not be trigger-happy either: a touch while somebody IS typing -
+    // scrolling the form with the keyboard up - leaves the keyboard where it is.
+    await page.evaluate(() => {
+        showAddWorkerModal();
+        document.getElementById('workerFormName').focus();
+    });
+    await settle();
+    await page.evaluate(() => document.body.dispatchEvent(new Event('touchstart', { bubbles: true })));
+    await settle();
+    const stillTyping = await bars();
+    check('390px: a touch while the name field is focused leaves the keyboard standing',
+        hidden(stillTyping) && stillTyping.active === 'INPUT:text', JSON.stringify(stillTyping));
+    await page.evaluate(() => {
+        document.getElementById('workerFormName').blur();
+        closeWorkerForm();
+    });
+
+    await page.context().close();
+}
+
 for (const width of [320, 390]) {
     suite(`${width}px: הגדרות וכלים`);
 
