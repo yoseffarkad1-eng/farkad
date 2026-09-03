@@ -52,6 +52,27 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 21bd9ba (v102: the code put in order and NOTHING else - js/sync/sync.js split
+    into six by concern, js/ui/share.js into two, js/model/schema.js into two, a table of
+    contents on css/app.css, three dead functions removed), a clean detached worktree at
+    that commit, Node v22.22.2, git diff --check clean, copied from no other run - BOTH
+    GATES, run separately:
+    npm test           43 suites   4380/4380   exit 0
+    npm run test:release
+                       59 suites   6816/6816   exit 0
+                       (smoke 1130, print 78, mobile 807, update 30, forms-browser 10,
+                       recovery-browser 25, handover 26, swrestart 31, swidentity 55,
+                       sendclaim 43; rules 59, cas.emulator 24, rollout 17,
+                       bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    IDENTICAL to v101, check for check, and that is the point rather than a coincidence:
+    not one check was added, removed or moved by a split. A refactor that changes what the
+    gate says is a refactor that changed something.
+    Two gates that did NOT finish, named so nobody reads a partial run as a result: one on
+    the sync split at 3767569 came back EXIT=2 at 50 suites - a race in stopWorker, which
+    read two sources of truth for one fact and waited on only one of them, since fixed -
+    and three attempts across that session were killed by container restarts.
+    Per suite and verbatim: features/code-order/handoff.md.
+
     At 991ced4 (v101: room on the day screen - the header compacts to one row past a
     scroll threshold and returns at the top, the switcher moves into it, and the site
     card's two footer buttons become icon buttons on its coloured head), a clean detached

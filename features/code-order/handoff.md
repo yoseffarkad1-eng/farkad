@@ -153,20 +153,131 @@ None. Nothing on a disk or on the wire is touched. Rollback is a plain revert.
 
 ## Test output (verbatim, on the final commit)
 
-**NOT YET COMPLETE, and this file says so rather than carrying a number from somewhere
-else.** At the time this was written the release gate was still running on `21bd9ba` in a
-clean detached worktree. What HAS been measured on this exact tree:
+```
+=== npm test on 21bd9ba0dd6a637707be8d48515a4b3b977e1cee at 00:04:37 v22.22.2
+18/18 checks passed
+11/11 checks passed
+29/29 checks passed
+37/37 checks passed
+28/28 checks passed
+73/73 checks passed
+28/28 checks passed
+1949/1949 checks passed
+75/75 checks passed
+116/116 checks passed
+35/35 checks passed
+44/44 checks passed
+46/46 checks passed
+73/73 checks passed
+35/35 checks passed
+43/43 checks passed
+21/21 checks passed
+9/9 checks passed
+21/21 checks passed
+17/17 checks passed
+4/4 checks passed
+82/82 checks passed
+37/37 checks passed
+36/36 checks passed
+122/122 checks passed
+79/79 checks passed
+33/33 checks passed
+82/82 checks passed
+72/72 checks passed
+240/240 checks passed
+151/151 checks passed
+88/88 checks passed
+37/37 checks passed
+40/40 checks passed
+206/206 checks passed
+51/51 checks passed
+51/51 checks passed
+48/48 checks passed
+61/61 checks passed
+74/74 checks passed
+23/23 checks passed
+23/23 checks passed
+32/32 checks passed
+EXIT=0
+43 suites · 4380/4380 checks
 
-    npm test            43 suites   4380/4380   exit 0
+=== npm run test:release on 21bd9ba0dd6a637707be8d48515a4b3b977e1cee at 00:08:14 v22.22.2
+18/18 checks passed
+11/11 checks passed
+29/29 checks passed
+37/37 checks passed
+28/28 checks passed
+73/73 checks passed
+28/28 checks passed
+1949/1949 checks passed
+75/75 checks passed
+116/116 checks passed
+35/35 checks passed
+44/44 checks passed
+46/46 checks passed
+73/73 checks passed
+35/35 checks passed
+43/43 checks passed
+21/21 checks passed
+9/9 checks passed
+21/21 checks passed
+17/17 checks passed
+4/4 checks passed
+82/82 checks passed
+37/37 checks passed
+36/36 checks passed
+122/122 checks passed
+79/79 checks passed
+33/33 checks passed
+82/82 checks passed
+72/72 checks passed
+240/240 checks passed
+151/151 checks passed
+88/88 checks passed
+37/37 checks passed
+40/40 checks passed
+206/206 checks passed
+51/51 checks passed
+51/51 checks passed
+48/48 checks passed
+61/61 checks passed
+74/74 checks passed
+23/23 checks passed
+23/23 checks passed
+32/32 checks passed
+1130/1130 checks passed
+78/78 checks passed
+807/807 checks passed
+30/30 checks passed
+10/10 checks passed
+25/25 checks passed
+26/26 checks passed
+31/31 checks passed
+55/55 checks passed
+43/43 checks passed
+59/59 checks passed
+24/24 checks passed
+17/17 checks passed
+23/23 checks passed
+28/28 checks passed
+50/50 checks passed
+EXIT=0
+59 suites · 6816/6816 checks
+```
 
-`npm run test:release` — the gate that adds the nine browser suites, sendclaim and the six
-emulator suites — is outstanding, and **this build is not published until it comes back
-green on this commit**. Its verbatim per-suite output replaces this section in the commit
-that publishes the build.
+Both from one clean detached worktree at `21bd9ba`, `git diff --check` clean, Node v22.22.2,
+run separately and reported separately, neither wrapped in anything that turns a nonzero exit
+into a success.
 
-One earlier release gate, on the sync split at `3767569`, came back EXIT=2 at 50 suites: the
-`swrestart` race described above, now fixed. That run's counts are not recorded as a result,
-because it did not finish.
+**The numbers are IDENTICAL to v101's** — 43 suites 4380/4380 and 59 suites 6816/6816 — and
+that is the point of this wave rather than a coincidence. Not one check was added, removed or
+moved by a split. A refactor that changes what the gate says is a refactor that changed
+something.
+
+Two gates that did NOT finish are named rather than hidden: one on the sync split at
+`3767569` came back EXIT=2 at 50 suites (the `swrestart` race above, since fixed), and three
+earlier attempts across this session were killed by container restarts. None of their counts
+is recorded as a result anywhere, because a run that did not finish is not one.
 
 ## Contract items NOT completed
 - **`js/ui/reports.js` is not split.** Measured, reasoned and written down above and in the
