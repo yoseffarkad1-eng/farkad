@@ -388,7 +388,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-color: var(--line);
 }
 .btn-success { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
-.btn-info { background: var(--surface); color: var(--ink); border-color: var(--line); }
+/* .btn-info was here and was byte-for-byte .btn-secondary - same background, same ink,
+   same border token. Two names for one appearance is a vocabulary that cannot be read:
+   somebody choosing between them was choosing nothing. Its two call sites now say
+   btn-secondary, which is what they always looked like. */
 
 .btn-add {
     background: var(--accent-soft);
@@ -705,7 +708,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* The one primary action on the sheet: full width, its own row, nothing beside it to
    mis-tap. It keeps the default button colours - everything else here is quieted with
-   btn-secondary instead. */
+   btn-secondary instead - so this class carries SIZE and nothing else, which is why it
+   sits beside no colour of its own. The name says which action it is, not what it looks
+   like. */
 .backup-primary {
     width: 100%;
     min-height: 48px;
