@@ -1,8 +1,10 @@
 # בדיקת קבלה במכשיר אמיתי — רשימה ליוסף
 
 > **NOT YET PHYSICALLY VERIFIED.** Nothing in this list has been performed on a real
-> iPhone for the current build, and that has been true of every build since v86. Fifty-eight
-> rows, none of them run. The number is written here rather than left to be counted, because
+> iPhone for the current build, and that has been true of every build since v86. Fifty-nine
+> rows, none of them run — row 59 is the exception that proves the point: it exists BECAUSE a
+> real screenshot arrived showing something no suite here can produce, and it is still NOT RUN
+> as a deliberate check. The number is written here rather than left to be counted, because
 > "the suites are green" and "somebody looked at it on a phone" are two different claims and
 > only one of them is true of this repository.
 >
@@ -183,6 +185,16 @@
 | 56 | פתח את מסך שבוע באפליקציה ריקה (בלי עובדים) | כתוב «אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.» - ולא רק שאין מה להציג |
 | 57 | ⋯ ← גרסה | כתוב v103. אם כתוב מספר אחר - האפליקציה לא סיימה להתעדכן |
 | 58 | פתח דוח "לפי עובדים" בחודש שהיום הראשון בו הוא תחילת חשבון | מספר הימים והסכום **תואמים** את מה שהצוות באמת עבד. זה הבאג ש-v100 תיקן: לפני כן החודש הראה עשרה ימים במקום עשרים |
+
+## י. מה שנראה על טלפון אמיתי, ועדיין לא הוסבר
+
+השורה הזאת היא היחידה בקובץ שמקורה בצילום מסך אמיתי (3/9/2026, iPhone 16 Pro Max). היא
+**לא** נבדקה על ידי אף אחד מלבד בעל הטלפון, והיא כאן כדי שאפשר יהיה לחזור עליה בכוונה.
+הניתוח המלא: `features/bars-raised/findings.md`.
+
+| # | מה לעשות | מה צריך לקרות |
+|---|---|---|
+| 59 | פתח שדה כלשהו, סגור את המקלדת, ואז גלול את רשימת העובדים | שתי השורות התחתונות יושבות **בתחתית המסך**. אם הן מרחפות באמצע ורואים תוכן מתחתן - זה מה שנראה בצילום, וצריך לצלם שוב עם מספר הגרסה |
 
 ---
 
