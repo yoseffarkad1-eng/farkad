@@ -308,6 +308,89 @@ for (const crew of CREWS) {
     }
 }
 
+// ---------------------------------------------------------------- the same screens, on a season
+//
+// The suites above draw a fortnight. A phone that has been in use since the spring is
+// holding a season, and two of these screens get SLOWER AS THE RECORD GROWS even though
+// they still draw exactly the same number of rows.
+//
+// The reason is one line in the wrong place. placeLabelsIn (js/model/schema.js) walks every
+// day in the schedule looking for sites the roster has lost, and it was called from INSIDE
+// the per-row loop on the day screen and the per-CELL loop on the week grid - so drawing
+// thirty rows walked the season thirty times, and drawing a week walked it ninety. The map
+// cannot change while one screen is being drawn: the schedule is not touched between the
+// first row and the last. So the map is built once per draw and handed down.
+//
+// It is NOT held across draws, and must not be: tests/labelcache.test.mjs pins that these
+// two screens follow a site rename immediately, which is exactly what a cached map would
+// stop doing. Once per draw is the whole of the fix.
+//
+// The call count is asserted as well as the time, because the time is a number about this
+// machine and the count is a fact about the code. A rewrite that made the map ten times
+// cheaper would hide the defect from the clock and not from the count.
+{
+    suite('a season on the disk: the site-label map is built once per screen, not once per row');
+
+    const { page, result } = await seeded(30, 12, 200, FIRST);
+    given('a season of records is on the device',
+        result.landed === true, JSON.stringify(result));
+
+    // The counter wraps the global the two screens call. A function declaration at the top
+    // level of a classic script is a writable property of the window, and every free
+    // reference to it inside day.js and week.js resolves through the same property - so
+    // this counts the app's own calls without a line of instrumentation in the app.
+    const counted = await page.evaluate(() => {
+        const original = window.placeLabelsIn;
+        let calls = 0;
+        window.placeLabelsIn = function () { calls += 1; return original.apply(this, arguments); };
+
+        const take = draw => { calls = 0; draw(); return calls; };
+        setDayMode('workers'); showView('day'); render();
+        const byWorker = take(() => renderDay());
+        setDayMode('sites'); render();
+        const bySite = take(() => renderDay());
+        setWeekFromDate(State.date); showView('week'); render();
+        const week = take(() => renderWeek());
+
+        window.placeLabelsIn = original;
+        return { byWorker, bySite, week };
+    });
+
+    check('the day screen by worker builds the map once', counted.byWorker === 1,
+        `${counted.byWorker} calls to placeLabelsIn per renderDay()`);
+    check('the day screen by site builds it at most once', counted.bySite <= 1,
+        `${counted.bySite} calls to placeLabelsIn per renderDay()`);
+    check('the week grid builds it once', counted.week === 1,
+        `${counted.week} calls to placeLabelsIn per renderWeek()`);
+
+    // And the clock, on the same record. These are the numbers the count above is the
+    // explanation for.
+    await page.evaluate(() => { setDayMode('workers'); showView('day'); render(); });
+    const byWorker = await timeInPage(page, 'renderDay();');
+    check('the day screen by worker redraws in under 8ms on a season of records',
+        median(byWorker) < 8, spread(byWorker));
+
+    await page.evaluate(() => { setDayMode('sites'); showView('day'); render(); });
+    const bySite = await timeInPage(page, 'renderDay();');
+    check('the day screen by site redraws in under 8ms on a season of records',
+        median(bySite) < 8, spread(bySite));
+
+    // The two ways of looking at one day must cost about the same. They draw the same
+    // record and roughly the same number of rows; a five-fold difference between them is
+    // never a drawing difference, it is one of them doing work per row that belongs to
+    // the screen.
+    check('neither way of looking at the day is more than twice the cost of the other',
+        median(byWorker) < median(bySite) * 2 + 2 && median(bySite) < median(byWorker) * 2 + 2,
+        `by worker ${round(median(byWorker))}ms, by site ${round(median(bySite))}ms`);
+
+    await page.evaluate(() => { setWeekFromDate(State.date); showView('week'); render(); });
+    const week = await timeInPage(page, 'renderWeek();');
+    check('the week grid redraws in under 12ms on a season of records',
+        median(week) < 12, spread(week));
+
+    await page.context().close();
+}
+
 // ---------------------------------------------------------------- one tap
 //
 // The number the crew actually feels. A tap on a site tile in the assign sheet runs

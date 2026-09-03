@@ -68,6 +68,20 @@ function renderWeek() {
     head.appendChild(headRow);
     table.appendChild(head);
 
+    // ONE MAP FOR THE WHOLE GRID, built here rather than inside renderWeekCell.
+    //
+    // placeLabelsIn walks every day in the schedule (js/model/schema.js). renderWeekCell
+    // called it for every filled cell, and a week of thirty people is up to two hundred and
+    // ten cells - eighty-one walks of the record to draw one screen, measured, which is
+    // 36.1ms on a season against 2.2ms for the day screen beside it. tests/perf.test.mjs
+    // counts the calls as well as the clock, because a cheaper map would hide this from the
+    // clock and not from the count.
+    //
+    // Safe because nothing touches the schedule between the first cell and the last. NOT
+    // held across draws - tests/labelcache.test.mjs pins that this grid follows a site
+    // rename immediately, and a map kept from the last render is what would stop it.
+    const labels = placeLabelsIn(State.schedule);
+
     const body = el('tbody');
     workers.forEach(worker => {
         const row = el('tr');
@@ -96,7 +110,7 @@ function renderWeek() {
         row.appendChild(name);
 
         dates.forEach(date => {
-            row.appendChild(renderWeekCell(worker, date));
+            row.appendChild(renderWeekCell(worker, date, labels));
         });
 
         body.appendChild(row);
@@ -175,7 +189,15 @@ function renderWeekTotals(dates, workers) {
     return foot;
 }
 
-function renderWeekCell(worker, date) {
+// `labels` is the grid's one site-label map, built once by renderWeek above and handed down
+// so the record is not walked once per cell.
+//
+// OPTIONAL, and the fallback is not tidiness. placeLabelFrom answers a missing map with
+// 'אתר שאינו ברשימה' rather than throwing, so a caller that forgot to hand one down would
+// draw a whole week in which every site has lost its name - silently, and on the screen the
+// crew reads a week off. A cell that can find the map itself cannot fail that way.
+function renderWeekCell(worker, date, labels) {
+    const map = labels || placeLabelsIn(State.schedule);
     const cell = el('td', 'week-cell');
     if (parseLocalDate(date).getDay() === 6) cell.classList.add('col-rest');
 
@@ -186,13 +208,12 @@ function renderWeekCell(worker, date) {
         const entries = entriesFor(State.schedule, date, worker.id, State.layer);
         if (entries.length > 0) {
             cell.classList.add('cell-filled');
-            const labels = placeLabelsIn(State.schedule);
             entries.forEach(entry => {
                 // The same badge the day screen uses. This grid is read across a whole
                 // week at once, which is precisely where a colour beats reading a name in
                 // every cell - and where two different sites must not look alike.
                 const line = el('div', 'cell-line tag tag-place');
-                appendSiteName(line, entry.placeId, placeLabelFrom(labels, entry.placeId));
+                appendSiteName(line, entry.placeId, placeLabelFrom(map, entry.placeId));
                 paintSite(line, entry.placeId);
 
                 const rate = entryRate(entry);

@@ -731,7 +731,11 @@ function openWorkerDays(workerId) {
     } else {
         const strip = renderAttendanceChips(days);
         if (strip) body.appendChild(strip);
-        days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
+        // One map for the whole list, for the same reason the day screen builds one for
+        // the whole list: reportPlaceLabels walks the range, and per row that is the range
+        // walked once per day on screen.
+        const labels = reportPlaceLabels();
+        days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker, labels)));
         body.appendChild(renderWorkerDaysTotal(days, worker));
         // Named before the rows begin: money that went the other way is its own block,
         // not three more days at the end of the list.
@@ -1711,7 +1715,16 @@ function openEventReversalForm(entry, row) {
     host.insertBefore(form, row.nextSibling);
 }
 
-function renderWorkerDayRow(day, worker) {
+// `labels` is the list's one site-label map, handed down by the caller that draws the whole
+// list so the range is not walked once per row (placeLabelsIn walks every day in it).
+//
+// OPTIONAL, and the fallback is the point rather than tidiness: a caller that does not hand
+// one down still gets THE PAGE'S map, not a different answer and never a record id. That is
+// the guarantee tests/labels.test.mjs and tests/labelcache.test.mjs ask of this row, and
+// they ask it by calling this function with two arguments - so the row has to be able to
+// find the map for itself, and the parameter may only ever be an optimisation on top.
+function renderWorkerDayRow(day, worker, labels) {
+    const map = labels || reportPlaceLabels();
     const row = el('div', day.absent ? 'wday wday-absent' : 'wday');
     const parsed = parseLocalDate(day.date);
 
@@ -1724,10 +1737,9 @@ function renderWorkerDayRow(day, worker) {
     if (day.absent) {
         what.appendChild(el('span', 'tag tag-absent', 'נעדר'));
     } else {
-        const labels = reportPlaceLabels();
         day.entries.forEach(entry => {
             const tag = el('span', 'tag tag-place');
-            appendSiteName(tag, entry.placeId, placeLabelFrom(labels, entry.placeId));
+            appendSiteName(tag, entry.placeId, placeLabelFrom(map, entry.placeId));
             paintSite(tag, entry.placeId);
 
             const rate = entryRate(entry);

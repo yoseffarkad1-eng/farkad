@@ -531,6 +531,21 @@ function drawerWeek(list, title, start, today) {
 function renderDayWorkerList() {
     const list = el('div', 'worker-list');
 
+    // ONE MAP FOR THE WHOLE DRAW, built here rather than inside the loop below.
+    //
+    // placeLabelsIn walks every day in the schedule (js/model/schema.js: it is looking for
+    // sites the days name and the roster has lost). It used to be called from inside the
+    // per-worker loop, so drawing thirty rows walked the whole record thirty times - which
+    // costs nothing on a fortnight and 12.5ms on a season, and gets worse every week the
+    // crew keeps recording. Measured in tests/perf.test.mjs.
+    //
+    // Building it once is safe for exactly one reason: nothing touches the schedule between
+    // the first row and the last, so a per-row map and a per-draw map cannot differ. It is
+    // NOT held across draws and must not be - tests/labelcache.test.mjs pins that this
+    // screen follows a site rename immediately, which is the guarantee a cached map breaks.
+    // The map is rebuilt on the next render, like the rest of the list.
+    const labels = placeLabelsIn(State.schedule);
+
     State.workersForDay(State.date, State.layer).forEach(worker => {
         const absent = isAbsent(State.schedule, State.date, worker.id, State.layer);
         const entries = entriesFor(State.schedule, State.date, worker.id, State.layer);
@@ -555,7 +570,6 @@ function renderDayWorkerList() {
         } else if (entries.length === 0) {
             value.appendChild(el('span', 'tag tag-empty', 'טרם נרשם'));
         } else {
-            const labels = placeLabelsIn(State.schedule);
             entries.forEach(entry => {
                 const tag = el('span', 'tag tag-place');
                 appendSiteName(tag, entry.placeId, placeLabelFrom(labels, entry.placeId));

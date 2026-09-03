@@ -36,6 +36,13 @@ function workerStatementText(workerId) {
 
     const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
     const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
+    // The message's one site-label map, built before the loop rather than inside it.
+    // reportPlaceLabels walks every day in the range (placeLabelsIn, js/model/schema.js),
+    // and this was asking for it once per day of the statement - a season's statement
+    // walked the season a hundred and seventy times to write one message. Once here is the
+    // same map every line reads, which is also what labels.test.mjs is about.
+    const labels = reportPlaceLabels();
+
     const worked = days.filter(day => !day.absent);
     const earned = worked.reduce((sum, day) => sum + (day.amount || 0), 0);
     // THE SAME ACCOUNT THE SCREEN AND THE SHEET READ. This summed the advances dated in
@@ -58,7 +65,6 @@ function workerStatementText(workerId) {
         const when = `${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`;
         if (day.absent) { lines.push(`• ${when} - נעדר`); return; }
 
-        const labels = reportPlaceLabels();
         const where = day.entries.map(entry => {
             const name = placeLabelFrom(labels, entry.placeId);
             const rate = entryRate(entry);
