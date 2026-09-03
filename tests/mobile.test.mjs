@@ -3074,7 +3074,7 @@ for (const scheme of ['light', 'dark']) {
     given(`${label}: the sweep actually found lines written in the quiet ink`,
         seen.length >= 10, String(seen.length));
     check(`${label}: every line the app writes in it clears the floor too`,
-        faint.length === 0, JSON.stringify(faint.slice(0, 6)));
+        faint.length === 0, JSON.stringify(faint));
 
     await page.context().close();
 }
@@ -3320,6 +3320,123 @@ for (const width of [320, 390]) {
     check(`${label}: and it carries a dark edge, so it holds on all ten and never merges`,
         marked.length > 0 && marked.every(b => b.halo && b.halo !== 'none'),
         JSON.stringify(marked.slice(0, 2).map(b => ({ site: b.site, halo: b.halo }))));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the ring, on any ground
+//
+// css/app.css: `button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }`.
+// The 2px offset puts the ring OUTSIDE the button's own box, so what it is drawn on is
+// whatever is behind the button - and v101 put two buttons on the site's colour, which is
+// an inline style off js/ui/sitecolor.js that no stylesheet knows the value of. --accent
+// against the ten: 1.34 1.73 1.78 1.28 1.82 1.67 1.38 1.48 1.64 1.13 in light. On slot 10
+// that is 1.13:1, which is not a ring at all. Against the paper elsewhere the same ring is
+// 7.90:1, so the token is fine and the assumption underneath it - that the stylesheet knows
+// what its own ring is drawn on - is not.
+//
+// 3:1, which is the floor for a boundary rather than a glyph, and the ring is asked for it
+// on EVERY ground the app draws a focusable thing on: the whole palette, the theme surfaces,
+// and the filled buttons. Driven by real Tab presses rather than element.focus(), because
+// :focus-visible is a statement about how the focus arrived.
+//
+// A two-tone ring passes this and a one-tone ring cannot: no single colour clears 3:1
+// against both a near-white paper and a mid-saturated blue, and the palette has both.
+for (const scheme of ['light', 'dark']) {
+    const label = `390px ${scheme}: the focus ring`;
+    suite(label);
+
+    const page = await open({ width: 390, height: 844, scheme, mode: 'sites', touch: false });
+    await setInset(page, 34);
+
+    await page.evaluate(() => { window.__rings = []; });
+
+    // Tab through the day screen and stop at each thing that takes focus, reading the ring
+    // off the element the browser actually focused.
+    for (let i = 0; i < 90; i++) {
+        await page.keyboard.press('Tab');
+        await page.evaluate(() => {
+            const node = document.activeElement;
+            if (!node || node === document.body) return;
+
+            const parse = value => {
+                const n = (String(value).match(/-?[\d.]+/g) || []).map(Number);
+                return n.length < 3 ? null : [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
+            };
+            const lum = ([r, g, b]) => {
+                const ch = c => {
+                    const v = c / 255;
+                    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+                };
+                return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+            };
+            const ratio = (a, b) => {
+                const hi = Math.max(lum(a), lum(b));
+                const lo = Math.min(lum(a), lum(b));
+                return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+            };
+            const over = (ink, back) => (ink[3] === 1 ? ink.slice(0, 3)
+                : [0, 1, 2].map(i => ink[i] * ink[3] + back[i] * (1 - ink[3])));
+            const ground = el => {
+                for (let n = el; n; n = n.parentElement) {
+                    const c = parse(getComputedStyle(n).backgroundColor);
+                    if (c && c[3] > 0) return over(c, ground(n.parentElement) || [255, 255, 255]);
+                }
+                return null;
+            };
+
+            const style = getComputedStyle(node);
+            const offset = parseFloat(style.outlineOffset) || 0;
+            // A ring sitting OUTSIDE the box is drawn on what is behind the box, not on the
+            // box. That is the whole fault: the button brought its own dark scrim and the
+            // ring landed two pixels past it, on the site's colour.
+            const on = (offset >= 0 ? ground(node.parentElement) : ground(node))
+                || [255, 255, 255];
+
+            const strokes = [];
+            if (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 1) {
+                strokes.push({ what: 'outline', rgb: parse(style.outlineColor) });
+            }
+            // The other half of a two-tone ring, if there is one. The COLOUR out of the
+            // shadow and nothing else: a box-shadow is "rgb(255, 255, 255) 0px 0px 0px
+            // 2px", and reading the numbers straight off it takes the first offset for
+            // the alpha, calls a white ring transparent, and scores it 1.00 - which is
+            // this check silently passing the broken build for the fixed one. It did,
+            // once, before the string was looked at.
+            (style.boxShadow && style.boxShadow !== 'none' ? style.boxShadow.split(/,(?![^(]*\))/) : [])
+                .forEach(part => {
+                    const colour = String(part).match(/rgba?\([^)]*\)/);
+                    strokes.push({ what: 'shadow', rgb: colour ? parse(colour[0]) : null });
+                });
+
+            const best = strokes.reduce((top, stroke) => {
+                const value = stroke.rgb ? ratio(over(stroke.rgb, on), on) : 0;
+                return value > top.ratio ? { ratio: value, what: stroke.what } : top;
+            }, { ratio: 0, what: 'nothing' });
+
+            window.__rings.push({
+                cls: String(node.className || node.tagName).slice(0, 24),
+                on: `rgb(${on.map(c => Math.round(c)).join(',')})`,
+                ratio: best.ratio,
+                by: best.what
+            });
+        });
+    }
+
+    const rings = await page.evaluate(() => window.__rings);
+    const seen = new Map();
+    rings.forEach(ring => { if (!seen.has(ring.cls + ring.on)) seen.set(ring.cls + ring.on, ring); });
+    const distinct = [...seen.values()];
+    const heads = distinct.filter(ring => ring.cls.includes('site-head-btn'));
+
+    given(`${label}: the tab walk reached the buttons on the site colours`,
+        distinct.length >= 8 && heads.length >= 6,
+        JSON.stringify({ stops: rings.length, distinct: distinct.length, heads: heads.length }));
+
+    const faint = distinct.filter(ring => ring.ratio < 3);
+    check(`${label}: every focus ring clears 3:1 on the ground it is drawn on`,
+        faint.length === 0,
+        `${faint.length} of ${distinct.length} — ${JSON.stringify(faint)}`);
 
     await page.context().close();
 }

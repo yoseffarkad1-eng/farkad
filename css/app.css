@@ -66,6 +66,23 @@
     --accent-soft: #dce7f3;
     --on-accent: #ffffff;
 
+    /* THE FOCUS RING'S SECOND STROKE, and it is a second stroke rather than a better
+       colour because there is no colour that would do.
+
+       The ring sits OUTSIDE the box it marks, so what it is drawn on is whatever is
+       behind the box - and since v101 that includes the site's own colour, which is an
+       inline style off js/ui/sitecolor.js that no stylesheet knows the value of.
+       --accent against the ten palette colours measured 1.34 1.73 1.78 1.28 1.82 1.67
+       1.38 1.48 1.64 1.13 in the light scheme. On slot 10 that is 1.13:1, which is not a
+       ring; against the paper everywhere else it is 7.90:1, so the token is right and the
+       assumption under it - that the stylesheet knows its own ground - is not.
+
+       One stroke cannot clear 3:1 against a near-white paper AND a mid-saturated blue,
+       and this app draws focusable things on both. Two can: the accent is dark in this
+       scheme, so its partner is white, and whichever ground the ring lands on, one of
+       the pair stands on it. The dark scheme flips both, for the same reason. */
+    --focus-edge: #ffffff;
+
     --warn: #9a5b0e;
     --warn-bg: #fbf0dd;
     --danger: #9c2f26;
@@ -107,6 +124,8 @@
         --accent: #8ab4e2;
         --accent-soft: #1d2b3b;
         --on-accent: #0f1319;
+        /* The accent is the LIGHT one here, so the ring's other stroke is the dark one. */
+        --focus-edge: #0a0e13;
         --warn: #dfa259;
         --warn-bg: #2c2315;
         --danger: #e18a80;
@@ -144,6 +163,8 @@
     --accent: #8ab4e2;
     --accent-soft: #1d2b3b;
     --on-accent: #0f1319;
+    /* The accent is the LIGHT one here, so the ring's other stroke is the dark one. */
+    --focus-edge: #0a0e13;
     --warn: #dfa259;
     --warn-bg: #2c2315;
     --danger: #e18a80;
@@ -402,7 +423,22 @@ button {
 }
 
 button:hover { filter: brightness(1.08); }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Every focusable thing, not only <button>. The rule used to name buttons alone and
+   everything else took the browser's own ring - which on the rate <select>, in the dark
+   scheme, measured 1.12:1 against the row it sits on. An app that draws its own ring
+   draws it everywhere or it has not drawn one. The two strokes are adjacent: the 2px
+   spread exactly fills the 2px the outline is offset by. */
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+a[href]:focus-visible,
+[role="button"]:focus-visible,
+[tabindex="0"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--focus-edge);
+}
 
 .btn-secondary {
     background: var(--surface);
@@ -556,7 +592,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .reorder-titles h2 { font-size: 18px; }
 /* The heading takes focus when the panel opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
-.reorder-titles h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.reorder-titles h2:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 .reorder-sub { margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
 .reorder-head-end { width: 44px; flex: none; }
 
@@ -718,9 +759,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-head h2 { font-size: 18px; }
 /* The heading takes focus when the sheet opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
-.settings-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.settings-head h2:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 /* The worker's account is entered at its heading too (modal.js). */
-#workerDaysTitle:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+#workerDaysTitle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 
 .settings-body {
     flex: 1;
@@ -1415,7 +1466,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .week-cell { cursor: pointer; min-width: 88px; font-size: 13px; }
 .week-cell:hover { background: var(--accent-soft); }
-.week-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The one ring drawn INSIDE its own box - a grid of cells with no gap between them has
+   nowhere to put a ring outside - so its second stroke is inset too, in the 2px the
+   outline leaves at the edge. */
+.week-cell:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 2px var(--focus-edge);
+}
 .cell-filled { background: var(--surface); }
 .col-rest { background: var(--surface-2) !important; opacity: .65; }
 
