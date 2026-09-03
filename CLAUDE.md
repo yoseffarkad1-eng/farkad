@@ -195,6 +195,7 @@ written down so it cannot happen twice.
     tests/money.test.mjs       the same shekels on the far side of four real doors
     tests/nonassertions.test.mjs a test that fails when a test stops testing
     tests/restore.test.mjs     a device holding only part of a restore is caught
+    tests/restore.ledger.test.mjs a restore removes no ledger entry, on any phone; all four doors
     tests/upgrade.test.mjs     a v86 disk opened by this build
     tests/vehicles.test.mjs    the retired feature, from both sides of its flag
     tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx, built by the shipped library
