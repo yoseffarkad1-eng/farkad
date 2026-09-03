@@ -81,6 +81,31 @@ get a comment in the table of contents saying why they are where they are. A par
 reordered file with the reason written down is worth more than a tidy one that renders
 differently.
 
+## `js/ui/reports.js` was measured and NOT split, and here is the number
+
+The wave asks for `reports.js` (2,562 lines) to be split into rendering, the exports and
+the worker statement. It was split, measured, and put back. The reason is in the test
+suite, not in the file:
+
+- **25 places in 13 suites read `js/ui/reports.js` off the disk directly** and evaluate it
+  into a device's context — not through `tests/harness.mjs`'s list, but by name. Every one
+  of them would have to learn that "reports" is now three files.
+- **Three of those are meta-tests.** `tests/isolation.test.mjs` pins the READ ITSELF as a
+  string; `tests/vehicles.test.mjs` and `tests/wording.test.mjs` iterate hard-coded file
+  lists that include it. A split that missed one of those three would leave a suite quietly
+  covering less than it says it does — which is the exact failure `tests/nonassertions.test.mjs`
+  exists to catch, and the one this repository fears most.
+
+`js/model/schema.js` and `js/ui/share.js` were split instead, and they cost 1 and 3 direct
+reads respectively because they load through the harness's own list. Same for
+`js/sync/sync.js`. The difference is not the size of the file; it is how the suites reach it.
+
+So `reports.js` stays whole at v102, with the measurement written down rather than the
+intention. Splitting it is a real piece of work worth doing — it needs one place in the
+harness that names the reports group, all 25 reads moved onto it, and the three meta-tests
+moved deliberately with their reasons — and it is not worth doing carelessly at the end of
+a wave whose whole promise is that nothing changed.
+
 ## The dead-code sweep needs evidence, not a grep
 
 For every top-level function not referenced anywhere, the commit that removes it names where

@@ -140,7 +140,8 @@ written down so it cannot happen twice.
     js/store.js                every localStorage touch; setVerified reads back; full ≠ blocked; the reclaim ladder; the write tick
     js/recovery.js             quarantine for unreadable records; never deletes; blocks writes until acknowledged; what the rescue file carries
     js/state.js                the one live schedule; journal-first commits; save vs persist; the ledger mirror at boot
-    js/model/schema.js         the v2 model, validators, field paths, payroll and invoice arithmetic; pure functions
+    js/model/schema.js         the v2 model, validators, field paths; pure functions
+    js/model/money.js          what a day was worth: payroll, invoice, the advances walk, the closed period
     js/model/migrate.js        v1→v2; never guesses; ambiguous cells become decisions, not data
     js/model/ledger.js         the v80 advances ledger: entries, fold, closed gate, mirror migration, parity check;
                                the repayment and period-closure kinds, both behind the writer gate
@@ -164,7 +165,8 @@ written down so it cannot happen twice.
     js/ui/week.js              the read-only week grid and its print layout
     js/ui/roster.js            workers and sites; archive vs delete; the reorder mode
     js/ui/reports.js           pay and invoice reports; the advance form
-    js/ui/share.js             the WhatsApp message, backups, snapshots, the four restore doors, exports
+    js/ui/share.js             the WhatsApp message and the CSV
+    js/ui/backup.js            snapshots, the backup file, the four restore doors, the rescue file
     js/ui/printout.js          the table as a PNG, read off the DOM, for the phone where window.print()
                                opens nothing: the 1.5s heuristic, the share sheet, the download
     js/ui/migration.js         the cells the migration refused to guess, put to a person
