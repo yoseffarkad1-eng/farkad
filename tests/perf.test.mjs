@@ -557,10 +557,30 @@ for (const crew of CREWS) {
     // different route (see the note on open() above).
     check('the queue is still holding every one of them, unsent and unprunable',
         growth.pending === 600, `${growth.pending} paths across ${growth.keys} storage keys`);
-    // THE ONE DELIBERATE RED IN THIS FILE. It is a committed reproduction, not a threshold
-    // that wants loosening, and the decision it needs belongs to a person - see
-    // features/performance/contract-journal-growth.md. Do not widen it; the day it passes
-    // should be the day somebody changed what the queue may forget, and said so.
+    // THIS WAS THE ONE DELIBERATE RED IN THIS FILE, and it is green now. The threshold has
+    // never moved: it was 4x + 5ms when it was committed as a reproduction and it is 4x +
+    // 5ms here. WHAT WENT IS NOT AN ENTRY. On this container it read
+    //
+    //   before  first 25:  4.6ms (journal 0.4, save 1.1, render 3.0)
+    //           last 25:  40.4ms (journal 9.3, save 14.9, render 10.2)
+    //   after   first 25:  5.0ms (journal 0.4, save 1.4, render 3.1)
+    //           last 25:  15.2ms (journal 2.7, save 7.3, render 5.2)
+    //
+    // The first band did not move and is not meant to: at fifty edits deep there is
+    // nothing to decode twice. The two figures either side of it are one container's
+    // noise around the same number.
+    //
+    // and every millisecond of that is the queue no longer being DECODED four times per
+    // edit - see features/queue-cost/contract.md. The check above still says 600 paths
+    // across 601 storage keys, unsent and unprunable, which is the half of this suite that
+    // proves nothing was forgotten to buy it. The question
+    // features/performance/contract-journal-growth.md asks - when a device whose writes are
+    // REFUSED may forget a journal entry - is still open, still the owner's, and still
+    // unanswered by any code.
+    //
+    // So: do not widen it, and do not read it as finished either. The cost still grows with
+    // the depth of the queue, at about a quarter of the slope, and the remedy is still to
+    // deploy firestore.rules.
     check('the six-hundredth edit costs no more than four times the first',
         median(late) < median(early) * 4 + 5,
         `first 25: ${round(median(early))}ms (${breakdown(growth.parts.slice(0, 25))}), `

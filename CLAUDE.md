@@ -199,6 +199,8 @@ written down so it cannot happen twice.
     tests/capacity.test.mjs    a season of days on a disk that fills up
     tests/concurrency.test.mjs C1-C5: the cross-tab hazards, one at a time
     tests/exports.test.mjs     the three files that leave the phone, read back
+    tests/queuecost.test.mjs   what asking the queue a question costs: one decode per change, not
+                               per question - and the other tab, and what is never forgotten
     tests/fence.test.mjs       the write counter: what moves it, and what it costs
     tests/method.test.mjs      how an advance was handed over, through all four doors
     tests/money.test.mjs       the same shekels on the far side of four real doors

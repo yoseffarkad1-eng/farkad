@@ -181,3 +181,33 @@ as designed.
 with `npm run test:perf`, suite "the journal an unsent queue accumulates". The state it is
 about is the owner's iPhone screenshot of 3 September 2026, at fifty-nine pending and
 climbing.
+
+## What has been done since, and what has not
+
+**Done — the two costs named above:** `features/queue-cost/contract.md` and
+`tests/queuecost.test.mjs`. The queue is now decoded once per change of the bytes on the
+disk rather than once per question, and a render that asks nothing new decodes nothing. The
+disk is still re-read for every question, through `Store.durableGet`, so another tab's
+write is still what comes back; only the decode is reused, and only against the exact bytes
+it was made from.
+
+Same container, same seeds, `npm run test:perf`, suite "the journal an unsent queue
+accumulates":
+
+| band | journal | save | render | total |
+|---|---|---|---|---|
+| 1-50, before | 0.4ms | 1.1ms | 3.0ms | **4.6ms** |
+| 551-600, before | 9.3ms | 14.9ms | 10.2ms | **40.4ms** |
+| 1-50, after | 0.4ms | 1.4ms | 3.1ms | **5.0ms** |
+| 551-600, after | 2.7ms | 7.3ms | 5.2ms | **15.2ms** |
+
+The save column moved because `collectQueueGarbage` is called from `State.save` and was one
+of the four askers; `Store.setVerified` writing the whole schedule and reading it back is
+untouched and is what the rest of that column is.
+
+**NOT done, and still not this repository's to do:** the question this document is about.
+Nothing was capped, expired, evicted or forgotten; `collectQueueGarbage` still asks
+`op.sent && scheduleHoldsEntry(...)`, both halves; six hundred edits still leave six hundred
+pending paths across six hundred and one storage keys, and `tests/queuecost.test.mjs` fails
+if that ever stops being true. The queue still grows by one per edit for as long as the
+writes are refused, and **the remedy is still to deploy `firestore.rules`.**
