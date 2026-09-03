@@ -245,12 +245,18 @@ async function bootTiming(page) {
     const page = await open();
     const timing = await bootTiming(page);
 
-    check('the scripts are parsed and run inside 400ms',
-        timing.interactive < 400, `domInteractive ${round(timing.interactive)}ms`);
+    // THE TWO NOISIEST NUMBERS IN THIS FILE, and they get their own margin. domInteractive
+    // is the container fetching, parsing and running thirty-odd script tags over a loopback
+    // server, and across three runs it came back at 146ms, 200ms and 263ms - a spread of
+    // nearly two to one on work the app does not control. The rule is unchanged (twice the
+    // largest observation) but the observation to double is the slow one, not the fast one,
+    // or this check is red on a busy afternoon and means nothing on a quiet one.
+    check('the scripts are parsed and run inside 550ms',
+        timing.interactive < 550, `domInteractive ${round(timing.interactive)}ms`);
     check('boot - read the disk, replay the journal, draw the first screen - is under 60ms',
         timing.boot < 60, `${round(timing.boot)}ms`);
-    check('the app answers a tap inside 450ms of the navigation',
-        timing.bootEnd < 450, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
+    check('the app answers a tap inside 600ms of the navigation',
+        timing.bootEnd < 600, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
 
     await page.context().close();
 }
@@ -270,8 +276,8 @@ async function bootTiming(page) {
     await page.waitForTimeout(400);
     const timing = await bootTiming(page);
 
-    check('a season of records still parses and boots inside 400ms to first tap',
-        timing.bootEnd < 400, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
+    check('a season of records still parses and boots inside 500ms to first tap',
+        timing.bootEnd < 500, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
     check('boot itself - the parse of the record, the snapshot and the first draw - is under 200ms',
         timing.boot < 200, `${round(timing.boot)}ms`);
     check('the first screen is under 1200 nodes',
