@@ -1141,6 +1141,188 @@ for (const width of [320, 390]) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- the bars put back on the bottom
+
+// THIS SIMULATES AN iOS BEHAVIOUR CHROMIUM DOES NOT HAVE. Read that before reading the
+// numbers. On iOS a `position: fixed` element is anchored to the VISUAL viewport;
+// Chromium anchors it to the layout viewport, so the geometry this block is about
+// cannot occur in this browser at any width, in any orientation, ever. Nothing here is
+// device coverage - docs/iphone-acceptance.md is where a device claim would come from.
+// What IS checked here is the app's arithmetic: given the numbers iOS reports, does the
+// app move the bars by exactly the amount that puts them back on the bottom of the
+// screen, and does it refuse to move them in every case where moving them would be
+// wrong.
+//
+// The round this comes from: one screenshot from the owner's iPhone 16 Pro Max on v103,
+// both bottom bars drawn about 387pt ABOVE the bottom of the screen with a worker row
+// and the storage notice showing underneath them. body.kbd-open hides both bars, and
+// the bars were drawn, so the class was off - which is v99 working as written. What v99
+// could not do is tell iOS where to paint a fixed element. See
+// features/bars-raised/findings.md and features/bars-raised/contract.md.
+//
+// The model, which is the whole of the simulation:
+//   * the screen shows the entire layout viewport (there is no keyboard occluding it -
+//     that is the fault: the reported visual viewport is short and nothing is there);
+//   * flow content is painted where it is laid out, so its rect IS what is on screen;
+//   * a fixed element is lifted by the shortfall, so its painted position is its rect
+//     minus the shortfall - and the rect already carries whatever the app translated it
+//     by, because getBoundingClientRect includes transforms.
+{
+    suite('390px: the viewport left short with nothing focused');
+    const page = await open({ width: 390, height: 844 });
+    await setInset(page, 34);
+
+    // 387pt is what the screenshot measured on that device, kept as the number rather
+    // than a round one so that a reader can find it in the findings.
+    const SHORT = 387;
+
+    const settle = () => page.evaluate(() => new Promise(done =>
+        requestAnimationFrame(() => requestAnimationFrame(done))));
+
+    // Replaces window.visualViewport with what iOS reports in the stranded state, the
+    // same way the v99 block above does. scale is passed so the pinch case can be asked
+    // with one line; height 0 means "no visualViewport at all", which is every browser
+    // that does not implement it and must go on rendering what it renders today.
+    const stub = (short, scale = 1) => page.evaluate(([short, scale]) => {
+        if (short < 0) {
+            Object.defineProperty(window, 'visualViewport',
+                { configurable: true, value: undefined });
+            return;
+        }
+        Object.defineProperty(window, 'visualViewport', {
+            configurable: true,
+            value: {
+                height: window.innerHeight - short, offsetTop: 0, scale,
+                addEventListener() {}, removeEventListener() {}
+            }
+        });
+    }, [short, scale]);
+
+    // Everything this suite asks, in one read, in the coordinates a person on that phone
+    // would be looking at.
+    const painted = short => page.evaluate(short => {
+        const root = getComputedStyle(document.documentElement);
+        const seen = selector => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const style = getComputedStyle(node);
+            if (style.display === 'none' || style.visibility === 'hidden') return null;
+            const box = node.getBoundingClientRect();
+            // A fixed bar is painted `short` higher than its rect says. Flow content is
+            // painted where its rect says. That difference is the entire fault.
+            const lift = style.position === 'fixed' ? short : 0;
+            return { top: Math.round(box.top - lift), bottom: Math.round(box.bottom - lift) };
+        };
+        const tabs = seen('.tabs');
+        // The strip between the bottom of the tab bar as painted and the bottom of the
+        // screen. On the phone it was 387pt tall and had the crew showing in it.
+        const strip = tabs ? tabs.bottom : window.innerHeight;
+        // The visible overlap, not merely "reaches past the bar": with the bars back on
+        // the bottom the strip has no height at all, and a row running off the bottom of
+        // the page overlaps a zero-height strip by nothing. Counting a touch would have
+        // made this check pass on a strip that does not exist.
+        const under = [...document.querySelectorAll('.wrow')].filter(node => {
+            const box = node.getBoundingClientRect();
+            return Math.min(box.bottom, window.innerHeight) - Math.max(box.top, strip) > 1;
+        }).length;
+        return {
+            tabs, dock: seen('.day-actions'),
+            bottom: window.innerHeight,
+            under,
+            drop: root.getPropertyValue('--bar-drop').trim(),
+            lowered: document.body.classList.contains('bars-lowered'),
+            kbdOpen: document.body.classList.contains('kbd-open'),
+            navVar: root.getPropertyValue('--nav-h').trim(),
+            dockVar: root.getPropertyValue('--day-actions-h').trim(),
+            active: document.activeElement ? document.activeElement.tagName : 'none'
+        };
+    }, short);
+
+    await stub(SHORT);
+    await page.evaluate(() => {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        scheduleBarMeasure();
+    });
+    await settle();
+    const strandedState = await painted(SHORT);
+
+    // v99's guarantee, first and unmoved: a short viewport with nothing focused is not a
+    // keyboard, so neither bar is hidden and both are still measured. If this ever stops
+    // holding, everything below is measuring the wrong thing.
+    given('the stub is 387px short with nothing focused', strandedState.active === 'BODY',
+        JSON.stringify(strandedState));
+    given('v99 still holds: no kbd-open, both bars drawn and measured',
+        !strandedState.kbdOpen && strandedState.tabs && strandedState.dock
+        && strandedState.navVar !== '0px' && strandedState.dockVar !== '0px',
+        JSON.stringify(strandedState));
+
+    check('390px: the page marks the stranded viewport and publishes the gap',
+        strandedState.lowered === true && strandedState.drop === `${SHORT}px`,
+        JSON.stringify(strandedState));
+    check('390px: the tab bar is painted on the bottom of the screen, not 387px above it',
+        strandedState.tabs && Math.abs(strandedState.tabs.bottom - strandedState.bottom) <= 1,
+        JSON.stringify(strandedState));
+    check('390px: the dock still sits directly on the tab bar, both of them lowered',
+        strandedState.dock && strandedState.tabs
+        && Math.abs(strandedState.dock.bottom - strandedState.tabs.top) <= 1,
+        JSON.stringify(strandedState));
+    // The screenshot's fault, stated as a rectangle: the crew was showing in the strip
+    // under the bars.
+    check('390px: no worker row is painted in the strip below the bars',
+        strandedState.under === 0, JSON.stringify(strandedState));
+
+    // A real keyboard under the same shortfall. The two answers are mutually exclusive
+    // by construction - the drop is 0 whenever an editable has focus - because a bar
+    // lowered under a keyboard is a bar under the keys, which is what v93 hid them for.
+    await page.evaluate(() => {
+        showAddWorkerModal();
+        document.getElementById('workerFormName').focus();
+    });
+    await settle();
+    const typing = await painted(SHORT);
+    check('390px: a real keyboard under the same shortfall hides the bars and lowers nothing',
+        typing.kbdOpen === true && typing.lowered === false && typing.tabs === null,
+        JSON.stringify(typing));
+    await page.evaluate(() => {
+        document.getElementById('workerFormName').blur();
+        closeWorkerForm();
+    });
+    await settle();
+
+    // Pinch-zoom shrinks the visual viewport exactly like a keyboard does, and zoom is
+    // allowed here. v99 guards the hiding against it; the lowering is guarded by the
+    // same reading, or a zoomed page has its bars shoved off the bottom of the screen.
+    await stub(SHORT, 1.5);
+    await page.evaluate(() => scheduleBarMeasure());
+    await settle();
+    const pinched = await painted(0);
+    check('390px: a pinched page is not a stranded viewport: nothing is lowered',
+        pinched.lowered === false && pinched.drop === '0px', JSON.stringify(pinched));
+
+    // No visualViewport at all - the API is what this whole mechanism reads, and a
+    // browser without it must render exactly what it rendered before this round.
+    await stub(-1);
+    await page.evaluate(() => scheduleBarMeasure());
+    await settle();
+    const blind = await painted(0);
+    check('390px: with no visualViewport nothing is lowered and nothing is marked',
+        blind.lowered === false && blind.drop === '0px'
+        && Math.abs(blind.tabs.bottom - blind.bottom) <= 1, JSON.stringify(blind));
+
+    // The gap closes - the share sheet goes away, the app comes back, iOS catches up.
+    // The bars go back up with it: a drop that outlives its measurement is the v98
+    // failure with a different sign.
+    await stub(0);
+    await page.evaluate(() => scheduleBarMeasure());
+    await settle();
+    const restored = await painted(0);
+    check('390px: the gap closing takes the drop and the class away again',
+        restored.lowered === false && restored.drop === '0px'
+        && Math.abs(restored.tabs.bottom - restored.bottom) <= 1, JSON.stringify(restored));
+
+    await page.context().close();
+}
+
 for (const width of [320, 390]) {
     suite(`${width}px: הגדרות וכלים`);
 
