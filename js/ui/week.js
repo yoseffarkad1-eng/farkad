@@ -39,7 +39,10 @@ function renderWeek() {
     const workers = weekWorkers(dates);
 
     if (workers.length === 0) {
-        root.appendChild(emptyHint('אין עובדים להצגה.'));
+        // Says the next move, not only the absence. An empty week is the one moment a
+        // person cannot tell a fresh install from a broken app, and this screen is one a
+        // phone may well open on first. Named in the same voice the roster uses.
+        root.appendChild(emptyHint('אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.'));
         return;
     }
 
