@@ -187,6 +187,9 @@ written down so it cannot happen twice.
     tests/runner.mjs           suite/check/same/given/report; given prints its detail too
     tests/harness.mjs          devices in Node: V8 contexts, a faithful fake localStorage and Firestore;
                                REPORTS_GROUP/reportsSource — the ONE place the reports files are named
+    tests/emulator-host.mjs    where the Firestore emulator actually is: FIRESTORE_EMULATOR_HOST,
+                               or 127.0.0.1:8080. The six emulator suites read it and none of them
+                               writes a port down, so they can run in parallel on private ports
     tests/build.test.mjs       the three stamps agree; the shell is complete; caches never cross builds
     tests/data.test.mjs        storage, sync, and the money arithmetic — the big one
     tests/smoke.mjs            the app in real Chromium, self-served
