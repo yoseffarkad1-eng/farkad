@@ -59,6 +59,7 @@
     "test:smoke": "node tests/smoke.mjs",
     "test:print": "node tests/print.test.mjs",
     "test:mobile": "node tests/mobile.test.mjs",
+    "test:perf": "node tests/perf.test.mjs",
     "test:update": "node tests/update.test.mjs",
     "test:forms": "node tests/forms.browser.mjs",
     "test:recovery-browser": "node tests/recovery.browser.mjs",
