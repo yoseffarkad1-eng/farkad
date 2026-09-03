@@ -21,7 +21,15 @@ const MODAL_CLOSERS = {
     workerFormModal: () => closeWorkerForm(),
     workerDaysModal: () => closeWorkerDays(),
     shareModal: () => closeShareModal(),
-    migrationModal: () => closeMigrationModal()
+    migrationModal: () => closeMigrationModal(),
+    // The one .modal that had no entry here, so Escape fell through to the bare
+    // `display = 'none'` below and never reached closeSignInModal - which exists, and
+    // clears the password field. Measured before this line was added: a typed password
+    // and a "סיסמה שגויה" both survived Escape and were still there the next time the
+    // sheet was opened from the same page. Three men share one phone on a site; the
+    // sentence at the top of this file - "closing is not always just hiding" - is the
+    // whole reason this table exists, and this was the row it was missing.
+    signInModal: () => closeSignInModal()
 };
 
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';

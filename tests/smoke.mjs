@@ -8723,6 +8723,47 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- Escape leaves no password behind
+{
+  // signInModal is a .modal, so topModal() finds it and Escape closes it - through the
+  // FALLBACK at js/ui/modal.js (`modal.style.display = 'none'`), because it was the one
+  // .modal with no entry in MODAL_CLOSERS. Closing is not always just hiding, which is
+  // the whole reason that table exists: closeSignInModal clears the password field, and
+  // Escape never reached it. This is a phone three men share on a site.
+  const page = await open();
+  await page.evaluate(() => {
+    openSignInModal();
+    document.getElementById('signInPassword').value = 'hunter2';
+    document.getElementById('signInError').textContent = 'סיסמה שגויה';
+  });
+  await page.waitForTimeout(250);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const left = await page.evaluate(() => ({
+    open: document.getElementById('signInModal').style.display,
+    password: document.getElementById('signInPassword').value,
+    error: document.getElementById('signInError').textContent
+  }));
+  check('Escape closes the sign-in sheet', left.open === 'none', JSON.stringify(left));
+  check('and takes the password out of the field with it',
+    left.password === '', JSON.stringify(left));
+
+  // The same door the button uses, for comparison: this was already right, and it is what
+  // Escape now goes through rather than around.
+  await page.evaluate(() => {
+    openSignInModal();
+    document.getElementById('signInPassword').value = 'hunter2';
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => closeSignInModal());
+  await page.waitForTimeout(200);
+  const byButton = await page.evaluate(() =>
+    document.getElementById('signInPassword').value);
+  check('as the ביטול button always did', byButton === '', JSON.stringify(byButton));
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
