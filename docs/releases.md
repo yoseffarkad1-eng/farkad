@@ -12,17 +12,80 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v101 (`ee50ae4`).** Every build at the top of this file has reached `main`;
+**`main` is at v102 (`2bae97f`).** Every build at the top of this file has reached `main`;
 a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v102 — the code put in order, and nothing else
+## CANDIDATE — v103 — the app put in order, and the panel that was already right
 
-Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v101 as served
-(`ee50ae4`).
+Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v102 as served
+(`2bae97f`). **No number moved** — not a shekel on a report, not a day on a record, not a
+byte on the wire.
+
+**What it gives the crew that v102 does not**
+
+- **The week screen tells an empty app what to do.** It said only «אין עובדים להצגה»; it now
+  says «אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.» An empty week is the one moment a
+  person cannot tell a fresh install from a broken app, and it is a screen a phone may open
+  first.
+
+That is the whole of what a person can see. Everything else in this build is for the people
+who USE the documents and read the code.
+
+**What it gives whoever runs the phones**
+
+- **The Arabic guide caught up** with the site-card icons, the header that compacts on
+  scroll, the Saturday arrows, the print that offers a picture when nothing opens, the export
+  file names and the save dialog — each with the one tap that shows it working. And a new
+  section on telling whether a phone is well in two lines, with the three reasons a sync
+  error gives and their three different answers.
+- **`docs/iphone-acceptance.md` has thirteen new rows** for v99–v103 and an Arabic block
+  saying which order to run them in. **58 rows, none of them run**, and the count is at the
+  top rather than left to be counted.
+- **`docs/firebase-setup.md` states the rules deploy properly**: the exact command, the order
+  (rules before any phone writes the new protocol), and why — measured by
+  `tests/rollout.test.mjs` against a real legacy document, not asserted.
+
+**What it fixes in the code that nobody can see**
+
+`.btn-primary` matched no rule in the stylesheet at all: three money-form save buttons looked
+right only because the base `button` rule already paints the primary style, and the name was
+a lie to the next reader. `.btn-info` was byte-for-byte `.btn-secondary`. Both fixed as
+removals or renames — a button that looks different after this build would be a bug in it.
+
+**What was checked and deliberately NOT changed**
+
+- **The ⋯ panel's order was already right** — cloud and sync, backup, restore, update and
+  version, device state, the carry migration last behind its flag. Verified, not assumed, and
+  not touched.
+- **The rules review found no gap.** All three claims `docs/sync-protocol.md` says the rules
+  enforce have checks in `tests/rules.test.mjs`, and the protocol now names which check
+  answers which claim.
+
+**What it is known NOT to cover**
+
+- **No phone has run any of it**, and this build is largely FOR a phone: it extends an
+  acceptance list that is 58 rows long and entirely NOT RUN. Nothing since v86 has been on a
+  device.
+- **`firestore.rules` is still not deployed.** This build documented the deploy; it did not
+  perform it and cannot.
+- The two findings v100's re-audit left OPEN are still open and untouched.
+- Both money gates are shut.
+
+**Checked before it was stamped**: both gates on `6011430` from one clean detached worktree,
+run separately — `npm test` 43 suites 4381/4381, `npm run test:release` 59 suites 6817/6817,
+both exit 0. Exactly one check more than v102, and it is the empty-state pin. Per suite and
+verbatim in `features/organization/handoff.md`.
+
+---
+
+## v102 — 3 September 2026 — `2bae97f` (PR #14, the tree at `1e0aeb0`)
+
+On `main` since 3 September 2026; whether any phone has taken the update is not known from
+here. Built on v101 as served (`ee50ae4`).
 
 **This build changes nothing a person can see or use.** Not a pixel, not a shekel, not a
 byte on a disk or on the wire. It is the code moved into rooms it can be found in, and the
@@ -55,6 +118,7 @@ a refactor that changed something.
 
 **What it is known NOT to cover**
 
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - **No phone has run any of it.** For a behaviour-neutral build that matters less than it
   did for v101, but "behaviour-neutral" is a claim held by 59 suites, not by a person using
   the app. Every row of `docs/iphone-acceptance.md` is still NOT RUN.

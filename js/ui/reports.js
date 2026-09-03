@@ -156,14 +156,14 @@ function renderRangePicker() {
     // js/ui/printout.js: where the print sheet does not open, the sheet on screen is
     // offered as a picture instead, and the picture has its own button beside it.
     actions.appendChild(button('🖨️ הדפסה', 'btn-success', () => printWithFallback('report')));
-    actions.appendChild(button('🖼️ שיתוף כתמונה', 'btn-info', () => sharePrintout('report')));
+    actions.appendChild(button('🖼️ שיתוף כתמונה', 'btn-secondary', () => sharePrintout('report')));
     // The button says what will come out of it. With one client's site chosen the file
     // is that client's billing sheet and nothing else (see reportSheets), and a button
     // still reading "יצוא" would promise the usual workbook and quietly hand over less.
     const client = scopedExportPlace();
     actions.appendChild(button(
         client ? `📊 יצוא חיוב - ${isolate(client.name)}` : '📊 יצוא',
-        'btn-info', exportReports));
+        'btn-secondary', exportReports));
     wrap.appendChild(actions);
 
     return wrap;
@@ -1088,7 +1088,10 @@ function openRepaymentForm(item, settled, row) {
     };
 
     const buttons = el('div', 'modal-actions');
-    buttons.appendChild(button('שמור', 'btn-primary', save));
+    // No class: the base `button` rule IS the primary style, and this is the primary
+    // action of the form. `btn-primary` used to be written here and matched no rule in
+    // css/app.css at all - it looked right by accident and told the next reader a lie.
+    buttons.appendChild(button('שמור', null, save));
     buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
     form.appendChild(buttons);
     host.insertBefore(form, row.nextSibling);
@@ -1209,7 +1212,7 @@ function openReversalForm(item, settled, row) {
     };
 
     const buttons = el('div', 'modal-actions');
-    buttons.appendChild(button('שמור תיקון', 'btn-primary', save));
+    buttons.appendChild(button('שמור תיקון', null, save));
     buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
     form.appendChild(buttons);
     host.insertBefore(form, row.nextSibling);
@@ -1682,7 +1685,7 @@ function openEventReversalForm(entry, row) {
     };
 
     const buttons = el('div', 'modal-actions');
-    buttons.appendChild(button('שמור תיקון', 'btn-primary', save));
+    buttons.appendChild(button('שמור תיקון', null, save));
     buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
     form.appendChild(buttons);
     host.insertBefore(form, row.nextSibling);

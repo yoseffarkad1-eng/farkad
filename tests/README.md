@@ -52,6 +52,18 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 6011430 (v103: the app put in order - the week's empty screen naming the next
+    move, three button classes that meant nothing, the rules review, and the documents),
+    a clean detached worktree at that commit, Node v22.22.2, git diff --check clean:
+    npm test           43 suites   4381/4381   exit 0
+    npm run test:release
+                       59 suites   6817/6817   exit 0
+                       (wording 37: one pin added - the week's empty state)
+    Exactly ONE check more than v102 in each gate, and it is that pin. Everything else in
+    the wave is a rename, a document, or a class that matched no rule - none of which the
+    gate can see, which is the point of the wave rather than a gap in it.
+    Per suite and verbatim: features/organization/handoff.md.
+
     At 21bd9ba (v102: the code put in order and NOTHING else - js/sync/sync.js split
     into six by concern, js/ui/share.js into two, js/model/schema.js into two, a table of
     contents on css/app.css, three dead functions removed), a clean detached worktree at

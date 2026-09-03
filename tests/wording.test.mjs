@@ -293,6 +293,22 @@ const noteOf = ({ head, row }) => String(row[head.length - 1] || '');
         .split('\n')
         .filter(line => line.trim().indexOf('//') !== 0)
         .join('\n');
+    // ---------------------------------------------------------------- an empty screen says what to do
+    //
+    // A screen with nothing on it is the one moment a person cannot tell "set up wrong"
+    // from "broken". Every one of them names the next move: the roster's three do
+    // ("הוסף עובד כדי להתחיל"), the day screen's setup cards do, and the week's did not -
+    // it said only that there was nothing to show, on the screen a person opens FIRST on a
+    // phone they have just installed.
+    //
+    // The reports screen is deliberately not in this list. "אין רישומים בטווח הזה" is a
+    // fact about the crew and not a setup problem, and the range that would change it is
+    // on the screen already; the comment above dateInput in js/ui/reports.js explains why
+    // that sentence is the one it is.
+    const WEEK_EMPTY = 'אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.';
+    check('the week screen tells an empty app what to do next',
+        spoken('js/ui/week.js').indexOf(WEEK_EMPTY) !== -1, WEEK_EMPTY);
+
     shipped.forEach(file => {
         const text = spoken(file);
         check(`${file} says no version number to a person`,
