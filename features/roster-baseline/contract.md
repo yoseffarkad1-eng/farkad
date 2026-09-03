@@ -157,9 +157,23 @@ Named here so nobody reads the fix as wider than it is.
   document saying 500 while `roster.workers.<id>` says 600. Every build since v79 reads
   the map in preference (`mergeRoster`), and the next roster edit rewrites the array from
   the corrected schedule. A phone still on v78 would read the stale array in that window.
-  The stamps are at v103 and law 7 puts the supported floor at v87; closing this properly
-  means extending `sanitiseQueuedRosters` to refresh bodies and not just drop tombstoned
-  ids, which is a change to a mechanism that currently has one narrow, tested job.
+
+  **DECIDED, 3 September 2026: this stays open, deliberately, and is not work.** The
+  exposure is to a v78 READER and to nothing else. Law 7 puts the supported floor at v87 -
+  "the catch-up half only holds from v87 forward" - so v78 is nine builds below the floor
+  this repository says it supports, and the one phone whose build is actually known runs
+  v103. Closing it means teaching `sanitiseQueuedRosters` to refresh BODIES as well as drop
+  tombstoned ids, and that function is in `js/sync/receive.js`: the highest-consequence file
+  in the app, where a mistake is somebody's pay. It currently has one narrow job and a test
+  for exactly that job.
+
+  Adding risk to the sync layer for a reader that does not exist is a bad trade, and the
+  reason it looks like a good one is that the work is small and the sentence "not closed"
+  is uncomfortable. It is written down here as a decision rather than left in the list, so
+  that the next person weighs the same trade rather than assuming nobody thought about it.
+
+  What would REOPEN it: a phone found running below v87, or a deliberate choice to keep
+  supporting one. Neither is true today.
 - **A phone whose disk has no readable schedule still sends its whole roster.** By R1 that
   is deliberate — it has no record to be stale against — but it is a window, and it is the
   one shape of carrier 1 that survives.
