@@ -13,10 +13,74 @@ commit is worse than no count at all, so a build whose run was not written down 
 time says so rather than borrowing a neighbour's.
 
 **`main` is at v103 (`21c8e08`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
+a candidate, when there is one, sits above them headed CANDIDATE, **and there is one now** -
+v104, on `claude/farkad-quality-leap`. It has not been merged, not been served, and no phone
+has it.
 v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## CANDIDATE v104 — 3 September 2026 — `claude/farkad-quality-leap`
+
+**NOT SERVED, NOT MERGED, ON NO PHONE.** It is a branch, and by the rule at the top of this
+file a branch full of verified work is not a release, it is a cost. It is written down here
+so that the next person finds it where builds are recorded rather than in a chat log. The
+owner asked for the work and asked for it NOT to be published; that is why it stops here.
+
+Built on v103 as served (`21c8e08`). Forty commits.
+
+**The three stamps move together in this commit** and read v104 in all three places. They
+sat at v103 for the whole of the branch's life, deliberately: five agent branches were being
+integrated and five of them each bumping to v104 makes five different v104s and a conflict in
+three files for nothing. Every intermediate commit therefore has three stamps that AGREE,
+which is what `tests/build.test.mjs` enforces, and only the tip carries a number different
+from what is served.
+
+**What it changes that a person would notice**
+
+- **The bottom bars go back to the bottom of the screen** when iOS strands them. This is the
+  fault the owner's screenshot showed on 3 September, about 387pt up with the worker list
+  underneath. The fix moves them back by exactly the gap it measures and never hides
+  anything. It is simulated arithmetic in `tests/mobile.test.mjs`, not device coverage, and
+  says so at length in its own comment.
+- **The quiet ink is readable in sun.** `--ink-3` went from 3.66/3.23/3.00 against the three
+  grounds to a measured 4.5:1 floor - the date on the day header, the sync sentence, every
+  hint, the week grid's dates, and the ✕ that clears a man's record.
+- **The day screen fits at twice the text size.** Its default by-site view ran 398px wide
+  inside 390, 375 and 320.
+- **The days drawer answers the keyboard** like the other twelve dialogs, and stops holding
+  26 buttons in the tab order while shut.
+- **The keyboard comes back to the button you pressed** from the three dialogs that focus a
+  field for themselves.
+- **The app is faster on a full record.** The week grid on a season went 36.1ms to 2.5ms, and
+  the cost of one edit with 600 records waiting went 40.4ms to 15.2ms.
+
+**What it changes that only the record would notice, and matters more**
+
+- **O2 is closed.** A phone coming back online could put its older copy of a man's day rate
+  over a newer one, silently, and then send the stale number to everybody else. Two carriers,
+  both reproduced before a line was changed.
+- **Five holes in law 10 are closed** - the law that says nothing unreadable is ever deleted,
+  overwritten or treated as empty. Four were reproduced. The worst destroyed the way back
+  from a restore on a full phone and returned `true` saying it had not.
+- **A restore removes no ledger entry** on the phone doing it. The case it does NOT cover -
+  an entry that exists only in the cloud - is named in four places rather than hidden.
+
+**What it is known NOT to cover**
+
+- **No row of `docs/iphone-acceptance.md` has been run**, and nothing here was seen on a
+  phone. Chromium anchors `position: fixed` to the layout viewport and does not reproduce
+  what iOS does; the bars check models the geometry and cannot be read as device coverage.
+- **The journal still grows without bound while writes are refused.** The cost per edit was
+  cut by about two thirds, not removed, and the remedy for the growth itself is deploying
+  `firestore.rules` - which drains the queue and lets collection resume. That is the owner's
+  action and no code here does it.
+- **Ten error-path findings below P1 are recorded and not fixed**
+  (`features/error-paths/findings.md`), and eight accessibility findings below F4
+  (`features/accessibility/findings.md`).
+- **`LEDGER_WRITES` and `carryAdvances` are both still `false`.** Neither gate was touched.
 
 ---
 
