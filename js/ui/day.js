@@ -174,8 +174,12 @@ function renderAccountBanner() {
     const banner = document.getElementById('accountBanner');
     if (!banner) return;
 
+    // Hidden AND forgotten, the same pair showStorageBanner keeps: the memo below must
+    // not turn the next genuine appearance into silence.
+    const hide = () => { banner.style.display = 'none'; delete banner.dataset.drawn; };
+
     if (State.activeWorkers().length === 0 || State.activePlaces().length === 0) {
-        banner.style.display = 'none';
+        hide();
         return;
     }
 
@@ -214,16 +218,26 @@ function renderAccountBanner() {
         notes.push(`החשבון נסגר ${closing} - בדוק את השכר ושמור קובץ גיבוי.`);
     }
 
-    if (notes.length === 0) { banner.style.display = 'none'; return; }
+    if (notes.length === 0) { hide(); return; }
 
     // Dismissed for today, and back tomorrow if it still applies. A notice that cannot
     // be put away is read once and then looked past for good - and this one has to keep
     // working on the day it actually matters.
     const text = notes.join(' · ');
     if (Store.get(ACCOUNT_BANNER_KEY) === todayStr() + '|' + text) {
-        banner.style.display = 'none';
+        hide();
         return;
     }
+
+    // REBUILT ONLY WHEN WHAT IT SAYS HAS CHANGED. clear() and eight appendChilds inside
+    // an aria-live region is eight announcements, and render() runs on every tap:
+    // measured at 24 mutations across three renders that changed nothing at all. This
+    // banner is a financial warning and it earns being heard once, not once per name.
+    // Keyed on the fold's posture too, because that is the other thing that changes what
+    // is drawn here - and the ✕ hides without forgetting, so a dismissal stays dismissed.
+    const drawn = `${text}|${accountOpen}`;
+    if (banner.dataset.drawn === drawn && banner.style.display !== 'none') return;
+    banner.dataset.drawn = drawn;
 
     clear(banner);
     // Folded by default: one strong line, the report door and ✕ - a 60px row, not the
@@ -322,14 +336,29 @@ function renderProgress() {
             if (next) openAssignSheet(next.id);
         }, `${count} - המשך אל הבא שטרם נרשם`));
     }
-    // Announced politely on change - the day switch and the climbing count are the two
-    // things a person not looking at the screen most needs to hear.
-    line.setAttribute('role', 'status');
-    line.setAttribute('aria-live', 'polite');
-
     if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
         line.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
     }
+
+    // ANNOUNCED FROM A NODE THAT IS NOT REBUILT.
+    //
+    // The role="status" and aria-live used to go on `line` - a node built from scratch,
+    // filled, and only then inserted, so it was a different node on every render: three
+    // distinct .progress-line nodes across three ordinary edits, measured. index.html
+    // states the rule about the panel beside the reorder list - "the list is redrawn on
+    // every move and a live region that is destroyed and rebuilt is a live region that
+    // announces nothing" - and this was the same mistake one screen over, on the region
+    // the design leans on hardest: the day switch and the climbing count, which are the
+    // two things a person not looking at the screen most needs to hear, and the
+    // הרישום מושבת badge, which is the only text anywhere saying writing is held.
+    //
+    // #dayLive is in index.html and outlives every render. The words are READ OFF the
+    // line rather than composed a second time: the line is the visible answer and the
+    // two may not drift apart - which is also why the badge is appended above this and
+    // not below it. sayOnce (js/sync/status.js) is the guard the storage banner has
+    // always had: writing the same sentence again is a change, to a live region.
+    sayOnce(document.getElementById('dayLive'), [...line.children]
+        .map(node => (node.textContent || '').trim()).filter(Boolean).join(' · '));
 
     wrap.appendChild(line);
 

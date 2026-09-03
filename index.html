@@ -124,6 +124,16 @@
 
     <p class="storage-notice" id="storageNotice" role="status" aria-live="polite">הנתונים נשמרים במכשיר הזה בלבד.</p>
 
+    <!-- What the day screen's progress line SAYS, announced from a node that survives
+         the render that redraws it. The line itself is built from scratch every time -
+         renderProgress fills it and only then inserts it - so a live region on it was a
+         different node each render, which is the same mistake the note above #reorderLive
+         describes and the reason that panel's region lives outside its list. js/ui/day.js
+         reads the words off the line rather than composing them again, so the announced
+         sentence and the drawn one cannot drift apart. Out here, not inside #dayView:
+         renderDay empties that section on every render. -->
+    <div class="day-live" id="dayLive" role="status" aria-live="polite"></div>
+
     <!-- The side drawer of days: every working day of the account period, by full name,
          one tap away - and costing the main screen nothing until the ☰ is pressed. -->
     <div class="drawer-backdrop" id="dayDrawerBack" onclick="closeDayDrawer()"></div>

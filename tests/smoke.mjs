@@ -8768,6 +8768,97 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- the live regions, both directions
+{
+  // Two faults, opposite ways round, and they are one fault: the region the day screen
+  // leans on announced nothing, and the region under it announced on every tap.
+  //
+  // index.html states the rule, about the panel beside the reorder list: "It lives out
+  // here rather than inside the list, because the list is redrawn on every move and a
+  // live region that is destroyed and rebuilt is a live region that announces nothing."
+  // .progress-line was built from scratch by renderProgress, filled, and given
+  // role="status" and aria-live on the way in - a different node every render. What rode
+  // on it: the day switch, the climbing count, and the only text anywhere that says
+  // writing is held.
+  //
+  // The other way: #storageNotice is written with `textContent =`, which replaces the
+  // text node whether or not the string differs, and render() calls updateSyncNotice on
+  // every change. Forty lines above it in the same file showStorageBanner has carried
+  // `if (banner.dataset.text === text) return;` since it was written.
+  //
+  // Both are asked of EVERY live region the app has, not of the two that were wrong.
+  const page = await open();
+  await seedRoster(page);
+
+  const measured = await page.evaluate(async () => {
+    const wait = ms => new Promise(done => setTimeout(done, ms));
+    const regions = [...document.querySelectorAll('[aria-live]')];
+    const before = new Set(regions);
+    const churn = new Map();
+    const observers = regions.map(node => {
+      const key = node.id || String(node.className);
+      churn.set(key, 0);
+      const observer = new MutationObserver(records => {
+        churn.set(key, churn.get(key) + records.length);
+      });
+      observer.observe(node, { childList: true, characterData: true, subtree: true });
+      return observer;
+    });
+
+    // NOTHING CHANGES. Three renders of the same screen with the same record: a live
+    // region that speaks here is a live region that speaks over whatever the person
+    // asked for next.
+    for (let i = 0; i < 3; i++) { render(); await wait(60); }
+    observers.forEach(observer => observer.disconnect());
+
+    const after = [...document.querySelectorAll('[aria-live]')];
+    return {
+      regions: regions.length,
+      noisy: [...churn].filter(([, count]) => count > 0).map(([key, count]) => `${key}:${count}`),
+      // A region that is not the node it was is a region whose subscribers are gone.
+      rebuilt: after.filter(node => !before.has(node)).map(node => node.id || String(node.className)),
+      lost: regions.filter(node => !node.isConnected).map(node => node.id || String(node.className))
+    };
+  });
+
+  check('the app has live regions to measure', measured.regions >= 6, JSON.stringify(measured));
+  check('three renders that change nothing announce nothing',
+    measured.noisy.length === 0, JSON.stringify(measured.noisy));
+  check('and no live region is a different node afterwards',
+    measured.rebuilt.length === 0 && measured.lost.length === 0,
+    JSON.stringify({ rebuilt: measured.rebuilt, lost: measured.lost }));
+
+  // AND IT STILL SPEAKS. A region that never changes is silent by another route, so the
+  // day's own region is asked for the two things js/ui/day.js calls "the two things a
+  // person not looking at the screen most needs to hear".
+  const said = await page.evaluate(async () => {
+    const wait = ms => new Promise(done => setTimeout(done, ms));
+    const live = document.getElementById('dayLive');
+    const read = () => (live ? live.textContent : null);
+    const start = read();
+    assignPlace(State.schedule, State.date, 'w_01', 'actual', 'p_01');
+    State.save({ silent: true });
+    render();
+    await wait(80);
+    const counted = read();
+    stepDay(-1);
+    await wait(80);
+    const stepped = read();
+    return { present: Boolean(live), start, counted, stepped };
+  });
+  check('the day screen has a live region that outlives its own render',
+    said.present, JSON.stringify(said));
+  check('it names the day and the date, so a count has a day attached',
+    Boolean(said.start) && said.start.includes('12/08') && said.start.includes('יום'),
+    JSON.stringify(said.start));
+  check('the climbing count reaches it', said.counted !== said.start
+    && String(said.counted).includes('1 מתוך 3'), JSON.stringify(said));
+  check('and so does the day switch', said.stepped !== said.counted
+    && String(said.stepped).includes('11/08'), JSON.stringify(said));
+
+  await page.context().close();
+}
+
 // ------------------------------------------------- nothing on the day screen is unnamed
 {
   // Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼, ⤓, ₪, 🗄️ and ↩️ in this app carries a Hebrew
