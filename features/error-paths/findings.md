@@ -30,7 +30,7 @@ record still true?**
 | E7 | P3 | `js/ui/roster.js:241` | `closeReorder()` leaves `reorderDragging`, its 16ms autoscroll interval and three document pointer listeners standing — and the autoscroll's direction is captured in the interval's closure, so a drag that crosses the panel scrolls the wrong way. | **PROVED in Chromium; FIXED** |
 | E8 | P4 | `js/ui/backup.js:356`, `:401` | `readUndoStack()` answers `[]` for a stack it cannot parse. The `dropUndoState` half is NOT REACHABLE — measured. One reader earlier it is: «אין גיבוי מקומי» is said about a record that is on the disk and will not parse, with no copy and no hold. | **half disproved, half PROVED; FIXED** |
 | E9 | P4 | `js/app.js:325` + `:345` | A damaged boot that also migrates raises «הנתונים הועברו לגרסה החדשה» over a migration `js/state.js:122` deliberately did not write down — then displaces it in the same tick, and the displaced dialog OPENS the migration questions over the damage notice. | **PROVED in Chromium; FIXED** |
-| E10 | P4 | `js/state.js:404` | `refuseEdit()` ignores `rollback()`'s verdict, so on the one path where the rollback fails the dialog still says «השינוי בוטל כדי שלא ייראה כאילו נרשם». | SUSPECTED, likely unreachable |
+| E10 | P4 | `js/state.js:404` | `refuseEdit()` ignores `rollback()`'s verdict. NOT REACHABLE — driven through all three doors, measured true at each. Not fixed; pinned as a standing guard instead. | **investigated; no defect** |
 
 ## E1 — the damaged undo stack is overwritten by the recovery meant to save it
 
@@ -445,11 +445,37 @@ and neither were its questions, so the next boot that reads a healthy record rai
 again from the top. The second suite in that file is the control — a guard that silenced
 the honest migration too would have passed every check above.
 
-## E10 — `refuseEdit` and the verdict it does not read
+## E10 — `refuseEdit` and the verdict it does not read: not reachable, and not fixed
 
-`refuseEdit` ignores `rollback()`'s verdict. Likely unreachable — `durableText` only ever
-holds text `State` produced or a v2 record that already parsed — but the whole point of
-`js/state.js:279-293` is that this dialog's sentence must be true.
+**Driven, not read, and nothing was changed.** `refuseEdit` ignores `rollback()`'s
+verdict, so if the rollback ever failed the dialog would still say «השינוי בוטל כדי שלא
+ייראה כאילו נרשם» over an edit still standing on the screen. Every door `refuseEdit` can
+be reached by was driven with `rollback` wrapped and its answer recorded:
+
+    every door refuseEdit is reached by rolled back successfully  —
+      [{"door":"a journal write the disk refused","verdict":true},
+       {"door":"a bulk edit the disk refused","verdict":true},
+       {"door":"a device holding nothing durable","verdict":true}]
+
+**Why it cannot fail.** `rollback` answers false in exactly one case: `durableText` is a
+string that will not `JSON.parse`, or that `normaliseSchedule` throws on. `durableText` is
+assigned in three places and nowhere else — `load`'s v2 branch, AFTER that same text has
+already parsed and normalised; `save()`; `persist()` — and the last two hand it
+`JSON.stringify` of the live object. `JSON.parse` is deterministic, so text that parsed
+once parses again, and `normaliseSchedule` starts from `emptySchedule()` and guards every
+read off `raw`. (One asymmetry, harmless today and worth knowing: `load` normalises
+`upgradeStoredSchedule(JSON.parse(v2))` and `rollback` normalises `JSON.parse(durable)`
+with no upgrade. `upgradeStoredSchedule` only ever adds an empty `advances`, and
+`normaliseSchedule` guards that field, so the un-upgraded shape goes through.)
+
+**No line was added.** The only branch that could be written there would be a dialog
+nobody can reach, carrying a Hebrew string nobody could argue over against a real screen —
+dead code with a product decision inside it, which is worse than the gap. What went in
+instead is the standing guard: a suite that pins the verdict at all three doors, with the
+instrument proved first — `rollback` IS made to answer false, for text `State` never
+produces, so the three trues are a fact about the doors rather than about a function that
+could only say one thing. The day `durableText` is assigned bytes nobody has validated,
+that suite is what says so.
 
 ## What was checked and found sound
 

@@ -10442,5 +10442,113 @@ const VEHICLES_ON = { vehicles: true };
             String(device.dump()[key]).indexOf('2026-08-10') !== -1)));
 }
 
+{
+    suite('the rollback behind «השינוי בוטל» answers true on every door there is');
+
+    // E10, and it is a claim about REACHABILITY. refuseEdit ignores rollback()'s verdict,
+    // and the audit called that "likely unreachable" from reading. This drives it.
+    //
+    // rollback() answers false in exactly one case: durableText is a string that will not
+    // JSON.parse, or that normaliseSchedule throws on. durableText is set in three places
+    // and nowhere else - load's v2 branch, AFTER that text has already parsed and
+    // normalised; save(); persist() - and the last two hand it JSON.stringify of the live
+    // object. JSON.parse is deterministic, so a text that parsed once parses again, and
+    // normaliseSchedule starts from emptySchedule and guards every read off `raw`. So the
+    // false branch is real code that no door reaches, and the sentence «השינוי בוטל כדי
+    // שלא ייראה כאילו נרשם» is true whenever it is said.
+    //
+    // Written down as a standing guard rather than as a fix: the day durableText is
+    // assigned bytes nobody has validated, this suite is what says so.
+    const doors = [];
+    const note = (door, verdict) => doors.push({ door, verdict });
+
+    // The instrument first, and proved before it is believed: rollback CAN answer false,
+    // so the three trues below are a fact about the doors and not about a function that
+    // could only ever say one thing.
+    {
+        const device = makeDevice();
+        seed(device);
+        device.State.save({ silent: true });
+        device.State.durableText = '{"workers":[';
+        given('rollback answers false for text that will not parse',
+            device.State.rollback() === false, String(device.State.durableText));
+    }
+
+    // Door one: the journal write the disk refused. Store.available stays true - a full
+    // disk is not an absent one - so journal() answers false and commit() refuses.
+    {
+        const device = makeDevice();
+        seed(device);
+        device.State.save({ silent: true });
+        device.ctx.askConfirm = () => Promise.resolve(true);
+        device.ctx.askTell = () => Promise.resolve();
+        given('a real record stands behind the screen',
+            typeof device.State.durableText === 'string'
+                && device.State.durableText.length > 0,
+            String(typeof device.State.durableText));
+
+        device.setQuota(() => true);
+        const before = device.State.rollback.bind(device.State);
+        device.State.rollback = function () {
+            const verdict = before();
+            note('a journal write the disk refused', verdict);
+            return verdict;
+        };
+        const refused = device.State.commit(device.call('assignPlace',
+            device.State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01'));
+        given('the edit was refused at that door', refused === false, String(refused));
+    }
+
+    // Door two: a bulk edit, through commitMany and journalBatch.
+    {
+        const device = makeDevice();
+        seed(device);
+        device.State.save({ silent: true });
+        device.ctx.askConfirm = () => Promise.resolve(true);
+        device.ctx.askTell = () => Promise.resolve();
+        device.setQuota(() => true);
+        const before = device.State.rollback.bind(device.State);
+        device.State.rollback = function () {
+            const verdict = before();
+            note('a bulk edit the disk refused', verdict);
+            return verdict;
+        };
+        const refused = device.State.commitMany([
+            device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'),
+            device.call('assignPlace', device.State.schedule, '2026-08-13', 'w_02', 'actual', 'p_01')
+        ]);
+        given('the bulk edit was refused too', refused === false, String(refused));
+    }
+
+    // Door three: the held device, where durableText is null because no save has ever
+    // landed. The suite above measures what the screen holds; this one measures the
+    // verdict refuseEdit throws away.
+    {
+        const device = makeDevice({ storage: { 'scheduleData:v2': '{"schemaVersion":2,"workers":[' } });
+        device.State.load();
+        device.ctx.askConfirm = () => Promise.resolve(true);
+        device.ctx.askTell = () => Promise.resolve();
+        device.State.schedule.workers = [
+            { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+        device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+        const before = device.State.rollback.bind(device.State);
+        device.State.rollback = function () {
+            const verdict = before();
+            note('a device holding nothing durable', verdict);
+            return verdict;
+        };
+        const refused = device.State.commit(device.call('assignPlace',
+            device.State.schedule, '2026-08-14', 'w_01', 'actual', 'p_01'));
+        given('the edit was refused on the held device', refused === false, String(refused));
+    }
+
+    check('every door refuseEdit is reached by rolled back successfully',
+        doors.length === 3 && doors.every(entry => entry.verdict === true),
+        JSON.stringify(doors));
+    check('and the three doors are three different ones',
+        new Set(doors.map(entry => entry.door)).size === 3,
+        JSON.stringify(doors.map(entry => entry.door)));
+}
+
 
 report();
