@@ -109,7 +109,26 @@ const State = {
         try {
             result = migrateV1(JSON.parse(v1));
         } catch (error) {
+            // The v2 branch above copies the bytes, keeps the original and blocks
+            // writing. This one used to do none of the three: a console line nobody on a
+            // building site can open, and emptySchedule() - which is law 10's third verb,
+            // treated as empty.
+            //
+            // What made it survivable was luck, not a guarantee. Nothing in the app
+            // writes this key, so the bytes stayed and the export sweeps them up by name.
+            // What was lost was anybody's chance of noticing after the one boot dialog,
+            // on a blank screen that invites being re-typed - and re-typing the week onto
+            // an empty schedule and saving it is the sequence the v2 branch was rewritten
+            // to stop. The same sequence, one branch down, was still open.
+            //
+            // So: the same three things, and deliberately the same sentence the v2 branch
+            // says. It is the same failure told to the same person, and there is no
+            // reason for them to read two wordings of it. The load still reports `failed`
+            // rather than `damaged`, so js/app.js says «לא הצלחנו לפתוח את הרישום» - the
+            // dialog written for a screen that opens blank, which is what this one does.
             console.error('v1 schedule unreadable:', error);
+            Recovery.damaged(V1_KEY, v1,
+                'הרישום השמור במכשיר לא נקרא: ' + String(error && error.message || error));
             this.schedule = emptySchedule();
             return { migrated: false, failed: true, damaged };
         }

@@ -1528,6 +1528,49 @@ function record(device, date, workerId, placeId, rate) {
 }
 
 {
+    suite('a v1 record that will not parse is held like every other one');
+
+    // The last unreadable record family in the app that got neither a copy nor a hold.
+    //
+    // The v2 catch two branches up does all three things law 10 asks for: it copies the
+    // bytes through Recovery and reads the copy back, it leaves the original where it is,
+    // and it stops writing. This one printed a console line nobody on a building site can
+    // open and handed back emptySchedule() - which is law 10's third verb, treated as
+    // empty - and then let the session carry on writing.
+    //
+    // What saved it was luck of a kind that is not a guarantee: nothing in the app writes
+    // this key, so the bytes are still there, and the export sweeps them up by name. What
+    // was actually lost is anybody's chance of noticing after the one boot dialog, on a
+    // blank screen that invites being re-typed - which is the exact sequence the v2 branch
+    // was rewritten to stop.
+    const brokenV1 = '{"workers":["דוד"],"places":["הרצליה"],'
+        + '"assignments":[{"index":0,"value":"AUGUST-CELL';
+    const device = makeDevice({ storage: { scheduleData: brokenV1 } });
+    const result = device.State.load();
+
+    check('it says it failed rather than opening blank and quiet',
+        result.failed === true, JSON.stringify(result));
+    check('the raw record is exactly where it was',
+        device.raw('scheduleData') === brokenV1);
+    check('a copy was put aside under its own name',
+        device.raw('scheduleData:damaged') === brokenV1,
+        JSON.stringify(Object.keys(device.dump())));
+    check('and writing is blocked until somebody has been told',
+        device.call('farkadWritesBlocked') === true);
+
+    // The scenario, the same one as the v2 suites above: an empty screen, and somebody
+    // starts entering the week again on top of it.
+    device.State.schedule.workers.push({ id: 'w_99', name: 'מקליד מחדש', active: true });
+    check('re-typing over the blank screen is refused rather than recorded',
+        device.State.save() === false && device.raw('scheduleData:v2') === null,
+        String(device.raw('scheduleData:v2')));
+    check('and the v1 bytes are still the only record of that work',
+        device.raw('scheduleData') === brokenV1);
+    check('with the rescue file able to carry them',
+        JSON.stringify(device.global('Recovery').rawRecords()).indexOf('AUGUST-CELL') !== -1);
+}
+
+{
     suite('a damaged schedule on a full device holds everything');
 
     const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
