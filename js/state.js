@@ -1145,16 +1145,25 @@ function scheduleFingerprint() {
 //   unbound    a bare array, the way a build before the binding wrote one. It is all
 //              there is, so it is carried - and it is NOT evidence about this week
 //   stale      the list names a different schedule: not adopted
+//   unreadable bytes that will not parse. NOT the same as "there were no questions",
+//              which is what this answered before, in the same words it uses for a key
+//              that is not there
 //
 // The version this replaced returned a bare array for all three, and its caller could not
 // tell them apart.
+//
+// It stays a PARSER: nothing here quarantines and nothing here holds. Two callers read
+// through it, and only one of them is reading this device's record - js/ui/backup.js
+// reads a rescue file through it, and a report raised from in here would file another
+// phone's bytes as damage found on this one. Recovery.collect's comment is about exactly
+// that mistake. So the reading caller is told, and decides.
 function parseIssuesRecord(raw, fingerprint) {
     if (!raw) return { issues: [], bound: true, found: false };
     let parsed;
     try {
         parsed = JSON.parse(raw);
     } catch (error) {
-        return { issues: [], bound: true, found: false };
+        return { issues: [], bound: true, found: false, unreadable: true };
     }
     if (Array.isArray(parsed)) return { issues: parsed, bound: false, found: true };
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.issues)) {
@@ -1169,8 +1178,26 @@ function parseIssuesRecord(raw, fingerprint) {
     return { issues: parsed.issues, bound: true, found: true };
 }
 
+// The record on THIS device, and law 10 applies to it like any other.
+//
+// An unreadable list used to come back as [] with nothing said: the migration screen drew
+// "nothing left to decide", the banner said nothing, no copy was made, and the next
+// writeIssues put an empty list over the only place those questions existed. They are not
+// derivable from the schedule beside them - js/recovery.js calls them a question about
+// somebody's day that is still waiting for a person - so losing them loses the half
+// nobody can reconstruct.
+//
+// Reported the way every other damaged record on this device is: the bytes copied under
+// their own name and read back, the original left where it is, the person told, and the
+// device held until they are. The screen still opens, because the questions are not the
+// record - what is refused is writing over them.
 function readIssues() {
-    const read = parseIssuesRecord(Store.get(ISSUES_KEY), scheduleFingerprint());
+    const raw = Store.get(ISSUES_KEY);
+    const read = parseIssuesRecord(raw, scheduleFingerprint());
+    if (read.unreadable && typeof Recovery !== 'undefined' && Recovery && Recovery.damaged) {
+        Recovery.damaged(ISSUES_KEY, raw,
+            'רשימת הרישומים הממתינים להחלטה לא נקראה.');
+    }
     return read.issues;
 }
 
@@ -1183,6 +1210,12 @@ function readIssues() {
 // questions are still somebody's questions and are kept, but nothing here pretends to
 // know which week they are about.
 function writeIssues(issues, options) {
+    // The same line State.save and State.persist carry, for the same reason. The record
+    // under this key may BE the unreadable one, and a device that has not yet told
+    // somebody about it must not write anything over it - least of all an empty list,
+    // which is what a reader that could not parse it hands straight back.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+
     const bound = !options || options.bound !== false;
     const record = { issues: issues || [] };
     if (bound) record.forSchedule = scheduleFingerprint();
