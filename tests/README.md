@@ -56,10 +56,14 @@ So: run it before and after a change that touches a hot path - the day screen, t
 the numbers mean something. `features/performance/findings.md` is the baseline they are read
 against, and it names the machine, the runtime and the seeds.
 
-It carries ONE DELIBERATE RED, in the same spirit `test:sendclaim` used to: a phone with no
-cloud never prunes its outbox, so its six-hundredth edit costs eight times its first. That is
-a committed reproduction, not a threshold that wants loosening, and the decision it needs
-belongs to a person - `features/performance/contract-journal-growth.md`.
+It carries ONE DELIBERATE RED, in the same spirit `test:sendclaim` used to: a queue whose
+writes are being refused can never be pruned - `collectQueueGarbage` releases an operation
+only once it is `sent` - so the six-hundredth edit costs eight times the first. That is a
+committed reproduction rather than a threshold that wants loosening, and it is not
+hypothetical: the owner's phone was at fifty-nine pending under a sync error on 3 September
+2026. The remedy is deploying `firestore.rules`, which is the owner's action and nobody
+else's; what needs a person's decision in code is written down in
+`features/performance/contract-journal-growth.md`.
 
 A green sendclaim is not the same as a green protocol. The client half is measured in
 `tests/cas.test.mjs` against the harness, and a harness-only green would prove only that

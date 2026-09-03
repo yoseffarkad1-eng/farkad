@@ -106,7 +106,14 @@ function spread(values) {
         + `max ${round(sorted[sorted.length - 1])}, n=${sorted.length})`;
 }
 
-// A page with the app on it, on a phone-sized viewport, with no cloud anywhere near it.
+// A page with the app on it, on a phone-sized viewport.
+//
+// The cloud config in js/sync/firebase-config.js is LIVE, so the app tries for it - and this
+// container cannot reach gstatic.com, so the SDK import fails, connectCloudLater resets, no
+// adapter is installed and the status line reads «הנתונים נשמרים במכשיר הזה בלבד». That is
+// not the same state as the owner's phone, which HAS an adapter and has its writes refused;
+// it is a different route to the same dead end, and the difference is written up in
+// features/performance/contract-journal-growth.md.
 async function newPage() {
     const context = await browser.newContext({
         viewport: { width: 390, height: 844 },
@@ -465,19 +472,26 @@ for (const crew of CREWS) {
 
 // ---------------------------------------------------------------- the journal, as it grows
 //
-// A LOCAL-ONLY PHONE NEVER PRUNES ITS JOURNAL, and this is the suite that says so with a
-// number. js/sync/sync.js collectQueueGarbage lets an operation go only when it is BOTH in
-// a written schedule and acknowledged by the cloud (`op.sent`). On the three phones this app
-// runs on today - js/sync/firebase-config.js is empty, so there is no cloud - the second
-// half is never true, so every edit ever made stays in the queue, is written to its own
-// localStorage key, and is replayed onto the schedule at every boot for ever.
+// AN UNSENT QUEUE CANNOT BE PRUNED, and this is the suite that says so with a number.
+// js/sync/sync.js collectQueueGarbage lets an operation go only when it is BOTH in a written
+// schedule and acknowledged by the cloud (`op.sent`). A write that is REFUSED is never sent,
+// so it is never collectable: every edit made since the refusals began stays in the queue,
+// in its own localStorage key, decoded on every queue write and replayed onto the schedule
+// at every boot.
 //
-// That is not a bug to be fixed here: the journal is the ONLY local rebuild of an edit whose
-// schedule write failed (iron law 3), and shortening it is a change to how the record
-// survives a crash. What this suite does is put a cost on it, so the decision is made
-// against a number rather than a feeling.
+// Not hypothetical. js/sync/firebase-config.js carries a live farkad-schedule config, and
+// the owner's iPhone showed «שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (59 ממתינים לשליחה)»
+// on 3 September 2026 - the cloud configured, the writes refused, and the queue climbing by
+// one per edit. Nothing is lost at fifty-nine and nothing is slow; the durable outbox is
+// doing its job. What grows without bound is the cost of the next edit.
+//
+// This suite is NOT the place that fixes it. The remedy is deploying firestore.rules, which
+// drains the queue and lets collection resume, and which is the owner's action alone. What
+// remains after that is a change to how an edit survives a crash (iron law 3), so it gets
+// features/performance/contract-journal-growth.md rather than a patch, and this suite gives
+// the decision a number instead of a feeling.
 {
-    suite('the journal a phone with no cloud accumulates');
+    suite('the journal an unsent queue accumulates');
 
     const { page, result } = await seeded(30, 12, 14, FIRST);
     given('the crew and the fortnight are on the device',
@@ -538,6 +552,9 @@ for (const crew of CREWS) {
     console.log(`  first 25:  ${breakdown(growth.parts.slice(0, 25))}`);
     console.log(`  last 25:   ${breakdown(growth.parts.slice(-25))}`);
 
+    // Six hundred is what the owner's fifty-nine becomes if the refusals go on. Nothing
+    // here sends, so nothing here is collectable - which is the state his phone is in, by a
+    // different route (see the note on open() above).
     check('the queue is still holding every one of them, unsent and unprunable',
         growth.pending === 600, `${growth.pending} paths across ${growth.keys} storage keys`);
     // THE ONE DELIBERATE RED IN THIS FILE. It is a committed reproduction, not a threshold

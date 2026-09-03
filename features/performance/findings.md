@@ -102,9 +102,10 @@ A tap runs `editWithUndo` -> `State.commit` -> the journal write, the whole-sche
 stringify, the verified write and read-back, and a full `render()`. Eleven milliseconds for
 all of that is comfortable.
 
-### One tap, on a phone that has been recording for a month with no cloud
+### One tap, on a phone whose writes are being refused
 
-This is the number that is not fine, and it is the one the crew would feel first.
+This is the number that is not fine, it is the one the crew would feel first, and it is the
+state the owner's phone is in today - see the correction below the table.
 
 | edits made so far | journal | save | render | total |
 |---|---|---|---|---|
@@ -123,17 +124,27 @@ Two separate things are growing here and they need separating:
    writes it, and reads it back to prove it landed (`Store.setVerified`, iron law 3). That
    is 0.7ms on a fortnight and 9.5ms on a season, and it is paid on every edit. This is the
    honest price of never claiming saved before a durable commit, and it is not a defect.
-2. **The journal never shrinks on a phone with no cloud.** `collectQueueGarbage` in
-   `js/sync/sync.js` lets an operation go only when it is BOTH in a written schedule and
-   acknowledged by the cloud (`op.sent`). `js/sync/firebase-config.js` is empty, so there is
-   no cloud, so `op.sent` is never true, so **every edit ever made on these three phones is
-   still in the outbox**, in its own localStorage key, decoded on every queue write and
-   replayed onto the schedule at every boot. The suite proves it: 600 edits, 600 pending
-   paths, 601 storage keys, none collectable.
+2. **The journal never shrinks while the writes are being refused.** `collectQueueGarbage`
+   in `js/sync/sync.js` lets an operation go only when it is BOTH in a written schedule and
+   acknowledged by the cloud (`op.sent`). A refused write is never sent, so it is never
+   collectable, so **every edit made since the refusals began is still in the outbox**, in
+   its own localStorage key, decoded on every queue write and replayed onto the schedule at
+   every boot. The suite proves it: 600 edits, 600 pending paths, 601 storage keys, none
+   collectable.
 
-That second one is a change to how an edit survives a crash, which is iron law 3 and the
-sync layer. It gets a contract, not a patch, and this wave writes the contract and stops:
-`features/performance/contract-journal-growth.md`.
+**This first said "on a phone with no cloud", and that was wrong.**
+`js/sync/firebase-config.js` is NOT empty - it carries a live `farkad-schedule` config and
+`SCHEDULE_DOC_PATH` - and the error was reading CLAUDE.md's "off until it is filled in" as a
+statement about the current state rather than about the mechanism. The real state is worse:
+the owner's iPhone showed «שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (59 ממתינים לשליחה)» on
+3 September 2026. The cloud is configured and the writes are being refused, so the growth
+above is not hypothetical - it is running, at 59 and climbing by one per edit.
+
+Nothing is lost and nothing is slow at 59; the durable outbox is doing its job. The remedy
+is not a code change at all - deploying `firestore.rules` drains the queue and collection
+resumes - and it is the owner's action, not this repository's. The rest is a change to how
+an edit survives a crash, which is iron law 3 and the sync layer, so it gets a contract
+rather than a patch: `features/performance/contract-journal-growth.md`.
 
 ### The reports screen, on a season
 
@@ -187,10 +198,11 @@ the cost of the day screen by worker and nine times the cost of the week grid, o
 that has been in use for a season - and the multiplier grows every week the crew keeps
 using the app.
 
-**Not fine, contracted and NOT fixed here:** the outbox that never prunes without a cloud.
-It makes every edit more expensive than the last, for ever, on the only configuration these
-three phones are actually running. Fixing it means changing when the one local rebuild of an
-unwritten edit may be discarded, which is iron law 3.
+**Not fine, contracted and NOT fixed here:** the outbox that cannot prune while the writes
+are being refused. It makes every edit more expensive than the last, without bound, and it
+is happening on the owner's phone now. The remedy is to deploy `firestore.rules`, which is
+the owner's action; changing when the one local rebuild of an unsent edit may be discarded
+is iron law 3 and needs a person, not an agent.
 
 ## After the one fix this wave made
 
