@@ -310,10 +310,22 @@ function pushUndoState(schedule) {
         // stack starts again rather than taking the app down with it - which is the part
         // of the old comment that was right: this is not the schedule, and refusing to
         // record until somebody looks would be a worse trade for a convenience.
-        if (typeof Recovery !== 'undefined' && Recovery && Recovery.damaged) {
-            Recovery.damaged(UNDO_STACK_KEY, Store.get(UNDO_STACK_KEY),
-                'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה.');
-        }
+        //
+        // AND THE COPY HAS TO HAVE LANDED. The replacement written below holds ONE
+        // schedule where the damaged record holds up to three, so the device that had no
+        // room for the copy can still have room for the write that goes over it - which
+        // is this file's own mistake, one level up: the recovery destroying the thing it
+        // was recovering, on the full device where it is likeliest to be reached.
+        //
+        // So nothing is written from here, and the answer is false. The caller abandons
+        // the restore and says noWayBackNotice(), which is the honest end of a device
+        // that has nowhere to put a way back - and it is true twice over here, because
+        // the way back this device already had is the record it cannot read.
+        const copied = (typeof Recovery !== 'undefined' && Recovery && Recovery.damaged)
+            ? Recovery.damaged(UNDO_STACK_KEY, Store.get(UNDO_STACK_KEY),
+                'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה.')
+            : null;
+        if (!copied) return false;
         stack = [];
     }
 

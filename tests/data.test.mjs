@@ -10166,6 +10166,53 @@ const VEHICLES_ON = { vehicles: true };
         JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('undoStack') !== -1)));
 }
 
+{
+    suite('an undo stack that will not parse, on a device with no room for the copy');
+
+    // The half of law 10 the copy-first fix did not reach: what happens when the copy
+    // ITSELF fails. js/recovery.js's header names that device as the likely one - "on the
+    // device where this is most likely to happen - a full one - the copy had failed too".
+    //
+    // The damaged record holds up to THREE whole schedules and its replacement holds one,
+    // so a disk with no room for the copy can still have room for the write that goes
+    // over it. quarantineRecord answered null, the problem was filed with mustHold, the
+    // banner said the bytes could not be copied - and four lines later the write went out
+    // and the bytes it was describing were gone.
+    //
+    // And the answer was still `true`, so the caller replaced the record believing there
+    // was a confirmed way back. That is the same claim law 3 forbids, made at the moment
+    // the way back was destroyed.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    const broken = '[{"at":"2026-07-01T00:00:00.000Z","schedule":"{\\"marker\\":\\"JULY-WAY-BACK\\"}"'
+        + 'x'.repeat(20000);
+    device.putRaw('scheduleData:undoStack', broken);
+    given('the stack on disk will not parse and holds a way back',
+        device.raw('scheduleData:undoStack').indexOf('JULY-WAY-BACK') !== -1,
+        device.raw('scheduleData:undoStack').slice(0, 40));
+
+    // Room for the small write and none for the big copy. Not a key rule: the quota is by
+    // size, the way a full disk is.
+    device.setQuota((key, value) => String(value).length > 4000);
+    const answer = device.call('pushUndoState', device.State.schedule);
+
+    const problem = device.global('Recovery').problems
+        .find(entry => entry.key === 'scheduleData:undoStack');
+    given('the copy was refused and the device is held',
+        Boolean(problem) && problem.copy === null && problem.mustHold === true
+            && device.call('farkadWritesBlocked') === true,
+        JSON.stringify([problem && problem.copy, problem && problem.mustHold,
+            device.call('farkadWritesBlocked')]));
+
+    check('the damaged bytes are still on the device',
+        Object.keys(device.dump()).some(key =>
+            String(device.dump()[key]).indexOf('JULY-WAY-BACK') !== -1),
+        String(device.raw('scheduleData:undoStack')).slice(0, 60));
+    check('and no way back is reported, so the restore does not go ahead',
+        answer === false, String(answer));
+}
+
 
 {
     suite('a refused edit is taken off the screen even with nothing durable behind it');
