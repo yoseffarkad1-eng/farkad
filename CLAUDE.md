@@ -36,7 +36,11 @@ different from what was done.
   phone is incomplete, not that the signal is weak, and it says so.
 - **The service worker (`sw.js`) serves everything cache-first**, the page included:
   a session runs one build, end to end. Data lives in `localStorage`, always through
-  `Store`; sync is optional and off until `js/sync/firebase-config.js` is filled in.
+  `Store`; sync is optional and off until `js/sync/firebase-config.js` is filled in —
+  **and it IS filled in**, with a live `farkad-schedule` config, so every phone is paired.
+  That sentence describes the mechanism, not the state, and reading it as the state is a
+  mistake somebody actually made this round: a whole finding was written on the premise
+  that the three phones had no cloud. Open the file before you assume either way.
 
 ## The iron laws
 

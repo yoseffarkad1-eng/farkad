@@ -21,7 +21,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { suite, check, same, report } from './runner.mjs';
+import { suite, check, same, given, report } from './runner.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = name => readFileSync(join(ROOT, name), 'utf8');
@@ -344,6 +344,50 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     const vendorFiles = readdirSync(join(ROOT, 'vendor')).sort();
     same('and nothing else is vendored', vendorFiles,
         ['xlsx-0.18.5.LICENSE', 'xlsx-0.18.5.min.js']);
+}
+
+// ------------------------------------------------- one global scope, one name per thing
+//
+// Every script in index.html is a CLASSIC script and they all share one global scope.
+// Two files declaring the same top-level name is therefore not an error and not a warning:
+// the one loaded later silently wins, and the earlier file's version is simply never the
+// one that runs. Every button in this app is an inline onclick resolved on that scope, so
+// the symptom is a button that does the wrong thing - or the right thing until somebody
+// reorders index.html.
+//
+// This is a refactoring hazard, not a coding one, and it grew teeth this round: the sync
+// group is six files, the reports screen is three, and the next split will be somebody
+// extracting a shared helper into two of them without noticing it already exists in a
+// third. Nothing else in this repository would catch that. The suites load the app, the
+// shadowed name resolves to SOMETHING, and the arithmetic is right because the two copies
+// were identical on the day of the split.
+//
+// Read off column-0 declarations, which is this codebase's convention for a top-level
+// name; a nested or conditionally-assigned global is not caught and is not meant to be.
+{
+    suite('no two shipped scripts declare the same global');
+
+    const loaded = [...page.matchAll(/<script src="(js\/[^"]+)"/g)].map(match => match[1]);
+    given('the page loads the scripts this reads', loaded.length > 20, String(loaded.length));
+
+    const declared = new Map();
+    for (const file of loaded) {
+        const source = readFileSync(join(ROOT, file), 'utf8');
+        const names = [...source.matchAll(/^(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)]
+            .map(match => match[1]);
+        for (const name of names) {
+            if (!declared.has(name)) declared.set(name, []);
+            if (!declared.get(name).includes(file)) declared.get(name).push(file);
+        }
+    }
+
+    given('it found the app\'s globals', declared.size > 100, String(declared.size));
+
+    const shadowed = [...declared.entries()]
+        .filter(([, files]) => files.length > 1)
+        .map(([name, files]) => name + ' (' + files.join(' + ') + ')');
+    check('every top-level name is declared in exactly one file',
+        shadowed.length === 0, shadowed.slice(0, 4).join('; '));
 }
 
 report();
