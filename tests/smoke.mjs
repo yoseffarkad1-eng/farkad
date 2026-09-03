@@ -8987,6 +8987,68 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- the hold is said by the button itself
+{
+  // While writes are held, the day screen dims and the dock's copy button "goes quiet".
+  // Quiet was CSS only: `body.writes-blocked .day-actions #copyDayBtn { pointer-events:
+  // none; }` plus opacity .5. Neither reaches the accessibility tree, and pointer-events
+  // stops a finger without stopping a keyboard - so the button reported itself ENABLED,
+  // and Enter on it fired the copy.
+  //
+  // The record was never at risk: State.commit refuses under the hold, which is law 3
+  // working. What was wrong was the SAYING. Somebody who presses a button that announces
+  // itself live and then does nothing has been told the app is broken, not that recording
+  // is held - and this is the button a foreman reaches for first in the morning.
+  //
+  // Fixed where it is DECIDED (renderCopyButton), not where it is painted. The word is the
+  // app's own: «הרישום מושבת» is already what the day screen's progress line says in this
+  // exact state (js/ui/day.js), so no new string enters the product.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+    State.date = '2026-08-12';
+    State.save({ silent: true });
+    render();
+  });
+
+  // The button must be live for the RIGHT reason first, or a disabled reading afterwards
+  // proves nothing: renderCopyButton also disables it when there is no day to copy.
+  const before = await page.evaluate(() => {
+    const btn = document.getElementById('copyDayBtn');
+    return { disabled: btn.disabled, blocked: farkadWritesBlocked() };
+  });
+  // Asserted rather than assumed: smoke has no given(), and this IS a claim - the button
+  // must be live for the right reason before a disabled reading afterwards means anything.
+  check('the copy button is live, and writes are not held',
+    before.disabled === false && before.blocked === false, JSON.stringify(before));
+
+  // The hold, induced the way the app really enters it - a half-written outbox record.
+  const held = await page.evaluate(() => {
+    // Recovery.halt is the app's OWN door into this state - it is what a boot-time
+    // discovery calls, it sets mustHold, and it paints. Reached for after a guess at
+    // `Recovery.load()` threw `is not a function`: the surface here is damaged, evidence,
+    // collect, deliver, halt, blocked, rawRecords, rawSnapshot, acknowledge, paint.
+    Recovery.halt('scheduleData:v2', 'הרישום השמור נפגם');
+    render();
+    const btn = document.getElementById('copyDayBtn');
+    return {
+      blocked: farkadWritesBlocked(),
+      disabled: btn.disabled,
+      title: btn.title,
+      pointerEvents: getComputedStyle(btn).pointerEvents
+    };
+  });
+  check('the hold is on', held.blocked === true, JSON.stringify(held));
+
+  check('the copy button reports itself disabled, not merely unclickable',
+    held.disabled === true, JSON.stringify(held));
+  check('and it says which state it is in, in the app\'s own word for it',
+    typeof held.title === 'string' && held.title.includes('הרישום מושבת'), held.title);
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
