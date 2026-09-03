@@ -230,6 +230,8 @@ written down so it cannot happen twice.
     vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
     tests/recovery.browser.mjs the rescue export through the real button
     tests/forms.browser.mjs    the advance and correction forms, driven in real Chromium
+    tests/reorder.browser.mjs  the reorder mode's drag, in real Chromium: what an exit leaves armed,
+                               and which way the list scrolls when the finger crosses the panel
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator

@@ -241,7 +241,22 @@ function openReorder() {
 function closeReorder() {
     reorderDraft = null;
     reorderBase = null;
-    reorderHeld = null;
+    // A drag still in the air when the mode closes. Escape under a held finger, a tab
+    // tapped mid-sort, the foot's own «יציאה בלי לשמור» - three doors that all end
+    // here, and none of them ends at a pointerup. This used to clear the draft and walk
+    // away from the rest: reorderDragging stayed non-null, its 16ms autoscroll interval
+    // went on ticking on a list nobody can see, and three document listeners stayed
+    // attached. The leak is not the harm; the NEXT open of the panel is - the foot reads
+    // reorderDragging to decide whether the save button may be pressed, so it opened
+    // disabled. That is exactly the failure the comment in startReorderDrag was written
+    // about, reached through a door it does not cover.
+    //
+    // endReorderDrag IS the teardown, so it is the teardown here too rather than a
+    // second copy of it that can drift. Called after the draft is cleared, so the
+    // renderReorderList at the end of it takes its null branch instead of drawing a list
+    // this function is closing; it is safe with no drag in flight, where every line of it
+    // is a no-op.
+    endReorderDrag();
     const line = document.getElementById('reorderLive');
     if (line) line.textContent = '';
     document.removeEventListener('keydown', reorderKeydown);
@@ -552,7 +567,10 @@ function startReorderDrag(event, workerId) {
 
     event.preventDefault();
     reorderHeld = workerId;
-    reorderDragging = { workerId, scrolling: null };
+    // `step` is how far each autoscroll tick moves the list, and which way; it is
+    // held here rather than closed over, so a finger that crosses to the other band
+    // turns the scroll around. See autoScrollWhileDragging.
+    reorderDragging = { workerId, scrolling: null, step: 0 };
     // The edge bands appear only while a row is actually in the air - painted, they say
     // where holding the row will scroll, and gone the moment the finger lets go.
     if (document.body && document.body.classList) document.body.classList.add('reorder-dragging');
@@ -607,8 +625,27 @@ function autoScrollWhileDragging(clientY) {
         }
         return;
     }
-    if (!reorderDragging || reorderDragging.scrolling) return;
-    reorderDragging.scrolling = setInterval(() => { box.scrollTop += step; }, 16);
+    if (!reorderDragging) return;
+
+    // THE DIRECTION IS READ AT EVERY TICK, not captured when the interval was made.
+    //
+    // It used to close over `step`, and the guard below returns early whenever an
+    // interval is already running - so the direction was decided by the first sample
+    // that landed in a band and never revised. A finger going from the top band to the
+    // bottom one with no sample in the dead zone between them left the list running UP
+    // while it was being held against the bottom edge, and only a sample in the middle
+    // could stop it. That is not an exotic path: pointermove is delivered once a frame
+    // at best and the browser coalesces the rest, so a flick down the length of the
+    // panel IS two samples - and on a panel shorter than the two 90px bands there is no
+    // dead zone to land in at all.
+    reorderDragging.step = step;
+    if (reorderDragging.scrolling) return;
+    reorderDragging.scrolling = setInterval(() => {
+        // The drag can end between two ticks; the teardown clears this interval, but a
+        // tick already queued must not scroll a list that nobody is holding.
+        if (!reorderDragging) return;
+        box.scrollTop += reorderDragging.step;
+    }, 16);
 }
 
 function endReorderDrag() {

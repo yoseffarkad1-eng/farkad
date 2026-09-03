@@ -27,7 +27,7 @@ record still true?**
 | E4 | P2 | `js/ui/backup.js:54` at `js/app.js:295` | On a boot that quarantined the v2 record, today's restore point is written from a v1 migration the app deliberately refused to save, and the oldest good restore point is evicted — while the dialog on screen tells the person to check the restore points. | PROVED |
 | E5 | P3 | `js/state.js:111` | A v1 record that will not parse is `console.error` + `emptySchedule()`: no quarantine copy, no `:damaged` key, no write block. The v2 path two branches up does all three. | PROVED (the asymmetry); mitigated |
 | E6 | P3 | `js/app.js:54` | The one `.catch(() => {})` on a user tap. The only place that can swallow a real programming error out of an `onclick`. | SUSPECTED |
-| E7 | P3 | `js/ui/roster.js:241` | `closeReorder()` leaves `reorderDragging`, its 16ms autoscroll interval and two document pointer listeners standing. Self-heals at the next `pointerup`. | SUSPECTED, narrow |
+| E7 | P3 | `js/ui/roster.js:241` | `closeReorder()` leaves `reorderDragging`, its 16ms autoscroll interval and three document pointer listeners standing — and the autoscroll's direction is captured in the interval's closure, so a drag that crosses the panel scrolls the wrong way. | **PROVED in Chromium; FIXED** |
 | E8 | P4 | `js/ui/backup.js:356`, `:401` | `readUndoStack()` answers `[]` for a stack it cannot parse, and `dropUndoState` then reports `gone: true` about an entry it could not see. | PROVED by reading; no record moves |
 | E9 | P4 | `js/app.js:325` + `:345` | A damaged boot that also migrates raises «הנתונים הועברו לגרסה החדשה» over a migration `js/state.js:122` deliberately did not write down — then displaces it in the same tick. | SUSPECTED |
 | E10 | P4 | `js/state.js:404` | `refuseEdit()` ignores `rollback()`'s verdict, so on the one path where the rollback fails the dialog still says «השינוי בוטל כדי שלא ייראה כאילו נרשם». | SUSPECTED, likely unreachable |
@@ -246,16 +246,54 @@ font), `js/ui/offline.js:45` (a background update check), `js/sync/receive.js:36
 `js/sync/send.js:75` (a reread whose absence the caller handles), and `js/sync/restore.js:275`,
 where the inner chain has already called `this.fail(error)` before rethrowing.
 
-## E7 — `closeReorder` leaves the drag armed
+## E7 — `closeReorder` leaves the drag armed, and the autoscroll goes the wrong way
 
-`startReorderDrag` (`js/ui/roster.js:547`) sets `reorderDragging`, attaches three document
-pointer listeners, and may start a 16ms interval at `:611`. All are torn down in
-`endReorderDrag` — and `closeReorder` (`:241-254`) tears down none of them. Reachable by Escape
-during a drag or by a tab tapped mid-sort. Bounded: `onReorderDrag` early-returns on a null
-draft, and the next `pointerup` anywhere runs `endReorderDrag`. So the leak needs a
-keyboard-only exit with a pointer still held. While it stands, `reorderDragging` being non-null
-disables the save button on the next open of the panel — the failure the comment at `:560-562`
-was written about, reached by a door it does not cover. Fix is one line.
+**Both halves reproduced in real Chromium, through the shipped functions, and both are
+fixed.** `tests/reorder.browser.mjs` is the suite; it is new, because the node harness
+loads `js/ui/roster.js` against a document of nulls and so had never once executed
+`startReorderDrag`, `onReorderDrag`, `autoScrollWhileDragging` or `endReorderDrag`.
+
+**The armed drag.** `startReorderDrag` (`js/ui/roster.js:547`) sets `reorderDragging`,
+attaches three document pointer listeners, and may start a 16ms interval. All are torn
+down in `endReorderDrag` — and `closeReorder` tore down none of them. Three doors end
+there without a `pointerup`: Escape under a held finger, a tab tapped mid-sort, and the
+foot's own «יציאה בלי לשמור». The audit called it self-healing at the next `pointerup`,
+which is true and is not the harm. The harm is the NEXT open of the panel: the foot reads
+`save.disabled = Boolean(reorderDragging)`, so it opens with the save button dead — the
+exact failure the comment at `:560-562` was written about, through a door it does not
+cover.
+
+Measured with the drag armed on the handle, the finger held against the bottom band, the
+exit taken through the dialog's own «יציאה בלי לשמור» (pressed, not tapped, so no
+`pointerup` reaches the document), and the interval's ticks COUNTED — the panel's list is
+emptied on close, which clamps `scrollTop` to zero, so the scroll position can no longer
+say whether the timer is running:
+
+    **FAIL**  the drag is not left standing when the mode closes under it  — false
+    **FAIL**  the autoscroll interval is not still ticking after the panel is gone  — 16
+    **FAIL**  and the body no longer wears the class that paints the drag bands  — true
+    **FAIL**  the save button on the next open of the panel is pressable  — {"found":true,"disabled":true}
+
+**The direction, which the audit did not find.** `autoScrollWhileDragging` closed over
+`step`, and it early-returns whenever an interval is already running — so the direction
+was decided by the first sample that landed in a band and never revised. A finger that
+goes from the top band to the bottom one with no sample in the dead zone between them
+leaves the list running UP while it is held against the bottom edge, and only a sample in
+the middle can stop it. Not exotic: `pointermove` is delivered once a frame at best and
+the browser coalesces the rest, so a flick down the length of the panel IS two samples —
+and on a panel shorter than the two 90px bands there is no dead zone to land in at all.
+Parked halfway down a list of forty, one sample at the top edge, then one at the bottom:
+
+    **FAIL**  a finger that has moved to the bottom edge scrolls the list down  — {"room":4305,"parked":2153,"atTop":2027,"atBottom":1747,"height":631}
+
+2,153 → 2,027 is the list scrolling up, correctly, for the finger at the top. 2,027 →
+1,747 is it still scrolling up while the finger holds the bottom edge.
+
+**The fix.** `closeReorder` calls `endReorderDrag()` — the teardown itself, not a second
+copy of it that can drift — after the draft is cleared, so the render at the end of it
+takes its null branch. `autoScrollWhileDragging` keeps the step on `reorderDragging` and
+the interval reads it at every tick, so crossing to the other band turns the scroll
+around on the next tick instead of never.
 
 ## E8, E9, E10
 
@@ -321,7 +359,15 @@ relisten timers. `scheduleRetry` and `scheduleRelisten` each clear before settin
 `catchUpWhenSafe` re-arms with no give-up branch, which is deliberate and stated. The one gap
 is E7.
 
-## What was not done
+## What was not done, when this document was first written
 
 No gate was run for this document, no browser suite was driven, `tests/` was not modified, and
-E6, E7, E9 and E10 are read out of the code rather than reproduced.
+E6, E7, E9 and E10 were read out of the code rather than reproduced.
+
+That paragraph is kept as it was written, because it is the honest record of what the audit
+itself covered. E6-E10 were taken up afterwards, one commit each, and each of those five
+sections above now says what was MEASURED rather than what was read: the reproduction, the
+verbatim red output of the check that would have caught it, and either the fix or the reason
+there is none. A finding that turned out not to be reachable is recorded as not reachable and
+is not fixed - the evidence for that is worth as much as a fix, and pretending otherwise is
+how a defect list grows things nobody can point at.
