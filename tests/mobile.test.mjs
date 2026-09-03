@@ -3441,6 +3441,82 @@ for (const scheme of ['light', 'dark']) {
     await page.context().close();
 }
 
+// ------------------------------------------------- the two evenings the gate never drew
+//
+// The by-site block above assigns ONE site per man and leaves every rate at the default.
+// Those are the two states this app exists to record and neither was ever on the screen
+// at 320: a man at two sites puts a «2 אתרים» badge beside his name, and a day of extra
+// hours puts a number box beside the rate select. Both were measured running the page off
+// the side - 337/320 and 338/320 - by the same minmax(auto, 1fr) trap the 200%-text block
+// below was written for: .rate-control computes min-width:auto and will not shrink below
+// the select plus the hours box, .assign-name beside it shrinks to nothing, and the track
+// takes the card's min-content.
+//
+// The repair for that trap - minmax(0, 1fr) on the phone's .site-grid, and .assign-row
+// allowed to wrap when the rate control cannot shrink - landed with F1 and was NOT
+// claimed to cover this, because there was no check standing here to say either way.
+// This is that check. Both shapes, every width, ordinary text; and the name is measured
+// beside the width for the reason the 200% block gives - a page that fits by having lost
+// the name of the man it prices is not a page that survived.
+for (const width of WIDTHS) {
+    const label = `${width}px: the day, by site, on a real evening`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width], mode: 'sites' });
+    await setInset(page, 34);
+
+    const seeded = await page.evaluate(() => {
+        // w_01 is already at p_1 from the fixture; a second site is the doubled day.
+        assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_2');
+        // And somebody's extra hours, which is what puts the number box on the row.
+        setRate(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_2', RATE_EXTRA, 3);
+        State.save();
+        render();
+        return {
+            split: document.querySelectorAll('.badge-split').length,
+            hours: document.querySelectorAll('.rate-hours').length
+        };
+    });
+    await page.waitForTimeout(300);
+
+    given(`${label}: both shapes are on the screen`,
+        seeded.split > 0 && seeded.hours > 0, JSON.stringify(seeded));
+
+    const m = await page.evaluate(() => {
+        const box = node => node.getBoundingClientRect();
+        const rows = [...document.querySelectorAll('.assign-row')];
+        const withHours = rows.find(row => row.querySelector('.rate-hours'));
+        const withBadge = rows.find(row => row.querySelector('.badge-split'));
+        const nameOf = row => {
+            const name = row && row.querySelector('.assign-name');
+            return name ? Math.round(box(name).width) : null;
+        };
+        return {
+            doc: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth,
+            widest: Math.max(0, ...[...document.querySelectorAll('.site-card')]
+                .map(node => Math.round(box(node).width))),
+            hoursName: nameOf(withHours),
+            splitName: nameOf(withBadge),
+            // Every row's inline end, against the screen's: in RTL a card that overflows
+            // does not necessarily push the DOCUMENT, so this is asked of the rows too.
+            outside: rows.filter(row => box(row).left < -1
+                || box(row).right > window.innerWidth + 1).length
+        };
+    });
+
+    check(`${label}: the page does not run off the side`,
+        m.doc <= m.client + 1, JSON.stringify(m));
+    check(`${label}: and no priced row hangs over the edge`,
+        m.outside === 0, JSON.stringify(m));
+    check(`${label}: the man with extra hours still has a name to read`,
+        m.hoursName !== null && m.hoursName >= 60, JSON.stringify(m));
+    check(`${label}: and so does the man at two sites`,
+        m.splitName !== null && m.splitName >= 60, JSON.stringify(m));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();
