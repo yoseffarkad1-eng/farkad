@@ -1,0 +1,44 @@
+# Publishes firestore.rules to the farkad-schedule project whenever the file changes on
+# main - the "rules first" half of every rollout (tests/rollout.test.mjs says why), done
+# by the merge instead of by a person at a console.
+#
+# It needs one secret, FIREBASE_SERVICE_ACCOUNT: the JSON of a service account key with
+# the "Firebase Rules Admin" role (Firebase console -> Project settings -> Service
+# accounts -> Generate new private key), pasted into the repository's Settings ->
+# Secrets and variables -> Actions. Until the secret exists the job runs, says so, and
+# publishes nothing - so a fork or a clone without the key is never a broken build.
+#
+# The rules are still tested against the emulator before any merge (tests/rules.test.mjs,
+# tests/bootstrap.rules.test.mjs); this only carries a file the gate already passed.
+name: rules
+
+on:
+  push:
+    branches: [main]
+    paths: [firestore.rules, firebase.json, .github/workflows/rules.yml]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The key, if the repository holds one
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "FIREBASE_SERVICE_ACCOUNT is not set: nothing published. See the comment at the top of this file."
+            exit 0
+          fi
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+          echo "HAVE_SA=1" >> "$GITHUB_ENV"
+      - name: Publish firestore.rules
+        if: env.HAVE_SA == '1'
+        run: |
+          npm ci
+          npx firebase deploy --only firestore:rules --project farkad-schedule --non-interactive
