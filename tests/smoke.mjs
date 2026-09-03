@@ -8569,6 +8569,73 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- focus comes back from the field dialogs
+{
+  // Ten of thirteen dialogs return the keyboard to where the person was. Three did not,
+  // and they are exactly the three that focus a text field for themselves: askText - which
+  // is this app's prompt(), so renaming a site, correcting an amount and answering the
+  // reorder guard all go through it - the quick-start paste, and the sign-in sheet.
+  //
+  // The mechanism, and why the fix is not in the three dialogs. watchModals captures the
+  // return target from a MutationObserver, which fires at the microtask checkpoint - AFTER
+  // the whole synchronous block that both revealed the dialog and moved focus into it:
+  //
+  //     parts.modal.style.display = 'flex';   // ask.js  - the mutation is queued
+  //     parts.input.focus();                  // ask.js  - activeElement is now the input
+  //     ...                                   // the observer runs here
+  //
+  // So it recorded a node INSIDE the dialog, and calling .focus() on that node after the
+  // dialog was hidden did nothing at all, which is how focus ended up on <body>. The three
+  // dialogs are not wrong; the capture was late.
+  //
+  // Driven the way the fault happens: something outside is focused, then the dialog is
+  // opened in the same synchronous block, exactly as a real click does it.
+  const page = await open();
+  await seedRoster(page);
+
+  const OPENER = 'settingsBtn';
+  const returns = async (name, which, howToClose) => {
+    const before = await page.evaluate(([id, key]) => {
+      document.getElementById(id).focus();
+      // Opened in the SAME synchronous block as the focus above it, which is what a real
+      // click does and what the observer arrives too late for.
+      if (key === 'ask') askText({ title: 'שם חדש' });
+      if (key === 'quick') openQuickStart();
+      if (key === 'signin') openSignInModal();
+      if (key === 'workerform') showAddWorkerModal();
+      return { opener: document.activeElement && document.activeElement.id };
+    }, [OPENER, which]);
+    await page.waitForTimeout(300);
+    const during = await page.evaluate(() =>
+      document.activeElement && (document.activeElement.id || document.activeElement.tagName));
+    await howToClose();
+    await page.waitForTimeout(350);
+    const after = await page.evaluate(() =>
+      document.activeElement && (document.activeElement.id || document.activeElement.tagName));
+    check(`focus comes back from ${name}`, after === OPENER,
+      JSON.stringify({ before, during, after, wanted: OPENER }));
+  };
+
+  // askText, closed with Escape.
+  await returns('askText', 'ask', async () => { await page.keyboard.press('Escape'); });
+  // The quick start, closed with its own ביטול - this was never about Escape.
+  await returns('the quick start', 'quick',
+    async () => { await page.evaluate(() => closeQuickStart()); });
+  // The sign-in sheet, closed with Escape.
+  await returns('the sign-in sheet', 'signin',
+    async () => { await page.keyboard.press('Escape'); });
+
+  // And one of the ten that already worked, driven the same way, so a repair that moved
+  // the capture cannot quietly have moved THEM: the worker form does not focus a field for
+  // itself, so it is the control case for the three above.
+  await page.evaluate(() => { showView('roster'); render(); });
+  await page.waitForTimeout(200);
+  await returns('the worker form, which was never broken', 'workerform',
+    async () => { await page.keyboard.press('Escape'); });
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
