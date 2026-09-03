@@ -211,8 +211,8 @@ const CONTRAST_FLOOR = 4.5;
 // both jobs below: named elements as they are actually rendered, and the raw token pairs
 // out of :root - because a token that fails on a ground no fixture happens to draw today
 // is still a defect, and the next call site is the one that finds it.
-async function contrast(page, { elements = [], pairs = [] } = {}) {
-    return page.evaluate(([list, tokenPairs]) => {
+async function contrast(page, { elements = [], pairs = [], each = [] } = {}) {
+    return page.evaluate(([list, tokenPairs, everyOf]) => {
         const parse = value => {
             const n = (String(value).match(/[\d.]+/g) || []).map(Number);
             return n.length < 3 ? null : [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
@@ -261,7 +261,24 @@ async function contrast(page, { elements = [], pairs = [] } = {}) {
             return getComputedStyle(probe).color;
         };
 
-        const out = { elements: [], pairs: [] };
+        const out = { elements: [], pairs: [], each: [] };
+
+        // EVERY match, not the first. One instance of a repeated element proves nothing
+        // when what it is drawn on changes from one instance to the next - which is the
+        // whole shape of the site palette: ten colours, and the count sits on all of them.
+        everyOf.forEach(({ name, selector }) => {
+            [...document.querySelectorAll(selector)].filter(visible).forEach(node => {
+                const back = ground(node) || [255, 255, 255];
+                const ink = over(parse(getComputedStyle(node).color), back);
+                out.each.push({
+                    name, selector,
+                    px: Math.round(parseFloat(getComputedStyle(node).fontSize) * 10) / 10,
+                    text: (node.textContent || '').trim().slice(0, 14),
+                    on: `rgb(${back.map(c => Math.round(c)).join(',')})`,
+                    ratio: ratio(ink, back)
+                });
+            });
+        });
 
         list.forEach(({ name, selector }) => {
             const node = [...document.querySelectorAll(selector)].find(visible);
@@ -284,7 +301,7 @@ async function contrast(page, { elements = [], pairs = [] } = {}) {
 
         probe.remove();
         return out;
-    }, [elements, pairs]);
+    }, [elements, pairs, each]);
 }
 
 // Every line on the screen that is written in one named token, and what each of them
@@ -3050,6 +3067,60 @@ for (const scheme of ['light', 'dark']) {
         seen.length >= 10, String(seen.length));
     check(`${label}: every line the app writes in it clears the floor too`,
         faint.length === 0, JSON.stringify(faint.slice(0, 6)));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the count on the head
+//
+// The number of men at a site, written on the site's own colour. Two buttons sit beside
+// it on that same colour and they were argued out properly - css/app.css above
+// .site-head-btn says why the scrim under them has to be DARK: "a white overlay only ever
+// LIGHTENS, so what the glyph is written on depends on the colour underneath, and on the
+// lightest of the ten (--site-5, the ochre) white ink over an 18% white wash is about
+// 3.2:1 - under the 4.5 floor, on one site out of ten, and invisible to anybody reading
+// the stylesheet."
+//
+// That paragraph was written about the COUNT and applied to the buttons. The count kept
+// the white wash, at 22% rather than 18%, which is slightly worse than the number the
+// paragraph refused.
+//
+// So: every card on the screen, not the first one. A palette of ten measured at one slot
+// is a measurement of one colour, and the failure here is a function of which colour is
+// underneath - which is exactly what the comment says and what no check had ever read.
+for (const scheme of ['light', 'dark']) {
+    const label = `390px ${scheme}: the count on the site head`;
+    suite(label);
+
+    const page = await open({ width: 390, height: 844, scheme, mode: 'sites' });
+    await setInset(page, 34);
+
+    const m = await contrast(page, {
+        each: [
+            { name: 'the count', selector: '.site-head-color .site-count' },
+            { name: 'the buttons beside it', selector: '.site-head-color .site-head-btn' }
+        ]
+    });
+    const counts = m.each.filter(item => item.name === 'the count');
+    const buttons = m.each.filter(item => item.name === 'the buttons beside it');
+
+    // Twelve sites in the fixture and a palette of ten, so every slot is on the screen -
+    // including the ochre the comment names, and the wrap past ten.
+    given(`${label}: every palette slot is on the screen to be measured`,
+        counts.length >= 10, JSON.stringify(counts.map(c => c.on)));
+
+    const faint = counts.filter(item => item.ratio < CONTRAST_FLOOR);
+    check(`${label}: the count clears ${CONTRAST_FLOOR}:1 on every colour a site can have`,
+        faint.length === 0,
+        `${faint.length} of ${counts.length} under the floor — ${JSON.stringify(counts.map(c => c.ratio))}`);
+
+    // The neighbours, measured in the same breath and by the same arithmetic. They are
+    // already right; the point of reading them here is that the count is now written on
+    // the same ground as the buttons it sits between, and a later hand that lightens one
+    // of the two takes both red.
+    check(`${label}: and so do the two buttons beside it`,
+        buttons.length > 0 && buttons.every(item => item.ratio >= CONTRAST_FLOOR),
+        JSON.stringify(buttons.map(b => b.ratio)));
 
     await page.context().close();
 }

@@ -1027,8 +1027,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding-bottom: 8px;
     border-bottom: 1px solid var(--line-soft);
 }
-/* The card head carries the site's colour, so the count sits on a translucent white
-   rather than a theme surface that would clash with ten different backgrounds. */
+/* The card head carries the site's colour, so the count sits on a scrim of its own
+   rather than a theme surface that would clash with ten different backgrounds. See the
+   .site-count rule below for which scrim, and why it is not the white one this comment
+   used to name. */
 .site-head-color {
     border-radius: var(--radius);
     /* Was 8px top and bottom, for a head that held only text. It now holds two 44px
@@ -1040,7 +1042,25 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-bottom: none;
     margin-bottom: 10px;
 }
-.site-head-color .site-count { background: rgba(255, 255, 255, .22); color: #fff; }
+/* The SAME dark scrim as the two buttons beside it, and for the reason written out at
+   length above .site-head-btn: a white overlay only ever LIGHTENS, so what white ink is
+   written on depends on the colour underneath, and the palette has ten of those.
+
+   That paragraph was written ABOUT this element - it says so, "the translucent WHITE the
+   count beside it uses" - and then the cure went to the buttons and the count kept the
+   wash, at 22% rather than the 18% the paragraph had measured and refused. Measured on
+   the rendered page, white on the 22% white wash: 4.24 3.60 3.37 4.56 3.29 3.53 4.50
+   4.29 3.57 4.75 in the light scheme, nine of the ten under the floor, and 3.49 3.39
+   3.22 3.73 3.17 3.25 3.66 3.57 3.22 3.55 in the dark, all ten under. On the same dark
+   scrim it is 9.26 to 10.53 light and 6.86 to 7.76 dark - the buttons' own numbers,
+   because it is now the buttons' own ground.
+
+   A dark scrim can only ever darken, so this holds for any colour added to the palette
+   later, which is the property that made it right for the buttons and makes it right
+   here. tests/mobile.test.mjs, "the count on the site head", reads every card on the
+   screen rather than the first one: the failure was a function of which of the ten was
+   underneath, and one sample cannot see that. */
+.site-head-color .site-count { background: rgba(0, 0, 0, .22); color: #fff; }
 /* The name takes the room that is left and the tools keep theirs: a long site name used
    to have the whole head to itself, and without min-width:0 a flex item refuses to go
    under its content's width - it would push the two buttons off the end of a 320px card
