@@ -3220,6 +3220,110 @@ for (const width of WIDTHS) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- one colour, two sites
+//
+// On a phone the week's cells shrink to a 16px block of the site's colour and nothing
+// else: css/app.css hides .site-name, .tag-rate and .site-mark inside .week-cell .cell-line
+// below 424px. Two of those three have a stand-in - the legend under the grid names each
+// colour, and the rate word becomes a white dot or a plus drawn by ::after. The third has
+// none, and it is the one that exists FOR this case.
+//
+// js/ui/sitecolor.js: "Past ten, added colours are variations of ones already used, and
+// telling them apart at night - or with any degree of colour blindness - stops working. So
+// the palette repeats and the second lap is marked with a diamond instead." The eleventh
+// site is painted in the first site's colour on purpose, and the ◆ is the whole of the
+// difference. The phone block switched it off, so on the one screen a manager reads a
+// whole week off, site 1 and site 11 paint the same rgb(29,78,216) with empty innerText -
+// measured - and the legend cannot answer which is which, because the legend names the
+// COLOUR and the colour is shared.
+//
+// This is asked of the whole palette rather than of the pair that was found: every site in
+// the record is drawn, and no two of them may leave the eye the same block. A signature is
+// the colour PLUS whatever else survives the width, so a fix that lets the mark through
+// without giving it a box - display:block on a 0x0 element - does not go green either.
+for (const width of [320, 390]) {
+    const label = `${width}px: the week's colour map`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+
+    // Twelve sites and a palette of ten, so two colours are worn by two sites each. One
+    // man per site, one day, so every block on the grid stands for exactly one place.
+    const seeded = await page.evaluate(() => {
+        setWeekFromDate(State.date);
+        const day = weekDates()[2];
+        State.schedule.places.forEach((place, i) => {
+            const worker = State.schedule.workers[i];
+            if (worker) assignPlace(State.schedule, day, worker.id, 'actual', place.id);
+        });
+        State.save();
+        showView('week');
+        render();
+        return { places: State.schedule.places.length, day };
+    });
+    await page.waitForTimeout(400);
+
+    const blocks = await page.evaluate(() => [...document.querySelectorAll('.week-cell .cell-line')]
+        .map(node => {
+            const name = node.querySelector('.site-name');
+            const mark = node.querySelector('.site-mark');
+            const shown = el => el && getComputedStyle(el).display !== 'none'
+                && el.getBoundingClientRect().width > 0;
+            const box = node.getBoundingClientRect();
+            const markBox = mark ? mark.getBoundingClientRect() : null;
+            return {
+                site: name ? name.textContent : '',
+                colour: getComputedStyle(node).backgroundColor,
+                // What is left of the site's identity once the width has had its way.
+                mark: shown(mark) ? mark.textContent : '',
+                // A white glyph on one of ten colours, a pixel or two from the white dot
+                // a doubled day draws through the middle of the same block: without an
+                // edge of its own it either washes out or merges with the dot.
+                halo: mark ? getComputedStyle(mark).textShadow : 'no mark',
+                nameShown: shown(name) ? (name.textContent || '') : '',
+                // A mark that hangs outside its own 16px block is a mark drawn over the
+                // cell beside it.
+                inside: !markBox || !shown(mark) || (markBox.left >= box.left - 1
+                    && markBox.right <= box.right + 1 && markBox.top >= box.top - 1
+                    && markBox.bottom <= box.bottom + 1)
+            };
+        }));
+
+    // The fixture's own evening is on another day of the same week, so there are more
+    // blocks than sites; what has to hold is that every SITE reached the grid and that
+    // the palette ran out before the sites did.
+    const colours = new Set(blocks.map(b => b.colour));
+    const sites = new Set(blocks.map(b => b.site));
+    given(`${label}: every site in the record is drawn, and the palette really wrapped`,
+        sites.size === seeded.places && colours.size < sites.size,
+        JSON.stringify({ blocks: blocks.length, sites: sites.size, places: seeded.places,
+            colours: colours.size }));
+
+    // The signature is everything the eye has EXCEPT which site it happens to be.
+    const collisions = [];
+    const bySignature = new Map();
+    blocks.forEach(b => {
+        const signature = JSON.stringify([b.colour, b.mark, b.nameShown]);
+        const seen = bySignature.get(signature);
+        if (seen && seen !== b.site) collisions.push({ signature, sites: [seen, b.site] });
+        else bySignature.set(signature, b.site);
+    });
+    check(`${label}: no two sites paint the same block`,
+        collisions.length === 0,
+        `${collisions.length} pairs — ${JSON.stringify(collisions.slice(0, 3))}`);
+
+    check(`${label}: and the cycle mark stays inside the 16px block it marks`,
+        blocks.every(b => b.inside), JSON.stringify(blocks.filter(b => !b.inside).slice(0, 2)));
+
+    const marked = blocks.filter(b => b.mark);
+    check(`${label}: and it carries a dark edge, so it holds on all ten and never merges`,
+        marked.length > 0 && marked.every(b => b.halo && b.halo !== 'none'),
+        JSON.stringify(marked.slice(0, 2).map(b => ({ site: b.site, halo: b.halo }))));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();

@@ -201,9 +201,24 @@ function renderWeekCell(worker, date, labels) {
     const cell = el('td', 'week-cell');
     if (parseLocalDate(date).getDay() === 6) cell.classList.add('col-rest');
 
+    // WHAT THE CELL SAYS, gathered as it is drawn.
+    //
+    // The label below is on a role="button", and a label overrides the element's
+    // contents: the browser reports this cell as a LEAF - childIds 0, measured - so
+    // whatever is not in this list is not on the screen at all for anybody who is not
+    // looking at the picture. The label used to be a template that knew the man and the
+    // date, so a fortnight of work read as thirty identical "who and when", an absence
+    // announced exactly like a blank Tuesday, and a doubled day like an ordinary one.
+    //
+    // Built here, beside the block it describes, rather than from a template - the fault
+    // was a template that knew two of the three facts the block is painted from. Nothing
+    // in it is a new word: נעדר, כפול and the hours badge are the cell's own text.
+    const said = [];
+
     if (isAbsent(State.schedule, date, worker.id, State.layer)) {
         cell.classList.add('cell-absent');
         cell.textContent = 'נעדר';
+        said.push('נעדר');
     } else {
         const entries = entriesFor(State.schedule, date, worker.id, State.layer);
         if (entries.length > 0) {
@@ -213,20 +228,29 @@ function renderWeekCell(worker, date, labels) {
                 // week at once, which is precisely where a colour beats reading a name in
                 // every cell - and where two different sites must not look alike.
                 const line = el('div', 'cell-line tag tag-place');
-                appendSiteName(line, entry.placeId, placeLabelFrom(map, entry.placeId));
+                const place = placeLabelFrom(map, entry.placeId);
+                appendSiteName(line, entry.placeId, place);
                 paintSite(line, entry.placeId);
 
                 const rate = entryRate(entry);
                 // The classes exist for the phone's colour map, where there is no room
                 // for the word: a doubled day carries a white dot, extra hours a plus.
+                let word = '';
                 if (rate === RATE_DOUBLE) {
                     line.classList.add('cell-double');
-                    line.appendChild(el('span', 'tag-rate', 'כפול'));
+                    word = 'כפול';
+                    line.appendChild(el('span', 'tag-rate', word));
                 } else if (rate === RATE_EXTRA) {
                     const hours = entryExtraHours(entry);
                     line.classList.add('cell-extra');
-                    line.appendChild(el('span', 'tag-rate', hours ? plusAmount(hours) : 'נוספות'));
+                    word = hours ? plusAmount(hours) : 'נוספות';
+                    line.appendChild(el('span', 'tag-rate', word));
                 }
+                // isolate(), for the reason js/ui/dom.js gives and this label was the one
+                // place in the app that did not: a site called "B7" is a left-to-right run
+                // inside a right-to-left sentence, and unisolated it slides across the
+                // words around it.
+                said.push(word ? `${isolate(place)} ${word}` : isolate(place));
                 cell.appendChild(line);
             });
         }
@@ -235,9 +259,11 @@ function renderWeekCell(worker, date, labels) {
     cell.tabIndex = 0;
     cell.setAttribute('role', 'button');
     // Without a name an empty cell announces as "button" and nothing else - the reader
-    // hears thirty of those per week. The name says whose day it opens.
-    cell.setAttribute('aria-label',
-        `${worker.name} · ${hebrewDayName(parseLocalDate(date))} ${formatFullDate(parseLocalDate(date))}`);
+    // hears thirty of those per week. The name says whose day it opens, and everything
+    // gathered above says what is on it.
+    const who = `${isolate(worker.name)} · ${hebrewDayName(parseLocalDate(date))} `
+        + `${formatFullDate(parseLocalDate(date))}`;
+    cell.setAttribute('aria-label', said.length ? `${who} · ${said.join(' · ')}` : who);
     const open = () => { State.date = date; showView('day'); };
     cell.addEventListener('click', open);
     cell.addEventListener('keydown', event => {

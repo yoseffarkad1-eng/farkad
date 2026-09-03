@@ -2133,8 +2133,33 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         border-radius: 5px;
     }
     .week-cell .cell-line .site-name,
-    .week-cell .cell-line .tag-rate,
-    .week-cell .cell-line .site-mark { display: none; }
+    .week-cell .cell-line .tag-rate { display: none; }
+
+    /* THE MARK STAYS, and it is the one of the three that has no stand-in.
+       The name has the legend under the grid; the rate word has the dot and the plus
+       below. The cycle mark had nothing, and it is the only thing in the app that tells
+       the eleventh site from the first - js/ui/sitecolor.js paints them the same colour
+       ON PURPOSE ("the palette repeats and the second lap is marked with a diamond
+       instead"), so hiding it here left two sites painting one identical 16px block on
+       the single screen a whole week is read off.
+
+       A corner, because the middle of the block belongs to the rate: a doubled day draws
+       a 6px white dot through it and extra hours a plus, and those are the common marks.
+       The dark halo is the same reasoning as the scrim under .site-head-btn - a white
+       overlay only ever lightens, so white ink needs something dark of its own to hold
+       on all ten colours - and it does a second job here: where the corner glyph comes
+       within a pixel or two of the white dot, what is between them is dark, so the two
+       marks cannot merge into one blob. */
+    .week-cell .cell-line .site-mark {
+        position: absolute;
+        inset-block-start: 0;
+        inset-inline-start: 1px;
+        font-size: 9px;
+        line-height: 1;
+        color: #fff;
+        opacity: 1;
+        text-shadow: 0 0 2px rgba(0, 0, 0, .95);
+    }
 
     /* No room for the word, so the mark: a white dot is a doubled day, a plus is extra
        hours. White clears every one of the ten site colours by design. */

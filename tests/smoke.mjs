@@ -8661,6 +8661,113 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- what a week cell says it is
+{
+  // The week grid is read as a picture, and on a phone the cells shrink to the site's
+  // colour alone. For anybody NOT looking at the picture the cell's aria-label is the
+  // whole cell: a label on a role="button" overrides its contents, so the browser
+  // reports the cell as a leaf and whatever the label does not say is not on the screen
+  // at all.
+  //
+  // It said who and when. Never where - so a fortnight of work read as thirty identical
+  // "דוד · יום שישי 07/08/2026" - and never that a day was an ABSENCE, so a man marked
+  // נעדר announced exactly like a blank Tuesday.
+  //
+  // Swept rather than sampled, and built out of the same three facts the block is
+  // painted from, because the fault was a template that knew two of the three.
+  const page = await open();
+  await page.evaluate(() => {
+    State.schedule.workers = [
+      { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
+      // Latin with a digit: two left-to-right runs inside a right-to-left sentence,
+      // which is the arrangement isolate() exists for.
+      { id: 'w_02', name: 'Ali 2', active: true, dailyRate: 400, hourlyRate: 50 }
+    ];
+    State.schedule.places = [
+      { id: 'p_01', name: 'הרצליה', active: true },
+      { id: 'p_02', name: 'B7', active: true }
+    ];
+    State.date = '2026-08-12';
+    setWeekFromDate(State.date);
+    const dates = weekDates();
+    // A doubled day at two sites, somebody else's single day, and an absence: the three
+    // shapes a cell can take, all in one grid.
+    assignPlace(State.schedule, dates[0], 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, dates[0], 'w_01', 'actual', 'p_02');
+    assignPlace(State.schedule, dates[2], 'w_02', 'actual', 'p_02');
+    markAbsent(State.schedule, dates[3], 'w_01', 'actual');
+    State.save({ silent: true });
+    showView('week');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const cells = await page.evaluate(() => [...document.querySelectorAll('.week-cell')].map(cell => ({
+    label: cell.getAttribute('aria-label') || '',
+    // The site names are in the DOM whatever the width does to their display.
+    sites: [...cell.querySelectorAll('.site-name')].map(node => node.textContent),
+    absent: cell.classList.contains('cell-absent')
+  })));
+
+  const filled = cells.filter(cell => cell.sites.length > 0);
+  const absent = cells.filter(cell => cell.absent);
+  check('the week drew cells of all three shapes to read',
+    cells.length === 14 && filled.length === 2 && absent.length === 1
+      && filled.some(cell => cell.sites.length === 2),
+    JSON.stringify({ cells: cells.length, filled: filled.length, absent: absent.length }));
+
+  const silent = filled.filter(cell => cell.sites.some(site => !cell.label.includes(site)));
+  check('every week cell names the site its block stands for',
+    silent.length === 0, JSON.stringify(silent));
+
+  const blank = absent.filter(cell => !cell.label.includes('נעדר'));
+  check('and an absence is not announced as an empty day',
+    blank.length === 0, JSON.stringify(absent.map(cell => cell.label)));
+
+  // The other side of the same statement: a day with nothing on it must not claim one.
+  const empty = cells.filter(cell => !cell.absent && cell.sites.length === 0);
+  const overclaimed = empty.filter(cell => cell.label.includes('נעדר') || cell.label.includes('B7')
+    || cell.label.includes('הרצליה'));
+  check('and a day with nothing on it says nothing extra',
+    empty.length > 0 && overclaimed.length === 0, JSON.stringify(overclaimed.slice(0, 2)));
+
+  // ---- and the bidi rule, everywhere a name is spoken
+  //
+  // js/ui/dom.js states it: a name that is not plain Hebrew is a left-to-right run
+  // inside a right-to-left sentence, and it slides to wherever the algorithm puts it -
+  // "all the way through offerUndo, askConfirm and every aria-label". It held in every
+  // label on the day screen and in none of the twenty-eight week cells.
+  //
+  // So this asks the question of every aria-label the app draws on every view, not of
+  // the one that was found wrong. A label that IS the bare name needs no isolate: there
+  // is no sentence around it to be reordered by.
+  const bare = await page.evaluate(names => {
+    const out = [];
+    ['day', 'week', 'roster', 'reports'].forEach(view => {
+      showView(view);
+      render();
+      document.querySelectorAll('[aria-label]').forEach(node => {
+        const label = node.getAttribute('aria-label') || '';
+        names.forEach(name => {
+          if (label === name) return;
+          for (let at = label.indexOf(name); at !== -1; at = label.indexOf(name, at + 1)) {
+            if (label[at - 1] === '⁨' || label[at - 1] === '⁦') continue;
+            out.push({ view, cls: String(node.className || node.tagName).slice(0, 20), label });
+            return;
+          }
+        });
+      });
+    });
+    showView('week');
+    render();
+    return out;
+  }, ['Ali 2', 'B7']);
+  check('every aria-label that carries a name isolates it, on every view',
+    bare.length === 0, `${bare.length} bare — ${JSON.stringify(bare.slice(0, 3))}`);
+
+  await page.context().close();
+}
+
 // ------------------------------------------------- nothing on the day screen is unnamed
 {
   // Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼, ⤓, ₪, 🗄️ and ↩️ in this app carries a Hebrew
