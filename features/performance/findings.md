@@ -186,6 +186,48 @@ It makes every edit more expensive than the last, for ever, on the only configur
 three phones are actually running. Fixing it means changing when the one local rebuild of an
 unwritten edit may be discarded, which is iron law 3.
 
+## After the one fix this wave made
+
+`placeLabelsIn` hoisted out of the per-row loop on the day screen, out of the per-cell loop
+on the week grid, and out of the per-day loops in the worker-days modal and the worker's
+WhatsApp statement. One map per draw, never held across draws. Same machine, same seeds,
+median of eleven in-page runs, two independent runs agreeing to within half a millisecond:
+
+| what | before | after |
+|---|---|---|
+| calls to `placeLabelsIn` per `renderDay()`, by worker | 27 | **1** |
+| calls to `placeLabelsIn` per `renderWeek()` | 81 | **1** |
+| day screen by worker, 30 workers, **season** | 12.5ms | **1.8ms** |
+| week grid, 30 workers x 7 days, **season** | 36.1ms | **2.5ms** |
+| day screen by worker, 120 workers, fortnight | 15.6ms | **2.8ms** |
+| day screen by worker, 30 workers, fortnight | 2.3ms | 1.4ms |
+| week grid, 30 workers, fortnight | 8.0ms | 2.9ms |
+| reports screen, season | 11.0ms | 9.8ms |
+
+The two ways of looking at one day now cost the same on a season - 1.8ms and 2.0ms - where
+they differed six-fold before. More important than either number: the cost has stopped
+growing with the record. A screen that was 2.3ms on a fortnight and 12.5ms on a season would
+have gone on getting worse every week the crew kept recording, and would have arrived at the
+phone as "the app got slow this winter" with nothing to point at.
+
+Nothing else was changed. Every other number in the table above is within the noise of the
+run that produced it.
+
+## The budgets
+
+`tests/perf.test.mjs` now pins every one of these as a ceiling at **twice the larger of two
+independent runs**, with a small absolute floor on the millisecond figures - twice 1.4ms is
+2.8ms, and a single scheduler slice on a shared container is wider than that, so the small
+screens get 2x plus a couple of milliseconds and the large ones get 2x. The node counts are
+deterministic and are pinned tighter: 14 nodes per worker on the day screen against the 8
+and 9 measured.
+
+They are calibrated on **one machine class** and are a regression tripwire for a developer's
+machine, not a portable specification. That is the second reason this suite is not in
+`test:all` or `test:release`; the first is that a timing suite on a shared container will
+eventually be red for a reason that is nobody's defect, and a red suite in this repository is
+a stop.
+
 ## What a phone would do to these numbers
 
 Nothing here says. Three of the numbers above will be worse on a phone for a reason this

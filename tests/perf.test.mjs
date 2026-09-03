@@ -25,12 +25,24 @@
 // printed as the detail of every check, so a reader can see the noise rather than trust a
 // single figure.
 //
-// THE CEILINGS ARE TRIPWIRES, NOT A SPEC. Each budget below is roughly twice the number
-// measured on the machine named in features/performance/findings.md. Twice, because a
-// container's clock is not steady enough to defend a tighter margin and because the
-// question worth failing on is "did somebody double the cost of the day screen", not "is
-// this machine 15% busier than the one that set the number". A budget that fires is a
-// question, not a verdict: re-run it, and if it stays red, find what changed.
+// THE CEILINGS ARE TRIPWIRES, NOT A SPEC, AND HERE IS EXACTLY HOW THEY WERE SET.
+//
+// Every budget in this file is TWICE the larger of two independent runs on the machine
+// named in features/performance/findings.md, with a small absolute floor added to the
+// millisecond ones. Twice, because the question worth failing on is "did somebody double
+// the cost of the day screen", not "is this machine fifteen per cent busier tonight". The
+// floor, because twice 1.4ms is 2.8ms and a single scheduler slice on a shared container is
+// wider than that - a budget a hiccup can break is a budget that gets ignored, and an
+// ignored budget is worse than none. So the small screens get 2x plus a couple of
+// milliseconds and the big ones get 2x, which is where the real regressions would show.
+//
+// The two runs agreed to within half a millisecond on every median; the boot numbers, which
+// are dominated by parsing the scripts, moved by a quarter and are budgeted accordingly.
+//
+// These numbers are calibrated on ONE MACHINE CLASS. They are a regression tripwire for a
+// developer's machine, not a portable specification, and that is a second reason this suite
+// is not in the release gate. A budget that fires is a question, not a verdict: re-run it,
+// and if it stays red, find what changed.
 //
 // AND THIS SUITE IS DELIBERATELY OUT OF THE RELEASE GATE. See tests/README.md and
 // package.json: a red suite in this repository is a stop and "flake" is not a cause, and a
@@ -235,10 +247,10 @@ async function bootTiming(page) {
 
     check('the scripts are parsed and run inside 400ms',
         timing.interactive < 400, `domInteractive ${round(timing.interactive)}ms`);
-    check('boot - read the disk, replay the journal, draw the first screen - is under 120ms',
-        timing.boot < 120, `${round(timing.boot)}ms`);
-    check('the app answers a tap inside 500ms of the navigation',
-        timing.bootEnd < 500, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
+    check('boot - read the disk, replay the journal, draw the first screen - is under 60ms',
+        timing.boot < 60, `${round(timing.boot)}ms`);
+    check('the app answers a tap inside 450ms of the navigation',
+        timing.bootEnd < 450, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
 
     await page.context().close();
 }
@@ -258,12 +270,12 @@ async function bootTiming(page) {
     await page.waitForTimeout(400);
     const timing = await bootTiming(page);
 
-    check('a season of records still parses and boots inside 900ms to first tap',
-        timing.bootEnd < 900, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
-    check('boot itself - the parse of the record, the snapshot and the first draw - is under 400ms',
-        timing.boot < 400, `${round(timing.boot)}ms`);
-    check('the first screen is not an unreasonable number of nodes',
-        timing.nodes < 3000, `${timing.nodes} elements`);
+    check('a season of records still parses and boots inside 400ms to first tap',
+        timing.bootEnd < 400, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms`);
+    check('boot itself - the parse of the record, the snapshot and the first draw - is under 200ms',
+        timing.boot < 200, `${round(timing.boot)}ms`);
+    check('the first screen is under 1200 nodes',
+        timing.nodes < 1200, `${timing.nodes} elements`);
 
     await page.context().close();
 }
@@ -276,10 +288,12 @@ async function bootTiming(page) {
 const CREWS = [30, 60, 120];
 const MODES = [['workers', 'לפי עובדים'], ['sites', 'לפי אתרים']];
 
-// Roughly twice the numbers in features/performance/findings.md, per the note at the top of
-// this file. Two entries, because the by-site view builds a card per site with a select on
-// every row and is genuinely a heavier screen than the flat list.
-const DAY_BUDGET = { workers: { 30: 40, 60: 60, 120: 110 }, sites: { 30: 60, 60: 90, 120: 170 } };
+// Twice the measured median plus a couple of milliseconds of floor, per the note at the top
+// of this file. Two entries, because the by-site view builds a card per site with a select
+// on every row and is genuinely a heavier screen than the flat list - which is why they are
+// budgeted separately rather than held to one number that would have to fit the slower one
+// and would then never catch a regression in the faster one.
+const DAY_BUDGET = { workers: { 30: 5, 60: 6, 120: 8 }, sites: { 30: 8, 60: 9, 120: 12 } };
 
 for (const crew of CREWS) {
     for (const [mode, hebrew] of MODES) {
@@ -301,8 +315,12 @@ for (const crew of CREWS) {
             all: document.getElementsByTagName('*').length,
             day: document.getElementById('dayView').getElementsByTagName('*').length
         }));
-        check(`the day screen builds fewer than ${crew * 40} nodes`,
-            size.day < crew * 40, `${size.day} in #dayView, ${size.all} in the page`);
+        // Node counts are deterministic - the same crew builds the same rows every time -
+        // so this one is pinned tight. Measured: about 8 nodes per worker by worker and 9
+        // by site; fourteen is the ceiling, and a row that grows past it is a row somebody
+        // added markup to without noticing what it costs on a screen of a hundred.
+        check(`the day screen builds fewer than ${crew * 14} nodes`,
+            size.day < crew * 14, `${size.day} in #dayView, ${size.all} in the page`);
 
         await page.context().close();
     }
@@ -367,13 +385,13 @@ for (const crew of CREWS) {
     // explanation for.
     await page.evaluate(() => { setDayMode('workers'); showView('day'); render(); });
     const byWorker = await timeInPage(page, 'renderDay();');
-    check('the day screen by worker redraws in under 8ms on a season of records',
-        median(byWorker) < 8, spread(byWorker));
+    check('the day screen by worker redraws in under 5ms on a season of records',
+        median(byWorker) < 5, spread(byWorker));
 
     await page.evaluate(() => { setDayMode('sites'); showView('day'); render(); });
     const bySite = await timeInPage(page, 'renderDay();');
-    check('the day screen by site redraws in under 8ms on a season of records',
-        median(bySite) < 8, spread(bySite));
+    check('the day screen by site redraws in under 5ms on a season of records',
+        median(bySite) < 5, spread(bySite));
 
     // The two ways of looking at one day must cost about the same. They draw the same
     // record and roughly the same number of rows; a five-fold difference between them is
@@ -385,8 +403,8 @@ for (const crew of CREWS) {
 
     await page.evaluate(() => { setWeekFromDate(State.date); showView('week'); render(); });
     const week = await timeInPage(page, 'renderWeek();');
-    check('the week grid redraws in under 12ms on a season of records',
-        median(week) < 12, spread(week));
+    check('the week grid redraws in under 6ms on a season of records',
+        median(week) < 6, spread(week));
 
     await page.context().close();
 }
@@ -428,10 +446,10 @@ for (const crew of CREWS) {
     });
 
     given('twenty-five taps were actually made', taps.length === 25, `${taps.length} taps`);
-    // The interaction budget everyone uses is 100ms for "instant"; 60ms leaves the browser
-    // room to paint what the render just built inside one frame budget on a machine several
-    // times slower than this one.
-    check('a tap that records a day costs under 60ms end to end', median(taps) < 60, spread(taps));
+    // Twice the measured median, and comfortably inside the 100ms everyone means by
+    // "instant" - which matters here because the tap is followed by a paint of what the
+    // render just built, and that paint is not in this number.
+    check('a tap that records a day costs under 30ms end to end', median(taps) < 30, spread(taps));
     // The tenth tap must not cost more than the first. A record that grows with every tap -
     // a journal that never prunes, a map rebuilt per row - shows up here and nowhere else.
     check('the last five taps are no worse than twice the first five',
@@ -507,8 +525,8 @@ for (const crew of CREWS) {
     await page.reload({ waitUntil: 'load' });
     await page.waitForTimeout(400);
     const timing = await bootTiming(page);
-    check('a boot replaying six hundred journal entries is under 1500ms to first tap',
-        timing.bootEnd < 1500, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms, `
+    check('a boot replaying six hundred journal entries is under 900ms to first tap',
+        timing.bootEnd < 900, `domContentLoadedEventEnd ${round(timing.bootEnd)}ms, `
             + `boot ${round(timing.boot)}ms`);
 
     await page.context().close();
@@ -528,9 +546,9 @@ for (const crew of CREWS) {
         result.landed === true, JSON.stringify(result));
 
     const RANGES = [
-        ['a fortnight', '2026-01-02', '2026-01-15', 220, 400],
-        ['a month', '2026-01-02', '2026-02-01', 320, 600],
-        ['a season, 200 days', '2026-01-02', '2026-07-20', 1200, 2400]
+        ['a fortnight', '2026-01-02', '2026-01-15', 4, 8],
+        ['a month', '2026-01-02', '2026-02-01', 4, 10],
+        ['a season, 200 days', '2026-01-02', '2026-07-20', 12, 25]
     ];
 
     for (const [label, from, to, arithmeticBudget, screenBudget] of RANGES) {
@@ -554,7 +572,7 @@ for (const crew of CREWS) {
 
     const nodes = await page.evaluate(() =>
         document.getElementById('reportsView').getElementsByTagName('*').length);
-    check('the season report is under 12000 nodes', nodes < 12000, `${nodes} elements`);
+    check('the season report is under 5000 nodes', nodes < 5000, `${nodes} elements`);
 
     await page.context().close();
 }
@@ -569,11 +587,11 @@ for (const crew of CREWS) {
 
     await page.evaluate(() => { setWeekFromDate('2026-01-05'); showView('week'); render(); });
     const times = await timeInPage(page, 'renderWeek();');
-    check('one redraw of the week grid is under 120ms', median(times) < 120, spread(times));
+    check('one redraw of the week grid is under 8ms', median(times) < 8, spread(times));
 
     const nodes = await page.evaluate(() =>
         document.getElementById('weekView').getElementsByTagName('*').length);
-    check('the week grid is under 4000 nodes', nodes < 4000, `${nodes} elements`);
+    check('the week grid is under 1200 nodes', nodes < 1200, `${nodes} elements`);
 
     await page.context().close();
 }
@@ -588,9 +606,9 @@ for (const crew of CREWS) {
     suite('State.save(): the whole record, written and read back, on every edit');
 
     const sizes = [
-        ['a fortnight', 14, 25],
-        ['a month', 30, 40],
-        ['a season, 200 days', 200, 120]
+        ['a fortnight', 14, 3],
+        ['a month', 30, 4],
+        ['a season, 200 days', 200, 22]
     ];
 
     for (const [label, days, budget] of sizes) {
@@ -647,8 +665,8 @@ for (const crew of CREWS) {
     check('two hundred redraws grow the heap by less than 4MB',
         grown < 4 * 1024 * 1024,
         `${Math.round(grown / 1024)}KB over 200 renders (${Math.round(perRender / 1024)}KB each)`);
-    check('the heap holding a drawn day screen is under 40MB',
-        memory.after < 40 * 1024 * 1024, `${Math.round(memory.after / (1024 * 1024))}MB`);
+    check('the heap holding a drawn day screen is under 16MB',
+        memory.after < 16 * 1024 * 1024, `${Math.round(memory.after / (1024 * 1024))}MB`);
 
     await page.context().close();
 }
@@ -687,8 +705,8 @@ for (const crew of CREWS) {
     // itself - not the JavaScript - is what the thumb waits for.
     check('the busiest day screen this app can be given is under 5000 nodes',
         size.nodes < 5000, JSON.stringify(size));
-    check('and under 1200 interactive controls',
-        size.buttons + size.selects < 1200,
+    check('and under 500 interactive controls',
+        size.buttons + size.selects < 500,
         `${size.buttons} buttons, ${size.selects} selects`);
 
     await page.context().close();

@@ -100,6 +100,11 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
     npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
                             #   CAS, the rollout, the cutover and two phones writing
                             #   money at once (needs Java)
+    npm run test:perf       # what the app COSTS: time and memory. In NO gate, on purpose -
+                            #   a wall clock on a shared machine goes red for reasons that
+                            #   are nobody's defect, and a red suite here is a stop. Run it
+                            #   either side of a change to a hot path and put both numbers
+                            #   in the message; the baseline is features/performance/
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). NO COUNT IS WRITTEN HERE, deliberately. A
 count belongs to a commit and to nothing else, and one left in a file goes stale the
@@ -194,6 +199,9 @@ written down so it cannot happen twice.
     tests/method.test.mjs      how an advance was handed over, through all four doors
     tests/money.test.mjs       the same shekels on the far side of four real doors
     tests/nonassertions.test.mjs a test that fails when a test stops testing
+    tests/perf.test.mjs        what the app COSTS: boot, the day screen, one tap, the reports, save,
+                               the heap, the node count. Desktop Chromium, a lower bound, never a
+                               phone - and in no gate; tests/README.md says why
     tests/restore.test.mjs     a device holding only part of a restore is caught
     tests/restore.ledger.test.mjs a restore removes no ledger entry, on any phone; all four doors
     tests/upgrade.test.mjs     a v86 disk opened by this build

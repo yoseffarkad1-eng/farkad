@@ -12,6 +12,7 @@ six emulator suites.) From a clean clone:
     npm run test:release    # the RELEASE gate: test:all plus sendclaim and the emulator suites
     npm run test:emulator   # rules, the adapter's CAS, the rollout, the cutover, and two
                             #   phones writing money at once (needs Java)
+    npm run test:perf       # what the app COSTS: time and memory. Not in any gate - see below
 
 `npm test` and `npm run test:all` are DEVELOPMENT gates. Neither one is permission to
 ship, and a green run of either must never be reported as a release gate.
@@ -33,6 +34,32 @@ conflict-carries-the-document, rebase-if-uncontested and hold-if-contested; see
 none of the reproductions was closed by softening what it asserts. It is 43 checks and
 all 43 pass. `npm run test:sendclaim` still runs it directly and still exits non-zero on
 any failure; nothing anywhere may catch that exit code and print success.
+
+## `test:perf` is run on purpose, and is in no gate
+
+`tests/perf.test.mjs` is the one suite here that measures time and memory rather than
+behaviour, and it is deliberately outside `test:all` and `test:release`. Two reasons, and
+both of them are this repository's own rules pointed at a timing suite:
+
+A red suite here is a stop, and "flake" is not a cause. A number taken off a wall clock on a
+shared container will eventually be red for a reason that is nobody's defect, and the first
+time that happens in the release gate somebody learns to re-run the gate until it is green -
+which is the habit that makes every other suite in this file worthless.
+
+And its ceilings are calibrated on ONE MACHINE CLASS. They are twice the larger of two runs
+on the machine named in `features/performance/findings.md`; on a slower laptop half of them
+are red on arrival, and on a faster one a real regression can hide under them. That is a
+tripwire, not a specification, and a tripwire belongs where a person is looking at it.
+
+So: run it before and after a change that touches a hot path - the day screen, the week grid,
+`State.save`, the reports, boot - and put both numbers in the commit message. That is when
+the numbers mean something. `features/performance/findings.md` is the baseline they are read
+against, and it names the machine, the runtime and the seeds.
+
+It carries ONE DELIBERATE RED, in the same spirit `test:sendclaim` used to: a phone with no
+cloud never prunes its outbox, so its six-hundredth edit costs eight times its first. That is
+a committed reproduction, not a threshold that wants loosening, and the decision it needs
+belongs to a person - `features/performance/contract-journal-growth.md`.
 
 A green sendclaim is not the same as a green protocol. The client half is measured in
 `tests/cas.test.mjs` against the harness, and a harness-only green would prove only that
@@ -293,6 +320,7 @@ several waves of tests and is stale.)
 | fence | `fence.test.mjs` | The write counter that lets a rescue file claim its readings were one moment - what moves it, what must not, and what it costs per edit. |
 | method | `method.test.mjs` | How an advance was handed over, through all four doors and the ledger mirror, the fold and the overlay. |
 | money | `money.test.mjs` | The same literal shekels on the far side of four real doors: a reopen, a second phone, an export, and a restore. |
+| perf | `perf.test.mjs` | What the app COSTS, in milliseconds and in bytes of heap: boot on an empty app and on a season, the day screen at three crew sizes in both modes, one tap end to end through the real button, the reports arithmetic and screen over three ranges, `State.save()` against the size of the record, the heap over two hundred redraws, and the node count of the busiest screen the app can be given. Desktop Chromium in a container and a LOWER BOUND - nothing in it is a measurement of a phone, and the file's header says so. In no gate: see the section above. |
 | nonassertions | `nonassertions.test.mjs` | A test that fails when a test stops testing: every assertion in `tests/` is scanned for the shapes that cannot fail, and the scanner is itself proved against written offenders and written near-misses. |
 | restore | `restore.test.mjs` | A device holding only part of a restore is caught, subtree by subtree, and a frozen v71 companion is bound to the primary it belongs to. |
 | restore-ledger | `restore.ledger.test.mjs` | Rule A: a restore removes no ledger entry, on any phone. The three-device reproduction end to end - two phones and a cloud, a repayment on one of them, a restore on the other - and then the same claim through each of the four doors a whole document replaces the record by. The union is asked of `mergeLedgerInto` itself, so a restore and a snapshot cannot disagree about what merging a ledger means, and one id arriving with two different bodies is still held rather than resolved. |
