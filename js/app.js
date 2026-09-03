@@ -50,8 +50,17 @@ function showView(view) {
     // unsaved order away without a word; now the mode asks its three-answer question
     // and the switch proceeds only once the draft is saved or knowingly discarded.
     if (typeof reorderDraft !== 'undefined' && reorderDraft && view !== 'roster') {
-        confirmReorderExit().then(allowed => { if (allowed) showView(view); })
-            .catch(() => {});
+        // NOT CAUGHT, on purpose. This chain used to end in `.catch(() => {})` - the one
+        // empty catch in this app sitting on a user tap, on the most-tapped control
+        // there is. watchForCrashes listens for unhandledrejection precisely so that a
+        // throw inside an async click handler becomes the crash banner instead of a
+        // tap that does nothing; catching here cut that net, and a TypeError inside
+        // saveReorder left the person looking at a panel that would not close, a tab
+        // that would not switch, and nothing anywhere saying why. Nothing on this path
+        // rejects in the ordinary course - confirmReorderExit answers true or false and
+        // askChoice resolves null when it is displaced - so a rejection here IS a
+        // programming error, and the app already has one place to put those.
+        confirmReorderExit().then(allowed => { if (allowed) showView(view); });
         return;
     }
     // The offer to undo belongs to the screen the change was made on. Left floating over

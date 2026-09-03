@@ -10,8 +10,8 @@
 // outlives the function that made it, which is the kind of state a screenshot cannot
 // see and a data suite cannot reach.
 //
-// Two claims are measured here, both found by reading js/ui/roster.js and both
-// reproduced through the shipped functions before anything was changed:
+// Three claims are measured here, each found by reading the source and each reproduced
+// through the shipped functions before anything was changed:
 //
 //   the mode's exits leave nothing armed. `closeReorder` used to clear the draft and
 //   walk away from the drag: `reorderDragging` stayed non-null, the autoscroll interval
@@ -27,6 +27,13 @@
 //   with no sample in the dead zone between them - a flick, or two pointermoves
 //   coalesced into one - left the list running UP while the finger was holding the
 //   bottom edge.
+//
+//   a save that throws under a tab tap reaches the person. `showView` held the one empty
+//   catch on a user tap in this app, and the only rejection it can swallow comes out of
+//   `confirmReorderExit` or the `saveReorder` it calls - so the measurement belongs
+//   here. The fault is induced, because what is being measured is what the app does with
+//   a throw out of an async click handler, not whether that particular function can
+//   throw.
 //
 // Any uncaught page error fails the run, whatever else passes.
 
@@ -256,6 +263,73 @@ async function open() {
         walk.atBottom > walk.atTop, JSON.stringify(walk));
     check('nothing threw while the list was dragged from one edge to the other',
         errors.length === before, JSON.stringify(errors.slice(before, before + 3)));
+
+    await page.context().close();
+}
+
+// ------------------------------------------------ what a tap does when the save throws
+//
+// E6, and the reason it is here rather than in a file of its own: the one empty catch on
+// a user tap in this app is showView's, and the only thing it can swallow is a rejection
+// out of confirmReorderExit or the saveReorder it calls.
+//
+// The fault is INDUCED, and deliberately so. What is being measured is not that
+// commitRoster can throw - it cannot - but what the app does with a throw out of an
+// async click handler on the most-tapped control there is. `watchForCrashes` installs an
+// unhandledrejection listener precisely so that such a throw becomes the crash banner
+// rather than a tap that does nothing, and this is the one path where that net was cut.
+// tests/forms.browser.mjs exists because a ReferenceError shipped in a save handler; the
+// same shape, on this path, was invisible even to a browser suite, because the catch
+// swallowed it before Playwright could see a page error.
+{
+    suite('a save that throws under a tab tap reaches the person');
+
+    const page = await open();
+    const before = errors.length;
+
+    const tapped = await page.evaluate(async () => {
+        // Something to lose: one row moved, so the door asks its three-answer question
+        // instead of closing quietly.
+        moveDraftTo(reorderDraft[reorderDraft.length - 1], 0);
+        await new Promise(done => setTimeout(done, 100));
+
+        // A programming error inside saveReorder - the shape forms.browser.mjs was
+        // written for, one screen along.
+        State.commitRoster = () => { throw new TypeError('nope is not a function'); };
+
+        const banner = document.getElementById('crashBanner');
+        const before = banner.style.display;
+        showView('week');
+        await new Promise(done => setTimeout(done, 200));
+        const save = [...document.querySelectorAll('#askChoices button')]
+            .find(node => node.textContent === 'שמירה ויציאה');
+        if (!save) return { asked: false };
+        save.click();
+        await new Promise(done => setTimeout(done, 400));
+        return {
+            asked: true,
+            bannerWasHidden: before === 'none',
+            banner: banner.style.display !== 'none',
+            says: banner.textContent,
+            view: currentView,
+            panel: document.getElementById('reorderPanel').classList.contains('open'),
+            draft: reorderDraft !== null
+        };
+    });
+    given('the tab tap asked the exit question and the save was pressed',
+        tapped.asked === true && tapped.bannerWasHidden === true, JSON.stringify(tapped));
+    given('the throw left the person where they were, with the draft still standing',
+        tapped.view === 'roster' && tapped.panel === true && tapped.draft === true,
+        JSON.stringify({ view: tapped.view, panel: tapped.panel, draft: tapped.draft }));
+
+    check('the crash banner is raised rather than the tap doing nothing at all',
+        tapped.banner === true, String(tapped.banner));
+    check('and it carries the message, not just «something went wrong»',
+        String(tapped.says || '').indexOf('nope is not a function') !== -1,
+        JSON.stringify(String(tapped.says || '').slice(0, 200)));
+    check('the throw reached the page as an error rather than being swallowed',
+        errors.length > before,
+        JSON.stringify(errors.slice(before, before + 3)));
 
     await page.context().close();
 }

@@ -26,7 +26,7 @@ record still true?**
 | E3 | P2 | `js/ui/backup.js:47` ← `js/store.js:580` | The reclaim ladder deletes restore points oldest-first without ever reading one, so an unreadable restore point is deleted rather than quarantined. Law 10. | PROVED |
 | E4 | P2 | `js/ui/backup.js:54` at `js/app.js:295` | On a boot that quarantined the v2 record, today's restore point is written from a v1 migration the app deliberately refused to save, and the oldest good restore point is evicted — while the dialog on screen tells the person to check the restore points. | PROVED |
 | E5 | P3 | `js/state.js:111` | A v1 record that will not parse is `console.error` + `emptySchedule()`: no quarantine copy, no `:damaged` key, no write block. The v2 path two branches up does all three. | PROVED (the asymmetry); mitigated |
-| E6 | P3 | `js/app.js:54` | The one `.catch(() => {})` on a user tap. The only place that can swallow a real programming error out of an `onclick`. | SUSPECTED |
+| E6 | P3 | `js/app.js:54` | The one `.catch(() => {})` on a user tap. The only place that can swallow a real programming error out of an `onclick`. | **PROVED in Chromium; FIXED** |
 | E7 | P3 | `js/ui/roster.js:241` | `closeReorder()` leaves `reorderDragging`, its 16ms autoscroll interval and three document pointer listeners standing — and the autoscroll's direction is captured in the interval's closure, so a drag that crosses the panel scrolls the wrong way. | **PROVED in Chromium; FIXED** |
 | E8 | P4 | `js/ui/backup.js:356`, `:401` | `readUndoStack()` answers `[]` for a stack it cannot parse, and `dropUndoState` then reports `gone: true` about an entry it could not see. | PROVED by reading; no record moves |
 | E9 | P4 | `js/app.js:325` + `:345` | A damaged boot that also migrates raises «הנתונים הועברו לגרסה החדשה» over a migration `js/state.js:122` deliberately did not write down — then displaces it in the same tick. | SUSPECTED |
@@ -230,21 +230,52 @@ dialog. It is the only unreadable record family in the app that gets neither a c
 
 ## E6 — the one empty catch on a user tap
 
-`js/app.js:47-56`, in `showView`. `watchForCrashes` installs an `unhandledrejection` listener
-(`js/app.js:250`), so a rejection out of an async click handler normally becomes the crash
-banner. This `.catch(() => {})` is the one place on a user tap where that net is cut: a throw
-inside `confirmReorderExit` (`js/ui/roster.js:298-316`) — or inside `saveReorder`, which it
-calls — leaves the tap doing nothing, with nothing on screen and nothing in the banner. It sits
-on the view switcher, the most-tapped control in the app.
+**Reproduced in real Chromium, and fixed.** `js/app.js:47-56`, in `showView`.
+`watchForCrashes` installs an `unhandledrejection` listener (`js/app.js:250`), so a
+rejection out of an async click handler normally becomes the crash banner. This
+`.catch(() => {})` was the one place on a user tap where that net was cut, and it sat on
+the view switcher — the most-tapped control in the app.
 
-`tests/forms.browser.mjs` exists because "a ReferenceError in a save handler is invisible to
-every node suite, and this is where one shipped from". This is the same shape, on a path no
-browser suite drives.
+**What the person does.** One row moved in the reorder panel, then a tab tapped. The
+door asks its three-answer question, they choose «שמירה ויציאה», and `saveReorder`
+throws. Measured with the throw induced — `State.commitRoster` replaced by a `TypeError`,
+which is the shape `tests/forms.browser.mjs` was written for, one screen along:
 
-The other five empty catches are justified and none is on a tap: `js/ui/bars.js:289` (a late
-font), `js/ui/offline.js:45` (a background update check), `js/sync/receive.js:361` and
-`js/sync/send.js:75` (a reread whose absence the caller handles), and `js/sync/restore.js:275`,
-where the inner chain has already called `this.fail(error)` before rethrowing.
+    {
+      "asked": ["שמירה ויציאה", "יציאה בלי לשמור", "הישארות"],
+      "bannerBefore": "none",
+      "bannerDisplay": "none",
+      "bannerText": "",
+      "view": "roster",
+      "panelOpen": true,
+      "draftStanding": true
+    }
+    pageerrors: []
+
+Nothing. The view does not change, the panel will not close, the crash banner is empty
+and hidden — and `pageerrors: []` is the part that matters most: the catch swallowed the
+rejection before Playwright itself could see a page error, so this failure was invisible
+even to a browser suite that fails on any page error.
+
+**The check that would have caught it**, red on `6155243` with `js/app.js` untouched:
+
+    a save that throws under a tab tap reaches the person
+    **FAIL**  the crash banner is raised rather than the tap doing nothing at all  — false
+    **FAIL**  and it carries the message, not just «something went wrong»  — ""
+    **FAIL**  the throw reached the page as an error rather than being swallowed  — []
+
+**The fix.** The catch is gone, not replaced. Nothing on this path rejects in the
+ordinary course — `confirmReorderExit` answers true or false, and `askChoice` resolves
+`null` when it is displaced rather than rejecting — so a rejection here IS a programming
+error, and the app already has exactly one place to put those. Afterwards the same tap
+raises «⚠️ משהו השתבש במסך…» with `nope is not a function` under it and the reload
+button beside it, and Playwright sees the page error.
+
+**The other five empty catches are justified and none is on a tap**: `js/ui/bars.js:289`
+(a late font), `js/ui/offline.js:45` (a background update check), `js/sync/receive.js:361`
+and `js/sync/send.js:75` (a reread whose absence the caller handles), and
+`js/sync/restore.js:275`, where the inner chain has already called `this.fail(error)`
+before rethrowing.
 
 ## E7 — `closeReorder` leaves the drag armed, and the autoscroll goes the wrong way
 
@@ -335,8 +366,8 @@ and are listed in this file so nobody re-audits them. The rest either tell the p
 state a person reads.
 
 **Promise rejections.** `watchForCrashes` listens for both `error` and `unhandledrejection`, so
-an async `onclick` that throws is not a silent no-op — with the single exception of E6. Every
-long chain terminates in a `.catch`.
+an async `onclick` that throws is not a silent no-op — with the single exception of E6, which
+is now closed and has a check standing on it. Every long chain terminates in a `.catch`.
 
 **Disk-full and the reclaim ladder.** `isQuotaError` and the `available`/`full` split hold; the
 load-time probe deliberately does not declare a full disk unavailable; `set` reclaims only for a
@@ -357,7 +388,7 @@ in a try with both listeners attached first and the 1.5s picture fallback behind
 arms of the flush wrapper, and is `unref`'d. `disconnect()` clears the flush, retry and
 relisten timers. `scheduleRetry` and `scheduleRelisten` each clear before setting.
 `catchUpWhenSafe` re-arms with no give-up branch, which is deliberate and stated. The one gap
-is E7.
+is E7, which is now closed and has a check standing on it - the interval's ticks are counted.
 
 ## What was not done, when this document was first written
 
