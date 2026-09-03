@@ -12,17 +12,18 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v101 (`ee50ae4`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+**`main` is at v102 (`2bae97f`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
+v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v102 — the code put in order, and nothing else
+## v102 — 3 September 2026 — `2bae97f` (PR #14, the tree at `1e0aeb0`)
 
-Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v101 as served
-(`ee50ae4`).
+On `main` since 3 September 2026; whether any phone has taken the update is not known from
+here. Built on v101 as served (`ee50ae4`).
 
 **This build changes nothing a person can see or use.** Not a pixel, not a shekel, not a
 byte on a disk or on the wire. It is the code moved into rooms it can be found in, and the
@@ -55,6 +56,7 @@ a refactor that changed something.
 
 **What it is known NOT to cover**
 
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - **No phone has run any of it.** For a behaviour-neutral build that matters less than it
   did for v101, but "behaviour-neutral" is a claim held by 59 suites, not by a person using
   the app. Every row of `docs/iphone-acceptance.md` is still NOT RUN.
