@@ -413,26 +413,65 @@ function pushUndoState(schedule) {
     return stacked;
 }
 
-function readUndoStack() {
+// The stack, and whether the RECORD that holds it could be read at all.
+//
+// It stays a parser: nothing here quarantines and nothing here holds, the same division
+// parseIssuesRecord draws in js/state.js and for the same reason - three readers go
+// through it and each one has a different right answer for a record that will not parse.
+// `unreadable` is what lets a caller tell "no way back was ever written" from "the way
+// back is here and cannot be read", which are opposite facts that this function used to
+// hand back as one empty array.
+function parseUndoStack(raw) {
+    if (!raw) return { stack: [], found: false };
     try {
-        const raw = Store.get(UNDO_STACK_KEY);
-        const stack = raw ? JSON.parse(raw) : [];
-        return Array.isArray(stack) ? stack : [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed)
+            ? { stack: parsed, found: true }
+            : { stack: [], found: false };
     } catch (error) {
-        return [];
+        return { stack: [], found: false, unreadable: true };
     }
+}
+
+function readUndoStack() {
+    return parseUndoStack(Store.get(UNDO_STACK_KEY)).stack;
 }
 
 // The way back, WITHOUT taking it off the stack. Reading and consuming used to be the
 // same call, so an entry that turned out to be unreadable was destroyed by the attempt
 // that discovered it.
 function peekUndoState() {
-    const top = readUndoStack()[0];
+    const raw = Store.get(UNDO_STACK_KEY);
+    const read = parseUndoStack(raw);
+    const top = read.stack[0];
     if (top && typeof top.schedule === 'string') return top.schedule;
 
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
-    return Store.get(UNDO_KEY);
+    const slot = Store.get(UNDO_KEY);
+    if (slot) return slot;
+
+    // NOTHING READABLE AND NOTHING TO FALL BACK ON - and those are two different
+    // devices. A device that has never restored has no record here at all, and «אין
+    // גיבוי מקומי» is the truth. A device whose stack is sitting right there and will
+    // not parse is being told the opposite of the truth about up to three whole
+    // schedules, and nothing else on this path would ever mention them: pushUndoState is
+    // the only reader that quarantines, and the caller returns before reaching it.
+    //
+    // The device this happens on is a full one. pushUndoState writes the stack and the
+    // single slot as two writes, so a disk that took the first and refused the second
+    // leaves exactly this shape - and a truncated record comes from a full disk in the
+    // first place, which is the pairing js/recovery.js's header names.
+    //
+    // Reported the way every other damaged record on this device is, under the same
+    // sentence pushUndoState's own catch uses for these bytes: a copy under its own
+    // name, read back, the original left where it is, the person told through the banner
+    // and the device held until they acknowledge it. Nothing is written here either way.
+    if (read.unreadable && typeof Recovery !== 'undefined' && Recovery && Recovery.damaged) {
+        Recovery.damaged(UNDO_STACK_KEY, raw,
+            'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה.');
+    }
+    return null;
 }
 
 // The unanswered decisions stored beside a way back, or null when the entry predates
@@ -1830,6 +1869,20 @@ async function restoreLocalBackup() {
     // state without saying so.
     const raw = peekUndoState();
     if (!raw) {
+        // Two different devices, and they must not be told the same thing. peekUndoState
+        // has already quarantined the unreadable one and held the device; what is left
+        // here is which sentence is true. «אין גיבוי מקומי» over a record that is on the
+        // disk and will not parse is the app agreeing that work nobody can read is work
+        // that was never there.
+        if (parseUndoStack(Store.get(UNDO_STACK_KEY)).unreadable) {
+            askTell({
+                title: 'לא בוצע שחזור',
+                message: 'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה, ולכן אין לאן לחזור ' +
+                    'כרגע. העותק נשמר במכשיר ולא נמחק - הסיבה כתובה בהודעה שבראש המסך. ' +
+                    'מה שכבר שמור לא נפגע.'
+            });
+            return;
+        }
         askTell('אין גיבוי מקומי.');
         return;
     }

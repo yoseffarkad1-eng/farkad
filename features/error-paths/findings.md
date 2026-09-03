@@ -28,7 +28,7 @@ record still true?**
 | E5 | P3 | `js/state.js:111` | A v1 record that will not parse is `console.error` + `emptySchedule()`: no quarantine copy, no `:damaged` key, no write block. The v2 path two branches up does all three. | PROVED (the asymmetry); mitigated |
 | E6 | P3 | `js/app.js:54` | The one `.catch(() => {})` on a user tap. The only place that can swallow a real programming error out of an `onclick`. | **PROVED in Chromium; FIXED** |
 | E7 | P3 | `js/ui/roster.js:241` | `closeReorder()` leaves `reorderDragging`, its 16ms autoscroll interval and three document pointer listeners standing — and the autoscroll's direction is captured in the interval's closure, so a drag that crosses the panel scrolls the wrong way. | **PROVED in Chromium; FIXED** |
-| E8 | P4 | `js/ui/backup.js:356`, `:401` | `readUndoStack()` answers `[]` for a stack it cannot parse, and `dropUndoState` then reports `gone: true` about an entry it could not see. | PROVED by reading; no record moves |
+| E8 | P4 | `js/ui/backup.js:356`, `:401` | `readUndoStack()` answers `[]` for a stack it cannot parse. The `dropUndoState` half is NOT REACHABLE — measured. One reader earlier it is: «אין גיבוי מקומי» is said about a record that is on the disk and will not parse, with no copy and no hold. | **half disproved, half PROVED; FIXED** |
 | E9 | P4 | `js/app.js:325` + `:345` | A damaged boot that also migrates raises «הנתונים הועברו לגרסה החדשה» over a migration `js/state.js:122` deliberately did not write down — then displaces it in the same tick, and the displaced dialog OPENS the migration questions over the damage notice. | **PROVED in Chromium; FIXED** |
 | E10 | P4 | `js/state.js:404` | `refuseEdit()` ignores `rollback()`'s verdict, so on the one path where the rollback fails the dialog still says «השינוי בוטל כדי שלא ייראה כאילו נרשם». | SUSPECTED, likely unreachable |
 
@@ -326,15 +326,68 @@ takes its null branch. `autoScrollWhileDragging` keeps the step on `reorderDragg
 the interval reads it at every tick, so crossing to the other band turns the scroll
 around on the next tick instead of never.
 
-## E8 and E10
+## E8 — half of it is not reachable, and the reachable half is one reader earlier
 
-E8: `readUndoStack` answers `[]` for a stack it cannot read, so `dropUndoState` reports
-`gone: true` about an entry it never saw. Nothing moves on the disk. Worth the same
-`found`/`unreadable` distinction `parseIssuesRecord` already draws.
+**Driven, not read.** The audit put E8 on `dropUndoState`: `readUndoStack` answers `[]`
+for a record it cannot parse, so `dropUndoState` would report `gone: true` about an entry
+it never saw. Through the only door either function is reached by —
+`restoreLocalBackup` — that does not happen, and cannot:
 
-E10: `refuseEdit` ignores `rollback()`'s verdict. Likely unreachable — `durableText` only ever
-holds text `State` produced or a v2 record that already parsed — but the whole point of
-`js/state.js:279-293` is that this dialog's sentence must be true.
+    roomForCopy: true    dropCalls: [{ readable: "1 entries", answer: true }]
+    roomForCopy: false   dropCalls: []
+
+`pushUndoState` always runs first. With room for the quarantine copy it files the damaged
+record under its own name and starts a fresh stack, so every later read parses — the drop
+below it saw one readable entry and answered correctly. With no room it returns false, the
+restore is abandoned with «אין מקום במכשיר לשמור את המצב הנוכחי לפני השחזור», and
+`dropUndoState` is never called at all. Both call sites ignore the return value in any
+case. **Not fixed, because there is nothing there to fix**; a comment in the suite records
+the measurement so the next reader does not re-derive it.
+
+**One reader earlier, the same `[]` is reachable and does harm.** `peekUndoState` falls
+back to the single slot, and a device whose slot write was refused while the stack write
+landed has no slot to fall back on. `pushUndoState` writes the two as two writes, and a
+truncated record comes from a full disk in the first place — the pairing
+`js/recovery.js`'s header names. Driven on that device:
+
+    {
+      "peek": null,
+      "told": ["אין גיבוי מקומי."],
+      "problems": [],
+      "blocked": false,
+      "damagedCopyMade": false,
+      "stackUntouched": true
+    }
+
+Up to three whole schedules are sitting on the disk unread, and the app says there is no
+local backup. No copy under its own name, no hold, nothing said — law 10's third verb,
+with the app agreeing on top of it that work nobody can read is work that was never there.
+Nothing is LOST, because nothing on this path writes that key; what is lost is anybody's
+chance of finding out.
+
+**The checks that would have caught it**, red on `26197e7` with `js/ui/backup.js`
+untouched:
+
+    «there is no local backup» is not said about a stack that would not parse
+    **FAIL**  the app does not answer «there is no local backup»  — ["אין גיבוי מקומי."]
+    **FAIL**  it says the list could not be read, and that the copy was kept  — ["אין גיבוי מקומי."]
+    **FAIL**  a copy was put aside under its own name  — ["scheduleData:undoStack"]
+      PASS  the damaged bytes are still exactly where they were  — [{"at":"2026-07-01T00:00:00.000Z","schedule":"{\"marker\":\"
+    **FAIL**  and the device is held until somebody is told  — []
+
+    and a device that really has no way back is still told so
+      PASS  the app says there is no local backup, because there is not  — ["אין גיבוי מקומי."]
+      PASS  and nothing was quarantined over an absence  — []
+
+**The fix**, which is the distinction the finding asked for, drawn where
+`parseIssuesRecord` draws it. `parseUndoStack` is a pure parser answering `found` and
+`unreadable`; `readUndoStack` is one line over it, so the two readers that legitimately
+want "nothing usable" are unchanged. `peekUndoState` quarantines the unreadable record
+through `Recovery.damaged`, under the same sentence `pushUndoState`'s own catch already
+uses for these bytes, and `restoreLocalBackup` says which of the two devices this is. One
+new Hebrew string, pinned verbatim in the same commit; «אין גיבוי מקומי.» is untouched and
+still said on the device that really has no way back, which is what the second suite is
+for.
 
 ## E9 — the boot that claims a migration it refused to write down
 
@@ -391,6 +444,12 @@ unsaved migration is. Nothing is lost by staying quiet: the migration was not wr
 and neither were its questions, so the next boot that reads a healthy record raises both
 again from the top. The second suite in that file is the control — a guard that silenced
 the honest migration too would have passed every check above.
+
+## E10 — `refuseEdit` and the verdict it does not read
+
+`refuseEdit` ignores `rollback()`'s verdict. Likely unreachable — `durableText` only ever
+holds text `State` produced or a v2 record that already parsed — but the whole point of
+`js/state.js:279-293` is that this dialog's sentence must be true.
 
 ## What was checked and found sound
 

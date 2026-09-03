@@ -10309,6 +10309,93 @@ const VEHICLES_ON = { vehicles: true };
         answer === false, String(answer));
 }
 
+{
+    suite('«there is no local backup» is not said about a stack that would not parse');
+
+    // E8, relocated. The audit put it on dropUndoState - readUndoStack answers [] for a
+    // record it cannot parse, so dropUndoState would report gone:true about an entry it
+    // never saw. Driven through the only door either is reached by, that turns out not to
+    // be reachable: restoreLocalBackup always runs pushUndoState first, which either
+    // quarantines the damaged record and replaces it with a readable one - so the drop
+    // below it sees a stack that parses - or refuses, and the restore never gets there.
+    // Measured both ways; the calls to dropUndoState were 1 with a readable stack, and 0.
+    //
+    // What IS reachable is the same [] one reader earlier. peekUndoState falls back to
+    // the single slot, and a device whose slot write was refused while the stack write
+    // landed - a full one, which is where a truncated record comes from in the first
+    // place - has no slot to fall back to. The person presses «לשחזר את המצב שלפני
+    // הטעינה האחרונה», is told «אין גיבוי מקומי.», and up to three whole schedules are
+    // sitting on the disk unread: no copy under its own name, no hold, nothing said. Law
+    // 10's third verb, and the app saying the opposite of the truth on top of it.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    const broken = '[{"at":"2026-07-01T00:00:00.000Z","schedule":"{\\"marker\\":\\"JULY-WAY-BACK\\"}"';
+    device.putRaw('scheduleData:undoStack', broken);
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    const told = [];
+    device.ctx.askTell = message => {
+        told.push(typeof message === 'string' ? message : String((message || {}).message));
+        return Promise.resolve();
+    };
+
+    given('the stack will not parse, holds a way back, and there is no slot beside it',
+        device.raw('scheduleData:undoStack').indexOf('JULY-WAY-BACK') !== -1
+            && device.raw('scheduleData:v2backup') === null,
+        JSON.stringify([device.raw('scheduleData:undoStack').slice(0, 40),
+            device.raw('scheduleData:v2backup')]));
+
+    await device.call('restoreLocalBackup');
+    await settle(60);
+
+    check('the app does not answer «there is no local backup»',
+        told.indexOf('אין גיבוי מקומי.') === -1, JSON.stringify(told));
+    check('it says the list could not be read, and that the copy was kept',
+        told.length === 1 && told[0] === 'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה, ולכן '
+            + 'אין לאן לחזור כרגע. העותק נשמר במכשיר ולא נמחק - הסיבה כתובה בהודעה '
+            + 'שבראש המסך. מה שכבר שמור לא נפגע.',
+        JSON.stringify(told));
+    check('a copy was put aside under its own name',
+        Object.keys(device.dump()).some(key => key.indexOf('scheduleData:undoStack:damaged') === 0),
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('undoStack') !== -1)));
+    check('the damaged bytes are still exactly where they were',
+        device.raw('scheduleData:undoStack') === broken,
+        String(device.raw('scheduleData:undoStack')).slice(0, 60));
+    check('and the device is held until somebody is told',
+        device.call('farkadWritesBlocked') === true,
+        JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
+}
+
+{
+    suite('and a device that really has no way back is still told so');
+
+    // The control. A branch that reported damage for every empty stack would pass every
+    // check above and take the true sentence with it.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    const told = [];
+    device.ctx.askTell = message => {
+        told.push(typeof message === 'string' ? message : String((message || {}).title));
+        return Promise.resolve();
+    };
+
+    given('there is no undo stack and no slot on this device',
+        device.raw('scheduleData:undoStack') === null
+            && device.raw('scheduleData:v2backup') === null);
+
+    await device.call('restoreLocalBackup');
+    await settle(60);
+
+    check('the app says there is no local backup, because there is not',
+        told.length === 1 && told[0] === 'אין גיבוי מקומי.', JSON.stringify(told));
+    check('and nothing was quarantined over an absence',
+        device.global('Recovery').problems.length === 0
+            && device.call('farkadWritesBlocked') === false,
+        JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
+}
+
 
 {
     suite('a refused edit is taken off the screen even with nothing durable behind it');
