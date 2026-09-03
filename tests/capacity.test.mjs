@@ -295,6 +295,58 @@ let seasonDump = null;
         JSON.stringify(snapKeys(after)));
 }
 
+{
+    suite('the reclaim ladder does not spend a restore point it cannot read');
+
+    // Law 10 reaches the ladder too. dropOldestSnapshot listed the snapshot keys and
+    // removed the oldest without ever reading one - and the oldest is the likeliest to be
+    // a truncated write, because a truncated write comes from a full disk and a full disk
+    // is the only thing that calls this. So the one restore point whose bytes could not be
+    // rebuilt from anywhere was the first thing sold to buy space.
+    //
+    // The read path already leaves such a snapshot exactly where it is: G16.4 in
+    // tests/data.test.mjs stages one and pins that the restore says so and touches
+    // nothing. The ladder is the same record, seen from the other side.
+    const first = makeDevice({ deviceId: 'd_truncated' });
+    roster(first, 3);
+    recordDays(first, workingDates(6), 3);
+    ['2026-08-10', '2026-08-11', '2026-08-12'].forEach(date => {
+        first.setToday(date);
+        first.call('takeDailySnapshot');
+    });
+    const disk = first.dump();
+    // A write cut off half way, on the session before this one - which is why it is put
+    // on the disk of a device that is then OPENED on it: this session's Store never held
+    // the whole one, exactly as a phone that was closed mid-write never did.
+    const truncated = String(disk['scheduleData:snap:2026-08-10']).slice(0, 120);
+    disk['scheduleData:snap:2026-08-10'] = truncated;
+
+    const phone = makeDevice({ storage: disk, deviceId: 'd_truncated' });
+    phone.State.load();
+    given('there are three restore points', snapKeys(phone.dump()).length === 3,
+        JSON.stringify(snapKeys(phone.dump())));
+    let parses = true;
+    try { JSON.parse(truncated); } catch (error) { parses = false; }
+    given('and the oldest of them will not parse', parses === false, truncated.slice(0, 40));
+
+    capAt(phone, phone.Store.used() + 64);
+    const wrote = phone.State.commit(phone.call('assignPlace',
+        phone.State.schedule, '2026-08-13', 'w_01', 'actual', 'p_02'));
+    const after = phone.dump();
+
+    check('the edit still landed', wrote === true && phone.Store.full === false,
+        `${wrote} / full=${phone.Store.full}`);
+    check('the restore point that will not parse was not sold to pay for it',
+        after['scheduleData:snap:2026-08-10'] === truncated,
+        String(after['scheduleData:snap:2026-08-10']));
+    check('the ladder stepped over it and spent the oldest READABLE one',
+        !snapKeys(after).includes('scheduleData:snap:2026-08-11'),
+        JSON.stringify(snapKeys(after)));
+    check('and the bytes of that state are still on the device',
+        Object.keys(after).some(key => String(after[key]) === truncated),
+        JSON.stringify(snapKeys(after)));
+}
+
 // ---------------------------------------------------------------- genuinely full
 {
     suite('a device with nowhere left refuses the edit rather than claiming it');

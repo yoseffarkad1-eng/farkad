@@ -3371,8 +3371,19 @@ async function seedRoster(page) {
   await seedRoster(page);
 
   const result = await page.evaluate(() => {
-    // an old restore point, big enough that dropping it is what makes room
-    Store.set('scheduleData:snap:2020-01-01', 'o'.repeat(400 * 1024));
+    // an old restore point, big enough that dropping it is what makes room.
+    //
+    // A REAL one - a schedule, padded to the size this scenario needs. It used to be
+    // 400 KB of the letter 'o', which was a stand-in for a photograph and is not one:
+    // the reclaim ladder now steps over a restore point it cannot parse, because an
+    // unreadable restore point is somebody's only copy of that state and not spare
+    // change (law 10, js/ui/backup.js). What this scenario is about - that an OLD
+    // restore point is what pays for the record - is unchanged; the bytes are now a
+    // restore point rather than filler that happens to sit under the key.
+    Store.set('scheduleData:snap:2020-01-01', JSON.stringify({
+      schemaVersion: 2, workers: [], places: [], days: {}, advances: {},
+      filler: 'o'.repeat(400 * 1024)
+    }));
 
     // then fill the rest of the quota, in small pieces so it ends up close to the brim
     let filled = 0;

@@ -44,11 +44,47 @@ function snapshotDates() {
 // What Store is allowed to throw away when the device runs out of space: the oldest
 // restore point, one at a time. Registered here because Store must not be the thing that
 // decides which of the app's data is expendable.
+//
+// AND ONLY ONE IT CAN READ. This used to list the keys and remove the oldest without ever
+// looking inside it - and the oldest is the likeliest of the three to be a truncated
+// write, because a truncated write comes from a full disk and a full disk is the only
+// thing that calls this at all. So the one restore point whose contents exist nowhere
+// else was the first thing sold. Law 10 has no exception for a ladder: the read path
+// already leaves such a snapshot exactly where it is, and so does this now.
+//
+// Asked of the DISK rather than of the session cache, because the disk is what removal
+// takes away: memory can be holding a whole copy of a record that a half-finished write
+// truncated behind it, and the bytes that would be destroyed are the disk's.
+//
+// Nothing is quarantined from in here. The copy would be a write on a device that has
+// just refused one, and it would re-enter this very ladder to pay for itself. Stepping
+// over is the whole of it; the bytes stay where they are and leave in the rescue file
+// like any other record.
+//
+// When every restore point on the device is unreadable there is nothing here to spend.
+// The ladder ends, Store.full goes up, and the write is refused and SAID - which is the
+// honest end of a full disk and one the person is already told about, rather than a
+// quiet sale of somebody's only copy of a fortnight.
 Store.reclaim = function dropOldestSnapshot() {
     const dates = snapshotDates();
-    if (dates.length === 0) return false;
-    Store.remove(SNAPSHOT_PREFIX + dates[dates.length - 1]);
-    return true;
+    for (let at = dates.length - 1; at >= 0; at -= 1) {
+        const key = SNAPSHOT_PREFIX + dates[at];
+        const raw = Store.durableGet(key);
+        if (raw !== null) {
+            try {
+                JSON.parse(raw);
+            } catch (error) {
+                continue;
+            }
+        }
+        // A null here is a key this session has in memory and the disk does not, so there
+        // is nothing to lose by dropping it and nothing to free either. It goes anyway:
+        // that takes it out of the list, so the ladder makes progress instead of being
+        // offered the same key on every turn.
+        Store.remove(key);
+        return true;
+    }
+    return false;
 };
 
 function takeDailySnapshot() {
