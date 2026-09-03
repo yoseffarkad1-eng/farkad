@@ -42,6 +42,7 @@ const FILES = [
     // askTell, but only inside functions - nothing at its top level touches either, and
     // registering Store.reclaim is exactly the behaviour a full-disk test needs.
     'js/ui/share.js',
+    'js/ui/backup.js',
     // For deleting and archiving a worker. Those two decide what happens to somebody's
     // record, so they are tested the way the data layer is - across a close and reopen,
     // and against a second phone - rather than only through a browser. Same as the file
