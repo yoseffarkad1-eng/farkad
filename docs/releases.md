@@ -12,17 +12,18 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v102 (`2bae97f`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+**`main` is at v103 (`21c8e08`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
+v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v103 — the app put in order, and the panel that was already right
+## v103 — 3 September 2026 — `21c8e08` (PR #15, the tree at `86053d2`)
 
-Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v102 as served
-(`2bae97f`). **No number moved** — not a shekel on a report, not a day on a record, not a
+On `main` since 3 September 2026; **being on `main` is not being on a phone**, and no phone
+is known to have taken it. Built on v102 as served (`2bae97f`). **No number moved** — not a shekel on a report, not a day on a record, not a
 byte on the wire.
 
 **What it gives the crew that v102 does not**
