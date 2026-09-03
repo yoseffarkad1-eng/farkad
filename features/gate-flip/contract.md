@@ -39,19 +39,37 @@ demand the envelope from clients that do not send it stops all three phones. The
 `firebase deploy --only firestore:rules --project farkad-schedule`, and it is the owner's
 to run — no agent does it.
 
+**Last checked against `main` at v103 (`21c8e08`), 3 September 2026.** The conditions below
+are unchanged since v99 wrote them; what has changed is that item 4 is now met and item 2 is
+not, and the re-audit under item 4 has added two open findings worth reading first.
+
 **3. Every phone has a backup exported that day.**
 ⋯ → נסח גיבוי on each phone, saved somewhere off the phone. The flip is revertible in code
 (below) and the ledger it writes is not: entries are append-only by law 1, and a wrong
 entry is corrected by a second entry beside it, never removed.
 
-**4. Items 1–4 of the v98 open list are closed.**
-They are, at v99 — `features/false-holds/contract.md` and its handoff. Two of them were
-reachable only with these gates open, which is exactly why they had to be shut when they
-were found and closed before the gates open:
+**4. Items 1–4 of the v98 open list are closed, and so is the re-audit they led to.**
+They are, and they shipped in **v100** — `features/false-holds/contract.md` and its handoff.
+Three of them were reachable only with these gates open, which is exactly why the gates had
+to be shut when they were found and why they had to be closed before the gates open:
 
 - a fortnight closed after the man had already repaid put the phone into recovery;
 - a phone whose clock was behind moved a payment into the next fortnight silently;
 - two phones each approving the carry plan held one another's approval for ever.
+
+**The data-safety re-audit that shipped beside them found five more and left TWO OPEN**, and
+one of the two is about money with these gates open. Both are in `docs/data-safety-audit.md`
+with runnable reproductions:
+
+- **O1** — a restore is undone on the phone that did NOT ask for it, in the ledger only, with
+  both phones reporting synced. **This one is behind these gates**, and it is a reason to
+  weigh before opening them rather than after: two rules would both fix it and they disagree
+  about somebody's pay, so it needs an answer, not a patch.
+- **O2** — a roster edit made before the first snapshot arrives reverts another phone's rate
+  change on all three devices, silently. This one is NOT behind the gates and is live today.
+
+Neither is a reason the flip cannot happen. Both are reasons the person opening the gates
+should know what is still open underneath them.
 
 **5. The person has read every row of `planAdvanceCarry`.**
 Not the summary — the rows. It says which legacy advance becomes which ledger entry for
