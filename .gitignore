@@ -1,4 +1,8 @@
-node_modules/
+# No trailing slash, deliberately. `node_modules/` matches a DIRECTORY only, and the
+# parallel worktrees this repository is worked in link node_modules rather than copying
+# 366MB per tree - a symlink is not a directory to git, so the slashed form let the link
+# be committed as a tracked file pointing outside the repository. It happened once.
+node_modules
 
 # Firebase emulator output. Written into the working tree by `firebase
 # emulators:exec`, and one of these was committed once already.
