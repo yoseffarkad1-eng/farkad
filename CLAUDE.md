@@ -232,6 +232,8 @@ written down so it cannot happen twice.
     tests/forms.browser.mjs    the advance and correction forms, driven in real Chromium
     tests/reorder.browser.mjs  the reorder mode's drag, in real Chromium: what an exit leaves armed,
                                and which way the list scrolls when the finger crosses the panel
+    tests/boot.browser.mjs     what the boot SAYS, in order, on a disk that both migrates and is
+                               damaged; the sequence, because a claim withdrawn leaves no final state
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator

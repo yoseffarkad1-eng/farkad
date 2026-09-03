@@ -331,7 +331,27 @@ function boot() {
     // the three had gone.
     watchSyncNotice();
 
-    if (result.migrated) {
+    // AND NOT DAMAGED. Both branches read one `result` and both used to fire, in this
+    // order, in the same tick.
+    //
+    // A boot that migrates BECAUSE the v2 record would not parse has migrated nothing to
+    // the disk: js/state.js keeps the migrated week in memory and deliberately does not
+    // save it, because saving it would put pre-migration data over the newest record
+    // there is. «הנתונים הועברו לגרסה החדשה» describes something that happened to this
+    // device; on that boot nothing happened to it. The sentence was then displaced by the
+    // damage notice a few lines down, in the same tick, which is what made this invisible
+    // - a claim made and withdrawn leaves no trace for a check that reads the screen at
+    // the end. See tests/status.test.mjs for where that lesson is written down, and
+    // tests/boot.browser.mjs for this one.
+    //
+    // It was not only invisible. The count>0 arm chains openMigrationModal onto its
+    // dialog, and a DISPLACED dialog resolves - as a dismissal - so the questions modal
+    // opened by itself over the damage notice: a device that is holding its writes,
+    // asking somebody to answer questions about a migration it never recorded and could
+    // not record the answers to. Nothing is lost by staying quiet here. The migration was
+    // not written down and neither were its questions, so the next boot that reads a
+    // healthy record raises both again, from the top.
+    if (result.migrated && !result.damaged) {
         const count = (result.issues || []).length;
         // The counts are stated so they can be checked against the old board rather than
         // taken on trust - a migration that quietly lost a week would look identical to

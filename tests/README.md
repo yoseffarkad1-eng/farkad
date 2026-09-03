@@ -1,14 +1,14 @@
 # The suites
 
-Sixty-two suites, forty-five of which need no browser at all. (Counted off
+Sixty-three suites, forty-five of which need no browser at all. (Counted off
 package.json, which is the only place a suite count is true: `npm test` names the node
-suites, `test:all` adds the ten browser suites, `test:release` adds sendclaim and the
+suites, `test:all` adds the eleven browser suites, `test:release` adds sendclaim and the
 six emulator suites. The count in this paragraph is re-counted whenever a suite is added
 and is true of nothing but the commit it was written on.) From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
-    npm run test:all        # adds smoke, print, mobile, update, forms, reorder,
+    npm run test:all        # adds smoke, print, mobile, update, forms, reorder, boot,
                             #   recovery-browser, handover, swrestart, swidentity
     npm run test:release    # the RELEASE gate: test:all plus sendclaim and the emulator suites
     npm run test:emulator   # rules, the adapter's CAS, the rollout, the cutover, and two
@@ -379,6 +379,7 @@ several waves of tests and is stale.)
 | samefact | `samefact.test.mjs` | One fact written by two phones - the same approval, the same closure, the same correction, under one deterministic id with two names on it - is one fact: dropped from the second write as already done, kept by the merge as one body, never a conflict held for ever. |
 | forms | `forms.browser.mjs` | The advance and correction forms, driven by real clicks in real Chromium: open the history, press תיקון, type a reason, press שמור, read the record. A ReferenceError in a save handler is invisible to every node suite, and this is where one shipped from. |
 | reorder | `reorder.browser.mjs` | The reorder mode, driven by real pointer events in real Chromium. The node harness loads `js/ui/roster.js` against a document of nulls, so the drag, its three document listeners and its 16ms autoscroll interval had never been executed by a suite at all. Two claims: the mode's exits leave nothing armed - the interval's ticks are counted, and a drag left standing is what disabled the save button on the NEXT open of the panel - and the list scrolls the way the finger went, not the way it first went, which is the direction the interval used to capture in its closure and never revise. |
+| boot | `boot.browser.mjs` | What the boot SAYS, in order, on a disk it had to make two decisions about. Asserts the SEQUENCE and not the final state, for the reason `status.test.mjs` was written: the app's dialogs displace one another, so a false sentence raised over a true one leaves no trace. It wraps `askTell` from a DOMContentLoaded listener registered before `js/app.js`'s own, and stages the disk in an init script. Two boots: the one that migrates BECAUSE the v2 record will not parse - where the migration is deliberately not written down, so the app may not say it was - and the ordinary migration, which must still say so and still ask its questions. |
 | status | `status.test.mjs` | What the line is ALLOWED to say. Asserts transitions rather than final states, because a claim made and withdrawn is invisible to a final-state check and that claim is the defect: it wraps setStatus and records what was asked for, what was said, and what was owed at that moment. A queue larger than one write, a restore the cloud will not take, a record Recovery could not read, and a close-and-reopen. |
 | rollout | `rollout.test.mjs` | Publishing the rules, from a GENUINE legacy document — roster, days and an advance, no `protocol`, no `revision`, no receipt. The first protocol write preserves every legacy byte; a bootstrap without its receipt is refused; two phones racing produce exactly one bootstrap and the loser rebases; the exception is one write wide; an un-updated phone works before cutover and is refused after; and a missing document is a different road from a legacy one. |
 | ledger-ingress | `ledger.ingress.test.mjs` | Thirteen shapes of malformed ledger data through every door — boot, load, cloud snapshot, restore, JSON import, raw recovery, migration, full replacement. Each is named by the check that catches it, held aside rather than folded, never normalised or coerced to zero; the record still opens, the bytes are kept, the person is told, writes are blocked, and the rescue export still carries the bytes. |

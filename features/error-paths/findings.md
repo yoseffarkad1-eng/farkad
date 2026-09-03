@@ -29,7 +29,7 @@ record still true?**
 | E6 | P3 | `js/app.js:54` | The one `.catch(() => {})` on a user tap. The only place that can swallow a real programming error out of an `onclick`. | **PROVED in Chromium; FIXED** |
 | E7 | P3 | `js/ui/roster.js:241` | `closeReorder()` leaves `reorderDragging`, its 16ms autoscroll interval and three document pointer listeners standing — and the autoscroll's direction is captured in the interval's closure, so a drag that crosses the panel scrolls the wrong way. | **PROVED in Chromium; FIXED** |
 | E8 | P4 | `js/ui/backup.js:356`, `:401` | `readUndoStack()` answers `[]` for a stack it cannot parse, and `dropUndoState` then reports `gone: true` about an entry it could not see. | PROVED by reading; no record moves |
-| E9 | P4 | `js/app.js:325` + `:345` | A damaged boot that also migrates raises «הנתונים הועברו לגרסה החדשה» over a migration `js/state.js:122` deliberately did not write down — then displaces it in the same tick. | SUSPECTED |
+| E9 | P4 | `js/app.js:325` + `:345` | A damaged boot that also migrates raises «הנתונים הועברו לגרסה החדשה» over a migration `js/state.js:122` deliberately did not write down — then displaces it in the same tick, and the displaced dialog OPENS the migration questions over the damage notice. | **PROVED in Chromium; FIXED** |
 | E10 | P4 | `js/state.js:404` | `refuseEdit()` ignores `rollback()`'s verdict, so on the one path where the rollback fails the dialog still says «השינוי בוטל כדי שלא ייראה כאילו נרשם». | SUSPECTED, likely unreachable |
 
 ## E1 — the damaged undo stack is overwritten by the recovery meant to save it
@@ -326,20 +326,71 @@ takes its null branch. `autoScrollWhileDragging` keeps the step on `reorderDragg
 the interval reads it at every tick, so crossing to the other band turns the scroll
 around on the next tick instead of never.
 
-## E8, E9, E10
+## E8 and E10
 
 E8: `readUndoStack` answers `[]` for a stack it cannot read, so `dropUndoState` reports
 `gone: true` about an entry it never saw. Nothing moves on the disk. Worth the same
 `found`/`unreadable` distinction `parseIssuesRecord` already draws.
 
-E9: on E4's boot both branches fire synchronously — the migration-success sentence is raised
-over a migration that was deliberately not written down, then displaced by the damage notice in
-the same tick. Invisible today for exactly the reason `tests/status.test.mjs` was written, and
-one reordering of `boot()` away from being the sentence on screen.
-
 E10: `refuseEdit` ignores `rollback()`'s verdict. Likely unreachable — `durableText` only ever
 holds text `State` produced or a v2 record that already parsed — but the whole point of
 `js/state.js:279-293` is that this dialog's sentence must be true.
+
+## E9 — the boot that claims a migration it refused to write down
+
+**Reproduced in real Chromium, and fixed.** `tests/boot.browser.mjs` is the suite; it is
+new, because `boot()` is not reachable from `tests/harness.mjs` at all — the harness does
+not load `js/app.js` and could not run it if it did.
+
+**The instrument** is `watchStatus` from `tests/status.test.mjs`, moved to the one
+function the boot speaks through: `askTell` is wrapped and every call recorded IN ORDER.
+A final-state check cannot see this defect, because the app's dialogs displace one another
+— `askResetExtras` resolves the question it is covering as a dismissal — so the false
+sentence leaves no trace on the screen. The wrapper is installed from a `DOMContentLoaded`
+listener registered in a Playwright init script, which runs before `js/app.js` registers
+its own listener for the same event; it cannot go any earlier, because `askTell` is a
+function declaration in a classic script and does not exist until `js/ui/ask.js` has been
+evaluated.
+
+**Measured**, on the same fixture `tests/data.test.mjs` stages for this boot — a truncated
+v2 record with a v1 record under it, two sites sharing a name so the migration raises
+questions:
+
+    "said": ["הנתונים הועברו לגרסה החדשה", "הקובץ השמור נפגם"],
+    "onScreen": "הקובץ השמור נפגם",
+    "migrationModal": "flex",
+    "blocked": true,
+    "v2Intact": "{\"schemaVersion\":2,\"workers\":[{\"id\":\"w_01\",\"name\":\"דו"
+
+Both branches fire, in that order, in the same tick, off one `result`. And
+`migrationModal: "flex"` is the half the audit did not reach: the `count > 0` arm chains
+`openMigrationModal` onto its own dialog, a displaced dialog RESOLVES, so the questions
+modal opened by itself over the damage notice. A device holding its writes, asking
+somebody to answer questions about a migration it never recorded and could not record the
+answers to.
+
+**The checks that would have caught it**, red on `2611cac` with `js/app.js` untouched:
+
+    a boot that migrates because it is damaged says only the true half
+    **FAIL**  the boot does not claim a migration it deliberately did not write down  — ["הנתונים הועברו לגרסה החדשה","הקובץ השמור נפגם"]
+    **FAIL**  it says one thing, and it is that the record is damaged  — ["הנתונים הועברו לגרסה החדשה","הקובץ השמור נפגם"]
+      PASS  and the damage notice is the sentence left on the screen  — "הקובץ השמור נפגם"
+    **FAIL**  and it does not open questions the device could not record the answers to  — "flex"
+    **FAIL**  nor when the damage notice itself is read and closed  — {"migrationModal":"flex","onScreen":"הקובץ השמור נפגם"}
+
+    an ordinary migration still says so, and still asks its questions
+      PASS  the boot says the data was moved to the new version  — ["הנתונים הועברו לגרסה החדשה"]
+      PASS  and puts the unanswered questions in front of the person who read that  — {"migrationModal":"flex","onScreen":"הנתונים הועברו לגרסה החדשה"}
+
+The third line is the point of the whole file: «the damage notice is the sentence left on
+the screen» PASSED throughout. A final-state check reads this boot as correct.
+
+**The fix.** `if (result.migrated && !result.damaged)`. No Hebrew string moved — the damage
+notice already says «מה שרואים כרגע הוא המצב הישן יותר», which is exactly what a shown-but-
+unsaved migration is. Nothing is lost by staying quiet: the migration was not written down
+and neither were its questions, so the next boot that reads a healthy record raises both
+again from the top. The second suite in that file is the control — a guard that silenced
+the honest migration too would have passed every check above.
 
 ## What was checked and found sound
 
