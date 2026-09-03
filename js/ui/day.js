@@ -448,21 +448,59 @@ function bulkAssign(place) {
 // its last Thursday, with the account before it underneath for late corrections. A
 // jump-to-today on top, full day names throughout.
 
+// THE SAME KEYBOARD CONTRACT AS EVERY OTHER DIALOG IN THE APP.
+//
+// This was the one that had only half of it. Escape closed it and nothing else was true:
+// focus never entered, so pressing ☰ moved a reader nowhere and the next Tab went to the
+// tab bar BEHIND the panel that had just opened; Tab was not held, so it walked out into
+// the day list; and closing returned the keyboard to <body> rather than to the ☰.
+//
+// settingsPanel and reorderPanel are not .modal elements either, and both do this by
+// hand. The two pieces that matter are already written once, in js/ui/modal.js, so this
+// borrows them rather than growing a third copy: focus enters at the heading (a reader is
+// told where it has arrived before it is read twenty-four dates), and trapTab keeps it
+// there. The other half - a CLOSED drawer being genuinely absent rather than parked off
+// the edge - is in css/app.css, on .day-drawer, and says so there.
+let drawerOpener = null;
+
 function openDayDrawer() {
+    // Remembered BEFORE the drawer can take focus off it. document.activeElement after a
+    // real tap is the ☰ on a desktop and <body> on iOS, which is why there is a fallback
+    // rather than a stored node: the way back has to exist either way.
+    drawerOpener = document.activeElement;
+
     renderDayDrawer();
     ['dayDrawer', 'dayDrawerBack', 'dayDrawerWrap'].forEach(id =>
         document.getElementById(id).classList.add('drawer-open'));
     document.addEventListener('keydown', drawerKeydown);
+
+    const drawer = document.getElementById('dayDrawer');
+    const title = document.getElementById('dayDrawerTitle');
+    // The class has to be IN EFFECT before the focus call: a visibility:hidden element
+    // cannot take focus, and the style has only been asked for, not computed. Reading a
+    // layout property forces that, and it is one read on a tap.
+    if (drawer) void drawer.offsetHeight;
+    // preventScroll for the same reason the modal helper gives: the heading is at the top
+    // and a focus that scrolls the panel is the bug, not the fix.
+    if (title && title.focus) title.focus({ preventScroll: true });
 }
 
 function closeDayDrawer() {
     ['dayDrawer', 'dayDrawerBack', 'dayDrawerWrap'].forEach(id =>
         document.getElementById(id).classList.remove('drawer-open'));
     document.removeEventListener('keydown', drawerKeydown);
+
+    const opener = (drawerOpener && document.contains(drawerOpener))
+        ? drawerOpener : document.querySelector('.day-nav .drawer-btn');
+    drawerOpener = null;
+    if (opener && opener.focus) opener.focus();
 }
 
 function drawerKeydown(event) {
-    if (event.key === 'Escape') { event.preventDefault(); closeDayDrawer(); }
+    if (event.key === 'Escape') { event.preventDefault(); closeDayDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const drawer = document.getElementById('dayDrawer');
+    if (drawer && typeof trapTab === 'function') trapTab(event, drawer);
 }
 
 function renderDayDrawer() {

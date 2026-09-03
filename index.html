@@ -130,9 +130,16 @@
     <!-- The clip box: a fixed, overflow-hidden viewport layer, so the parked panel can
          never widen the document - the exact bug the page-width tests exist to stop. -->
     <div class="drawer-wrap" id="dayDrawerWrap">
-    <aside class="day-drawer" id="dayDrawer" aria-label="בחירת יום">
+    <!-- role="dialog" and aria-modal, because that is what it is: a backdrop over the
+         whole screen and one way out. It used to be an <aside> with a label, which makes
+         it a permanent landmark that comes and goes - a reader is told there is a
+         "בחירת יום" region on every screen and never told it has arrived in one.
+         The label itself does not move: it is the name announced, and it was argued over.
+         The heading takes an id and tabindex="-1" so focus can enter at it, exactly as
+         #settingsTitle and #reorderTitle do. -->
+    <aside class="day-drawer" id="dayDrawer" role="dialog" aria-modal="true" aria-label="בחירת יום">
         <div class="drawer-head">
-            <h3>לאיזה יום?</h3>
+            <h3 id="dayDrawerTitle" tabindex="-1">לאיזה יום?</h3>
             <button type="button" class="btn-icon" onclick="closeDayDrawer()" aria-label="סגור">✕</button>
         </div>
         <div id="dayDrawerList"></div>

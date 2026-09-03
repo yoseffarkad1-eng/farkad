@@ -2478,6 +2478,21 @@ body.bars-lowered .undo-bar { transform: translateY(var(--bar-drop, 0px)); }
 }
 .drawer-wrap.drawer-open { pointer-events: auto; }
 
+/* CLOSED MEANS ABSENT, not parked off the edge.
+
+   A transform moves a thing on the screen and moves nothing else about it. Closed, this
+   panel was display:flex and visibility:visible with a live offsetParent, so its buttons
+   stayed in the tab order and in the accessibility tree of every screen in the app:
+   before it had ever been opened its ✕ was already a tab stop, and after one open and
+   close it was twenty-six day buttons sitting behind the day list, none of them visible
+   and all of them reachable.
+
+   visibility, not display, and not aria-hidden. aria-hidden takes a thing out of the
+   accessibility tree and leaves it in the tab order, which is the worse of the two
+   halves; display:none takes both but cannot be animated, and this panel slides. So:
+   hidden while closed, visible while open, and the transition delays the flip back to
+   hidden until the slide has finished - which is why the visibility line carries a delay
+   on the way out and none on the way in. */
 .day-drawer {
     position: absolute;
     top: 0;
@@ -2486,13 +2501,18 @@ body.bars-lowered .undo-bar { transform: translateY(var(--bar-drop, 0px)); }
     width: min(310px, 84vw);
     background: var(--surface);
     transform: translateX(100%);
-    transition: transform .2s ease-out;
+    visibility: hidden;
+    transition: transform .2s ease-out, visibility 0s linear .2s;
     box-shadow: var(--shadow-lift);
     display: flex;
     flex-direction: column;
     padding-bottom: var(--safe-bottom);
 }
-.day-drawer.drawer-open { transform: translateX(0); }
+.day-drawer.drawer-open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform .2s ease-out, visibility 0s linear 0s;
+}
 
 .drawer-head {
     display: flex;

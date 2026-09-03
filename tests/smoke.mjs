@@ -8467,6 +8467,108 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- the days drawer keeps the keyboard
+{
+  // The one dialog in this app with no keyboard contract. Twelve others were driven and
+  // measured for this: focus enters every one of them, Tab is held inside every one of
+  // them, Escape closes every one of them. The drawer had Escape and nothing else - and
+  // worse, it never left the page: closed, it was display:flex, visibility:visible,
+  // parked off the inline edge with no aria-hidden and no inert, so its buttons kept a
+  // live offsetParent and stayed in the tab order of every screen. Before it had ever
+  // been opened its ✕ was already a tab stop; after one open and close it was twenty-six
+  // day buttons a Tab walk could reach, none of them on the screen.
+  //
+  // settingsPanel and reorderPanel are not .modal either and both implement the whole
+  // contract by hand. The drawer now uses the same two pieces of js/ui/modal.js they do.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    todayStr = () => '2026-08-12';
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    State.save(); render();
+  });
+
+  // CLOSED, and never yet opened.
+  const fresh = await page.evaluate(() => {
+    const drawer = document.getElementById('dayDrawer');
+    const style = getComputedStyle(drawer);
+    const items = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    return {
+      display: style.display,
+      visibility: style.visibility,
+      reachable: items.filter(node => node.offsetParent !== null
+        && getComputedStyle(node).visibility !== 'hidden').length
+    };
+  });
+  check('a drawer nobody has opened is not in the tab order',
+    fresh.reachable === 0, JSON.stringify(fresh));
+
+  // OPEN: focus enters at the heading, the way the settings sheet and the reorder panel
+  // are entered - a reader is told where it has arrived before it is read a list of days.
+  await page.locator('.day-nav .drawer-btn').click();
+  await page.waitForTimeout(300);
+  const entered = await page.evaluate(() => ({
+    open: document.getElementById('dayDrawer').classList.contains('drawer-open'),
+    role: document.getElementById('dayDrawer').getAttribute('role'),
+    modal: document.getElementById('dayDrawer').getAttribute('aria-modal'),
+    focused: document.activeElement && document.activeElement.id,
+    inside: document.getElementById('dayDrawer').contains(document.activeElement)
+  }));
+  check('the drawer is a dialog and says so', entered.open === true
+    && entered.role === 'dialog' && entered.modal === 'true', JSON.stringify(entered));
+  check('opening it puts the keyboard inside it, at the heading',
+    entered.inside === true && entered.focused === 'dayDrawerTitle',
+    JSON.stringify(entered));
+
+  // Tab is held. Twenty presses, because the drawer holds twenty-four days and one way
+  // out - a trap that leaks on the twenty-first press is not a trap.
+  let leaked = 0;
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press('Tab');
+    if (!(await page.evaluate(() =>
+      document.getElementById('dayDrawer').contains(document.activeElement)))) leaked += 1;
+  }
+  check('Tab does not walk out of the open drawer into the day behind it',
+    leaked === 0, `${leaked} of 20 presses landed outside`);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const shut = await page.evaluate(() => {
+    const drawer = document.getElementById('dayDrawer');
+    const items = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    return {
+      open: drawer.classList.contains('drawer-open'),
+      visibility: getComputedStyle(drawer).visibility,
+      buttons: items.length,
+      reachable: items.filter(node => node.offsetParent !== null
+        && getComputedStyle(node).visibility !== 'hidden').length,
+      focused: document.activeElement && document.activeElement.className
+    };
+  });
+  check('Escape closes it and the keyboard goes back to the ☰ that opened it',
+    shut.open === false && String(shut.focused).includes('drawer-btn'),
+    JSON.stringify(shut));
+  // The half that costs a reader on every screen, not only on this one: a drawer full of
+  // days, drawn and then closed, must be gone from the tab order and from the
+  // accessibility tree - not merely slid off the edge.
+  check('and a closed drawer full of days is out of the tab order again',
+    shut.buttons > 20 && shut.reachable === 0, JSON.stringify(shut));
+
+  // Walked rather than inferred, because that is how the fault was found: Tab from the
+  // top of the day screen and see whether focus ever lands behind the parked panel.
+  await page.evaluate(() => { document.body.focus(); if (document.activeElement) document.activeElement.blur(); });
+  let behind = 0;
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    if (await page.evaluate(() =>
+      document.getElementById('dayDrawer').contains(document.activeElement))) behind += 1;
+  }
+  check('and forty tab presses across the day screen reach none of it',
+    behind === 0, `${behind} of 40 landed inside the closed drawer`);
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
