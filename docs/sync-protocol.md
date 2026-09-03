@@ -15,7 +15,7 @@ What does not work is everything that is not a disjoint field merge:
 - A request that may still land is treated as dead, and the work is sent twice or
   dropped.
 - A stale writer overwrites a newer document, and nothing on either phone notices.
-- The local send claim (`js/sync/sync.js`, `SEND_CLAIM_KEY`) is a lease in
+- The local send claim (`js/sync/send.js`, `SEND_CLAIM_KEY` in `js/sync/sync.js`) is a lease in
   `localStorage`. It coordinates **tabs of one browser profile**. It has never been able
   to order writes across phones and cannot be made to: the three phones share no storage.
   That is the whole of what `tests/sendclaim.test.mjs` was measuring, and why 25 of its
@@ -164,7 +164,7 @@ a first-ever `create` must be a full protocol write at revision 1 with its recei
 
 ## What is implemented at this commit
 
-- The client protocol (`js/sync/sync.js`, `js/sync/firebase-adapter.js`): revision,
+- The client protocol (`js/sync/receive.js` and `js/sync/send.js`, `js/sync/firebase-adapter.js`): revision,
   receipt, conflict-carries-the-document, rebase-if-uncontested, hold-if-contested.
 - The rules above, in `firestore.rules`.
 - `tests/rules.test.mjs`, `tests/cas.emulator.test.mjs` and `tests/rollout.test.mjs`
@@ -193,13 +193,22 @@ and is stated here rather than implied:
 - A receipt is immutable: created once, never updated, never deleted. So a name can
   never be re-pointed at different semantics after the fact.
 
+**Every one of the three above has a check, and this was verified rather than assumed**
+(v103's rules review). `tests/rules.test.mjs`: «a schedule write with no fingerprint at all
+is refused» for the first; «a receipt whose fingerprint disagrees with the document is
+refused» and «a receipt with a fingerprint for a document without one is refused» for the
+second; «and can never be changed afterwards» and «nor deleted» for the third. Adding a
+server-enforced claim to this list without adding its check is how a protocol comes to
+promise a guarantee its rules do not keep.
+
 **Not server-enforced, and it cannot be:** the rules cannot RECOMPUTE the digest. There
 are no loops and no canonical serializer in the rules language, and on an update
 `request.resource.data` is the merged document rather than the patch. A client that
 computes its fingerprint wrongly, or lies about it deliberately, is not caught by the
 server — it is caught, if at all, by the next honest client that compares.
 
-**Client-enforced** (`js/sync/sync.js`, `js/sync/firebase-adapter.js`): the replay path.
+**Client-enforced** (`js/sync/firebase-adapter.js`, which is where `receipt-mismatch` is
+raised, with the queue half in `js/sync/sync.js` and `js/sync/send.js`): the replay path.
 A replay performs no write, so the rules are never consulted for it; the client compares
 the receipt's fingerprint against the operation it is about to repeat, and a mismatch is
 `receipt-mismatch` — never acknowledged, never pruned from the queue, never reported as
