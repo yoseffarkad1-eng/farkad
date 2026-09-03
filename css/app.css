@@ -54,7 +54,13 @@
     --line-soft: #e6eaef;
     --ink: #17202b;
     --ink-2: #4d5a69;
-    --ink-3: #7a8797;
+    /* The third ink, and a floor under it: 4.5:1 against the darkest ground this
+       stylesheet can put text on. It was #7a8797, which measured 3.66 on --surface,
+       3.23 on --paper and 3.00 on --surface-2 - fine on the desk it was chosen at, and
+       not on a phone held up on a site at four in the afternoon. Still the QUIET ink,
+       by measurement as well as by intent: 5.17 on paper against --ink-2's 6.22. Going
+       darker than this collapses three inks into two. */
+    --ink-3: #5a6673;
 
     --accent: #1f4b7a;
     --accent-soft: #dce7f3;
@@ -95,7 +101,9 @@
         --line-soft: #232b35;
         --ink: #e6eaf0;
         --ink-2: #a7b2c0;
-        --ink-3: #7c8796;
+        /* Lifted rather than darkened, to the same floor: #7c8796 read 4.03 against
+       --surface-2, which is the week grid's band and the dates written across it. */
+    --ink-3: #8a95a3;
         --accent: #8ab4e2;
         --accent-soft: #1d2b3b;
         --on-accent: #0f1319;
@@ -130,7 +138,9 @@
     --line-soft: #232b35;
     --ink: #e6eaf0;
     --ink-2: #a7b2c0;
-    --ink-3: #7c8796;
+    /* Lifted rather than darkened, to the same floor: #7c8796 read 4.03 against
+       --surface-2, which is the week grid's band and the dates written across it. */
+    --ink-3: #8a95a3;
     --accent: #8ab4e2;
     --accent-soft: #1d2b3b;
     --on-accent: #0f1319;
@@ -423,9 +433,24 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-icon:hover { background: var(--surface-2); color: var(--ink); }
 
 /* The one icon button that is a way IN rather than a way out, so it is written in the
-   text colour rather than the quiet one: --ink-3 on paper is 3.2:1, which is under the
+   text colour rather than the quiet one. That, and only that, is what this line is for
+   now: EMPHASIS. It used to be the contrast repair as well, and it was the wrong shape
+   for one.
+
+   The sentence that used to sit here - "--ink-3 on paper is 3.2:1, which is under the
    4.5:1 a small glyph needs and exactly the sort of thing that reads fine to whoever
-   chose it and not at all on a site at four in the afternoon. */
+   chose it and not at all on a site at four in the afternoon" - was a diagnosis of the
+   TOKEN, and the cure was applied to one id. .btn-icon eight lines above kept the colour
+   that sentence had just condemned, and so did thirty-one other rules: the date on the
+   day header at 3.66, the line that says whether the other two phones have seen tonight's
+   work at 3.23, the dates across the week grid at 3.00. A correct diagnosis cured at one
+   call site is worse than none, because it reads to the next person as already handled.
+
+   So the token moved instead (see :root, both schemes), which fixes .btn-icon and the
+   other thirty-two at once. The measurement is in tests/mobile.test.mjs, "the quiet ink":
+   --ink-3 against all seven grounds this stylesheet can put text on, and separately every
+   element the browser is actually painting in it, across the four screens and the ⋯ panel.
+   Neither of those can be made green by moving one rule. That is the point of them. */
 #settingsBtn { color: var(--ink-2); font-size: 20px; letter-spacing: 2px; }
 
 /* ---------------------------------------------------------------- a thumb's worth

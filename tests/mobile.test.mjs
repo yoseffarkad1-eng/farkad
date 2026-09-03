@@ -189,6 +189,175 @@ async function unreadable(page, floor = TEXT_FLOOR, gridFloor = GRID_FLOOR, inGr
     }, [floor, gridFloor, inGrid]);
 }
 
+// ---------------------------------------------------------------- ink against ground
+//
+// unreadable() above asks whether a glyph is big enough. This asks whether it is there at
+// all. They are different failures and only one of them was measured: a 14px date is over
+// the size floor and still unreadable if it is written 3.2:1 against the card under it,
+// which is what a phone in the sun at four in the afternoon actually costs.
+//
+// 4.5:1 is the floor, for every glyph this app draws at ordinary weight. It is an INDOOR
+// number - the men using this are outside - so it is a floor and not a target.
+//
+// The ground is the one the element is DRAWN on, not the one it declares. Almost nothing
+// in this stylesheet sets a background: --ink-3 is transparent-over-whatever, which is
+// exactly why the same token reads 3.66 on a white card and 3.00 on the week grid's band,
+// and why a check that assumed --paper everywhere would have reported the wrong number
+// three ways. So the ancestors are walked until one is opaque, and a translucent
+// background is composited onto what is behind IT before the ink is composited onto that.
+const CONTRAST_FLOOR = 4.5;
+
+// The arithmetic itself is WCAG 2 relative luminance. Written once, page-side, and handed
+// both jobs below: named elements as they are actually rendered, and the raw token pairs
+// out of :root - because a token that fails on a ground no fixture happens to draw today
+// is still a defect, and the next call site is the one that finds it.
+async function contrast(page, { elements = [], pairs = [] } = {}) {
+    return page.evaluate(([list, tokenPairs]) => {
+        const parse = value => {
+            const n = (String(value).match(/[\d.]+/g) || []).map(Number);
+            return n.length < 3 ? null : [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
+        };
+        const lum = ([r, g, b]) => {
+            const ch = c => {
+                const v = c / 255;
+                return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+            };
+            return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+        };
+        const ratio = (a, b) => {
+            const hi = Math.max(lum(a), lum(b));
+            const lo = Math.min(lum(a), lum(b));
+            return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+        };
+        const over = (ink, back) => (ink[3] === 1 ? ink.slice(0, 3)
+            : [0, 1, 2].map(i => ink[i] * ink[3] + back[i] * (1 - ink[3])));
+
+        const ground = node => {
+            for (let n = node; n; n = n.parentElement) {
+                const c = parse(getComputedStyle(n).backgroundColor);
+                if (c && c[3] > 0) return over(c, ground(n.parentElement) || [255, 255, 255]);
+            }
+            return null;
+        };
+        // offsetParent is null for anything position:fixed, and the sync sentence and the
+        // dock are both fixed - a visibility filter written on offsetParent would skip
+        // precisely the line that says whether the other two phones can see tonight's work.
+        const visible = node => {
+            const box = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return box.width > 0 && box.height > 0
+                && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+
+        // A colour token, resolved the way the browser resolves it: through a real element,
+        // so `var(--ink-3)` comes back as the rgb() the page is actually painted with.
+        const probe = document.createElement('span');
+        probe.style.position = 'fixed';
+        probe.style.left = '-9999px';
+        document.body.appendChild(probe);
+        const resolve = value => {
+            probe.style.color = '';
+            probe.style.color = value;
+            return getComputedStyle(probe).color;
+        };
+
+        const out = { elements: [], pairs: [] };
+
+        list.forEach(({ name, selector }) => {
+            const node = [...document.querySelectorAll(selector)].find(visible);
+            if (!node) { out.elements.push({ name, selector, found: false }); return; }
+            const back = ground(node) || [255, 255, 255];
+            const ink = over(parse(getComputedStyle(node).color), back);
+            out.elements.push({
+                name, selector, found: true,
+                px: Math.round(parseFloat(getComputedStyle(node).fontSize) * 10) / 10,
+                text: (node.textContent || '').trim().slice(0, 14),
+                ratio: ratio(ink, back)
+            });
+        });
+
+        tokenPairs.forEach(([ink, back]) => {
+            const a = parse(resolve(`var(${ink})`));
+            const b = parse(resolve(`var(${back})`));
+            out.pairs.push({ ink, back, ratio: (a && b) ? ratio(over(a, b.slice(0, 3)), b.slice(0, 3)) : 0 });
+        });
+
+        probe.remove();
+        return out;
+    }, [elements, pairs]);
+}
+
+// Every line on the screen that is written in one named token, and what each of them
+// actually reads against the ground under it. Handed the token rather than a list of
+// selectors on purpose: the fault this was written for was a stylesheet that fixed ONE of
+// thirty-three call sites, and a check enumerating call sites by hand would have had the
+// same blind spot as the fix.
+async function inkedWith(page, token) {
+    return page.evaluate(name => {
+        const parse = value => {
+            const n = (String(value).match(/[\d.]+/g) || []).map(Number);
+            return n.length < 3 ? null : [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
+        };
+        const lum = ([r, g, b]) => {
+            const ch = c => {
+                const v = c / 255;
+                return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+            };
+            return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+        };
+        const ratio = (a, b) => {
+            const hi = Math.max(lum(a), lum(b));
+            const lo = Math.min(lum(a), lum(b));
+            return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+        };
+        const over = (ink, back) => (ink[3] === 1 ? ink.slice(0, 3)
+            : [0, 1, 2].map(i => ink[i] * ink[3] + back[i] * (1 - ink[3])));
+        const ground = node => {
+            for (let n = node; n; n = n.parentElement) {
+                const c = parse(getComputedStyle(n).backgroundColor);
+                if (c && c[3] > 0) return over(c, ground(n.parentElement) || [255, 255, 255]);
+            }
+            return null;
+        };
+
+        const probe = document.createElement('span');
+        probe.style.position = 'fixed';
+        probe.style.left = '-9999px';
+        probe.style.color = `var(${name})`;
+        document.body.appendChild(probe);
+        const wanted = getComputedStyle(probe).color;
+        probe.remove();
+
+        const out = [];
+        document.querySelectorAll('body *').forEach(node => {
+            const style = getComputedStyle(node);
+            if (style.color !== wanted) return;
+            if (node.getAttribute('aria-hidden') === 'true') return;
+            const box = node.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0) return;
+            if (style.visibility === 'hidden' || style.display === 'none') return;
+            // Text of its own: a wrapper inherits the colour of whatever is inside it and
+            // would be counted twice, once at the wrong box.
+            const owns = [...node.childNodes]
+                .some(child => child.nodeType === 3 && child.textContent.trim());
+            if (!owns) return;
+            // A marker is not a sentence - the same exemption unreadable() makes, and for
+            // the same reason: the ▸ on a fold and the — for an absence carry no letters.
+            if (!/[\p{L}\p{N}]/u.test(node.textContent)) return;
+
+            const back = ground(node) || [255, 255, 255];
+            const ink = over(parse(style.color), back);
+            out.push({
+                cls: String(node.className || node.tagName).slice(0, 26),
+                px: Math.round(parseFloat(style.fontSize) * 10) / 10,
+                text: node.textContent.trim().slice(0, 14),
+                ratio: ratio(ink, back)
+            });
+        });
+        return out;
+    }, token);
+}
+
 // Is this element the thing a tap at its own centre would hit?
 async function reachable(page, selector, which = 0) {
     return page.evaluate(([sel, index]) => {
@@ -2793,6 +2962,94 @@ for (const width of [430, 390, 320]) {
     check(`${label}: both segments are 44px in both dimensions`,
         m.boxes.length === 2 && m.boxes.every(b => b.w >= 44 && b.h >= 44),
         JSON.stringify(m.boxes));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the quiet ink
+//
+// --ink-3 is the app's third ink: the date under the day name, the sentence that says
+// whether the other two phones have seen tonight's work, every explanatory line, the ✕
+// that takes a man off a site, the dates across the week grid. Thirty-three rules in
+// css/app.css are written in it and every one of them is small text.
+//
+// The stylesheet knew it was under the floor. The comment above #settingsBtn says so in
+// its own words - "3.2:1, which is under the 4.5:1 a small glyph needs and exactly the
+// sort of thing that reads fine to whoever chose it and not at all on a site at four in
+// the afternoon" - and then the cure was applied to #settingsBtn, one id, while the token
+// itself and the other thirty-two rules kept the colour the comment had just condemned.
+//
+// A fix aimed at call sites has the same blind spot the half-fix had, so this is aimed at
+// the TOKEN twice over. The first check reads --ink-3 out of :root and puts it against
+// every ground this stylesheet can place text on - including the four it does not happen
+// to draw in this fixture, because the next call site is the one that finds them. The
+// second sweeps the four screens and the ⋯ panel for every element the browser is
+// actually painting in that colour and measures each against the ground under it. Neither
+// can be satisfied by moving one rule.
+for (const scheme of ['light', 'dark']) {
+    const label = `390px ${scheme}: the quiet ink`;
+    suite(label);
+
+    // By site, because two of the faintest things in the app - the ✕ on an assign row and
+    // the line under an empty site card - are drawn on that half of the day screen only.
+    const page = await open({ width: 390, height: 844, scheme, mode: 'sites' });
+    await setInset(page, 34);
+
+    const tokens = await contrast(page, {
+        pairs: [
+            ['--ink-3', '--paper'], ['--ink-3', '--surface'], ['--ink-3', '--surface-2'],
+            ['--ink-3', '--accent-soft'], ['--ink-3', '--warn-bg'],
+            ['--ink-3', '--danger-bg'], ['--ink-3', '--ok-bg']
+        ]
+    });
+    const weak = tokens.pairs.filter(pair => pair.ratio < CONTRAST_FLOOR);
+    check(`${label}: --ink-3 clears ${CONTRAST_FLOOR}:1 on every ground this app has`,
+        weak.length === 0,
+        JSON.stringify(tokens.pairs.map(p => `${p.back}:${p.ratio}`)));
+
+    // The date on the day header, named on its own. Recording an evening against the wrong
+    // date is the money bug this app's whole calendar is built around, and the label that
+    // prevents it is the one the audit found faintest.
+    const named = await contrast(page, {
+        elements: [
+            { name: 'the date on the day header', selector: '.day-date' },
+            { name: 'the ✕ that takes a man off a site', selector: '.assign-row .btn-icon' },
+            { name: 'the line that says where the record lives', selector: '#storageNotice' }
+        ]
+    });
+    given(`${label}: all three named lines are on the screen to be measured`,
+        named.elements.every(item => item.found), JSON.stringify(named.elements));
+    named.elements.forEach(item => {
+        check(`${label}: ${item.name} clears the floor`,
+            item.ratio >= CONTRAST_FLOOR, `${item.ratio}:1 at ${item.px}px — ${item.text}`);
+    });
+
+    // AND EVERY OTHER LINE WRITTEN IN IT, wherever the app draws one.
+    const seen = [];
+    const faint = [];
+    const sweep = async where => {
+        (await inkedWith(page, '--ink-3')).forEach(item => {
+            seen.push(item);
+            if (item.ratio < CONTRAST_FLOOR) faint.push({ where, ...item });
+        });
+    };
+    for (const view of ['day', 'week', 'roster', 'reports']) {
+        await page.evaluate(name => showView(name), view);
+        await page.waitForTimeout(250);
+        await sweep(view);
+    }
+    await page.evaluate(() => showView('day'));
+    await page.waitForTimeout(200);
+    await page.click('#settingsBtn');
+    await page.waitForTimeout(300);
+    await sweep('settings');
+
+    // Vacuous is the failure mode this whole file was rewritten twice to avoid: a sweep
+    // that finds nothing passes and says nothing.
+    given(`${label}: the sweep actually found lines written in the quiet ink`,
+        seen.length >= 10, String(seen.length));
+    check(`${label}: every line the app writes in it clears the floor too`,
+        faint.length === 0, JSON.stringify(faint.slice(0, 6)));
 
     await page.context().close();
 }

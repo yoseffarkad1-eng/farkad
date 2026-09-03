@@ -52,7 +52,7 @@ const PRINTOUT_PAPER = {
     background: '#ffffff',
     ink: '#17202b',
     ink2: '#4d5a69',
-    ink3: '#7a8797',
+    ink3: '#5a6673',
     line: '#d3dae2',
     lineSoft: '#e6eaef',
     band: '#e4e9ef'
