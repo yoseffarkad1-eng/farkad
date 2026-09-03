@@ -1,10 +1,20 @@
 # בדיקת קבלה במכשיר אמיתי — רשימה ליוסף
 
-> **NOT YET PHYSICALLY VERIFIED.** Nothing in this list has been performed on a real
-> iPhone for the current build, and that has been true of every build since v86. Fifty-nine
-> rows, none of them run — row 59 is the exception that proves the point: it exists BECAUSE a
-> real screenshot arrived showing something no suite here can produce, and it is still NOT RUN
-> as a deliberate check. The number is written here rather than left to be counted, because
+> **NOT YET PHYSICALLY VERIFIED — and read the next paragraph before quoting that.**
+> Nothing in this list has been performed on a real iPhone. Fifty-nine rows, none of them run.
+>
+> **A phone IS running v103.** The owner confirmed it on 3 September 2026 and sent a
+> screenshot. So the sentence this file used to carry — "that has been true of every build
+> since v86" — was wrong, and is gone. What replaces it is the distinction this whole file
+> exists for: **a build being ON a phone and a build being CHECKED on a phone are two
+> different claims.** The first is now true. The second is not, for any row here.
+>
+> The first thing that real phone showed was a fault **no suite in this repository can
+> produce** — both bottom bars drawn about 387pt above the bottom of the screen with page
+> content underneath them (row 59; `features/bars-raised/findings.md`). That is the argument
+> for this file, made by a device rather than by an author.
+>
+> The count is written here rather than left to be counted, because
 > "the suites are green" and "somebody looked at it on a phone" are two different claims and
 > only one of them is true of this repository.
 >

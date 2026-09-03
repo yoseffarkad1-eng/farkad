@@ -22,8 +22,20 @@ first of the line to reach `main`.
 
 ## v103 — 3 September 2026 — `21c8e08` (PR #15, the tree at `86053d2`)
 
-On `main` since 3 September 2026; **being on `main` is not being on a phone**, and no phone
-is known to have taken it. Built on v102 as served (`2bae97f`). **No number moved** — not a shekel on a report, not a day on a record, not a
+On `main` since 3 September 2026. Built on v102 as served (`2bae97f`).
+
+> **CORRECTED 3 September 2026, and it is the correction that matters most in this file.**
+> This entry first said no phone was known to have taken it. **That was wrong.** The owner
+> confirmed a phone — an iPhone 16 Pro Max — is running **v103**, and sent a screenshot of it.
+> So the line this repository had repeated since v86 — "nothing since v86 has been on a
+> phone" — stopped being true at v103, and the first thing a real device did was show a
+> fault no suite here can produce: both bottom bars drawn about 387pt above the bottom of
+> the screen with page content underneath them. See `features/bars-raised/findings.md`.
+>
+> **What is still true, and must not be blurred with it:** no row of
+> `docs/iphone-acceptance.md` has been RUN. Using the app is not running the acceptance
+> list. A build being on a phone and a build being checked on a phone are two different
+> claims, and only the first is now true. **No number moved** — not a shekel on a report, not a day on a record, not a
 byte on the wire.
 
 **What it gives the crew that v102 does not**
@@ -68,9 +80,10 @@ removals or renames — a button that looks different after this build would be 
 
 **What it is known NOT to cover**
 
-- **No phone has run any of it**, and this build is largely FOR a phone: it extends an
-  acceptance list that is 58 rows long and entirely NOT RUN. Nothing since v86 has been on a
-  device.
+- **No acceptance row has been RUN** — the list is 59 rows and every one is outstanding.
+  This is no longer the same as "no phone has run it": a phone IS running v103 (see the
+  corrected heading above), it simply has not been driven through the checklist. The
+  distinction is the whole point of that file.
 - **`firestore.rules` is still not deployed.** This build documented the deploy; it did not
   perform it and cannot.
 - The two findings v100's re-audit left OPEN are still open and untouched.
