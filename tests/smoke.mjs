@@ -6104,6 +6104,31 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
       }
     });
     FarkadSync.pushDelayMs = 0;
+    // A FIXED WAIT, and two attempts to replace it with a condition both made it WORSE.
+    // Written down because the next person will have the same idea, and because what the
+    // wait is actually for is still not known.
+    //
+    // The failure it guards is real: seen once on a clean tree as 1129/1130 with this the
+    // only red, `[]` - the flush sent nothing. That is the app behaving correctly. Since
+    // v79 a queued roster is HELD until the device has heard from the document, so if the
+    // flush runs too early it sends nothing and this check fails for the right behaviour.
+    //
+    // Attempt 1, waiting for `FarkadSync._heardFromCloud`: turned the intermittent red
+    // into 1148/1149 TWICE running. The reasoning was that the latch was already set from
+    // an earlier block so the wait returned instantly - and an instrumented run DISPROVED
+    // that: `_heardFromCloud already true before the wait: false`. So the hypothesis was
+    // wrong as well as the fix.
+    //
+    // Attempt 2, waiting for `_remoteRoster` to be REPLACED (js/sync/receive.js:781
+    // rebuilds it per snapshot): the instrumented run shows this genuinely blocks - 10ms -
+    // so the snapshot really has been delivered AND processed by the time it resolves.
+    // It still fails, `[]` again. Therefore THE SNAPSHOT BEING PROCESSED IS NOT THE
+    // PRECONDITION. Something else, completing somewhere between 10ms and 50ms, is.
+    //
+    // Until that something is named, 50ms stays. Do not replace it with a condition that
+    // has not been INSTRUMENTED to show both that it blocks and that the check then
+    // passes: a wait on the wrong fact looks principled and is worse than a wait on the
+    // clock, because the clock at least admits to being a guess.
     await new Promise(resolve => setTimeout(resolve, 50));
     paths.length = 0;
 
