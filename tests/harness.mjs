@@ -27,14 +27,22 @@ const FILES = [
     'js/store.js',
     'js/recovery.js',
     'js/model/schema.js',
+    'js/model/money.js',
     'js/model/migrate.js',
     'js/model/ledger.js',
     'js/state.js',
     'js/sync/sync.js',
+    'js/sync/restore.js',
+    'js/sync/receive.js',
+    'js/sync/send.js',
+    'js/sync/status.js',
+    // Last of the sync group, and last for a reason - see the file's own header.
+    'js/sync/boot.js',
     // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls
     // askTell, but only inside functions - nothing at its top level touches either, and
     // registering Store.reclaim is exactly the behaviour a full-disk test needs.
     'js/ui/share.js',
+    'js/ui/backup.js',
     // For deleting and archiving a worker. Those two decide what happens to somebody's
     // record, so they are tested the way the data layer is - across a close and reopen,
     // and against a second phone - rather than only through a browser. Same as the file

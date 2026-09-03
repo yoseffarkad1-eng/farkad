@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v101">
+<meta name="farkad-build" content="v102">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -540,9 +540,17 @@
 <script src="js/recovery.js"></script>
 <script src="js/dates.js"></script>
 <script src="js/model/schema.js"></script>
+<script src="js/model/money.js"></script>
 <script src="js/model/migrate.js"></script>
 <script src="js/model/ledger.js"></script>
 <script src="js/sync/sync.js"></script>
+<script src="js/sync/restore.js"></script>
+<script src="js/sync/receive.js"></script>
+<script src="js/sync/send.js"></script>
+<script src="js/sync/status.js"></script>
+<!-- boot.js is last of the sync group and must stay last: its two lines RUN at load
+     time. Any further split of this group goes ABOVE it. -->
+<script src="js/sync/boot.js"></script>
 <script src="js/state.js"></script>
 <script src="js/ui/dom.js"></script>
 <script src="js/ui/bars.js"></script>
@@ -557,6 +565,7 @@
 <script src="js/ui/roster.js"></script>
 <script src="js/ui/reports.js"></script>
 <script src="js/ui/share.js"></script>
+<script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>
 <script src="js/ui/offline.js"></script>

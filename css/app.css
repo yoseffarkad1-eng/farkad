@@ -2,6 +2,50 @@
    A dense working tool used late at night on a phone and on a desktop, in Hebrew RTL.
    Quiet surfaces, one accent, and colour never carrying meaning on its own. */
 
+/* ================================================================ what is in this file
+
+   In file order. Search for the banner text to jump - no line numbers, because a line
+   number in a comment is wrong the first time anybody edits above it.
+
+     (the head)            the palette, both schemes, the reset, the app shell
+     top bar               the strip above everything, and the tab bar
+     buttons               every btn-* class, and the 44px floor they are held to
+     a thumb's worth       the touch targets that are not buttons
+     reorder mode          dragging the roster into order
+     settings sheet        the ... panel
+     banners               the account warning, the storage banner, the update notice
+     day view              the day header, the progress, the site cards, the trays
+     pickers               the worker and place pickers
+     week                  the read-only grid and its strip
+     roster                workers and places, archive and delete
+     reports               pay and invoice, the tables, the advance form
+     modals                every dialog's frame
+     misc                  the phone block for widths <= 700, and what did not fit above
+     day: by worker        the worker list, its rows and its rates
+     assign sheet          the write half of the day screen
+     print                 the paper layouts
+     the header on scroll  what goes when the list is moving (v101)
+     the compact day       the measured phone design (v93): rows at 430 / 390 / 320
+     (the tail)            the narrowest phone, then the landscape bar
+
+   ORDER IS THE MECHANISM IN THIS FILE, in at least four places, and each of them says so
+   where it sits. A section moved without reading them renders differently on a phone, and
+   the failure is quiet - which is why v102 wrote this list and did NOT reorder the file:
+
+     - the print rule that lifts the unpaid-hours warning back onto the paper does it by
+       SPECIFICITY, not by position. The earlier version had been losing to a later block
+       for months, silently, and what it lost was a warning about hours somebody was not
+       paid for.
+     - the narrowest-phone block near the end must come AFTER the compact-day block, whose
+       same-specificity rules would otherwise win by being later.
+     - the landscape bar is last on purpose: it collapses the header that everything above
+       refines, so it must follow all of it or lose to the cascade in silence.
+     - inside the day view, one sticky rule notes that it was beaten by a later rule of the
+       same specificity - the reason that comment exists at all.
+
+   So: add to a section, do not move one. If a section must move, prove first that no rule
+   in it shares a selector AND a specificity with any rule it would cross. */
+
 :root {
     --paper: #eef1f5;
     --surface: #ffffff;

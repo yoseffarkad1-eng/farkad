@@ -364,17 +364,37 @@ const swTargets = async () => (await browserCdp.send('Target.getTargets')).targe
 // record says `stopped`, and the service_worker TARGET is gone from the browser - a
 // target is a process, so its absence is the process being gone rather than an opinion
 // about it.
+// TWO SOURCES OF TRUTH FOR ONE FACT, AND BOTH MUST BE WAITED ON.
+//
+// `targets` is asked for on demand; `control.versions` is a Map filled in by
+// ServiceWorker.workerVersionUpdated events as they arrive. The loop used to wait only
+// for the targets to drain and then read `versions` once - so when the last event
+// carrying runningStatus 'stopped' had not been delivered yet, the caller was told the
+// worker was still running while the browser had already let it go.
+//
+// That is not hypothetical. It went red exactly once, inside a full release gate, with
+// the detail "0 targets" - targets drained, versions stale - and green every time this
+// suite was run on its own. Running alone is the case with the least event latency, which
+// is why the race hid there. It was made likelier by v102 splitting js/sync/sync.js into
+// six: six shell files instead of one is six times the fetches behind a worker being
+// stopped, and a longer tail after the stop. The split did not create the race and the
+// app is not what was wrong - this function was reading one of the two facts before it
+// had settled.
+//
+// So both are polled, under the one deadline, and the return says what each of them was.
 async function stopWorker(control) {
     await control.cdp.send('ServiceWorker.stopAllWorkers');
     const deadline = Date.now() + 10000;
-    let targets = await swTargets();
-    while (targets.length > 0 && Date.now() < deadline) {
-        await settle(150);
-        targets = await swTargets();
-    }
-    const running = [...control.versions.values()]
+    const stillRunning = () => [...control.versions.values()]
         .filter(version => version.runningStatus !== 'stopped')
         .map(version => `${version.versionId}:${version.runningStatus}`);
+    let targets = await swTargets();
+    let running = stillRunning();
+    while ((targets.length > 0 || running.length > 0) && Date.now() < deadline) {
+        await settle(150);
+        targets = await swTargets();
+        running = stillRunning();
+    }
     return { targets: targets.length, running };
 }
 

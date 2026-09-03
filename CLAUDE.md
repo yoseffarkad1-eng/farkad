@@ -24,8 +24,9 @@ different from what was done.
   silently — no error, the taps just stop working. The one exception is
   `js/sync/firebase-adapter.js` (the SDK ships only as modules); it is imported at
   runtime by `app.js` AFTER local boot and reaches the app through `window.FarkadSync`.
-- **Script order is load-bearing.** `store.js` and `recovery.js` must precede
-  `sync/sync.js`, which reads its outbox the moment it loads; `model/schema.js` must
+- **Script order is load-bearing.** `store.js` and `recovery.js` must precede the sync
+  group; that group ends with `sync/boot.js`, which reads the outbox the moment it loads,
+  so every file the read reaches has to be above it; `model/schema.js` must
   precede `state.js`, which calls `emptySchedule()` at definition time; the UI files
   come after the data layer. The order in `index.html` is the order.
 - **Nothing off this origin sits between a person and their data.** The Firebase SDK is
@@ -139,11 +140,17 @@ written down so it cannot happen twice.
     js/store.js                every localStorage touch; setVerified reads back; full ≠ blocked; the reclaim ladder; the write tick
     js/recovery.js             quarantine for unreadable records; never deletes; blocks writes until acknowledged; what the rescue file carries
     js/state.js                the one live schedule; journal-first commits; save vs persist; the ledger mirror at boot
-    js/model/schema.js         the v2 model, validators, field paths, payroll and invoice arithmetic; pure functions
+    js/model/schema.js         the v2 model, validators, field paths; pure functions
+    js/model/money.js          what a day was worth: payroll, invoice, the advances walk, the closed period
     js/model/migrate.js        v1→v2; never guesses; ambiguous cells become decisions, not data
     js/model/ledger.js         the v80 advances ledger: entries, fold, closed gate, mirror migration, parity check;
                                the repayment and period-closure kinds, both behind the writer gate
-    js/sync/sync.js            outbox/journal, flush, snapshot adoption, provenance, the restore transaction, the status line
+    js/sync/sync.js            the durable queue: outbox, journal, replay, receipts, provenance; the one accessor pair
+    js/sync/restore.js         the whole-document restore, the ONE place allowed to write the whole document
+    js/sync/receive.js         snapshot adoption, merge, the ordering protocol's client half, the poison doors
+    js/sync/send.js            the flush, the send claim, the pre-send hold, the create race, the retry ladder
+    js/sync/status.js          connect and listen; the one sentence the person reads; the banner
+    js/sync/boot.js            two lines that RUN at load; loaded last, and every later split goes above it
     js/sync/firebase-adapter.js  the only file that knows Firebase exists; the one ES module
     js/sync/firebase-config.js   project config; empty means local-only
     js/ui/dom.js               el()/clear()/button(); textContent only — names are never markup; todayStr
@@ -158,7 +165,8 @@ written down so it cannot happen twice.
     js/ui/week.js              the read-only week grid and its print layout
     js/ui/roster.js            workers and sites; archive vs delete; the reorder mode
     js/ui/reports.js           pay and invoice reports; the advance form
-    js/ui/share.js             the WhatsApp message, backups, snapshots, the four restore doors, exports
+    js/ui/share.js             the WhatsApp message and the CSV
+    js/ui/backup.js            snapshots, the backup file, the four restore doors, the rescue file
     js/ui/printout.js          the table as a PNG, read off the DOM, for the phone where window.print()
                                opens nothing: the 1.5s heuristic, the share sheet, the download
     js/ui/migration.js         the cells the migration refused to guess, put to a person

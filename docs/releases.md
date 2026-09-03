@@ -12,20 +12,73 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v100 (`e4aa66b`).** Every build at the top of this file has reached `main`;
+**`main` is at v101 (`ee50ae4`).** Every build at the top of this file has reached `main`;
 a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v101 — room on the day screen, and the change that could not give any
+## CANDIDATE — v102 — the code put in order, and nothing else
 
-Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v100 as served
+Not served. On `claude/farkad-mobile-design-review-odl8ue`, built on v101 as served
+(`ee50ae4`).
+
+**This build changes nothing a person can see or use.** Not a pixel, not a shekel, not a
+byte on a disk or on the wire. It is the code moved into rooms it can be found in, and the
+proof that it is only that is the gate: **43 suites 4380/4380 and 59 suites 6816/6816 —
+the same numbers, check for check, as v101.** A refactor that changes what the gate says is
+a refactor that changed something.
+
+**What it gives whoever works on this next**
+
+- `js/sync/sync.js` was 6,194 lines. It is 2,523, and the rest is in five files named for
+  what they own: the restore transaction, the receive path, the send path, the connection
+  and status line, and a two-line bootstrap that exists to be loaded last.
+- `js/ui/share.js` was 2,093 and is 290 — the WhatsApp message and the CSV, which is what
+  its name always meant. The snapshots, the backup file, the four restore doors and the
+  rescue file are in `js/ui/backup.js`.
+- `js/model/schema.js` was 2,928 and is 2,430; the arithmetic every paid and billed number
+  comes out of is in `js/model/money.js`.
+- `css/app.css` has a table of contents.
+- Three functions that nothing called are gone, each named with the reason.
+
+**What it deliberately did NOT do, with the numbers**
+
+- **`js/ui/reports.js` is not split.** It was, and it was put back: 25 places in 13 suites
+  read that file off the disk by name, and three of them are meta-tests — one pins the read
+  itself as a string, two iterate hard-coded file lists. A split that missed any of the
+  three would leave a suite quietly covering less than it claims.
+- **`css/app.css` is not reordered.** That file documents four places where cascade order
+  IS the mechanism, including a print rule that had been losing to a later block for months,
+  silently — and what it lost was a warning about hours somebody was not paid for.
+
+**What it is known NOT to cover**
+
+- **No phone has run any of it.** For a behaviour-neutral build that matters less than it
+  did for v101, but "behaviour-neutral" is a claim held by 59 suites, not by a person using
+  the app. Every row of `docs/iphone-acceptance.md` is still NOT RUN.
+- The two findings v100's re-audit left OPEN are still open and untouched.
+- `firestore.rules` has changed since v86 and is still not deployed — the owner's to run;
+  `docs/rollout-checklist.md` has the steps.
+- Both money gates are shut and nothing in this build goes near them.
+
+**Checked before it was stamped**: both gates on `21bd9ba` from one clean detached worktree,
+run separately. Per suite and verbatim in `features/code-order/handoff.md`, which also names
+the one gate that came back EXIT=2 (a race in `tests/swrestart.test.mjs`, root-caused and
+fixed) and the three killed by container restarts — none of whose counts is recorded as a
+result anywhere.
+
+---
+
+## v101 — 2 September 2026 — `ee50ae4` (PR #13, the tree at `718ee6e`)
+
+On `main` since 2 September 2026; whether any phone has taken the update is not known from
+here. Built on v100 as served
 (`e4aa66b`). One screen's chrome, three changes, nothing behind either money gate and
 nothing touching the record, sync or the arithmetic. Both gates stay shut.
 
-**What it would give the crew that v100 does not have**
+**What it gives the crew that v100 does not have**
 
 - **The day header shrinks to one row as soon as the list is scrolled.** The day name, its
   date and the two arrows stay — halfway down a list of names, nothing else on screen says
@@ -50,6 +103,7 @@ nothing touching the record, sync or the arithmetic. Both gates stay shut.
 
 **What it is known NOT to cover**
 
+- **Being on `main` is not being on a phone.** No phone is known to have taken it.
 - **No phone has run any of it, and this is the round where that matters most.** It is a
   round about how a screen feels under a thumb, and every measurement in it is headless
   Chromium. The scroll threshold's behaviour under iOS rubber-band scrolling and momentum
