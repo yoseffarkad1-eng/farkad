@@ -13,6 +13,12 @@ said, on one machine, at one commit, and what follows from it.
     method      median of repeated in-page runs, warm-ups discarded; every check prints
                 its own min/max/n
 
+**The container is shared, and other work was running in it.** Three independent runs of the
+whole suite at the same commit agreed to within half a millisecond on every median and to
+within a factor of two on `domInteractive`, which is the noisiest figure here and the one
+budgeted for it - so the medians below are stable enough to act on. They are not laboratory
+numbers, and a figure reproduced once on a quiet machine is worth more than any of them.
+
 **These are desktop Chromium numbers in a container. They are a LOWER BOUND and nothing in
 this document is a measurement of a phone.** No number below was taken on an iPhone, and
 none may be reported as if it were. A phone is slower for reasons that do not multiply
@@ -202,7 +208,14 @@ median of eleven in-page runs, two independent runs agreeing to within half a mi
 | day screen by worker, 120 workers, fortnight | 15.6ms | **2.8ms** |
 | day screen by worker, 30 workers, fortnight | 2.3ms | 1.4ms |
 | week grid, 30 workers, fortnight | 8.0ms | 2.9ms |
-| reports screen, season | 11.0ms | 9.8ms |
+
+The reports screen moved from 11.0ms to 9.8ms and that is **noise, not the fix**:
+`renderReports` never reached either of the two loops that were repaired there (the
+worker-days modal and the worker's own WhatsApp statement, both opened from the reports
+screen rather than drawn with it). Those two are not in the table because no baseline
+figure was taken for them before the change; what is known about them is the shape - the
+statement asked for the map once per day of itself, so a season's statement walked the
+season a hundred and seventy times to write one message - and that shape is gone.
 
 The two ways of looking at one day now cost the same on a season - 1.8ms and 2.0ms - where
 they differed six-fold before. More important than either number: the cost has stopped

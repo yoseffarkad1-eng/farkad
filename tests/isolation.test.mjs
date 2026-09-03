@@ -227,7 +227,7 @@ function offences(name, src) {
         unhashed.length === 0, unhashed.join(', '));
 
     same('the suites that take an origin are the ones we know about', served,
-        ['forms.browser.mjs', 'mobile.test.mjs', 'print.test.mjs',
+        ['forms.browser.mjs', 'mobile.test.mjs', 'perf.test.mjs', 'print.test.mjs',
             'recovery.browser.mjs', 'smoke.mjs']
             .filter(name => files.includes(name)));
 

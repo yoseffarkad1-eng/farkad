@@ -494,16 +494,28 @@ for (const crew of CREWS) {
             if (day.getDay() !== 6) dates.push(toLocalDateStr(day));
         }
 
-        // Real commits: journal write, whole-schedule save, read-back, render. Exactly what
-        // a tap does, minus the sheet.
+        // A real commit, taken apart into its own three steps rather than approximated:
+        // State.commit (js/state.js) IS `this.journal(change)`, then `this.save()`, then
+        // `render()`, in that order and with nothing between them. Timing the three
+        // separately measures the same work and says WHICH of them is growing, which is
+        // the whole question - the answer turns out to be all three, for two different
+        // reasons, and the contract in features/performance/ separates them.
         const times = [];
+        const parts = [];
         let made = 0;
         for (const date of dates) {
             for (const worker of State.schedule.workers) {
                 State.date = date;
-                const started = performance.now();
-                State.commit(assignPlace(State.schedule, date, worker.id, 'actual', 'p_01', RATE_NORMAL));
-                times.push(performance.now() - started);
+                const change = assignPlace(State.schedule, date, worker.id, 'actual', 'p_01', RATE_NORMAL);
+                const t0 = performance.now();
+                State.journal(change);
+                const t1 = performance.now();
+                State.save();
+                const t2 = performance.now();
+                render();
+                const t3 = performance.now();
+                times.push(t3 - t0);
+                parts.push([t1 - t0, t2 - t1, t3 - t2]);
                 made += 1;
                 if (made >= 600) break;
             }
@@ -511,6 +523,7 @@ for (const crew of CREWS) {
         }
         return {
             times,
+            parts,
             pending: FarkadSync.pendingPaths().length,
             keys: Object.keys(localStorage).filter(k => k.indexOf('farkad:outbox') === 0).length
         };
@@ -518,14 +531,29 @@ for (const crew of CREWS) {
 
     const early = growth.times.slice(0, 25);
     const late = growth.times.slice(-25);
+    // Which of the three steps grew, printed rather than asserted: the assertion below is
+    // about the total a person waits for, and this is the sentence that says where it went.
+    const part = (rows, at) => round(median(rows.map(row => row[at])));
+    const breakdown = window => `journal ${part(window, 0)}ms, save ${part(window, 1)}ms, `
+        + `render ${part(window, 2)}ms`;
     given('six hundred edits were made', growth.times.length === 600, `${growth.times.length} edits`);
+    console.log(`  first 25:  ${breakdown(growth.parts.slice(0, 25))}`);
+    console.log(`  last 25:   ${breakdown(growth.parts.slice(-25))}`);
 
     check('the queue is still holding every one of them, unsent and unprunable',
         growth.pending === 600, `${growth.pending} paths across ${growth.keys} storage keys`);
+    // THE ONE DELIBERATE RED IN THIS FILE. It is a committed reproduction, not a threshold
+    // that wants loosening, and the decision it needs belongs to a person - see
+    // features/performance/contract-journal-growth.md. Do not widen it; the day it passes
+    // should be the day somebody changed what the queue may forget, and said so.
     check('the six-hundredth edit costs no more than four times the first',
         median(late) < median(early) * 4 + 5,
-        `first 25: ${round(median(early))}ms, last 25: ${round(median(late))}ms`);
-    check('even the six-hundredth edit is under 250ms', median(late) < 250, spread(late));
+        `first 25: ${round(median(early))}ms (${breakdown(growth.parts.slice(0, 25))}), `
+        + `last 25: ${round(median(late))}ms (${breakdown(growth.parts.slice(-25))})`);
+    // And the absolute figure, budgeted the way everything else here is - twice the
+    // measured median. The growth above is the defect; this is the line past which the
+    // defect stops being something a person can work through.
+    check('even the six-hundredth edit is under 80ms', median(late) < 80, spread(late));
 
     // And the boot that has to replay all of it.
     await page.reload({ waitUntil: 'load' });
