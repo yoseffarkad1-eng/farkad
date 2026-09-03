@@ -1192,7 +1192,18 @@ const FarkadSync = {
     _stamp: null,
     // The roster as the cloud last showed it, keyed by id. What a roster edit is compared
     // against to work out which people actually changed.
+    //
+    // MEMORY ONLY, and an app start empties it - which is the whole of O2's first
+    // carrier, because an empty baseline used to mean "everything is news". It does not
+    // any more: _remoteRosterKnown says whether a snapshot has ever set this, and
+    // rosterBaseline() answers out of this device's own last durable record until one
+    // has. See editRoster and features/roster-baseline/contract.md.
     _remoteRoster: { workers: {}, places: {} },
+    _remoteRosterKnown: false,
+    // The fallback baseline, and the exact bytes it was built from, so it is parsed once
+    // per durable record rather than once per roster edit.
+    _localRosterBaseline: null,
+    _localRosterBaselineText: null,
     // A whole-document replacement that has not been acknowledged yet. Mirrored to disk.
     _replace: null,
     _replacing: false,

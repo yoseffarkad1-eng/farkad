@@ -505,7 +505,12 @@ Object.assign(FarkadSync, {
             // Authoritative: the document exists and has no roster in it, so there is
             // nothing tombstoned for a queued array to contradict.
             this.noteCloudHeard();
-            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
+            // SEEDING, not reporting an edit: the document has no roster in it, so this
+            // device's whole roster is what goes up and every entity is genuinely news.
+            // Said with a flag rather than left to an empty baseline - see editRoster.
+            if (State.schedule.workers.length > 0) {
+                this.editRoster(State.schedule, null, { all: true });
+            }
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             if (this.pendingCount() > 0) this.scheduleFlush();
@@ -573,7 +578,12 @@ Object.assign(FarkadSync, {
             // A document nobody has written to holds no tombstones either, and this is
             // the server saying so rather than a guess.
             this.noteCloudHeard();
-            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
+            // SEEDING, not reporting an edit: the document has no roster in it, so this
+            // device's whole roster is what goes up and every entity is genuinely news.
+            // Said with a flag rather than left to an empty baseline - see editRoster.
+            if (State.schedule.workers.length > 0) {
+                this.editRoster(State.schedule, null, { all: true });
+            }
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             if (this.pendingCount() > 0) this.scheduleFlush();
@@ -772,6 +782,10 @@ Object.assign(FarkadSync, {
             workers: byId(schedule.workers),
             places: byId(schedule.places)
         };
+        // A snapshot has now spoken, so the local fallback in rosterBaseline() stands
+        // down. Set AFTER the maps, never before: a baseline that is announced and then
+        // filled in is a window where a roster edit measures against nothing.
+        this._remoteRosterKnown = true;
         // Everything in a snapshot has, by definition, been somewhere other than here.
         // Nothing is handed over on this path, so a refused write cannot hold anything
         // up - it just leaves the record undurable, which refuses every deletion.
@@ -1117,22 +1131,54 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
             }
 
             // The legacy whole-array form, still queued for devices that only read it.
-            // Applied only when nothing per-entity has already spoken for this list -
-            // otherwise a stale array would undo the per-person edits above.
             //
-            // And never over a tombstone. This array was built before the snapshot it is
-            // being laid on top of: a man removed on another phone while this one was
-            // away is still in it, and putting the array back whole was enough to stand
-            // him up again on this device and then send him to everybody else. The
-            // queued array is this device's own opinion of the roster from BEFORE it
-            // heard; the tombstone is a statement about one man made after.
+            // A QUEUED ARRAY MAY NOT CONTRADICT THE SNAPSHOT IT IS LAID ON TOP OF. Not
+            // about a body - a rate, a name, an archive mark - and not about membership.
+            // It may only carry somebody that snapshot has never heard of, and never over
+            // a tombstone.
+            //
+            // The tombstone half of that was already here, for one man at a time: an
+            // array built before the snapshot still holds somebody another phone removed,
+            // and putting it back whole stood him up again on this device and then sent
+            // him to everybody else. O2 is the same sentence about a rate, and it needed
+            // no removal at all. The old guard was per-LIST - `perEntity.has('workers')` -
+            // so a person who edited only a site queued nothing under roster.workers, the
+            // `workers` array was unguarded, and this phone's pre-snapshot copy of every
+            // worker went straight over the raise it had just been handed. Nothing on
+            // screen said anything, and the next ordinary roster edit then published the
+            // stale rate to everybody as an authoritative per-entity write.
+            //
+            // Nothing of the person's own work rests on this array: editRoster queues one
+            // path per changed entity beside it, and those carry the edit. The array is
+            // redundant here and was never anything but a hazard.
+            //
+            // Outside a snapshot replay - the boot-time journal replay, and the backup
+            // reader, neither of which passes perEntity - there is no snapshot to
+            // contradict and this array is the only opinion there is. It still replaces
+            // the list wholesale there.
             if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
-                if (perEntity && perEntity.has(parts[0])) return;
                 const gone = tombstoned && tombstoned[parts[0]];
-                schedule[parts[0]] = (!gone || gone.size === 0)
-                    ? value
-                    : (Array.isArray(value) ? value : [])
-                        .filter(item => !(item && gone.has(String(item.id))));
+                if (!perEntity) {
+                    schedule[parts[0]] = (!gone || gone.size === 0)
+                        ? value
+                        : (Array.isArray(value) ? value : [])
+                            .filter(item => !(item && gone.has(String(item.id))));
+                    return;
+                }
+                if (perEntity.has(parts[0])) return;
+
+                const list = schedule[parts[0]] || [];
+                const held = new Set(list.filter(item => item && item.id)
+                    .map(item => String(item.id)));
+                (Array.isArray(value) ? value : []).forEach(item => {
+                    if (!item || !item.id) return;
+                    const id = String(item.id);
+                    if (held.has(id)) return;
+                    if (gone && gone.has(id)) return;
+                    held.add(id);
+                    list.push(item);
+                });
+                schedule[parts[0]] = list;
             }
         }
     }

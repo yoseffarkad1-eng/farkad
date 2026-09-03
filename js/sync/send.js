@@ -80,6 +80,70 @@ Object.assign(FarkadSync, {
         return Promise.resolve(this.adapter.archiveRead(key));
     },
 
+    // What a roster edit is measured against - and the answer when this session has not
+    // heard from the cloud yet.
+    //
+    // A per-entity roster write is a CLAIM: I changed this man. Only this device's own
+    // record can justify one. The baseline used to be _remoteRoster alone, which is
+    // memory and starts empty at every app start, so a phone that edited the roster
+    // before its first snapshot arrived found every entity different from nothing and
+    // sent all of them - including a man whose rate another phone had raised while this
+    // one was away. That write is an ordinary per-entity write, it wins on the server,
+    // every phone adopts it, and no line on any screen says a word. A day recorded
+    // afterwards is then priced at the resurrected rate: law 2 reached from the wrong
+    // end. It needs no race - open the app, change a site, and the write can leave before
+    // the listener delivers.
+    //
+    // So there is no such thing as a phone with no baseline. A phone that has heard
+    // nothing this session still has its own last durable record on its own disk, and an
+    // entity it has not itself just changed is not news it is entitled to broadcast.
+    // State.durableText is exactly those bytes - the last schedule this device wrote and
+    // read back - and editRoster runs BEFORE commitRoster's save(), so at that moment
+    // they are the roster as it stood before this edit.
+    //
+    // Normalised through the app's own normaliseSchedule, because _remoteRoster is: the
+    // two sides have to be compared on the same footing or every entity looks changed and
+    // the baseline does nothing. Only the roster is handed over, not the days - this is a
+    // question about people, and a season of days is not cheap to walk.
+    //
+    // If those bytes cannot be read there is no local record either, so there is nothing
+    // this device could be stale ABOUT: the old behaviour stands and the whole roster
+    // goes up.
+    rosterBaseline() {
+        if (this._remoteRosterKnown) return this._remoteRoster;
+
+        const text = (typeof State !== 'undefined' && typeof State.durableText === 'string')
+            ? State.durableText : null;
+        if (!text) return this._remoteRoster;
+        if (this._localRosterBaselineText === text && this._localRosterBaseline) {
+            return this._localRosterBaseline;
+        }
+
+        let roster;
+        try {
+            const parsed = JSON.parse(text);
+            if (!parsed || typeof parsed !== 'object') return this._remoteRoster;
+            roster = normaliseSchedule({
+                workers: parsed.workers, places: parsed.places, roster: parsed.roster
+            });
+        } catch (error) {
+            return this._remoteRoster;
+        }
+
+        const byId = list => {
+            const out = {};
+            (list || []).forEach(item => {
+                if (item && item.id) out[String(item.id)] = item;
+            });
+            return out;
+        };
+        this._localRosterBaselineText = text;
+        this._localRosterBaseline = {
+            workers: byId(roster.workers), places: byId(roster.places)
+        };
+        return this._localRosterBaseline;
+    },
+
     // The roster - who exists, where they work, and what they are paid.
     //
     // It used to travel as two whole arrays, and an array cannot be merged element by
@@ -101,7 +165,14 @@ Object.assign(FarkadSync, {
     // `removed` names entities that are gone from the roster on purpose, so their
     // tombstones go out even when this device has never seen a snapshot and therefore has
     // no _remoteRoster to notice the absence against.
-    editRoster(schedule, removed) {
+    //
+    // `options.all` is the seeding case and says so out loud: the cloud has no roster at
+    // all, this device's roster is what goes into it, and every entity is genuinely news.
+    // It used to be spelled as an empty baseline, which is the same words as "this
+    // session has not heard from the cloud yet" - and one emptiness meaning two opposite
+    // things is exactly how O2's first carrier got in. See rosterBaseline().
+    editRoster(schedule, removed, options) {
+        const sendAll = Boolean(options && options.all);
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
         // result here is the hardest kind to notice: a worker present but missing from
@@ -110,7 +181,7 @@ Object.assign(FarkadSync, {
         const put = (path, value) => batch.push({ path, value });
 
         [['workers', 'workerOrder'], ['places', 'placeOrder']].forEach(([kind, orderKey]) => {
-            const known = this._remoteRoster[kind] || {};
+            const known = sendAll ? {} : (this.rosterBaseline()[kind] || {});
             const here = new Set();
 
             (schedule[kind] || []).forEach(item => {

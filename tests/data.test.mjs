@@ -387,21 +387,49 @@ function record(device, date, workerId, placeId, rate) {
         device.Sync.pendingCount() === 2, String(device.Sync.pendingCount()));
 
     // A roster change queues with no cloud too - a worker added offline who never
-    // reaches the cloud takes his days with him. It is one path per person, plus the
-    // order, plus the whole array kept for devices still on the older build: for three
-    // workers and two places that is 5 + 4 on top of the two days.
+    // reaches the cloud takes his days with him. It is one path per person WHO CHANGED,
+    // plus the order, plus the whole array kept for devices still on the older build.
+    //
+    // "Who changed" is measured against this device's own last durable record - see
+    // FarkadSync.rosterBaseline. It used to be measured against the last snapshot
+    // adopted, which is memory and starts empty at every app start, so a phone reopened
+    // in the morning found EVERYBODY different from nothing and sent its stale copy of
+    // every man over whatever another phone had corrected while it was away. This suite
+    // pinned 11 for a commitRoster that changed nothing at all, which is that behaviour
+    // written down as though it were the guarantee.
+    //
+    // Reloaded first, because that is the shape a real boot leaves the roster in: seed()
+    // pushes raw literals, the baseline is normalised the way the app normalises
+    // everything it reads, and a comparison across two shapes finds a difference in
+    // everybody.
+    device.State.load();
+    given('the reload kept the crew and the queue',
+        device.State.schedule.workers.length === 3 && device.Sync.pendingCount() === 2,
+        String(device.Sync.pendingCount()));
+
+    device.State.commitRoster();
+    check('a roster change nobody made queues no path for any person',
+        device.Sync.pendingCount() === 6, String(device.Sync.pendingCount()));
+    same('and what it does queue is the two orders and the two legacy arrays',
+        device.Sync.pendingPaths().filter(path => path.indexOf('days.') !== 0).sort(),
+        ['places', 'roster.placeOrder', 'roster.workerOrder', 'workers']);
+
+    device.State.worker('w_02').dailyRate = 375;
     device.State.commitRoster();
     check('a roster change queues one path per person, not one whole array',
-        device.Sync.pendingCount() === 11, String(device.Sync.pendingCount()));
+        device.Sync.pendingCount() === 7, String(device.Sync.pendingCount()));
     check('and the paths are per-entity',
-        device.Sync.pendingPaths().includes('roster.workers.w_01')
+        device.Sync.pendingPaths().includes('roster.workers.w_02')
         && device.Sync.pendingPaths().includes('roster.workerOrder'),
+        JSON.stringify(device.Sync.pendingPaths()));
+    check('and nobody who did not change is in it',
+        !device.Sync.pendingPaths().includes('roster.workers.w_01'),
         JSON.stringify(device.Sync.pendingPaths()));
 
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
     check('and the queue survives the app being closed',
-        reopened.Sync.pendingCount() === 11, String(reopened.Sync.pendingCount()));
+        reopened.Sync.pendingCount() === 7, String(reopened.Sync.pendingCount()));
 }
 
 {
@@ -6175,6 +6203,156 @@ for (const [label, arm] of [
     check('and neither did his advance',
         b2.call('advancesTotal', b2.State.schedule, 'w_01', '2026-08-01', '2026-08-31') === 100,
         String(b2.call('advancesTotal', b2.State.schedule, 'w_01', '2026-08-01', '2026-08-31')));
+}
+
+{
+    suite('a roster edit queued while away does not revert another phone\'s rate');
+
+    // O2, carrier 2 - docs/data-safety-audit.md, features/roster-baseline/contract.md.
+    //
+    // editRoster queues the legacy whole `workers` array and the legacy whole `places`
+    // array on EVERY roster edit, whether or not anything in that list changed. When a
+    // snapshot is adopted, reapplyPending lays the unsent queue back on top of it - and
+    // the array branch was guarded only against per-entity edits to the SAME list. So a
+    // person who edits only a site queues nothing under roster.workers, the `workers`
+    // array is unguarded, and this phone's opinion of every worker from BEFORE the
+    // snapshot is written straight over the one it was just handed.
+    //
+    // Nothing on screen says anything, and it does not stop there: the phone's schedule
+    // now says 400 while its baseline says 600, so the very next ordinary roster edit
+    // reports the difference as news and sends the old rate to everybody as an
+    // authoritative per-entity write. A day recorded in between is stamped at 400.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' });
+    a.device.State.load();
+    const link = await unplugged(a.device, cloud);
+    await settle(TICK * 20);
+
+    const b = crew({ deviceId: 'd_b' });
+    b.device.State.load();
+    await connected(b.device, cloud);
+    await settle(TICK * 20);
+    given('both phones hold the same rate',
+        a.device.State.worker('w_01').dailyRate === 400
+        && b.device.State.worker('w_01').dailyRate === 400);
+
+    // A into the stairwell.
+    link.away();
+
+    b.device.State.worker('w_01').dailyRate = 600;
+    b.device.State.commitRoster();
+    await settle(TICK * 40);
+    given('the raise reached the cloud',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+
+    // And while it is away, the person on A renames a site. Nothing about any worker.
+    a.device.State.schedule.places[0].name = 'הרצליה צפון';
+    a.device.State.commitRoster();
+    await settle(TICK * 20);
+    given('the phone that is away queues no write about any worker',
+        !physicalOps(a.device).some(op => op.path.indexOf('roster.workers.') === 0),
+        JSON.stringify(physicalOps(a.device).map(op => op.path)));
+
+    await link.back();
+    await settle(TICK * 60);
+
+    check('the phone that was away shows the raise, not its own older copy',
+        a.device.State.worker('w_01').dailyRate === 600,
+        String(a.device.State.worker('w_01').dailyRate));
+    check('and the site it renamed while away is still renamed',
+        (a.device.State.schedule.places.find(p => p.id === 'p_01') || {}).name === 'הרצליה צפון',
+        JSON.stringify(a.device.State.schedule.places));
+
+    // The next ordinary roster edit on that phone, which is what published the stale
+    // value to everybody else.
+    a.device.State.schedule.places.find(p => p.id === 'p_01').name = 'הרצליה מזרח';
+    a.device.State.commitRoster();
+    await settle(TICK * 60);
+
+    check('the next ordinary roster edit does not send the older rate back',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+    check('and the phone that made the raise still has it',
+        b.device.State.worker('w_01').dailyRate === 600,
+        String(b.device.State.worker('w_01').dailyRate));
+    // Law 2 from the other end: a day is priced at the roster's rate when it is
+    // recorded, so a reverted roster stamps somebody's day at a price nobody agreed to.
+    record(a.device, '2026-08-12', 'w_01', 'p_01');
+    check('a day recorded now on the phone that was away is priced at the real rate',
+        a.device.call('ratesForDay', a.device.State.schedule, '2026-08-12', 'w_01',
+            a.device.State.worker('w_01')).daily === 600,
+        JSON.stringify(a.device.call('ratesForDay', a.device.State.schedule,
+            '2026-08-12', 'w_01', a.device.State.worker('w_01'))));
+}
+
+{
+    suite('a roster edit made before the first snapshot arrives');
+
+    // O2, carrier 1 - the established one. The baseline editRoster measures against is
+    // the last roster this device ADOPTED, and it lives in memory: an app start empties
+    // it. A phone reopened in the morning therefore found every entity different from an
+    // empty baseline and sent all of them - including a man whose rate another phone
+    // raised while this one was away. No race is needed. Open the app, change a site, and
+    // the write leaves before the listener delivers.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' });
+    a.device.State.load();
+    const link = await unplugged(a.device, cloud);
+    await settle(TICK * 20);
+
+    const b = crew({ deviceId: 'd_b' });
+    b.device.State.load();
+    await connected(b.device, cloud);
+    await settle(TICK * 20);
+
+    link.away();
+    // Closed for the night with nothing queued, holding the rate as it was.
+    const overnight = a.device.dump();
+
+    b.device.State.worker('w_01').dailyRate = 600;
+    b.device.State.commitRoster();
+    await settle(TICK * 40);
+    given('the raise reached the cloud',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+
+    // The next morning. A fresh session: no baseline, and the disk still says 400.
+    const reopened = makeDevice({ storage: overnight, deviceId: 'd_a', flags: DELETION_ON });
+    reopened.State.load();
+    given('the reopened phone still holds the old rate',
+        reopened.State.worker('w_01').dailyRate === 400);
+    given('and it has heard nothing from the cloud this session',
+        Object.keys(reopened.Sync._remoteRoster.workers).length === 0);
+
+    // The person renames a site before anything has arrived. The signal is back - it is
+    // the morning - but nothing has been delivered to this session yet.
+    cloud.reject = null;
+    reopened.State.schedule.places[0].name = 'הרצליה צפון';
+    reopened.State.commitRoster();
+
+    check('a phone with no snapshot this session queues no write about a man nobody touched',
+        !physicalOps(reopened).some(op => op.path === 'roster.workers.w_01'),
+        JSON.stringify(physicalOps(reopened).map(op => op.path)));
+    check('and it does queue the site the person actually changed',
+        physicalOps(reopened).some(op => op.path === 'roster.places.p_01'),
+        JSON.stringify(physicalOps(reopened).map(op => op.path)));
+
+    await connected(reopened, cloud);
+    await settle(TICK * 80);
+
+    check('the cloud keeps the raise',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+    check('the phone that made the raise is not reverted',
+        b.device.State.worker('w_01').dailyRate === 600,
+        String(b.device.State.worker('w_01').dailyRate));
+    check('the reopened phone adopts it',
+        reopened.State.worker('w_01').dailyRate === 600,
+        String(reopened.State.worker('w_01').dailyRate));
+    check('and the site rename it made offline reached the cloud',
+        cloud.doc.roster.places.p_01.name === 'הרצליה צפון',
+        JSON.stringify(cloud.doc.roster.places.p_01));
 }
 
 {
