@@ -1120,15 +1120,36 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .site-empty { color: var(--ink-3); font-size: 14px; margin: 4px 0; }
 .site-list { display: flex; flex-direction: column; gap: 4px; }
 
+/* THE ROW WRAPS, and the name has a floor under it. Both halves are one repair.
+
+   The rate <select> will not go under its longest option (שעות נוספות), so with the text
+   turned up it wants 215px on a 320px phone. The row used to answer that by refusing to
+   be narrower, which pushed the whole card - and the two buttons on its head - off the
+   side of the screen (see .site-grid in the phone block below). Letting the track be
+   narrower than the card only moves the failure: measured, `minmax(0, 1fr)` alone crushed
+   .assign-name to ZERO at 320 at twice the text, which is a row that has lost the name of
+   the man it prices in order to keep a dropdown whole.
+
+   So the name may shrink to a name and no further, and when the rate control cannot fit
+   beside it the row wraps instead. 4em, because min-width takes part in flex line
+   breaking (it clamps the hypothetical main size) and because it scales with the text:
+   68px at the ordinary size, which is what the name box already measures on a 320 phone -
+   so nothing about the ordinary day moves, measured at all four widths - and 136px at
+   twice it, which is wide enough to force the wrap and wide enough to read.
+
+   tests/mobile.test.mjs, "${width}px at 200% text, by site", measures both halves: the
+   page fitting across AND the name still having a box. A fix for one that breaks the
+   other goes red. */
 .assign-row {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 5px 6px;
     border-radius: var(--radius);
+    flex-wrap: wrap;
 }
 .assign-row:hover { background: var(--surface-2); }
-.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 4em; }
 
 .rate-control { display: flex; gap: 4px; align-items: center; }
 /* 16px is not a taste here, it is the threshold below which iOS magnifies the whole page
@@ -2346,7 +2367,18 @@ body.bars-lowered .undo-bar { transform: translateY(var(--bar-drop, 0px)); }
     /* --page-pad is the ONE place the phone's page padding is written; the week strip
        gives it back with the same property, so the two cannot drift apart. */
     .app { --page-pad: 12px; padding-inline: var(--page-pad); }
-    .site-grid { grid-template-columns: 1fr; }
+    /* minmax(0, 1fr), not 1fr. `1fr` is `minmax(auto, 1fr)`, and `auto` as a track
+       MINIMUM is the item's min-content - so the column refused to be narrower than the
+       card, the card refused to be narrower than the rate <select> inside it, and at
+       twice the text size the day screen came out 398px wide inside 390, 375 and 320.
+       What went off the edge was the inline end of every site card: the ＋ that adds a
+       man to that site and the 💬 that sends that gate its seder, with nothing on screen
+       saying the page could be dragged sideways to reach them.
+
+       The zero minimum is only half of it - on its own it hands the squeeze to the row
+       inside, and the row gave it all to the worker's name. .assign-row above wraps, and
+       .assign-name has a floor; the two are one repair and the comment there says so. */
+    .site-grid { grid-template-columns: minmax(0, 1fr); }
     /* min-width, because the buttons inside are flex: 1 from a zero basis - so the
        toggle's own natural size collapses to almost nothing. It never looks too big for
        the line it is on, so when undo, redo and "היום" joined that line it stayed put and

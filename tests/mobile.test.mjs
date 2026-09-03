@@ -92,6 +92,14 @@ async function open({ width, height, scheme = 'light', touch = true, mode = 'wor
         // view is a grid of sites and has no row per man to reach the bottom of. The
         // suites that measure SIZES rather than reach switch it over - see below, and see
         // what that exclusion was quietly hiding.
+        //
+        // AND THE DEFAULT IS NOT THE APP'S. js/ui/day.js:22 opens on by-site; this opens
+        // on by-worker. Every block that takes the default is therefore measuring the
+        // OTHER screen, and the one place that mattered was the 200%-text block: the day
+        // ran 398px wide inside 390 by site, at ordinary text by worker it did not, and no
+        // check stood where the two conditions met. "${width}px at 200% text, by site" at
+        // the foot of this file is that square. A new block that measures a layout should
+        // ask itself which mode it is in before it takes this default.
         if (typeof setDayMode === 'function') setDayMode(mode);
         render();
     }, [CREW, mode]);
@@ -3121,6 +3129,93 @@ for (const scheme of ['light', 'dark']) {
     check(`${label}: and so do the two buttons beside it`,
         buttons.length > 0 && buttons.every(item => item.ratio >= CONTRAST_FLOOR),
         JSON.stringify(buttons.map(b => b.ratio)));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- by site, at 200% text
+//
+// THE CELL THIS MATRIX DID NOT HAVE, and the reason the fault below it shipped.
+//
+// open() defaults to mode: 'workers'. The 200%-text block above takes that default, so
+// every one of its checks is about the by-WORKER list. The by-site block further up does
+// check "the page does not run off the side" - at ordinary text only. Between them they
+// cover every width and every mode except this one square, and the app OPENS on by-site
+// (js/ui/day.js:22), so the missing square was the default screen at the accommodation an
+// older man actually makes.
+//
+// What was in it: the day screen ran 398px wide inside 320, 375 and 390. `1fr` is
+// `minmax(auto, 1fr)`, and `auto` as a track minimum is the item's min-content - so the
+// track refused to be narrower than the card, and the card refused to be narrower than
+// the rate <select>, whose own min-content is its longest option (שעות נוספות) at twice
+// the size. The two buttons v101 put on the coloured head - "add a man to this site" and
+// "send this gate its seder" - went off the edge, with nothing on screen saying the page
+// could be dragged.
+//
+// The second check here is the one that matters more than the width. `minmax(0, 1fr)`
+// alone makes the page fit and crushes .assign-name to ZERO at 320 - measured, before the
+// row was allowed to wrap - which trades a page that has to be dragged for a row that has
+// lost the name of the man it prices. A width check on its own would have gone green on
+// that, so the name is measured beside it.
+for (const width of WIDTHS) {
+    const label = `${width}px at 200% text, by site`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width], mode: 'sites' });
+    await setInset(page, 34);
+
+    const touched = await doubleEveryFontSize(page);
+    await page.evaluate(async () => {
+        showView('day');
+        render();
+        await new Promise(done => setTimeout(done, 200));
+    });
+    await page.waitForTimeout(300);
+
+    const m = await page.evaluate(() => {
+        const box = node => node.getBoundingClientRect();
+        const card = [...document.querySelectorAll('.site-card')]
+            .find(node => node.querySelectorAll('.assign-row').length > 0);
+        const row = card && card.querySelector('.assign-row');
+        const name = row && row.querySelector('.assign-name');
+        const rate = row && row.querySelector('.rate-select');
+        return {
+            doc: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth,
+            cards: document.querySelectorAll('.site-card').length,
+            widest: Math.max(0, ...[...document.querySelectorAll('.site-card')]
+                .map(node => Math.round(box(node).width))),
+            name: name ? Math.round(box(name).width) : null,
+            rate: rate ? Math.round(box(rate).width) : null,
+            // The two head buttons, and whether both ends of each are on the screen.
+            head: card ? [...card.querySelectorAll('.site-head button')].map(node => ({
+                label: (node.getAttribute('aria-label') || '').replace(/[⁦-⁩]/g, '').slice(0, 22),
+                inside: box(node).left >= -1 && box(node).right <= window.innerWidth + 1
+            })) : []
+        };
+    });
+
+    given(`${label}: the text really is twice the size and the cards were drawn`,
+        touched.emitted > 1 && m.cards > 0, JSON.stringify({ touched, cards: m.cards }));
+
+    check(`${label}: the day screen still fits across`,
+        m.doc <= m.client + 1,
+        JSON.stringify({ doc: m.doc, client: m.client, widestCard: m.widest }));
+
+    // The two actions on the coloured head are what went off the edge, and this check was
+    // GREEN on the broken build: at 320 the card overflows the inline end, and in RTL the
+    // inline end of the card is not the edge of the viewport. It is here anyway, and named
+    // as a guard rather than as a reproduction, because the cheap way to make the check
+    // above go green is to clip the card - and a page that fits by having lost the button
+    // is not a page that survived.
+    check(`${label}: both actions on a site's head are on the screen`,
+        m.head.length === 2 && m.head.every(item => item.inside),
+        JSON.stringify(m.head));
+
+    // Not zero, and not smaller than the rate control beside it is allowed to be: the man
+    // is who the row is about.
+    check(`${label}: and the worker's name still has a box to be read in`,
+        m.name !== null && m.name >= 60, JSON.stringify({ name: m.name, rate: m.rate }));
 
     await page.context().close();
 }
