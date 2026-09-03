@@ -88,6 +88,23 @@ Store.reclaim = function dropOldestSnapshot() {
 };
 
 function takeDailySnapshot() {
+    // NOT ON A BOOT THAT IS HOLDING. js/app.js calls this immediately after State.load()
+    // and before the first render, and on the boot where the v2 record would not parse
+    // State.load has quarantined it, fallen through to the v1 beneath it, migrated that
+    // into memory and deliberately NOT written it down - saving it would put
+    // pre-migration data over the newest record there is. A photograph taken here is a
+    // photograph of exactly that state, filed under today's date beside the real ones,
+    // with nothing on the row to say it is not a copy of the record; and the eviction at
+    // the end of this function then deletes the oldest real one to make room for it.
+    //
+    // Two lines after that call the person is told to check the last few days against
+    // the restore points. Sending somebody to an album this boot has just written a
+    // false entry into and taken the furthest-back true one out of is worse than sending
+    // them nowhere.
+    //
+    // The same guard State.save and State.persist carry, for the same reason.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return;
+
     // Nothing to photograph, and nothing worth keeping over a real one.
     if (State.schedule.workers.length === 0) return;
 

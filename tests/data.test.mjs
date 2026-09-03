@@ -1454,6 +1454,59 @@ function record(device, date, workerId, placeId, rate) {
 }
 
 {
+    suite('a held boot does not photograph the state it refused to write down');
+
+    // The same boot as the suite above, one line further on. js/app.js calls
+    // takeDailySnapshot() immediately after State.load() and before the first render.
+    //
+    // On this boot State.load has quarantined the v2 record, fallen through to the v1
+    // beneath it, migrated that into MEMORY and deliberately not saved it - "saving it
+    // would put pre-migration data over the newest record there is". takeDailySnapshot
+    // carried no writes-blocked check, so it photographed exactly that state, filed it
+    // under TODAY beside the real restore points, and then evicted everything past the
+    // third to make room for it.
+    //
+    // Two lines later the person is told «בדוק את הימים האחרונים מול נקודות השחזור לפני
+    // שממשיכים לרשום». They are sent to an album whose newest entry is the state the app
+    // refused to save - nothing on that row says so - and whose furthest-back entry the
+    // same boot threw away.
+    const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
+    const v1 = JSON.stringify({
+        workers: ['דוד'], places: ['הרצליה'],
+        weekStartDate: '2026-08-07',
+        assignments: [{ index: 0, value: 'הרצליה' }]
+    });
+    const point = JSON.stringify({ schemaVersion: 2, workers: [], places: [], days: {},
+        advances: {} });
+    const device = makeDevice({ storage: {
+        'scheduleData:v2': brokenV2,
+        scheduleData: v1,
+        'scheduleData:snap:2026-08-30': point,
+        'scheduleData:snap:2026-08-31': point,
+        'scheduleData:snap:2026-09-01': point
+    } });
+    device.setToday('2026-09-03');
+    const result = device.State.load();
+    given('the boot is the held one: v2 quarantined, v1 shown and not written down',
+        result.damaged === true && result.migrated === true
+            && device.call('farkadWritesBlocked') === true
+            && device.raw('scheduleData:v2') === brokenV2,
+        JSON.stringify(result));
+    given('there are three restore points to lose',
+        Object.keys(device.dump())
+            .filter(key => key.startsWith('scheduleData:snap:')).length === 3);
+
+    device.call('takeDailySnapshot');
+    const points = Object.keys(device.dump())
+        .filter(key => key.startsWith('scheduleData:snap:')).sort();
+
+    check('today is not filed as a restore point on a boot that is holding',
+        !points.includes('scheduleData:snap:2026-09-03'), JSON.stringify(points));
+    check('and the furthest-back real one is still there to be checked against',
+        points.includes('scheduleData:snap:2026-08-30'), JSON.stringify(points));
+}
+
+{
     suite('a damaged schedule with no v1 does not become an empty table');
 
     const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
