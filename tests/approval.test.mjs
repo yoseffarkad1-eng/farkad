@@ -35,7 +35,7 @@
 //
 // So there is ONE predicate, carryReportingEnabled(schedule), and every surface asks it.
 
-import { makeDevice, settle } from './harness.mjs';
+import { makeDevice, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -76,13 +76,13 @@ function phone(deviceId, storage) {
     return device;
 }
 
-// js/ui/reports.js in the device's own context, which is how money.display.test.mjs
+// The reports screen in the device's own context, which is how money.display.test.mjs
 // reaches the same surfaces. The point is to read what the app RENDERS and what it
 // WRITES INTO A FILE, not to re-ask the model a question in the test's own words.
 function reportsIn(device) {
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
     run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
     run(`REPORT_RANGE.from = '${FROM}'; REPORT_RANGE.to = '${TO}';`
         + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
     return run;

@@ -26,7 +26,7 @@
 // Every check here asserts what the app is supposed to do. A failing check is the defect,
 // and its detail is what the app actually said.
 
-import { makeDevice, settle } from './harness.mjs';
+import { makeDevice, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+const REPORTS = reportsSource();
 const DAY = readFileSync(join(ROOT, 'js/ui/day.js'), 'utf8');
 const WEEK = readFileSync(join(ROOT, 'js/ui/week.js'), 'utf8');
 const SHEET = readFileSync(join(ROOT, 'js/ui/sheet.js'), 'utf8');
@@ -505,7 +505,7 @@ const uniq = list => [...new Set(list)].sort();
 
     // And the memo is gone from the file, not merely bypassed: a second one added later
     // would reintroduce every failure this suite was written for.
-    const REPORTS_SRC = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+    const REPORTS_SRC = reportsSource();
     check('reports.js holds no label map across renders',
         REPORTS_SRC.indexOf('LABELS_FOR') === -1
         && /function reportPlaceLabels\(\) \{\s*return placeLabelsIn\(/.test(REPORTS_SRC));

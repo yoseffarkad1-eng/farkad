@@ -6,7 +6,7 @@
 // Store, State and FarkadSync - so two devices editing at once, and a device closed and
 // reopened against a cloud that is behind, are both things a test can simply say.
 
-import { makeDevice, makeCloud, settle, settleUntil, deferred } from './harness.mjs';
+import { makeDevice, makeCloud, settle, settleUntil, deferred, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 // Real time, kept short. The sync layer debounces before it sends, and a test that does
@@ -9641,7 +9641,7 @@ function withAdvances(device, rows) {
     const device = makeDevice();
     seed(device);
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
 
     run(`
         assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');

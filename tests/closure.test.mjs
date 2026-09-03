@@ -40,7 +40,7 @@
 // and the sheet says both with "הגיעה תנועה אחרי סגירת התקופה". Those are two different
 // facts about two different moments. Neither may ever replace the other.
 
-import { makeDevice, settle } from './harness.mjs';
+import { makeDevice, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -96,7 +96,7 @@ function reportsIn(device) {
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:closure' });
     if (!LOADED.has(device.ctx)) {
         run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        run(reportsSource());
         LOADED.set(device.ctx, true);
     }
     run(`REPORT_RANGE.from = '${A.from}'; REPORT_RANGE.to = '${A.to}';`

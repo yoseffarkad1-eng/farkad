@@ -94,7 +94,13 @@ function offences(name, src) {
     const NEAR_MISSES = [
         "const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');",
         "const root = new URL('../', import.meta.url);",
-        "readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');",
+        // The shape the reports screen is read by since js/ui/reports.js was split: no
+        // suite names that file any more, they ask tests/harness.mjs for the group and it
+        // reads the three by name. This fixture's job is the PATH SHAPE and not the
+        // filename, so either string would prove the rule - but a fixture naming a read
+        // that nothing performs any more is a fossil, and a suite quietly describing a
+        // tree it does not open is this file's entire subject.
+        "readFileSync(join(root, file), 'utf8');",
         "const oneUp = join(HERE, '../js/app.js');",
         "const served = await fetch(`${BASE}/js/app.js`);"
     ];

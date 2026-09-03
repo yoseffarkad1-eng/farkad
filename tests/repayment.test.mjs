@@ -27,7 +27,7 @@
 // the same treatment planRateStamping gives to stamping old days, and for the same reason.
 
 import { readFileSync } from 'node:fs';
-import { makeDevice } from './harness.mjs';
+import { makeDevice, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { makeNode } from './nodes.mjs';
 
@@ -191,7 +191,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         if (!loadedInto.has(device)) {
             loadedInto.add(device);
             run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-            run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+            run(reportsSource());
         }
         run(`REPORT_RANGE.from = '${range.from}'; REPORT_RANGE.to = '${range.to}';`
             + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
@@ -331,7 +331,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
         };
         const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
         run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        run(reportsSource());
         run(`REPORT_RANGE.from = '${A.from}'; REPORT_RANGE.to = '${A.to}';`
             + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
         run(`openWorkerDays('w_01')`);
@@ -479,7 +479,7 @@ const B_DAYS = ['2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26',
 
         const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
         run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        run(reportsSource());
         run(`REPORT_RANGE.from = '${A.from}'; REPORT_RANGE.to = '${A.to}';`
             + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
         run(`openWorkerDays('w_01')`);
@@ -658,7 +658,7 @@ function omer(flags) {
 
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
     run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
 
     // The CLOSED period. Its figures are a record, and the sheet says so before it says
     // anything else.
@@ -986,7 +986,7 @@ function omer(flags) {
     // understood when it arrives from a phone that has not updated - but no screen may
     // send one. The check is on the shipped source, because a button is easy to add back
     // and this is the rule it would break.
-    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    const reports = reportsSource();
     check('the ✕ that deleted an advance is gone from the advance row',
         reports.indexOf('מחק מקדמה') === -1);
     check('and nothing in the reports screen calls removeAdvance',
@@ -1121,7 +1121,7 @@ function omer(flags) {
     // Reading an account must never seal it. Every one of these is a person LOOKING at
     // a number - a preview, a print, a workbook, a message - and a closure cannot be
     // taken back, so none of them may write one.
-    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    const reports = reportsSource();
     const share = readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8');
     const callers = (reports + share).split('closePeriodChanges').length - 1;
     check('closePeriodChanges is called from exactly one place in the whole app',
@@ -1364,7 +1364,7 @@ function omer(flags) {
     // The source, because a button is easy to change back and this is the rule it would
     // break. openAdvanceForm called addAdvance directly; it must go through the one
     // function that writes the origin beside it, and commit them together.
-    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    const reports = reportsSource();
     check('the advance form calls recordNewAdvance',
         reports.indexOf('recordNewAdvance(') !== -1);
     check('and commits both halves in one operation',
@@ -1409,7 +1409,7 @@ function omer(flags) {
     const vm = await import('node:vm');
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:l2' });
     run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
     run(`REPORT_RANGE.from = '${OMER_B.from}'; REPORT_RANGE.to = '${OMER_B.to}';`
         + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
 
@@ -1457,7 +1457,7 @@ function omer(flags) {
         JSON.stringify(surfaces.openBalance));
 
     // AND ONE FUNCTION BEHIND ALL OF THEM. The check that keeps it that way.
-    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    const reports = reportsSource();
     check('every surface goes through the one account reader',
         (reports.match(/workerAccountFor\(/g) || []).length >= 3,
         String((reports.match(/workerAccountFor\(/g) || []).length));
@@ -1475,7 +1475,7 @@ function omer(flags) {
     const vm = await import('node:vm');
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:l2b' });
     run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
     run(`REPORT_RANGE.from = '${OMER_A.from}'; REPORT_RANGE.to = '${OMER_A.to}';`
         + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
 
@@ -1813,7 +1813,7 @@ function omer(flags) {
             .test(settings));
     check('recordCarryApproval is called from exactly one place in the app',
         ((readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8')
-            + readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8')
+            + reportsSource()
             + readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8'))
             .split('recordCarryApproval(').length - 1) === 1);
     check('and the row that has no recorded closure says so on the screen',
@@ -1973,7 +1973,7 @@ function omer(flags) {
 
     // The screen: a correction is offered against a TRANSACTION in the history, not
     // against the advance - which is the only place the id it needs is on the page.
-    const reports = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
+    const reports = reportsSource();
     check('the history offers a correction per transaction',
         reports.indexOf('openEventReversalForm') !== -1
         && reports.indexOf('recordEventReversed(') !== -1);

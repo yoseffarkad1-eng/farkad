@@ -358,6 +358,20 @@ from an OLDER commit must use that commit's file list rather than this one's —
 first time a file was split, because reading today's file names out of a commit from
 before they existed is a demand that the past contain the present.
 
+The reports screen is three files and the harness names them ONCE. It is not in the
+device file list — a device here has no views — so the suites that want the screen load
+it themselves, and until the split they did it by writing `js/ui/reports.js` out by hand:
+twenty-seven such reads across fourteen suites, some evaluating the file into a context,
+some searching its text for a Hebrew string or counting a call site, three of them
+meta-tests iterating their own hard-coded lists. That is the number that made v102
+measure the split and put it back. `REPORTS_GROUP` is the list and `reportsSource(root)`
+is the three files joined in load order; every one of those reads now goes through it, so
+the next file to come out of that screen is added on one line and no suite quietly ends up
+covering a third of what it claims. `root` is passed only by the two suites that can be
+re-rooted onto another checkout (`xlsx.test.mjs` through `treecheck.mjs`,
+`money.ingress.test.mjs` through its own `findRepo`); everything else takes the default,
+which is derived from the harness's own file — see `isolation.test.mjs`.
+
 The rest of the kit, each modelled on a measured failure:
 
 - `makeCloud()` — a fake Firestore that is faithful where it hurts: `update` rejects

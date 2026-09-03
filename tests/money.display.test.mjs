@@ -21,7 +21,7 @@
 //
 // Every expected value here is a literal somebody could check on paper.
 
-import { makeDevice, settle } from './harness.mjs';
+import { makeDevice, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 import vm from 'node:vm';
@@ -65,7 +65,7 @@ function reportsIn(device) {
     // index.html loads before this file. Loading one without the other is a harness
     // fault, not a product one.
     run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
     run(`REPORT_RANGE.from = '${FROM}'; REPORT_RANGE.to = '${TO}';`
         + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
     return run;

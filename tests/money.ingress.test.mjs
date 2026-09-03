@@ -20,7 +20,7 @@
 //                            string becomes money and rubbish becomes zero.
 //   js/ui/reports.js:312     the מקדמות column appears only when some row has
 //                            advances > 0, so a negative advance is invisible.
-//   js/ui/reports.js:1273    moneyCells writes `row.advances > 0 ? -Math.round(...) : 0`,
+//   js/ui/reports-export.js   moneyCells writes `row.advances > 0 ? -Math.round(...) : 0`,
 //                            so the spreadsheet says the advance was 0.
 //
 // Every value below is driven through the three real doors - importBackup, a restore
@@ -55,15 +55,17 @@ function findRepo() {
 }
 
 const ROOT = findRepo();
-const { makeDevice, makeCloud, settle } =
+const { makeDevice, makeCloud, settle, reportsSource } =
     await import(pathToFileURL(join(ROOT, 'tests/harness.mjs')).href);
 const { suite, check, same, given, report } =
     await import(pathToFileURL(join(ROOT, 'tests/runner.mjs')).href);
 
-// reports.js draws site names through js/ui/sitecolor.js, so that file goes in with it.
-// Both are classic scripts and both run in the device's own scope.
+// The reports screen draws site names through js/ui/sitecolor.js, so that file goes in
+// with it. All of them are classic scripts and all run in the device's own scope.
+// reportsSource() takes THIS suite's ROOT, which findRepo above may have re-rooted onto
+// another checkout - the harness's own default would read the tree the harness is in.
 const REPORTS = readFileSync(join(ROOT, 'js/ui/sitecolor.js'), 'utf8')
-    + '\n' + readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+    + '\n' + reportsSource(ROOT);
 // The SHIPPED library, for the same reason tests/xlsx.test.mjs reads it: a workbook
 // proved against a copy installed beside the app says nothing about the file a phone
 // writes. vendor/ is what the service worker precaches and what XLSX_URL names.

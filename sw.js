@@ -53,6 +53,8 @@ const SHELL = [
     './js/ui/week.js',
     './js/ui/roster.js',
     './js/ui/reports.js',
+    './js/ui/reports-statement.js',
+    './js/ui/reports-export.js',
     './js/ui/share.js',
     './js/ui/backup.js',
     './js/ui/printout.js',

@@ -164,7 +164,9 @@ written down so it cannot happen twice.
     js/ui/quickstart.js        paste a list, get a roster
     js/ui/week.js              the read-only week grid and its print layout
     js/ui/roster.js            workers and sites; archive vs delete; the reorder mode
-    js/ui/reports.js           pay and invoice reports; the advance form
+    js/ui/reports.js           pay and invoice reports; the advance form — the screen half
+    js/ui/reports-statement.js the message a worker is sent on payday; reads, never writes
+    js/ui/reports-export.js    the workbook, the CSV, the file names, the hand-over dialog
     js/ui/share.js             the WhatsApp message and the CSV
     js/ui/backup.js            snapshots, the backup file, the four restore doors, the rescue file
     js/ui/printout.js          the table as a PNG, read off the DOM, for the phone where window.print()
@@ -174,7 +176,8 @@ written down so it cannot happen twice.
     js/ui/install.js           the add-to-home-screen warning (iOS evicts browser-tab storage)
     js/ui/settings.js          the ⋯ panel: sync, backup, restores, version, device state, ledger parity
     tests/runner.mjs           suite/check/same/given/report; given prints its detail too
-    tests/harness.mjs          devices in Node: V8 contexts, a faithful fake localStorage and Firestore
+    tests/harness.mjs          devices in Node: V8 contexts, a faithful fake localStorage and Firestore;
+                               REPORTS_GROUP/reportsSource — the ONE place the reports files are named
     tests/build.test.mjs       the three stamps agree; the shell is complete; caches never cross builds
     tests/data.test.mjs        storage, sync, and the money arithmetic — the big one
     tests/smoke.mjs            the app in real Chromium, self-served
