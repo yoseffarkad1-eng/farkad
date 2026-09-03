@@ -163,9 +163,40 @@ does not is a count from some other tree:
     gate, 50/50. Two earlier attempts came back 43/50 and 46/50 and were
     self-inflicted - two loops running the suite at once share the emulator that
     `firebase emulators:exec` binds from firebase.json, and reseed() wipes the shared
-    document, so each run was deleting the other's record. Passing --config with a private
-    port does NOT fix it: the websocket port is not read from that config and still
-    collides. Run them serially.
+    document, so each run was deleting the other's record.
+
+    The sentence that used to stand here said passing --config with a private port "does
+    NOT fix it: the websocket port is not read from that config and still collides". THAT
+    REASON WAS WRONG, and a wrong reason is worse than none - it sends the next person to
+    read firebase-tools instead of the six lines that were the whole problem. The websocket
+    port IS read from a private config, as long as the config names it:
+
+        firebase emulators:exec --only firestore --config firebase.alt.json "..."
+          with { "firestore": { "port": 8099, "websocketPort": 9199 } }
+        firestore: Firestore Emulator UI websocket is running on 9199.
+        FIRESTORE_EMULATOR_HOST=127.0.0.1:8099
+
+    measured while another emulator held 8080 and 9150. What actually collided was the
+    hard-coded `host: '127.0.0.1', port: 8080` in all six emulator suites: each reached
+    past the emulator started for it and found the other one, or nothing at all
+    (`connect ECONNREFUSED 127.0.0.1:8080`).
+
+    They now read it from tests/emulator-host.mjs, which answers out of
+    FIRESTORE_EMULATOR_HOST - set by `firebase emulators:exec` for the script it runs - and
+    falls back to 127.0.0.1:8080 when nothing says otherwise, so the plain
+    `npm run test:emulator` is byte-for-byte the run it always was.
+
+    SO THEY CAN NOW RUN IN PARALLEL, on private ports. Copy firebase.json, give it another
+    `port` AND another `websocketPort`, and pass it with --config; the file name is
+    gitignored as `firebase.*.json`. Proved on this commit, all six against a 8099/9199
+    emulator while port 8080 was busy: rules 59, cas.emulator 24, rollout 17,
+    bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50 - every count identical
+    to the serial numbers recorded above, every one EXIT=0. And on the default path with no
+    --config, rules 59/59 on 8080 with the websocket on 9150, unchanged.
+
+    Two runs still must not share ONE emulator: reseed() wipes the document and the
+    argument above stands unaltered. Different emulators on different ports do not share
+    anything.
     Per suite and verbatim: features/false-holds/handoff.md.
 
     At 55bfa00 (v99: the bottom bars come back - a keyboard needs a focused editable - and
