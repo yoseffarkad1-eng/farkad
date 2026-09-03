@@ -898,7 +898,11 @@ function renderAssignmentRow(place, workerId) {
 
     // The record is what pay is calculated from, so the rate sits on the row itself
     // rather than behind a dialog nobody will open thirty times an evening.
-    row.appendChild(renderRateControl(place.id, workerId, entry));
+    //
+    // The whole place, not its id: the control needs the site's NAME for its own label,
+    // and this is the one caller, which already holds a roster entry rather than a key
+    // off a day record.
+    row.appendChild(renderRateControl(place, workerId, entry));
 
     row.appendChild(button('✕', 'btn-icon', () => {
         editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
@@ -908,11 +912,27 @@ function renderAssignmentRow(place, workerId) {
     return row;
 }
 
-function renderRateControl(placeId, workerId, entry) {
+function renderRateControl(place, workerId, entry) {
+    const placeId = place.id;
     const wrap = el('span', 'rate-control');
 
     const select = document.createElement('select');
     select.className = 'rate-select';
+    // THE ONE CONTROL IN THE APP THAT HAD NO NAME. Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼,
+    // ⤓, ₪, 🗄️ and ↩️ carries a Hebrew name, most of them with the worker's or the site's
+    // folded in. This one announced as "רגיל, תיבה משולבת" and nothing else - on a screen
+    // where four of them are visible at once, one per recorded man, and where what it
+    // sets is what the day is PRICED at.
+    //
+    // Shaped like its neighbours: the ✕ beside it says הסר את <X> מ<Y>, and the hours box
+    // in the assign sheet says שעות נוספות ב<Y>, so a site is named with ב and a man with
+    // his name. תעריף is the app's own word for the thing this picks - js/model/schema.js
+    // says תעריף שאינו מוכר when a day arrives with a rate it does not recognise - rather
+    // than a new one invented at the point of labelling. Both names are bidi-isolated,
+    // like every other name in every other label (js/ui/dom.js).
+    const worker = State.worker(workerId);
+    select.setAttribute('aria-label',
+        `תעריף של ${isolate(worker ? worker.name : workerId)} ב${isolate(place.name)}`);
     RATES.forEach(rate => {
         const option = document.createElement('option');
         option.value = rate;

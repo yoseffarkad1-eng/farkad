@@ -8636,6 +8636,93 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- nothing on the day screen is unnamed
+{
+  // Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼, ⤓, ₪, 🗄️ and ↩️ in this app carries a Hebrew
+  // name, and most of them fold in the worker's or the site's. One control did not: the
+  // rate <select> on each assign row, which a reader announced as "רגיל, תיבה משולבת" and
+  // nothing more - on a screen where four of them are visible at once, one per recorded
+  // man, and where what it sets is what that man's day is PRICED at.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    State.date = '2026-08-12';
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_01');
+    State.save();
+    setDayMode('sites');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  // The sweep first, so this is a claim about the screen and not about one element.
+  //
+  // AND IT COMPUTES THE NAME THE WAY THE BROWSER DOES, which the first draft of this
+  // check did not: it added node.textContent for everything, and a <select>'s textContent
+  // is the text of its OPTIONS - "רגילשעות נוספותיום כפול" - so the one unnamed control
+  // in the app came out named and the sweep was green on the broken build. Content is a
+  // name source for a button and a link. It is not one for a select, an input or a
+  // textarea: those are named by a label, aria-label, aria-labelledby or title, and
+  // nothing else.
+  const sweep = () => page.evaluate(() => {
+    const out = [];
+    const fromContent = node => node.tagName === 'BUTTON' || node.tagName === 'A'
+      || node.getAttribute('role') === 'button';
+    document.querySelectorAll('#dayView button, #dayView select, #dayView input, #dayView textarea, #dayView a[href], #dayView [role="button"]')
+      .forEach(node => {
+        if (node.getAttribute('aria-hidden') === 'true') return;
+        if (node.offsetParent === null) return;
+        const labelled = node.getAttribute('aria-labelledby');
+        const parts = [
+          node.getAttribute('aria-label'),
+          labelled ? (document.getElementById(labelled) || {}).textContent : '',
+          node.labels && node.labels.length ? node.labels[0].textContent : '',
+          node.getAttribute('title'),
+          node.getAttribute('placeholder'),
+          fromContent(node) ? node.textContent : ''
+        ];
+        if (parts.some(part => String(part || '').trim())) return;
+        out.push({ tag: node.tagName, cls: String(node.className).slice(0, 24) });
+      });
+    return out;
+  });
+
+  const unnamed = await sweep();
+  check('every control on the day screen, by site, has a name',
+    unnamed.length === 0, JSON.stringify(unnamed));
+
+  // And the name is the one the buttons around it use: the man, and the site, both
+  // bidi-isolated the way js/ui/dom.js requires of every name in every label.
+  const rate = await page.evaluate(() => {
+    const node = document.querySelector('.site-card .rate-select');
+    if (!node) return null;
+    const label = node.getAttribute('aria-label') || '';
+    // FSI…PDI, U+2068 and U+2069 - what js/ui/dom.js's isolate() emits around a NAME.
+    // U+2066 is the other one, LRI, and it belongs to dateRange(): a first draft of this
+    // check counted that instead and reported a correctly isolated label as bare.
+    return {
+      label,
+      plain: label.replace(/[\u2066-\u2069]/g, ''),
+      isolated: (label.match(/\u2068/g) || []).length === 2
+        && (label.match(/\u2069/g) || []).length === 2
+    };
+  });
+  check('the rate control names the man whose day it prices',
+    rate !== null && rate.plain.includes('דוד'), JSON.stringify(rate));
+  check('and the site it is priced at, because four of them are on the screen at once',
+    rate !== null && rate.plain.includes('הרצליה'), JSON.stringify(rate));
+  check('with both names bidi-isolated, like every other name in every other label',
+    rate !== null && rate.isolated === true, JSON.stringify(rate));
+
+  await page.evaluate(() => { setDayMode('workers'); render(); });
+  await page.waitForTimeout(250);
+  const unnamedByWorker = await sweep();
+  check('and the same screen by worker', unnamedByWorker.length === 0,
+    JSON.stringify(unnamedByWorker));
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
