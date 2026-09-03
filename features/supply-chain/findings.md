@@ -63,15 +63,29 @@ own dist — bytes npm fetched from the registry and `npm ci` verified against
 
     the only third-party code shipped is the release it claims to be
       PASS  the vendored library is in the shell
-      PASS  the shipped copy is byte-identical to the pinned dependency's dist
+      PASS  the shipped copy is the exact release these bytes were pinned to
+      PASS  and the pinned dependency npm installed has those same bytes
       PASS  and the version in its filename is the version installed  — 0.18.5
       PASS  its licence sits beside it in the repository
       PASS  and nothing else is vendored
 
 Proved able to fail on this commit: appending one comment line to
-`vendor/xlsx-0.18.5.min.js` gives **FAIL ... b4512242ce973c5c vs c9506197caf809a0** and
-33/34. The file was restored and re-hashed afterwards
+`vendor/xlsx-0.18.5.min.js` gives **FAIL ... b4512242ce973c5c vs c9506197caf809a0**. The
+file was restored and re-hashed afterwards
 (`c9506197caf809a075b6dee1da0d36fb19da7158ffe8a88e7b0c96c5d8623c99`).
+
+The first version of this check got the shape wrong and is worth recording, because the
+mistake is a tempting one. It compared only against `node_modules`, and when the
+dependency was absent it SKIPPED with `check(name, true, 'SKIPPED: ...')` so the suite
+would still run on a machine that had not run `npm ci`. That is an assertion whose
+condition is the literal `true`: it cannot fail, `tests/nonassertions.test.mjs` exists to
+catch exactly that, and it did — `npm test` went red on the very commit that added it,
+and the failure was found by another reader rather than by its author. The repair is the
+written-down `RELEASE_SHA256` above: a real assertion on every machine, needing nothing
+installed. The dist comparison survives as a SECOND, corroborating check, which is what
+stops the constant from drifting into a number somebody edited to make a red check green
+— the two must agree, and they can only be made to agree by vendoring the release the
+lockfile names.
 
 The check also makes the two halves inseparable: bumping the dependency without
 re-vendoring, and re-vendoring without bumping the dependency, both fail. An upgrade is

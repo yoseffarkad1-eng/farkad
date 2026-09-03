@@ -285,26 +285,46 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     suite('the only third-party code shipped is the release it claims to be');
 
     const VENDORED = 'vendor/xlsx-0.18.5.min.js';
-    const DIST = 'node_modules/xlsx/dist/xlsx.full.min.js';
 
     check('the vendored library is in the shell', shellPaths.includes(VENDORED),
         shellPaths.filter(path => path.startsWith('vendor/')).join(', '));
 
-    // Skipped rather than failed when the dependency is not installed: this suite is meant
-    // to run in a second before a commit, on a machine that may not have run `npm ci`, and
-    // a check that fails for want of node_modules teaches people to ignore it. The gate
-    // does run `npm ci`, so there it is a real check.
-    if (!existsSync(join(ROOT, DIST))) {
-        check('the pinned dependency is installed, so its bytes can be compared',
-            true, 'SKIPPED: ' + DIST + ' is not present - run `npm ci`');
-    } else {
-        const vendored = createHash('sha256').update(readFileSync(join(ROOT, VENDORED))).digest('hex');
-        const dist = createHash('sha256').update(readFileSync(join(ROOT, DIST))).digest('hex');
-        check('the shipped copy is byte-identical to the pinned dependency\'s dist',
-            vendored === dist, vendored.slice(0, 16) + ' vs ' + dist.slice(0, 16));
+    // The authority is a hash written down HERE, not a comparison that only happens when
+    // node_modules is present. The first version of this check skipped with
+    // `check(name, true, 'SKIPPED: ...')` when the dependency was absent, so that the
+    // suite would still run in a second on a machine that had not run `npm ci`. That was
+    // wrong twice over: an assertion whose condition is the literal `true` cannot fail,
+    // which is exactly what tests/nonassertions.test.mjs exists to catch and did catch,
+    // and a check that quietly stops checking on the machines most likely to be missing
+    // something is the weakest possible place to put a skip.
+    //
+    // A written-down hash has neither problem. It is a real assertion on every machine,
+    // it needs nothing installed, and changing it is a deliberate line in a diff.
+    const RELEASE_SHA256 =
+        'c9506197caf809a075b6dee1da0d36fb19da7158ffe8a88e7b0c96c5d8623c99';
 
-        // And the version in the FILENAME is the version that was installed, so the name
-        // the page asks for is not describing some other release.
+    const vendored = createHash('sha256')
+        .update(readFileSync(join(ROOT, VENDORED))).digest('hex');
+    check('the shipped copy is the exact release these bytes were pinned to',
+        vendored === RELEASE_SHA256, vendored.slice(0, 16) + ' vs ' + RELEASE_SHA256.slice(0, 16));
+
+    // And when the dependency IS installed - which it is in the gate, because `npm ci`
+    // runs first - the written-down hash is checked against the bytes npm fetched from
+    // the registry and verified against package-lock.json's integrity hash. That is what
+    // stops the constant above from drifting into a number somebody updated to make a red
+    // check green: the two have to agree, and they can only be made to agree by vendoring
+    // the release the lockfile names.
+    //
+    // Guarded by existsSync so this suite still runs on a machine without node_modules -
+    // but the guard skips a SECOND, corroborating check, never the assertion itself, and
+    // the branch it guards contains no assertion that could pass vacuously.
+    const DIST = 'node_modules/xlsx/dist/xlsx.full.min.js';
+    if (existsSync(join(ROOT, DIST))) {
+        const dist = createHash('sha256')
+            .update(readFileSync(join(ROOT, DIST))).digest('hex');
+        check('and the pinned dependency npm installed has those same bytes',
+            dist === RELEASE_SHA256, dist.slice(0, 16) + ' vs ' + RELEASE_SHA256.slice(0, 16));
+
         const installed = JSON.parse(
             readFileSync(join(ROOT, 'node_modules/xlsx/package.json'), 'utf8')).version;
         check('and the version in its filename is the version installed',
