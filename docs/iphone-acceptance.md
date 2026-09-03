@@ -22,9 +22,20 @@
 >
 > | suite | runs on |
 > |---|---|
-> | smoke, print, mobile, update, forms, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
+> | smoke, print, mobile, perf, update, forms, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
 > | every other suite in `npm test` | **Node**, with V8 contexts and a fake localStorage - no browser at all |
 > | rules, bootstrap-rules, cas-emulator, rollout, bootstrap, money-concurrency | **Node** against the local **Firestore emulator** |
+>
+> `perf` is the newest of them and the one most likely to be misread, so it is named
+> separately: it measures TIME AND MEMORY, in headless Chromium, in a Linux container, and
+> every number it produces is a LOWER BOUND on what a phone does. Not a multiple of it - a
+> lower bound. A phone is slower for reasons that do not scale cleanly (a smaller core, a
+> colder cache, a thermally throttled clock, a `localStorage` that is a synchronous
+> main-thread trip through SQLite), and `features/performance/findings.md` deliberately
+> refuses to guess the factor. "The app draws the day screen in 2ms" is a true sentence
+> about that container and is NOT a sentence about anybody's phone. The one measurement
+> that would settle it is this suite, or a stopwatch, on a real device - and it has not
+> been taken.
 >
 > None of them is Safari and none of them is a phone. Where a suite sets an iPhone
 > user-agent string it is still Chromium: that proves the app's own branch runs, not that
