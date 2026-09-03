@@ -156,7 +156,7 @@ async function timeInPage(page, body, { runs = 11, warmups = 3 } = {}) {
 // measure the parser against a shape the app never writes.
 
 const SEED = `
-window.__seed = function (workerCount, placeCount, dayCount, firstDate, fillRatio) {
+window.__seed = function (workerCount, placeCount, dayCount, firstDate) {
     State.schedule.workers = Array.from({ length: workerCount }, function (unused, i) {
         return {
             id: 'w_' + String(i + 1).padStart(3, '0'),
@@ -181,7 +181,6 @@ window.__seed = function (workerCount, placeCount, dayCount, firstDate, fillRati
         lastDate = value;
         State.schedule.workers.forEach(function (worker, i) {
             if ((i + offset) % 10 === 0) { markAbsent(State.schedule, value, worker.id, 'actual'); return; }
-            if (i / workerCount >= fillRatio) return;
             assignPlace(State.schedule, value, worker.id, 'actual',
                 State.schedule.places[(i + offset) % placeCount].id, RATE_NORMAL);
             written += 1;
@@ -200,12 +199,12 @@ window.__seed = function (workerCount, placeCount, dayCount, firstDate, fillRati
 `;
 
 // Every page gets the seeder; whether it is called, and with what, is each suite's business.
-async function seeded(workers, places, days, from, fillRatio = 1) {
+async function seeded(workers, places, days, from) {
     const page = await open();
     await page.evaluate(SEED);
     const result = await page.evaluate(
-        ([w, p, d, f, r]) => window.__seed(w, p, d, f, r),
-        [workers, places, days, from, fillRatio]);
+        ([w, p, d, f]) => window.__seed(w, p, d, f),
+        [workers, places, days, from]);
     return { page, result };
 }
 
@@ -231,7 +230,6 @@ async function bootTiming(page) {
         const nav = performance.getEntriesByType('navigation')[0];
         return {
             interactive: nav.domInteractive,
-            bootStart: nav.domContentLoadedEventStart,
             bootEnd: nav.domContentLoadedEventEnd,
             boot: nav.domContentLoadedEventEnd - nav.domContentLoadedEventStart,
             nodes: document.getElementsByTagName('*').length
@@ -686,11 +684,24 @@ for (const crew of CREWS) {
         collect();
         const after = heap();
 
-        return { before, after, precise: before % 100000 !== 0 || after % 100000 !== 0 };
+        return {
+            before,
+            after,
+            precise: before % 100000 !== 0 || after % 100000 !== 0,
+            collected: typeof gc === 'function'
+        };
     });
 
     const grown = memory.after - memory.before;
     const perRender = grown / 200;
+    // Both of these are about the INSTRUMENT, and both have to hold or the two checks under
+    // them are measuring something else. Without a collector, two heap reads differ by
+    // whatever V8 had not swept yet and the difference is the collector's mood; without the
+    // precise flag, Chromium rounds to 100KB and a real leak of 40KB a render reads as no
+    // change at all. Either one missing is a setup failure, not a passing check.
+    given('the collector was exposed, so the two heap reads are of swept heaps',
+        memory.collected === true,
+        'gc() was not defined in the page - --js-flags=--expose-gc did not take');
     given('the heap was read at a finer grain than Chromium\'s 100KB default rounding',
         memory.precise === true,
         `before ${memory.before}, after ${memory.after} - if both are round hundreds of KB, `
@@ -734,9 +745,12 @@ for (const crew of CREWS) {
         };
     });
 
-    // 5000 nodes is the number in the brief this suite was written to, and it is a fair
-    // line: below it a 2019 phone lays out a screen in one frame, above it the layout
-    // itself - not the JavaScript - is what the thumb waits for.
+    // 5000 is not twice anything measured here - it is 1053 - and it is deliberately not.
+    // The other budgets in this file catch a regression; this one is a DESIGN LINE, and the
+    // line is about layout rather than about JavaScript: a few thousand nodes is where a
+    // phone several years old stops laying a screen out inside one frame, whatever the code
+    // that built them did. Passing it by a factor of five is the finding. If a later screen
+    // ever approaches it, the answer is not a bigger number here.
     check('the busiest day screen this app can be given is under 5000 nodes',
         size.nodes < 5000, JSON.stringify(size));
     check('and under 500 interactive controls',
