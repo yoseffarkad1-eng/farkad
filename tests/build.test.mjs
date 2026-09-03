@@ -17,10 +17,11 @@
 // running app, and needs Playwright and a server to do it; this one is a file read, so
 // it runs in a second, before a commit, on any machine.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { suite, check, report } from './runner.mjs';
+import { createHash } from 'node:crypto';
+import { suite, check, same, report } from './runner.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = name => readFileSync(join(ROOT, name), 'utf8');
@@ -258,6 +259,71 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     const page = readFileSync(join(ROOT, 'index.html'), 'utf8');
     check('nor does the page itself',
         !/FARKAD_FLAG_OVERRIDES/.test(page));
+}
+
+// ---------------------------------------------------------------- the third-party bytes
+//
+// vendor/xlsx-0.18.5.min.js is the ONLY third-party code this app ships. It is 881KB of
+// minified JavaScript, it is in the service worker's shell, and it therefore runs on
+// three phones with the same reach over the page as every file in js/.
+//
+// tests/xlsx.test.mjs already proves the library WORKS: it builds a real workbook through
+// this exact file and reads the arithmetic back out. It also pins the filename the page
+// asks for and cross-checks it against the XLSX.version the file reports. What none of
+// that can catch is the file being a DIFFERENT 0.18.5 - bytes edited, appended to, or
+// swapped for a build from somewhere other than the release this repository pins. Such a
+// file reports 0.18.5, writes correct spreadsheets, passes every check in that suite, and
+// is not the code anybody reviewed.
+//
+// So the authority is the pinned devDependency's own dist, which npm fetched from the
+// registry and `npm ci` verified against package-lock.json's integrity hash. Identical
+// bytes mean the shipped copy IS the release named in package.json. They also mean the
+// two cannot drift apart silently: bumping the dependency without re-vendoring, or
+// re-vendoring without bumping the dependency, both fail here, which is what makes an
+// upgrade a deliberate act with a diff rather than something that half-happens.
+{
+    suite('the only third-party code shipped is the release it claims to be');
+
+    const VENDORED = 'vendor/xlsx-0.18.5.min.js';
+    const DIST = 'node_modules/xlsx/dist/xlsx.full.min.js';
+
+    check('the vendored library is in the shell', shellPaths.includes(VENDORED),
+        shellPaths.filter(path => path.startsWith('vendor/')).join(', '));
+
+    // Skipped rather than failed when the dependency is not installed: this suite is meant
+    // to run in a second before a commit, on a machine that may not have run `npm ci`, and
+    // a check that fails for want of node_modules teaches people to ignore it. The gate
+    // does run `npm ci`, so there it is a real check.
+    if (!existsSync(join(ROOT, DIST))) {
+        check('the pinned dependency is installed, so its bytes can be compared',
+            true, 'SKIPPED: ' + DIST + ' is not present - run `npm ci`');
+    } else {
+        const vendored = createHash('sha256').update(readFileSync(join(ROOT, VENDORED))).digest('hex');
+        const dist = createHash('sha256').update(readFileSync(join(ROOT, DIST))).digest('hex');
+        check('the shipped copy is byte-identical to the pinned dependency\'s dist',
+            vendored === dist, vendored.slice(0, 16) + ' vs ' + dist.slice(0, 16));
+
+        // And the version in the FILENAME is the version that was installed, so the name
+        // the page asks for is not describing some other release.
+        const installed = JSON.parse(
+            readFileSync(join(ROOT, 'node_modules/xlsx/package.json'), 'utf8')).version;
+        check('and the version in its filename is the version installed',
+            VENDORED.includes('-' + installed + '.min.js'), installed);
+    }
+
+    // Apache-2.0 requires the licence to travel with the code, and here it genuinely
+    // travels: it is in the shell alongside the library, so the copy on a phone with no
+    // signal is attributed too. Asserted separately from the shell check above because
+    // the two say different things - that one says the code is cached, this one says the
+    // file exists to be cached.
+    check('its licence sits beside it in the repository',
+        existsSync(join(ROOT, 'vendor/xlsx-0.18.5.LICENSE')));
+
+    // Nothing else. A second vendored file would be a second piece of third-party code on
+    // three phones, and it should not be possible to add one without this line changing.
+    const vendorFiles = readdirSync(join(ROOT, 'vendor')).sort();
+    same('and nothing else is vendored', vendorFiles,
+        ['xlsx-0.18.5.LICENSE', 'xlsx-0.18.5.min.js']);
 }
 
 report();
