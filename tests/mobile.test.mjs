@@ -1321,6 +1321,49 @@ for (const width of [320, 390]) {
         && Math.abs(restored.tabs.bottom - restored.bottom) <= 1, JSON.stringify(restored));
 
     await page.context().close();
+
+    // Above 700px the tab bar is in the header, in ordinary flow. A translateY there
+    // would move its box and leave its layout where it was - a row of tabs sliding down
+    // over the page - and an iPad in landscape is over 700px wide, is WebKit, and can
+    // strand its viewport exactly like the phone did. So the tab bar's half of the rule
+    // lives inside the block that makes it fixed, and this is the check that says so.
+    // The dock and the undo bar are fixed at every width and are lowered at every width.
+    const wide = await open({ width: 900, height: 800 });
+    await wide.evaluate(([short]) => {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        Object.defineProperty(window, 'visualViewport', {
+            configurable: true,
+            value: {
+                height: window.innerHeight - short, offsetTop: 0, scale: 1,
+                addEventListener() {}, removeEventListener() {}
+            }
+        });
+        scheduleBarMeasure();
+    }, [SHORT]);
+    await wide.evaluate(() => new Promise(done =>
+        requestAnimationFrame(() => requestAnimationFrame(done))));
+    const desk = await wide.evaluate(() => {
+        const read = selector => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const style = getComputedStyle(node);
+            return { position: style.position, transform: style.transform };
+        };
+        return {
+            lowered: document.body.classList.contains('bars-lowered'),
+            tabs: read('.tabs'), dock: read('.day-actions')
+        };
+    });
+    given('900px: the shortfall is read there too and the tab bar is in the flow',
+        desk.lowered === true && desk.tabs && desk.tabs.position !== 'fixed',
+        JSON.stringify(desk));
+    check('900px: the tab bar is in the flow there, so it is not translated',
+        desk.tabs.transform === 'none', JSON.stringify(desk));
+    check('900px: the dock is fixed at every width, so it is lowered at every width',
+        Boolean(desk.dock) && desk.dock.position === 'fixed'
+        && desk.dock.transform !== 'none', JSON.stringify(desk));
+
+    await wide.context().close();
 }
 
 for (const width of [320, 390]) {

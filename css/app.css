@@ -216,6 +216,12 @@ body {
    calculation that is a choice rather than a measurement. */
 :root { --nav-h: 0px; --day-actions-h: 0px; --bars-h: calc(var(--nav-h) + var(--day-actions-h)); }
 
+/* How far iOS has lifted every fixed bar off the bottom of the screen, written by
+   js/ui/bars.js, and 0 everywhere else. It is a HEIGHT-PRESERVING move, so it is not in
+   --bars-h and must never be: the bars take the same room they always did, and the room
+   the page reserves for them is now the room they are actually painted in. */
+:root { --bar-drop: 0px; }
+
 .app {
     max-width: 1180px;
     margin: 0 auto;
@@ -346,6 +352,12 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
         padding: 6px 10px max(8px, var(--safe-bottom));
         box-shadow: 0 -6px 24px -18px rgba(0, 0, 0, .5);
     }
+
+    /* Lowered with the other two when iOS has lifted every fixed element off the bottom
+       of the screen - see body.bars-lowered beside the kbd-open rule. The rule is HERE,
+       inside the block that makes .tabs fixed, because above 700px it is in the header
+       and in ordinary flow, where moving the box would leave its layout behind. */
+    body.bars-lowered .tabs { transform: translateY(var(--bar-drop, 0px)); }
     .tab {
         flex-direction: column;
         gap: 3px;
@@ -2120,6 +2132,28 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 body.kbd-open .tabs,
 body.kbd-open .day-actions { display: none; }
 body.kbd-open .sheet-foot { padding-bottom: 16px; }
+
+/* And the other half of the same fact about iOS, which is NOT a keyboard.
+   On iOS a `position: fixed` element is anchored to the VISUAL viewport. When that
+   viewport is reported short with nothing covering the screen - the share sheet closed,
+   the app brought back from the background, a keyboard dismissed with the page scrolled
+   - iOS paints these bars that far above the bottom of the screen, and the worker list
+   shows in the strip underneath them. That was one real iPhone on v103, about 387pt up.
+   js/ui/bars.js measures the gap and puts them back.
+   All three move together or the fix makes the layout worse than the fault: the dock's
+   whole job is to sit on the tab bar and the undo bar's is to sit above the dock, and
+   lowering one of them alone would take them apart.
+   The rule is behind the class rather than a var() fallback so that in the ordinary case
+   there is no transform here at all - a transform is a containing block for fixed
+   descendants, and ruling one out of every ancestor is how this fault was found.
+   These two are `position: fixed` at every width, so the rule is at every width too.
+   .tabs is NOT - above 700px it is in the header, in ordinary flow - and its half of
+   this rule lives beside the declaration that makes it fixed, up in the phone block.
+   A translateY on a flow element moves the box and leaves its layout where it was, and
+   an iPad in landscape is over 700px wide, WebKit, and can strand its viewport exactly
+   like the phone did: the case is real, not hypothetical. */
+body.bars-lowered .day-actions,
+body.bars-lowered .undo-bar { transform: translateY(var(--bar-drop, 0px)); }
 
 /* Above both bottom bars. A dialog the tab bar draws over is a dialog whose last button
    cannot be pressed - and the last button is usually the one that says no. */
