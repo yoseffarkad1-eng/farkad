@@ -95,6 +95,10 @@ function keyboardTarget() {
 // bar on it, and only killing the app brought them back. So the difference is read only
 // while something a keyboard opens for has focus; with nothing editable focused there
 // is no keyboard, whatever the numbers say, and the answer is 0.
+// The shortest an on-screen keyboard is. Named because two answers below are measured
+// against it and a number written twice is a number that gets changed once.
+const KEYBOARD_FLOOR = 150;
+
 function keyboardHeight() {
     if (typeof window === 'undefined' || !window.visualViewport) return 0;
     if (!keyboardTarget()) return 0;
@@ -102,8 +106,89 @@ function keyboardHeight() {
     // deliberately allowed here: at 1.25x on a tall phone the difference already
     // clears the keyboard floor, and the bars would vanish under somebody's zoom.
     if (window.visualViewport.scale > 1.01) return 0;
+    // offsetTop is deliberately NOT subtracted here, and IS subtracted by the drop
+    // below. A keyboard covers the bottom of the visual viewport, so its height is the
+    // difference between the two heights whatever the viewport has been scrolled to;
+    // subtracting the scroll as well would read a real keyboard as shorter than it is
+    // and, past the floor, as no keyboard at all.
     const covered = window.innerHeight - window.visualViewport.height;
-    return covered > 150 ? Math.round(covered) : 0;
+    return covered > KEYBOARD_FLOOR ? Math.round(covered) : 0;
+}
+
+// ---------------------------------------------------------------- the bars put back on the bottom
+//
+// One screenshot from the owner's iPhone 16 Pro Max on v103: both bottom bars drawn
+// about 387pt ABOVE the bottom of the screen, with a worker row and the storage notice
+// showing in the strip underneath them. The stylesheet cannot produce that geometry -
+// .tabs is bottom:0, .day-actions is bottom:var(--nav-h), and no ancestor of either is
+// a containing block for fixed descendants. On iOS a `position: fixed` element is
+// anchored to the VISUAL viewport, so when the visual viewport is reported short while
+// nothing is covering the screen - the share sheet closed, the app brought back from
+// the background, a keyboard dismissed with the page scrolled, a stale layout viewport
+// - iOS paints both bars at the bottom of a viewport that is not where the screen ends.
+//
+// This is the residue v99 left, not a return of the v98 fault. v99 was right: a keyboard
+// needs a focused editable, and the app stopped HIDING bars on a measurement alone. What
+// v99 could not do is tell iOS where to paint a fixed element. So the app cannot stop
+// it happening; it has to be correct anyway, and the only correction available is to
+// move the bars back down by exactly the amount iOS lifted them.
+//
+// How far the bottom of the visual viewport sits above the bottom of the layout
+// viewport, or 0. offsetTop is the visual viewport's own scroll INSIDE the layout
+// viewport, so the bottom edge is offsetTop + height and both terms count.
+function viewportShortfall() {
+    if (typeof window === 'undefined' || !window.visualViewport) return 0;
+    // Every browser without the API renders exactly what it rendered before this
+    // existed, and a pinched page is left alone for the reason keyboardHeight gives.
+    if (window.visualViewport.scale > 1.01) return 0;
+    const gap = window.innerHeight
+        - (window.visualViewport.height + (window.visualViewport.offsetTop || 0));
+    return gap > 0 ? Math.round(gap) : 0;
+}
+
+// How far to lower the bars, or 0.
+//
+// A KEYBOARD IS ANSWERED BY HIDING, NEVER BY MOVING. The two are mutually exclusive by
+// construction rather than by luck: this returns 0 whenever something a keyboard opens
+// for has focus, which is the single condition v99 put the hiding behind. A bar lowered
+// under a real keyboard is a bar under the keys, which is what hiding them is for.
+//
+// The floor is the keyboard's floor, and for the same reason: the browser's own chrome
+// sliding in and out as the page scrolls is tens of pixels, and a bar that moves while
+// a thumb is travelling to it is a missed target. Nothing here ever hides a bar, ever
+// reads the page's scroll, and ever moves a bar for any reason but the viewport under
+// it having moved first.
+//
+// The assumption this rests on, named rather than hidden: on a browser that anchors
+// `fixed` to the LAYOUT viewport, this state - more than 150px short, nothing focused,
+// not zoomed - is not producible. A keyboard there needs focus and closes on blur with
+// a resize, and the URL bar's own shrink is far under the floor. If that is ever false
+// somewhere, this function is the one line to delete.
+function barDrop() {
+    if (keyboardTarget()) return 0;
+    const gap = viewportShortfall();
+    return gap > KEYBOARD_FLOOR ? gap : 0;
+}
+
+// Publishes the drop as --bar-drop and marks the page while one stands. Separate from
+// the measuring above for the reason applyKeyboardInset is: headless browsers do not
+// strand a viewport, and a seam that asks questions of its own is not one a test can
+// push a stranded viewport through.
+//
+// The class carries the rule, not a var() fallback on the transform: with no drop there
+// is then no `transform` on any bar at all, so the ordinary case gains no stacking
+// context, no compositing layer, and no containing block for fixed descendants - the
+// last of which is the very thing that had to be ruled out of every ancestor before this
+// fault could be understood.
+function applyBarDrop(pixels) {
+    const root = document.documentElement;
+    if (!root || !root.style) return;
+    const drop = Math.max(0, Math.round(pixels) || 0);
+
+    root.style.setProperty('--bar-drop', drop + 'px');
+    if (document.body && document.body.classList) {
+        document.body.classList.toggle('bars-lowered', drop > 0);
+    }
 }
 
 // Publishes the keyboard's height as --kb-h and marks the page while one is open.
@@ -139,6 +224,12 @@ function scheduleBarMeasure() {
     const run = () => {
         barsQueued = false;
         applyKeyboardInset(keyboardHeight());
+        // After the keyboard and before the measuring: the drop is 0 whenever the
+        // keyboard is up, and it does not change any bar's HEIGHT - translateY moves a
+        // rectangle without resizing it - so what measureBottomBars reads, and the room
+        // the page reserves from it, are the same numbers either way. They now describe
+        // where the bars are actually painted.
+        applyBarDrop(barDrop());
         measureBottomBars();
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
@@ -163,6 +254,10 @@ function watchBottomBars() {
     window.addEventListener('orientationchange', scheduleBarMeasure);
     if (window.visualViewport && window.visualViewport.addEventListener) {
         window.visualViewport.addEventListener('resize', scheduleBarMeasure);
+        // Its 'scroll' event is deliberately NOT listened to. It fires for every frame of
+        // a pinch being panned, measureBottomBars reads three rectangles, and a layout
+        // read per frame of a pinch is a cost this file will not pay for a case the zoom
+        // guard already answers with 0.
     }
     // keyboardHeight reads what has focus, so a focus change is a measurement too - and
     // it is the one that brings the bars back when the keyboard leaves WITHOUT a resize
@@ -178,8 +273,14 @@ function watchBottomBars() {
     // page, the measurement is asked again; a class the viewport still justifies costs
     // one re-measure, a stale one comes off at the first touch instead of at the next
     // launch. When the class is not standing this is one classList read and nothing else.
+    // bars-lowered is asked for the same reason: the gap that lowered them can close
+    // without a resize event on exactly the phone that opened it, and a drop that
+    // outlives its measurement is the same failure as a class that outlives its keyboard.
     const recheck = () => {
-        if (document.body && document.body.classList.contains('kbd-open')) scheduleBarMeasure();
+        const marks = document.body && document.body.classList;
+        if (marks && (marks.contains('kbd-open') || marks.contains('bars-lowered'))) {
+            scheduleBarMeasure();
+        }
     };
     window.addEventListener('touchstart', recheck, { capture: true, passive: true });
     window.addEventListener('scroll', recheck, { capture: true, passive: true });

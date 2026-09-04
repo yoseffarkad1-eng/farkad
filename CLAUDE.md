@@ -36,7 +36,11 @@ different from what was done.
   phone is incomplete, not that the signal is weak, and it says so.
 - **The service worker (`sw.js`) serves everything cache-first**, the page included:
   a session runs one build, end to end. Data lives in `localStorage`, always through
-  `Store`; sync is optional and off until `js/sync/firebase-config.js` is filled in.
+  `Store`; sync is optional and off until `js/sync/firebase-config.js` is filled in —
+  **and it IS filled in**, with a live `farkad-schedule` config, so every phone is paired.
+  That sentence describes the mechanism, not the state, and reading it as the state is a
+  mistake somebody actually made this round: a whole finding was written on the premise
+  that the three phones had no cloud. Open the file before you assume either way.
 
 ## The iron laws
 
@@ -100,6 +104,11 @@ No build, no install: `python3 -m http.server` serves the app. For the tests:
     npm run test:emulator   # rules, the bootstrap's own rules, the production adapter's
                             #   CAS, the rollout, the cutover and two phones writing
                             #   money at once (needs Java)
+    npm run test:perf       # what the app COSTS: time and memory. In NO gate, on purpose -
+                            #   a wall clock on a shared machine goes red for reasons that
+                            #   are nobody's defect, and a red suite here is a stop. Run it
+                            #   either side of a change to a hot path and put both numbers
+                            #   in the message; the baseline is features/performance/
 
 Node 20 or 22 (`engines` says `>=20.11 <23`). NO COUNT IS WRITTEN HERE, deliberately. A
 count belongs to a commit and to nothing else, and one left in a file goes stale the
@@ -164,7 +173,9 @@ written down so it cannot happen twice.
     js/ui/quickstart.js        paste a list, get a roster
     js/ui/week.js              the read-only week grid and its print layout
     js/ui/roster.js            workers and sites; archive vs delete; the reorder mode
-    js/ui/reports.js           pay and invoice reports; the advance form
+    js/ui/reports.js           pay and invoice reports; the advance form — the screen half
+    js/ui/reports-statement.js the message a worker is sent on payday; reads, never writes
+    js/ui/reports-export.js    the workbook, the CSV, the file names, the hand-over dialog
     js/ui/share.js             the WhatsApp message and the CSV
     js/ui/backup.js            snapshots, the backup file, the four restore doors, the rescue file
     js/ui/printout.js          the table as a PNG, read off the DOM, for the phone where window.print()
@@ -174,7 +185,11 @@ written down so it cannot happen twice.
     js/ui/install.js           the add-to-home-screen warning (iOS evicts browser-tab storage)
     js/ui/settings.js          the ⋯ panel: sync, backup, restores, version, device state, ledger parity
     tests/runner.mjs           suite/check/same/given/report; given prints its detail too
-    tests/harness.mjs          devices in Node: V8 contexts, a faithful fake localStorage and Firestore
+    tests/harness.mjs          devices in Node: V8 contexts, a faithful fake localStorage and Firestore;
+                               REPORTS_GROUP/reportsSource — the ONE place the reports files are named
+    tests/emulator-host.mjs    where the Firestore emulator actually is: FIRESTORE_EMULATOR_HOST,
+                               or 127.0.0.1:8080. The six emulator suites read it and none of them
+                               writes a port down, so they can run in parallel on private ports
     tests/build.test.mjs       the three stamps agree; the shell is complete; caches never cross builds
     tests/data.test.mjs        storage, sync, and the money arithmetic — the big one
     tests/smoke.mjs            the app in real Chromium, self-served
@@ -187,11 +202,17 @@ written down so it cannot happen twice.
     tests/capacity.test.mjs    a season of days on a disk that fills up
     tests/concurrency.test.mjs C1-C5: the cross-tab hazards, one at a time
     tests/exports.test.mjs     the three files that leave the phone, read back
+    tests/queuecost.test.mjs   what asking the queue a question costs: one decode per change, not
+                               per question - and the other tab, and what is never forgotten
     tests/fence.test.mjs       the write counter: what moves it, and what it costs
     tests/method.test.mjs      how an advance was handed over, through all four doors
     tests/money.test.mjs       the same shekels on the far side of four real doors
     tests/nonassertions.test.mjs a test that fails when a test stops testing
+    tests/perf.test.mjs        what the app COSTS: boot, the day screen, one tap, the reports, save,
+                               the heap, the node count. Desktop Chromium, a lower bound, never a
+                               phone - and in no gate; tests/README.md says why
     tests/restore.test.mjs     a device holding only part of a restore is caught
+    tests/restore.ledger.test.mjs a restore removes no ledger entry, on any phone; all four doors
     tests/upgrade.test.mjs     a v86 disk opened by this build
     tests/vehicles.test.mjs    the retired feature, from both sides of its flag
     tests/xlsx.test.mjs        the arithmetic proved through a real .xlsx, built by the shipped library
@@ -209,6 +230,10 @@ written down so it cannot happen twice.
     vendor/                    SheetJS, pinned by filename and precached; the only third-party code shipped
     tests/recovery.browser.mjs the rescue export through the real button
     tests/forms.browser.mjs    the advance and correction forms, driven in real Chromium
+    tests/reorder.browser.mjs  the reorder mode's drag, in real Chromium: what an exit leaves armed,
+                               and which way the list scrolls when the finger crosses the panel
+    tests/boot.browser.mjs     what the boot SAYS, in order, on a disk that both migrates and is
+                               damaged; the sequence, because a claim withdrawn leaves no final state
     tests/handover.test.mjs    v86 -> v87 between two real trees, one origin
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator

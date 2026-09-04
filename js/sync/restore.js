@@ -91,6 +91,39 @@ Object.assign(FarkadSync, {
         return this.forgetReplace();
     },
 
+    // RULE A: A RESTORE REMOVES NO LEDGER ENTRY, ON ANY PHONE.
+    //
+    // The failure this prevents, end to end. Two phones online, nothing failing. A takes
+    // a backup; B records a repayment of 500 which reaches the cloud and A; A restores
+    // that backup through the ordinary door. The whole-document replacement carried the
+    // ledger the backup was taken with, so A went back to owing 5,000, the cloud went
+    // with it, and B - which had merged nothing and been told nothing - kept 4,500 for
+    // ever and never sent it again. Both phones read "מסונכרן" over two different debts,
+    // and a man is docked 500 shekels he has already handed over.
+    //
+    // Days, roster, places and everything else still REPLACE: a restore is still a
+    // restore, and this narrows it in exactly one place. The ledger alone is unioned,
+    // because it is append-only (law 1) and the two failures are not comparable. An entry
+    // somebody wanted gone surviving a restore is VISIBLE - it is on the screen and in the
+    // statement - and the ledger's own correction kinds are the designed answer to it. An
+    // entry somebody else recorded, deleted from their phone by a restore they never asked
+    // for, is invisible and recoverable only from a backup. See
+    // features/restore-ledger/contract.md, which is where that was decided and why.
+    //
+    // Through mergeLedgerInto and nothing else - the SAME union receive() performs on an
+    // arriving snapshot - so that a restore and a snapshot can never disagree about what
+    // merging a ledger means. `conflicts`, when given, collects the ids whose two sides
+    // say different things about money; nothing here resolves one.
+    keepLedgerFrom(document, held, conflicts) {
+        if (!document || !held) return document;
+        // Feature-detected for the same reason advanceOutstanding detects its reader: a
+        // build with js/model/ledger.js missing must not silently fall back to replacing
+        // the ledger. There is nothing to union there, and nothing to lose either - a
+        // build with no ledger file writes no ledger entries.
+        if (typeof mergeLedgerInto !== 'function') return document;
+        return mergeLedgerInto(document, held, conflicts);
+    },
+
     // THE INVARIANT. Does scheduleData:v2, read straight off the disk, already contain
     // the replacement?
     //
@@ -114,6 +147,17 @@ Object.assign(FarkadSync, {
         // the next open would not produce.
         const expected = normaliseSchedule(envelope.document);
         if (!this.replayDurableJournal(expected, envelope)) return false;
+        // RULE A, on the gate as well as on the write, or the gate wedges the transaction
+        // it is supposed to protect: applyReplacementLocally now stores the document with
+        // this device's ledger unioned into it, so a comparison against the bare document
+        // would find entries on the disk the replacement never named and answer "this
+        // device does not hold the restore" - for ever, after the person has already been
+        // told the restore happened.
+        //
+        // It only ever ADDS to what is expected, and that is the whole of its effect on
+        // the gate's strictness: a ledger entry the replacement carries and the disk does
+        // NOT have is still missing, still noticed, and still stops the transaction.
+        this.keepLedgerFrom(expected, actual);
         return replacementContent(actual) === replacementContent(expected);
     },
 
@@ -172,6 +216,48 @@ Object.assign(FarkadSync, {
             return { stored: false, pruned: false };
         }
 
+        // RULE A: the ledger this device already holds goes back on top of the
+        // replacement. See keepLedgerFrom for the failure and for why the ledger and
+        // nothing else. Everything the four doors replace is still replaced.
+        //
+        // From BOTH the schedule in memory and the record on the disk, because they are
+        // not always the same statement: a second tab of this app writes the disk without
+        // touching this context's State.schedule, and its entry is exactly the kind that
+        // would be lost with nobody watching. Unioning twice is unioning once - the merge
+        // is by id and an id already present is left alone - so the extra read costs a
+        // parse on a path taken a handful of times in a phone's life.
+        const ledgerClash = [];
+        this.keepLedgerFrom(next, previous, ledgerClash);
+        const durable = this.durableLocalState();
+        if (durable) this.keepLedgerFrom(next, durable, ledgerClash);
+
+        // ONE IMMUTABLE ID, TWO DIFFERENT BODIES, and a restore decides which is true no
+        // more than a snapshot does. Both are kept - the restore's copy where it landed,
+        // this phone's beside it under a name nothing folds - exactly as receive() keeps
+        // them, so the two doors leave the same evidence in the same place. Recovery is
+        // told AFTER the write below, because it blocks writing the moment it is told and
+        // telling it first would refuse the very save that puts the bytes somewhere a
+        // person can reach them.
+        if (ledgerClash.length > 0) {
+            next.ledger = next.ledger || {};
+            if (!next.ledger.conflicted || typeof next.ledger.conflicted !== 'object'
+                || Array.isArray(next.ledger.conflicted)) {
+                next.ledger.conflicted = {};
+            }
+            ledgerClash.forEach(clash => {
+                // AN OWN PROPERTY, WHATEVER THE NAME IS. `map[id] = value` for an id of
+                // `__proto__` writes the PROTOTYPE and creates nothing - see putKey in
+                // js/model/ledger.js, which is the same rule for the merge. The doors
+                // refuse a poisoned map before it gets this far, but the one map whose
+                // job is to keep evidence must not be the one that loses it.
+                Object.defineProperty(next.ledger.conflicted, clash.id, {
+                    value: { id: clash.id, family: clash.family,
+                        here: clash.mine, arrived: clash.theirs },
+                    writable: true, enumerable: true, configurable: true
+                });
+            });
+        }
+
         // BEFORE the schedule is swapped, and its answer decides whether the swap happens
         // at all.
         //
@@ -200,6 +286,18 @@ Object.assign(FarkadSync, {
 
         const pruned = this.dropSupersededEntries(envelope);
         if (typeof render === 'function') render();
+
+        // Now that the bytes are durable. A disputed id is a disagreement about somebody's
+        // money and the device stops writing until a person has looked at both copies -
+        // the same sentence, the same key and the same hold receive() uses, because it is
+        // the same trouble arriving through a different door.
+        if (ledgerClash.length > 0 && typeof Recovery !== 'undefined') {
+            Recovery.damaged('scheduleData:v2:ledger:conflict',
+                JSON.stringify(next.ledger.conflicted),
+                'הגיעה רשומת מקדמה עם אותו מזהה ותוכן אחר. שתי הגרסאות נשמרו כמו שהן '
+                + 'ולא נמחק דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי ותבדוק איזו '
+                + 'מהן נכונה.');
+        }
         return { stored: true, pruned };
     },
 
@@ -291,19 +389,65 @@ Object.assign(FarkadSync, {
         return this.forgetReplace();
     },
 
+    // The replacement as it will go to the cloud: the document that was asked for, with
+    // the ledger this device durably holds unioned into it. See keepLedgerFrom.
+    //
+    // A COPY, always. Mutating envelope.document would put the union into the record of
+    // what was asked for - which readFrozenLegacy compares against the raw v71 bytes
+    // beside it, and which would then stop binding on the next open, holding a genuine
+    // restore for ever. Falls back to the document untouched if the disk cannot be read:
+    // the gate above has already answered that case, and a copy that will not serialise
+    // is not a reason to invent one.
+    //
+    // AND WHAT THIS DOES NOT COVER, said here because a reader of this function will
+    // otherwise believe it does. It unions the ledger THIS DEVICE HOLDS, so an entry that
+    // is in the cloud and has never reached this phone is not in it - and the save below
+    // takes that entry off the cloud. It is reachable: a restore prepared while offline,
+    // another phone's repayment landing and being confirmed meanwhile, and this phone
+    // coming back. receive() records the arriving revision BEFORE the branch that declines
+    // to adopt a snapshot while a restore is pending, so this device learns the number
+    // without the content and its write is then accepted rather than refused. Not new,
+    // not fixed here, and written up in full - with the two lines that produce it and the
+    // three candidate fixes - under LIMIT in features/restore-ledger/contract.md.
+    replacementToSend(envelope) {
+        const document = (envelope || {}).document;
+        const held = this.durableLocalState();
+        if (!document || !held) return document;
+        let copy;
+        try {
+            copy = JSON.parse(JSON.stringify(document));
+        } catch (error) {
+            return document;
+        }
+        return this.keepLedgerFrom(copy, held) || document;
+    },
+
     executePreparedReplace() {
         const envelope = this.pendingReplace();
         if (!envelope) {
             return Promise.reject(new Error('no prepared replacement to send'));
         }
 
-        const document = envelope.document;
         // The gate. A phase can be stale after a crash; the disk cannot.
         if (!this.localDurableHolds(envelope)) {
             return Promise.reject(
                 new Error('the replacement is not stored on this device yet'));
         }
         if (!this.adapter) return Promise.resolve();
+
+        // RULE A ON THE WIRE, and this is the half the other two phones live or die by.
+        //
+        // The cloud write here is a whole-document save: whatever is not in the document
+        // is not in the cloud afterwards. Sending the envelope's document as it arrived
+        // therefore deleted from the cloud the very ledger entries the gate above has just
+        // confirmed are on this disk - and every phone that adopted the snapshot after it
+        // lost them too, silently, having asked for nothing.
+        //
+        // So what goes out is what this device HOLDS. envelope.document is left exactly as
+        // it arrived, because it is the durable record of what was asked for and the
+        // frozen v71 companion is bound to it byte for byte; the union is made on a copy,
+        // at the moment of sending, out of the same durable state the gate just read.
+        const document = this.replacementToSend(envelope);
 
         this._stamp = null;
         this._replacing = true;

@@ -14,7 +14,7 @@
 // closed and reopened, on a second phone that adopted the cloud document, through a real
 // backup file read by importBackup, and after a whole-document restore.
 
-import { makeDevice, makeCloud, settle } from './harness.mjs';
+import { makeDevice, makeCloud, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 import vm from 'node:vm';
@@ -117,12 +117,12 @@ function billing(device, from = FROM, to = TO) {
         .map(row => [row.name, row.workerDays]);
 }
 
-// js/ui/reports.js is a classic script like the rest, so the file a bookkeeper opens and
+// The reports screen is classic scripts like the rest, so the file a bookkeeper opens and
 // the message a worker receives are produced HERE, by the shipped functions, with no
 // browser and no spreadsheet library.
 function reportsIn(device, from = FROM, to = TO) {
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
     run(`REPORT_RANGE.from = '${from}'; REPORT_RANGE.to = '${to}';`
         + `REPORT_SECTION = 'workers'; INVOICE_PLACE = null;`);
     return run;

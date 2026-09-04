@@ -103,6 +103,48 @@ export function sourceRoot() {
     return ROOT;
 }
 
+// The reports screen, which is three files and is loaded as one.
+//
+// It is NOT in FILES above: a device in this harness has no views, and the suites that do
+// want the screen load it into a device's own context themselves. What they must not do is
+// name the files. js/ui/reports.js was 2,562 lines and the v102 round split it, measured
+// the cost and PUT IT BACK - not because of the file's size, but because twenty-seven
+// places across fourteen suites read it off the disk by name, three of them meta-tests
+// iterating their own hard-coded lists. Every one of them would have had to learn that
+// "reports" was now three files, and the one that was missed would have gone on passing
+// while covering a third of what it claims. That is the failure tests/nonassertions.test.mjs
+// exists to catch, and it is the one this repository fears most.
+//
+// So the group is named HERE, once. A suite asks for the reports screen and gets all of it;
+// the next file to come out of that screen is added on this line and nowhere else.
+//
+// Load order is index.html's order, and it is the order the files must be evaluated in for
+// a person's phone - not because anything here runs at load time (nothing in the three does)
+// but because a harness that loads the app in a different order from the app is a harness
+// that can be green about a build nobody has.
+export const REPORTS_GROUP = [
+    'js/ui/reports.js',
+    'js/ui/reports-statement.js',
+    'js/ui/reports-export.js'
+];
+
+// The three files as ONE script, in load order.
+//
+// Concatenated rather than evaluated one at a time, because half the reads this replaces
+// were not evaluating the file at all - they were searching its TEXT for a Hebrew string, a
+// call site, or a count of callers. One string answers both kinds, and it answers them about
+// the same bytes. Classic scripts sharing one global scope concatenate exactly: a top-level
+// const redeclared across two of them throws either way, and nothing in the three runs at
+// load time, so there is no order these could be evaluated in that a join changes.
+//
+// `root` exists for the two suites that may be re-rooted onto another checkout
+// (tests/xlsx.test.mjs through tests/treecheck.mjs, tests/money.ingress.test.mjs through its
+// own findRepo). Defaulting it to ROOT - derived from THIS file - is what keeps every other
+// suite reading its own tree; see tests/isolation.test.mjs.
+export function reportsSource(root = ROOT) {
+    return REPORTS_GROUP.map(file => readFileSync(join(root, file), 'utf8')).join('\n');
+}
+
 // Store.keys() calls Object.keys(localStorage), which in a browser returns the stored
 // keys - so the data has to sit on the object as own enumerable properties and the
 // methods must not. A plain object with a Map inside would pass every other test here

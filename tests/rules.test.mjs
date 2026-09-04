@@ -17,6 +17,11 @@ import { doc, getDoc, setDoc, updateDoc, deleteDoc, runTransaction, FieldPath } 
 import { readFileSync } from 'node:fs';
 import { suite, check, report } from './runner.mjs';
 
+import { emulatorHost } from './emulator-host.mjs';
+
+// Whatever port `firebase emulators:exec` actually started, so this suite can run
+// beside another one on another port. 127.0.0.1:8080 when nothing says otherwise.
+const EMULATOR = emulatorHost();
 const ALLOWED = 'yosef.farkad1@gmail.com';
 const ALSO_ALLOWED = 'farkad1963@gmail.com';
 const STRANGER = 'someone.else@gmail.com';
@@ -26,8 +31,8 @@ const env = await initializeTestEnvironment({
     projectId: 'farkad-rules-test',
     firestore: {
         rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8'),
-        host: '127.0.0.1',
-        port: 8080
+        host: EMULATOR.host,
+        port: EMULATOR.port
     }
 });
 

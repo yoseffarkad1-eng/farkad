@@ -560,6 +560,30 @@ function renderCopyButton() {
     const btn = document.getElementById('copyDayBtn');
     if (!btn) return;
 
+    // THE HOLD IS SAID BY THE BUTTON, not only worn by the stylesheet.
+    //
+    // css/app.css gives this button `pointer-events: none` and opacity .5 while
+    // body.writes-blocked stands. That stops a FINGER. It does not stop a keyboard, and it
+    // does not reach the accessibility tree at all - so the button reported itself enabled,
+    // Enter on it fired, and its title still promised to copy the day. Measured:
+    // blocked:true, disabled:false, pointerEvents:"none", all at once.
+    //
+    // The record was never at risk - State.commit refuses under the hold, which is law 3
+    // doing its job. What was wrong was the SAYING, on the button somebody reaches for
+    // first in the morning: a control that announces itself live and then does nothing has
+    // told the person the app is broken, not that recording is held.
+    //
+    // Checked BEFORE the "is there a day to copy" question below, because the hold outranks
+    // it: on a held phone the answer is the same whether or not yesterday has a record.
+    // The word is the app's own - js/ui/day.js's progress line already says «הרישום מושבת»
+    // in exactly this state - so no new string enters the product.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        btn.textContent = '↧ מהיום הקודם';
+        btn.disabled = true;
+        btn.title = 'הרישום מושבת';
+        return;
+    }
+
     const from = State.schedule.workers.length === 0
         ? null
         : lastRecordedDayBefore(State.schedule, State.date, State.layer);

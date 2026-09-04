@@ -1,8 +1,20 @@
 # בדיקת קבלה במכשיר אמיתי — רשימה ליוסף
 
-> **NOT YET PHYSICALLY VERIFIED.** Nothing in this list has been performed on a real
-> iPhone for the current build, and that has been true of every build since v86. Fifty-eight
-> rows, none of them run. The number is written here rather than left to be counted, because
+> **NOT YET PHYSICALLY VERIFIED — and read the next paragraph before quoting that.**
+> Nothing in this list has been performed on a real iPhone. **Seventy rows, none of them run.**
+>
+> **A phone IS running v103.** The owner confirmed it on 3 September 2026 and sent a
+> screenshot. So the sentence this file used to carry — "that has been true of every build
+> since v86" — was wrong, and is gone. What replaces it is the distinction this whole file
+> exists for: **a build being ON a phone and a build being CHECKED on a phone are two
+> different claims.** The first is now true. The second is not, for any row here.
+>
+> The first thing that real phone showed was a fault **no suite in this repository can
+> produce** — both bottom bars drawn about 387pt above the bottom of the screen with page
+> content underneath them (row 59; `features/bars-raised/findings.md`). That is the argument
+> for this file, made by a device rather than by an author.
+>
+> The count is written here rather than left to be counted, because
 > "the suites are green" and "somebody looked at it on a phone" are two different claims and
 > only one of them is true of this repository.
 >
@@ -10,9 +22,20 @@
 >
 > | suite | runs on |
 > |---|---|
-> | smoke, print, mobile, update, forms, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
+> | smoke, print, mobile, perf, update, forms, recovery-browser, handover, swrestart, swidentity | headless **Chromium**, driven by Playwright, against a local static server |
 > | every other suite in `npm test` | **Node**, with V8 contexts and a fake localStorage - no browser at all |
 > | rules, bootstrap-rules, cas-emulator, rollout, bootstrap, money-concurrency | **Node** against the local **Firestore emulator** |
+>
+> `perf` is the newest of them and the one most likely to be misread, so it is named
+> separately: it measures TIME AND MEMORY, in headless Chromium, in a Linux container, and
+> every number it produces is a LOWER BOUND on what a phone does. Not a multiple of it - a
+> lower bound. A phone is slower for reasons that do not scale cleanly (a smaller core, a
+> colder cache, a thermally throttled clock, a `localStorage` that is a synchronous
+> main-thread trip through SQLite), and `features/performance/findings.md` deliberately
+> refuses to guess the factor. "The app draws the day screen in 2ms" is a true sentence
+> about that container and is NOT a sentence about anybody's phone. The one measurement
+> that would settle it is this suite, or a stopwatch, on a real device - and it has not
+> been taken.
 >
 > None of them is Safari and none of them is a phone. Where a suite sets an iPhone
 > user-agent string it is still Chromium: that proves the app's own branch runs, not that
@@ -183,6 +206,46 @@
 | 56 | פתח את מסך שבוע באפליקציה ריקה (בלי עובדים) | כתוב «אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.» - ולא רק שאין מה להציג |
 | 57 | ⋯ ← גרסה | כתוב v103. אם כתוב מספר אחר - האפליקציה לא סיימה להתעדכן |
 | 58 | פתח דוח "לפי עובדים" בחודש שהיום הראשון בו הוא תחילת חשבון | מספר הימים והסכום **תואמים** את מה שהצוות באמת עבד. זה הבאג ש-v100 תיקן: לפני כן החודש הראה עשרה ימים במקום עשרים |
+
+## י. מה שנראה על טלפון אמיתי, ועדיין לא הוסבר
+
+השורה הזאת היא היחידה בקובץ שמקורה בצילום מסך אמיתי (3/9/2026, iPhone 16 Pro Max). היא
+**לא** נבדקה על ידי אף אחד מלבד בעל הטלפון, והיא כאן כדי שאפשר יהיה לחזור עליה בכוונה.
+הניתוח המלא: `features/bars-raised/findings.md`.
+
+| # | מה לעשות | מה צריך לקרות |
+|---|---|---|
+| 59 | פתח שדה כלשהו, סגור את המקלדת, ואז גלול את רשימת העובדים | שתי השורות התחתונות יושבות **בתחתית המסך**. אם הן מרחפות באמצע ורואים תוכן מתחתן - זה מה שנראה בצילום, וצריך לצלם שוב עם מספר הגרסה |
+
+---
+
+## יא. v104 — מה שנוסף אחרי v103, ולמה השורה הראשונה כאן חשובה מכולן
+
+**v104 הוא מועמד. הוא לא נמסר, לא מוזג, ואיננו על אף טלפון.** השורות כאן נכתבו כדי שאפשר
+יהיה לבדוק אותו אם וכאשר הוא יגיע לטלפון - וכולן NOT RUN, כמו כל השאר.
+
+**שורה 60 היא היחידה בקובץ שבודקת תיקון שנשען על הנחה ולא על מדידה.** כל שאר מה ש-v104
+משנה נבדק בדפדפן אמיתי; את זה אי אפשר. Chromium קושר `position: fixed` ל-layout viewport
+ו-iOS קושר אותו ל-**visual** viewport, ואף סוויטה כאן לא יכולה לייצר את הגיאומטריה שבצילום.
+מה שנבדק הוא חשבון על מלבנים. רק הטלפון יכול לענות.
+
+| # | מה לעשות | מה צריך לקרות |
+|---|---|---|
+| 60 | חזור בדיוק על שורה 59 - פתח שדה, סגור את המקלדת, גלול | שתי השורות התחתונות **בתחתית המסך**. אם עדיין מרחפות: צלם, ורשום את המספר מ-⋯ ← גרסה באותו צילום. זו השורה שבגללה v104 קיים |
+| 61 | ⋯ ← גרסה | כתוב **v104** |
+| 62 | פתח מסך יום בשמש, והסתכל על התאריך בראש המסך ועל השורה שאומרת אם הטלפונים האחרים ראו את העבודה | הכתב **קריא**. עד v103 הוא היה 3.2:1 - נראה טוב על שולחן ולא על אתר בארבע אחר הצהריים |
+| 63 | הגדל את הכתב במכשיר לפי שניים (הגדרות ← תצוגה) ופתח מסך יום | הדף **נכנס לרוחב המסך**. אין מה לגרור הצידה, וה-＋ וה-💬 של כל אתר נראים |
+| 64 | פתח את מגירת הימים (☰), ונסה לצאת ממנה עם המקלדת בלבד | Esc סוגר, והפוקוס חוזר ל-☰. וכשהמגירה סגורה - Tab לא נכנס לתוכה |
+| 65 | פתח חלון "רשום מקדמה", לחץ Esc, ואז Tab | הפוקוס חוזר לכפתור שפתח את החלון, לא לראש הדף |
+| 66 | פתח את שדה התעריף בגיליון ההקצאה עם VoiceOver | הוא נקרא בשם: «תעריף של ⟪שם העובד⟫ ב⟪שם האתר⟫» |
+| 67 | הזן סיסמה במסך הכניסה ולחץ Esc | החלון נסגר **והשדה מתרוקן**. הסיסמה לא נשארת בו |
+| 68 | פתח מיון עובדים (גרירה), התחל לגרור, ואז לחץ Esc באמצע הגרירה | המיון נסגר. **ופתח אותו שוב** - כפתור "שמור" חייב לעבוד. עד v104 הוא נפתח מת |
+| 69 | במיון, גרור שורה מהקצה העליון ישר לקצה התחתון בתנועה מהירה | הרשימה גוללת **למטה**. עד v104 היא המשיכה לגלול למעלה, לכיוון שבו האצבע התחילה |
+| 70 | פתח יום עמוס (30 עובדים או יותר) על רשומה של עונה שלמה, ועבור בין "לפי עובד" ו"לפי אתר" | שני המסכים נפתחים **מיד**. עד v104 מסך השבוע על עונה לקח פי ארבעה עשר יותר |
+
+**ואחרי כל אלה, הבדיקה שהכי חשובה ואי אפשר לעשות אותה מכאן:** אחרי שהחוקים
+(`firestore.rules`) פורסמו - האם ה-59 ההמתנות ירדו מהטלפון? זה גם מה שמפסיק את הגידול
+בעלות של כל תיקון. `docs/rollout-checklist.md`.
 
 ---
 

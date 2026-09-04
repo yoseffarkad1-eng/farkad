@@ -174,8 +174,12 @@ function renderAccountBanner() {
     const banner = document.getElementById('accountBanner');
     if (!banner) return;
 
+    // Hidden AND forgotten, the same pair showStorageBanner keeps: the memo below must
+    // not turn the next genuine appearance into silence.
+    const hide = () => { banner.style.display = 'none'; delete banner.dataset.drawn; };
+
     if (State.activeWorkers().length === 0 || State.activePlaces().length === 0) {
-        banner.style.display = 'none';
+        hide();
         return;
     }
 
@@ -214,16 +218,26 @@ function renderAccountBanner() {
         notes.push(`החשבון נסגר ${closing} - בדוק את השכר ושמור קובץ גיבוי.`);
     }
 
-    if (notes.length === 0) { banner.style.display = 'none'; return; }
+    if (notes.length === 0) { hide(); return; }
 
     // Dismissed for today, and back tomorrow if it still applies. A notice that cannot
     // be put away is read once and then looked past for good - and this one has to keep
     // working on the day it actually matters.
     const text = notes.join(' · ');
     if (Store.get(ACCOUNT_BANNER_KEY) === todayStr() + '|' + text) {
-        banner.style.display = 'none';
+        hide();
         return;
     }
+
+    // REBUILT ONLY WHEN WHAT IT SAYS HAS CHANGED. clear() and eight appendChilds inside
+    // an aria-live region is eight announcements, and render() runs on every tap:
+    // measured at 24 mutations across three renders that changed nothing at all. This
+    // banner is a financial warning and it earns being heard once, not once per name.
+    // Keyed on the fold's posture too, because that is the other thing that changes what
+    // is drawn here - and the ✕ hides without forgetting, so a dismissal stays dismissed.
+    const drawn = `${text}|${accountOpen}`;
+    if (banner.dataset.drawn === drawn && banner.style.display !== 'none') return;
+    banner.dataset.drawn = drawn;
 
     clear(banner);
     // Folded by default: one strong line, the report door and ✕ - a 60px row, not the
@@ -322,14 +336,29 @@ function renderProgress() {
             if (next) openAssignSheet(next.id);
         }, `${count} - המשך אל הבא שטרם נרשם`));
     }
-    // Announced politely on change - the day switch and the climbing count are the two
-    // things a person not looking at the screen most needs to hear.
-    line.setAttribute('role', 'status');
-    line.setAttribute('aria-live', 'polite');
-
     if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
         line.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
     }
+
+    // ANNOUNCED FROM A NODE THAT IS NOT REBUILT.
+    //
+    // The role="status" and aria-live used to go on `line` - a node built from scratch,
+    // filled, and only then inserted, so it was a different node on every render: three
+    // distinct .progress-line nodes across three ordinary edits, measured. index.html
+    // states the rule about the panel beside the reorder list - "the list is redrawn on
+    // every move and a live region that is destroyed and rebuilt is a live region that
+    // announces nothing" - and this was the same mistake one screen over, on the region
+    // the design leans on hardest: the day switch and the climbing count, which are the
+    // two things a person not looking at the screen most needs to hear, and the
+    // הרישום מושבת badge, which is the only text anywhere saying writing is held.
+    //
+    // #dayLive is in index.html and outlives every render. The words are READ OFF the
+    // line rather than composed a second time: the line is the visible answer and the
+    // two may not drift apart - which is also why the badge is appended above this and
+    // not below it. sayOnce (js/sync/status.js) is the guard the storage banner has
+    // always had: writing the same sentence again is a change, to a live region.
+    sayOnce(document.getElementById('dayLive'), [...line.children]
+        .map(node => (node.textContent || '').trim()).filter(Boolean).join(' · '));
 
     wrap.appendChild(line);
 
@@ -448,21 +477,59 @@ function bulkAssign(place) {
 // its last Thursday, with the account before it underneath for late corrections. A
 // jump-to-today on top, full day names throughout.
 
+// THE SAME KEYBOARD CONTRACT AS EVERY OTHER DIALOG IN THE APP.
+//
+// This was the one that had only half of it. Escape closed it and nothing else was true:
+// focus never entered, so pressing ☰ moved a reader nowhere and the next Tab went to the
+// tab bar BEHIND the panel that had just opened; Tab was not held, so it walked out into
+// the day list; and closing returned the keyboard to <body> rather than to the ☰.
+//
+// settingsPanel and reorderPanel are not .modal elements either, and both do this by
+// hand. The two pieces that matter are already written once, in js/ui/modal.js, so this
+// borrows them rather than growing a third copy: focus enters at the heading (a reader is
+// told where it has arrived before it is read twenty-four dates), and trapTab keeps it
+// there. The other half - a CLOSED drawer being genuinely absent rather than parked off
+// the edge - is in css/app.css, on .day-drawer, and says so there.
+let drawerOpener = null;
+
 function openDayDrawer() {
+    // Remembered BEFORE the drawer can take focus off it. document.activeElement after a
+    // real tap is the ☰ on a desktop and <body> on iOS, which is why there is a fallback
+    // rather than a stored node: the way back has to exist either way.
+    drawerOpener = document.activeElement;
+
     renderDayDrawer();
     ['dayDrawer', 'dayDrawerBack', 'dayDrawerWrap'].forEach(id =>
         document.getElementById(id).classList.add('drawer-open'));
     document.addEventListener('keydown', drawerKeydown);
+
+    const drawer = document.getElementById('dayDrawer');
+    const title = document.getElementById('dayDrawerTitle');
+    // The class has to be IN EFFECT before the focus call: a visibility:hidden element
+    // cannot take focus, and the style has only been asked for, not computed. Reading a
+    // layout property forces that, and it is one read on a tap.
+    if (drawer) void drawer.offsetHeight;
+    // preventScroll for the same reason the modal helper gives: the heading is at the top
+    // and a focus that scrolls the panel is the bug, not the fix.
+    if (title && title.focus) title.focus({ preventScroll: true });
 }
 
 function closeDayDrawer() {
     ['dayDrawer', 'dayDrawerBack', 'dayDrawerWrap'].forEach(id =>
         document.getElementById(id).classList.remove('drawer-open'));
     document.removeEventListener('keydown', drawerKeydown);
+
+    const opener = (drawerOpener && document.contains(drawerOpener))
+        ? drawerOpener : document.querySelector('.day-nav .drawer-btn');
+    drawerOpener = null;
+    if (opener && opener.focus) opener.focus();
 }
 
 function drawerKeydown(event) {
-    if (event.key === 'Escape') { event.preventDefault(); closeDayDrawer(); }
+    if (event.key === 'Escape') { event.preventDefault(); closeDayDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const drawer = document.getElementById('dayDrawer');
+    if (drawer && typeof trapTab === 'function') trapTab(event, drawer);
 }
 
 function renderDayDrawer() {
@@ -531,6 +598,21 @@ function drawerWeek(list, title, start, today) {
 function renderDayWorkerList() {
     const list = el('div', 'worker-list');
 
+    // ONE MAP FOR THE WHOLE DRAW, built here rather than inside the loop below.
+    //
+    // placeLabelsIn walks every day in the schedule (js/model/schema.js: it is looking for
+    // sites the days name and the roster has lost). It used to be called from inside the
+    // per-worker loop, so drawing thirty rows walked the whole record thirty times - which
+    // costs nothing on a fortnight and 12.5ms on a season, and gets worse every week the
+    // crew keeps recording. Measured in tests/perf.test.mjs.
+    //
+    // Building it once is safe for exactly one reason: nothing touches the schedule between
+    // the first row and the last, so a per-row map and a per-draw map cannot differ. It is
+    // NOT held across draws and must not be - tests/labelcache.test.mjs pins that this
+    // screen follows a site rename immediately, which is the guarantee a cached map breaks.
+    // The map is rebuilt on the next render, like the rest of the list.
+    const labels = placeLabelsIn(State.schedule);
+
     State.workersForDay(State.date, State.layer).forEach(worker => {
         const absent = isAbsent(State.schedule, State.date, worker.id, State.layer);
         const entries = entriesFor(State.schedule, State.date, worker.id, State.layer);
@@ -555,7 +637,6 @@ function renderDayWorkerList() {
         } else if (entries.length === 0) {
             value.appendChild(el('span', 'tag tag-empty', 'טרם נרשם'));
         } else {
-            const labels = placeLabelsIn(State.schedule);
             entries.forEach(entry => {
                 const tag = el('span', 'tag tag-place');
                 appendSiteName(tag, entry.placeId, placeLabelFrom(labels, entry.placeId));
@@ -846,7 +927,11 @@ function renderAssignmentRow(place, workerId) {
 
     // The record is what pay is calculated from, so the rate sits on the row itself
     // rather than behind a dialog nobody will open thirty times an evening.
-    row.appendChild(renderRateControl(place.id, workerId, entry));
+    //
+    // The whole place, not its id: the control needs the site's NAME for its own label,
+    // and this is the one caller, which already holds a roster entry rather than a key
+    // off a day record.
+    row.appendChild(renderRateControl(place, workerId, entry));
 
     row.appendChild(button('✕', 'btn-icon', () => {
         editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
@@ -856,11 +941,27 @@ function renderAssignmentRow(place, workerId) {
     return row;
 }
 
-function renderRateControl(placeId, workerId, entry) {
+function renderRateControl(place, workerId, entry) {
+    const placeId = place.id;
     const wrap = el('span', 'rate-control');
 
     const select = document.createElement('select');
     select.className = 'rate-select';
+    // THE ONE CONTROL IN THE APP THAT HAD NO NAME. Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼,
+    // ⤓, ₪, 🗄️ and ↩️ carries a Hebrew name, most of them with the worker's or the site's
+    // folded in. This one announced as "רגיל, תיבה משולבת" and nothing else - on a screen
+    // where four of them are visible at once, one per recorded man, and where what it
+    // sets is what the day is PRICED at.
+    //
+    // Shaped like its neighbours: the ✕ beside it says הסר את <X> מ<Y>, and the hours box
+    // in the assign sheet says שעות נוספות ב<Y>, so a site is named with ב and a man with
+    // his name. תעריף is the app's own word for the thing this picks - js/model/schema.js
+    // says תעריף שאינו מוכר when a day arrives with a rate it does not recognise - rather
+    // than a new one invented at the point of labelling. Both names are bidi-isolated,
+    // like every other name in every other label (js/ui/dom.js).
+    const worker = State.worker(workerId);
+    select.setAttribute('aria-label',
+        `תעריף של ${isolate(worker ? worker.name : workerId)} ב${isolate(place.name)}`);
     RATES.forEach(rate => {
         const option = document.createElement('option');
         option.value = rate;

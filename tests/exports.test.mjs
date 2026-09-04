@@ -13,7 +13,7 @@
 // file. Everything asserted is either a byte in a produced file or a durable record on
 // the disk beside it.
 
-import { makeDevice, settle } from './harness.mjs';
+import { makeDevice, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ import { dirname, join } from 'node:path';
 // result about a tree it never opened. See tests/isolation.test.mjs, which fails when any
 // suite grows one back.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+const REPORTS = reportsSource();
 
 // Fixed, because every file this suite reads is stamped with the day it left the phone,
 // and a suite whose expected filename changes at midnight is a suite nobody trusts.
@@ -325,7 +325,7 @@ function csvRows(text) {
     const oddRows = csvRows(fileNamed(odd, `farkad-payroll_${STAMP}.csv`));
     // -500.5, not -501. The agora is no longer rounded away on the way into the file:
     // six surfaces used to round gross, advance and net independently, from the exact
-    // value, and produced six answers to one question. See moneyOf in js/ui/reports.js.
+    // value, and produced six answers to one question. See moneyOf in js/ui/reports-export.js.
     given('the fraction reached the file', oddRows[1][8] === '-500.5', oddRows[1][8]);
     check('and it still adds up when an advance arrives with an agora on it',
         unbalanced(oddRows).length === 0,

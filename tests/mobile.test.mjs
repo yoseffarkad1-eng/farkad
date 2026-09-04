@@ -92,6 +92,14 @@ async function open({ width, height, scheme = 'light', touch = true, mode = 'wor
         // view is a grid of sites and has no row per man to reach the bottom of. The
         // suites that measure SIZES rather than reach switch it over - see below, and see
         // what that exclusion was quietly hiding.
+        //
+        // AND THE DEFAULT IS NOT THE APP'S. js/ui/day.js:22 opens on by-site; this opens
+        // on by-worker. Every block that takes the default is therefore measuring the
+        // OTHER screen, and the one place that mattered was the 200%-text block: the day
+        // ran 398px wide inside 390 by site, at ordinary text by worker it did not, and no
+        // check stood where the two conditions met. "${width}px at 200% text, by site" at
+        // the foot of this file is that square. A new block that measures a layout should
+        // ask itself which mode it is in before it takes this default.
         if (typeof setDayMode === 'function') setDayMode(mode);
         render();
     }, [CREW, mode]);
@@ -187,6 +195,192 @@ async function unreadable(page, floor = TEXT_FLOOR, gridFloor = GRID_FLOOR, inGr
         });
         return out;
     }, [floor, gridFloor, inGrid]);
+}
+
+// ---------------------------------------------------------------- ink against ground
+//
+// unreadable() above asks whether a glyph is big enough. This asks whether it is there at
+// all. They are different failures and only one of them was measured: a 14px date is over
+// the size floor and still unreadable if it is written 3.2:1 against the card under it,
+// which is what a phone in the sun at four in the afternoon actually costs.
+//
+// 4.5:1 is the floor, for every glyph this app draws at ordinary weight. It is an INDOOR
+// number - the men using this are outside - so it is a floor and not a target.
+//
+// The ground is the one the element is DRAWN on, not the one it declares. Almost nothing
+// in this stylesheet sets a background: --ink-3 is transparent-over-whatever, which is
+// exactly why the same token reads 3.66 on a white card and 3.00 on the week grid's band,
+// and why a check that assumed --paper everywhere would have reported the wrong number
+// three ways. So the ancestors are walked until one is opaque, and a translucent
+// background is composited onto what is behind IT before the ink is composited onto that.
+const CONTRAST_FLOOR = 4.5;
+
+// The arithmetic itself is WCAG 2 relative luminance. Written once, page-side, and handed
+// both jobs below: named elements as they are actually rendered, and the raw token pairs
+// out of :root - because a token that fails on a ground no fixture happens to draw today
+// is still a defect, and the next call site is the one that finds it.
+async function contrast(page, { elements = [], pairs = [], each = [] } = {}) {
+    return page.evaluate(([list, tokenPairs, everyOf]) => {
+        const parse = value => {
+            const n = (String(value).match(/[\d.]+/g) || []).map(Number);
+            return n.length < 3 ? null : [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
+        };
+        const lum = ([r, g, b]) => {
+            const ch = c => {
+                const v = c / 255;
+                return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+            };
+            return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+        };
+        const ratio = (a, b) => {
+            const hi = Math.max(lum(a), lum(b));
+            const lo = Math.min(lum(a), lum(b));
+            return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+        };
+        const over = (ink, back) => (ink[3] === 1 ? ink.slice(0, 3)
+            : [0, 1, 2].map(i => ink[i] * ink[3] + back[i] * (1 - ink[3])));
+
+        const ground = node => {
+            for (let n = node; n; n = n.parentElement) {
+                const c = parse(getComputedStyle(n).backgroundColor);
+                if (c && c[3] > 0) return over(c, ground(n.parentElement) || [255, 255, 255]);
+            }
+            return null;
+        };
+        // offsetParent is null for anything position:fixed, and the sync sentence and the
+        // dock are both fixed - a visibility filter written on offsetParent would skip
+        // precisely the line that says whether the other two phones can see tonight's work.
+        const visible = node => {
+            const box = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return box.width > 0 && box.height > 0
+                && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+
+        // A colour token, resolved the way the browser resolves it: through a real element,
+        // so `var(--ink-3)` comes back as the rgb() the page is actually painted with.
+        const probe = document.createElement('span');
+        probe.style.position = 'fixed';
+        probe.style.left = '-9999px';
+        document.body.appendChild(probe);
+        const resolve = value => {
+            probe.style.color = '';
+            probe.style.color = value;
+            return getComputedStyle(probe).color;
+        };
+
+        const out = { elements: [], pairs: [], each: [] };
+
+        // EVERY match, not the first. One instance of a repeated element proves nothing
+        // when what it is drawn on changes from one instance to the next - which is the
+        // whole shape of the site palette: ten colours, and the count sits on all of them.
+        everyOf.forEach(({ name, selector }) => {
+            [...document.querySelectorAll(selector)].filter(visible).forEach(node => {
+                const back = ground(node) || [255, 255, 255];
+                const ink = over(parse(getComputedStyle(node).color), back);
+                out.each.push({
+                    name, selector,
+                    px: Math.round(parseFloat(getComputedStyle(node).fontSize) * 10) / 10,
+                    text: (node.textContent || '').trim().slice(0, 14),
+                    on: `rgb(${back.map(c => Math.round(c)).join(',')})`,
+                    ratio: ratio(ink, back)
+                });
+            });
+        });
+
+        list.forEach(({ name, selector }) => {
+            const node = [...document.querySelectorAll(selector)].find(visible);
+            if (!node) { out.elements.push({ name, selector, found: false }); return; }
+            const back = ground(node) || [255, 255, 255];
+            const ink = over(parse(getComputedStyle(node).color), back);
+            out.elements.push({
+                name, selector, found: true,
+                px: Math.round(parseFloat(getComputedStyle(node).fontSize) * 10) / 10,
+                text: (node.textContent || '').trim().slice(0, 14),
+                ratio: ratio(ink, back)
+            });
+        });
+
+        tokenPairs.forEach(([ink, back]) => {
+            const a = parse(resolve(`var(${ink})`));
+            const b = parse(resolve(`var(${back})`));
+            out.pairs.push({ ink, back, ratio: (a && b) ? ratio(over(a, b.slice(0, 3)), b.slice(0, 3)) : 0 });
+        });
+
+        probe.remove();
+        return out;
+    }, [elements, pairs, each]);
+}
+
+// Every line on the screen that is written in one named token, and what each of them
+// actually reads against the ground under it. Handed the token rather than a list of
+// selectors on purpose: the fault this was written for was a stylesheet that fixed ONE of
+// thirty-three call sites, and a check enumerating call sites by hand would have had the
+// same blind spot as the fix.
+async function inkedWith(page, token) {
+    return page.evaluate(name => {
+        const parse = value => {
+            const n = (String(value).match(/[\d.]+/g) || []).map(Number);
+            return n.length < 3 ? null : [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
+        };
+        const lum = ([r, g, b]) => {
+            const ch = c => {
+                const v = c / 255;
+                return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+            };
+            return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+        };
+        const ratio = (a, b) => {
+            const hi = Math.max(lum(a), lum(b));
+            const lo = Math.min(lum(a), lum(b));
+            return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+        };
+        const over = (ink, back) => (ink[3] === 1 ? ink.slice(0, 3)
+            : [0, 1, 2].map(i => ink[i] * ink[3] + back[i] * (1 - ink[3])));
+        const ground = node => {
+            for (let n = node; n; n = n.parentElement) {
+                const c = parse(getComputedStyle(n).backgroundColor);
+                if (c && c[3] > 0) return over(c, ground(n.parentElement) || [255, 255, 255]);
+            }
+            return null;
+        };
+
+        const probe = document.createElement('span');
+        probe.style.position = 'fixed';
+        probe.style.left = '-9999px';
+        probe.style.color = `var(${name})`;
+        document.body.appendChild(probe);
+        const wanted = getComputedStyle(probe).color;
+        probe.remove();
+
+        const out = [];
+        document.querySelectorAll('body *').forEach(node => {
+            const style = getComputedStyle(node);
+            if (style.color !== wanted) return;
+            if (node.getAttribute('aria-hidden') === 'true') return;
+            const box = node.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0) return;
+            if (style.visibility === 'hidden' || style.display === 'none') return;
+            // Text of its own: a wrapper inherits the colour of whatever is inside it and
+            // would be counted twice, once at the wrong box.
+            const owns = [...node.childNodes]
+                .some(child => child.nodeType === 3 && child.textContent.trim());
+            if (!owns) return;
+            // A marker is not a sentence - the same exemption unreadable() makes, and for
+            // the same reason: the ▸ on a fold and the — for an absence carry no letters.
+            if (!/[\p{L}\p{N}]/u.test(node.textContent)) return;
+
+            const back = ground(node) || [255, 255, 255];
+            const ink = over(parse(style.color), back);
+            out.push({
+                cls: String(node.className || node.tagName).slice(0, 26),
+                px: Math.round(parseFloat(style.fontSize) * 10) / 10,
+                text: node.textContent.trim().slice(0, 14),
+                ratio: ratio(ink, back)
+            });
+        });
+        return out;
+    }, token);
 }
 
 // Is this element the thing a tap at its own centre would hit?
@@ -1139,6 +1333,231 @@ for (const width of [320, 390]) {
     });
 
     await page.context().close();
+}
+
+// ---------------------------------------------------------------- the bars put back on the bottom
+
+// THIS SIMULATES AN iOS BEHAVIOUR CHROMIUM DOES NOT HAVE. Read that before reading the
+// numbers. On iOS a `position: fixed` element is anchored to the VISUAL viewport;
+// Chromium anchors it to the layout viewport, so the geometry this block is about
+// cannot occur in this browser at any width, in any orientation, ever. Nothing here is
+// device coverage - docs/iphone-acceptance.md is where a device claim would come from.
+// What IS checked here is the app's arithmetic: given the numbers iOS reports, does the
+// app move the bars by exactly the amount that puts them back on the bottom of the
+// screen, and does it refuse to move them in every case where moving them would be
+// wrong.
+//
+// The round this comes from: one screenshot from the owner's iPhone 16 Pro Max on v103,
+// both bottom bars drawn about 387pt ABOVE the bottom of the screen with a worker row
+// and the storage notice showing underneath them. body.kbd-open hides both bars, and
+// the bars were drawn, so the class was off - which is v99 working as written. What v99
+// could not do is tell iOS where to paint a fixed element. See
+// features/bars-raised/findings.md and features/bars-raised/contract.md.
+//
+// The model, which is the whole of the simulation:
+//   * the screen shows the entire layout viewport (there is no keyboard occluding it -
+//     that is the fault: the reported visual viewport is short and nothing is there);
+//   * flow content is painted where it is laid out, so its rect IS what is on screen;
+//   * a fixed element is lifted by the shortfall, so its painted position is its rect
+//     minus the shortfall - and the rect already carries whatever the app translated it
+//     by, because getBoundingClientRect includes transforms.
+{
+    suite('390px: the viewport left short with nothing focused');
+    const page = await open({ width: 390, height: 844 });
+    await setInset(page, 34);
+
+    // 387pt is what the screenshot measured on that device, kept as the number rather
+    // than a round one so that a reader can find it in the findings.
+    const SHORT = 387;
+
+    const settle = () => page.evaluate(() => new Promise(done =>
+        requestAnimationFrame(() => requestAnimationFrame(done))));
+
+    // Replaces window.visualViewport with what iOS reports in the stranded state, the
+    // same way the v99 block above does. scale is passed so the pinch case can be asked
+    // with one line; height 0 means "no visualViewport at all", which is every browser
+    // that does not implement it and must go on rendering what it renders today.
+    const stub = (short, scale = 1) => page.evaluate(([short, scale]) => {
+        if (short < 0) {
+            Object.defineProperty(window, 'visualViewport',
+                { configurable: true, value: undefined });
+            return;
+        }
+        Object.defineProperty(window, 'visualViewport', {
+            configurable: true,
+            value: {
+                height: window.innerHeight - short, offsetTop: 0, scale,
+                addEventListener() {}, removeEventListener() {}
+            }
+        });
+    }, [short, scale]);
+
+    // Everything this suite asks, in one read, in the coordinates a person on that phone
+    // would be looking at.
+    const painted = short => page.evaluate(short => {
+        const root = getComputedStyle(document.documentElement);
+        const seen = selector => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const style = getComputedStyle(node);
+            if (style.display === 'none' || style.visibility === 'hidden') return null;
+            const box = node.getBoundingClientRect();
+            // A fixed bar is painted `short` higher than its rect says. Flow content is
+            // painted where its rect says. That difference is the entire fault.
+            const lift = style.position === 'fixed' ? short : 0;
+            return { top: Math.round(box.top - lift), bottom: Math.round(box.bottom - lift) };
+        };
+        const tabs = seen('.tabs');
+        // The strip between the bottom of the tab bar as painted and the bottom of the
+        // screen. On the phone it was 387pt tall and had the crew showing in it.
+        const strip = tabs ? tabs.bottom : window.innerHeight;
+        // The visible overlap, not merely "reaches past the bar": with the bars back on
+        // the bottom the strip has no height at all, and a row running off the bottom of
+        // the page overlaps a zero-height strip by nothing. Counting a touch would have
+        // made this check pass on a strip that does not exist.
+        const under = [...document.querySelectorAll('.wrow')].filter(node => {
+            const box = node.getBoundingClientRect();
+            return Math.min(box.bottom, window.innerHeight) - Math.max(box.top, strip) > 1;
+        }).length;
+        return {
+            tabs, dock: seen('.day-actions'),
+            bottom: window.innerHeight,
+            under,
+            drop: root.getPropertyValue('--bar-drop').trim(),
+            lowered: document.body.classList.contains('bars-lowered'),
+            kbdOpen: document.body.classList.contains('kbd-open'),
+            navVar: root.getPropertyValue('--nav-h').trim(),
+            dockVar: root.getPropertyValue('--day-actions-h').trim(),
+            active: document.activeElement ? document.activeElement.tagName : 'none'
+        };
+    }, short);
+
+    await stub(SHORT);
+    await page.evaluate(() => {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        scheduleBarMeasure();
+    });
+    await settle();
+    const strandedState = await painted(SHORT);
+
+    // v99's guarantee, first and unmoved: a short viewport with nothing focused is not a
+    // keyboard, so neither bar is hidden and both are still measured. If this ever stops
+    // holding, everything below is measuring the wrong thing.
+    given('the stub is 387px short with nothing focused', strandedState.active === 'BODY',
+        JSON.stringify(strandedState));
+    given('v99 still holds: no kbd-open, both bars drawn and measured',
+        !strandedState.kbdOpen && strandedState.tabs && strandedState.dock
+        && strandedState.navVar !== '0px' && strandedState.dockVar !== '0px',
+        JSON.stringify(strandedState));
+
+    check('390px: the page marks the stranded viewport and publishes the gap',
+        strandedState.lowered === true && strandedState.drop === `${SHORT}px`,
+        JSON.stringify(strandedState));
+    check('390px: the tab bar is painted on the bottom of the screen, not 387px above it',
+        strandedState.tabs && Math.abs(strandedState.tabs.bottom - strandedState.bottom) <= 1,
+        JSON.stringify(strandedState));
+    check('390px: the dock still sits directly on the tab bar, both of them lowered',
+        strandedState.dock && strandedState.tabs
+        && Math.abs(strandedState.dock.bottom - strandedState.tabs.top) <= 1,
+        JSON.stringify(strandedState));
+    // The screenshot's fault, stated as a rectangle: the crew was showing in the strip
+    // under the bars.
+    check('390px: no worker row is painted in the strip below the bars',
+        strandedState.under === 0, JSON.stringify(strandedState));
+
+    // A real keyboard under the same shortfall. The two answers are mutually exclusive
+    // by construction - the drop is 0 whenever an editable has focus - because a bar
+    // lowered under a keyboard is a bar under the keys, which is what v93 hid them for.
+    await page.evaluate(() => {
+        showAddWorkerModal();
+        document.getElementById('workerFormName').focus();
+    });
+    await settle();
+    const typing = await painted(SHORT);
+    check('390px: a real keyboard under the same shortfall hides the bars and lowers nothing',
+        typing.kbdOpen === true && typing.lowered === false && typing.tabs === null,
+        JSON.stringify(typing));
+    await page.evaluate(() => {
+        document.getElementById('workerFormName').blur();
+        closeWorkerForm();
+    });
+    await settle();
+
+    // Pinch-zoom shrinks the visual viewport exactly like a keyboard does, and zoom is
+    // allowed here. v99 guards the hiding against it; the lowering is guarded by the
+    // same reading, or a zoomed page has its bars shoved off the bottom of the screen.
+    await stub(SHORT, 1.5);
+    await page.evaluate(() => scheduleBarMeasure());
+    await settle();
+    const pinched = await painted(0);
+    check('390px: a pinched page is not a stranded viewport: nothing is lowered',
+        pinched.lowered === false && pinched.drop === '0px', JSON.stringify(pinched));
+
+    // No visualViewport at all - the API is what this whole mechanism reads, and a
+    // browser without it must render exactly what it rendered before this round.
+    await stub(-1);
+    await page.evaluate(() => scheduleBarMeasure());
+    await settle();
+    const blind = await painted(0);
+    check('390px: with no visualViewport nothing is lowered and nothing is marked',
+        blind.lowered === false && blind.drop === '0px'
+        && Math.abs(blind.tabs.bottom - blind.bottom) <= 1, JSON.stringify(blind));
+
+    // The gap closes - the share sheet goes away, the app comes back, iOS catches up.
+    // The bars go back up with it: a drop that outlives its measurement is the v98
+    // failure with a different sign.
+    await stub(0);
+    await page.evaluate(() => scheduleBarMeasure());
+    await settle();
+    const restored = await painted(0);
+    check('390px: the gap closing takes the drop and the class away again',
+        restored.lowered === false && restored.drop === '0px'
+        && Math.abs(restored.tabs.bottom - restored.bottom) <= 1, JSON.stringify(restored));
+
+    await page.context().close();
+
+    // Above 700px the tab bar is in the header, in ordinary flow. A translateY there
+    // would move its box and leave its layout where it was - a row of tabs sliding down
+    // over the page - and an iPad in landscape is over 700px wide, is WebKit, and can
+    // strand its viewport exactly like the phone did. So the tab bar's half of the rule
+    // lives inside the block that makes it fixed, and this is the check that says so.
+    // The dock and the undo bar are fixed at every width and are lowered at every width.
+    const wide = await open({ width: 900, height: 800 });
+    await wide.evaluate(([short]) => {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        Object.defineProperty(window, 'visualViewport', {
+            configurable: true,
+            value: {
+                height: window.innerHeight - short, offsetTop: 0, scale: 1,
+                addEventListener() {}, removeEventListener() {}
+            }
+        });
+        scheduleBarMeasure();
+    }, [SHORT]);
+    await wide.evaluate(() => new Promise(done =>
+        requestAnimationFrame(() => requestAnimationFrame(done))));
+    const desk = await wide.evaluate(() => {
+        const read = selector => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const style = getComputedStyle(node);
+            return { position: style.position, transform: style.transform };
+        };
+        return {
+            lowered: document.body.classList.contains('bars-lowered'),
+            tabs: read('.tabs'), dock: read('.day-actions')
+        };
+    });
+    given('900px: the shortfall is read there too and the tab bar is in the flow',
+        desk.lowered === true && desk.tabs && desk.tabs.position !== 'fixed',
+        JSON.stringify(desk));
+    check('900px: the tab bar is in the flow there, so it is not translated',
+        desk.tabs.transform === 'none', JSON.stringify(desk));
+    check('900px: the dock is fixed at every width, so it is lowered at every width',
+        Boolean(desk.dock) && desk.dock.position === 'fixed'
+        && desk.dock.transform !== 'none', JSON.stringify(desk));
+
+    await wide.context().close();
 }
 
 for (const width of [320, 390]) {
@@ -2568,6 +2987,532 @@ for (const width of [430, 390, 320]) {
     check(`${label}: both segments are 44px in both dimensions`,
         m.boxes.length === 2 && m.boxes.every(b => b.w >= 44 && b.h >= 44),
         JSON.stringify(m.boxes));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the quiet ink
+//
+// --ink-3 is the app's third ink: the date under the day name, the sentence that says
+// whether the other two phones have seen tonight's work, every explanatory line, the ✕
+// that takes a man off a site, the dates across the week grid. Thirty-three rules in
+// css/app.css are written in it and every one of them is small text.
+//
+// The stylesheet knew it was under the floor. The comment above #settingsBtn says so in
+// its own words - "3.2:1, which is under the 4.5:1 a small glyph needs and exactly the
+// sort of thing that reads fine to whoever chose it and not at all on a site at four in
+// the afternoon" - and then the cure was applied to #settingsBtn, one id, while the token
+// itself and the other thirty-two rules kept the colour the comment had just condemned.
+//
+// A fix aimed at call sites has the same blind spot the half-fix had, so this is aimed at
+// the TOKEN twice over. The first check reads --ink-3 out of :root and puts it against
+// every ground this stylesheet can place text on - including the four it does not happen
+// to draw in this fixture, because the next call site is the one that finds them. The
+// second sweeps the four screens and the ⋯ panel for every element the browser is
+// actually painting in that colour and measures each against the ground under it. Neither
+// can be satisfied by moving one rule.
+for (const scheme of ['light', 'dark']) {
+    const label = `390px ${scheme}: the quiet ink`;
+    suite(label);
+
+    // By site, because two of the faintest things in the app - the ✕ on an assign row and
+    // the line under an empty site card - are drawn on that half of the day screen only.
+    const page = await open({ width: 390, height: 844, scheme, mode: 'sites' });
+    await setInset(page, 34);
+
+    const tokens = await contrast(page, {
+        pairs: [
+            ['--ink-3', '--paper'], ['--ink-3', '--surface'], ['--ink-3', '--surface-2'],
+            ['--ink-3', '--accent-soft'], ['--ink-3', '--warn-bg'],
+            ['--ink-3', '--danger-bg'], ['--ink-3', '--ok-bg']
+        ]
+    });
+    const weak = tokens.pairs.filter(pair => pair.ratio < CONTRAST_FLOOR);
+    check(`${label}: --ink-3 clears ${CONTRAST_FLOOR}:1 on every ground this app has`,
+        weak.length === 0,
+        JSON.stringify(tokens.pairs.map(p => `${p.back}:${p.ratio}`)));
+
+    // The date on the day header, named on its own. Recording an evening against the wrong
+    // date is the money bug this app's whole calendar is built around, and the label that
+    // prevents it is the one the audit found faintest.
+    const named = await contrast(page, {
+        elements: [
+            { name: 'the date on the day header', selector: '.day-date' },
+            { name: 'the ✕ that takes a man off a site', selector: '.assign-row .btn-icon' },
+            { name: 'the line that says where the record lives', selector: '#storageNotice' }
+        ]
+    });
+    given(`${label}: all three named lines are on the screen to be measured`,
+        named.elements.every(item => item.found), JSON.stringify(named.elements));
+    named.elements.forEach(item => {
+        check(`${label}: ${item.name} clears the floor`,
+            item.ratio >= CONTRAST_FLOOR, `${item.ratio}:1 at ${item.px}px — ${item.text}`);
+    });
+
+    // AND EVERY OTHER LINE WRITTEN IN IT, wherever the app draws one.
+    const seen = [];
+    const faint = [];
+    const sweep = async where => {
+        (await inkedWith(page, '--ink-3')).forEach(item => {
+            seen.push(item);
+            if (item.ratio < CONTRAST_FLOOR) faint.push({ where, ...item });
+        });
+    };
+    for (const view of ['day', 'week', 'roster', 'reports']) {
+        await page.evaluate(name => showView(name), view);
+        await page.waitForTimeout(250);
+        await sweep(view);
+    }
+    await page.evaluate(() => showView('day'));
+    await page.waitForTimeout(200);
+    await page.click('#settingsBtn');
+    await page.waitForTimeout(300);
+    await sweep('settings');
+
+    // Vacuous is the failure mode this whole file was rewritten twice to avoid: a sweep
+    // that finds nothing passes and says nothing.
+    given(`${label}: the sweep actually found lines written in the quiet ink`,
+        seen.length >= 10, String(seen.length));
+    check(`${label}: every line the app writes in it clears the floor too`,
+        faint.length === 0, JSON.stringify(faint));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the count on the head
+//
+// The number of men at a site, written on the site's own colour. Two buttons sit beside
+// it on that same colour and they were argued out properly - css/app.css above
+// .site-head-btn says why the scrim under them has to be DARK: "a white overlay only ever
+// LIGHTENS, so what the glyph is written on depends on the colour underneath, and on the
+// lightest of the ten (--site-5, the ochre) white ink over an 18% white wash is about
+// 3.2:1 - under the 4.5 floor, on one site out of ten, and invisible to anybody reading
+// the stylesheet."
+//
+// That paragraph was written about the COUNT and applied to the buttons. The count kept
+// the white wash, at 22% rather than 18%, which is slightly worse than the number the
+// paragraph refused.
+//
+// So: every card on the screen, not the first one. A palette of ten measured at one slot
+// is a measurement of one colour, and the failure here is a function of which colour is
+// underneath - which is exactly what the comment says and what no check had ever read.
+for (const scheme of ['light', 'dark']) {
+    const label = `390px ${scheme}: the count on the site head`;
+    suite(label);
+
+    const page = await open({ width: 390, height: 844, scheme, mode: 'sites' });
+    await setInset(page, 34);
+
+    const m = await contrast(page, {
+        each: [
+            { name: 'the count', selector: '.site-head-color .site-count' },
+            { name: 'the buttons beside it', selector: '.site-head-color .site-head-btn' }
+        ]
+    });
+    const counts = m.each.filter(item => item.name === 'the count');
+    const buttons = m.each.filter(item => item.name === 'the buttons beside it');
+
+    // Twelve sites in the fixture and a palette of ten, so every slot is on the screen -
+    // including the ochre the comment names, and the wrap past ten.
+    given(`${label}: every palette slot is on the screen to be measured`,
+        counts.length >= 10, JSON.stringify(counts.map(c => c.on)));
+
+    const faint = counts.filter(item => item.ratio < CONTRAST_FLOOR);
+    check(`${label}: the count clears ${CONTRAST_FLOOR}:1 on every colour a site can have`,
+        faint.length === 0,
+        `${faint.length} of ${counts.length} under the floor — ${JSON.stringify(counts.map(c => c.ratio))}`);
+
+    // The neighbours, measured in the same breath and by the same arithmetic. They are
+    // already right; the point of reading them here is that the count is now written on
+    // the same ground as the buttons it sits between, and a later hand that lightens one
+    // of the two takes both red.
+    check(`${label}: and so do the two buttons beside it`,
+        buttons.length > 0 && buttons.every(item => item.ratio >= CONTRAST_FLOOR),
+        JSON.stringify(buttons.map(b => b.ratio)));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- by site, at 200% text
+//
+// THE CELL THIS MATRIX DID NOT HAVE, and the reason the fault below it shipped.
+//
+// open() defaults to mode: 'workers'. The 200%-text block above takes that default, so
+// every one of its checks is about the by-WORKER list. The by-site block further up does
+// check "the page does not run off the side" - at ordinary text only. Between them they
+// cover every width and every mode except this one square, and the app OPENS on by-site
+// (js/ui/day.js:22), so the missing square was the default screen at the accommodation an
+// older man actually makes.
+//
+// What was in it: the day screen ran 398px wide inside 320, 375 and 390. `1fr` is
+// `minmax(auto, 1fr)`, and `auto` as a track minimum is the item's min-content - so the
+// track refused to be narrower than the card, and the card refused to be narrower than
+// the rate <select>, whose own min-content is its longest option (שעות נוספות) at twice
+// the size. The two buttons v101 put on the coloured head - "add a man to this site" and
+// "send this gate its seder" - went off the edge, with nothing on screen saying the page
+// could be dragged.
+//
+// The second check here is the one that matters more than the width. `minmax(0, 1fr)`
+// alone makes the page fit and crushes .assign-name to ZERO at 320 - measured, before the
+// row was allowed to wrap - which trades a page that has to be dragged for a row that has
+// lost the name of the man it prices. A width check on its own would have gone green on
+// that, so the name is measured beside it.
+for (const width of WIDTHS) {
+    const label = `${width}px at 200% text, by site`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width], mode: 'sites' });
+    await setInset(page, 34);
+
+    const touched = await doubleEveryFontSize(page);
+    await page.evaluate(async () => {
+        showView('day');
+        render();
+        await new Promise(done => setTimeout(done, 200));
+    });
+    await page.waitForTimeout(300);
+
+    const m = await page.evaluate(() => {
+        const box = node => node.getBoundingClientRect();
+        const card = [...document.querySelectorAll('.site-card')]
+            .find(node => node.querySelectorAll('.assign-row').length > 0);
+        const row = card && card.querySelector('.assign-row');
+        const name = row && row.querySelector('.assign-name');
+        const rate = row && row.querySelector('.rate-select');
+        return {
+            doc: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth,
+            cards: document.querySelectorAll('.site-card').length,
+            widest: Math.max(0, ...[...document.querySelectorAll('.site-card')]
+                .map(node => Math.round(box(node).width))),
+            name: name ? Math.round(box(name).width) : null,
+            rate: rate ? Math.round(box(rate).width) : null,
+            // The two head buttons, and whether both ends of each are on the screen.
+            head: card ? [...card.querySelectorAll('.site-head button')].map(node => ({
+                label: (node.getAttribute('aria-label') || '').replace(/[⁦-⁩]/g, '').slice(0, 22),
+                inside: box(node).left >= -1 && box(node).right <= window.innerWidth + 1
+            })) : []
+        };
+    });
+
+    given(`${label}: the text really is twice the size and the cards were drawn`,
+        touched.emitted > 1 && m.cards > 0, JSON.stringify({ touched, cards: m.cards }));
+
+    check(`${label}: the day screen still fits across`,
+        m.doc <= m.client + 1,
+        JSON.stringify({ doc: m.doc, client: m.client, widestCard: m.widest }));
+
+    // The two actions on the coloured head are what went off the edge, and this check was
+    // GREEN on the broken build: at 320 the card overflows the inline end, and in RTL the
+    // inline end of the card is not the edge of the viewport. It is here anyway, and named
+    // as a guard rather than as a reproduction, because the cheap way to make the check
+    // above go green is to clip the card - and a page that fits by having lost the button
+    // is not a page that survived.
+    check(`${label}: both actions on a site's head are on the screen`,
+        m.head.length === 2 && m.head.every(item => item.inside),
+        JSON.stringify(m.head));
+
+    // Not zero, and not smaller than the rate control beside it is allowed to be: the man
+    // is who the row is about.
+    check(`${label}: and the worker's name still has a box to be read in`,
+        m.name !== null && m.name >= 60, JSON.stringify({ name: m.name, rate: m.rate }));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- one colour, two sites
+//
+// On a phone the week's cells shrink to a 16px block of the site's colour and nothing
+// else: css/app.css hides .site-name, .tag-rate and .site-mark inside .week-cell .cell-line
+// below 424px. Two of those three have a stand-in - the legend under the grid names each
+// colour, and the rate word becomes a white dot or a plus drawn by ::after. The third has
+// none, and it is the one that exists FOR this case.
+//
+// js/ui/sitecolor.js: "Past ten, added colours are variations of ones already used, and
+// telling them apart at night - or with any degree of colour blindness - stops working. So
+// the palette repeats and the second lap is marked with a diamond instead." The eleventh
+// site is painted in the first site's colour on purpose, and the ◆ is the whole of the
+// difference. The phone block switched it off, so on the one screen a manager reads a
+// whole week off, site 1 and site 11 paint the same rgb(29,78,216) with empty innerText -
+// measured - and the legend cannot answer which is which, because the legend names the
+// COLOUR and the colour is shared.
+//
+// This is asked of the whole palette rather than of the pair that was found: every site in
+// the record is drawn, and no two of them may leave the eye the same block. A signature is
+// the colour PLUS whatever else survives the width, so a fix that lets the mark through
+// without giving it a box - display:block on a 0x0 element - does not go green either.
+for (const width of [320, 390]) {
+    const label = `${width}px: the week's colour map`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    await setInset(page, 34);
+
+    // Twelve sites and a palette of ten, so two colours are worn by two sites each. One
+    // man per site, one day, so every block on the grid stands for exactly one place.
+    const seeded = await page.evaluate(() => {
+        setWeekFromDate(State.date);
+        const day = weekDates()[2];
+        State.schedule.places.forEach((place, i) => {
+            const worker = State.schedule.workers[i];
+            if (worker) assignPlace(State.schedule, day, worker.id, 'actual', place.id);
+        });
+        State.save();
+        showView('week');
+        render();
+        return { places: State.schedule.places.length, day };
+    });
+    await page.waitForTimeout(400);
+
+    const blocks = await page.evaluate(() => [...document.querySelectorAll('.week-cell .cell-line')]
+        .map(node => {
+            const name = node.querySelector('.site-name');
+            const mark = node.querySelector('.site-mark');
+            const shown = el => el && getComputedStyle(el).display !== 'none'
+                && el.getBoundingClientRect().width > 0;
+            const box = node.getBoundingClientRect();
+            const markBox = mark ? mark.getBoundingClientRect() : null;
+            return {
+                site: name ? name.textContent : '',
+                colour: getComputedStyle(node).backgroundColor,
+                // What is left of the site's identity once the width has had its way.
+                mark: shown(mark) ? mark.textContent : '',
+                // A white glyph on one of ten colours, a pixel or two from the white dot
+                // a doubled day draws through the middle of the same block: without an
+                // edge of its own it either washes out or merges with the dot.
+                halo: mark ? getComputedStyle(mark).textShadow : 'no mark',
+                nameShown: shown(name) ? (name.textContent || '') : '',
+                // A mark that hangs outside its own 16px block is a mark drawn over the
+                // cell beside it.
+                inside: !markBox || !shown(mark) || (markBox.left >= box.left - 1
+                    && markBox.right <= box.right + 1 && markBox.top >= box.top - 1
+                    && markBox.bottom <= box.bottom + 1)
+            };
+        }));
+
+    // The fixture's own evening is on another day of the same week, so there are more
+    // blocks than sites; what has to hold is that every SITE reached the grid and that
+    // the palette ran out before the sites did.
+    const colours = new Set(blocks.map(b => b.colour));
+    const sites = new Set(blocks.map(b => b.site));
+    given(`${label}: every site in the record is drawn, and the palette really wrapped`,
+        sites.size === seeded.places && colours.size < sites.size,
+        JSON.stringify({ blocks: blocks.length, sites: sites.size, places: seeded.places,
+            colours: colours.size }));
+
+    // The signature is everything the eye has EXCEPT which site it happens to be.
+    const collisions = [];
+    const bySignature = new Map();
+    blocks.forEach(b => {
+        const signature = JSON.stringify([b.colour, b.mark, b.nameShown]);
+        const seen = bySignature.get(signature);
+        if (seen && seen !== b.site) collisions.push({ signature, sites: [seen, b.site] });
+        else bySignature.set(signature, b.site);
+    });
+    check(`${label}: no two sites paint the same block`,
+        collisions.length === 0,
+        `${collisions.length} pairs — ${JSON.stringify(collisions.slice(0, 3))}`);
+
+    check(`${label}: and the cycle mark stays inside the 16px block it marks`,
+        blocks.every(b => b.inside), JSON.stringify(blocks.filter(b => !b.inside).slice(0, 2)));
+
+    const marked = blocks.filter(b => b.mark);
+    check(`${label}: and it carries a dark edge, so it holds on all ten and never merges`,
+        marked.length > 0 && marked.every(b => b.halo && b.halo !== 'none'),
+        JSON.stringify(marked.slice(0, 2).map(b => ({ site: b.site, halo: b.halo }))));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the ring, on any ground
+//
+// css/app.css: `button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }`.
+// The 2px offset puts the ring OUTSIDE the button's own box, so what it is drawn on is
+// whatever is behind the button - and v101 put two buttons on the site's colour, which is
+// an inline style off js/ui/sitecolor.js that no stylesheet knows the value of. --accent
+// against the ten: 1.34 1.73 1.78 1.28 1.82 1.67 1.38 1.48 1.64 1.13 in light. On slot 10
+// that is 1.13:1, which is not a ring at all. Against the paper elsewhere the same ring is
+// 7.90:1, so the token is fine and the assumption underneath it - that the stylesheet knows
+// what its own ring is drawn on - is not.
+//
+// 3:1, which is the floor for a boundary rather than a glyph, and the ring is asked for it
+// on EVERY ground the app draws a focusable thing on: the whole palette, the theme surfaces,
+// and the filled buttons. Driven by real Tab presses rather than element.focus(), because
+// :focus-visible is a statement about how the focus arrived.
+//
+// A two-tone ring passes this and a one-tone ring cannot: no single colour clears 3:1
+// against both a near-white paper and a mid-saturated blue, and the palette has both.
+for (const scheme of ['light', 'dark']) {
+    const label = `390px ${scheme}: the focus ring`;
+    suite(label);
+
+    const page = await open({ width: 390, height: 844, scheme, mode: 'sites', touch: false });
+    await setInset(page, 34);
+
+    await page.evaluate(() => { window.__rings = []; });
+
+    // Tab through the day screen and stop at each thing that takes focus, reading the ring
+    // off the element the browser actually focused.
+    for (let i = 0; i < 90; i++) {
+        await page.keyboard.press('Tab');
+        await page.evaluate(() => {
+            const node = document.activeElement;
+            if (!node || node === document.body) return;
+
+            const parse = value => {
+                const n = (String(value).match(/-?[\d.]+/g) || []).map(Number);
+                return n.length < 3 ? null : [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
+            };
+            const lum = ([r, g, b]) => {
+                const ch = c => {
+                    const v = c / 255;
+                    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+                };
+                return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+            };
+            const ratio = (a, b) => {
+                const hi = Math.max(lum(a), lum(b));
+                const lo = Math.min(lum(a), lum(b));
+                return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+            };
+            const over = (ink, back) => (ink[3] === 1 ? ink.slice(0, 3)
+                : [0, 1, 2].map(i => ink[i] * ink[3] + back[i] * (1 - ink[3])));
+            const ground = el => {
+                for (let n = el; n; n = n.parentElement) {
+                    const c = parse(getComputedStyle(n).backgroundColor);
+                    if (c && c[3] > 0) return over(c, ground(n.parentElement) || [255, 255, 255]);
+                }
+                return null;
+            };
+
+            const style = getComputedStyle(node);
+            const offset = parseFloat(style.outlineOffset) || 0;
+            // A ring sitting OUTSIDE the box is drawn on what is behind the box, not on the
+            // box. That is the whole fault: the button brought its own dark scrim and the
+            // ring landed two pixels past it, on the site's colour.
+            const on = (offset >= 0 ? ground(node.parentElement) : ground(node))
+                || [255, 255, 255];
+
+            const strokes = [];
+            if (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 1) {
+                strokes.push({ what: 'outline', rgb: parse(style.outlineColor) });
+            }
+            // The other half of a two-tone ring, if there is one. The COLOUR out of the
+            // shadow and nothing else: a box-shadow is "rgb(255, 255, 255) 0px 0px 0px
+            // 2px", and reading the numbers straight off it takes the first offset for
+            // the alpha, calls a white ring transparent, and scores it 1.00 - which is
+            // this check silently passing the broken build for the fixed one. It did,
+            // once, before the string was looked at.
+            (style.boxShadow && style.boxShadow !== 'none' ? style.boxShadow.split(/,(?![^(]*\))/) : [])
+                .forEach(part => {
+                    const colour = String(part).match(/rgba?\([^)]*\)/);
+                    strokes.push({ what: 'shadow', rgb: colour ? parse(colour[0]) : null });
+                });
+
+            const best = strokes.reduce((top, stroke) => {
+                const value = stroke.rgb ? ratio(over(stroke.rgb, on), on) : 0;
+                return value > top.ratio ? { ratio: value, what: stroke.what } : top;
+            }, { ratio: 0, what: 'nothing' });
+
+            window.__rings.push({
+                cls: String(node.className || node.tagName).slice(0, 24),
+                on: `rgb(${on.map(c => Math.round(c)).join(',')})`,
+                ratio: best.ratio,
+                by: best.what
+            });
+        });
+    }
+
+    const rings = await page.evaluate(() => window.__rings);
+    const seen = new Map();
+    rings.forEach(ring => { if (!seen.has(ring.cls + ring.on)) seen.set(ring.cls + ring.on, ring); });
+    const distinct = [...seen.values()];
+    const heads = distinct.filter(ring => ring.cls.includes('site-head-btn'));
+
+    given(`${label}: the tab walk reached the buttons on the site colours`,
+        distinct.length >= 8 && heads.length >= 6,
+        JSON.stringify({ stops: rings.length, distinct: distinct.length, heads: heads.length }));
+
+    const faint = distinct.filter(ring => ring.ratio < 3);
+    check(`${label}: every focus ring clears 3:1 on the ground it is drawn on`,
+        faint.length === 0,
+        `${faint.length} of ${distinct.length} — ${JSON.stringify(faint)}`);
+
+    await page.context().close();
+}
+
+// ------------------------------------------------- the two evenings the gate never drew
+//
+// The by-site block above assigns ONE site per man and leaves every rate at the default.
+// Those are the two states this app exists to record and neither was ever on the screen
+// at 320: a man at two sites puts a «2 אתרים» badge beside his name, and a day of extra
+// hours puts a number box beside the rate select. Both were measured running the page off
+// the side - 337/320 and 338/320 - by the same minmax(auto, 1fr) trap the 200%-text block
+// below was written for: .rate-control computes min-width:auto and will not shrink below
+// the select plus the hours box, .assign-name beside it shrinks to nothing, and the track
+// takes the card's min-content.
+//
+// The repair for that trap - minmax(0, 1fr) on the phone's .site-grid, and .assign-row
+// allowed to wrap when the rate control cannot shrink - landed with F1 and was NOT
+// claimed to cover this, because there was no check standing here to say either way.
+// This is that check. Both shapes, every width, ordinary text; and the name is measured
+// beside the width for the reason the 200% block gives - a page that fits by having lost
+// the name of the man it prices is not a page that survived.
+for (const width of WIDTHS) {
+    const label = `${width}px: the day, by site, on a real evening`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width], mode: 'sites' });
+    await setInset(page, 34);
+
+    const seeded = await page.evaluate(() => {
+        // w_01 is already at p_1 from the fixture; a second site is the doubled day.
+        assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_2');
+        // And somebody's extra hours, which is what puts the number box on the row.
+        setRate(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_2', RATE_EXTRA, 3);
+        State.save();
+        render();
+        return {
+            split: document.querySelectorAll('.badge-split').length,
+            hours: document.querySelectorAll('.rate-hours').length
+        };
+    });
+    await page.waitForTimeout(300);
+
+    given(`${label}: both shapes are on the screen`,
+        seeded.split > 0 && seeded.hours > 0, JSON.stringify(seeded));
+
+    const m = await page.evaluate(() => {
+        const box = node => node.getBoundingClientRect();
+        const rows = [...document.querySelectorAll('.assign-row')];
+        const withHours = rows.find(row => row.querySelector('.rate-hours'));
+        const withBadge = rows.find(row => row.querySelector('.badge-split'));
+        const nameOf = row => {
+            const name = row && row.querySelector('.assign-name');
+            return name ? Math.round(box(name).width) : null;
+        };
+        return {
+            doc: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth,
+            widest: Math.max(0, ...[...document.querySelectorAll('.site-card')]
+                .map(node => Math.round(box(node).width))),
+            hoursName: nameOf(withHours),
+            splitName: nameOf(withBadge),
+            // Every row's inline end, against the screen's: in RTL a card that overflows
+            // does not necessarily push the DOCUMENT, so this is asked of the rows too.
+            outside: rows.filter(row => box(row).left < -1
+                || box(row).right > window.innerWidth + 1).length
+        };
+    });
+
+    check(`${label}: the page does not run off the side`,
+        m.doc <= m.client + 1, JSON.stringify(m));
+    check(`${label}: and no priced row hangs over the edge`,
+        m.outside === 0, JSON.stringify(m));
+    check(`${label}: the man with extra hours still has a name to read`,
+        m.hoursName !== null && m.hoursName >= 60, JSON.stringify(m));
+    check(`${label}: and so does the man at two sites`,
+        m.splitName !== null && m.splitName >= 60, JSON.stringify(m));
 
     await page.context().close();
 }

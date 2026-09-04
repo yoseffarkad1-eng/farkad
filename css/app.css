@@ -54,11 +54,34 @@
     --line-soft: #e6eaef;
     --ink: #17202b;
     --ink-2: #4d5a69;
-    --ink-3: #7a8797;
+    /* The third ink, and a floor under it: 4.5:1 against the darkest ground this
+       stylesheet can put text on. It was #7a8797, which measured 3.66 on --surface,
+       3.23 on --paper and 3.00 on --surface-2 - fine on the desk it was chosen at, and
+       not on a phone held up on a site at four in the afternoon. Still the QUIET ink,
+       by measurement as well as by intent: 5.17 on paper against --ink-2's 6.22. Going
+       darker than this collapses three inks into two. */
+    --ink-3: #5a6673;
 
     --accent: #1f4b7a;
     --accent-soft: #dce7f3;
     --on-accent: #ffffff;
+
+    /* THE FOCUS RING'S SECOND STROKE, and it is a second stroke rather than a better
+       colour because there is no colour that would do.
+
+       The ring sits OUTSIDE the box it marks, so what it is drawn on is whatever is
+       behind the box - and since v101 that includes the site's own colour, which is an
+       inline style off js/ui/sitecolor.js that no stylesheet knows the value of.
+       --accent against the ten palette colours measured 1.34 1.73 1.78 1.28 1.82 1.67
+       1.38 1.48 1.64 1.13 in the light scheme. On slot 10 that is 1.13:1, which is not a
+       ring; against the paper everywhere else it is 7.90:1, so the token is right and the
+       assumption under it - that the stylesheet knows its own ground - is not.
+
+       One stroke cannot clear 3:1 against a near-white paper AND a mid-saturated blue,
+       and this app draws focusable things on both. Two can: the accent is dark in this
+       scheme, so its partner is white, and whichever ground the ring lands on, one of
+       the pair stands on it. The dark scheme flips both, for the same reason. */
+    --focus-edge: #ffffff;
 
     --warn: #9a5b0e;
     --warn-bg: #fbf0dd;
@@ -95,10 +118,14 @@
         --line-soft: #232b35;
         --ink: #e6eaf0;
         --ink-2: #a7b2c0;
-        --ink-3: #7c8796;
+        /* Lifted rather than darkened, to the same floor: #7c8796 read 4.03 against
+       --surface-2, which is the week grid's band and the dates written across it. */
+    --ink-3: #8a95a3;
         --accent: #8ab4e2;
         --accent-soft: #1d2b3b;
         --on-accent: #0f1319;
+        /* The accent is the LIGHT one here, so the ring's other stroke is the dark one. */
+        --focus-edge: #0a0e13;
         --warn: #dfa259;
         --warn-bg: #2c2315;
         --danger: #e18a80;
@@ -130,10 +157,14 @@
     --line-soft: #232b35;
     --ink: #e6eaf0;
     --ink-2: #a7b2c0;
-    --ink-3: #7c8796;
+    /* Lifted rather than darkened, to the same floor: #7c8796 read 4.03 against
+       --surface-2, which is the week grid's band and the dates written across it. */
+    --ink-3: #8a95a3;
     --accent: #8ab4e2;
     --accent-soft: #1d2b3b;
     --on-accent: #0f1319;
+    /* The accent is the LIGHT one here, so the ring's other stroke is the dark one. */
+    --focus-edge: #0a0e13;
     --warn: #dfa259;
     --warn-bg: #2c2315;
     --danger: #e18a80;
@@ -215,6 +246,12 @@ body {
    The 24px is the gap between the last row and the bar above it - the only number in this
    calculation that is a choice rather than a measurement. */
 :root { --nav-h: 0px; --day-actions-h: 0px; --bars-h: calc(var(--nav-h) + var(--day-actions-h)); }
+
+/* How far iOS has lifted every fixed bar off the bottom of the screen, written by
+   js/ui/bars.js, and 0 everywhere else. It is a HEIGHT-PRESERVING move, so it is not in
+   --bars-h and must never be: the bars take the same room they always did, and the room
+   the page reserves for them is now the room they are actually painted in. */
+:root { --bar-drop: 0px; }
 
 .app {
     max-width: 1180px;
@@ -346,6 +383,12 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
         padding: 6px 10px max(8px, var(--safe-bottom));
         box-shadow: 0 -6px 24px -18px rgba(0, 0, 0, .5);
     }
+
+    /* Lowered with the other two when iOS has lifted every fixed element off the bottom
+       of the screen - see body.bars-lowered beside the kbd-open rule. The rule is HERE,
+       inside the block that makes .tabs fixed, because above 700px it is in the header
+       and in ordinary flow, where moving the box would leave its layout behind. */
+    body.bars-lowered .tabs { transform: translateY(var(--bar-drop, 0px)); }
     .tab {
         flex-direction: column;
         gap: 3px;
@@ -380,7 +423,22 @@ button {
 }
 
 button:hover { filter: brightness(1.08); }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Every focusable thing, not only <button>. The rule used to name buttons alone and
+   everything else took the browser's own ring - which on the rate <select>, in the dark
+   scheme, measured 1.12:1 against the row it sits on. An app that draws its own ring
+   draws it everywhere or it has not drawn one. The two strokes are adjacent: the 2px
+   spread exactly fills the 2px the outline is offset by. */
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+a[href]:focus-visible,
+[role="button"]:focus-visible,
+[tabindex="0"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--focus-edge);
+}
 
 .btn-secondary {
     background: var(--surface);
@@ -411,9 +469,24 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-icon:hover { background: var(--surface-2); color: var(--ink); }
 
 /* The one icon button that is a way IN rather than a way out, so it is written in the
-   text colour rather than the quiet one: --ink-3 on paper is 3.2:1, which is under the
+   text colour rather than the quiet one. That, and only that, is what this line is for
+   now: EMPHASIS. It used to be the contrast repair as well, and it was the wrong shape
+   for one.
+
+   The sentence that used to sit here - "--ink-3 on paper is 3.2:1, which is under the
    4.5:1 a small glyph needs and exactly the sort of thing that reads fine to whoever
-   chose it and not at all on a site at four in the afternoon. */
+   chose it and not at all on a site at four in the afternoon" - was a diagnosis of the
+   TOKEN, and the cure was applied to one id. .btn-icon eight lines above kept the colour
+   that sentence had just condemned, and so did thirty-one other rules: the date on the
+   day header at 3.66, the line that says whether the other two phones have seen tonight's
+   work at 3.23, the dates across the week grid at 3.00. A correct diagnosis cured at one
+   call site is worse than none, because it reads to the next person as already handled.
+
+   So the token moved instead (see :root, both schemes), which fixes .btn-icon and the
+   other thirty-two at once. The measurement is in tests/mobile.test.mjs, "the quiet ink":
+   --ink-3 against all seven grounds this stylesheet can put text on, and separately every
+   element the browser is actually painting in it, across the four screens and the ⋯ panel.
+   Neither of those can be made green by moving one rule. That is the point of them. */
 #settingsBtn { color: var(--ink-2); font-size: 20px; letter-spacing: 2px; }
 
 /* ---------------------------------------------------------------- a thumb's worth
@@ -519,7 +592,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .reorder-titles h2 { font-size: 18px; }
 /* The heading takes focus when the panel opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
-.reorder-titles h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.reorder-titles h2:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 .reorder-sub { margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
 .reorder-head-end { width: 44px; flex: none; }
 
@@ -528,6 +606,18 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     padding: 10px 12px 14px;
+}
+
+/* Announced, not drawn - the progress line is the visible answer, and on the two phone
+   layouts that clip the line away entirely this is the only channel left. Same box
+   .reorder-live takes below, for the same reason. */
+.day-live {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .reorder-live {
@@ -669,9 +759,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-head h2 { font-size: 18px; }
 /* The heading takes focus when the sheet opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
-.settings-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.settings-head h2:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 /* The worker's account is entered at its heading too (modal.js). */
-#workerDaysTitle:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+#workerDaysTitle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 
 .settings-body {
     flex: 1;
@@ -990,8 +1090,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding-bottom: 8px;
     border-bottom: 1px solid var(--line-soft);
 }
-/* The card head carries the site's colour, so the count sits on a translucent white
-   rather than a theme surface that would clash with ten different backgrounds. */
+/* The card head carries the site's colour, so the count sits on a scrim of its own
+   rather than a theme surface that would clash with ten different backgrounds. See the
+   .site-count rule below for which scrim, and why it is not the white one this comment
+   used to name. */
 .site-head-color {
     border-radius: var(--radius);
     /* Was 8px top and bottom, for a head that held only text. It now holds two 44px
@@ -1003,7 +1105,25 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-bottom: none;
     margin-bottom: 10px;
 }
-.site-head-color .site-count { background: rgba(255, 255, 255, .22); color: #fff; }
+/* The SAME dark scrim as the two buttons beside it, and for the reason written out at
+   length above .site-head-btn: a white overlay only ever LIGHTENS, so what white ink is
+   written on depends on the colour underneath, and the palette has ten of those.
+
+   That paragraph was written ABOUT this element - it says so, "the translucent WHITE the
+   count beside it uses" - and then the cure went to the buttons and the count kept the
+   wash, at 22% rather than the 18% the paragraph had measured and refused. Measured on
+   the rendered page, white on the 22% white wash: 4.24 3.60 3.37 4.56 3.29 3.53 4.50
+   4.29 3.57 4.75 in the light scheme, nine of the ten under the floor, and 3.49 3.39
+   3.22 3.73 3.17 3.25 3.66 3.57 3.22 3.55 in the dark, all ten under. On the same dark
+   scrim it is 9.26 to 10.53 light and 6.86 to 7.76 dark - the buttons' own numbers,
+   because it is now the buttons' own ground.
+
+   A dark scrim can only ever darken, so this holds for any colour added to the palette
+   later, which is the property that made it right for the buttons and makes it right
+   here. tests/mobile.test.mjs, "the count on the site head", reads every card on the
+   screen rather than the first one: the failure was a function of which of the ten was
+   underneath, and one sample cannot see that. */
+.site-head-color .site-count { background: rgba(0, 0, 0, .22); color: #fff; }
 /* The name takes the room that is left and the tools keep theirs: a long site name used
    to have the whole head to itself, and without min-width:0 a flex item refuses to go
    under its content's width - it would push the two buttons off the end of a 320px card
@@ -1063,15 +1183,36 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .site-empty { color: var(--ink-3); font-size: 14px; margin: 4px 0; }
 .site-list { display: flex; flex-direction: column; gap: 4px; }
 
+/* THE ROW WRAPS, and the name has a floor under it. Both halves are one repair.
+
+   The rate <select> will not go under its longest option (שעות נוספות), so with the text
+   turned up it wants 215px on a 320px phone. The row used to answer that by refusing to
+   be narrower, which pushed the whole card - and the two buttons on its head - off the
+   side of the screen (see .site-grid in the phone block below). Letting the track be
+   narrower than the card only moves the failure: measured, `minmax(0, 1fr)` alone crushed
+   .assign-name to ZERO at 320 at twice the text, which is a row that has lost the name of
+   the man it prices in order to keep a dropdown whole.
+
+   So the name may shrink to a name and no further, and when the rate control cannot fit
+   beside it the row wraps instead. 4em, because min-width takes part in flex line
+   breaking (it clamps the hypothetical main size) and because it scales with the text:
+   68px at the ordinary size, which is what the name box already measures on a 320 phone -
+   so nothing about the ordinary day moves, measured at all four widths - and 136px at
+   twice it, which is wide enough to force the wrap and wide enough to read.
+
+   tests/mobile.test.mjs, "${width}px at 200% text, by site", measures both halves: the
+   page fitting across AND the name still having a box. A fix for one that breaks the
+   other goes red. */
 .assign-row {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 5px 6px;
     border-radius: var(--radius);
+    flex-wrap: wrap;
 }
 .assign-row:hover { background: var(--surface-2); }
-.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 4em; }
 
 .rate-control { display: flex; gap: 4px; align-items: center; }
 /* 16px is not a taste here, it is the threshold below which iOS magnifies the whole page
@@ -1325,7 +1466,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .week-cell { cursor: pointer; min-width: 88px; font-size: 13px; }
 .week-cell:hover { background: var(--accent-soft); }
-.week-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The one ring drawn INSIDE its own box - a grid of cells with no gap between them has
+   nowhere to put a ring outside - so its second stroke is inset too, in the 2px the
+   outline leaves at the edge. */
+.week-cell:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 2px var(--focus-edge);
+}
 .cell-filled { background: var(--surface); }
 .col-rest { background: var(--surface-2) !important; opacity: .65; }
 
@@ -2055,8 +2203,33 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         border-radius: 5px;
     }
     .week-cell .cell-line .site-name,
-    .week-cell .cell-line .tag-rate,
-    .week-cell .cell-line .site-mark { display: none; }
+    .week-cell .cell-line .tag-rate { display: none; }
+
+    /* THE MARK STAYS, and it is the one of the three that has no stand-in.
+       The name has the legend under the grid; the rate word has the dot and the plus
+       below. The cycle mark had nothing, and it is the only thing in the app that tells
+       the eleventh site from the first - js/ui/sitecolor.js paints them the same colour
+       ON PURPOSE ("the palette repeats and the second lap is marked with a diamond
+       instead"), so hiding it here left two sites painting one identical 16px block on
+       the single screen a whole week is read off.
+
+       A corner, because the middle of the block belongs to the rate: a doubled day draws
+       a 6px white dot through it and extra hours a plus, and those are the common marks.
+       The dark halo is the same reasoning as the scrim under .site-head-btn - a white
+       overlay only ever lightens, so white ink needs something dark of its own to hold
+       on all ten colours - and it does a second job here: where the corner glyph comes
+       within a pixel or two of the white dot, what is between them is dark, so the two
+       marks cannot merge into one blob. */
+    .week-cell .cell-line .site-mark {
+        position: absolute;
+        inset-block-start: 0;
+        inset-inline-start: 1px;
+        font-size: 9px;
+        line-height: 1;
+        color: #fff;
+        opacity: 1;
+        text-shadow: 0 0 2px rgba(0, 0, 0, .95);
+    }
 
     /* No room for the word, so the mark: a white dot is a doubled day, a plus is extra
        hours. White clears every one of the ten site colours by design. */
@@ -2120,6 +2293,28 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 body.kbd-open .tabs,
 body.kbd-open .day-actions { display: none; }
 body.kbd-open .sheet-foot { padding-bottom: 16px; }
+
+/* And the other half of the same fact about iOS, which is NOT a keyboard.
+   On iOS a `position: fixed` element is anchored to the VISUAL viewport. When that
+   viewport is reported short with nothing covering the screen - the share sheet closed,
+   the app brought back from the background, a keyboard dismissed with the page scrolled
+   - iOS paints these bars that far above the bottom of the screen, and the worker list
+   shows in the strip underneath them. That was one real iPhone on v103, about 387pt up.
+   js/ui/bars.js measures the gap and puts them back.
+   All three move together or the fix makes the layout worse than the fault: the dock's
+   whole job is to sit on the tab bar and the undo bar's is to sit above the dock, and
+   lowering one of them alone would take them apart.
+   The rule is behind the class rather than a var() fallback so that in the ordinary case
+   there is no transform here at all - a transform is a containing block for fixed
+   descendants, and ruling one out of every ancestor is how this fault was found.
+   These two are `position: fixed` at every width, so the rule is at every width too.
+   .tabs is NOT - above 700px it is in the header, in ordinary flow - and its half of
+   this rule lives beside the declaration that makes it fixed, up in the phone block.
+   A translateY on a flow element moves the box and leaves its layout where it was, and
+   an iPad in landscape is over 700px wide, WebKit, and can strand its viewport exactly
+   like the phone did: the case is real, not hypothetical. */
+body.bars-lowered .day-actions,
+body.bars-lowered .undo-bar { transform: translateY(var(--bar-drop, 0px)); }
 
 /* Above both bottom bars. A dialog the tab bar draws over is a dialog whose last button
    cannot be pressed - and the last button is usually the one that says no. */
@@ -2267,7 +2462,18 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     /* --page-pad is the ONE place the phone's page padding is written; the week strip
        gives it back with the same property, so the two cannot drift apart. */
     .app { --page-pad: 12px; padding-inline: var(--page-pad); }
-    .site-grid { grid-template-columns: 1fr; }
+    /* minmax(0, 1fr), not 1fr. `1fr` is `minmax(auto, 1fr)`, and `auto` as a track
+       MINIMUM is the item's min-content - so the column refused to be narrower than the
+       card, the card refused to be narrower than the rate <select> inside it, and at
+       twice the text size the day screen came out 398px wide inside 390, 375 and 320.
+       What went off the edge was the inline end of every site card: the ＋ that adds a
+       man to that site and the 💬 that sends that gate its seder, with nothing on screen
+       saying the page could be dragged sideways to reach them.
+
+       The zero minimum is only half of it - on its own it hands the squeeze to the row
+       inside, and the row gave it all to the worker's name. .assign-row above wraps, and
+       .assign-name has a floor; the two are one repair and the comment there says so. */
+    .site-grid { grid-template-columns: minmax(0, 1fr); }
     /* min-width, because the buttons inside are flex: 1 from a zero basis - so the
        toggle's own natural size collapses to almost nothing. It never looks too big for
        the line it is on, so when undo, redo and "היום" joined that line it stayed put and
@@ -2367,6 +2573,21 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 }
 .drawer-wrap.drawer-open { pointer-events: auto; }
 
+/* CLOSED MEANS ABSENT, not parked off the edge.
+
+   A transform moves a thing on the screen and moves nothing else about it. Closed, this
+   panel was display:flex and visibility:visible with a live offsetParent, so its buttons
+   stayed in the tab order and in the accessibility tree of every screen in the app:
+   before it had ever been opened its ✕ was already a tab stop, and after one open and
+   close it was twenty-six day buttons sitting behind the day list, none of them visible
+   and all of them reachable.
+
+   visibility, not display, and not aria-hidden. aria-hidden takes a thing out of the
+   accessibility tree and leaves it in the tab order, which is the worse of the two
+   halves; display:none takes both but cannot be animated, and this panel slides. So:
+   hidden while closed, visible while open, and the transition delays the flip back to
+   hidden until the slide has finished - which is why the visibility line carries a delay
+   on the way out and none on the way in. */
 .day-drawer {
     position: absolute;
     top: 0;
@@ -2375,13 +2596,18 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     width: min(310px, 84vw);
     background: var(--surface);
     transform: translateX(100%);
-    transition: transform .2s ease-out;
+    visibility: hidden;
+    transition: transform .2s ease-out, visibility 0s linear .2s;
     box-shadow: var(--shadow-lift);
     display: flex;
     flex-direction: column;
     padding-bottom: var(--safe-bottom);
 }
-.day-drawer.drawer-open { transform: translateX(0); }
+.day-drawer.drawer-open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform .2s ease-out, visibility 0s linear 0s;
+}
 
 .drawer-head {
     display: flex;

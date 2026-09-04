@@ -17,10 +17,11 @@
 // running app, and needs Playwright and a server to do it; this one is a file read, so
 // it runs in a second, before a commit, on any machine.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { suite, check, report } from './runner.mjs';
+import { createHash } from 'node:crypto';
+import { suite, check, same, given, report } from './runner.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = name => readFileSync(join(ROOT, name), 'utf8');
@@ -258,6 +259,135 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     const page = readFileSync(join(ROOT, 'index.html'), 'utf8');
     check('nor does the page itself',
         !/FARKAD_FLAG_OVERRIDES/.test(page));
+}
+
+// ---------------------------------------------------------------- the third-party bytes
+//
+// vendor/xlsx-0.18.5.min.js is the ONLY third-party code this app ships. It is 881KB of
+// minified JavaScript, it is in the service worker's shell, and it therefore runs on
+// three phones with the same reach over the page as every file in js/.
+//
+// tests/xlsx.test.mjs already proves the library WORKS: it builds a real workbook through
+// this exact file and reads the arithmetic back out. It also pins the filename the page
+// asks for and cross-checks it against the XLSX.version the file reports. What none of
+// that can catch is the file being a DIFFERENT 0.18.5 - bytes edited, appended to, or
+// swapped for a build from somewhere other than the release this repository pins. Such a
+// file reports 0.18.5, writes correct spreadsheets, passes every check in that suite, and
+// is not the code anybody reviewed.
+//
+// So the authority is the pinned devDependency's own dist, which npm fetched from the
+// registry and `npm ci` verified against package-lock.json's integrity hash. Identical
+// bytes mean the shipped copy IS the release named in package.json. They also mean the
+// two cannot drift apart silently: bumping the dependency without re-vendoring, or
+// re-vendoring without bumping the dependency, both fail here, which is what makes an
+// upgrade a deliberate act with a diff rather than something that half-happens.
+{
+    suite('the only third-party code shipped is the release it claims to be');
+
+    const VENDORED = 'vendor/xlsx-0.18.5.min.js';
+
+    check('the vendored library is in the shell', shellPaths.includes(VENDORED),
+        shellPaths.filter(path => path.startsWith('vendor/')).join(', '));
+
+    // The authority is a hash written down HERE, not a comparison that only happens when
+    // node_modules is present. The first version of this check skipped with
+    // `check(name, true, 'SKIPPED: ...')` when the dependency was absent, so that the
+    // suite would still run in a second on a machine that had not run `npm ci`. That was
+    // wrong twice over: an assertion whose condition is the literal `true` cannot fail,
+    // which is exactly what tests/nonassertions.test.mjs exists to catch and did catch,
+    // and a check that quietly stops checking on the machines most likely to be missing
+    // something is the weakest possible place to put a skip.
+    //
+    // A written-down hash has neither problem. It is a real assertion on every machine,
+    // it needs nothing installed, and changing it is a deliberate line in a diff.
+    const RELEASE_SHA256 =
+        'c9506197caf809a075b6dee1da0d36fb19da7158ffe8a88e7b0c96c5d8623c99';
+
+    const vendored = createHash('sha256')
+        .update(readFileSync(join(ROOT, VENDORED))).digest('hex');
+    check('the shipped copy is the exact release these bytes were pinned to',
+        vendored === RELEASE_SHA256, vendored.slice(0, 16) + ' vs ' + RELEASE_SHA256.slice(0, 16));
+
+    // And when the dependency IS installed - which it is in the gate, because `npm ci`
+    // runs first - the written-down hash is checked against the bytes npm fetched from
+    // the registry and verified against package-lock.json's integrity hash. That is what
+    // stops the constant above from drifting into a number somebody updated to make a red
+    // check green: the two have to agree, and they can only be made to agree by vendoring
+    // the release the lockfile names.
+    //
+    // Guarded by existsSync so this suite still runs on a machine without node_modules -
+    // but the guard skips a SECOND, corroborating check, never the assertion itself, and
+    // the branch it guards contains no assertion that could pass vacuously.
+    const DIST = 'node_modules/xlsx/dist/xlsx.full.min.js';
+    if (existsSync(join(ROOT, DIST))) {
+        const dist = createHash('sha256')
+            .update(readFileSync(join(ROOT, DIST))).digest('hex');
+        check('and the pinned dependency npm installed has those same bytes',
+            dist === RELEASE_SHA256, dist.slice(0, 16) + ' vs ' + RELEASE_SHA256.slice(0, 16));
+
+        const installed = JSON.parse(
+            readFileSync(join(ROOT, 'node_modules/xlsx/package.json'), 'utf8')).version;
+        check('and the version in its filename is the version installed',
+            VENDORED.includes('-' + installed + '.min.js'), installed);
+    }
+
+    // Apache-2.0 requires the licence to travel with the code, and here it genuinely
+    // travels: it is in the shell alongside the library, so the copy on a phone with no
+    // signal is attributed too. Asserted separately from the shell check above because
+    // the two say different things - that one says the code is cached, this one says the
+    // file exists to be cached.
+    check('its licence sits beside it in the repository',
+        existsSync(join(ROOT, 'vendor/xlsx-0.18.5.LICENSE')));
+
+    // Nothing else. A second vendored file would be a second piece of third-party code on
+    // three phones, and it should not be possible to add one without this line changing.
+    const vendorFiles = readdirSync(join(ROOT, 'vendor')).sort();
+    same('and nothing else is vendored', vendorFiles,
+        ['xlsx-0.18.5.LICENSE', 'xlsx-0.18.5.min.js']);
+}
+
+// ------------------------------------------------- one global scope, one name per thing
+//
+// Every script in index.html is a CLASSIC script and they all share one global scope.
+// Two files declaring the same top-level name is therefore not an error and not a warning:
+// the one loaded later silently wins, and the earlier file's version is simply never the
+// one that runs. Every button in this app is an inline onclick resolved on that scope, so
+// the symptom is a button that does the wrong thing - or the right thing until somebody
+// reorders index.html.
+//
+// This is a refactoring hazard, not a coding one, and it grew teeth this round: the sync
+// group is six files, the reports screen is three, and the next split will be somebody
+// extracting a shared helper into two of them without noticing it already exists in a
+// third. Nothing else in this repository would catch that. The suites load the app, the
+// shadowed name resolves to SOMETHING, and the arithmetic is right because the two copies
+// were identical on the day of the split.
+//
+// Read off column-0 declarations, which is this codebase's convention for a top-level
+// name; a nested or conditionally-assigned global is not caught and is not meant to be.
+{
+    suite('no two shipped scripts declare the same global');
+
+    const loaded = [...page.matchAll(/<script src="(js\/[^"]+)"/g)].map(match => match[1]);
+    given('the page loads the scripts this reads', loaded.length > 20, String(loaded.length));
+
+    const declared = new Map();
+    for (const file of loaded) {
+        const source = readFileSync(join(ROOT, file), 'utf8');
+        const names = [...source.matchAll(/^(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)]
+            .map(match => match[1]);
+        for (const name of names) {
+            if (!declared.has(name)) declared.set(name, []);
+            if (!declared.get(name).includes(file)) declared.get(name).push(file);
+        }
+    }
+
+    given('it found the app\'s globals', declared.size > 100, String(declared.size));
+
+    const shadowed = [...declared.entries()]
+        .filter(([, files]) => files.length > 1)
+        .map(([name, files]) => name + ' (' + files.join(' + ') + ')');
+    check('every top-level name is declared in exactly one file',
+        shadowed.length === 0, shadowed.slice(0, 4).join('; '));
 }
 
 report();

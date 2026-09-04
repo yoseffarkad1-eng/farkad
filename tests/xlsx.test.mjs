@@ -21,7 +21,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeDevice } from './harness.mjs';
+import { makeDevice, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 
@@ -31,14 +31,17 @@ const ROOT_REFUSAL = refuseUnlessVerified(ROOT_ENV.root, ROOT_ENV.overridden, RO
 given('the tree this suite reads is the tree it was pointed at',
     ROOT_REFUSAL === null, String(ROOT_REFUSAL));
 const ROOT = ROOT_ENV.root;
-const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+// The whole reports screen, which is three files - see reportsSource in tests/harness.mjs.
+// ROOT is passed because this suite can be re-rooted onto another checkout by
+// tests/treecheck.mjs, and the harness's own default would read the tree it is in.
+const REPORTS = reportsSource(ROOT);
 // THE SHIPPED BYTES, not a devDependency's copy of them.
 //
 // This suite proves what a real workbook contains, so it has to run the library a phone
 // actually runs. That used to be node_modules/xlsx - the same version, installed beside
 // the app rather than in it - and while the app fetched the library from a CDN there was
 // no shipped copy to prefer. There is now: vendor/, in the service worker's shell, named
-// by js/ui/reports.js. Reading anything else would prove the arithmetic of a file no
+// by js/ui/reports-export.js. Reading anything else would prove the arithmetic of a file no
 // phone has.
 const SHEETJS = process.env.FARKAD_SHEETJS ||
     join(ROOT, 'vendor/xlsx-0.18.5.min.js');
@@ -713,7 +716,7 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
     suite('the spreadsheet library the app names is the one in this tree');
 
     const named = /const XLSX_URL = '([^']+)'/.exec(REPORTS);
-    given('js/ui/reports.js names one', named !== null, String(named && named[1]));
+    given('the reports screen names one', named !== null, String(named && named[1]));
     check('and it is a file on this origin, not a CDN',
         named && named[1].indexOf('//') === -1 && named[1].indexOf(':') === -1,
         String(named && named[1]));

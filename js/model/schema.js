@@ -1830,7 +1830,7 @@ function advanceCarryEnabled() {
 // canonicalJson out of this file.
 //
 // The rounding is the agora, which is the precision the record can hold - see the block
-// over `agora` in js/ui/reports.js. A walk that carries binary float error from one
+// over `agora` in js/ui/reports-export.js. A walk that carries binary float error from one
 // account into the next turns 1,800 into 1,799.9999999999998 and prints it.
 function advanceDayStep(dateStr, days) {
     const at = parseLocalDate(dateStr);
@@ -1996,7 +1996,7 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     const row = payrollReport(schedule, fromDate, toDate)
         .find(item => item.workerId === workerId);
     // A man with no rate is owed an UNKNOWN amount, which is not zero - see moneyOf in
-    // js/ui/reports.js. Nothing can be deducted from a number nobody knows, so the
+    // js/ui/reports-export.js. Nothing can be deducted from a number nobody knows, so the
     // balance passes through him untouched rather than being written off against a wage
     // this app cannot price.
     // A CLOSED PERIOD REPORTS THE WAGE IT WAS CLOSED ON, not the wage the schedule

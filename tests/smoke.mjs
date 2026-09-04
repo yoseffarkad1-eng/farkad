@@ -3371,8 +3371,19 @@ async function seedRoster(page) {
   await seedRoster(page);
 
   const result = await page.evaluate(() => {
-    // an old restore point, big enough that dropping it is what makes room
-    Store.set('scheduleData:snap:2020-01-01', 'o'.repeat(400 * 1024));
+    // an old restore point, big enough that dropping it is what makes room.
+    //
+    // A REAL one - a schedule, padded to the size this scenario needs. It used to be
+    // 400 KB of the letter 'o', which was a stand-in for a photograph and is not one:
+    // the reclaim ladder now steps over a restore point it cannot parse, because an
+    // unreadable restore point is somebody's only copy of that state and not spare
+    // change (law 10, js/ui/backup.js). What this scenario is about - that an OLD
+    // restore point is what pays for the record - is unchanged; the bytes are now a
+    // restore point rather than filler that happens to sit under the key.
+    Store.set('scheduleData:snap:2020-01-01', JSON.stringify({
+      schemaVersion: 2, workers: [], places: [], days: {}, advances: {},
+      filler: 'o'.repeat(400 * 1024)
+    }));
 
     // then fill the rest of the quota, in small pieces so it ends up close to the brim
     let filled = 0;
@@ -6093,6 +6104,31 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
       }
     });
     FarkadSync.pushDelayMs = 0;
+    // A FIXED WAIT, and two attempts to replace it with a condition both made it WORSE.
+    // Written down because the next person will have the same idea, and because what the
+    // wait is actually for is still not known.
+    //
+    // The failure it guards is real: seen once on a clean tree as 1129/1130 with this the
+    // only red, `[]` - the flush sent nothing. That is the app behaving correctly. Since
+    // v79 a queued roster is HELD until the device has heard from the document, so if the
+    // flush runs too early it sends nothing and this check fails for the right behaviour.
+    //
+    // Attempt 1, waiting for `FarkadSync._heardFromCloud`: turned the intermittent red
+    // into 1148/1149 TWICE running. The reasoning was that the latch was already set from
+    // an earlier block so the wait returned instantly - and an instrumented run DISPROVED
+    // that: `_heardFromCloud already true before the wait: false`. So the hypothesis was
+    // wrong as well as the fix.
+    //
+    // Attempt 2, waiting for `_remoteRoster` to be REPLACED (js/sync/receive.js:781
+    // rebuilds it per snapshot): the instrumented run shows this genuinely blocks - 10ms -
+    // so the snapshot really has been delivered AND processed by the time it resolves.
+    // It still fails, `[]` again. Therefore THE SNAPSHOT BEING PROCESSED IS NOT THE
+    // PRECONDITION. Something else, completing somewhere between 10ms and 50ms, is.
+    //
+    // Until that something is named, 50ms stays. Do not replace it with a condition that
+    // has not been INSTRUMENTED to show both that it blocks and that the check then
+    // passes: a wait on the wrong fact looks principled and is worse than a wait on the
+    // clock, because the clock at least admits to being a guess.
     await new Promise(resolve => setTimeout(resolve, 50));
     paths.length = 0;
 
@@ -8453,6 +8489,563 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('Escape still closes it', closed.open === 'none', JSON.stringify(closed));
   check('and focus goes back to the name that opened it',
     closed.cls === 'link-cell' && closed.text === 'דוד', JSON.stringify(closed));
+  await page.context().close();
+}
+
+// ------------------------------------------------- the days drawer keeps the keyboard
+{
+  // The one dialog in this app with no keyboard contract. Twelve others were driven and
+  // measured for this: focus enters every one of them, Tab is held inside every one of
+  // them, Escape closes every one of them. The drawer had Escape and nothing else - and
+  // worse, it never left the page: closed, it was display:flex, visibility:visible,
+  // parked off the inline edge with no aria-hidden and no inert, so its buttons kept a
+  // live offsetParent and stayed in the tab order of every screen. Before it had ever
+  // been opened its ✕ was already a tab stop; after one open and close it was twenty-six
+  // day buttons a Tab walk could reach, none of them on the screen.
+  //
+  // settingsPanel and reorderPanel are not .modal either and both implement the whole
+  // contract by hand. The drawer now uses the same two pieces of js/ui/modal.js they do.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    todayStr = () => '2026-08-12';
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    State.save(); render();
+  });
+
+  // CLOSED, and never yet opened.
+  const fresh = await page.evaluate(() => {
+    const drawer = document.getElementById('dayDrawer');
+    const style = getComputedStyle(drawer);
+    const items = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    return {
+      display: style.display,
+      visibility: style.visibility,
+      reachable: items.filter(node => node.offsetParent !== null
+        && getComputedStyle(node).visibility !== 'hidden').length
+    };
+  });
+  check('a drawer nobody has opened is not in the tab order',
+    fresh.reachable === 0, JSON.stringify(fresh));
+
+  // OPEN: focus enters at the heading, the way the settings sheet and the reorder panel
+  // are entered - a reader is told where it has arrived before it is read a list of days.
+  await page.locator('.day-nav .drawer-btn').click();
+  await page.waitForTimeout(300);
+  const entered = await page.evaluate(() => ({
+    open: document.getElementById('dayDrawer').classList.contains('drawer-open'),
+    role: document.getElementById('dayDrawer').getAttribute('role'),
+    modal: document.getElementById('dayDrawer').getAttribute('aria-modal'),
+    focused: document.activeElement && document.activeElement.id,
+    inside: document.getElementById('dayDrawer').contains(document.activeElement)
+  }));
+  check('the drawer is a dialog and says so', entered.open === true
+    && entered.role === 'dialog' && entered.modal === 'true', JSON.stringify(entered));
+  check('opening it puts the keyboard inside it, at the heading',
+    entered.inside === true && entered.focused === 'dayDrawerTitle',
+    JSON.stringify(entered));
+
+  // Tab is held. Twenty presses, because the drawer holds twenty-four days and one way
+  // out - a trap that leaks on the twenty-first press is not a trap.
+  let leaked = 0;
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press('Tab');
+    if (!(await page.evaluate(() =>
+      document.getElementById('dayDrawer').contains(document.activeElement)))) leaked += 1;
+  }
+  check('Tab does not walk out of the open drawer into the day behind it',
+    leaked === 0, `${leaked} of 20 presses landed outside`);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const shut = await page.evaluate(() => {
+    const drawer = document.getElementById('dayDrawer');
+    const items = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    return {
+      open: drawer.classList.contains('drawer-open'),
+      visibility: getComputedStyle(drawer).visibility,
+      buttons: items.length,
+      reachable: items.filter(node => node.offsetParent !== null
+        && getComputedStyle(node).visibility !== 'hidden').length,
+      focused: document.activeElement && document.activeElement.className
+    };
+  });
+  check('Escape closes it and the keyboard goes back to the ☰ that opened it',
+    shut.open === false && String(shut.focused).includes('drawer-btn'),
+    JSON.stringify(shut));
+  // The half that costs a reader on every screen, not only on this one: a drawer full of
+  // days, drawn and then closed, must be gone from the tab order and from the
+  // accessibility tree - not merely slid off the edge.
+  check('and a closed drawer full of days is out of the tab order again',
+    shut.buttons > 20 && shut.reachable === 0, JSON.stringify(shut));
+
+  // Walked rather than inferred, because that is how the fault was found: Tab from the
+  // top of the day screen and see whether focus ever lands behind the parked panel.
+  await page.evaluate(() => { document.body.focus(); if (document.activeElement) document.activeElement.blur(); });
+  let behind = 0;
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    if (await page.evaluate(() =>
+      document.getElementById('dayDrawer').contains(document.activeElement))) behind += 1;
+  }
+  check('and forty tab presses across the day screen reach none of it',
+    behind === 0, `${behind} of 40 landed inside the closed drawer`);
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- focus comes back from the field dialogs
+{
+  // Ten of thirteen dialogs return the keyboard to where the person was. Three did not,
+  // and they are exactly the three that focus a text field for themselves: askText - which
+  // is this app's prompt(), so renaming a site, correcting an amount and answering the
+  // reorder guard all go through it - the quick-start paste, and the sign-in sheet.
+  //
+  // The mechanism, and why the fix is not in the three dialogs. watchModals captures the
+  // return target from a MutationObserver, which fires at the microtask checkpoint - AFTER
+  // the whole synchronous block that both revealed the dialog and moved focus into it:
+  //
+  //     parts.modal.style.display = 'flex';   // ask.js  - the mutation is queued
+  //     parts.input.focus();                  // ask.js  - activeElement is now the input
+  //     ...                                   // the observer runs here
+  //
+  // So it recorded a node INSIDE the dialog, and calling .focus() on that node after the
+  // dialog was hidden did nothing at all, which is how focus ended up on <body>. The three
+  // dialogs are not wrong; the capture was late.
+  //
+  // Driven the way the fault happens: something outside is focused, then the dialog is
+  // opened in the same synchronous block, exactly as a real click does it.
+  const page = await open();
+  await seedRoster(page);
+
+  const OPENER = 'settingsBtn';
+  const returns = async (name, which, howToClose) => {
+    const before = await page.evaluate(([id, key]) => {
+      document.getElementById(id).focus();
+      // Opened in the SAME synchronous block as the focus above it, which is what a real
+      // click does and what the observer arrives too late for.
+      if (key === 'ask') askText({ title: 'שם חדש' });
+      if (key === 'quick') openQuickStart();
+      if (key === 'signin') openSignInModal();
+      if (key === 'workerform') showAddWorkerModal();
+      return { opener: document.activeElement && document.activeElement.id };
+    }, [OPENER, which]);
+    await page.waitForTimeout(300);
+    const during = await page.evaluate(() =>
+      document.activeElement && (document.activeElement.id || document.activeElement.tagName));
+    await howToClose();
+    await page.waitForTimeout(350);
+    const after = await page.evaluate(() =>
+      document.activeElement && (document.activeElement.id || document.activeElement.tagName));
+    check(`focus comes back from ${name}`, after === OPENER,
+      JSON.stringify({ before, during, after, wanted: OPENER }));
+  };
+
+  // askText, closed with Escape.
+  await returns('askText', 'ask', async () => { await page.keyboard.press('Escape'); });
+  // The quick start, closed with its own ביטול - this was never about Escape.
+  await returns('the quick start', 'quick',
+    async () => { await page.evaluate(() => closeQuickStart()); });
+  // The sign-in sheet, closed with Escape.
+  await returns('the sign-in sheet', 'signin',
+    async () => { await page.keyboard.press('Escape'); });
+
+  // And one of the ten that already worked, driven the same way, so a repair that moved
+  // the capture cannot quietly have moved THEM: the worker form does not focus a field for
+  // itself, so it is the control case for the three above.
+  await page.evaluate(() => { showView('roster'); render(); });
+  await page.waitForTimeout(200);
+  await returns('the worker form, which was never broken', 'workerform',
+    async () => { await page.keyboard.press('Escape'); });
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- what a week cell says it is
+{
+  // The week grid is read as a picture, and on a phone the cells shrink to the site's
+  // colour alone. For anybody NOT looking at the picture the cell's aria-label is the
+  // whole cell: a label on a role="button" overrides its contents, so the browser
+  // reports the cell as a leaf and whatever the label does not say is not on the screen
+  // at all.
+  //
+  // It said who and when. Never where - so a fortnight of work read as thirty identical
+  // "דוד · יום שישי 07/08/2026" - and never that a day was an ABSENCE, so a man marked
+  // נעדר announced exactly like a blank Tuesday.
+  //
+  // Swept rather than sampled, and built out of the same three facts the block is
+  // painted from, because the fault was a template that knew two of the three.
+  const page = await open();
+  await page.evaluate(() => {
+    State.schedule.workers = [
+      { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
+      // Latin with a digit: two left-to-right runs inside a right-to-left sentence,
+      // which is the arrangement isolate() exists for.
+      { id: 'w_02', name: 'Ali 2', active: true, dailyRate: 400, hourlyRate: 50 }
+    ];
+    State.schedule.places = [
+      { id: 'p_01', name: 'הרצליה', active: true },
+      { id: 'p_02', name: 'B7', active: true }
+    ];
+    State.date = '2026-08-12';
+    setWeekFromDate(State.date);
+    const dates = weekDates();
+    // A doubled day at two sites, somebody else's single day, and an absence: the three
+    // shapes a cell can take, all in one grid.
+    assignPlace(State.schedule, dates[0], 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, dates[0], 'w_01', 'actual', 'p_02');
+    assignPlace(State.schedule, dates[2], 'w_02', 'actual', 'p_02');
+    markAbsent(State.schedule, dates[3], 'w_01', 'actual');
+    State.save({ silent: true });
+    showView('week');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const cells = await page.evaluate(() => [...document.querySelectorAll('.week-cell')].map(cell => ({
+    label: cell.getAttribute('aria-label') || '',
+    // The site names are in the DOM whatever the width does to their display.
+    sites: [...cell.querySelectorAll('.site-name')].map(node => node.textContent),
+    absent: cell.classList.contains('cell-absent')
+  })));
+
+  const filled = cells.filter(cell => cell.sites.length > 0);
+  const absent = cells.filter(cell => cell.absent);
+  check('the week drew cells of all three shapes to read',
+    cells.length === 14 && filled.length === 2 && absent.length === 1
+      && filled.some(cell => cell.sites.length === 2),
+    JSON.stringify({ cells: cells.length, filled: filled.length, absent: absent.length }));
+
+  const silent = filled.filter(cell => cell.sites.some(site => !cell.label.includes(site)));
+  check('every week cell names the site its block stands for',
+    silent.length === 0, JSON.stringify(silent));
+
+  const blank = absent.filter(cell => !cell.label.includes('נעדר'));
+  check('and an absence is not announced as an empty day',
+    blank.length === 0, JSON.stringify(absent.map(cell => cell.label)));
+
+  // The other side of the same statement: a day with nothing on it must not claim one.
+  const empty = cells.filter(cell => !cell.absent && cell.sites.length === 0);
+  const overclaimed = empty.filter(cell => cell.label.includes('נעדר') || cell.label.includes('B7')
+    || cell.label.includes('הרצליה'));
+  check('and a day with nothing on it says nothing extra',
+    empty.length > 0 && overclaimed.length === 0, JSON.stringify(overclaimed.slice(0, 2)));
+
+  // ---- and the bidi rule, everywhere a name is spoken
+  //
+  // js/ui/dom.js states it: a name that is not plain Hebrew is a left-to-right run
+  // inside a right-to-left sentence, and it slides to wherever the algorithm puts it -
+  // "all the way through offerUndo, askConfirm and every aria-label". It held in every
+  // label on the day screen and in none of the twenty-eight week cells.
+  //
+  // So this asks the question of every aria-label the app draws on every view, not of
+  // the one that was found wrong. A label that IS the bare name needs no isolate: there
+  // is no sentence around it to be reordered by.
+  const bare = await page.evaluate(names => {
+    const out = [];
+    ['day', 'week', 'roster', 'reports'].forEach(view => {
+      showView(view);
+      render();
+      document.querySelectorAll('[aria-label]').forEach(node => {
+        const label = node.getAttribute('aria-label') || '';
+        names.forEach(name => {
+          if (label === name) return;
+          for (let at = label.indexOf(name); at !== -1; at = label.indexOf(name, at + 1)) {
+            if (label[at - 1] === '⁨' || label[at - 1] === '⁦') continue;
+            out.push({ view, cls: String(node.className || node.tagName).slice(0, 20), label });
+            return;
+          }
+        });
+      });
+    });
+    showView('week');
+    render();
+    return out;
+  }, ['Ali 2', 'B7']);
+  check('every aria-label that carries a name isolates it, on every view',
+    bare.length === 0, `${bare.length} bare — ${JSON.stringify(bare.slice(0, 3))}`);
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the live regions, both directions
+{
+  // Two faults, opposite ways round, and they are one fault: the region the day screen
+  // leans on announced nothing, and the region under it announced on every tap.
+  //
+  // index.html states the rule, about the panel beside the reorder list: "It lives out
+  // here rather than inside the list, because the list is redrawn on every move and a
+  // live region that is destroyed and rebuilt is a live region that announces nothing."
+  // .progress-line was built from scratch by renderProgress, filled, and given
+  // role="status" and aria-live on the way in - a different node every render. What rode
+  // on it: the day switch, the climbing count, and the only text anywhere that says
+  // writing is held.
+  //
+  // The other way: #storageNotice is written with `textContent =`, which replaces the
+  // text node whether or not the string differs, and render() calls updateSyncNotice on
+  // every change. Forty lines above it in the same file showStorageBanner has carried
+  // `if (banner.dataset.text === text) return;` since it was written.
+  //
+  // Both are asked of EVERY live region the app has, not of the two that were wrong.
+  const page = await open();
+  await seedRoster(page);
+
+  const measured = await page.evaluate(async () => {
+    const wait = ms => new Promise(done => setTimeout(done, ms));
+    const regions = [...document.querySelectorAll('[aria-live]')];
+    const before = new Set(regions);
+    const churn = new Map();
+    const observers = regions.map(node => {
+      const key = node.id || String(node.className);
+      churn.set(key, 0);
+      const observer = new MutationObserver(records => {
+        churn.set(key, churn.get(key) + records.length);
+      });
+      observer.observe(node, { childList: true, characterData: true, subtree: true });
+      return observer;
+    });
+
+    // NOTHING CHANGES. Three renders of the same screen with the same record: a live
+    // region that speaks here is a live region that speaks over whatever the person
+    // asked for next.
+    for (let i = 0; i < 3; i++) { render(); await wait(60); }
+    observers.forEach(observer => observer.disconnect());
+
+    const after = [...document.querySelectorAll('[aria-live]')];
+    return {
+      regions: regions.length,
+      noisy: [...churn].filter(([, count]) => count > 0).map(([key, count]) => `${key}:${count}`),
+      // A region that is not the node it was is a region whose subscribers are gone.
+      rebuilt: after.filter(node => !before.has(node)).map(node => node.id || String(node.className)),
+      lost: regions.filter(node => !node.isConnected).map(node => node.id || String(node.className))
+    };
+  });
+
+  check('the app has live regions to measure', measured.regions >= 6, JSON.stringify(measured));
+  check('three renders that change nothing announce nothing',
+    measured.noisy.length === 0, JSON.stringify(measured.noisy));
+  check('and no live region is a different node afterwards',
+    measured.rebuilt.length === 0 && measured.lost.length === 0,
+    JSON.stringify({ rebuilt: measured.rebuilt, lost: measured.lost }));
+
+  // AND IT STILL SPEAKS. A region that never changes is silent by another route, so the
+  // day's own region is asked for the two things js/ui/day.js calls "the two things a
+  // person not looking at the screen most needs to hear".
+  const said = await page.evaluate(async () => {
+    const wait = ms => new Promise(done => setTimeout(done, ms));
+    const live = document.getElementById('dayLive');
+    const read = () => (live ? live.textContent : null);
+    const start = read();
+    assignPlace(State.schedule, State.date, 'w_01', 'actual', 'p_01');
+    State.save({ silent: true });
+    render();
+    await wait(80);
+    const counted = read();
+    stepDay(-1);
+    await wait(80);
+    const stepped = read();
+    return { present: Boolean(live), start, counted, stepped };
+  });
+  check('the day screen has a live region that outlives its own render',
+    said.present, JSON.stringify(said));
+  check('it names the day and the date, so a count has a day attached',
+    Boolean(said.start) && said.start.includes('12/08') && said.start.includes('יום'),
+    JSON.stringify(said.start));
+  check('the climbing count reaches it', said.counted !== said.start
+    && String(said.counted).includes('1 מתוך 3'), JSON.stringify(said));
+  check('and so does the day switch', said.stepped !== said.counted
+    && String(said.stepped).includes('11/08'), JSON.stringify(said));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- nothing on the day screen is unnamed
+{
+  // Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼, ⤓, ₪, 🗄️ and ↩️ in this app carries a Hebrew
+  // name, and most of them fold in the worker's or the site's. One control did not: the
+  // rate <select> on each assign row, which a reader announced as "רגיל, תיבה משולבת" and
+  // nothing more - on a screen where four of them are visible at once, one per recorded
+  // man, and where what it sets is what that man's day is PRICED at.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    State.date = '2026-08-12';
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_01');
+    State.save();
+    setDayMode('sites');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  // The sweep first, so this is a claim about the screen and not about one element.
+  //
+  // AND IT COMPUTES THE NAME THE WAY THE BROWSER DOES, which the first draft of this
+  // check did not: it added node.textContent for everything, and a <select>'s textContent
+  // is the text of its OPTIONS - "רגילשעות נוספותיום כפול" - so the one unnamed control
+  // in the app came out named and the sweep was green on the broken build. Content is a
+  // name source for a button and a link. It is not one for a select, an input or a
+  // textarea: those are named by a label, aria-label, aria-labelledby or title, and
+  // nothing else.
+  const sweep = () => page.evaluate(() => {
+    const out = [];
+    const fromContent = node => node.tagName === 'BUTTON' || node.tagName === 'A'
+      || node.getAttribute('role') === 'button';
+    document.querySelectorAll('#dayView button, #dayView select, #dayView input, #dayView textarea, #dayView a[href], #dayView [role="button"]')
+      .forEach(node => {
+        if (node.getAttribute('aria-hidden') === 'true') return;
+        if (node.offsetParent === null) return;
+        const labelled = node.getAttribute('aria-labelledby');
+        const parts = [
+          node.getAttribute('aria-label'),
+          labelled ? (document.getElementById(labelled) || {}).textContent : '',
+          node.labels && node.labels.length ? node.labels[0].textContent : '',
+          node.getAttribute('title'),
+          node.getAttribute('placeholder'),
+          fromContent(node) ? node.textContent : ''
+        ];
+        if (parts.some(part => String(part || '').trim())) return;
+        out.push({ tag: node.tagName, cls: String(node.className).slice(0, 24) });
+      });
+    return out;
+  });
+
+  const unnamed = await sweep();
+  check('every control on the day screen, by site, has a name',
+    unnamed.length === 0, JSON.stringify(unnamed));
+
+  // And the name is the one the buttons around it use: the man, and the site, both
+  // bidi-isolated the way js/ui/dom.js requires of every name in every label.
+  const rate = await page.evaluate(() => {
+    const node = document.querySelector('.site-card .rate-select');
+    if (!node) return null;
+    const label = node.getAttribute('aria-label') || '';
+    // FSI…PDI, U+2068 and U+2069 - what js/ui/dom.js's isolate() emits around a NAME.
+    // U+2066 is the other one, LRI, and it belongs to dateRange(): a first draft of this
+    // check counted that instead and reported a correctly isolated label as bare.
+    return {
+      label,
+      plain: label.replace(/[\u2066-\u2069]/g, ''),
+      isolated: (label.match(/\u2068/g) || []).length === 2
+        && (label.match(/\u2069/g) || []).length === 2
+    };
+  });
+  check('the rate control names the man whose day it prices',
+    rate !== null && rate.plain.includes('דוד'), JSON.stringify(rate));
+  check('and the site it is priced at, because four of them are on the screen at once',
+    rate !== null && rate.plain.includes('הרצליה'), JSON.stringify(rate));
+  check('with both names bidi-isolated, like every other name in every other label',
+    rate !== null && rate.isolated === true, JSON.stringify(rate));
+
+  await page.evaluate(() => { setDayMode('workers'); render(); });
+  await page.waitForTimeout(250);
+  const unnamedByWorker = await sweep();
+  check('and the same screen by worker', unnamedByWorker.length === 0,
+    JSON.stringify(unnamedByWorker));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- Escape leaves no password behind
+{
+  // signInModal is a .modal, so topModal() finds it and Escape closes it - through the
+  // FALLBACK at js/ui/modal.js (`modal.style.display = 'none'`), because it was the one
+  // .modal with no entry in MODAL_CLOSERS. Closing is not always just hiding, which is
+  // the whole reason that table exists: closeSignInModal clears the password field, and
+  // Escape never reached it. This is a phone three men share on a site.
+  const page = await open();
+  await page.evaluate(() => {
+    openSignInModal();
+    document.getElementById('signInPassword').value = 'hunter2';
+    document.getElementById('signInError').textContent = 'סיסמה שגויה';
+  });
+  await page.waitForTimeout(250);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const left = await page.evaluate(() => ({
+    open: document.getElementById('signInModal').style.display,
+    password: document.getElementById('signInPassword').value,
+    error: document.getElementById('signInError').textContent
+  }));
+  check('Escape closes the sign-in sheet', left.open === 'none', JSON.stringify(left));
+  check('and takes the password out of the field with it',
+    left.password === '', JSON.stringify(left));
+
+  // The same door the button uses, for comparison: this was already right, and it is what
+  // Escape now goes through rather than around.
+  await page.evaluate(() => {
+    openSignInModal();
+    document.getElementById('signInPassword').value = 'hunter2';
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => closeSignInModal());
+  await page.waitForTimeout(200);
+  const byButton = await page.evaluate(() =>
+    document.getElementById('signInPassword').value);
+  check('as the ביטול button always did', byButton === '', JSON.stringify(byButton));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the hold is said by the button itself
+{
+  // While writes are held, the day screen dims and the dock's copy button "goes quiet".
+  // Quiet was CSS only: `body.writes-blocked .day-actions #copyDayBtn { pointer-events:
+  // none; }` plus opacity .5. Neither reaches the accessibility tree, and pointer-events
+  // stops a finger without stopping a keyboard - so the button reported itself ENABLED,
+  // and Enter on it fired the copy.
+  //
+  // The record was never at risk: State.commit refuses under the hold, which is law 3
+  // working. What was wrong was the SAYING. Somebody who presses a button that announces
+  // itself live and then does nothing has been told the app is broken, not that recording
+  // is held - and this is the button a foreman reaches for first in the morning.
+  //
+  // Fixed where it is DECIDED (renderCopyButton), not where it is painted. The word is the
+  // app's own: «הרישום מושבת» is already what the day screen's progress line says in this
+  // exact state (js/ui/day.js), so no new string enters the product.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+    State.date = '2026-08-12';
+    State.save({ silent: true });
+    render();
+  });
+
+  // The button must be live for the RIGHT reason first, or a disabled reading afterwards
+  // proves nothing: renderCopyButton also disables it when there is no day to copy.
+  const before = await page.evaluate(() => {
+    const btn = document.getElementById('copyDayBtn');
+    return { disabled: btn.disabled, blocked: farkadWritesBlocked() };
+  });
+  // Asserted rather than assumed: smoke has no given(), and this IS a claim - the button
+  // must be live for the right reason before a disabled reading afterwards means anything.
+  check('the copy button is live, and writes are not held',
+    before.disabled === false && before.blocked === false, JSON.stringify(before));
+
+  // The hold, induced the way the app really enters it - a half-written outbox record.
+  const held = await page.evaluate(() => {
+    // Recovery.halt is the app's OWN door into this state - it is what a boot-time
+    // discovery calls, it sets mustHold, and it paints. Reached for after a guess at
+    // `Recovery.load()` threw `is not a function`: the surface here is damaged, evidence,
+    // collect, deliver, halt, blocked, rawRecords, rawSnapshot, acknowledge, paint.
+    Recovery.halt('scheduleData:v2', 'הרישום השמור נפגם');
+    render();
+    const btn = document.getElementById('copyDayBtn');
+    return {
+      blocked: farkadWritesBlocked(),
+      disabled: btn.disabled,
+      title: btn.title,
+      pointerEvents: getComputedStyle(btn).pointerEvents
+    };
+  });
+  check('the hold is on', held.blocked === true, JSON.stringify(held));
+
+  check('the copy button reports itself disabled, not merely unclickable',
+    held.disabled === true, JSON.stringify(held));
+  check('and it says which state it is in, in the app\'s own word for it',
+    typeof held.title === 'string' && held.title.includes('הרישום מושבת'), held.title);
+
   await page.context().close();
 }
 

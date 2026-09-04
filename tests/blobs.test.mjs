@@ -28,7 +28,7 @@
 //   5. "A suite run from another checkout reads that checkout" asserts a path string and
 //      a version constant. It never CONSTRUCTS another checkout, so it cannot fail.
 
-import { readFileSync, readdirSync, lstatSync, existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, lstatSync, existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -234,6 +234,88 @@ try { HEAD = git(['rev-parse', 'HEAD']).trim(); } catch (error) { HEAD = ''; }
     } catch (error) {
         rmSync(work, { recursive: true, force: true });
     }
+}
+
+// ------------------------------------------------- 6. the INDEX itself carries nothing odd
+//
+// Section 2 asks whether the files the app LOADS are real files. That is a narrower
+// question than it reads as, and the gap it left was found the hard way: this repository
+// is worked in parallel git worktrees that LINK node_modules rather than copy 366MB into
+// each one, `.gitignore` said `node_modules/` with a trailing slash, and a trailing slash
+// matches a DIRECTORY. A symlink is not a directory to git. So the link - an absolute path
+// pointing outside the repository, at a tree that exists on one machine and nowhere else -
+// was staged and committed as a tracked file, and every check in section 2 passed, because
+// the app does not load node_modules.
+//
+// The question this section asks is the whole-index one: is anything in the commit a
+// symlink, and is anything in the commit inside a dependency directory. Both are cheap,
+// both are absolute, and neither depends on which files a suite happens to read.
+{
+    suite('the commit tracks no link and no dependency directory');
+
+    // `ls-files -s` prints the mode in the first field. 120000 is a symlink; 160000 is a
+    // gitlink (a submodule), which this repository has never had and which would bring the
+    // same class of problem - a path whose content lives somewhere this checkout does not
+    // control. Both are named, so that adding a submodule is a deliberate act that has to
+    // move this check rather than something a tool can do quietly.
+    let entries = [];
+    try {
+        entries = git(['ls-files', '-s']).trim().split('\n').filter(Boolean);
+    } catch (error) {
+        entries = [];
+    }
+    given('the index could be read', entries.length > 50, String(entries.length));
+
+    const modeOf = line => line.slice(0, 6);
+    const pathOf = line => line.slice(line.indexOf('\t') + 1);
+
+    const links = entries.filter(line => modeOf(line) === '120000').map(pathOf);
+    check('no tracked path is a symlink', links.length === 0, links.slice(0, 6).join(', '));
+
+    const gitlinks = entries.filter(line => modeOf(line) === '160000').map(pathOf);
+    check('and no tracked path is a submodule', gitlinks.length === 0,
+        gitlinks.slice(0, 6).join(', '));
+
+    // The second half: a real node_modules committed as files would not be a symlink and
+    // would pass the check above, while being the same mistake at 366MB.
+    const vendored = entries.map(pathOf)
+        .filter(file => file === 'node_modules' || file.startsWith('node_modules/'));
+    check('and nothing under node_modules is tracked', vendored.length === 0,
+        vendored.slice(0, 4).join(', ') + ' (' + vendored.length + ')');
+
+    // And the ignore rule that lets the worktrees exist has to actually cover the form the
+    // worktrees use. This cannot be asked with `git check-ignore <name>` alone: when the
+    // path does not exist on disk, git answers for a name that COULD be a directory, so
+    // `node_modules/` and `node_modules` give the same answer and the check discriminates
+    // nothing. The first version of this check did exactly that and passed against the very
+    // rule that had let the link through.
+    //
+    // So the state is CONSTRUCTED: a throwaway repository, this repository's own
+    // .gitignore copied into it verbatim, and a symlink named node_modules created for
+    // real. `git status --porcelain` then answers about the thing itself. Against the
+    // slashed rule the link shows up as untracked - one `git add -A` from being committed -
+    // and against the rule this repository now carries it does not show up at all.
+    const bench = mkdtempSync(join(tmpdir(), 'farkad-ignore-'));
+    let porcelain = 'NOT RUN';
+    try {
+        execFileSync('git', ['-C', bench, 'init', '-q'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        writeFileSync(join(bench, '.gitignore'), readFileSync(join(ROOT, '.gitignore')));
+        symlinkSync(join(ROOT, 'tests'), join(bench, 'node_modules'));
+        // Flattened, because a detail that carries a newline is printed truncated and the
+        // whole value of this check is the line naming node_modules.
+        porcelain = execFileSync('git', ['-C', bench, 'status', '--porcelain'],
+            { encoding: 'utf8' }).trim().split('\n').join(' | ');
+    } catch (error) {
+        porcelain = 'BENCH FAILED: ' + error.message;
+    } finally {
+        rmSync(bench, { recursive: true, force: true });
+    }
+
+    given('the bench repository saw this repository\'s .gitignore and a real symlink',
+        !porcelain.startsWith('BENCH FAILED'), porcelain.slice(0, 120));
+    check('a symlink named node_modules is ignored, not offered for staging',
+        !/node_modules/.test(porcelain),
+        porcelain === '' ? 'nothing untracked' : porcelain.slice(0, 120));
 }
 
 report();

@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v103">
+<meta name="farkad-build" content="v104">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -124,15 +124,32 @@
 
     <p class="storage-notice" id="storageNotice" role="status" aria-live="polite">הנתונים נשמרים במכשיר הזה בלבד.</p>
 
+    <!-- What the day screen's progress line SAYS, announced from a node that survives
+         the render that redraws it. The line itself is built from scratch every time -
+         renderProgress fills it and only then inserts it - so a live region on it was a
+         different node each render, which is the same mistake the note above #reorderLive
+         describes and the reason that panel's region lives outside its list. js/ui/day.js
+         reads the words off the line rather than composing them again, so the announced
+         sentence and the drawn one cannot drift apart. Out here, not inside #dayView:
+         renderDay empties that section on every render. -->
+    <div class="day-live" id="dayLive" role="status" aria-live="polite"></div>
+
     <!-- The side drawer of days: every working day of the account period, by full name,
          one tap away - and costing the main screen nothing until the ☰ is pressed. -->
     <div class="drawer-backdrop" id="dayDrawerBack" onclick="closeDayDrawer()"></div>
     <!-- The clip box: a fixed, overflow-hidden viewport layer, so the parked panel can
          never widen the document - the exact bug the page-width tests exist to stop. -->
     <div class="drawer-wrap" id="dayDrawerWrap">
-    <aside class="day-drawer" id="dayDrawer" aria-label="בחירת יום">
+    <!-- role="dialog" and aria-modal, because that is what it is: a backdrop over the
+         whole screen and one way out. It used to be an <aside> with a label, which makes
+         it a permanent landmark that comes and goes - a reader is told there is a
+         "בחירת יום" region on every screen and never told it has arrived in one.
+         The label itself does not move: it is the name announced, and it was argued over.
+         The heading takes an id and tabindex="-1" so focus can enter at it, exactly as
+         #settingsTitle and #reorderTitle do. -->
+    <aside class="day-drawer" id="dayDrawer" role="dialog" aria-modal="true" aria-label="בחירת יום">
         <div class="drawer-head">
-            <h3>לאיזה יום?</h3>
+            <h3 id="dayDrawerTitle" tabindex="-1">לאיזה יום?</h3>
             <button type="button" class="btn-icon" onclick="closeDayDrawer()" aria-label="סגור">✕</button>
         </div>
         <div id="dayDrawerList"></div>
@@ -564,6 +581,8 @@
 <script src="js/ui/week.js"></script>
 <script src="js/ui/roster.js"></script>
 <script src="js/ui/reports.js"></script>
+<script src="js/ui/reports-statement.js"></script>
+<script src="js/ui/reports-export.js"></script>
 <script src="js/ui/share.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>

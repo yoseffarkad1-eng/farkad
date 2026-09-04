@@ -23,6 +23,11 @@ import { fileURLToPath } from 'node:url';
 import { makeDevice, settle, settleUntil } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
+import { emulatorHost } from './emulator-host.mjs';
+
+// Whatever port `firebase emulators:exec` actually started, so this suite can run
+// beside another one on another port. 127.0.0.1:8080 when nothing says otherwise.
+const EMULATOR = emulatorHost();
 const ADAPTER = fileURLToPath(new URL('../js/sync/firebase-adapter.js', import.meta.url));
 const SHIM = fileURLToPath(new URL('../js/sync/_adapter-money-test.mjs', import.meta.url));
 const CONFIG = fileURLToPath(new URL('../js/sync/_money-test-config.mjs', import.meta.url));
@@ -68,8 +73,8 @@ const env = await initializeTestEnvironment({
     projectId: 'farkad-money-concurrency',
     firestore: {
         rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8'),
-        host: '127.0.0.1',
-        port: 8080
+        host: EMULATOR.host,
+        port: EMULATOR.port
     }
 });
 

@@ -33,7 +33,7 @@
 // account needing a person, or about the payment not being final. The one surface that
 // knows is the one nobody prints.
 
-import { makeDevice, settle } from './harness.mjs';
+import { makeDevice, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -79,7 +79,7 @@ function reportsIn(device, range) {
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:wording' });
     if (!LOADED.has(device.ctx)) {
         run(readFileSync(new URL('../js/ui/sitecolor.js', import.meta.url), 'utf8'));
-        run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+        run(reportsSource());
         LOADED.set(device.ctx, true);
     }
     const at = range || B;
@@ -289,7 +289,19 @@ const noteOf = ({ head, row }) => String(row[head.length - 1] || '');
     const shipped = ['js/ui/settings.js', 'js/ui/reports.js', 'js/ui/roster.js',
         'js/ui/share.js', 'js/ui/day.js', 'js/ui/week.js', 'js/model/ledger.js',
         'js/model/schema.js', 'js/state.js'];
-    const spoken = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8')
+    // 'js/ui/reports.js' in the list above names the reports SCREEN, which has been three
+    // files since the split - the rendering, the statement a worker is sent, and the
+    // workbook. It is read here as ONE, through the group tests/harness.mjs names, and
+    // that is deliberate twice over. A list of literal filenames is the failure mode this
+    // whole check exists to prevent: checking js/ui/settings.js alone once let a sentence
+    // stand in two other screens, and a list that had kept only the first third of this
+    // one would have gone on passing while a person read the stale name off the export.
+    // And it stays ONE entry rather than three because the promise is to the person
+    // reading the screen, not to a file: one screen, one claim about what it says.
+    const bytes = file => file === 'js/ui/reports.js'
+        ? reportsSource()
+        : readFileSync(new URL('../' + file, import.meta.url), 'utf8');
+    const spoken = file => bytes(file)
         .split('\n')
         .filter(line => line.trim().indexOf('//') !== 0)
         .join('\n');

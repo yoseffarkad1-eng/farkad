@@ -17,7 +17,7 @@
 // What is pinned here: one map per span, every consumer reading it, and no record id
 // reaching a person anywhere.
 
-import { makeDevice, settle } from './harness.mjs';
+import { makeDevice, settle, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
+const REPORTS = reportsSource();
 const DAY = readFileSync(join(ROOT, 'js/ui/day.js'), 'utf8');
 const WEEK = readFileSync(join(ROOT, 'js/ui/week.js'), 'utf8');
 const SITECOLOR = readFileSync(join(ROOT, 'js/ui/sitecolor.js'), 'utf8');

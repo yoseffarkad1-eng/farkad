@@ -6,7 +6,7 @@
 // Store, State and FarkadSync - so two devices editing at once, and a device closed and
 // reopened against a cloud that is behind, are both things a test can simply say.
 
-import { makeDevice, makeCloud, settle, settleUntil, deferred } from './harness.mjs';
+import { makeDevice, makeCloud, settle, settleUntil, deferred, reportsSource } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 // Real time, kept short. The sync layer debounces before it sends, and a test that does
@@ -387,21 +387,49 @@ function record(device, date, workerId, placeId, rate) {
         device.Sync.pendingCount() === 2, String(device.Sync.pendingCount()));
 
     // A roster change queues with no cloud too - a worker added offline who never
-    // reaches the cloud takes his days with him. It is one path per person, plus the
-    // order, plus the whole array kept for devices still on the older build: for three
-    // workers and two places that is 5 + 4 on top of the two days.
+    // reaches the cloud takes his days with him. It is one path per person WHO CHANGED,
+    // plus the order, plus the whole array kept for devices still on the older build.
+    //
+    // "Who changed" is measured against this device's own last durable record - see
+    // FarkadSync.rosterBaseline. It used to be measured against the last snapshot
+    // adopted, which is memory and starts empty at every app start, so a phone reopened
+    // in the morning found EVERYBODY different from nothing and sent its stale copy of
+    // every man over whatever another phone had corrected while it was away. This suite
+    // pinned 11 for a commitRoster that changed nothing at all, which is that behaviour
+    // written down as though it were the guarantee.
+    //
+    // Reloaded first, because that is the shape a real boot leaves the roster in: seed()
+    // pushes raw literals, the baseline is normalised the way the app normalises
+    // everything it reads, and a comparison across two shapes finds a difference in
+    // everybody.
+    device.State.load();
+    given('the reload kept the crew and the queue',
+        device.State.schedule.workers.length === 3 && device.Sync.pendingCount() === 2,
+        String(device.Sync.pendingCount()));
+
+    device.State.commitRoster();
+    check('a roster change nobody made queues no path for any person',
+        device.Sync.pendingCount() === 6, String(device.Sync.pendingCount()));
+    same('and what it does queue is the two orders and the two legacy arrays',
+        device.Sync.pendingPaths().filter(path => path.indexOf('days.') !== 0).sort(),
+        ['places', 'roster.placeOrder', 'roster.workerOrder', 'workers']);
+
+    device.State.worker('w_02').dailyRate = 375;
     device.State.commitRoster();
     check('a roster change queues one path per person, not one whole array',
-        device.Sync.pendingCount() === 11, String(device.Sync.pendingCount()));
+        device.Sync.pendingCount() === 7, String(device.Sync.pendingCount()));
     check('and the paths are per-entity',
-        device.Sync.pendingPaths().includes('roster.workers.w_01')
+        device.Sync.pendingPaths().includes('roster.workers.w_02')
         && device.Sync.pendingPaths().includes('roster.workerOrder'),
+        JSON.stringify(device.Sync.pendingPaths()));
+    check('and nobody who did not change is in it',
+        !device.Sync.pendingPaths().includes('roster.workers.w_01'),
         JSON.stringify(device.Sync.pendingPaths()));
 
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
     check('and the queue survives the app being closed',
-        reopened.Sync.pendingCount() === 11, String(reopened.Sync.pendingCount()));
+        reopened.Sync.pendingCount() === 7, String(reopened.Sync.pendingCount()));
 }
 
 {
@@ -1426,6 +1454,59 @@ function record(device, date, workerId, placeId, rate) {
 }
 
 {
+    suite('a held boot does not photograph the state it refused to write down');
+
+    // The same boot as the suite above, one line further on. js/app.js calls
+    // takeDailySnapshot() immediately after State.load() and before the first render.
+    //
+    // On this boot State.load has quarantined the v2 record, fallen through to the v1
+    // beneath it, migrated that into MEMORY and deliberately not saved it - "saving it
+    // would put pre-migration data over the newest record there is". takeDailySnapshot
+    // carried no writes-blocked check, so it photographed exactly that state, filed it
+    // under TODAY beside the real restore points, and then evicted everything past the
+    // third to make room for it.
+    //
+    // Two lines later the person is told «בדוק את הימים האחרונים מול נקודות השחזור לפני
+    // שממשיכים לרשום». They are sent to an album whose newest entry is the state the app
+    // refused to save - nothing on that row says so - and whose furthest-back entry the
+    // same boot threw away.
+    const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
+    const v1 = JSON.stringify({
+        workers: ['דוד'], places: ['הרצליה'],
+        weekStartDate: '2026-08-07',
+        assignments: [{ index: 0, value: 'הרצליה' }]
+    });
+    const point = JSON.stringify({ schemaVersion: 2, workers: [], places: [], days: {},
+        advances: {} });
+    const device = makeDevice({ storage: {
+        'scheduleData:v2': brokenV2,
+        scheduleData: v1,
+        'scheduleData:snap:2026-08-30': point,
+        'scheduleData:snap:2026-08-31': point,
+        'scheduleData:snap:2026-09-01': point
+    } });
+    device.setToday('2026-09-03');
+    const result = device.State.load();
+    given('the boot is the held one: v2 quarantined, v1 shown and not written down',
+        result.damaged === true && result.migrated === true
+            && device.call('farkadWritesBlocked') === true
+            && device.raw('scheduleData:v2') === brokenV2,
+        JSON.stringify(result));
+    given('there are three restore points to lose',
+        Object.keys(device.dump())
+            .filter(key => key.startsWith('scheduleData:snap:')).length === 3);
+
+    device.call('takeDailySnapshot');
+    const points = Object.keys(device.dump())
+        .filter(key => key.startsWith('scheduleData:snap:')).sort();
+
+    check('today is not filed as a restore point on a boot that is holding',
+        !points.includes('scheduleData:snap:2026-09-03'), JSON.stringify(points));
+    check('and the furthest-back real one is still there to be checked against',
+        points.includes('scheduleData:snap:2026-08-30'), JSON.stringify(points));
+}
+
+{
     suite('a damaged schedule with no v1 does not become an empty table');
 
     const brokenV2 = '{"schemaVersion":2,"workers":[{"id":"w_01","name":"דו';
@@ -1444,6 +1525,49 @@ function record(device, date, workerId, placeId, rate) {
     device.State.save();
     check('re-typing over the blank screen does not destroy the damaged record',
         device.raw('scheduleData:v2') === brokenV2, device.raw('scheduleData:v2'));
+}
+
+{
+    suite('a v1 record that will not parse is held like every other one');
+
+    // The last unreadable record family in the app that got neither a copy nor a hold.
+    //
+    // The v2 catch two branches up does all three things law 10 asks for: it copies the
+    // bytes through Recovery and reads the copy back, it leaves the original where it is,
+    // and it stops writing. This one printed a console line nobody on a building site can
+    // open and handed back emptySchedule() - which is law 10's third verb, treated as
+    // empty - and then let the session carry on writing.
+    //
+    // What saved it was luck of a kind that is not a guarantee: nothing in the app writes
+    // this key, so the bytes are still there, and the export sweeps them up by name. What
+    // was actually lost is anybody's chance of noticing after the one boot dialog, on a
+    // blank screen that invites being re-typed - which is the exact sequence the v2 branch
+    // was rewritten to stop.
+    const brokenV1 = '{"workers":["דוד"],"places":["הרצליה"],'
+        + '"assignments":[{"index":0,"value":"AUGUST-CELL';
+    const device = makeDevice({ storage: { scheduleData: brokenV1 } });
+    const result = device.State.load();
+
+    check('it says it failed rather than opening blank and quiet',
+        result.failed === true, JSON.stringify(result));
+    check('the raw record is exactly where it was',
+        device.raw('scheduleData') === brokenV1);
+    check('a copy was put aside under its own name',
+        device.raw('scheduleData:damaged') === brokenV1,
+        JSON.stringify(Object.keys(device.dump())));
+    check('and writing is blocked until somebody has been told',
+        device.call('farkadWritesBlocked') === true);
+
+    // The scenario, the same one as the v2 suites above: an empty screen, and somebody
+    // starts entering the week again on top of it.
+    device.State.schedule.workers.push({ id: 'w_99', name: 'מקליד מחדש', active: true });
+    check('re-typing over the blank screen is refused rather than recorded',
+        device.State.save() === false && device.raw('scheduleData:v2') === null,
+        String(device.raw('scheduleData:v2')));
+    check('and the v1 bytes are still the only record of that work',
+        device.raw('scheduleData') === brokenV1);
+    check('with the rescue file able to carry them',
+        JSON.stringify(device.global('Recovery').rawRecords()).indexOf('AUGUST-CELL') !== -1);
 }
 
 {
@@ -6178,6 +6302,156 @@ for (const [label, arm] of [
 }
 
 {
+    suite('a roster edit queued while away does not revert another phone\'s rate');
+
+    // O2, carrier 2 - docs/data-safety-audit.md, features/roster-baseline/contract.md.
+    //
+    // editRoster queues the legacy whole `workers` array and the legacy whole `places`
+    // array on EVERY roster edit, whether or not anything in that list changed. When a
+    // snapshot is adopted, reapplyPending lays the unsent queue back on top of it - and
+    // the array branch was guarded only against per-entity edits to the SAME list. So a
+    // person who edits only a site queues nothing under roster.workers, the `workers`
+    // array is unguarded, and this phone's opinion of every worker from BEFORE the
+    // snapshot is written straight over the one it was just handed.
+    //
+    // Nothing on screen says anything, and it does not stop there: the phone's schedule
+    // now says 400 while its baseline says 600, so the very next ordinary roster edit
+    // reports the difference as news and sends the old rate to everybody as an
+    // authoritative per-entity write. A day recorded in between is stamped at 400.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' });
+    a.device.State.load();
+    const link = await unplugged(a.device, cloud);
+    await settle(TICK * 20);
+
+    const b = crew({ deviceId: 'd_b' });
+    b.device.State.load();
+    await connected(b.device, cloud);
+    await settle(TICK * 20);
+    given('both phones hold the same rate',
+        a.device.State.worker('w_01').dailyRate === 400
+        && b.device.State.worker('w_01').dailyRate === 400);
+
+    // A into the stairwell.
+    link.away();
+
+    b.device.State.worker('w_01').dailyRate = 600;
+    b.device.State.commitRoster();
+    await settle(TICK * 40);
+    given('the raise reached the cloud',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+
+    // And while it is away, the person on A renames a site. Nothing about any worker.
+    a.device.State.schedule.places[0].name = 'הרצליה צפון';
+    a.device.State.commitRoster();
+    await settle(TICK * 20);
+    given('the phone that is away queues no write about any worker',
+        !physicalOps(a.device).some(op => op.path.indexOf('roster.workers.') === 0),
+        JSON.stringify(physicalOps(a.device).map(op => op.path)));
+
+    await link.back();
+    await settle(TICK * 60);
+
+    check('the phone that was away shows the raise, not its own older copy',
+        a.device.State.worker('w_01').dailyRate === 600,
+        String(a.device.State.worker('w_01').dailyRate));
+    check('and the site it renamed while away is still renamed',
+        (a.device.State.schedule.places.find(p => p.id === 'p_01') || {}).name === 'הרצליה צפון',
+        JSON.stringify(a.device.State.schedule.places));
+
+    // The next ordinary roster edit on that phone, which is what published the stale
+    // value to everybody else.
+    a.device.State.schedule.places.find(p => p.id === 'p_01').name = 'הרצליה מזרח';
+    a.device.State.commitRoster();
+    await settle(TICK * 60);
+
+    check('the next ordinary roster edit does not send the older rate back',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+    check('and the phone that made the raise still has it',
+        b.device.State.worker('w_01').dailyRate === 600,
+        String(b.device.State.worker('w_01').dailyRate));
+    // Law 2 from the other end: a day is priced at the roster's rate when it is
+    // recorded, so a reverted roster stamps somebody's day at a price nobody agreed to.
+    record(a.device, '2026-08-12', 'w_01', 'p_01');
+    check('a day recorded now on the phone that was away is priced at the real rate',
+        a.device.call('ratesForDay', a.device.State.schedule, '2026-08-12', 'w_01',
+            a.device.State.worker('w_01')).daily === 600,
+        JSON.stringify(a.device.call('ratesForDay', a.device.State.schedule,
+            '2026-08-12', 'w_01', a.device.State.worker('w_01'))));
+}
+
+{
+    suite('a roster edit made before the first snapshot arrives');
+
+    // O2, carrier 1 - the established one. The baseline editRoster measures against is
+    // the last roster this device ADOPTED, and it lives in memory: an app start empties
+    // it. A phone reopened in the morning therefore found every entity different from an
+    // empty baseline and sent all of them - including a man whose rate another phone
+    // raised while this one was away. No race is needed. Open the app, change a site, and
+    // the write leaves before the listener delivers.
+    const cloud = makeCloud();
+    const a = crew({ deviceId: 'd_a' });
+    a.device.State.load();
+    const link = await unplugged(a.device, cloud);
+    await settle(TICK * 20);
+
+    const b = crew({ deviceId: 'd_b' });
+    b.device.State.load();
+    await connected(b.device, cloud);
+    await settle(TICK * 20);
+
+    link.away();
+    // Closed for the night with nothing queued, holding the rate as it was.
+    const overnight = a.device.dump();
+
+    b.device.State.worker('w_01').dailyRate = 600;
+    b.device.State.commitRoster();
+    await settle(TICK * 40);
+    given('the raise reached the cloud',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+
+    // The next morning. A fresh session: no baseline, and the disk still says 400.
+    const reopened = makeDevice({ storage: overnight, deviceId: 'd_a', flags: DELETION_ON });
+    reopened.State.load();
+    given('the reopened phone still holds the old rate',
+        reopened.State.worker('w_01').dailyRate === 400);
+    given('and it has heard nothing from the cloud this session',
+        Object.keys(reopened.Sync._remoteRoster.workers).length === 0);
+
+    // The person renames a site before anything has arrived. The signal is back - it is
+    // the morning - but nothing has been delivered to this session yet.
+    cloud.reject = null;
+    reopened.State.schedule.places[0].name = 'הרצליה צפון';
+    reopened.State.commitRoster();
+
+    check('a phone with no snapshot this session queues no write about a man nobody touched',
+        !physicalOps(reopened).some(op => op.path === 'roster.workers.w_01'),
+        JSON.stringify(physicalOps(reopened).map(op => op.path)));
+    check('and it does queue the site the person actually changed',
+        physicalOps(reopened).some(op => op.path === 'roster.places.p_01'),
+        JSON.stringify(physicalOps(reopened).map(op => op.path)));
+
+    await connected(reopened, cloud);
+    await settle(TICK * 80);
+
+    check('the cloud keeps the raise',
+        cloud.doc.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(cloud.doc.roster.workers.w_01));
+    check('the phone that made the raise is not reverted',
+        b.device.State.worker('w_01').dailyRate === 600,
+        String(b.device.State.worker('w_01').dailyRate));
+    check('the reopened phone adopts it',
+        reopened.State.worker('w_01').dailyRate === 600,
+        String(reopened.State.worker('w_01').dailyRate));
+    check('and the site rename it made offline reached the cloud',
+        cloud.doc.roster.places.p_01.name === 'הרצליה צפון',
+        JSON.stringify(cloud.doc.roster.places.p_01));
+}
+
+{
     suite('a snapshot that arrives while the archive question is open');
 
     // The question is open for as long as somebody takes to read it, and the schedule
@@ -9463,7 +9737,7 @@ function withAdvances(device, rows) {
     const device = makeDevice();
     seed(device);
     const run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports' });
-    run(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'));
+    run(reportsSource());
 
     run(`
         assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
@@ -9988,6 +10262,140 @@ const VEHICLES_ON = { vehicles: true };
         JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('undoStack') !== -1)));
 }
 
+{
+    suite('an undo stack that will not parse, on a device with no room for the copy');
+
+    // The half of law 10 the copy-first fix did not reach: what happens when the copy
+    // ITSELF fails. js/recovery.js's header names that device as the likely one - "on the
+    // device where this is most likely to happen - a full one - the copy had failed too".
+    //
+    // The damaged record holds up to THREE whole schedules and its replacement holds one,
+    // so a disk with no room for the copy can still have room for the write that goes
+    // over it. quarantineRecord answered null, the problem was filed with mustHold, the
+    // banner said the bytes could not be copied - and four lines later the write went out
+    // and the bytes it was describing were gone.
+    //
+    // And the answer was still `true`, so the caller replaced the record believing there
+    // was a confirmed way back. That is the same claim law 3 forbids, made at the moment
+    // the way back was destroyed.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    const broken = '[{"at":"2026-07-01T00:00:00.000Z","schedule":"{\\"marker\\":\\"JULY-WAY-BACK\\"}"'
+        + 'x'.repeat(20000);
+    device.putRaw('scheduleData:undoStack', broken);
+    given('the stack on disk will not parse and holds a way back',
+        device.raw('scheduleData:undoStack').indexOf('JULY-WAY-BACK') !== -1,
+        device.raw('scheduleData:undoStack').slice(0, 40));
+
+    // Room for the small write and none for the big copy. Not a key rule: the quota is by
+    // size, the way a full disk is.
+    device.setQuota((key, value) => String(value).length > 4000);
+    const answer = device.call('pushUndoState', device.State.schedule);
+
+    const problem = device.global('Recovery').problems
+        .find(entry => entry.key === 'scheduleData:undoStack');
+    given('the copy was refused and the device is held',
+        Boolean(problem) && problem.copy === null && problem.mustHold === true
+            && device.call('farkadWritesBlocked') === true,
+        JSON.stringify([problem && problem.copy, problem && problem.mustHold,
+            device.call('farkadWritesBlocked')]));
+
+    check('the damaged bytes are still on the device',
+        Object.keys(device.dump()).some(key =>
+            String(device.dump()[key]).indexOf('JULY-WAY-BACK') !== -1),
+        String(device.raw('scheduleData:undoStack')).slice(0, 60));
+    check('and no way back is reported, so the restore does not go ahead',
+        answer === false, String(answer));
+}
+
+{
+    suite('«there is no local backup» is not said about a stack that would not parse');
+
+    // E8, relocated. The audit put it on dropUndoState - readUndoStack answers [] for a
+    // record it cannot parse, so dropUndoState would report gone:true about an entry it
+    // never saw. Driven through the only door either is reached by, that turns out not to
+    // be reachable: restoreLocalBackup always runs pushUndoState first, which either
+    // quarantines the damaged record and replaces it with a readable one - so the drop
+    // below it sees a stack that parses - or refuses, and the restore never gets there.
+    // Measured both ways; the calls to dropUndoState were 1 with a readable stack, and 0.
+    //
+    // What IS reachable is the same [] one reader earlier. peekUndoState falls back to
+    // the single slot, and a device whose slot write was refused while the stack write
+    // landed - a full one, which is where a truncated record comes from in the first
+    // place - has no slot to fall back to. The person presses «לשחזר את המצב שלפני
+    // הטעינה האחרונה», is told «אין גיבוי מקומי.», and up to three whole schedules are
+    // sitting on the disk unread: no copy under its own name, no hold, nothing said. Law
+    // 10's third verb, and the app saying the opposite of the truth on top of it.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    const broken = '[{"at":"2026-07-01T00:00:00.000Z","schedule":"{\\"marker\\":\\"JULY-WAY-BACK\\"}"';
+    device.putRaw('scheduleData:undoStack', broken);
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    const told = [];
+    device.ctx.askTell = message => {
+        told.push(typeof message === 'string' ? message : String((message || {}).message));
+        return Promise.resolve();
+    };
+
+    given('the stack will not parse, holds a way back, and there is no slot beside it',
+        device.raw('scheduleData:undoStack').indexOf('JULY-WAY-BACK') !== -1
+            && device.raw('scheduleData:v2backup') === null,
+        JSON.stringify([device.raw('scheduleData:undoStack').slice(0, 40),
+            device.raw('scheduleData:v2backup')]));
+
+    await device.call('restoreLocalBackup');
+    await settle(60);
+
+    check('the app does not answer «there is no local backup»',
+        told.indexOf('אין גיבוי מקומי.') === -1, JSON.stringify(told));
+    check('it says the list could not be read, and that the copy was kept',
+        told.length === 1 && told[0] === 'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה, ולכן '
+            + 'אין לאן לחזור כרגע. העותק נשמר במכשיר ולא נמחק - הסיבה כתובה בהודעה '
+            + 'שבראש המסך. מה שכבר שמור לא נפגע.',
+        JSON.stringify(told));
+    check('a copy was put aside under its own name',
+        Object.keys(device.dump()).some(key => key.indexOf('scheduleData:undoStack:damaged') === 0),
+        JSON.stringify(Object.keys(device.dump()).filter(key => key.indexOf('undoStack') !== -1)));
+    check('the damaged bytes are still exactly where they were',
+        device.raw('scheduleData:undoStack') === broken,
+        String(device.raw('scheduleData:undoStack')).slice(0, 60));
+    check('and the device is held until somebody is told',
+        device.call('farkadWritesBlocked') === true,
+        JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
+}
+
+{
+    suite('and a device that really has no way back is still told so');
+
+    // The control. A branch that reported damage for every empty stack would pass every
+    // check above and take the true sentence with it.
+    const device = makeDevice();
+    seed(device);
+    device.State.save({ silent: true });
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    const told = [];
+    device.ctx.askTell = message => {
+        told.push(typeof message === 'string' ? message : String((message || {}).title));
+        return Promise.resolve();
+    };
+
+    given('there is no undo stack and no slot on this device',
+        device.raw('scheduleData:undoStack') === null
+            && device.raw('scheduleData:v2backup') === null);
+
+    await device.call('restoreLocalBackup');
+    await settle(60);
+
+    check('the app says there is no local backup, because there is not',
+        told.length === 1 && told[0] === 'אין גיבוי מקומי.', JSON.stringify(told));
+    check('and nothing was quarantined over an absence',
+        device.global('Recovery').problems.length === 0
+            && device.call('farkadWritesBlocked') === false,
+        JSON.stringify(device.global('Recovery').problems.map(problem => problem.key)));
+}
+
 
 {
     suite('a refused edit is taken off the screen even with nothing durable behind it');
@@ -10032,6 +10440,114 @@ const VEHICLES_ON = { vehicles: true };
             String(device.dump()[key]).indexOf('2026-08-10') === -1),
         JSON.stringify(Object.keys(device.dump()).filter(key =>
             String(device.dump()[key]).indexOf('2026-08-10') !== -1)));
+}
+
+{
+    suite('the rollback behind «השינוי בוטל» answers true on every door there is');
+
+    // E10, and it is a claim about REACHABILITY. refuseEdit ignores rollback()'s verdict,
+    // and the audit called that "likely unreachable" from reading. This drives it.
+    //
+    // rollback() answers false in exactly one case: durableText is a string that will not
+    // JSON.parse, or that normaliseSchedule throws on. durableText is set in three places
+    // and nowhere else - load's v2 branch, AFTER that text has already parsed and
+    // normalised; save(); persist() - and the last two hand it JSON.stringify of the live
+    // object. JSON.parse is deterministic, so a text that parsed once parses again, and
+    // normaliseSchedule starts from emptySchedule and guards every read off `raw`. So the
+    // false branch is real code that no door reaches, and the sentence «השינוי בוטל כדי
+    // שלא ייראה כאילו נרשם» is true whenever it is said.
+    //
+    // Written down as a standing guard rather than as a fix: the day durableText is
+    // assigned bytes nobody has validated, this suite is what says so.
+    const doors = [];
+    const note = (door, verdict) => doors.push({ door, verdict });
+
+    // The instrument first, and proved before it is believed: rollback CAN answer false,
+    // so the three trues below are a fact about the doors and not about a function that
+    // could only ever say one thing.
+    {
+        const device = makeDevice();
+        seed(device);
+        device.State.save({ silent: true });
+        device.State.durableText = '{"workers":[';
+        given('rollback answers false for text that will not parse',
+            device.State.rollback() === false, String(device.State.durableText));
+    }
+
+    // Door one: the journal write the disk refused. Store.available stays true - a full
+    // disk is not an absent one - so journal() answers false and commit() refuses.
+    {
+        const device = makeDevice();
+        seed(device);
+        device.State.save({ silent: true });
+        device.ctx.askConfirm = () => Promise.resolve(true);
+        device.ctx.askTell = () => Promise.resolve();
+        given('a real record stands behind the screen',
+            typeof device.State.durableText === 'string'
+                && device.State.durableText.length > 0,
+            String(typeof device.State.durableText));
+
+        device.setQuota(() => true);
+        const before = device.State.rollback.bind(device.State);
+        device.State.rollback = function () {
+            const verdict = before();
+            note('a journal write the disk refused', verdict);
+            return verdict;
+        };
+        const refused = device.State.commit(device.call('assignPlace',
+            device.State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01'));
+        given('the edit was refused at that door', refused === false, String(refused));
+    }
+
+    // Door two: a bulk edit, through commitMany and journalBatch.
+    {
+        const device = makeDevice();
+        seed(device);
+        device.State.save({ silent: true });
+        device.ctx.askConfirm = () => Promise.resolve(true);
+        device.ctx.askTell = () => Promise.resolve();
+        device.setQuota(() => true);
+        const before = device.State.rollback.bind(device.State);
+        device.State.rollback = function () {
+            const verdict = before();
+            note('a bulk edit the disk refused', verdict);
+            return verdict;
+        };
+        const refused = device.State.commitMany([
+            device.call('assignPlace', device.State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'),
+            device.call('assignPlace', device.State.schedule, '2026-08-13', 'w_02', 'actual', 'p_01')
+        ]);
+        given('the bulk edit was refused too', refused === false, String(refused));
+    }
+
+    // Door three: the held device, where durableText is null because no save has ever
+    // landed. The suite above measures what the screen holds; this one measures the
+    // verdict refuseEdit throws away.
+    {
+        const device = makeDevice({ storage: { 'scheduleData:v2': '{"schemaVersion":2,"workers":[' } });
+        device.State.load();
+        device.ctx.askConfirm = () => Promise.resolve(true);
+        device.ctx.askTell = () => Promise.resolve();
+        device.State.schedule.workers = [
+            { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 0 }];
+        device.State.schedule.places = [{ id: 'p_01', name: 'הרצליה', active: true }];
+        const before = device.State.rollback.bind(device.State);
+        device.State.rollback = function () {
+            const verdict = before();
+            note('a device holding nothing durable', verdict);
+            return verdict;
+        };
+        const refused = device.State.commit(device.call('assignPlace',
+            device.State.schedule, '2026-08-14', 'w_01', 'actual', 'p_01'));
+        given('the edit was refused on the held device', refused === false, String(refused));
+    }
+
+    check('every door refuseEdit is reached by rolled back successfully',
+        doors.length === 3 && doors.every(entry => entry.verdict === true),
+        JSON.stringify(doors));
+    check('and the three doors are three different ones',
+        new Set(doors.map(entry => entry.door)).size === 3,
+        JSON.stringify(doors.map(entry => entry.door)));
 }
 
 

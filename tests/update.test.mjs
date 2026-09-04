@@ -378,9 +378,21 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
 
     await typing.fill('#workerFormName', '');
     await typing.keyboard.press('Escape');
-    await typing.waitForTimeout(300);
-    given('the edit is over and a reload would cost nothing',
-        (await typing.evaluate(() => midEdit())) === false);
+    // Waited for as a CONDITION, and one that tolerates the reload having already
+    // happened. A fixed 300ms here raced the very behaviour under test: catchUpWhenSafe
+    // (js/ui/offline.js) polls every 500ms and reloads the moment midEdit() goes false,
+    // so a poll tick landing inside the wait left this evaluate arriving in a
+    // freshly-navigated document whose scripts had not run - `ReferenceError: midEdit is
+    // not defined`, seen once on a clean tree.
+    //
+    // `midEdit` being absent is not a failure to read: it means the page is mid-reload,
+    // and the only thing that reloads it is midEdit() having ALREADY returned false. So
+    // both arms of this condition say the same fact, which is why one may stand in for
+    // the other.
+    const edited = await typing.waitForFunction(
+        () => typeof midEdit !== 'function' || midEdit() === false,
+        null, { timeout: 5000, polling: 50 }).then(() => true, () => false);
+    given('the edit is over and a reload would cost nothing', edited);
 
     const caught = await typing.waitForFunction(
         expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,

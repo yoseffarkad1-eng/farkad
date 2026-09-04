@@ -29,7 +29,7 @@
 //       (setVehicleOut returns a three-segment day path; journalEntryProblems requires
 //       four, so the one control the feature has damages the queue on first use)
 
-import { makeDevice, makeCloud, settle } from './harness.mjs';
+import { makeDevice, makeCloud, settle, REPORTS_GROUP } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { makeNode } from './nodes.mjs';
 
@@ -161,7 +161,13 @@ async function staged(options = {}) {
     };
 
     const run = code => vm.runInContext(code, device.ctx, { filename: 'vehicles:ui' });
-    ['js/ui/sitecolor.js', 'js/ui/reports.js', 'js/ui/day.js'].forEach(file => {
+    // REPORTS_GROUP rather than 'js/ui/reports.js': the reports screen is three files
+    // since the split, and this list is hard-coded. A list like this one is exactly how
+    // a suite goes on passing while covering less than it says - it would have loaded
+    // the rendering, missed the workbook, and still reported that no day pays for a
+    // vehicle. The group is named in tests/harness.mjs and nowhere else, so the next
+    // file to come out of that screen arrives here without anybody remembering.
+    ['js/ui/sitecolor.js', ...REPORTS_GROUP, 'js/ui/day.js'].forEach(file => {
         run(readFileSync(new URL(file, root), 'utf8'));
     });
     run(`REPORT_RANGE.from = '2026-08-01'; REPORT_RANGE.to = '2026-08-31';

@@ -46,11 +46,43 @@ whoever picks that item up.
 
 ## What was found and is OPEN
 
-Both are reproducible, both were confirmed independently, and neither is fixed. They are
-here rather than in a commit message because each needs a decision this repository reserves
-for a contract, and one of them I could not diagnose to the line.
+O1 below is now CLOSED - see the note under its heading. O2 is still open. Both were
+reproducible and both were confirmed independently. They were written here rather than
+in a commit message because each needed a decision this repository reserves for a
+contract, and one of them I could not diagnose to the line. O1 got its contract
+(`features/restore-ledger/contract.md`) and its fix; O2 has neither yet.
 
 ### O1 — a restore is undone on the phone that did not ask for it, in the ledger only
+
+> **CLOSED.** Decided in `features/restore-ledger/contract.md` (Rule A: a restore removes
+> no ledger entry, on any phone) and fixed in `js/sync/restore.js` - the ledger is unioned
+> through `mergeLedgerInto`, the same union `receive()` performs, on the restoring device,
+> on the wire, and at the invariant that gates the transaction. Days, roster, places and
+> every other part still replace. Proved by `tests/restore.ledger.test.mjs`: the
+> reproduction below, red at `A 5000 / B 4500 / cloud 5000` and green at 4,500 on all
+> three, then the same claim through each of the four doors. The paragraph below is kept
+> as it was written, because it is the description of the fault.
+>
+> **CLOSED NARROWLY, and the remainder is named.** It holds for every restore door on
+> the phone performing the restore, and for the cloud when that phone has ALREADY
+> adopted the entry - which is the sequence below. It does NOT yet hold when the
+> restoring phone has never received the entry: A restores while offline, B's
+> repayment lands and is confirmed, A comes back, and A's whole-document write is
+> ACCEPTED at the next revision and takes the entry off the cloud. `noteRevision`
+> runs before `receive()`'s pending-replace branch returns, so A learns the revision
+> from a snapshot whose content it declines to adopt. Same numbers, different route,
+> and NOT a regression: identical on `5faa40a` without the fix. The sequence, the two
+> lines that produce it and the three candidate fixes are written up under LIMIT in
+> `features/restore-ledger/contract.md`.
+>
+> **One sentence in it was wrong and is corrected here**: `tests/restore.test.mjs`
+> R1/R2/R5 do NOT pin ledger replacement on the restoring device. Every one of those
+> fixtures restores onto a phone with an empty ledger, so there is nothing for a union
+> to preserve; what they pin is that a restore is not REFUSED, and that is untouched.
+> They were expected to move and did not: the suite is unchanged and green. The check
+> that genuinely constrains this is R6's «with the ledger emptied», which requires the
+> gate to notice an entry the replacement carries and the disk lacks - and it still does,
+> because the union only ever adds to what is expected.
 
 Two phones, both online, nothing failing. A takes a backup; B records a repayment of 500,
 which reaches the cloud and A; A restores that backup through the ordinary door. Afterwards

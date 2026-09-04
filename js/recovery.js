@@ -589,8 +589,17 @@ function quarantineRecord(key, raw) {
 
     // NOT optional. An optional write is one the app can live without, and this is the
     // only copy of somebody's work that exists. If there is no room, the reclaim ladder
-    // inside Store is allowed to throw away restore points to make some - a restore point
-    // is a copy of a state that parsed, and this is a state that did not.
+    // inside Store is allowed to throw away restore points to make some - but only the
+    // ones it can READ.
+    //
+    // The sentence here used to end "a restore point is a copy of a state that parsed,
+    // and this is a state that did not", and that premise was the defect. A restore point
+    // is written with { optional: true } onto the same disk as everything else, so a write
+    // cut off half way leaves a truncated one - G16.4 in tests/data.test.mjs stages
+    // exactly that, and the read path leaves it alone. The ladder did not: it removed the
+    // oldest key without reading it. dropOldestSnapshot in js/ui/backup.js now steps over
+    // any restore point it cannot parse, which is what makes the sentence true - it is
+    // true because the ladder was changed to make it so, not because it always was.
     return Store.setVerified(target, raw) ? target : null;
 }
 

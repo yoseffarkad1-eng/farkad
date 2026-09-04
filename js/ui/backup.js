@@ -44,14 +44,67 @@ function snapshotDates() {
 // What Store is allowed to throw away when the device runs out of space: the oldest
 // restore point, one at a time. Registered here because Store must not be the thing that
 // decides which of the app's data is expendable.
+//
+// AND ONLY ONE IT CAN READ. This used to list the keys and remove the oldest without ever
+// looking inside it - and the oldest is the likeliest of the three to be a truncated
+// write, because a truncated write comes from a full disk and a full disk is the only
+// thing that calls this at all. So the one restore point whose contents exist nowhere
+// else was the first thing sold. Law 10 has no exception for a ladder: the read path
+// already leaves such a snapshot exactly where it is, and so does this now.
+//
+// Asked of the DISK rather than of the session cache, because the disk is what removal
+// takes away: memory can be holding a whole copy of a record that a half-finished write
+// truncated behind it, and the bytes that would be destroyed are the disk's.
+//
+// Nothing is quarantined from in here. The copy would be a write on a device that has
+// just refused one, and it would re-enter this very ladder to pay for itself. Stepping
+// over is the whole of it; the bytes stay where they are and leave in the rescue file
+// like any other record.
+//
+// When every restore point on the device is unreadable there is nothing here to spend.
+// The ladder ends, Store.full goes up, and the write is refused and SAID - which is the
+// honest end of a full disk and one the person is already told about, rather than a
+// quiet sale of somebody's only copy of a fortnight.
 Store.reclaim = function dropOldestSnapshot() {
     const dates = snapshotDates();
-    if (dates.length === 0) return false;
-    Store.remove(SNAPSHOT_PREFIX + dates[dates.length - 1]);
-    return true;
+    for (let at = dates.length - 1; at >= 0; at -= 1) {
+        const key = SNAPSHOT_PREFIX + dates[at];
+        const raw = Store.durableGet(key);
+        if (raw !== null) {
+            try {
+                JSON.parse(raw);
+            } catch (error) {
+                continue;
+            }
+        }
+        // A null here is a key this session has in memory and the disk does not, so there
+        // is nothing to lose by dropping it and nothing to free either. It goes anyway:
+        // that takes it out of the list, so the ladder makes progress instead of being
+        // offered the same key on every turn.
+        Store.remove(key);
+        return true;
+    }
+    return false;
 };
 
 function takeDailySnapshot() {
+    // NOT ON A BOOT THAT IS HOLDING. js/app.js calls this immediately after State.load()
+    // and before the first render, and on the boot where the v2 record would not parse
+    // State.load has quarantined it, fallen through to the v1 beneath it, migrated that
+    // into memory and deliberately NOT written it down - saving it would put
+    // pre-migration data over the newest record there is. A photograph taken here is a
+    // photograph of exactly that state, filed under today's date beside the real ones,
+    // with nothing on the row to say it is not a copy of the record; and the eviction at
+    // the end of this function then deletes the oldest real one to make room for it.
+    //
+    // Two lines after that call the person is told to check the last few days against
+    // the restore points. Sending somebody to an album this boot has just written a
+    // false entry into and taken the furthest-back true one out of is worse than sending
+    // them nowhere.
+    //
+    // The same guard State.save and State.persist carry, for the same reason.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return;
+
     // Nothing to photograph, and nothing worth keeping over a real one.
     if (State.schedule.workers.length === 0) return;
 
@@ -310,10 +363,22 @@ function pushUndoState(schedule) {
         // stack starts again rather than taking the app down with it - which is the part
         // of the old comment that was right: this is not the schedule, and refusing to
         // record until somebody looks would be a worse trade for a convenience.
-        if (typeof Recovery !== 'undefined' && Recovery && Recovery.damaged) {
-            Recovery.damaged(UNDO_STACK_KEY, Store.get(UNDO_STACK_KEY),
-                'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה.');
-        }
+        //
+        // AND THE COPY HAS TO HAVE LANDED. The replacement written below holds ONE
+        // schedule where the damaged record holds up to three, so the device that had no
+        // room for the copy can still have room for the write that goes over it - which
+        // is this file's own mistake, one level up: the recovery destroying the thing it
+        // was recovering, on the full device where it is likeliest to be reached.
+        //
+        // So nothing is written from here, and the answer is false. The caller abandons
+        // the restore and says noWayBackNotice(), which is the honest end of a device
+        // that has nowhere to put a way back - and it is true twice over here, because
+        // the way back this device already had is the record it cannot read.
+        const copied = (typeof Recovery !== 'undefined' && Recovery && Recovery.damaged)
+            ? Recovery.damaged(UNDO_STACK_KEY, Store.get(UNDO_STACK_KEY),
+                'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה.')
+            : null;
+        if (!copied) return false;
         stack = [];
     }
 
@@ -348,26 +413,65 @@ function pushUndoState(schedule) {
     return stacked;
 }
 
-function readUndoStack() {
+// The stack, and whether the RECORD that holds it could be read at all.
+//
+// It stays a parser: nothing here quarantines and nothing here holds, the same division
+// parseIssuesRecord draws in js/state.js and for the same reason - three readers go
+// through it and each one has a different right answer for a record that will not parse.
+// `unreadable` is what lets a caller tell "no way back was ever written" from "the way
+// back is here and cannot be read", which are opposite facts that this function used to
+// hand back as one empty array.
+function parseUndoStack(raw) {
+    if (!raw) return { stack: [], found: false };
     try {
-        const raw = Store.get(UNDO_STACK_KEY);
-        const stack = raw ? JSON.parse(raw) : [];
-        return Array.isArray(stack) ? stack : [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed)
+            ? { stack: parsed, found: true }
+            : { stack: [], found: false };
     } catch (error) {
-        return [];
+        return { stack: [], found: false, unreadable: true };
     }
+}
+
+function readUndoStack() {
+    return parseUndoStack(Store.get(UNDO_STACK_KEY)).stack;
 }
 
 // The way back, WITHOUT taking it off the stack. Reading and consuming used to be the
 // same call, so an entry that turned out to be unreadable was destroyed by the attempt
 // that discovered it.
 function peekUndoState() {
-    const top = readUndoStack()[0];
+    const raw = Store.get(UNDO_STACK_KEY);
+    const read = parseUndoStack(raw);
+    const top = read.stack[0];
     if (top && typeof top.schedule === 'string') return top.schedule;
 
     // Nothing on the stack: fall back to the single slot, which is where a restore made
     // by an older build put its way back.
-    return Store.get(UNDO_KEY);
+    const slot = Store.get(UNDO_KEY);
+    if (slot) return slot;
+
+    // NOTHING READABLE AND NOTHING TO FALL BACK ON - and those are two different
+    // devices. A device that has never restored has no record here at all, and «אין
+    // גיבוי מקומי» is the truth. A device whose stack is sitting right there and will
+    // not parse is being told the opposite of the truth about up to three whole
+    // schedules, and nothing else on this path would ever mention them: pushUndoState is
+    // the only reader that quarantines, and the caller returns before reaching it.
+    //
+    // The device this happens on is a full one. pushUndoState writes the stack and the
+    // single slot as two writes, so a disk that took the first and refused the second
+    // leaves exactly this shape - and a truncated record comes from a full disk in the
+    // first place, which is the pairing js/recovery.js's header names.
+    //
+    // Reported the way every other damaged record on this device is, under the same
+    // sentence pushUndoState's own catch uses for these bytes: a copy under its own
+    // name, read back, the original left where it is, the person told through the banner
+    // and the device held until they acknowledge it. Nothing is written here either way.
+    if (read.unreadable && typeof Recovery !== 'undefined' && Recovery && Recovery.damaged) {
+        Recovery.damaged(UNDO_STACK_KEY, raw,
+            'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה.');
+    }
+    return null;
 }
 
 // The unanswered decisions stored beside a way back, or null when the entry predates
@@ -1765,6 +1869,20 @@ async function restoreLocalBackup() {
     // state without saying so.
     const raw = peekUndoState();
     if (!raw) {
+        // Two different devices, and they must not be told the same thing. peekUndoState
+        // has already quarantined the unreadable one and held the device; what is left
+        // here is which sentence is true. «אין גיבוי מקומי» over a record that is on the
+        // disk and will not parse is the app agreeing that work nobody can read is work
+        // that was never there.
+        if (parseUndoStack(Store.get(UNDO_STACK_KEY)).unreadable) {
+            askTell({
+                title: 'לא בוצע שחזור',
+                message: 'רשימת מצבי "חזרה אחורה" במכשיר לא נקראה, ולכן אין לאן לחזור ' +
+                    'כרגע. העותק נשמר במכשיר ולא נמחק - הסיבה כתובה בהודעה שבראש המסך. ' +
+                    'מה שכבר שמור לא נפגע.'
+            });
+            return;
+        }
         askTell('אין גיבוי מקומי.');
         return;
     }

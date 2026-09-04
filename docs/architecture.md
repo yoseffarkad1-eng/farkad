@@ -343,6 +343,23 @@ with a File, or an anchor download where there is no share sheet, and the whole
 drawing is synchronous because the share sheet needs the tap's gesture and an await
 would spend it. The picture also has its own button beside every print button.
 
+The reports screen is three files, loaded in this order and cached in it:
+`js/ui/reports.js` draws it — the range picker, the two tables, one worker's days and
+his history, and the forms that record an advance, a repayment, a correction or a
+closure. `js/ui/reports-statement.js` builds the message a worker is sent on payday.
+`js/ui/reports-export.js` builds the workbook and the CSV, names the files, and runs the
+hand-over dialog. Nothing in the three runs at load time, so the order is not
+definition-time dependency — it is the order `index.html`, `sw.js`'s SHELL and the
+harness's `REPORTS_GROUP` all state, and they move together or a phone in a tunnel gets
+a screen that draws and cannot export.
+
+The split is a split of ONE screen, and the two rules that survive it are the ones that
+were already there: every figure on any of the three comes through `workerAccountFor`,
+the one account reader, so a man is not told 1,950 on the screen and 3,050 on WhatsApp
+about the same fortnight; and reading an account never seals it — the statement and the
+export write nothing, and the only caller of the function that closes a fortnight is the
+account-closing button behind its confirmation.
+
 ## The update road
 
 Three strings name a build: the `farkad-build` meta in `index.html`, `APP_VERSION` in

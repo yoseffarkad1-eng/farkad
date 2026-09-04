@@ -21,12 +21,43 @@ const MODAL_CLOSERS = {
     workerFormModal: () => closeWorkerForm(),
     workerDaysModal: () => closeWorkerDays(),
     shareModal: () => closeShareModal(),
-    migrationModal: () => closeMigrationModal()
+    migrationModal: () => closeMigrationModal(),
+    // The one .modal that had no entry here, so Escape fell through to the bare
+    // `display = 'none'` below and never reached closeSignInModal - which exists, and
+    // clears the password field. Measured before this line was added: a typed password
+    // and a "סיסמה שגויה" both survived Escape and were still there the next time the
+    // sheet was opened from the same page. Three men share one phone on a site; the
+    // sentence at the top of this file - "closing is not always just hiding" - is the
+    // whole reason this table exists, and this was the row it was missing.
+    signInModal: () => closeSignInModal()
 };
 
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 let focusBeforeModal = null;
+
+// The last thing focused OUTSIDE every open dialog, recorded as it happens.
+//
+// This exists because the capture below could not be done where it was being done. The
+// MutationObserver fires at the microtask checkpoint - after the WHOLE synchronous block
+// that both revealed the dialog and moved focus into it:
+//
+//     parts.modal.style.display = 'flex';   // ask.js:80 - the mutation is only queued
+//     parts.input.focus();                  // ask.js:82 - activeElement is now the input
+//     ...                                   // the observer runs here
+//
+// so document.activeElement at that moment was a node INSIDE the dialog for the three
+// dialogs that focus a field for themselves (askText, the quick start, the sign-in
+// sheet). Calling .focus() on it after the dialog was hidden is a no-op, and the keyboard
+// landed on <body>: askText is this app's prompt(), so renaming a site, correcting an
+// amount and answering the reorder guard all dropped a person back at the top of the
+// document. focusFirst() twenty lines below anticipates exactly this case - "whatever the
+// dialog already focused for itself is left alone" - and the capture did not.
+//
+// A focusin listener is early by construction: it runs before the microtask checkpoint,
+// on the focus that is being replaced. Nothing here decides WHETHER to restore; it only
+// keeps a candidate that the dialogs cannot overwrite.
+let lastFocusOutsideModal = null;
 
 function openModals() {
     return Array.from(document.querySelectorAll('.modal'))
@@ -71,12 +102,30 @@ function watchModals() {
         if (pressed && event.target === modal) closeTopModal();
     });
 
+    // Every focus that lands outside an open dialog is a candidate to come back to. The
+    // openModals() test is what makes it safe to run on every focus: the dialog's own
+    // field is focused while its modal is already display:flex, so it is skipped here and
+    // the button that opened the dialog stays the last thing recorded.
+    document.addEventListener('focusin', event => {
+        const node = event.target;
+        if (!node || node === document.body || node === document) return;
+        if (openModals().some(modal => modal.contains(node))) return;
+        lastFocusOutsideModal = node;
+    });
+
     // Focus is captured before the dialog takes it, and given back when the last one
     // closes, so the keyboard carries on from where the person was.
     const observer = new MutationObserver(() => {
         const open = openModals();
         if (open.length > 0 && !focusBeforeModal) {
-            focusBeforeModal = document.activeElement;
+            // activeElement first, because for the ten dialogs that do NOT focus a field
+            // for themselves it is still the opener and still exactly right. The tracked
+            // node is the fallback for the three that do - and for the case where the
+            // opener was a tap on iOS, which focuses nothing at all.
+            const active = document.activeElement;
+            const outside = active && active !== document.body
+                && !open.some(modal => modal.contains(active));
+            focusBeforeModal = outside ? active : lastFocusOutsideModal;
             focusFirst(topModal());
         } else if (open.length === 0 && focusBeforeModal) {
             if (document.contains(focusBeforeModal)) focusBeforeModal.focus();
