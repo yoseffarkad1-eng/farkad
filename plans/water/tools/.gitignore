@@ -1,0 +1,5 @@
+# intermediates the build writes next to the tools
+_w01.pdf
+ov_*.html
+ov_*.pdf
+__pycache__/
