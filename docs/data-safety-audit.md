@@ -46,11 +46,45 @@ whoever picks that item up.
 
 ## What was found and is OPEN
 
-Both are reproducible, both were confirmed independently, and neither is fixed. They are
-here rather than in a commit message because each needs a decision this repository reserves
-for a contract, and one of them I could not diagnose to the line.
+Both were reproducible and both were confirmed independently. Neither was fixed when this
+section was first written, because each needed a decision this repository reserves for a
+contract, and one of them could not be diagnosed to the line.
 
-### O1 — a restore is undone on the phone that did not ask for it, in the ledger only
+**O1 is now CLOSED** — the decision was given, the contract is
+`features/restore-ledger/contract.md`, and its section below carries the fix and one
+correction to what this document originally claimed. O2's section says for itself where it
+stands. Each section is left with its original text underneath, because the record of what
+was wrong is worth more than a tidy page.
+
+### O1 — CLOSED. A restore no longer removes a financial event anywhere
+
+The finding below is left as it was written, because it is the record of what was wrong and
+why it was not fixed at the time. Two things have since changed.
+
+**The decision was taken.** `features/restore-ledger/contract.md` holds it: an ordinary
+restore replaces the work record and never erases a financial event, on any device
+including the restoring one. Ledger entries merge by union everywhere. Conflicting facts
+keep both sides and stop. The fix is one union at `prepareReplace`, so the document that is
+stored, sent and compared against is the same already-correct document — measured by
+`tests/restore-ledger-race.test.mjs`, 26/26, which fails 9/26 on 21c8e08.
+
+**One sentence below is wrong and is corrected here.** The paragraph beginning "Why it is
+not fixed here" cites `tests/restore.test.mjs` R1/R2/R5 as already pinning, on the restoring
+device, that a restore replaces the ledger. They do not. Their shared fixture
+(`tests/restore.test.mjs:85-96`) builds a phone with `workers`, `places` and one day and no
+`advances` and no `ledger` at all, so there is nothing on that device for a restore to
+remove; R2 (`:186-188`) goes the other way outright and requires the ledger to GROW by an
+entry the restored document never carried, and R6 (`:314`) empties the ledger after the
+restore to prove the restored entries must be PRESENT. Re-measured on 21c8e08 by reading the
+fixture's disk: `advances: {}`, `ledger: {"advances":{},"unreadable":{}}`.
+
+So the rule that was rejected as "what the tests already pin" was never pinned by anything,
+and the rule that was chosen contradicts no existing guarantee. `restore` is still 51/51
+with the fix in place. A citation that sends the next reader to a suite that says something
+else is the same class of fault as a comment that has drifted from its code, and it cost
+this finding a round.
+
+### O1, as originally written — a restore is undone on the phone that did not ask for it, in the ledger only
 
 Two phones, both online, nothing failing. A takes a backup; B records a repayment of 500,
 which reaches the cloud and A; A restores that backup through the ordinary door. Afterwards

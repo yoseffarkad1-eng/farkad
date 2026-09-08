@@ -56,6 +56,57 @@ Object.assign(FarkadSync, {
             document.updatedBy = syncDeviceId();
         }
 
+        // THE MONEY IS NOT PART OF WHAT A RESTORE PUTS BACK.
+        //
+        // A restore replaces the work record - days, workers, places, order. It never
+        // replaced the ledger on purpose; it did so because the ledger happened to live
+        // in the same document. See features/restore-ledger/contract.md.
+        //
+        // The failure, measured before this line existed: A takes a backup, B records a
+        // repayment of 500 which reaches the cloud and A, A restores the backup. A and
+        // the cloud then hold 5000 and B holds 4500, both reporting synced, for ever - B
+        // never sends it back and reopening B keeps 4500. A man handed 500 back and two
+        // devices out of three forgot it while telling the person everything agreed.
+        //
+        // The union goes in HERE, at prepare, and not at apply, for three reasons that
+        // each cost a bug elsewhere in this file:
+        //
+        //   the envelope is what is SENT       executePreparedReplace saves
+        //                                      envelope.document, so merging at apply
+        //                                      time would fix this phone and leave the
+        //                                      cloud holding the bare backup - the same
+        //                                      divergence, one device further away
+        //   the envelope is what is COMPARED   localDurableHolds builds `expected` from
+        //                                      envelope.document. Merging anywhere else
+        //                                      makes the disk and the invariant disagree
+        //                                      and every restore report failure
+        //   the envelope is FROZEN             a retry re-sends the same bytes. Merging
+        //                                      on each attempt is how a repayment gets
+        //                                      counted twice
+        //
+        // So the arriving document is already right, and no receiver has to be told what
+        // kind of snapshot it is - which is why no marker travels with it.
+        const ledgerClash = [];
+        if (typeof mergeLedgerInto === 'function') {
+            mergeLedgerInto(document, State.schedule, ledgerClash);
+        }
+        // ONE IMMUTABLE ID, TWO DIFFERENT BODIES, and a restore decides it no more than
+        // receive() does. Both are kept - the backup's copy where it landed, this phone's
+        // beside it under a name nothing folds - and the device stops writing until a
+        // person has looked. Same shape, same words, same reason as receive(); the two
+        // must not drift, because a person meeting this on one path and not the other
+        // learns that it depends on how the record arrived, which is not true.
+        if (ledgerClash.length > 0) {
+            document.ledger = document.ledger || { advances: {} };
+            document.ledger.conflicted = document.ledger.conflicted || {};
+            ledgerClash.forEach(clash => {
+                document.ledger.conflicted[clash.id] = {
+                    id: clash.id, family: clash.family,
+                    here: clash.mine, arrived: clash.theirs
+                };
+            });
+        }
+
         // Checked before it is written down, not only when it is read back. A record
         // that would be quarantined on the next read is a record that should never have
         // been written: it would block every restore on the device and halt recording,
