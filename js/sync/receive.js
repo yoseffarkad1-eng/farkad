@@ -505,7 +505,7 @@ Object.assign(FarkadSync, {
             // Authoritative: the document exists and has no roster in it, so there is
             // nothing tombstoned for a queued array to contradict.
             this.noteCloudHeard();
-            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
+            if (State.schedule.workers.length > 0) this.editRoster(State.schedule, null, { whole: true });
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             if (this.pendingCount() > 0) this.scheduleFlush();
@@ -573,7 +573,7 @@ Object.assign(FarkadSync, {
             // A document nobody has written to holds no tombstones either, and this is
             // the server saying so rather than a guess.
             this.noteCloudHeard();
-            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
+            if (State.schedule.workers.length > 0) this.editRoster(State.schedule, null, { whole: true });
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             if (this.pendingCount() > 0) this.scheduleFlush();
@@ -737,7 +737,7 @@ Object.assign(FarkadSync, {
         // way the answer is the same write - the roster as this device now holds it, in
         // both forms at once.
         if (this.repairsMissingIdentities(raw) || this.conflictsWithLegacyArray(raw, gone)) {
-            this.editRoster(State.schedule);
+            this.editRoster(State.schedule, null, { whole: true });
         }
 
         // The copy is taken from what the server holds at the first sight of it today -
@@ -834,6 +834,70 @@ Object.assign(FarkadSync, {
             });
             if (kept.length !== item.value.length) corrections.push({ path, value: kept });
         });
+
+        // AND THE WRITE THAT NAMES HIM ON HIS OWN.
+        //
+        // The lists are not the only queued opinion of a removed man. A whole-entity write
+        // for him - `roster.workers.w_01` with a record in it - lands straight on top of
+        // the null the tombstone is, and since v104 so does one FIELD of him: Firestore
+        // stores `roster.workers.w_01.phone` by replacing that null with `{ phone: … }`.
+        // Either way the tombstone is gone from the document, and the tombstone is the
+        // only thing telling the third phone - which still has him in its own stale whole
+        // array - that he was removed. Merged against that array, the record or the
+        // fragment stands him back up, with every day and every shekel recorded against
+        // him back in the report.
+        //
+        // So this device's queued opinion of him becomes the one it has just heard: gone.
+        // No more an invention than the sanitised array is - the same sentence, about one
+        // man rather than about a list.
+        //
+        // TWO SHAPES, TWO MECHANISMS, because an operation may only supersede one on the
+        // SAME path - decodeQueue enforces that on the bytes, and it is right to: naming
+        // an operation on another path suppresses work that was never replaced.
+        //
+        //   the whole-entity write is corrected AT ITS OWN PATH, to the tombstone. One
+        //   ordinary operation, superseding the one it replaces, exactly as the arrays are.
+        //
+        //   a field write has no such correction to make - every value that could go in it
+        //   stands the man back up, a null included, because Firestore stores
+        //   `roster.workers.w_01.phone = null` by replacing the tombstone with a record.
+        //   So it is RETIRED instead: the mark that says an operation lost, written to its
+        //   own key, which is how every other defeated operation in this queue is put out
+        //   of the way. The field the person typed is discarded with him, which is the
+        //   same thing the sanitised whole array does and for the same reason.
+        //
+        // If the work says otherwise, the work still wins: a man with a day behind him is
+        // reinstated by reinstateReferenced and written back whole by the repair at the
+        // foot of receive(), which is minted after this and supersedes it in turn.
+        const standingUp = new Set();
+        const retiring = [];
+        this.projectedQueue().forEach((item, path) => {
+            const parts = String(path).split('.');
+            if (parts[0] !== 'roster') return;
+            if (parts.length !== 3 && parts.length !== 4) return;
+            const kind = parts[1];
+            if (kind !== 'workers' && kind !== 'places') return;
+            if (!gone[kind] || !gone[kind].has(String(parts[2]))) return;
+            if (parts.length === 4) { retiring.push(item); return; }
+            // A tombstone already queued for him says exactly what this would say.
+            if (item.value === null) return;
+            standingUp.add(`roster.${kind}.${parts[2]}`);
+        });
+        standingUp.forEach(path => corrections.push({ path, value: null }));
+
+        // The marks go first. A correction that landed while a resurrecting field write
+        // stayed live would be a queue that says two things about one man, and the field
+        // write is the one that reaches the document last.
+        let retired = true;
+        retiring.forEach(item => {
+            const key = outboxBeatKey(item.slot, item.opId);
+            if (Store.durableGet(key) === ACK_VALUE) return;
+            if (Store.setVerified(key, ACK_VALUE)) return;
+            Store.forget(key);
+            retired = false;
+        });
+        if (!retired) return false;
+
         if (corrections.length === 0) return true;
         return this.queueOperations(corrections);
     },
@@ -986,10 +1050,46 @@ Object.assign(FarkadSync, {
         const perEntity = new Set();
         pending.forEach(([path]) => {
             const parts = path.split('.');
-            if (parts.length === 3 && parts[0] === 'roster') perEntity.add(parts[1]);
+            // Both per-person shapes count: the whole entity, and one field of it. A
+            // queue holding only `roster.workers.w_01.phone` is still a queue that has
+            // spoken for the workers list, and the legacy array beside it must not undo
+            // it at boot replay, where this same set is what stops it.
+            if (parts[0] === 'roster' && (parts.length === 3 || parts.length === 4)) {
+                perEntity.add(parts[1]);
+            }
         });
 
         pending.forEach(([path, item]) => {
+            // THE LEGACY WHOLE ARRAY IS NEVER LAID BACK OVER AN ADOPTED SNAPSHOT.
+            //
+            // `perEntity` above was meant to stop exactly this and only half does: it
+            // fires when a per-person edit for the SAME list is waiting, so renaming a
+            // SITE leaves the queued `workers` array unguarded. Measured: B raises a
+            // man's rate to 600 and it lands; A - which has already adopted a snapshot,
+            // so the memory baseline everyone blamed is present and correct - renames a
+            // site; A adopts 600 and this loop puts its own pre-snapshot `workers` array
+            // straight back on top. A holds 500, B and the cloud hold 600, and it
+            // survives A's reopen. A's next ordinary roster edit then finds its w_01
+            // differing from the baseline and sends 500 to everybody, where the map
+            // outranks the array in mergeRoster. All three converge on the stale value
+            // and nothing on any screen says so. A day recorded on A in between is
+            // stamped at 500 while the man is paid 600 - law 2 reached from the wrong end.
+            //
+            // The array carries nothing this queue does not already carry per person:
+            // every real roster change also queues `roster.<kind>.<id>`, the order, or a
+            // tombstone, and the entities it holds that none of those name are the
+            // unchanged ones the cloud already has. It exists to be READ by a phone still
+            // on v78 and for no other reason - see editRoster. A projection is not a
+            // record, and re-applying one over a newer truth can only lose.
+            //
+            // Filtered HERE and not inside applyJournalEntry, because the boot replay
+            // (js/sync/sync.js) and the rescue-file rebuild (js/ui/backup.js) call it
+            // too, and there the array IS this device's own latest opinion with no
+            // snapshot to contradict it.
+            const parts = String(path).split('.');
+            if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+                return;
+            }
             applyJournalEntry(schedule, path, item.value, perEntity, tombstoned);
         });
         // What was put back, so the acknowledgement that retires one of these can tell
@@ -1098,6 +1198,35 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 return;
             }
 
+            // ONE FIELD of one person - the unit an ordinary roster edit travels in, so
+            // that a phone number typed here does not carry this device's stale copy of
+            // his daily rate with it.
+            //
+            // And only onto somebody who is THERE. A field of a man this schedule does
+            // not have is not a man: pushing a row built out of it would invent a person
+            // with no name, and when the snapshot that has just been adopted is the one
+            // that removed him, it would stand him back up - the resurrection the
+            // tombstones exist to stop, done by the re-apply. The person's own field is
+            // not lost by that: whoever still holds a record for him writes it, and the
+            // write that gives him one is the whole-entity write editRoster keeps for an
+            // entity nobody has yet.
+            if (parts.length === 4 && parts[0] === 'roster'
+                && (parts[1] === 'workers' || parts[1] === 'places')) {
+                const list = schedule[parts[1]] || [];
+                const at = list.findIndex(item => item && String(item.id) === parts[2]);
+                // The gate that admits an operation refuses a poison segment anywhere in
+                // its path, so this cannot be reached with one. Asked again here anyway:
+                // this is the one arm that writes a segment straight into a record as a
+                // KEY, and `row.__proto__ = value` does not add a field, it moves the
+                // prototype. One comparison against a decision that already exists.
+                if (at !== -1 && isPlainObject(list[at])
+                    && POISON_SEGMENTS.indexOf(parts[3]) === -1) {
+                    list[at][parts[3]] = value;
+                }
+                schedule[parts[1]] = list;
+                return;
+            }
+
             if (parts.length === 2 && parts[0] === 'roster'
                 && (parts[1] === 'workerOrder' || parts[1] === 'placeOrder')) {
                 const kind = parts[1] === 'workerOrder' ? 'workers' : 'places';
@@ -1195,6 +1324,23 @@ function scheduleHoldsEntry(schedule, path, value) {
         return found !== undefined && same(found, value);
     }
 
+    // ONE FIELD of one person. Held when the man is on the disk AND his record there
+    // already says this.
+    //
+    // A man who is NOT on the disk answers no, and that is the rule at the top of this
+    // function rather than an oversight: the write may still be owed - he can be absent
+    // because this device has not adopted the snapshot that carries him yet - and a wrong
+    // "yes" would take the person's edit off the queue with nowhere it had landed. A
+    // wrong "no" costs one path's bytes and one more attempt, which is the direction to
+    // be wrong in.
+    if (parts.length === 4 && parts[0] === 'roster'
+        && (parts[1] === 'workers' || parts[1] === 'places')) {
+        const list = schedule[parts[1]] || [];
+        const found = list.find(item => item && String(item.id) === parts[2]);
+        if (!found || typeof found !== 'object') return false;
+        return same(found[parts[3]], value);
+    }
+
     // An order is held when the people it names appear in the stored list in the order it
     // named them. Anybody it had not heard of is not its business - applyJournalEntry
     // leaves them where they are rather than dropping them.
@@ -1208,8 +1354,27 @@ function scheduleHoldsEntry(schedule, path, value) {
         return wanted.every((id, at) => stored[at] === id);
     }
 
+    // THE LEGACY WHOLE ARRAY, once it has been sent, owes the disk nothing.
+    //
+    // This used to ask whether the stored list equalled the queued array, and that
+    // question stopped having an answer the moment reapplyPending stopped laying the
+    // array back over an adopted snapshot: the disk holds the snapshot's roster, the
+    // queued array holds this device's older opinion, and they differ for ever. Measured
+    // with only the reapply guarded: one operation on the disk became seven, five paths
+    // still listed by pendingPaths() while pendingCount() read 0 - sent work that could
+    // never be collected, growing on every roster edit.
+    //
+    // The honest answer is yes, and it is yes for the same reason the array is not
+    // re-applied: it is a wire-compat projection for a v78 reader, not a record. Every
+    // entity it names that this device actually changed is also queued at
+    // `roster.<kind>.<id>`, and those are asked the real question above; the rest were
+    // never this device's to say. So there is nothing in it that a "yes" could lose,
+    // which is the test this function is written against - a wrong yes loses somebody's
+    // day, and this one cannot, because the day is not in here.
+    //
+    // The caller only reaches this for an operation already `sent` (js/sync/sync.js).
     if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
-        return same(schedule[parts[0]], value);
+        return true;
     }
 
     return false;

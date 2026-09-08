@@ -377,6 +377,54 @@ async function editProtocolReplace(db, path, data) {
         Object.prototype.hasOwnProperty.call(second.data().roster.workers, 'w_01')
         && second.data().roster.workers.w_01 === null,
         JSON.stringify(second.data().roster.workers));
+
+    // ------------------------------------------------------- one field of one man
+    //
+    // Since v104 an ordinary roster edit travels as `roster.<kind>.<id>.<field>` - four
+    // segments, one deeper than anything the rules had ever been shown. The rules were
+    // read and no change was made, and this is the measurement behind that: they can only
+    // see top-level keys (.keys() reaches no further, and on an update
+    // request.resource.data is the MERGED document), so the depth of a field path is
+    // invisible to every function in the file. If that reading is wrong, the write below
+    // is refused and this check says so on the real emulator rather than in production.
+    await env.clearFirestore();
+    await passes('the document exists first', createProtocol(db, PATH, schedule({
+        roster: {
+            workers: { w_01: { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 } },
+            places: { p_01: { id: 'p_01', name: 'הרצליה', active: true } },
+            workerOrder: ['w_01'],
+            placeOrder: ['p_01']
+        }
+    })));
+
+    const fieldOp = nextOp();
+    await passes('a write to roster.workers.<id>.<field> is accepted',
+        runTransaction(db, async transaction => {
+            const snapshot = await transaction.get(doc(db, PATH));
+            const revision = ((snapshot.data() || {}).revision || 0) + 1;
+            transaction.update(doc(db, PATH),
+                new FieldPath('roster', 'workers', 'w_01', 'dailyRate'), 600,
+                new FieldPath('updatedAt'), '2026-08-12T10:00:00.000Z',
+                new FieldPath('protocol'), 1,
+                new FieldPath('revision'), revision,
+                new FieldPath('lastOpId'), fieldOp,
+                new FieldPath('opFingerprint'), printOf(fieldOp));
+            transaction.set(doc(db, `${PATH}/receipts/${fieldOp}`),
+                { opFingerprint: printOf(fieldOp), revision, at: new Date().toISOString(), by: 'd_test' });
+        }));
+
+    const patched = (await getDoc(doc(db, PATH))).data();
+    check('the one field moved',
+        patched.roster.workers.w_01.dailyRate === 600,
+        JSON.stringify(patched.roster.workers.w_01));
+    check('and every other field of that man is exactly where it was',
+        patched.roster.workers.w_01.name === 'דוד'
+        && patched.roster.workers.w_01.hourlyRate === 50
+        && patched.roster.workers.w_01.active === true,
+        JSON.stringify(patched.roster.workers.w_01));
+    check('while the site map beside him is untouched',
+        Boolean(patched.roster.places.p_01),
+        JSON.stringify(Object.keys(patched.roster.places)));
 }
 
 // ---------------------------------------------------------------- the ordering protocol

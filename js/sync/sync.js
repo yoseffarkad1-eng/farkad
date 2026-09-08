@@ -758,10 +758,30 @@ function marksOf(path, value) {
     return marks;
 }
 
-// The families where a queued value REPLACES what is there: a day, or a ledger entry.
-// See the pre-send check in sendClaimed for why the roster is not one of them.
+// The families where a queued value REPLACES what is there: a day, a ledger entry, or -
+// since v104 - one field of one person. See the pre-send check in sendClaimed, and the
+// paragraph below for why a WHOLE roster record is still not one of them.
 function replacesWhole(path) {
-    return String(path).indexOf('days.') === 0 || String(path).indexOf('ledger.') === 0;
+    const text = String(path);
+    if (text.indexOf('days.') === 0 || text.indexOf('ledger.') === 0) return true;
+    // ONE FIELD OF ONE PERSON, and it is in this family for the same reason a day is.
+    //
+    // The roster used to be excluded whole, and the reason given was that it merges per
+    // id and that an added worker is additive rather than a correction of a value
+    // somebody was looking at. That is still exactly true of `roster.workers.<id>` - a
+    // whole record, usually a man who has just been added, and holding those is what
+    // would have stopped a worker added after a prepared restore from ever reaching the
+    // cloud (G12-G14).
+    //
+    // It is not true of `roster.workers.<id>.dailyRate`. That path names one value, it
+    // REPLACES what is there, and what is there is what somebody is paid. Two phones
+    // disagreeing about it is not a merge and there is no arithmetic that resolves it:
+    // one of the two numbers is wrong and only a person knows which. So it is recorded
+    // with what this device had seen there, asked before it goes out, and HELD when the
+    // server holds something this device never saw - the same treatment a day gets, for
+    // the same reason. A phone number and a rate are held alike; the field that is
+    // contested is the only one held, because the paths are one field wide.
+    return text.indexOf('roster.') === 0 && text.split('.').length === 4;
 }
 
 // What two schedules have to agree on for one to BE the other.
@@ -2190,10 +2210,16 @@ const FarkadSync = {
                 fromList(parts[0], value);
                 return;
             }
-            if (parts[0] === 'roster' && parts.length === 3
+            if (parts[0] === 'roster' && (parts.length === 3 || parts.length === 4)
                 && (parts[1] === 'workers' || parts[1] === 'places')) {
                 // The tombstone too. A null names the id just as loudly as a record does,
                 // and it is the write that tells the other phones he existed.
+                //
+                // And one FIELD of him names him just as loudly again - four segments,
+                // the ordinary shape of a roster edit since v104. Missing it here would
+                // let a man leave this device with no record that he ever did, and the
+                // permanent-deletion offer reads exactly that record: he would be offered
+                // for deletion as though he had never been anywhere but here.
                 found[parts[1]].add(String(parts[2]));
                 return;
             }

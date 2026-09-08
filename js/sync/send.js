@@ -20,7 +20,64 @@
 //   - hold a write over a fact the cloud already agrees with. The same-fact rule is asked
 //     at every gate here, because two phones recording the same evening are not a conflict.
 
+// WHICH FIELDS OF ONE PERSON THIS EDIT ACTUALLY CHANGED, or null for "send him whole".
+//
+// `before` is the record that was on the DISK a moment before the edit was applied - see
+// durableRosterBaseline - so a field that differs from it is one the person just changed
+// and a field that does not is one this device merely happens to be holding. That
+// distinction is the whole of O2(d): the rate B raised while this phone was away is
+// identical to nothing on this disk, but it rides out inside a whole record and lands on
+// top of B's raise, because the keyed map outranks the legacy array everywhere.
+//
+// Null - meaning send the whole record - for every case where naming the changed fields
+// would be a guess:
+//
+//   nothing was on the disk for him. There is no record in the cloud to merge one field
+//   into either, and mergeRoster deliberately refuses to build a person out of a fragment,
+//   so the first write about anybody has to carry all of him.
+//
+//   the shape is not the one this build knows, on either side. A field this table does
+//   not name would simply never be sent, and a field silently left behind is the failure
+//   this function exists to prevent, pointed the other way.
+//
+//   nothing in the table differs, yet the records are not equal. Then what changed is
+//   something outside the table - the id, or a key nobody here recognises - and the honest
+//   answer is the whole record rather than an empty list that sends nothing at all.
+function perFieldChanges(kind, before, item) {
+    const fields = ENTITY_FIELDS[kind];
+    if (!fields || !before || typeof before !== 'object') return null;
+
+    const shaped = record => {
+        const keys = Object.keys(record).sort();
+        const wanted = fields.concat(['id']).sort();
+        return keys.length === wanted.length && keys.every((key, at) => key === wanted[at]);
+    };
+    if (!shaped(before) || !shaped(item)) return null;
+
+    const changed = fields.filter(field =>
+        JSON.stringify(before[field]) !== JSON.stringify(item[field]));
+    return changed.length > 0 ? changed : null;
+}
+
 Object.assign(FarkadSync, {
+    // Is a WHOLE record for this entity already waiting in the queue?
+    //
+    // Firestore refuses one update that names both a field and something inside it, so
+    // `roster.workers.w_01` and `roster.workers.w_01.phone` may never be in flight
+    // together. The whole record is the one that wins that tie: it carries the field the
+    // other one would have carried - it is built from the same schedule, after the edit -
+    // and it is the only one of the two that can create somebody the cloud has never
+    // heard of. So an edit made while one is queued goes out whole as well, replacing it
+    // at the same path - one operation superseding another at its own path, which is the
+    // only supersession the queue's own records are allowed to express (decodeQueue).
+    //
+    // The queue is read ONCE for the whole roster edit and handed in - see the caller.
+    // Asking it per entity would decode the durable queue once per person, which is the
+    // cost tests/queuecost.test.mjs exists to keep out of this file.
+    wholeEntityQueued(queued, kind, id) {
+        return Boolean(queued) && queued.has(`roster.${kind}.${id}`);
+    },
+
     // One changed field, e.g. days.2026-08-12.plan.w_03. Queued by path so that editing
     // the same worker twice before the flush sends one write, while edits to different
     // workers all survive.
@@ -101,24 +158,127 @@ Object.assign(FarkadSync, {
     // `removed` names entities that are gone from the roster on purpose, so their
     // tombstones go out even when this device has never seen a snapshot and therefore has
     // no _remoteRoster to notice the absence against.
-    editRoster(schedule, removed) {
+    // THE ROSTER THAT WAS ON THE DISK A MOMENT AGO, indexed by id.
+    //
+    // `_remoteRoster` is the last snapshot this device ADOPTED, it lives in memory, and it
+    // is empty at every app start - so a phone that edits the roster before its first
+    // snapshot arrives has no baseline at all and sends EVERY entity, stale ones included.
+    // That window is ordinary, not exotic: open the app, change a site, and the write can
+    // leave before the listener delivers.
+    //
+    // This is the other baseline, and it is the one that cannot be empty. State.commitRoster
+    // calls editRoster and saves on the NEXT line, so at this moment scheduleData:v2 still
+    // holds the roster from before the person touched anything. An entity identical to what
+    // was on the disk a moment ago was not part of this edit, whatever the memory baseline
+    // says, and must not be sent.
+    //
+    // Store.durableGet and not the memory cache, deliberately: this asks what the next
+    // session would read, which is the same question every other durability check in this
+    // app asks. Unreadable or absent, the answer is null and the old behaviour stands -
+    // this narrows what goes out, it never widens it.
+    durableRosterBaseline() {
+        let raw;
+        try {
+            raw = Store.durableGet(SCHEDULE_KEY);
+        } catch (error) {
+            return null;
+        }
+        if (raw === null || raw === undefined) return null;
+        try {
+            const stored = normaliseSchedule(JSON.parse(raw));
+            const byId = list => {
+                const out = {};
+                (list || []).forEach(item => {
+                    if (item && item.id) out[String(item.id)] = item;
+                });
+                return out;
+            };
+            return { workers: byId(stored.workers), places: byId(stored.places) };
+        } catch (error) {
+            // A record that will not parse is Recovery's business, not this function's.
+            // Answering null here sends what this device would have sent before; it does
+            // not touch the record and does not decide anything about it.
+            return null;
+        }
+    },
+
+    // `whole` forces every entity out regardless of either baseline. The seeding and repair
+    // calls in js/sync/receive.js use it: they exist precisely to populate a cloud document
+    // that is empty or damaged, where "nothing changed since the disk" is true of everything
+    // and sending nothing would leave the cloud empty for ever.
+    editRoster(schedule, removed, options) {
         // Collected, then written once. This is the longest chain of entries in the app -
         // one path per person, plus the order, plus the legacy array - and a partial
         // result here is the hardest kind to notice: a worker present but missing from
         // the order, or an order naming somebody who is not in the list.
         const batch = [];
         const put = (path, value) => batch.push({ path, value });
+        const sendWhole = Boolean(options && options.whole);
+        const onDisk = sendWhole ? null : this.durableRosterBaseline();
+        // Read once, for every entity in this edit. See wholeEntityQueued.
+        const queuedNow = sendWhole ? null : this._outbox;
 
         [['workers', 'workerOrder'], ['places', 'placeOrder']].forEach(([kind, orderKey]) => {
             const known = this._remoteRoster[kind] || {};
+            const before = (onDisk && onDisk[kind]) || null;
             const here = new Set();
 
             (schedule[kind] || []).forEach(item => {
                 if (!item || !item.id) return;
                 here.add(String(item.id));
-                const before = known[item.id];
-                if (before && JSON.stringify(before) === JSON.stringify(item)) return;
-                put(`roster.${kind}.${item.id}`, item);
+                const wire = JSON.stringify(item);
+                const adopted = known[item.id];
+                if (adopted && JSON.stringify(adopted) === wire) return;
+                // WHAT THIS EDIT ACTUALLY TOUCHED. Unchanged since the disk means the
+                // person did not touch it, and an untouched entity has no business on the
+                // wire - sending it is how a phone that has not yet heard about a rate
+                // change puts its stale copy of that man back on everybody else.
+                //
+                // This changes what is QUEUED, at commit time. That is the point, and it
+                // is why the existing pre-send hold is not enough on its own: the queue
+                // stores values computed when the edit was made, so a barrier that waits
+                // for the first snapshot and then releases the entry still releases an
+                // entry carrying the stale number. Measured: the hold waited, the cloud
+                // said 600, and the write that went out said 500. Nothing that acts at
+                // send time can fix a value that was wrong when it was written down.
+                const id = String(item.id);
+                const wasOnDisk = before && Object.prototype.hasOwnProperty.call(before, id)
+                    ? before[id] : null;
+                if (wasOnDisk && JSON.stringify(wasOnDisk) === wire) return;
+
+                // ONE FIELD PER EDIT, for somebody the disk already had.
+                //
+                // The whole entity record was the unit until v104, and inside that record
+                // rode every field this device happened to be holding - including the
+                // ones another phone had corrected while this one was in a stairwell. A
+                // phone number typed here put this device's copy of the man's daily rate
+                // back on all three, because the keyed map outranks the legacy array on
+                // every reader. Both phones said synced and no line anywhere said what
+                // had happened; a day recorded in between was stamped at the rate that
+                // walked backwards, which is law 2 reached from the wrong end. Measured
+                // in tests/roster-race.test.mjs, suite O2(d).
+                //
+                // The baseline is the DISK, read a moment before this edit was applied -
+                // see durableRosterBaseline - so a field that differs from it is a field
+                // the person just changed and nothing else is. Two phones editing two
+                // fields of one man now write two Firestore field paths and both land;
+                // two phones editing the same field write one path, and the ordering
+                // protocol contests it, which is what a contest is for.
+                const fields = perFieldChanges(kind, wasOnDisk, item);
+                if (fields && !this.wholeEntityQueued(queuedNow, kind, id)) {
+                    fields.forEach(field => put(`roster.${kind}.${id}.${field}`, item[field]));
+                    return;
+                }
+                // The whole record, and every reason it is still the right unit: an
+                // entity NOBODY has a record of yet - there is nothing to merge one field
+                // into, and mergeRoster will not build a person out of a fragment; a
+                // baseline this device could not read; a record whose shape this build
+                // does not recognise field for field, where naming the changed ones would
+                // silently leave the rest behind; and a whole write for this id already
+                // waiting in the queue, which one field of him may not travel beside -
+                // Firestore refuses a single update naming both a field and something
+                // inside it.
+                put(`roster.${kind}.${id}`, item);
             });
 
             // Somebody the cloud's map still holds who is no longer in the crew.
@@ -345,16 +505,19 @@ Object.assign(FarkadSync, {
             // Collection may not have taken it off the disk yet - it is allowed to fail -
             // and a settled path must not then be held as a contest on the way past.
             if (settledHere.has(String(path))) return;
-            // A DAY OR A LEDGER ENTRY, and nothing else.
+            // A DAY, A LEDGER ENTRY, OR ONE FIELD OF ONE PERSON.
             //
-            // Those are the two families where a queued value REPLACES what is there, so
+            // Those are the families where a queued value REPLACES what is there, so
             // sending one over somebody's correction loses recorded work or money - which
-            // is the whole of what this hold is for. The roster is not like that: it
-            // merges per id, an added worker is additive rather than a correction of a
-            // value somebody was looking at, and the ordering of a roster change against a
-            // restore is its own transaction with its own rules (G12-G14). Holding roster
-            // paths here would have stopped a worker added after a prepared restore from
-            // ever reaching the cloud - a guarantee that already has a suite of its own.
+            // is the whole of what this hold is for. A daily rate is exactly that, and
+            // since v104 it travels as a path of its own, so it is asked here like a day.
+            //
+            // A WHOLE roster record is still not one of them: it merges per id, an added
+            // worker is additive rather than a correction of a value somebody was looking
+            // at, and the ordering of a roster change against a restore is its own
+            // transaction with its own rules (G12-G14). Holding those here would have
+            // stopped a worker added after a prepared restore from ever reaching the
+            // cloud - a guarantee that already has a suite of its own. See replacesWhole.
             if (!replacesWhole(path)) return;
             if (this.movedUnder(item, path, this._baseDoc)) movedUnder.push(String(path));
         });
@@ -416,6 +579,35 @@ Object.assign(FarkadSync, {
                 // one that was sent.
                 sent.set(path, { opId: item.opId, seq: item.seq });
             });
+
+        // NO WRITE NAMES BOTH A FIELD AND SOMETHING INSIDE IT.
+        //
+        // updateDoc refuses one update carrying `roster.workers.w_01` and
+        // `roster.workers.w_01.phone` together - not as a conflict it resolves, as an
+        // error that fails the whole send, and it would fail every retry the same way for
+        // as long as both were queued. Since v104 the two shapes both exist, so the pair
+        // is possible in principle.
+        //
+        // editRoster is built so it cannot happen - it sends a man whole while a whole
+        // write for him is queued - but the seeding and repair calls send EVERY entity
+        // whole and can run with a field write already waiting, so the pair is reachable
+        // from there. This is where it is made harmless, because the cost of being wrong
+        // is a phone that cannot send anything at all. The CONTAINING
+        // path stays: it carries the field, being built from the schedule the field edit
+        // was already applied to. The one inside it is simply left in the queue, unsent
+        // and unacknowledged, and goes out on its own next time.
+        Object.keys(patch).forEach(path => {
+            const parts = String(path).split('.');
+            for (let at = 1; at < parts.length; at += 1) {
+                if (!Object.prototype.hasOwnProperty.call(patch, parts.slice(0, at).join('.'))) {
+                    continue;
+                }
+                delete patch[path];
+                sent.delete(path);
+                holding = true;
+                return;
+            }
+        });
 
         if (holding) {
             // Something is being kept back, so this device is not up to date whatever

@@ -582,7 +582,15 @@ function rosterIds(raw, kind) {
     const roster = isPlainObject(raw.roster) ? raw.roster : {};
     if (isPlainObject(roster[kind])) {
         Object.keys(roster[kind]).forEach(id => {
-            if (roster[kind][id]) ids.add(String(id));
+            if (!roster[kind][id]) return;
+            // A FRAGMENT GRANTS NOBODY. `roster.workers.w_01.phone` on a document whose
+            // map had no w_01 leaves `{ phone: … }` there, and mergeRoster refuses to
+            // build a person out of it. This function answers "who does the document
+            // grant", and it has to answer it the same way the reader does - otherwise a
+            // phone that still knows the man is told he is already granted, does not
+            // repair the document, and he stays missing everywhere.
+            if (isEntityFragment(roster[kind][id]) && !ids.has(String(id))) return;
+            ids.add(String(id));
         });
     }
     return ids;
@@ -639,11 +647,19 @@ function rosterProblems(raw) {
                     }
                     // The key IS the id. A map whose key and whose record disagree says
                     // two things about one person, and every reader picks a different one.
-                    if (String(item.id) !== String(id)) {
+                    //
+                    // A record that names NO id is the other thing this map holds now: a
+                    // fragment left by a per-field write - `roster.workers.w_01.phone` -
+                    // on a document whose map had not heard of him yet. It disagrees with
+                    // nobody, the key still says who it is, and refusing it would make
+                    // every document that has taken one unreadable on every phone. What a
+                    // fragment may NOT do is stand a man up on its own; that is
+                    // mergeRoster's rule, not this one's.
+                    if (!isEntityFragment(item) && String(item.id) !== String(id)) {
                         problems.push(label + ' ' + id + ' בגוש הרוסטר רשום תחת מזהה אחר.');
                         return;
                     }
-                    entityProblems(item, kind, label).forEach(p => problems.push(p));
+                    entityProblems(item, kind, label, id).forEach(p => problems.push(p));
                 });
             }
         }
@@ -670,18 +686,84 @@ function rosterProblems(raw) {
     return problems;
 }
 
-function entityProblems(item, kind, label) {
+// `id` names who this is when the record itself does not - a per-field write leaves a
+// FRAGMENT in the keyed map, and the key is then the only place the id lives. Without it
+// every sentence about a fragment read "עובד undefined", which is a sentence about
+// nobody.
+function entityProblems(item, kind, label, id) {
     const problems = [];
+    const who = label + ' ' + (item.id === undefined || item.id === null
+        ? String(id === undefined ? '' : id) : item.id);
     if (item.active !== undefined && typeof item.active !== 'boolean') {
-        problems.push(label + ' ' + item.id + ': הסימון "פעיל" אינו תקין.');
+        problems.push(who + ': הסימון "פעיל" אינו תקין.');
     }
     if (kind !== 'workers') return problems;
 
     ['dailyRate', 'hourlyRate'].forEach(field => {
-        rateProblems(item[field], 'השכר של', label + ' ' + item.id)
+        rateProblems(item[field], 'השכר של', who)
             .forEach(problem => problems.push(problem));
     });
     return problems;
+}
+
+// ---------------------------------------------------------------- one field of one man
+//
+// The unit a roster edit travels in used to be the WHOLE entity record, and that is a lie
+// whenever two phones touch one person: A types a phone number, A's stale copy of his
+// daily rate rides along inside the same record, and the keyed map outranks everything, so
+// A's 500 lands on top of the 600 B raised him to - on every device, with both phones
+// saying synced. Measured in tests/roster-race.test.mjs, suite O2(d).
+//
+// So a change to somebody who is ALREADY on the record travels one field at a time:
+// `roster.<kind>.<id>.<field>`. Two phones editing two different fields of one man write
+// two different Firestore field paths and both survive; two phones editing the SAME field
+// write one path and contest it, which is what a contest is.
+//
+// These are the fields such a path may name. `id` is deliberately not among them: the KEY
+// is the id, a write that could move it would file a man under somebody else's name, and
+// nothing in the app has ever needed to. A name this table does not carry is refused by
+// journalEntryProblems rather than written - an unknown field is a field no reader here
+// knows what to do with, and normaliseSchedule would drop it at the next reopen anyway.
+const ENTITY_FIELDS = {
+    workers: ['name', 'idNumber', 'phone', 'dailyRate', 'hourlyRate', 'active'],
+    places: ['name', 'active']
+};
+
+// A record in the keyed map that does not say who it is: what a per-field write leaves
+// behind on a document whose map had no entry for that id yet. It is a fragment of a
+// person, not a person, and every reader has to know the difference - mergeRoster will
+// not stand one up as a roster row on its own.
+function isEntityFragment(item) {
+    return isPlainObject(item)
+        && (item.id === undefined || item.id === null || item.id === '');
+}
+
+// One field of one entity, on the wire. Empty means it is one.
+//
+// The value rules are exactly the ones the whole-entity form is already held to - the
+// rates through rateProblems, `active` a boolean - so a field that would pass inside a
+// record cannot be refused for travelling on its own. A null is a field CLEARED: it is
+// what writeFieldPath and Firestore both store, and normaliseSchedule reads it back as
+// the empty string or as zero, which is what clearing a field means here.
+function entityFieldProblems(kind, field, value) {
+    const known = ENTITY_FIELDS[kind] || [];
+    if (known.indexOf(field) === -1) return ['a roster field nobody wrote'];
+    // No entity field is a container. A record or a list arriving at one is not a value
+    // this app produced, and writing it would put a shape every reader has to survive
+    // into somebody's row.
+    if (value !== null && (Array.isArray(value) || isPlainObject(value))) {
+        return ['a roster field carrying a record'];
+    }
+    if (field === 'active') {
+        return (value === null || typeof value === 'boolean')
+            ? [] : ['a roster field that is not a mark'];
+    }
+    if (field === 'dailyRate' || field === 'hourlyRate') {
+        return rateProblems(value, 'השכר של', kind === 'workers' ? 'עובד' : 'אתר').length > 0
+            ? ['a roster field that is not a wage'] : [];
+    }
+    return (value === null || typeof value === 'string')
+        ? [] : ['a roster field that is not text'];
 }
 
 // `known` names the ids that have to resolve, or null to skip the reference checks.
@@ -1104,14 +1186,23 @@ function journalEntryProblems(path, value) {
 
         // roster.workers.<id> / roster.places.<id> - one person or one site, or a
         // removal, which travels as null.
-        if (parts.length !== 3) return ['a roster path with the wrong number of segments'];
+        //
+        // roster.workers.<id>.<field> - ONE FIELD of one person. The unit an ordinary
+        // roster edit travels in, so that a phone number typed on one phone does not
+        // carry that phone's stale copy of the man's daily rate along with it. See
+        // ENTITY_FIELDS: the field name is checked against the fields that kind actually
+        // has, so an unknown one is refused rather than written into somebody's row.
+        if (parts.length !== 3 && parts.length !== 4) {
+            return ['a roster path with the wrong number of segments'];
+        }
         const kind = parts[1];
         if (kind !== 'workers' && kind !== 'places') return ['a roster path nobody wrote'];
         if (!isSafeSegment(parts[2])) return ['a roster path with an unusable id'];
+        if (parts.length === 4) return entityFieldProblems(kind, parts[3], value);
         if (value === null) return [];
         if (!isPlainObject(value)) return ['a roster entry that is not a record'];
         if (String(value.id) !== parts[2]) return ['a roster entry filed under another id'];
-        return entityProblems(value, kind, kind === 'workers' ? 'עובד' : 'אתר');
+        return entityProblems(value, kind, kind === 'workers' ? 'עובד' : 'אתר', parts[2]);
     }
 
     // The legacy whole-array form. Still written on purpose, for a phone that has not
@@ -1349,16 +1440,58 @@ function rosterDocument(schedule) {
 // Order: the order field first, then anyone it had not heard of, in the order the array
 // had them. An order written by a device that has not yet seen a new man must not remove
 // him.
+//
+// AND THE MAP ENTRY IS MERGED INTO WHAT IS THERE, not laid over it whole.
+//
+// An ordinary roster edit writes one FIELD now - `roster.workers.w_01.phone` - so the
+// entry the map ends up holding for a man whose record it had never carried is
+// `{ phone: … }` and nothing else. Replacing with that took his name, both his rates and
+// his active mark off him; normaliseSchedule then dropped the row for having no id, and
+// the man left every phone. Merging is also what makes the per-field write worth having:
+// the fields another device wrote stay exactly where they are, which is the whole point.
+//
+// For the whole-entity form this is the same answer it always gave. A record written by
+// this app carries every field it has, so nothing in the floor survives a merge that
+// would not have survived a replacement.
+//
+// A FRAGMENT WITH NOTHING TO MERGE INTO IS NOT A PERSON. Nobody holds a record for that
+// id - not the array, not the map - so all there is here is one field of somebody this
+// document cannot name. Standing him up would put a nameless row in the roster and, when
+// the fragment landed on a tombstone, resurrect a man somebody removed. Dropped: the
+// person who typed it still has it on their own phone, and the entity write that would
+// give it somebody to belong to is the one editRoster keeps whole.
 function mergeRoster(list, map, order) {
     const byId = new Map();
     (Array.isArray(list) ? list : []).forEach(item => {
         if (item && item.id) byId.set(String(item.id), item);
     });
 
+    // Field by field, and never through Object.assign: a document can arrive carrying an
+    // own `__proto__` key - JSON.parse makes one - and assigning it moves the prototype
+    // instead of copying a field. The poison names are skipped, which is what every other
+    // copy in this app does with them.
+    const overlay = (floor, entry, id) => {
+        const out = {};
+        [floor, entry].forEach(source => {
+            if (!source || typeof source !== 'object') return;
+            Object.keys(source).forEach(key => {
+                if (POISON_SEGMENTS.indexOf(key) !== -1) return;
+                out[key] = source[key];
+            });
+        });
+        out.id = String(id);
+        return out;
+    };
+
     const entries = (map && typeof map === 'object') ? map : {};
     Object.keys(entries).forEach(id => {
-        if (entries[id]) byId.set(String(id), entries[id]);
-        else byId.delete(String(id));
+        const key = String(id);
+        const entry = entries[id];
+        if (!entry) { byId.delete(key); return; }
+        if (!isPlainObject(entry)) return;
+        const floor = byId.get(key);
+        if (isEntityFragment(entry) && !floor) return;
+        byId.set(key, overlay(floor, entry, key));
     });
 
     const out = [];

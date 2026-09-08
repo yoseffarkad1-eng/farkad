@@ -1059,9 +1059,25 @@ function normaliseSchedule(raw, hints) {
 // form last.
 function rememberedEntities(raw, hints) {
     const out = { workers: {}, places: {} };
+    // MERGED, not overwritten. Since v104 the keyed map can hold a FRAGMENT - what one
+    // per-field write leaves on a document whose map had no entry for that man,
+    // `{ phone: … }` and nothing else - and it is the most authoritative form, so it went
+    // last and took his name, his identity number and both his rates off the copy the
+    // array still had. This function exists so a reinstated man keeps all of that. Later
+    // sources still win field by field, which is what "authoritative" was ever meant to
+    // say; what they cannot do any more is win by being silent.
     const keep = (kind, id, item) => {
-        if (!item) return;
-        out[kind][String(id)] = item;
+        if (!item || typeof item !== 'object') return;
+        const key = String(id);
+        const merged = {};
+        [out[kind][key], item].forEach(source => {
+            if (!source) return;
+            Object.keys(source).forEach(field => {
+                if (POISON_SEGMENTS.indexOf(field) !== -1) return;
+                merged[field] = source[field];
+            });
+        });
+        out[kind][key] = merged;
     };
 
     ['workers', 'places'].forEach(kind => {

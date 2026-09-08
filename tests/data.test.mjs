@@ -388,20 +388,63 @@ function record(device, date, workerId, placeId, rate) {
 
     // A roster change queues with no cloud too - a worker added offline who never
     // reaches the cloud takes his days with him. It is one path per person, plus the
-    // order, plus the whole array kept for devices still on the older build: for three
-    // workers and two places that is 5 + 4 on top of the two days.
+    // order, plus the whole array kept for devices still on the older build.
+    //
+    // ONE PATH PER PERSON WHO CHANGED, and that second half is new.
+    //
+    // This used to commit an UNTOUCHED roster and expect all five entities on the wire,
+    // and it counted 11. That number was an accident of the fixture: seed() assigns
+    // worker literals straight into the schedule without normalising, so the three
+    // workers differed from their own normalised copy on the disk and were queued as
+    // "changed", while the two places - which normalise to themselves - were not. The
+    // check said "one path per person" and was measuring a normalisation artifact that
+    // the app cannot produce, because State.schedule is always normaliseSchedule's
+    // output. So it is rewritten to change somebody on purpose.
+    //
+    // What it now pins is the guarantee that closes O2: an entity nobody touched is not
+    // written down, so it cannot be sent later over a newer value from another phone.
+    // See durableRosterBaseline in js/sync/send.js.
+    device.State.load();
+    device.State.worker('w_01').dailyRate = 450;
+    device.State.place('p_01').name = 'הרצליה מערב';
     device.State.commitRoster();
-    check('a roster change queues one path per person, not one whole array',
-        device.Sync.pendingCount() === 11, String(device.Sync.pendingCount()));
-    check('and the paths are per-entity',
-        device.Sync.pendingPaths().includes('roster.workers.w_01')
-        && device.Sync.pendingPaths().includes('roster.workerOrder'),
-        JSON.stringify(device.Sync.pendingPaths()));
 
+    // AND ONE PATH PER FIELD, which is newer again.
+    //
+    // The unit was the whole entity record until v104, and the record carried whatever
+    // this device happened to be holding in every OTHER field - including one another
+    // phone had corrected while this one was away. A phone number typed here put this
+    // device's stale copy of the man's daily rate back on all three, and the keyed map
+    // outranks the legacy array on every reader, so it won everywhere with both phones
+    // saying synced. That is suite O2(d) of tests/roster-race.test.mjs, and this is the
+    // shape that closes it: the rate changed, so the rate travels, and nothing else of
+    // his does.
+    const rosterPaths = device.Sync.pendingPaths();
+    check('a roster change queues one path per FIELD somebody changed',
+        rosterPaths.includes('roster.workers.w_01.dailyRate')
+        && rosterPaths.includes('roster.places.p_01.name'),
+        JSON.stringify(rosterPaths));
+    check('and nothing of the man the person did not touch goes with it',
+        !rosterPaths.includes('roster.workers.w_01')
+        && !rosterPaths.some(path => path.indexOf('roster.workers.w_01.') === 0
+            && path !== 'roster.workers.w_01.dailyRate'),
+        JSON.stringify(rosterPaths));
+    check('and the paths are per-entity, with the order beside them',
+        rosterPaths.includes('roster.workerOrder')
+        && rosterPaths.includes('roster.placeOrder'),
+        JSON.stringify(rosterPaths));
+    check('and nobody the person did not touch is on the wire',
+        !rosterPaths.includes('roster.workers.w_02')
+        && !rosterPaths.includes('roster.workers.w_03')
+        && !rosterPaths.includes('roster.places.p_02'),
+        JSON.stringify(rosterPaths));
+
+    const queuedAfterRoster = device.Sync.pendingCount();
     const reopened = makeDevice({ storage: device.dump() });
     reopened.State.load();
     check('and the queue survives the app being closed',
-        reopened.Sync.pendingCount() === 11, String(reopened.Sync.pendingCount()));
+        reopened.Sync.pendingCount() === queuedAfterRoster,
+        `${reopened.Sync.pendingCount()} of ${queuedAfterRoster}`);
 }
 
 {
