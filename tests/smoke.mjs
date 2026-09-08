@@ -5065,9 +5065,15 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   const heads = await page.$$eval('#settingsPanel .settings-group h3',
     nodes => nodes.map(node => node.textContent.trim()));
-  check('the sheet has the six groups, in the board order',
+  // WAS SIX. «מידע טכני» joined at v104: the copyable block that reports the page
+  // build, the app build, the service worker's own build census, the visual viewport
+  // and both bars as measured rects. The panel is the one place a person can be asked
+  // to look, and "which build is this phone on" had been asked twice with no way for
+  // anybody to answer it. The count moves because the panel gained a group on purpose.
+  check('the sheet has the seven groups, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'עדכון וגרסה', 'מצב המכשיר']),
+      ['ענן וסנכרון', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'עדכון וגרסה', 'מצב המכשיר',
+                'מידע טכני']),
     JSON.stringify(heads));
 
   // One primary action: the export. Everything else is quieted with btn-secondary or
@@ -6104,16 +6110,33 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     sent.includes('workers') && sent.includes('places'), JSON.stringify(sent));
 
   // and a roster edit in flight is not dropped by a snapshot landing on top of it
+  //
+  // THE GUARANTEE IS THE SAME; WHAT CARRIES IT IS NOT.
+  //
+  // This used to hand-queue the legacy whole array on its own - clearOutbox, then
+  // queue('workers', …) - and assert that reapplyPending laid it back over the snapshot.
+  // Since v104 the array is never re-applied over an adopted snapshot: it is a
+  // wire-compat projection for a v78 READER, and re-applying one over a newer truth is
+  // how a phone put another phone's rate change back (docs/data-safety-audit.md, O2).
+  // So the old shape now measures the absence of the defect and calls it a lost worker.
+  //
+  // It also could not happen. editRoster never queues the array alone - the order goes
+  // with it, and a worker who has just been added is not on the durable baseline, so
+  // `roster.workers.<id>` goes too. That per-entity path is what carries him, and it is
+  // what this check now drives, through commitRoster, the way the app does it.
   const kept = await page.evaluate(() => {
     FarkadSync.clearOutbox();
-    FarkadSync.queue('workers', State.schedule.workers);
+    State.commitRoster();
+    const queued = FarkadSync.pendingPaths();
     const incoming = { workers: [{ id: 'w_01', name: 'דוד', active: true }], places: [], days: {} };
     FarkadSync.reapplyPending(incoming);
     FarkadSync.clearOutbox();
-    return incoming.workers.map(w => w.id);
+    return { ids: incoming.workers.map(w => w.id), queued };
   });
   check('a just-added worker survives the snapshot that arrives mid-send',
-    kept.includes('w_09'), JSON.stringify(kept));
+    kept.ids.includes('w_09'), JSON.stringify(kept.ids));
+  check('and it is his own path that carries him, not the legacy array',
+    kept.queued.includes('roster.workers.w_09'), JSON.stringify(kept.queued));
 
   // A brand-new project: the first write is a day edit, so the server document has days
   // and a stamp but no roster. That is unfinished, not broken - it used to lock the
