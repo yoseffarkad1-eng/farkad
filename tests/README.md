@@ -41,6 +41,17 @@ against the real Firestore emulator in `tests/cas.emulator.test.mjs`, and the ro
 that has to publish it in `tests/rollout.test.mjs`. Both are in `test:release`. A manual
 emulator run on the side is not the gate.
 
+`tests/rollout-matrix.test.mjs` is in `test:release` too, and it is the one suite here whose
+output a DOCUMENT depends on. It measures eight cells — old and new client, against old and
+new rules, on a legacy document and one that has entered the protocol — plus the two
+rollback rows. `docs/rollout-checklist.md`, `docs/firebase-setup.md` and
+`features/gate-flip/contract.md` state the order those cells produce; before this suite
+existed the three of them disagreed, and one of them asked the operator for a state its own
+rules forbid. Nothing fails today if somebody weakens `legacyWrite()` or
+`bootstrapTouchesOnlyProtocol()` in `firestore.rules` — except this. It loads both rulesets
+itself through `@firebase/rules-unit-testing`, so it does not care which one `firebase.json`
+points at, and it runs on the repo's own config with no extra file.
+
 Any single suite runs on its own: `npm run test:build`, `node tests/data.test.mjs`,
 and so on — each file's header says exactly how to invoke it and why it exists.
 Node 20 or 22 (`engines` in package.json).

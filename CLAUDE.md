@@ -213,6 +213,8 @@ written down so it cannot happen twice.
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator
     tests/rollout.test.mjs     publishing the rules over a genuine legacy document, and the cutover
+    tests/rollout-matrix.test.mjs old and new client x old and new rules x legacy and protocol
+                               document: the eight cells the rollout order is DERIVED from, not argued
     tests/ledger.ingress.test.mjs malformed ledger data through every door: held aside, never coerced
     tests/money.concurrency.test.mjs two phones writing MONEY at once, through the production adapter
     tests/poison.test.mjs      a ledger id that would land on a prototype, through every writer
