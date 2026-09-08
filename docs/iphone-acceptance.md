@@ -1,8 +1,8 @@
 # בדיקת קבלה במכשיר אמיתי — רשימה ליוסף
 
 > **NOT YET PHYSICALLY VERIFIED.** Nothing in this list has been performed on a real
-> iPhone for the current build, and that has been true of every build since v86. Fifty-eight
-> rows, none of them run. The number is written here rather than left to be counted, because
+> iPhone for the current build, and that has been true of every build since v86. Seventy-three
+> rows, none of them run - sixty-one from earlier rounds and twelve added at v104. The number is written here rather than left to be counted, because
 > "the suites are green" and "somebody looked at it on a phone" are two different claims and
 > only one of them is true of this repository.
 >
@@ -222,3 +222,30 @@
 ابعت لكل بند: **مرق / ما مرق**، وإذا ما مرق — صورة شاشة وشو بالضبط صار.
 
 ما بدنا منك تفتح كود ولا سجلات. بس تفتح، تضغط، وتشوف.
+
+---
+
+## v104 — the twelve rows this round could not run
+
+Added by the closeout round. The first eleven exist because Chromium anchors
+`position: fixed` to the LAYOUT viewport and iOS anchors it to the VISUAL one, so the
+shape in the screenshot cannot be produced by any suite in this repository - that is a
+measured limit, not an untried idea. **P11 is the row that ends the guessing about which
+build the phone is on, and only the owner can run it.**
+
+Every one of these is **NOT RUN**.
+
+| # | what to do | what must happen | why no suite here can say |
+|---|---|---|---|
+| P1 | On the home-screen app: scroll the day list, then pull the page down and let it settle | Both bottom bars stay ON the bottom edge. If either floats mid-screen with content under it, that is the original fault | Chromium anchors `position: fixed` to the layout viewport, iOS to the visual viewport. The geometry cannot be produced here |
+| P2 | Pinch to zoom in, pan to the bottom of the list, tap the last man | His sheet opens, with his name on it | `visualViewport.offsetTop` stays 0 in headless Chromium; `Input.synthesizeScrollGesture` is refused at the coordinates that would pan it |
+| P3 | Open a field, dismiss the keyboard **with the page scrolled**, then tap the last man | Both bars return, and the tap reaches him | the return is measured here through the app's own seam; that Safari fires the events that seam is driven by is an assumption |
+| P4 | Press «הדפס», then close the sheet iOS opens (or does not) | Both bars return without killing the app | Safari's print sheet has no Chromium equivalent |
+| P5 | Background the app for a minute, bring it back, tap the last man | Bars in place, no empty strip at the bottom, the tap reaches him | `visibilitychange`/`pageshow` are dispatched here as events, not produced by the OS |
+| P6 | Turn the phone sideways, scroll to the end of the list, tap the last man, in **both** orientations | Reached, in both | a real finger on real glass — the board says this too and does not claim it |
+| P7 | iOS → Display → Text Size → largest (AX2), then open the day screen and the assign sheet | Nothing clipped, no button gone, every target still a finger's size | the 200% pass rewrites the CSS cascade; it is a real reflow and it is not Dynamic Type |
+| P8 | ⋯ → מידע טכני → «העתק», paste into WhatsApp | The block pastes whole, and `sw.builds` names a build | `navigator.clipboard` behaves differently inside a home-screen web app; the fallback path is written and unexercised on a phone |
+| P9 | With writes held (quarantine), scroll the day list | «הרישום מושבת» stays on the screen | measured here in Chromium; the compact header under Safari's own scroll is not |
+| P10 | Delete a worker's day so the undo bar appears carrying a long name, then tap the last man in the list | He is reached, not the undo bar | the fix is measured here; a real finger on a real 320px screen is not |
+| P11 | Send back the diagnostic block from the phone that produced the floating-bars screenshot | `page.build`, `app.build` and `sw.builds` all name the same version — or they do not, which is the answer | this is the one row that ends the guessing, and only the owner can run it |
+| P12 | On the smallest phone at AX2: delete a worker's day so the undo bar appears, then try to reach the last man in the list | If he cannot be reached, that is expected on that screen — the undo bar expires in twelve seconds and בטל stays in the header. What must NOT happen is the bar covering the screen with no way out | measured here as a geometric impossibility, not as a bug; a person's judgement of whether it is tolerable is not a measurement |

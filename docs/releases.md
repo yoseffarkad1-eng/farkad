@@ -12,12 +12,79 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v102 (`2bae97f`).** Every build at the top of this file has reached `main`;
+**`main` is at v103 (`21c8e08`).** Every build at the top of this file has reached `main`;
 a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
+
+## CANDIDATE — v104 — the two open blockers, closed
+
+**Not served. Not merged. On no phone.** On `claude/farkad-closeout-blockers`, built on
+`main` as served (`21c8e08`, v103). Both money gates are still `false`: `LEDGER_WRITES` in
+`js/model/ledger.js` and `carryAdvances` in `js/model/schema.js`. Code being ready is not
+permission to open them.
+
+**The two findings `docs/data-safety-audit.md` left OPEN are closed, with the contract each
+was waiting for**
+
+- **O1 — a restore took a repayment off two devices out of three.** A takes a backup, B
+  records 500 handed back, A restores. A and the cloud held 5000, B held 4500, both said
+  «מסונכרן», and reopening B kept it. `features/restore-ledger/contract.md` decides it: a
+  restore replaces the WORK record and never erases a financial event anywhere. The union
+  goes in at `prepareReplace`, so the document that is stored, sent and compared against is
+  one already-correct document and a retry re-sends the same bytes.
+- **O2 — a roster edit put another phone's rate change back.** Three mechanisms, not the
+  one the audit established. The memory baseline is empty at every app start; the legacy
+  whole array IS the carrier the audit said it was not, and its guard only fires for the
+  same list, so renaming a SITE reverted a WORKER; and the write unit was the whole person,
+  so editing a phone number carried a stale wage with it. A roster edit now writes
+  `roster.<kind>.<id>.<field>` — what the person touched, and nothing else.
+
+**Two defects on the phone, found by asking for a tap instead of a width**
+
+- A third fixed bar (`#undoBar`) that nothing had ever measured. At 320×667 with a long
+  name it covered 107px the page did not know about, and the last worker was not
+  hit-testable. At 200% text it missed at every width.
+- `.wrow-main { flex: 1 }` with the default `min-width: auto` let an unbreakable name grow a
+  button to 1008px inside a 320px row, putting the delete ✕ at x = −732 — off screen, and
+  invisible to every check because the list clips.
+
+**Five defects in what leaves the phone**, each proved by reading the produced file: a
+mid-period raise made a row uncheckable and only the screen said why; a closed payslip
+printed TODAY's daily rate beside a frozen wage that did not multiply out; «מקדמות חדשות»
+was missing from the workbook and the CSV; a correction carried four of its seven fields;
+and a range that is not a whole account changed the arithmetic without saying so.
+
+**A diagnostic that answers the question that has been asked twice** — ⋯ → מידע טכני prints
+the page build, the app build and the service worker's own build census, the visual viewport
+with its scale, both bars as measured rects, the pending count and the sync reason. It
+carries no name, no amount and no device id, and a Latin worker name is seeded to prove it.
+
+**The rollout order is now derived from measurement.** Eight cells on the emulator — old and
+new client × old and new rules × legacy and protocol document — plus two rollback rows.
+`docs/rollout-checklist.md`, `docs/firebase-setup.md` and `features/gate-flip/contract.md`
+disagreed; one of them asked the operator for a state its own rules forbid.
+
+**What this build is known NOT to cover**
+
+- **No physical iPhone has run any of it.** `docs/iphone-acceptance.md` holds 73 rows and
+  every one is NOT RUN. The floating-bars geometry from the September screenshot cannot be
+  reproduced by any suite here: Chromium anchors `position: fixed` to the layout viewport,
+  iOS to the visual one. Row P11 — send back the diagnostic block from that phone — is the
+  only thing that ends the guessing, and only the owner can run it.
+- **One screen stays broken and it is written down**: 320×667 at 200% text with the undo bar
+  up has 469px of chrome on a 667px screen, so the last worker cannot be reached. Acceptance
+  row P12. It is a geometric impossibility, not a defect that was skipped.
+- **One roster race survives**: a whole-entity write and a per-field write for one man,
+  serialised so they never race a revision, can still lose the field. Every actual race is
+  caught. The window exists only while some phone still sends whole records — a new entity,
+  and the seed path.
+- **`firestore.rules` is unchanged and unpublished.** Nothing in this repository proves which
+  rules are live on the project; reading the console is step zero of the runbook.
+- **The advances feature is not on.** Everything measured about it in this build was measured
+  with the gates opened through the test seam and closed again.
 
 ## CANDIDATE — v103 — the app put in order, and the panel that was already right
 
