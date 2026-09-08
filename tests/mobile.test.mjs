@@ -2572,6 +2572,554 @@ for (const width of [430, 390, 320]) {
     await page.context().close();
 }
 
+// ---------------------------------------------------------------- the transitions
+//
+// WHAT THIS BLOCK IS FOR, AND WHAT IT CANNOT DO.
+//
+// The screenshot this round is built on shows the two bottom bars floating in the middle
+// of the screen with page content underneath them, on an iPhone, on the home screen.
+// Nothing here can reproduce that geometry and this file must not pretend otherwise:
+// Chromium anchors `position: fixed` to the LAYOUT viewport, iOS Safari anchors it to the
+// VISUAL viewport, and it is that difference - a bar drawn against a viewport that has
+// slid out from under it - which puts a bar in the middle of the screen. No suite in this
+// repository can produce it. docs/iphone-acceptance.md is where that case lives.
+//
+// What CAN be measured is everything on this side of that difference: after each of the
+// six transitions the app is put through below, are the bars still fixed, still at the
+// bottom, still measured at the height they are actually drawn at - and, the half a
+// rectangle cannot answer, DOES A TAP STILL LAND WHERE IT LOOKS. Every transition ends
+// with the same three questions asked of the last man in the crew and of the buttons
+// along the bottom: is the element the thing document.elementFromPoint returns at its own
+// centre, does its rectangle intersect what is actually visible (the visual viewport, not
+// the layout one - they differ under a pinch), and - for the row and for one tab - does a
+// real tap through the browser produce the result the tap was for.
+//
+// The last question is why "kbd-open is absent" was never sufficient. A screen can have
+// both bars measured, both classes right and every rectangle where the design says, and
+// still hand a tap on the last row to the bar above it: that is the undo-bar defect this
+// round found, and it was invisible to every geometry check in this file.
+
+// Is this element reachable, in the viewport the person is actually looking through?
+//
+// Two rectangles, not one. window.innerHeight is the layout viewport and is what a fixed
+// bar is placed against; visualViewport is what is left to see through after a pinch or a
+// keyboard. Under a zoom the two disagree by half the screen, and a check written against
+// the layout one calls an off-screen row "on screen".
+const REACH = ([selector, index]) => {
+    const nodes = [...document.querySelectorAll(selector)].filter(n => n.offsetParent !== null);
+    const node = index < 0 ? nodes[nodes.length + index] : nodes[index];
+    if (!node) return { found: false, of: nodes.length };
+    const box = node.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const top = vv ? vv.offsetTop : 0;
+    const bottom = top + (vv ? vv.height : window.innerHeight);
+    const left = vv ? vv.offsetLeft : 0;
+    const right = left + (vv ? vv.width : window.innerWidth);
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    const hit = document.elementFromPoint(cx, cy);
+    return {
+        found: true,
+        cls: String(node.className || node.tagName).slice(0, 20),
+        // The centre is inside what can be seen, not merely inside the document.
+        visible: cy >= top && cy <= bottom && cx >= left && cx <= right,
+        // AND the box overlaps the visible band at all, so a row half under a bar is not
+        // reported as reachable on the strength of its centre alone.
+        intersects: box.bottom > top && box.top < bottom,
+        hit: Boolean(hit) && (node === hit || node.contains(hit)),
+        hitCls: hit ? String(hit.className || hit.tagName).slice(0, 20) : 'nothing',
+        box: { top: Math.round(box.top), bottom: Math.round(box.bottom) }
+    };
+};
+
+// Where both bars are and what the page believes about them, in one reading.
+const BARS = () => {
+    const read = selector => {
+        const node = document.querySelector(selector);
+        if (!node) return { there: false };
+        const style = getComputedStyle(node);
+        const box = node.getBoundingClientRect();
+        return {
+            there: style.display !== 'none' && box.height > 0,
+            fixed: style.position === 'fixed',
+            top: Math.round(box.top), bottom: Math.round(box.bottom),
+            h: Math.round(box.height)
+        };
+    };
+    const root = getComputedStyle(document.documentElement);
+    const varOf = name => root.getPropertyValue(name).trim();
+    return {
+        tabs: read('.tabs'), dock: read('.day-actions'), undo: read('#undoBar'),
+        nav: varOf('--nav-h'), dockVar: varOf('--day-actions-h'),
+        undoVar: varOf('--undo-h'), kb: varOf('--kb-h'),
+        kbdOpen: document.body.classList.contains('kbd-open'),
+        inner: window.innerHeight,
+        visual: window.visualViewport ? Math.round(window.visualViewport.height) : null,
+        scale: window.visualViewport ? Number(window.visualViewport.scale.toFixed(2)) : null,
+        offsetTop: window.visualViewport ? Math.round(window.visualViewport.offsetTop) : null
+    };
+};
+
+// The three questions, asked after one transition. `settled` is what the bars must look
+// like once the transition is over: both there, both fixed, both measured.
+async function afterTransition(page, label, { expectBars = true } = {}) {
+    const bars = await page.evaluate(BARS);
+    if (expectBars) {
+        // HOW MANY BOTTOM BARS THERE ARE IS A PROPERTY OF THE SCREEN, not a constant.
+        // Above 700px the tab bar moves up into the header and stops being fixed - which
+        // a phone turned sideways reaches (844x390) - and there the dock is the only bar
+        // at the bottom and carries the home indicator itself. barHeight (js/ui/bars.js)
+        // deliberately reports 0 for a bar that is not floating over the bottom, so the
+        // fact asserted here is the one that is true in both layouts: whatever IS fixed
+        // sits on the bottom edge, in order, and is measured at the height it is drawn at.
+        const stack = [['the dock', bars.dock, bars.dockVar], ['the tab bar', bars.tabs, bars.nav]]
+            .filter(entry => entry[1].there);
+        const floating = stack.filter(entry => entry[1].fixed);
+        const edge = floating.length === 0
+            || Math.abs(floating[floating.length - 1][1].bottom - bars.inner) <= 1;
+        const stacked = floating.length < 2
+            || Math.abs(floating[0][1].bottom - floating[1][1].top) <= 2;
+        check(`${label}: every bar floating over the bottom sits on the bottom edge, in order`,
+            stack.length > 0 && edge && stacked, JSON.stringify(bars));
+        check(`${label}: and each is measured at the height it is drawn at, 0 when it is not floating`,
+            stack.every(([, bar, published]) =>
+                published === `${bar.fixed ? bar.h : 0}px`),
+            JSON.stringify({ nav: bars.nav, tabs: bars.tabs, dockVar: bars.dockVar, dock: bars.dock }));
+    }
+
+    // The list scrolled to its end, which is the only place the last man can be.
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(220);
+
+    const row = await page.evaluate(REACH, ['#dayView .worker-list .wrow-main', -1]);
+    check(`${label}: the last man in the crew is visible and a tap at his centre reaches him`,
+        row.found && row.visible && row.intersects && row.hit, JSON.stringify(row));
+
+    for (const [what, selector, index] of [
+        ['the WhatsApp button', '.day-actions button', 0],
+        ['the copy button', '.day-actions button', -1],
+        ['the day tab', '.tabs .tab', 0],
+        ['the reports tab', '.tabs .tab', -1]
+    ]) {
+        const found = await page.evaluate(REACH, [selector, index]);
+        check(`${label}: ${what} is visible and a tap at its centre reaches it`,
+            found.found && found.visible && found.hit, JSON.stringify(found));
+    }
+    return bars;
+}
+
+// A REAL TAP, through the browser's own input path, and what it produced.
+//
+// A width measurement is not a reach test and elementFromPoint is not a tap: it asks what
+// is painted at a point, not what happens when a finger lands there. These two go all the
+// way through - the last row must open the assign sheet with THAT man's name on it, and
+// the week tab must actually change the screen.
+async function tapsStillWork(page, label) {
+    const target = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('#dayView .worker-list .wrow-main')]
+            .filter(n => n.offsetParent !== null);
+        const node = rows[rows.length - 1];
+        if (!node) return null;
+        const name = node.querySelector('.wrow-name');
+        return { name: (name ? name.textContent : '').trim() };
+    });
+    given(`${label}: there is a last man to tap`, Boolean(target && target.name));
+
+    await page.locator('#dayView .worker-list .wrow-main').last().tap();
+    await page.waitForTimeout(400);
+    const sheet = await page.evaluate(() => {
+        const modal = document.getElementById('assignSheet');
+        const title = document.getElementById('assignSheetTitle');
+        return {
+            open: modal ? getComputedStyle(modal).display !== 'none' : false,
+            title: title ? title.textContent.trim() : ''
+        };
+    });
+    check(`${label}: tapping the last man opens HIS sheet, not the row above his`,
+        sheet.open && target !== null && sheet.title.indexOf(target.name) !== -1,
+        JSON.stringify({ sheet, wanted: target && target.name }));
+
+    await page.evaluate(() => {
+        if (typeof closeAssignSheet === 'function') closeAssignSheet();
+    });
+    await page.waitForTimeout(300);
+
+    await page.locator('.tabs .tab').nth(1).tap();
+    await page.waitForTimeout(400);
+    const moved = await page.evaluate(() => ({
+        week: getComputedStyle(document.getElementById('weekView')).display !== 'none',
+        day: getComputedStyle(document.getElementById('dayView')).display !== 'none'
+    }));
+    check(`${label}: tapping the week tab actually changes the screen`,
+        moved.week && !moved.day, JSON.stringify(moved));
+
+    await page.evaluate(() => showView('day'));
+    await page.waitForTimeout(300);
+}
+
+for (const width of [320, 390]) {
+    const height = HEIGHTS[width];
+    suite(`${width}px: the transitions`);
+    const label = `${width}px`;
+
+    const page = await open({ width, height });
+    await setInset(page, 34);
+
+    // T0. The state everything below is compared against.
+    await afterTransition(page, `${label} at rest`);
+    await tapsStillWork(page, `${label} at rest`);
+
+    // T1. THE KEYBOARD GOING DOWN. Both halves: up (the bars must go, or the sheet's foot
+    // sits under the keys) and down again (they must come back, which is the v99 defect -
+    // on that build they did not, and only killing the app brought them back).
+    await page.evaluate(() => {
+        openAssignSheet('w_01');
+    });
+    await page.waitForTimeout(350);
+    await page.locator('.sheet-rate-row').getByText('שעות נוספות').click();
+    await page.waitForTimeout(250);
+    const up = await page.evaluate(() => {
+        const hours = document.querySelector('.rate-hours');
+        if (hours) hours.focus();
+        applyKeyboardInset(291);
+        measureBottomBars();
+        return {
+            tabs: getComputedStyle(document.querySelector('.tabs')).display,
+            kbdOpen: document.body.classList.contains('kbd-open')
+        };
+    });
+    check(`${label}: with the keyboard up both bars are out of the way`,
+        up.tabs === 'none' && up.kbdOpen === true, JSON.stringify(up));
+    await page.evaluate(async () => {
+        const hours = document.querySelector('.rate-hours');
+        if (hours) hours.blur();
+        if (typeof closeAssignSheet === 'function') closeAssignSheet();
+        await new Promise(done => setTimeout(done, 60));
+        // The measurement the app makes for itself: keyboardHeight() reads what has focus,
+        // and with nothing editable focused there is no keyboard whatever the numbers say.
+        applyKeyboardInset(keyboardHeight());
+        measureBottomBars();
+    });
+    await page.waitForTimeout(350);
+    await afterTransition(page, `${label} after the keyboard goes down`);
+    await tapsStillWork(page, `${label} after the keyboard goes down`);
+
+    // T2. THE SHARE OR PRINT SHEET, OPENED AND CLOSED. On a home-screen iPhone that sheet
+    // shrinks the visual viewport with NOTHING focused and closes again without a resize
+    // event. On v98 the app read that as a keyboard, hid both bars, and never measured
+    // again - the day screen ran to the bottom edge with neither bar on it. So: the
+    // shortfall arrives with nothing focused, and the bars must not move at all.
+    const sheetOver = await page.evaluate(() => {
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        // What the app itself would conclude from a 300px shortfall with nothing focused.
+        const decided = keyboardHeight();
+        applyKeyboardInset(decided);
+        measureBottomBars();
+        return {
+            decided,
+            tabs: getComputedStyle(document.querySelector('.tabs')).display,
+            kbdOpen: document.body.classList.contains('kbd-open')
+        };
+    });
+    check(`${label}: a sheet over the page with nothing focused is not a keyboard`,
+        sheetOver.decided === 0 && sheetOver.tabs !== 'none' && sheetOver.kbdOpen === false,
+        JSON.stringify(sheetOver));
+    // And the stale class, if one is somehow standing when the sheet closes, comes off at
+    // the first touch rather than at the next launch.
+    await page.evaluate(async () => {
+        applyKeyboardInset(300);          // the seam, standing in for the stale state
+        await new Promise(done => setTimeout(done, 60));
+        window.dispatchEvent(new Event('touchstart', { bubbles: true }));
+        document.dispatchEvent(new Event('touchstart', { bubbles: true }));
+    });
+    await page.waitForTimeout(350);
+    await afterTransition(page, `${label} after the share sheet closes`);
+    await tapsStillWork(page, `${label} after the share sheet closes`);
+
+    // T3. BACKGROUNDED AND BROUGHT BACK. Neither sends a resize; both once left the class
+    // standing and the bars hidden.
+    await page.evaluate(async () => {
+        applyKeyboardInset(300);
+        await new Promise(done => setTimeout(done, 60));
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await page.waitForTimeout(350);
+    await afterTransition(page, `${label} after coming back from the background`);
+    await tapsStillWork(page, `${label} after coming back from the background`);
+
+    // T4. TURNED SIDEWAYS AND BACK. The bars are as tall as their contents and the
+    // contents reflow; a height written down anywhere would be wrong in one of the two.
+    await page.setViewportSize({ width: height, height: width });
+    await page.evaluate(() => window.dispatchEvent(new Event('orientationchange')));
+    await page.waitForTimeout(400);
+    await afterTransition(page, `${label} turned sideways`);
+    await page.setViewportSize({ width, height });
+    await page.evaluate(() => window.dispatchEvent(new Event('orientationchange')));
+    await page.waitForTimeout(400);
+    await afterTransition(page, `${label} turned back`);
+    await tapsStillWork(page, `${label} turned back`);
+
+    // T5. PINCHED. Zoom is deliberately allowed in this app (the viewport meta is not
+    // locked and the smoke suite refuses user-scalable=no), and a pinch shrinks the visual
+    // viewport exactly the way a keyboard does. If the bars read that as a keyboard they
+    // vanish under somebody's zoom - which is why keyboardHeight() has a scale gate, and
+    // this is the check that would fail if it were removed.
+    //
+    // Emulation.setPageScaleFactor is a real page scale: measured on this Chromium, it
+    // moves visualViewport.scale to 2 and its height from 844 to 422. It is NOT an iOS
+    // pinch - see the note at the head of this block - and offsetTop stays 0 here, which
+    // is the half of the gesture this browser will not produce.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await page.waitForTimeout(350);
+    const pinched = await page.evaluate(() => {
+        applyKeyboardInset(keyboardHeight());
+        measureBottomBars();
+        return {
+            decided: keyboardHeight(),
+            scale: Number(window.visualViewport.scale.toFixed(2)),
+            visual: Math.round(window.visualViewport.height),
+            inner: window.innerHeight,
+            tabs: getComputedStyle(document.querySelector('.tabs')).display,
+            kbdOpen: document.body.classList.contains('kbd-open')
+        };
+    });
+    given(`${label}: the page really is zoomed`,
+        pinched.scale >= 1.9 && pinched.visual < pinched.inner, JSON.stringify(pinched));
+    check(`${label}: a pinch is not a keyboard - neither bar goes away under a zoom`,
+        pinched.decided === 0 && pinched.tabs !== 'none' && pinched.kbdOpen === false,
+        JSON.stringify(pinched));
+    await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await page.waitForTimeout(350);
+    await afterTransition(page, `${label} after the zoom is released`);
+    await tapsStillWork(page, `${label} after the zoom is released`);
+
+    // T6. THE VISUAL VIEWPORT MOVING ON ITS OWN. On a home-screen iPhone it slides inside
+    // a layout viewport that has not moved - the keyboard going down with the page
+    // scrolled - and that motion fires 'scroll' on visualViewport and nothing on window.
+    // Until v104 nothing listened to it, so a stale kbd-open outlived the gesture that
+    // should have cleared it.
+    await page.evaluate(async () => {
+        applyKeyboardInset(300);
+        await new Promise(done => setTimeout(done, 60));
+        window.visualViewport.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForTimeout(350);
+    await afterTransition(page, `${label} after the visual viewport moves`);
+    await tapsStillWork(page, `${label} after the visual viewport moves`);
+
+    // T7. THE UNDO BAR, which is the third bar and the one nothing measured.
+    //
+    // Measured before this round at 320x667 with a home indicator: an undo label carrying
+    // a long name wraps to three lines, the bar stands 107px tall, and the last man's row
+    // ran underneath it - document.elementFromPoint at the centre of that row returned the
+    // undo bar. The row was on the screen and could not be pressed.
+    await page.evaluate(() => {
+        offerUndo('הרישום של עובד עם שם ארוך מאוד נמחק מהאתר הראשי ומהיום הזה', () => {});
+    });
+    await page.waitForTimeout(400);
+    const withUndo = await page.evaluate(BARS);
+    check(`${label}: the undo bar is measured while it is up`,
+        withUndo.undo.there && withUndo.undo.fixed
+        && withUndo.undoVar === `${withUndo.inner - withUndo.undo.top}px`,
+        JSON.stringify({ undo: withUndo.undo, undoVar: withUndo.undoVar, inner: withUndo.inner }));
+    check(`${label}: and it is deeper than the two docked bars, which is why it must be`,
+        parseInt(withUndo.undoVar, 10)
+        > parseInt(withUndo.nav, 10) + parseInt(withUndo.dockVar, 10),
+        JSON.stringify({ undoVar: withUndo.undoVar, nav: withUndo.nav, dock: withUndo.dockVar }));
+    await afterTransition(page, `${label} with the undo bar up`);
+    await tapsStillWork(page, `${label} with the undo bar up`);
+    await page.evaluate(() => { if (typeof dismissUndoBar === 'function') dismissUndoBar(); });
+    await page.waitForTimeout(400);
+    const gone = await page.evaluate(BARS);
+    check(`${label}: and the room it took comes back when it goes`,
+        gone.undoVar === '0px', JSON.stringify({ undoVar: gone.undoVar }));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the diagnostic
+//
+// The block a person is asked to paste when the screen looks wrong. Two things have to be
+// true of it and only one of them is about layout: it has to SAY which build is running -
+// the question this round has asked twice and not had answered - and it has to carry
+// nothing about anybody.
+//
+// The roster below is seeded with a Hebrew name AND a Latin one on purpose. The report is
+// ASCII by construction, so a Hebrew name could not survive it whatever the code did; a
+// Latin one could, and a check that only looked for Hebrew would be a check that proves
+// the mechanism rather than the guarantee.
+for (const width of [320, 390]) {
+    suite(`${width}px: the diagnostic`);
+    const label = `${width}px`;
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    const SECRETS = ['מוחמד אבו פרקד', 'פרסדיה', 'Yosef Latin', 'Ashdod Yard', 'sod@example.com'];
+    await page.evaluate(async secrets => {
+        State.schedule.workers = [
+            { id: 'w_a', name: secrets[0], active: true, dailyRate: 437, hourlyRate: 51 },
+            { id: 'w_b', name: secrets[2], active: true, dailyRate: 613, hourlyRate: 77 }
+        ];
+        State.schedule.places = [
+            { id: 'p_a', name: secrets[1], active: true },
+            { id: 'p_b', name: secrets[3], active: true }
+        ];
+        State.schedule.advances = State.schedule.advances || {};
+        State.save();
+        render();
+        openSettings();
+        document.getElementById('diagnosticToggle').click();
+        await new Promise(done => setTimeout(done, 1100));
+    }, SECRETS);
+    await page.waitForTimeout(400);
+
+    const block = await page.evaluate(() => {
+        const field = document.getElementById('diagnosticText');
+        const toggle = document.getElementById('diagnosticToggle');
+        const copy = document.getElementById('diagnosticCopy');
+        const box = field ? field.getBoundingClientRect() : null;
+        const copyBox = copy ? copy.getBoundingClientRect() : null;
+        return {
+            text: field ? field.value : '',
+            expanded: toggle ? toggle.getAttribute('aria-expanded') : null,
+            readOnly: field ? field.readOnly : null,
+            px: field ? parseFloat(getComputedStyle(field).fontSize) : 0,
+            field: box ? { w: Math.round(box.width), h: Math.round(box.height) } : null,
+            copy: copyBox ? { w: Math.round(copyBox.width), h: Math.round(copyBox.height) } : null,
+            inside: box ? box.right <= window.innerWidth + 1 : false
+        };
+    });
+
+    given(`${label}: the block opens and has text in it`,
+        block.expanded === 'true' && block.text.length > 100);
+
+    // THE VERSION QUESTION, which is what this block was built for.
+    const lines = Object.fromEntries(block.text.split('\n')
+        .filter(line => line.indexOf('=') !== -1)
+        .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+    check(`${label}: it names the page's build, the scripts' build, and whether they agree`,
+        /^v\d+$/.test(lines['page.build'] || '') && /^v\d+$/.test(lines['app.build'] || '')
+        && lines['build.agree'] === 'yes',
+        JSON.stringify([lines['page.build'], lines['app.build'], lines['build.agree']]));
+    check(`${label}: and the builds the service worker still has windows on`,
+        typeof lines['sw.builds'] === 'string' && lines['sw.builds'].length > 0,
+        String(lines['sw.builds']));
+
+    // Everything the brief asks it to report, named field by field so a field that
+    // quietly stops being emitted fails here rather than on somebody's phone.
+    for (const field of ['window', 'visual', 'focus', 'bar.tabs', 'bar.dock', 'bar.undo',
+        'css.bars', 'sync.pending', 'sync.reason', 'writes.blocked']) {
+        check(`${label}: it reports ${field}`,
+            typeof lines[field] === 'string' && lines[field].length > 0,
+            JSON.stringify(lines[field]));
+    }
+    check(`${label}: the two viewports are both reported, with the scale and the offset`,
+        /^\d+x\d+$/.test(lines.window || '')
+        && /^\d+x\d+ scale=[\d.]+ offsetTop=-?\d+ pageTop=-?\d+$/.test(lines.visual || ''),
+        JSON.stringify([lines.window, lines.visual]));
+    check(`${label}: both bottom bars are reported as measured rectangles`,
+        /^(fixed|static|sticky|absolute) top=-?\d+ bottom=-?\d+ h=\d+$/.test(lines['bar.tabs'] || '')
+        && /^(fixed|static|sticky|absolute) top=-?\d+ bottom=-?\d+ h=\d+$/.test(lines['bar.dock'] || ''),
+        JSON.stringify([lines['bar.tabs'], lines['bar.dock']]));
+
+    // THE GUARANTEE.
+    const leaked = SECRETS.filter(secret => block.text.indexOf(secret) !== -1);
+    check(`${label}: no worker's name and no site's name is in it`,
+        leaked.length === 0, JSON.stringify(leaked));
+    // The daily rates seeded above, as digits. An amount is not a name and is just as
+    // much nobody's business on a WhatsApp thread.
+    const amounts = ['437', '613', '51', '77'].filter(n => block.text.indexOf(n) !== -1);
+    check(`${label}: and no amount out of the record either`,
+        amounts.length === 0, JSON.stringify(amounts));
+    check(`${label}: it is printable ASCII and nothing else, which no Hebrew name survives`,
+        /^[\x20-\x7E\n]*$/.test(block.text), JSON.stringify(
+            [...block.text].filter(c => !/[\x20-\x7E\n]/.test(c)).slice(0, 6)));
+    // The device id is a string this app writes and keeps; whether it identifies a person
+    // is not a question worth arguing on a thread, so it is simply not here.
+    const device = await page.evaluate(() => (typeof syncDeviceId === 'function' ? syncDeviceId() : ''));
+    check(`${label}: and not the device id`,
+        device.length === 0 || block.text.indexOf(device) === -1, device);
+
+    // ONE TAP TO COPY, and the field is big enough and legible enough to be that tap.
+    check(`${label}: the field is read-only, 16px, and inside the screen`,
+        block.readOnly === true && block.px >= 16 && block.inside === true,
+        JSON.stringify(block.field));
+    check(`${label}: and both its controls are a finger's size`,
+        block.copy.w >= 44 && block.copy.h >= 44, JSON.stringify(block.copy));
+    // Touching the field selects the whole report, which is the alternative to a
+    // long-press and two drag handles over a dozen lines, one-handed.
+    const selected = await page.evaluate(() => {
+        const field = document.getElementById('diagnosticText');
+        field.focus();
+        return { start: field.selectionStart, end: field.selectionEnd, len: field.value.length };
+    });
+    check(`${label}: touching it selects the whole block`,
+        selected.start === 0 && selected.end === selected.len && selected.len > 0,
+        JSON.stringify(selected));
+
+    const small = await undersized(page);
+    check(`${label}: every control on the panel with the block open is a finger's size`,
+        small.length === 0, JSON.stringify(small).slice(0, 200));
+    const faint = await unreadable(page);
+    check('and nothing on it is too small to read', faint.length === 0,
+        JSON.stringify(faint.slice(0, 4)));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- writes held, and scrolled
+//
+// A folded warning is one a person can unfold. A CLIPPED one is not.
+//
+// «הרישום מושבת» - this phone is refusing to record anything - used to be the last child
+// of .progress-line, and that element is clipped to one pixel by the compact header (v101)
+// and by the landscape bar. So the moment the list was scrolled, the only thing on the
+// screen saying that nothing typed tonight is being kept went away, while the banner
+// explaining why had scrolled off the top a moment earlier. The screen looked ordinary.
+for (const [width, height, what] of [[320, 667, 'portrait'], [667, 320, 'landscape']]) {
+    suite(`${width}x${height}: writes held, and the list scrolled (${what})`);
+    const label = `${width}x${height}`;
+
+    const page = await open({ width, height });
+    await setInset(page, 34);
+    await page.evaluate(() => { Recovery.halt('probe', 'בדיקה'); });
+    await page.waitForTimeout(300);
+
+    const read = async () => page.evaluate(() => {
+        const node = document.querySelector('.progress-blocked');
+        if (!node) return { found: false };
+        const box = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return {
+            found: true,
+            text: node.textContent.trim(),
+            h: Math.round(box.height), w: Math.round(box.width),
+            top: Math.round(box.top),
+            px: parseFloat(getComputedStyle(node).fontSize),
+            onScreen: box.bottom > 0 && box.top < window.innerHeight && box.height > 2,
+            painted: Boolean(hit) && (node === hit || node.contains(hit)),
+            compact: document.body.classList.contains('day-compact')
+        };
+    });
+
+    const top = await read();
+    given(`${label}: the day screen says the writing is held`,
+        top.found && top.text === 'הרישום מושבת');
+    check(`${label}: and it is legible - 14px, the same floor as every other sentence`,
+        top.px >= 14, `${top.px}px`);
+
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await page.waitForTimeout(350);
+    const scrolled = await read();
+    check(`${label}: scrolled, the header compacts and the held-writes badge is STILL there`,
+        scrolled.found && scrolled.compact === true && scrolled.onScreen === true
+        && scrolled.painted === true && scrolled.h > 2,
+        JSON.stringify(scrolled));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();

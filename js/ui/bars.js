@@ -21,6 +21,25 @@ function measureBottomBars() {
     root.style.setProperty('--nav-h', barHeight(document.querySelector('.tabs')) + 'px');
     root.style.setProperty('--day-actions-h',
         barHeight(document.querySelector('.day-actions')) + 'px');
+    // THE THIRD BAR. The undo bar floats above the other two - `bottom: calc(var(--bars-h)
+    // + 10px)` - and until v104 nothing measured it, so the page reserved room for two
+    // bars while three were covering it.
+    //
+    // Measured, at 320x667 with a home indicator and a crew of thirty: an undo label
+    // carrying a long name («הרישום של <שם> נמחק») wraps to three lines, the bar stands
+    // 107px tall with its top at y=379, and the last man's row runs 357-423. A tap at the
+    // centre of that row hit the undo bar's own text - document.elementFromPoint returned
+    // the bar, not the row. The row was on the screen and could not be pressed, which is
+    // the exact failure the two measurements above exist to prevent, arriving by a third
+    // door. On a wider phone the same label fits one line and the row clears the bar by a
+    // single pixel, which is how it went unnoticed: it was never fixed, it was lucky.
+    //
+    // COVERAGE, not height. The bar carries its own 10px lift above the pair below it, so
+    // its height alone under-reports what it is covering by exactly that lift - and the
+    // lift is a stylesheet choice this file must not have a copy of. What is measured is
+    // the strip of viewport from the bar's top edge to the bottom, which contains the
+    // height, the lift and anything else the layout puts between them.
+    root.style.setProperty('--undo-h', bottomCoverage(document.getElementById('undoBar')) + 'px');
     // The sticky strip at the top, measured for the same reason the bottom ones are:
     // the day header pins itself right under it, and a written-down height would be
     // wrong on the first phone with a different inset.
@@ -54,6 +73,29 @@ function barHeight(node) {
     // The measured height already contains the safe-area padding the bar carries, so the
     // stylesheet must not add env(safe-area-inset-bottom) on top of it again.
     return Math.max(0, Math.round(box.height));
+}
+
+// How much of the bottom of the viewport this element covers, from its top edge down -
+// its own height plus whatever the stylesheet lifted it by. 0 when it is not there.
+//
+// barHeight above answers a different question and both are needed: a bar sitting ON the
+// bottom edge covers exactly its height, and one floating above other bars covers more
+// than its height. Asking the height question about a floating bar is how the undo bar
+// went unmeasured for four builds.
+function bottomCoverage(node) {
+    if (!node || typeof getComputedStyle !== 'function') return 0;
+    if (typeof window === 'undefined') return 0;
+
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return 0;
+    if (style.position !== 'fixed') return 0;
+
+    const box = node.getBoundingClientRect();
+    if (box.height === 0) return 0;
+    // Against innerHeight, which is the layout viewport a fixed element is placed in.
+    // visualViewport.height is what the keyboard and a pinch leave visible, and reading it
+    // here would make the room the page reserves swing with a gesture - the v99 fault.
+    return Math.max(0, Math.round(window.innerHeight - box.top));
 }
 
 // The input types a phone opens a keyboard for. Everything else an <input> can be - a
@@ -183,6 +225,28 @@ function watchBottomBars() {
     };
     window.addEventListener('touchstart', recheck, { capture: true, passive: true });
     window.addEventListener('scroll', recheck, { capture: true, passive: true });
+    // The VISUAL viewport moving on its own, which the listener above cannot see. On a
+    // home-screen iPhone the visual viewport slides inside a layout viewport that has not
+    // moved - the keyboard going down with the page scrolled, a zoomed page panned - and
+    // that motion fires 'scroll' HERE and nothing on window. Same failsafe shape as the
+    // pair above and for the same reason: when the class is not standing this listener
+    // reads one classList entry and returns.
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+        window.visualViewport.addEventListener('scroll', recheck);
+    }
+    // The undo bar is shown, refilled and hidden by js/ui/undo.js without any of the
+    // events above: offerUndo writes a label into it and clears style.display, and twelve
+    // seconds later a timer puts it back. Some of those paths are followed by a render
+    // (which measures) and some are not, and which is which is not this file's business
+    // to know. So the element itself is watched: its label decides its height, and its
+    // height decides how much room the list has to leave under it.
+    const undoBar = document.getElementById('undoBar');
+    if (undoBar && typeof MutationObserver === 'function') {
+        new MutationObserver(scheduleBarMeasure).observe(undoBar, {
+            attributes: true, attributeFilter: ['style', 'class', 'hidden'],
+            childList: true, subtree: true, characterData: true
+        });
+    }
     // A font that arrives late re-lays the bars out after everything else has settled.
     if (document.fonts && document.fonts.ready && document.fonts.ready.then) {
         document.fonts.ready.then(scheduleBarMeasure).catch(() => {});

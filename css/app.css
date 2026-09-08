@@ -216,11 +216,25 @@ body {
    calculation that is a choice rather than a measurement. */
 :root { --nav-h: 0px; --day-actions-h: 0px; --bars-h: calc(var(--nav-h) + var(--day-actions-h)); }
 
+/* The undo bar's own strip, measured the same way and by the same file (bottomCoverage in
+   js/ui/bars.js): the distance from its top edge to the bottom of the viewport, which is
+   its height AND the 10px it is lifted by below. It is deliberately NOT folded into
+   --bars-h: the bar positions itself off --bars-h, and a variable that contained the bar
+   would move the bar. It is a THIRD term in the page's bottom padding instead. */
+:root { --undo-h: 0px; }
+
 .app {
     max-width: 1180px;
     margin: 0 auto;
     padding: 0 16px;
-    padding-bottom: max(calc(var(--bars-h) + 24px), calc(24px + var(--safe-bottom)));
+    /* Three claims on the bottom of the page, and the page clears whichever is deepest:
+       the two docked bars, the undo bar floating above them, and - when there is no fixed
+       bar at all (printing, a wide screen) - the home indicator on its own. The 24px is
+       the gap between the last row and whatever is under it, and is the only number in
+       this calculation that is a choice rather than a measurement. */
+    padding-bottom: max(calc(var(--bars-h) + 24px),
+                        calc(var(--undo-h) + 24px),
+                        calc(24px + var(--safe-bottom)));
 }
 
 h2 { font-size: 18px; margin: 0; }
@@ -717,6 +731,34 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     font-size: 16px;
     font-weight: 600;
 }
+
+/* The technical block. Latin, left-to-right and monospaced inside a Hebrew RTL sheet,
+   because that is what its contents are - and because a rectangle read out over the
+   phone must not be reordered by the bidi algorithm on its way to somebody's ear.
+
+   16px is the floor, not a taste: below it an iPhone magnifies the whole page the moment
+   this field takes focus, and it takes focus on purpose - touching it selects the whole
+   report, which is the alternative to a long-press and two drag handles over ten lines,
+   one-handed, at night. */
+.diagnostic-box { display: flex; flex-direction: column; gap: 10px; }
+.diagnostic-text {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 180px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    line-height: 1.45;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--ink);
+    /* It is read, selected and copied; it is never typed into. */
+    white-space: pre;
+    overflow: auto;
+}
+#diagnosticCopy { min-height: 48px; }
 
 @media (min-width: 701px) {
     .settings-panel.open {
@@ -2478,7 +2520,23 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     box-shadow: var(--shadow);
     font-size: 14px;
 }
-.undo-bar span { flex: 1; }
+/* THE BAR CANNOT BE TALLER THAN THE SCREEN IT FLOATS OVER.
+   Measured at 200% text on a 320x667 phone: the label «הרישום של <שם> נמחק» - built from
+   a real worker's name by editWithUndo - wrapped to a bar covering 727px of a 667px
+   viewport. The page dutifully reserved room for all of it (--undo-h is a measurement,
+   and it was telling the truth), and there was nowhere left for the last man's row to be:
+   it could not be scrolled clear of the bar at any scroll position, because the bar was
+   bigger than the screen. Three lines and an ellipsis. The FULL sentence stays in the
+   element, so the live region still reads it out whole; what is capped is how much of the
+   screen a message about something that already happened may take from the list. */
+.undo-bar span {
+    flex: 1;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 .undo-bar .btn-secondary { padding: 6px 14px; font-weight: 600; }
 .undo-bar .btn-icon { color: var(--paper); }
 .undo-bar .btn-icon:hover { background: transparent; color: var(--paper); }
@@ -2649,6 +2707,17 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
    this gets tapped thirty times an evening. */
 .wrow-main {
     flex: 1;
+    /* MEASURED, and it is not a tidy-up. A flex item's min-width defaults to `auto`,
+       which is its MIN-CONTENT - and the min-content of an unbreakable Hebrew or Arabic
+       name is the whole word. So `flex: 1` did not hold this button to the row: at twice
+       the text size with a long name on a 320px screen it grew to 885px inside a 320px
+       row, 565 of them off the start edge, and `.wrow-name`'s ellipsis never fired
+       because the button had already made room. The list clips the overflow, so the page
+       does not scroll sideways and every check in the mobile suite passed - what went off
+       the screen was the END of the row: the ✕ that clears a man's day, and the tags
+       saying where he was. min-width: 0 lets the button be the row's width and the NAME
+       shorten, which is what the ellipsis was put there for. */
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3153,13 +3222,20 @@ body.writes-blocked .day-actions button { opacity: .5; }
    reach the crew from somewhere. */
 body.writes-blocked .day-actions #copyDayBtn { pointer-events: none; }
 body.writes-blocked .day-actions .btn-success { opacity: 1; }
+/* 14px, not the 12 it was born at: this is the app telling somebody that nothing they
+   type tonight is being recorded, and it is read at the end of a working day. The floor
+   the mobile suite holds every other sentence to applies to the most serious one too. */
 .progress-blocked {
     display: inline-flex;
     align-items: center;
-    height: 22px;
-    padding: 0 8px;
+    /* Its own line inside .progress, so the count beside it is not pushed out of the
+       header on the narrowest phone. Height by its content, not a written-down number,
+       so it still fits its own text at twice the size. */
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 2px 8px;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 700;
     background: var(--danger-bg);
     color: var(--danger);
@@ -3412,6 +3488,25 @@ body.day-compact .day-header .progress .progress-line {
     .wrow-main { padding: 6px 12px; min-height: 68px; gap: 8px; font-size: 16.5px; }
     .wrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wrow .btn-icon { align-self: center; }
+    /* At ordinary sizes the name and its badges share one line and nothing here does
+       anything at all. At twice the text size with a long name they cannot: measured at
+       320, the badge «אתר עם שם ארוך מאוד» at 26px took the whole row and the name was
+       ellipsised to ZERO width - a row identifying nobody. The row gets a second line
+       instead, which is what the design board says happens at 200% ("rows grow in
+       height; no target shrinks below 44") and is the only answer that keeps BOTH the
+       man's name and where he was. The name asks for a full line; the badges take what
+       is left, on this line or the next. */
+    .wrow-main { flex-wrap: wrap; }
+    /* HALF, and the half is what makes this cheap. `flex: 1 1 auto` also protects the
+       name, by asking for the whole word - and a long name then demanded a line of its
+       own at ORDINARY text too, which took every row from 69px to 71 and cost a 375px
+       phone a whole name off the first screen (3 -> 2). Asking for half instead: at
+       ordinary sizes the badges fit in the other half, nothing wraps, and the name is
+       ellipsised exactly as before (measured 375: 69px rows, 3 whole names, the name
+       165px wide); at 200% the badge alone is wider than the row, the wrap happens, and
+       the name keeps its 303px instead of being squeezed to nothing. */
+    .wrow-name { flex: 1 1 50%; }
+    .wrow-value { flex: 0 1 auto; min-width: 0; }
 }
 
 /* The narrowest phone - AFTER the compact block above, whose same-specificity rules would

@@ -307,11 +307,21 @@ const TWO_CLIENTS = [['הרצליה', 7], ['תל אביב', 3]];
     // has to add up or the money is in a column no total reaches. The 0 is not a claim
     // that he earned nothing; the הערה beside it says so. A man with no rate and no
     // advances still gets three blanks: nothing there needs adding up.
+    //
+    // AND דוד'S NOTE IS NEW, deliberately. `fill` raises him from 400 to 500 after his
+    // days were recorded, so his 3,050 is not 7 x 500 - the case iron law 2 exists for.
+    // The screen has always said so under the table; the file said nothing, and the file
+    // is the copy the bookkeeper checks with a calculator. The sentence is the screen's,
+    // minus the name, because here the row IS the name. See moneyCells in js/ui/reports.js
+    // and tests/exports-proof.print.mjs, which measures the same sentence onto the paper
+    // and the picture.
     same('eleven columns, and the same money the screen shows under them',
         sheet,
         [['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר',
             'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה'],
-            ['דוד', 6, 7, 1, 3, 1, 500, 3050, -500, 2550, ''],
+            ['דוד', 6, 7, 1, 3, 1, 500, 3050, -500, 2550,
+                'השכר היומי השתנה - כל יום חושב לפי השכר שהיה בזמן הרישום, ולכן אין '
+                + 'לבדוק את הנצבר לפי מספר הימים כפול השכר שבעמודה'],
             ['שרה', 2, 2, 0, 2, 0, 350, 700, 0, 700, 'שעות נוספות בלי שכר שעה - לא נכללו'],
             ['עלי', 1, 1, 0, 0, 0, 0, 0, -300, -300,
                 'בלי שכר יומי - הנצבר לא חושב']]);

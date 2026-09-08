@@ -134,7 +134,14 @@ function sheetOf(xml, strings) {
                 const found = /<is>[\s\S]*?<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/.exec(cellXml);
                 text = found ? unescapeXml(found[1]) : '';
             } else {
-                const found = /<v>([\s\S]*?)<\/v>/.exec(cellXml);
+                // ATTRIBUTES ARE ALLOWED ON <v>, and one of them is written by the
+                // library under test: SheetJS writes <v xml:space="preserve"> for a
+                // value with leading whitespace in it - a tab, which is exactly what an
+                // injection check hands it - and a reader that insists on a bare <v>
+                // reads such a cell back as EMPTY. One false red, on the check that
+                // exists to prove the cell is inert. tests/exports-proof.lib.mjs has
+                // always accepted the attributes; this is the same reader.
+                const found = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(cellXml);
                 const raw = found ? unescapeXml(found[1]) : '';
                 text = type === 's' ? (strings[Number(raw)] || '') : raw;
             }

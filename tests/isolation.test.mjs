@@ -221,8 +221,12 @@ function offences(name, src) {
         unhashed.length === 0, unhashed.join(', '));
 
     same('the suites that take an origin are the ones we know about', served,
-        ['forms.browser.mjs', 'mobile.test.mjs', 'print.test.mjs',
-            'recovery.browser.mjs', 'smoke.mjs']
+        // Alphabetical, because that is the order the scan returns them in.
+        // exports-proof.print.mjs joined when the export proofs grew a browser half: it
+        // serves the app to read a real printout back. This check caught it the moment it
+        // appeared, which is the whole point of keeping the list by hand.
+        ['exports-proof.print.mjs', 'forms.browser.mjs', 'mobile.test.mjs',
+            'print.test.mjs', 'recovery.browser.mjs', 'smoke.mjs']
             .filter(name => files.includes(name)));
 
     // And the instrument itself defaults to this checkout when nothing is set, which is

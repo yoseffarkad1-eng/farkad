@@ -391,7 +391,11 @@ function renderPayrollTable() {
         const cells = [row.name].concat(columns.map(column => column.value(row)));
         if (anyVehicle) cells.push(row.vehicleDays || 0, agora(row.vehicleAmount || 0));
         if (anyRate) {
-            cells.push(row.dailyRate);
+            // The rate the days were priced at, which for a closed fortnight is the one
+            // the closure recorded and not the roster's today - see rateOf. '—' where a
+            // closure recorded none: unknown, which is not the same as today's number.
+            const rate = rateOf(row);
+            cells.push(rate === null ? '—' : rate);
             // null, not 0: a worker whose rate was never entered owes an unknown amount,
             // which is a different statement from owing nothing.
             const money = moneyOf(row);
@@ -519,12 +523,35 @@ function renderPayrollTable() {
     // cannot be checked by multiplying the days by the rate in the column beside it. Said
     // plainly, because a sheet whose arithmetic does not come out reads as a mistake -
     // and the alternative, quietly repaying old days at the new rate, is the mistake.
+    // hint-warn, and not the plain .hint it was. THE ONE SENTENCE THAT EXPLAINS THE ROW
+    // WAS THE ONE SENTENCE ONLY THE SCREEN HAD: css/app.css hides .hint in print and
+    // lifts back exactly two classes, readReportPrintout (js/ui/printout.js) reads those
+    // same two into the picture that goes out on WhatsApp, and moneyCells writes the
+    // file's notes. So the paper, the picture and the workbook all carried the row -
+    // 3 days, 900 in the column, 1,200 paid - with nothing anywhere saying why it does
+    // not multiply out, and the screen, which is the surface nobody hands over, was the
+    // only one that did. Measured in tests/exports-proof.print.mjs against a real PDF and
+    // the canvas's own fillText, and in tests/exports-proof.xlsx.mjs against the file.
+    //
+    // The class is a warning rather than hint-money because of what it asks the reader to
+    // do: this is the sentence that stops somebody 'correcting' a total that is right.
     const mixed = rows.filter(row => row.mixedRates);
     if (mixed.length > 0) {
-        section.appendChild(el('p', 'hint',
+        section.appendChild(el('p', 'hint hint-warn',
             `בתקופה הזו השתנה השכר היומי של ${mixed.map(row => isolate(row.name)).join(', ')}. ` +
             'כל יום מחושב לפי השכר שהיה בזמן הרישום, ולכן הסכום אינו מספר הימים כפול ' +
             'השכר שמופיע כאן.'));
+    }
+
+    // AND WHERE THE COLUMN IS EMPTY, why it is empty. A fortnight closed before closures
+    // recorded the rate they were priced at has no rate to print, and printing the
+    // roster's rate over a frozen wage is the fault one paragraph up - so the cell says
+    // nothing and this says why. See rateOf.
+    const rateless = rows.filter(row => rateOf(row) === null);
+    if (rateless.length > 0) {
+        section.appendChild(el('p', 'hint hint-warn',
+            `⚠️ בחשבון הסגור של ${rateless.map(row => isolate(row.name)).join(', ')} ` +
+            'לא נרשם השכר היומי, ולכן העמודה ריקה. הסכומים הם אלה שנרשמו בסגירה.'));
     }
 
     // A "—" in the pay column is easy to read past when it is one line among thirteen,
@@ -1452,8 +1479,26 @@ function correctionsIn(workerId, from, to) {
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-// One correction, in the words a person can answer for: what it undid, when that was,
-// how much it was, and why. The same sentence on every surface that shows it.
+// One correction, in the words a person can answer for. SEVEN FIELDS, because a
+// correction is the one entry that cannot be checked from anything else on the page:
+// what it undid, when that was, how much it was, why, WHICH transaction it names, when
+// the correction itself was recorded and on whose phone.
+//
+// It carried the first four. The other three are on the entry - recordEventReversed
+// (js/model/ledger.js) writes targetId, at and by - and were being dropped on the way to
+// the paper, so a bookkeeper holding two corrections of 400 against one man in one
+// fortnight could not tell which movement either of them undid, nor which of three phones
+// wrote it. The id is the only thing in this app that names ONE transaction; it is on
+// screen in the ledger row's correction button and nowhere else it can be read from.
+//
+// The same sentence on every surface that shows it - the workbook note, the CSV and the
+// message the man himself is sent.
+//
+// The id and the device are Latin inside a Hebrew line, so they travel isolated: without
+// it the bidi algorithm folds an id ending in digits round the wrong way, and an id read
+// backwards is not the id. The line still OPENS in Hebrew, which is what keeps the
+// statement's own direction (tests/exports.test.mjs, «nor any line of the worker's own
+// statement»).
 function correctionLine(entry) {
     const what = LEDGER_KIND_LABELS[String(entry.targetKind)] || String(entry.targetKind);
     const when = entry.targetDate
@@ -1462,7 +1507,18 @@ function correctionLine(entry) {
         ? `${moneyText(Number(entry.targetAmount) || 0)} ₪` : '';
     const head = [what, when, howMuch].filter(Boolean).join(' ');
     const why = String(entry.reason || '').trim();
-    return why ? `${head} - ${why}` : head;
+    // The day the correction was WRITTEN, off `at` - not entry.date, which is the day it
+    // is dated into the account and can be a different one. A migrated entry carries no
+    // `at` at all (there is no timestamp on an old advance), and then nothing is said
+    // rather than a date invented.
+    const stamp = String(entry.at || '').slice(0, 10);
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(stamp) ? parseLocalDate(stamp) : null;
+    const tail = [
+        parsed ? `תוקן ${formatShortDate(parsed)}` : '',
+        entry.by ? `נרשם במכשיר ${isolate(String(entry.by))}` : '',
+        entry.targetId ? `מזהה תנועה ${isolate(String(entry.targetId))}` : ''
+    ].filter(Boolean).join(' · ');
+    return [why ? `${head} - ${why}` : head, tail].filter(Boolean).join(' · ');
 }
 
 // What the third money column is called, which depends on what it holds - see moneyOf.
@@ -1809,9 +1865,34 @@ function workerStatementText(workerId) {
     }
 
     if (priced) {
+        const left = agora(agora(earned) - agora(taken));
         lines.push('');
-        lines.push(`נותר לתשלום: `
-            + `${bidiAmount(moneyText(agora(agora(earned) - agora(taken))))}`);
+        lines.push(`נותר לתשלום: ${bidiAmount(moneyText(left))}`);
+        // AND WHICH ARITHMETIC PRODUCED IT.
+        //
+        // The account - the opening balance, the deduction, the balance that carries out -
+        // is read only over a whole fortnight (workerAccountFor, and payrollRows above it,
+        // which says why a month must not get one). Over any other range the advances come
+        // off in full, so the same record that owes 0 over its own account owes -1,950 over
+        // the month containing it - and «החודש» is one tap on the range bar. The arithmetic
+        // is not the fault and does not move; the document saying neither which reading it
+        // did nor what a minus in front of לתשלום means IS, on the one copy the man himself
+        // holds. Said only where the two readings can differ - with the carry gate shut
+        // there is one reading and nothing to distinguish it from.
+        if (typeof carryReportingEnabled === 'function'
+            && carryReportingEnabled(State.schedule)
+            && !wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)) {
+            lines.push('');
+            lines.push('ℹ️ הטווח שנבחר אינו תקופת חשבון (14 יום, שישי עד חמישי).');
+            lines.push('החישוב כאן הוא לפי התאריכים שנבחרו בלבד: המקדמות נוכו במלואן, '
+                + 'בלי יתרה מחשבון קודם ובלי יתרה שעוברת לחשבון הבא.');
+            // Only where there is a minus to explain. A man whose line reads 1,500 does
+            // not need to be told what a negative number would have meant.
+            if (left < 0) {
+                lines.push('סכום שלילי כאן אינו כסף שמגיע לעובד - הוא אומר שבתאריכים '
+                    + 'האלה נמסרה מקדמה גדולה מהשכר.');
+            }
+        }
         // And what is still on the books afterwards, in the words the two labels never
         // swap: a closed period reports its יתרת סגירה, an open one its חוב פתוח.
         // BOTH FIGURES WHEN THERE ARE TWO, because there are two and he is entitled to
@@ -2191,6 +2272,36 @@ function overpaymentWarning(account) {
         + ' · אין לאשר את התשלום אוטומטית';
 }
 
+// THE RATE A CLOSED FORTNIGHT WAS PRICED AT, and nothing invented in its place.
+//
+// row.dailyRate is the roster's rate TODAY (js/model/money.js), while the wage, the day
+// counts and the day list beside it are frozen wherever a closure recorded them. So a
+// raise after a fortnight was closed reprinted the payslip as 5 days x 900 = 2,500 -
+// three cells that cannot all be true, on the document a man was already paid from. It is
+// not a wrong total; it is a row that cannot be checked, which is worse, because the
+// bookkeeper's calculator is the only thing that disagrees.
+//
+// The closure carries the basis it was priced at (closureFacts in js/model/ledger.js), so
+// that is the rate this column prints - the same source the frozen wage comes from.
+//
+// UNGATED, like the wage it stands beside. A closure is a fact on the shared record, and
+// a phone whose carry gate is shut printing today's rate over another phone's frozen wage
+// is two documents for one payday. See payrollReport, which freezes the counts the same
+// way and with the same absence of a gate.
+//
+// null when the fortnight is closed and the closure recorded no rate at all - a closure
+// written before closures carried a basis. Nothing is guessed for it: the cell is left
+// empty, and moneyCells and the sheet's own hint say why. A number that does not multiply
+// out is worse than a missing one.
+function rateOf(row) {
+    const frozen = typeof frozenPeriodFor === 'function'
+        ? frozenPeriodFor(State.schedule, row.workerId, REPORT_RANGE.from, REPORT_RANGE.to)
+        : undefined;
+    if (frozen === undefined) return row.dailyRate;
+    const rate = Number(frozen.basis && frozen.basis.dailyRate);
+    return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
 function moneyOf(row) {
     // Only a POSITIVE advance is money that was handed over, and only that is netted. A
     // negative one is not a repayment this build knows how to account for - netting it
@@ -2251,16 +2362,73 @@ function moneyCells(row) {
     const priced = row.amount !== null;
     const gross = priced ? money.gross : (advances === 0 ? '' : 0);
     const net = gross === '' ? '' : agora(gross + advances);
+    const rate = rateOf(row);
 
     const notes = [];
+    // WHICH ARITHMETIC THIS FILE DID, before any figure it produced.
+    //
+    // payrollRows attaches the account - the opening balance, the deduction, the balance
+    // that carries out - ONLY over a whole Friday-anchored fortnight, and the comment
+    // there says why a month must not get one. That is deliberate and it stays. What was
+    // missing is that the file did not SAY which of the two readings the reader is
+    // holding, and «החודש» is one tap on the range bar: the same record, one fortnight of
+    // work against a 5,000 advance, reads 0 payable over its account and -1,950 over the
+    // month that contains it. Both are honest; a document that does not say which it is
+    // is not, because -1,950 in a column called לתשלום reads as money owed to somebody.
+    //
+    // Only where the two readings can differ - a build and a record that do the account
+    // arithmetic at all. With the carry gate shut every range is read the same way and
+    // there is no second reading to name.
+    if (typeof carryReportingEnabled === 'function'
+        && carryReportingEnabled(State.schedule)
+        && !wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)) {
+        notes.push('הטווח אינו תקופת חשבון - החישוב לפי התאריכים שנבחרו בלבד, '
+            + 'בלי יתרה מחשבון קודם ובלי יתרה שעוברת לחשבון הבא');
+    }
     // Said in shekels, not in a word like "partial": the man asking is asking how much.
     // A closed period says so, in the design's words, before it says anything else: the
     // figures beside that sentence are a record and not a reckoning.
     if (row.carry && row.carry.closed) {
         notes.push('החשבון נסגר ולא ישתנה');
     }
+    // WHY THE שכר יומי CELL IS EMPTY, where it is. See rateOf: a fortnight closed before
+    // closures recorded their basis has no rate to print, and the roster's rate today is
+    // not that rate.
+    if (rate === null) {
+        notes.push('לא נרשם בסגירה השכר היומי, ולכן העמודה ריקה');
+    }
+    // AND WHY THE WAGE IS NOT THE DAYS TIMES THE RATE BESIDE IT.
+    //
+    // A day keeps the rate it was worked at (iron law 2), so after a raise the total
+    // cannot be checked by multiplying. The screen has said so since the column existed;
+    // the file, which is the copy the bookkeeper checks with a calculator, said nothing -
+    // a row reading 3 days, 900, 1,200 with no explanation anywhere on the page. The
+    // screen's sentence, minus the name - here the row IS the name - and ending in what
+    // the reader must not do rather than in an inequality: with a closed fortnight now
+    // printing the rate it was closed on (rateOf), the column and the stamps can happen
+    // to agree, and a note asserting they never do would be the next wrong sentence.
+    if (row.mixedRates) {
+        notes.push('השכר היומי השתנה - כל יום חושב לפי השכר שהיה בזמן הרישום, ולכן אין '
+            + 'לבדוק את הנצבר לפי מספר הימים כפול השכר שבעמודה');
+    }
     if (row.carry && row.carry.carriedIn > 0) {
         notes.push(`${moneyText(row.carry.carriedIn)} ₪ מקדמה מחשבון קודם`);
+    }
+    // THE MONEY HANDED OVER IN THIS PERIOD, as its own figure and under its own name.
+    //
+    // Only while the account is being read, and that is the whole point: then the third
+    // column is the DEDUCTION - what the wage could cover - and the sum actually handed
+    // to the man appears nowhere in the file. 5,000 given, 3,050 deducted, 1,950 carried,
+    // and the workbook printed the second and the third and not the first. With the
+    // account off, that column IS the advances and is named מקדמות, so a second figure
+    // would be the same shekels twice under two names.
+    //
+    // The account's own `given` rather than row.advances, so a closed fortnight reports
+    // what it was closed on, like every other figure on its row.
+    const given = row.carry && Number.isFinite(Number(row.carry.given))
+        ? agora(Number(row.carry.given)) : 0;
+    if (given > 0) {
+        notes.push(`${moneyText(given)} ₪ מקדמות חדשות`);
     }
     // Not on an unpriced row: that row shows the whole amount in its own column, so a
     // note saying the same shekels are ALSO going to the next account would have the
@@ -2304,7 +2472,9 @@ function moneyCells(row) {
     if (overpayment) notes.push(overpayment);
     if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
     if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');
-    return [row.dailyRate, gross, advances, net, notes.join(' · ')];
+    // Empty rather than the roster's rate where a closed fortnight recorded none - see
+    // rateOf, and the note two blocks up that says so in words.
+    return [rate === null ? '' : rate, gross, advances, net, notes.join(' · ')];
 }
 
 function invoiceSheetRows() {

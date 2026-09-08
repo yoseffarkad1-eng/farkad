@@ -327,11 +327,24 @@ function renderProgress() {
     line.setAttribute('role', 'status');
     line.setAttribute('aria-live', 'polite');
 
-    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
-        line.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
-    }
-
     wrap.appendChild(line);
+
+    // OUTSIDE the line, and that is the whole point of these five lines.
+    //
+    // «הרישום מושבת» used to be the last child of .progress-line - and .progress-line is
+    // the element the compact header (v101) and the landscape bar both clip to one pixel
+    // once the list is moving. So the moment somebody scrolled, the only thing on the
+    // screen saying that this phone is refusing to record anything went away, and the
+    // banner that explains WHY had scrolled off the top a moment earlier. A day's work
+    // could be tapped in against a screen that looked ordinary.
+    //
+    // A folded warning is a warning that can be opened again. A clipped one is not. The
+    // account notice folds because a person can unfold it; this is not that kind of
+    // notice, so it sits on .progress, which survives both states, and the stylesheet
+    // keeps it visible in each of them.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        wrap.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
+    }
 
     const bar = el('div', 'progress-bar');
     const fill = el('div', 'progress-fill');
