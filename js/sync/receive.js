@@ -90,10 +90,100 @@ Object.assign(FarkadSync, {
 
     // What the disk holds at `path`, as a mark: VALUE_ABSENT for nothing, and null when
     // the record will not read - which is not nothing, and contributes nothing.
+    //
+    // `roster.*` IS NOT A KEY ON THE DISK. A schedule this app saves carries
+    //
+    //     advances, days, ledger, places, schemaVersion, updatedAt, updatedBy, vehicles, workers
+    //
+    // and nothing named `roster`: the roster lives in the two arrays. `roster.<kind>.<id>`
+    // is the WIRE shape. So readPath walks a key that is not there, the operation is
+    // written down as having seen NOTHING, and the provenance is false at the moment it
+    // is journalled - see rosterMarkFromArrays for what that costs.
     storedMarkAt(path, stored) {
         if (stored.raw === null) return VALUE_ABSENT;
         if (!stored.schedule) return null;
-        return valueMark(readPath(stored.schedule, path));
+        const direct = readPath(stored.schedule, path);
+        if (direct !== undefined) return valueMark(direct);
+        const carried = this.rosterMarkFromArrays(path, stored);
+        if (carried !== undefined) return carried;
+        return valueMark(direct);
+    },
+
+    // THE SAME FACT, WHERE AN UPGRADED DISK ACTUALLY KEEPS IT.
+    //
+    // Measured on c7afe7f: a disk whose roster is only in the arrays - every disk this
+    // build opens that was written before the keyed map existed, and every disk that has
+    // not yet adopted a snapshot - records a per-field roster write with seen: ["absent"]
+    // while `places[0].name` on that same disk says "site". The first snapshot then
+    // arrives holding "site", movedUnder finds the server's mark outside the operation's
+    // seen list, reads it as another phone's correction this device has never seen, and
+    // holds the write. The person's rename is stranded for ever, the phone says
+    // «contested», and nothing anywhere is actually wrong except the record of what the
+    // device had seen.
+    //
+    // This is the mirror of O2 and it must not be fixed by loosening the rule that closed
+    // O2. Treating every absent keyed path as seen would let a genuinely stale value, or
+    // an invented field, walk over another phone's edit - which is the failure O2 was.
+    // So the fallback answers only when this device can prove it holds the fact:
+    //
+    //   the path is a roster entity or one of ITS OWN declared fields (ENTITY_FIELDS,
+    //   the same list the wire validator uses, so the two cannot drift apart);
+    //   the id is a safe segment;
+    //   the keyed map does not already say something - a tombstone there is read by
+    //   readPath above and is never inherited from the array underneath it;
+    //   the entity is REALLY in the durable roster. A missing one is not synthesized
+    //   from a fragment, so a new person still travels as a whole entity and a phone
+    //   that has never heard of somebody still records that it has not;
+    //   and the record reads. One that does not answers null - contributes nothing,
+    //   which leaves the write held. Fail-closed, deliberately: a wrong "seen" loses
+    //   somebody's edit to another phone, and that is worse than a hold somebody can see.
+    //
+    // Returns undefined for "no opinion, use the direct read".
+    rosterMarkFromArrays(path, stored) {
+        const parts = String(path).split('.');
+        if (parts[0] !== 'roster') return undefined;
+        if (parts.length !== 3 && parts.length !== 4) return undefined;
+        const kind = parts[1];
+        if (kind !== 'workers' && kind !== 'places') return undefined;
+        const id = parts[2];
+        if (typeof isSafeSegment !== 'function' || !isSafeSegment(id)) return undefined;
+        if (parts.length === 4) {
+            const known = (typeof ENTITY_FIELDS === 'object' && ENTITY_FIELDS
+                && ENTITY_FIELDS[kind]) || [];
+            if (known.indexOf(parts[3]) === -1) return undefined;
+        }
+        const index = this.durableRosterIndex(stored);
+        if (index === null) return null;
+        const entity = index[kind] && index[kind][id];
+        if (!entity) return undefined;
+        return parts.length === 3 ? valueMark(entity) : valueMark(entity[parts[3]]);
+    },
+
+    // The durable roster, normalised and keyed, cached against the exact bytes it was
+    // built from. Normalised because that is the footing the wire uses: editRoster sends
+    // entities out of State.schedule, which is always normaliseSchedule's output, so a
+    // mark built any other way would not match the one the server holds and the fallback
+    // would silently do nothing. Null when the record will not normalise.
+    durableRosterIndex(stored) {
+        if (this._durableRoster && this._durableRoster.raw === stored.raw) {
+            return this._durableRoster.index;
+        }
+        let index = null;
+        try {
+            const normal = normaliseSchedule(stored.schedule);
+            const byId = list => {
+                const out = {};
+                (list || []).forEach(item => {
+                    if (item && item.id) out[String(item.id)] = item;
+                });
+                return out;
+            };
+            index = { workers: byId(normal.workers), places: byId(normal.places) };
+        } catch (error) {
+            index = null;
+        }
+        this._durableRoster = { raw: stored.raw, index };
+        return index;
     },
 
     // Every value this device has held or produced at `path`, as marks. Recorded with
@@ -556,7 +646,7 @@ Object.assign(FarkadSync, {
         // snapshot, call the device synced, and then flush him back into the document,
         // where every v78 reader picks him up again. So the snapshot is not adopted, the
         // stale queue is barred from flushing, and the retry ladder comes back to it.
-        if (!this.sanitiseQueuedRosters(gone)) {
+        if (!this.sanitiseQueuedRosters(gone, remote)) {
             this.holdStaleRoster(gone);
             return;
         }
@@ -796,8 +886,12 @@ Object.assign(FarkadSync, {
     // v78 reader finds him - and the fix cannot be at replay time only, because replay is
     // in memory and the FLUSH reads what is stored. So the stored entry is rewritten, in
     // one atomic journal write, the same way every other queue change is made.
-    sanitiseQueuedRosters(gone) {
-        if (!gone || (gone.workers.size === 0 && gone.places.size === 0)) return true;
+    sanitiseQueuedRosters(gone, remote) {
+        const buried = gone && (gone.workers.size > 0 || gone.places.size > 0);
+        // `remote` arrived at v104 and the two passes below are one job: making the queue
+        // agree with what has just been heard. A tombstone is one way the queue can be
+        // out of date about a man; his WAGE is the other, and the second one costs money.
+        if (!buried && !remote) return true;
         this.loadOutbox();
 
         // Which queued path is a list of whom, in both of the forms a roster is queued
@@ -821,18 +915,66 @@ Object.assign(FarkadSync, {
         // Not an invention on somebody's behalf either. Once this device has heard that
         // the man is gone, the sanitised array IS its opinion of the roster, and sending
         // the old one would put him back into the document for every v78 reader.
+        // AND THE SECOND WAY THE QUEUE CAN BE OUT OF DATE: A STALE WAGE.
+        //
+        // The whole array is this device's opinion of the ENTIRE roster, so it carries
+        // every man this device has not reconciled - not only the one the person touched.
+        // Measured on c7afe7f: A opens on an upgraded disk holding the man at 500, renames
+        // a SITE, and the array goes out with him at 500 in it. Every v79+ reader takes
+        // the keyed map and converges on 600, so nothing looks wrong; the document's own
+        // array is left saying 500, which is the one place the reader it exists for looks.
+        //
+        // Which ids this device is actually speaking about, so its own edit is never
+        // overwritten by the thing meant to correct somebody else's copy. A per-entity or
+        // per-field write for a man IS this device's opinion of him and stands.
+        const speakingFor = { workers: new Set(), places: new Set() };
+        this.projectedQueue().forEach((item, path) => {
+            const parts = String(path).split('.');
+            if (parts[0] !== 'roster' || (parts.length !== 3 && parts.length !== 4)) return;
+            if (parts[1] !== 'workers' && parts[1] !== 'places') return;
+            speakingFor[parts[1]].add(String(parts[2]));
+        });
+
+        const heardEntity = (kind, id) => {
+            if (!remote) return null;
+            const found = (remote[kind] || []).find(item =>
+                item && String(item.id) === String(id));
+            return found || null;
+        };
+
+        // ONE CORRECTION PER PATH. An operation may only supersede one on the SAME path -
+        // decodeQueue enforces that on the bytes - so the two passes are folded into a
+        // single value per path rather than each minting its own.
         const corrections = [];
         this.projectedQueue().forEach((item, path) => {
             const kind = listedKind(path);
-            const removed = kind ? gone[kind] : null;
-            if (!removed || removed.size === 0 || !Array.isArray(item.value)) return;
-            // An array of records, or an array of bare ids - the same question either
-            // way: is this the man the document says is gone?
-            const kept = item.value.filter(entry => {
-                const id = entry && typeof entry === 'object' ? entry.id : entry;
-                return !removed.has(String(id));
-            });
-            if (kept.length !== item.value.length) corrections.push({ path, value: kept });
+            if (!kind || !Array.isArray(item.value)) return;
+            const removed = (gone && gone[kind]) || null;
+
+            let next = item.value;
+            if (removed && removed.size > 0) {
+                // An array of records, or an array of bare ids - the same question either
+                // way: is this the man the document says is gone?
+                next = next.filter(entry => {
+                    const id = entry && typeof entry === 'object' ? entry.id : entry;
+                    return !removed.has(String(id));
+                });
+            }
+            // The order list is bare ids and carries no wage, so there is nothing here to
+            // refresh - it is only ever shortened by the pass above.
+            if (remote) {
+                next = next.map(entry => {
+                    if (!entry || typeof entry !== 'object' || !entry.id) return entry;
+                    const id = String(entry.id);
+                    if (speakingFor[kind] && speakingFor[kind].has(id)) return entry;
+                    const heard = heardEntity(kind, id);
+                    if (!heard) return entry;
+                    return canonicalJson(heard) === canonicalJson(entry) ? entry : heard;
+                });
+            }
+            const changed = next.length !== item.value.length
+                || next.some((entry, at) => entry !== item.value[at]);
+            if (changed) corrections.push({ path, value: next });
         });
 
         // AND THE WRITE THAT NAMES HIM ON HIS OWN.
