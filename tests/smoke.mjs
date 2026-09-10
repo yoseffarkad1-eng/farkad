@@ -1103,8 +1103,20 @@ async function seedRoster(page) {
   const page = await open();
   await seedRoster(page);
 
+  // NOTHING CONNECTED, asked of the thing that would be connected.
+  //
+  // This read FarkadSync.status === 'off' and was measuring the machine it ran on rather
+  // than the app. Since a cloud that could not be LOADED stopped being indistinguishable
+  // from a phone with no cloud configured (js/app.js, noteCloudUnavailable), 'off' is no
+  // longer the only honest answer here: on a machine that cannot reach gstatic the
+  // adapter's import fails, the app says so, and the status is the sync-error one - which
+  // is the new behaviour working, not a regression.
+  //
+  // The check's own name is the environment-independent question, so it is the one asked.
+  // `adapter` is what connect() sets and disconnect() clears; null is nothing connected,
+  // on a machine with a network and on one without.
   check('the app runs local-only with nothing connected',
-    (await page.evaluate(() => FarkadSync.status)) === 'off');
+    (await page.evaluate(() => FarkadSync.adapter)) === null);
   check('and says so under the board',
     (await page.textContent('#storageNotice')).includes('במכשיר הזה'));
 
@@ -7103,6 +7115,17 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // screen, which is where a person who is not looking for this will meet it.
   check('and the line under the board carries it too',
     (await page.textContent('#storageNotice')).includes('אין מקום לשמור מצב קודם'));
+  // The claim is that the space message did not ERASE the sync half of this line - so the
+  // sync half is put into a state this check chooses, rather than whichever one the
+  // machine happened to produce. Reading it undetermined made the pinned sentence a fact
+  // about the sandbox's network: with no route to gstatic the adapter's import fails, the
+  // app now says so, and the line correctly carries the sync-error sentence instead.
+  //
+  // The string is NOT loosened to accept either one. That would turn the check into "some
+  // sync sentence is present", which is what it would have to say if the space message
+  // really had eaten it.
+  await page.evaluate(() => FarkadSync.setStatus('off'));
+  await page.waitForTimeout(50);
   check('without taking the sync state down with it',
     (await page.textContent('#storageNotice')).includes('הנתונים נשמרים במכשיר הזה בלבד'));
 
@@ -8483,4 +8506,16 @@ await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+// THE FAILURES, NAMED, the way tests/runner.mjs does it.
+//
+// This printed the count and nothing else. A FAIL is written inline as it happens, which
+// is fine when somebody is watching the run and useless afterwards: this suite is the
+// longest in the repository, its output is thousands of lines, and every way anyone
+// actually reads it - a pipe into tail, a CI log with a cap, a scroll-back - keeps the
+// end. So "1130/1131" was the whole of what survived, and finding out WHICH check needed
+// the entire suite run again.
+if (failed.length) {
+  console.log('\nfailed:');
+  failed.forEach(r => console.log(`  ${r.name}${r.detail ? '  — ' + r.detail : ''}`));
+}
 process.exit(failed.length ? 1 : 0);

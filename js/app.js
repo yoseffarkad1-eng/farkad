@@ -407,13 +407,41 @@ function connectCloudLater() {
             // later resume try again is the difference between a phone that reconnects
             // when the signal comes back and one that has to be closed and reopened.
             cloudStarted = false;
+            noteCloudUnavailable(error);
             console.info('Cloud sync is not available in this session:', error && error.message);
         });
     } catch (error) {
         cloudStarted = false;
+        noteCloudUnavailable(error);
         console.info('Cloud sync could not be started:', error && error.message);
     }
     return cloudStarted;
+}
+
+// AN IMPORT THAT DID NOT ARRIVE IS NOT A PHONE WITHOUT A CLOUD.
+//
+// This used to be a console.info and nothing else, and the two situations were then
+// indistinguishable on every screen: the line under the board read
+// «הנתונים נשמרים במכשיר הזה בלבד», the chip stayed off, and the ⋯ panel said the same.
+// That sentence is true of a build with no project configured. On a phone that HAS one it
+// is the opposite of the truth - the record is on this disk, the other two phones are not
+// getting it, and nothing anywhere says so. It is the same failure holdForRecovery was
+// given a status of its own for (js/sync/status.js): recording all evening while the
+// screen calls it local-only.
+//
+// Reported through the sync layer's own door rather than a banner of this file's own, so
+// it arrives in the words the app already has: the foot line says the sync failed, the
+// chip beside the name goes red, and the reason under it in ⋯ ← ענן וסנכרון is
+// «אין כרגע גישה לענן - הניסיון יחזור מעצמו.» - which is exactly what happened and
+// exactly what will happen, because the failed import is retried on the next resume.
+//
+// Only from 'off'. Anything else is a status something better informed has already set,
+// and a stale import failure must not paint over a live one.
+function noteCloudUnavailable(error) {
+    if (typeof FarkadSync === 'undefined' || typeof FarkadSync.fail !== 'function') return;
+    if (FarkadSync.status !== 'off') return;
+    FarkadSync.fail(error instanceof Error ? error
+        : new Error(String((error && error.message) || error || 'import failed')));
 }
 
 // Once, and never twice. A script that arrives after the document is already parsed gets

@@ -379,8 +379,16 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
     await typing.fill('#workerFormName', '');
     await typing.keyboard.press('Escape');
     await typing.waitForTimeout(300);
+    // Read tolerantly, because the thing being waited for can arrive DURING the read.
+    // catchUpWhenSafe polls every 500ms, and the reload it eventually fires destroys the
+    // execution context this evaluate is running in - which used to take the whole suite
+    // down with an "Execution context was destroyed" from the middle of a precondition,
+    // intermittently, on a run where the app had done exactly the right thing. A
+    // destroyed context here is not an unknown: the only thing that reloads this window
+    // is the catch-up, and the catch-up only fires when midEdit() is already false.
+    const stillTyping = await typing.evaluate(() => midEdit()).catch(() => 'already caught up');
     given('the edit is over and a reload would cost nothing',
-        (await typing.evaluate(() => midEdit())) === false);
+        stillTyping === false || stillTyping === 'already caught up', String(stillTyping));
 
     const caught = await typing.waitForFunction(
         expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
@@ -392,6 +400,110 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
         (await cacheNames(typing)).join());
 
     await asking.context().close();
+}
+
+// ------------------------------------------- the only window, and nobody pressing anything
+{
+    suite('the one window on the phone is never reloaded without being asked');
+
+    // THE SHAPE THE FIELD IS ACTUALLY IN. The suite above is two windows: one person
+    // presses, the OTHER window is claimed out from under itself and catches up at the
+    // first safe moment. That is law 7, and it is measured. A phone is not that. An
+    // installed app on a home screen is ONE window, nobody else presses anything, and
+    // there is no claim - the new worker installs, waits, and waits.
+    //
+    // This matters because docs/rollout-checklist.md tells Yusuf, in the list of things
+    // that need not worry him: «وإذا ما ضغطت، بيحدّث حاله أول لحظة ما حدا يكون عم يكتب» -
+    // if you do not press it, it updates itself at the first moment nobody is typing.
+    // That sentence is true of the OTHER window and of nothing else. On the one window in
+    // front of him, pressing «אחר כך» is a decision the app then keeps: no reload comes,
+    // at any moment, typing or not.
+    //
+    // Which of the two is right is not a close call. Reloading the only window somebody is
+    // looking at, because a timer decided they had stopped typing, is precisely what the
+    // first paragraph of js/ui/offline.js refuses to do, and this app's whole subject is a
+    // financial record being entered by hand. The code is right and the document overstates
+    // it. What the document should say is measured at the foot of this suite: the update
+    // lands when the app is fully closed and opened again, which is the thing a person on a
+    // phone can actually do.
+    await deploy(BUILDS.old);
+    const alone = await newPage();
+    await alone.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(alone);
+    await alone.waitForTimeout(2000);
+
+    await deploy(BUILDS.new);
+    await alone.evaluate(() => navigator.serviceWorker.getRegistration()
+        .then(registration => registration.update()));
+    const offered = await alone.waitForSelector('#updateBanner:visible', { timeout: 25000 })
+        .then(() => true, () => false);
+    given('the update is installed and offered', offered);
+
+    // «אחר כך». The banner goes; the update stays waiting.
+    await alone.getByRole('button', { name: 'אחר כך' }).click();
+    await alone.waitForTimeout(300);
+    check('saying "later" takes the banner off the screen',
+        (await alone.locator('#updateBanner').isVisible()) === false);
+    check('and leaves the update waiting rather than throwing it away',
+        (await alone.evaluate(() => navigator.serviceWorker.getRegistration()
+            .then(registration => Boolean(registration.waiting)))) === true);
+
+    // A mark on THIS window. A reload takes it with it, so its survival is the proof -
+    // not a version string, which would read the same either way if the reload happened
+    // to land on the same build.
+    await alone.evaluate(() => { window.__thisWindow = 'not reloaded'; });
+    const idle = await alone.evaluate(() => midEdit());
+    given('nobody is typing, so nothing is standing in a reload\'s way', idle === false);
+
+    // Long enough to have happened. catchUpWhenSafe polls every 500ms; ten seconds is
+    // twenty chances for a reload that is not coming.
+    await alone.waitForTimeout(10000);
+    check('and then nothing happens: ten idle seconds later it is the same window',
+        (await alone.evaluate(() => window.__thisWindow === 'not reloaded')) === true);
+    check('still running the build the person chose to stay on',
+        (await alone.evaluate(() => APP_VERSION)) === BUILDS.old.app,
+        await alone.evaluate(() => APP_VERSION));
+    check('and the day screen is still theirs, not a fresh one',
+        (await alone.evaluate(() => document.getElementById('dayView').children.length)) > 0);
+
+    // The offer comes back on the next return to the foreground, which is how it reaches
+    // somebody who said "later" and meant "not now" rather than "never" - an installed app
+    // on a phone is resumed, not reopened, and a banner does not survive that.
+    //
+    // THE EVENT IS SYNTHESISED, and that is a limit of the harness rather than a choice.
+    // Measured: in headless Chromium every page of a context stays visibilityState
+    // 'visible', and bringToFront moves nothing - a page sent behind another and brought
+    // back records no visibilitychange at all. So the browser cannot be made to produce
+    // this event here. What IS real is everything the event reaches: the listener
+    // registerOffline() installed, the registration it closes over, its waiting worker,
+    // and showUpdateBanner drawing the banner out of them. Only the tap on the app icon is
+    // pretended.
+    given('the page is in the state the listener requires',
+        (await alone.evaluate(() => document.visibilityState)) === 'visible');
+    await alone.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    const returned = await alone.waitForSelector('#updateBanner:visible', { timeout: 15000 })
+        .then(() => true, () => false);
+    check('coming back to the foreground offers the waiting update again', returned);
+
+    // AND THE WAY IT ACTUALLY LANDS ON A PHONE. Not a timer: the app is closed - properly
+    // closed, every window - and opened again. With no client left, the waiting worker
+    // activates, and the next launch is the new build from its first byte.
+    const context = alone.context();
+    await alone.close();
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const reopened = await context.newPage();
+    reopened.on('dialog', d => d.accept());
+    await reopened.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(reopened);
+    await reopened.waitForTimeout(400);
+    const relaunched = await buildOnScreen(reopened);
+    check('closing the app and opening it again lands on the new build',
+        relaunched.script === BUILDS.new.app, relaunched.script);
+    check('page and scripts from the same build, as always',
+        relaunched.meta === relaunched.script,
+        `${relaunched.meta} / ${relaunched.script}`);
+
+    await context.close();
 }
 
 // ---------------------------------------------------------------- the way out
