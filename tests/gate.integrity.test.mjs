@@ -245,18 +245,46 @@ function suitesOf(name) {
         .filter(path => path.length > 0);
     given('the shell has files in it', cached.length > 10, String(cached.length));
 
-    const commitOf = paths => {
-        try { return git(['log', '-1', '--format=%H', '--'].concat(paths)).trim(); }
+    // THE COMMIT THAT WROTE THE STAMP, found by the STAMP LINE and not by the file.
+    //
+    // This asked `git log -1 -- index.html js/app.js sw.js`: the last commit that touched
+    // any of those three. All three are ordinary source files that change for a hundred
+    // reasons that are not a stamp - js/app.js most of all - so ANY commit touching one of
+    // them silently moved the baseline forward, and everything before it stopped counting.
+    //
+    // It produced a FALSE GREEN, here, in this repository, on the one defect this suite
+    // exists to catch: b10a008 and 83ead39 changed eight shell files with the stamps still
+    // reading v104, 83ead39 touched js/app.js, the baseline jumped to it, and the check
+    // reported "no cached file has changed since the three stamps last moved". The correct
+    // answer at that same commit, from tests/build.test.mjs, was eight files.
+    //
+    // A green instrument that is wrong is worse than no instrument, and this one was
+    // wrong in the direction that hides the fault. So the question is put the way
+    // tests/build.test.mjs puts it: -S counts occurrences of the exact stamp LINE and
+    // names the commit where that count last changed, which for a stamp still in the file
+    // is the commit that introduced it, whatever else that commit touched.
+    const version = (readFileSync(join(ROOT, 'js/app.js'), 'utf8')
+        .match(/APP_VERSION = '(v\d+)'/) || [])[1];
+    const stampLines = [
+        ['index.html', `<meta name="farkad-build" content="${version}">`],
+        ['js/app.js', `const APP_VERSION = '${version}';`],
+        ['sw.js', `const VERSION = 'farkad-${version}';`]
+    ];
+    const wroteStamp = ([file, line]) => {
+        try { return git(['log', '-1', '--format=%H', '-S', line, '--', file]).trim(); }
         catch (error) { return ''; }
     };
+    const stampShas = stampLines.map(wroteStamp);
+    const stamped = stampShas[0];
 
-    // The commit that last moved a stamp, and the commit that last changed a cached file.
-    const stamped = commitOf(['index.html', 'js/app.js', 'sw.js']);
-    const touched = commitOf(cached.concat(['index.html', 'sw.js']));
-
-    check('a stamp commit and a shell commit were both found',
-        /^[0-9a-f]{40}$/.test(stamped) && /^[0-9a-f]{40}$/.test(touched),
-        `${stamped.slice(0, 8)} / ${touched.slice(0, 8)}`);
+    check('git can say which commit wrote each of the three stamps',
+        stampShas.every(sha => /^[0-9a-f]{40}$/.test(sha)),
+        stampShas.map((sha, i) => `${stampLines[i][0]}=${sha.slice(0, 8) || '(none)'}`).join(' '));
+    // And the historical half of law 5, which no comparison of strings can reach: the
+    // three did not merely end up equal, one commit wrote them.
+    check('and that it was one commit for all three',
+        new Set(stampShas).size === 1,
+        stampShas.map(sha => sha.slice(0, 8)).join(' '));
 
     // Not "the same commit": index.html and sw.js are themselves cached, so a stamp-only
     // commit IS a shell commit. The claim is that no cached file has been changed SINCE
