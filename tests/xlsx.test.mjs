@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
-import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
+import { rootFromEnv, refuseUnlessVerified, shippedLibrary } from './treecheck.mjs';
 
 // See tests/treecheck.mjs: an override must name the commit it is allowed to point at.
 const ROOT_ENV = rootFromEnv(join(dirname(fileURLToPath(import.meta.url)), '..'));
@@ -40,14 +40,17 @@ const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
 // no shipped copy to prefer. There is now: vendor/, in the service worker's shell, named
 // by js/ui/reports.js. Reading anything else would prove the arithmetic of a file no
 // phone has.
-const SHEETJS = process.env.FARKAD_SHEETJS ||
-    join(ROOT, 'vendor/xlsx-0.18.5.min.js');
+// FARKAD_SHEETJS may relocate the file; it may not change which build it is - which is
+// what the paragraph above asks for and what the bare `||` did not deliver. See
+// shippedLibrary in tests/treecheck.mjs.
+const SHIPPED = shippedLibrary(ROOT, 'FARKAD_SHEETJS', 'vendor/xlsx-0.18.5.min.js');
+const SHEETJS = SHIPPED.path;
 
 // dist/xlsx.full.min.js, not `import('xlsx')` - that resolves to a DIFFERENT build of
 // the package, and a test that proves the wrong build proves nothing about the file a
 // phone writes. The vendored file IS that dist build, copied in.
-given(`SheetJS is in the tree (${SHEETJS} - or set FARKAD_SHEETJS)`,
-    existsSync(SHEETJS));
+given(`SheetJS is the shipped build (${SHEETJS})`, SHIPPED.ok,
+    SHIPPED.reason || 'vendor/, the copy sw.js precaches');
 const SHEETJS_CODE = readFileSync(SHEETJS, 'utf8');
 
 // ---------------------------------------------------------------- a zip reader, by hand

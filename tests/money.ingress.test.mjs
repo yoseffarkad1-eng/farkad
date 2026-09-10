@@ -59,6 +59,8 @@ const { makeDevice, makeCloud, settle } =
     await import(pathToFileURL(join(ROOT, 'tests/harness.mjs')).href);
 const { suite, check, same, given, report } =
     await import(pathToFileURL(join(ROOT, 'tests/runner.mjs')).href);
+const { shippedLibrary } =
+    await import(pathToFileURL(join(ROOT, 'tests/treecheck.mjs')).href);
 
 // reports.js draws site names through js/ui/sitecolor.js, so that file goes in with it.
 // Both are classic scripts and both run in the device's own scope.
@@ -67,8 +69,10 @@ const REPORTS = readFileSync(join(ROOT, 'js/ui/sitecolor.js'), 'utf8')
 // The SHIPPED library, for the same reason tests/xlsx.test.mjs reads it: a workbook
 // proved against a copy installed beside the app says nothing about the file a phone
 // writes. vendor/ is what the service worker precaches and what XLSX_URL names.
-const SHEETJS = process.env.FARKAD_SHEETJS
-    || join(ROOT, 'vendor/xlsx-0.18.5.min.js');
+// Relocatable, not replaceable: FARKAD_SHEETJS must name the same bytes. The paragraph
+// above is the reason; shippedLibrary in tests/treecheck.mjs is the enforcement.
+const SHIPPED = shippedLibrary(ROOT, 'FARKAD_SHEETJS', 'vendor/xlsx-0.18.5.min.js');
+const SHEETJS = SHIPPED.path;
 
 // ---------------------------------------------------------------- the crew
 
@@ -660,8 +664,8 @@ suite('6. each surface rounds gross, advance and net on its own');
 suite('5b. the same record, read back out of a real .xlsx');
 
 {
-    given(`SheetJS is installed (${SHEETJS} - npm ci, or set FARKAD_SHEETJS)`,
-        existsSync(SHEETJS));
+    given(`SheetJS is the shipped build (${SHEETJS})`, SHIPPED.ok,
+        SHIPPED.reason || 'vendor/, the copy sw.js precaches');
     const device = crew({ deviceId: 'd_half_xlsx' });
     workOneDay(device);
     await adoptAdvance(device, 250.5);

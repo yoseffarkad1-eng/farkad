@@ -195,3 +195,58 @@ export async function verifyServedAssets(base, root, sha, fetchImpl) {
     }
     return { ok: wrong.length === 0, checked: names.length, wrong };
 }
+
+// ---------------------------------------------------------------- a library, not a tree
+//
+// The same escape, one size down. Three suites prove the money arithmetic THROUGH the
+// spreadsheet library, and all three say in their own comments why it must be the shipped
+// copy: vendor/xlsx-0.18.5.min.js is what sw.js precaches and what js/ui/reports.js names.
+// "Reading anything else would prove the arithmetic of a file no phone has" -
+// tests/xlsx.test.mjs, on the line directly above the one that let FARKAD_SHEETJS read
+// anything else.
+//
+// The variable was unbound: the only thing asked of it was that the path exist, so it
+// could name any file at all and every check still passed, still reported the same count,
+// and was no longer about the file a phone writes.
+//
+// One thing MEASURED rather than assumed, because those same comments assert it and it is
+// not true here: node_modules/xlsx/dist/xlsx.full.min.js and vendor/xlsx-0.18.5.min.js are
+// the same bytes in this tree today (sha256 c9506197caf8...). That is not a reason to
+// relax - it is the reason this is bound to BYTES and not to a path. A rule that refused
+// node_modules by name would pass a copy that had drifted and refuse one that had not;
+// this one asks the only question that decides anything.
+//
+// It is not removed - a bundle or a relocated checkout is a fair reason to move the file -
+// it is BOUND, the way FARKAD_REPO is bound to a commit: a substitute must be the same
+// bytes. Relocation passes. A different build does not.
+export function shippedLibrary(root, envName, shippedRelPath) {
+    const shipped = join(root, shippedRelPath);
+    const named = process.env[envName];
+    const path = named || shipped;
+    const present = existsSync(path);
+
+    if (!named) {
+        return { path, present, ok: present, substituted: false,
+            reason: present ? null : `${shippedRelPath} is not in the tree` };
+    }
+
+    const shippedBytes = existsSync(shipped) ? sha256(readFileSync(shipped, 'utf8')) : null;
+    const namedBytes = present ? sha256(readFileSync(path, 'utf8')) : null;
+    if (!present) {
+        return { path, present, ok: false, substituted: true,
+            reason: `${envName} names ${path}, which is not there` };
+    }
+    if (shippedBytes === null) {
+        return { path, present, ok: false, substituted: true,
+            reason: `${envName} was set but ${shippedRelPath} is missing, so there is `
+                + 'nothing to check the substitute against' };
+    }
+    if (namedBytes !== shippedBytes) {
+        return { path, present, ok: false, substituted: true,
+            reason: `${envName} names a DIFFERENT build: ${namedBytes.slice(0, 12)} is not `
+                + `${shippedBytes.slice(0, 12)}, the bytes a phone runs. A suite reading it `
+                + 'would prove the arithmetic of a file nobody has.' };
+    }
+    return { path, present, ok: true, substituted: true,
+        reason: `${envName} names the same bytes as ${shippedRelPath}` };
+}

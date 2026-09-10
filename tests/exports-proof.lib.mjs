@@ -13,14 +13,21 @@ import vm from 'node:vm';
 import { readFileSync, existsSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
 import { makeDevice } from './harness.mjs';
+import { shippedLibrary } from './treecheck.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 export const REPORTS = readFileSync(ROOT + 'js/ui/reports.js', 'utf8');
 // THE SHIPPED BYTES. vendor/ is what the service worker precaches and what a phone
 // runs; node_modules holds a different build of the same version.
-export const SHEETJS_PATH = process.env.FARKAD_SHEETJS || (ROOT + 'vendor/xlsx-0.18.5.min.js');
-export const SHEETJS_PRESENT = existsSync(SHEETJS_PATH);
-export const SHEETJS_CODE = SHEETJS_PRESENT ? readFileSync(SHEETJS_PATH, 'utf8') : '';
+// FARKAD_SHEETJS may relocate the file; it may not change which build it is. See
+// shippedLibrary in tests/treecheck.mjs for what an unbound seam here was worth.
+const SHEETJS = shippedLibrary(ROOT, 'FARKAD_SHEETJS', 'vendor/xlsx-0.18.5.min.js');
+export const SHEETJS_PATH = SHEETJS.path;
+export const SHEETJS_REASON = SHEETJS.reason;
+// PRESENT used to mean "the path exists". It now means "these are the bytes a phone runs",
+// which is what every `given` that reads it was already claiming.
+export const SHEETJS_PRESENT = SHEETJS.ok;
+export const SHEETJS_CODE = SHEETJS.ok ? readFileSync(SHEETJS_PATH, 'utf8') : '';
 
 // ---------------------------------------------------------------- a zip reader, by hand
 

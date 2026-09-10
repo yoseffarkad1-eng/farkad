@@ -19,9 +19,10 @@
 // printed page and the fallback picture are asked in tests/exports-proof.print.mjs.
 
 import { suite, check, same, given, report } from './runner.mjs';
-import { phone, SHEETJS_PRESENT, SHEETJS_PATH } from './exports-proof.lib.mjs';
+import { phone, SHEETJS_PRESENT, SHEETJS_PATH, SHEETJS_REASON } from './exports-proof.lib.mjs';
 
-given(`SheetJS is in the tree (${SHEETJS_PATH})`, SHEETJS_PRESENT);
+given(`SheetJS is the shipped build (${SHEETJS_PATH})`, SHEETJS_PRESENT,
+    SHEETJS_REASON || 'vendor/, the copy sw.js precaches');
 
 // עומר, the worked example: 500 a day and 50 an hour, six pay-days and one hour is 3,050
 // against an advance of 5,000. A repayment of 400 in cash is recorded against the wrong
