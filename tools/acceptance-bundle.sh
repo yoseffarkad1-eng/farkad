@@ -63,7 +63,15 @@ const sw = fs.readFileSync("sw.js", "utf8");
 const block = sw.match(/const SHELL\s*=\s*\[([\s\S]*?)\]/);
 if (!block) { console.error("sw.js: no SHELL array"); process.exit(1); }
 const found = [...block[1].matchAll(/["\x27]([^"\x27]+)["\x27]/g)].map(m => m[1]);
-const extra = ["index.html", "manifest.json", "sw.js"];
+// NAMES READ OFF THE APP, NEVER TYPED HERE. The first version of this script listed
+// "manifest.json" from memory; the app links manifest.webmanifest, so the script refused
+// to build over a file that was never missing. A list kept by hand goes stale the first
+// time somebody renames something, and then it lies about the app instead of about
+// itself. So index.html is parsed for what it actually asks the browser to fetch.
+const html = fs.readFileSync("index.html", "utf8");
+const linked = [...html.matchAll(/(?:src|href)="([^"]+)"/g)]
+    .map(m => m[1]).filter(p => p && !/^https?:/.test(p) && p !== "/");
+const extra = ["index.html", "sw.js", ...linked];
 const all = [...new Set([...found, ...extra])]
     .map(p => p.replace(/^\.\//, ""))
     .filter(p => p && p !== "/" && !/^https?:/.test(p));
