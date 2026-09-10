@@ -272,19 +272,68 @@ function csvCell(value) {
     return `"${(risky ? "'" + text : text).replace(/"/g, '""')}"`;
 }
 
+// ------------------------------------------------- handing a file to the browser
+
+// Blob, anchor, press - the three lines every export in this app ends in, written once.
+//
+// It answers ONE question and no more: did the browser TAKE the file. It cannot say
+// whether the file was kept, because no browser tells anybody that - the share sheet can
+// be dismissed and the save cancelled with nothing reported - which is why every sentence
+// in this app stops at «נמסר לדפדפן» and none of them says «נשמר».
+//
+// What it exists for is the answer BELOW that, which the three doors used to assume. A
+// programmatic click on a download is refused outright in a sandboxed frame and in some
+// embedded webviews, and an anchor with no `download` property never downloads anything
+// anywhere. Measured on this tree: the press threw, the exception left exportReports past
+// its own try, and the person who tapped יצוא saw nothing at all - no file, no dialog, no
+// error. The backup door was worse: it went on to stamp scheduleData:lastBackup, so the
+// age line said «גיבוי אחרון: היום» over a file that never existed.
+//
+// js/ui/printout.js has answered this question since it was written - downloadPrintout
+// returns false and its caller says PRINTOUT_NO_WAY_OUT. This is the same answer, for
+// the other three doors, and printout.js keeps its own copy deliberately: it must not
+// wait, and it is called inside a share gesture that an await would lose.
+//
+// Returns true when the browser took the file, false when it would not - never a claim
+// about a file on a disk. Every caller must say which of the two happened.
+function handOverBlob(blob, filename) {
+    if (!(window.URL && typeof URL.createObjectURL === 'function')) return false;
+    const link = document.createElement('a');
+    // A browser with no `download` on an anchor navigates to the blob instead of saving
+    // it, which for a JSON or a CSV is a page of text and no file. Asked before the
+    // press, because after it there is nothing left to ask.
+    if (!('download' in link)) return false;
+
+    let url = null;
+    try {
+        url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = filename;
+        link.click();
+    } catch (error) {
+        // The refusal is the answer, not a crash. The record was not touched getting
+        // here and is not touched now.
+        if (url !== null) {
+            try { URL.revokeObjectURL(url); } catch (ignored) { /* already gone */ }
+        }
+        return false;
+    }
+
+    // Revoking in the same tick can cancel the download before it starts.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+}
+
 // Excel needs a BOM to read a UTF-8 CSV as Hebrew rather than mojibake.
+//
+// Returns whether the browser took the file - see handOverBlob. The caller decides what
+// to say; this one must never be the thing that decides a file exists.
 function downloadCsv(rows, filename) {
     const csv = rows
         .map(row => row.map(csvCell).join(','))
         .join('\r\n');
 
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    // Revoking in the same tick can cancel the download before it starts.
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return handOverBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }),
+        filename);
 }
 

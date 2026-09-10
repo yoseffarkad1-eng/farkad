@@ -385,6 +385,194 @@ async function importThrough(page, name, text) {
   await page.context().close();
 }
 
+// ------------------------------------- every record the file is required to carry, named
+//
+// The suites above take one family at a time: the queue from every slot, a quarantine made
+// in an earlier session, a poisoned map, a pending restore. Each of them proves its own
+// family and none of them asks the question a person holding a broken phone is actually
+// asking, which is whether ALL of it came out.
+//
+// So this puts one record on the disk under every key the rescue file is required to carry
+// - the app's own list is js/recovery.js, isFarkadSnapshotKey and the two arrays above it -
+// presses the button in the settings panel, and asserts each one BY NAME and BY BYTES out
+// of the file that came off the press. A key added to that list without being added here
+// fails nothing; a key dropped from the sweep fails one check that names it.
+//
+// And the other half of the same rule: the two live records that are deliberately NOT in
+// the file, and a record on this origin that is not this app's. A sweep that widened to
+// catch everything would pass every check above and put another site's storage into a file
+// a person forwards to whoever is helping them.
+{
+  const page = await open();
+  await seed(page);
+
+  // The keys, and a distinguishable byte string for each. Written straight to the disk:
+  // several of these have no writer that can be called - a quarantine copy is made by
+  // Recovery when a record will not parse, and a poison copy by js/state.js - and this is
+  // asking what the SWEEP finds, not how the wreckage got there.
+  const REQUIRED = {
+    // The two schedules: what this build writes, and what an older build left.
+    'scheduleData': '{"marker":"v1-legacy"}',
+    'scheduleData:v2': '{"marker":"the live record"}',
+    'scheduleData:migrationIssues': '[{"marker":"a decision nobody answered"}]',
+    // A restore that was begun and not finished, and its frozen companion.
+    'farkad:pendingReplace': '{"marker":"an unfinished restore"}',
+    'farkad:pendingReplace:v71': '{"marker":"the v71 companion"}',
+    // Provenance: the whole record, and one entity's own claim.
+    'farkad:provenance:v1': '{"marker":"provenance"}',
+    'farkad:prov:w_01': '{"marker":"one man\'s provenance"}',
+    // The queue, across every key it is written on: two slots and the four marks.
+    'farkad:outbox': '{"marker":"slot zero"}',
+    'farkad:outbox:active1': '{"marker":"slot one"}',
+    'farkad:outbox:op:b1': '{"marker":"a batch"}',
+    'farkad:outbox:ack:b1': '{"marker":"an ack"}',
+    'farkad:outbox:beat:b1': '{"marker":"a beat"}',
+    'farkad:outbox:hold:b1': '{"marker":"a hold"}',
+    // Quarantine copies. Every one of these is the ONLY account of bytes nobody could
+    // read: the original under the same name has since been written over.
+    'scheduleData:v2:damaged': '{"marker":"the first wreck',
+    'scheduleData:v2:damaged:2': '{"marker":"the second wreck',
+    'scheduleData:v2:ledger:damaged': '{"marker":"a damaged ledger',
+    'scheduleData:v2:poison:days.2026-08-12.actual:damaged': '{"marker":"a poisoned day',
+    'farkad:outbox:damaged': '{"marker":"a damaged slot',
+    'farkad:provenance:v1:damaged': '{"marker":"damaged provenance',
+    'farkad:sendClaim:damaged': '{"marker":"a damaged send claim',
+    'farkad:deviceId:damaged': '{"marker":"a damaged device id'
+  };
+
+  // The send claim is the one record whose place in the file depends on whether it can be
+  // READ. A claim that parses is this session's own lock, worthless a second later, and
+  // putting it in a file somebody forwards over WhatsApp says nothing about anybody's
+  // work - so it is left out. A claim that does NOT parse is the account of why a send
+  // waited, and the disk that refused the quarantine copy is the same disk whose half
+  // write left it in that state, so those bytes may be the only ones in existence. It is
+  // named into the file for that case alone (FarkadSync.unreadableSendClaim).
+  //
+  // Both halves are asked, because a sweep that got either of them wrong is a sweep that
+  // either leaks a lock token or loses the only evidence there is.
+  const UNREADABLE_CLAIM = '{"token":"half a write';
+
+  // Deliberately NOT in the file. The first two are live coordination records - one is
+  // minted again by the sync layer on any device that has lost it, the other is rewritten
+  // twice per send - and carrying either would hand the receiving phone this phone's
+  // identity. The last two are not this app's records at all.
+  const EXCLUDED = {
+    'farkad:deviceId': 'd_this_phone',
+    // A claim anybody can read: a token, and a moment that is a moment. This is the shape
+    // readSendClaim accepts, and the shape that must never reach the file.
+    'farkad:sendClaim': JSON.stringify({
+      by: 'd_this_phone', token: 't1', at: Date.now(), beat: Date.now()
+    }),
+    'someoneelse:damaged': 'another site\'s wreckage',
+    'someoneelse': 'another site\'s record'
+  };
+
+  await page.evaluate(([required, excluded]) => {
+    Object.keys(required).forEach(key => localStorage.setItem(key, required[key]));
+    Object.keys(excluded).forEach(key => localStorage.setItem(key, excluded[key]));
+    window.__blobs = [];
+    const real = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => { window.__blobs.push(blob); return real(blob); };
+    window.askTell = () => Promise.resolve();
+  }, [REQUIRED, EXCLUDED]);
+
+  // THE REAL BUTTON, in the settings panel, by the onclick the page carries - not the
+  // function name typed into evaluate. The panel has to be open for the button to be
+  // there at all, which is also how a person reaches it.
+  const pressed = await page.evaluate(() => {
+    openSettings();
+    const button = document.querySelector('button[onclick="exportRecoveryData()"]');
+    if (!button) return null;
+    button.click();
+    return button.textContent;
+  });
+  check('the rescue export has a button on the settings panel, and it was pressed',
+    typeof pressed === 'string' && pressed.length > 0, String(pressed));
+  await page.waitForTimeout(500);
+
+  const text = await page.evaluate(() => window.__blobs.length
+    ? window.__blobs[window.__blobs.length - 1].text() : null);
+  check('and a file came off the press', typeof text === 'string' && text.length > 0,
+    String(text).slice(0, 40));
+
+  const file = JSON.parse(text);
+  const records = (file && file.records) || {};
+
+  // One check per key, named, so a failure says which record did not come out.
+  Object.keys(REQUIRED).forEach(key => {
+    check(`the file carries ${key}, byte for byte`, records[key] === REQUIRED[key],
+      records[key] === REQUIRED[key] ? ''
+        : `${JSON.stringify(records[key])} !== ${JSON.stringify(REQUIRED[key])}`);
+  });
+
+  // And nothing may be quietly dropped by being counted rather than named.
+  const missing = Object.keys(REQUIRED).filter(key => records[key] !== REQUIRED[key]);
+  check('every required record is in the file, with none of them missing',
+    missing.length === 0, JSON.stringify(missing));
+
+  Object.keys(EXCLUDED).forEach(key => {
+    check(`the file does NOT carry ${key}`, records[key] === undefined,
+      JSON.stringify(records[key]));
+  });
+
+  // And the other half of the send claim: the same key, bytes nobody can read, exported
+  // again. What changes is only whether the record parses.
+  await page.evaluate(bytes => {
+    localStorage.setItem('farkad:sendClaim', bytes);
+    window.__blobs = [];
+  }, UNREADABLE_CLAIM);
+  await page.evaluate(() => {
+    const button = document.querySelector('button[onclick="exportRecoveryData()"]');
+    button.click();
+  });
+  await page.waitForTimeout(500);
+  const second = JSON.parse(await page.evaluate(() =>
+    window.__blobs[window.__blobs.length - 1].text()));
+  check('but a send claim NOBODY CAN READ is carried - it is the only account of why a '
+    + 'send waited',
+    second.records['farkad:sendClaim'] === UNREADABLE_CLAIM,
+    JSON.stringify(second.records['farkad:sendClaim']));
+
+  // The file also has to say what it is and how it was taken, or the phone it is opened
+  // on cannot tell a complete rescue from half of one.
+  check('and the file says what it is, when it was taken and which build took it',
+    file.kind === 'farkad-recovery' && typeof file.takenAt === 'string'
+    && typeof file.appVersion === 'string',
+    JSON.stringify({ kind: file.kind, takenAt: file.takenAt, appVersion: file.appVersion }));
+  check('whether the disk was still answering, whether it was one moment, and whether the '
+    + 'handover was written down',
+    typeof file.storageReadable === 'boolean' && typeof file.stable === 'boolean'
+    && typeof file.handoverRecorded === 'boolean',
+    JSON.stringify({ readable: file.storageReadable, stable: file.stable,
+      handover: file.handoverRecorded }));
+  check('which keys the second reading could no longer see, named rather than implied',
+    Array.isArray(file.unreadableKeys), JSON.stringify(file.unreadableKeys));
+  check('the quarantines this session made, with the copy each one went to',
+    Array.isArray(file.problems), JSON.stringify(file.problems).slice(0, 120));
+  check('the decisions the migration refused to guess',
+    Array.isArray(file.pendingDecisions), JSON.stringify(file.pendingDecisions).slice(0, 80));
+
+  // The schedule AS THE APP IS HOLDING IT - which on the device this file exists for is
+  // not any record on the disk, because scheduleData:v2 will not parse and the app is
+  // running off a migrated v1 it deliberately never wrote down.
+  check('and the live schedule beside the wreckage, marked as derived and not as a record',
+    file.liveSchedule && Array.isArray(file.liveSchedule.workers)
+    && file.liveSchedule.workers.some(worker => worker.id === 'w_01'),
+    JSON.stringify(Object.keys(file.liveSchedule || {})));
+
+  // NOTHING WAS TAKEN OFF THE PHONE to make the file. The rule the whole recovery path is
+  // built on, asked of the disk after the press.
+  const still = await page.evaluate(keys => {
+    const gone = [];
+    keys.forEach(key => { if (localStorage.getItem(key) === null) gone.push(key); });
+    return gone;
+  }, Object.keys(REQUIRED).concat(Object.keys(EXCLUDED)));
+  check('and every record is still on the device afterwards - the export copies, never moves',
+    still.length === 0, JSON.stringify(still));
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);

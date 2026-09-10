@@ -874,6 +874,156 @@ for (const scenario of [
     await page.context().close();
 }
 
+// -------------------------------------------------- a row is not cut in half by a page
+//
+// `.report-table tr { page-break-inside: avoid }` and the same rule on the totals block
+// are two lines in the print stylesheet, and nothing in this file read a PDF to see what
+// they did. Every other payroll fixture here is one line tall per man, and a one-line row
+// cannot be split by anything - so those lines were covered by assertions that would pass
+// with them deleted.
+//
+// A split row costs somebody their pay: the paper says a man's name at the foot of one
+// sheet and what he is owed at the head of the next, and whoever is holding the paper
+// reconciles the two - who is the person being paid.
+//
+// The fixture is built so a break CAN land inside a row: names long enough to wrap the
+// first column onto several lines, each row opening and closing with a token of its own,
+// and a unique amount per man. Wa07 and Wz07 are the two ends of one row; on different
+// sheets, that row came apart.
+//
+// WHAT THIS ENGINE CANNOT SAY, measured rather than assumed: the same document printed
+// with `page-break-inside` forced back to `auto` comes out identical - headless Chromium
+// keeps a table row atomic on its own, at every row height tried here (12x30 words,
+// 10x60, 8x90, 30 and 60 short rows). So this suite proves the PDF, and it does not prove
+// the stylesheet: on this browser the rule is unfalsifiable. Whether the rule earns its
+// place is a question for the engines that DO break inside a row - Safari's print path
+// most of all, which is where this app is printed from - and that is an acceptance row,
+// not a check here. The control below is kept, and kept honest, so that nobody later
+// reads the check above as a proof of the rule.
+{
+    suite('a payroll row is never cut across a page break');
+
+    const page = await open();
+
+    // Twelve men, each on his own daily rate, each name wrapping the first column onto
+    // several lines - so the pay sheet runs to more than one sheet with rows tall enough
+    // for a page boundary to fall inside one.
+    const CREW = 12;
+    const token = (prefix, i) => `${prefix}${String(i + 1).padStart(2, '0')}`;
+    await page.evaluate(count => {
+        const filler = Array.from({ length: 30 }, (unused, k) => `crew${k}`).join(' ');
+        State.schedule.workers = Array.from({ length: count }, (unused, i) => {
+            const n = String(i + 1).padStart(2, '0');
+            return {
+                id: `w_${i + 1}`,
+                // The row's two ends, with the wrap between them.
+                name: `Wa${n} ${filler} Wz${n}`,
+                active: true,
+                dailyRate: 4001 + i,
+                hourlyRate: 50
+            };
+        });
+        State.schedule.places = [{ id: 'p_01', name: 'Site A', active: true }];
+        for (let i = 0; i < count; i += 1) {
+            assignPlace(State.schedule, '2026-08-10', `w_${i + 1}`, 'actual', 'p_01');
+        }
+        State.save();
+        REPORT_RANGE.from = '2026-08-01';
+        REPORT_RANGE.to = '2026-08-31';
+        REPORT_SECTION = 'workers';
+        showView('reports');
+        render();
+    }, CREW);
+    await page.waitForTimeout(400);
+
+    // A comma is stripped because the screen writes 4,001 and the question is about which
+    // sheet the amount is on, not about the separator.
+    const pagesOf = (pdf, text) => pdf.pages
+        .filter(item => pageText(item).replace(/,/g, '').includes(text))
+        .map(item => item.index);
+
+    const brokenRows = pdf => {
+        const broken = [];
+        for (let i = 0; i < CREW; i += 1) {
+            const head = pagesOf(pdf, token('Wa', i));
+            const foot = pagesOf(pdf, token('Wz', i));
+            const money = pagesOf(pdf, String(4001 + i));
+            if (head.length === 0 || foot.length === 0) continue;   // absent: caught below
+            if (head.length > 1 || foot.length > 1 || head[0] !== foot[0]
+                || !money.includes(head[0])) {
+                broken.push({ row: i + 1, head, foot, money });
+            }
+        }
+        return broken;
+    };
+
+    const shipped = readPdf(await page.pdf({ format: 'A4', printBackground: true }));
+    given('the print produced a real PDF that runs to more than one sheet',
+        shipped.pages.length >= 2, String(shipped.pages.length));
+
+    const missing = [];
+    for (let i = 0; i < CREW; i += 1) {
+        if (pagesOf(shipped, token('Wa', i)).length === 0) missing.push(token('Wa', i));
+    }
+    given('every man reached the paper', missing.length === 0, JSON.stringify(missing));
+
+    // The rows really are tall enough for the question to mean something - a fixture of
+    // one-line rows makes this suite pass without measuring anything.
+    const rowHeights = await page.evaluate(async () => {
+        const table = document.querySelector('#reportsView .report-payroll table');
+        return [...table.querySelectorAll('tbody tr')]
+            .map(row => Math.round(row.getBoundingClientRect().height));
+    });
+    given('and each of their rows is several lines tall',
+        rowHeights.every(height => height > 60), JSON.stringify(rowHeights.slice(0, 4)));
+
+    check('no row is cut across a page break: both ends of every man\'s row, and the '
+        + 'money on it, are on one sheet',
+        brokenRows(shipped).length === 0, JSON.stringify(brokenRows(shipped).slice(0, 4)));
+
+    // The totals block, the other half of the same rule: the label, the numbers it adds
+    // up and the row they sit on have to be one thing on one sheet.
+    const totalsPages = shipped.pages
+        .filter(item => says(pageText(item), 'סה״כ') && says(pageText(item), 'ימי נוכחות'));
+    check('the pay sheet\'s totals row is on exactly one sheet',
+        totalsPages.length === 1, JSON.stringify(totalsPages.map(item => item.index)));
+    if (totalsPages.length === 1) {
+        const totalsLine = linesOf(totalsPages[0])
+            .filter(line => says(line.text, 'סה״כ')).pop();
+        check('with its label and the numbers it totals on one line of it',
+            Boolean(totalsLine) && /\d{3,}/.test(totalsLine.text),
+            totalsLine ? totalsLine.text.slice(0, 80) : 'no totals line');
+    }
+
+    // THE CONTROL, and what it actually says. Not "the rule works" - it says this engine
+    // cannot tell whether it does, which is the only honest reading of two identical PDFs.
+    await page.addStyleTag({ content: `@media print {
+        .report-table tr { page-break-inside: auto !important; break-inside: auto !important; }
+        .report-table tfoot { page-break-inside: auto !important; break-inside: auto !important; }
+    }` });
+    await page.waitForTimeout(200);
+    const loosened = readPdf(await page.pdf({ format: 'A4', printBackground: true }));
+    check('and with the rule forced off this engine still cuts nothing - so what is proved '
+        + 'above is the paper, and the rule itself is an acceptance row for the browsers '
+        + 'that do break inside a row',
+        brokenRows(loosened).length === 0 && loosened.pages.length === shipped.pages.length,
+        JSON.stringify({ pages: loosened.pages.length, broken: brokenRows(loosened).slice(0, 2) }));
+
+    // So the rule is asserted where it can be: in the stylesheet the shell serves. A
+    // silent deletion is then a red check here rather than a discovery on somebody's
+    // printed pay sheet.
+    const css = await (await fetch(`${BASE}/css/app.css`)).text();
+    const carries = selector => (css.match(
+        new RegExp(`\\${selector}\\s*\\{[^}]*\\}`, 'g')) || [])
+        .filter(rule => /(page-)?break-inside:\s*avoid/.test(rule));
+    check('and the stylesheet still carries the rule, on the rows and on the totals',
+        carries('.report-table tr').length > 0 && carries('.report-table tfoot').length > 0,
+        JSON.stringify(carries('.report-table tr').concat(carries('.report-table tfoot'))
+            .map(rule => rule.replace(/\s+/g, ' '))));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();

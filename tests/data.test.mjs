@@ -7717,10 +7717,14 @@ function catchDownloads(device) {
         createObjectURL: () => 'blob:farkad',
         revokeObjectURL: () => {}
     };
+    // `download` is present before it is set, because the app feature-detects it before
+    // pressing the anchor - see handOverBlob in js/ui/share.js, and the same probe in
+    // js/ui/printout.js. An anchor without it is a browser that cannot download at all.
     device.ctx.document.createElement = () => ({
         style: {},
         setAttribute: () => {},
         appendChild: () => {},
+        download: '',
         click() { saved.push({ name: this.download, body: lastBody }); }
     });
     return saved;
@@ -8368,8 +8372,10 @@ for (const [label, run] of [
     let downloaded = null;
     device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
     device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    // `download: ''` because the app feature-detects it before pressing - see the note
+    // over catchDownloads above, and handOverBlob in js/ui/share.js.
     device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
-        appendChild: () => {}, click: () => {} });
+        appendChild: () => {}, download: '', click: () => {} });
     device.ctx.askTell = () => Promise.resolve();
 
     device.call('exportBackup');
@@ -8411,8 +8417,10 @@ for (const [label, run] of [
     let downloaded = null;
     device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
     device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    // `download: ''` because the app feature-detects it before pressing - see the note
+    // over catchDownloads above, and handOverBlob in js/ui/share.js.
     device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
-        appendChild: () => {}, click: () => {} });
+        appendChild: () => {}, download: '', click: () => {} });
     const said = [];
     device.ctx.askTell = message => {
         said.push(String((message && message.title) || message));
@@ -8464,8 +8472,10 @@ for (const [label, run] of [
     let downloaded = null;
     device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
     device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    // `download: ''` because the app feature-detects it before pressing - see the note
+    // over catchDownloads above, and handOverBlob in js/ui/share.js.
     device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
-        appendChild: () => {}, click: () => {} });
+        appendChild: () => {}, download: '', click: () => {} });
     device.ctx.askTell = () => Promise.resolve();
 
     device.setQuota(key => String(key).startsWith('farkad:prov:'));
@@ -8800,8 +8810,10 @@ function brokenPhone(options = {}) {
     let downloaded = null;
     device.ctx.Blob = function Blob(parts) { downloaded = String(parts[0]); };
     device.ctx.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+    // `download: ''` because the app feature-detects it before pressing - see the note
+    // over catchDownloads above, and handOverBlob in js/ui/share.js.
     device.ctx.document.createElement = () => ({ style: {}, setAttribute: () => {},
-        appendChild: () => {}, click: () => {} });
+        appendChild: () => {}, download: '', click: () => {} });
     device.ctx.askTell = () => Promise.resolve();
 
     device.setQuota(key => String(key).startsWith('farkad:prov:'));

@@ -2605,6 +2605,31 @@ function loadXlsx(timeoutMs = 8000) {
 const EXPORT_CHOICE_DONE = 'הבנתי';
 const EXPORT_CHOICE_AGAIN = 'שמירה חוזרת';
 
+// A file the browser would not take, said out loud.
+//
+// The rule the whole app already follows about the far end - never «נשמר», only
+// «נמסר לדפדפן», because no browser reports whether a file reached "קבצים" - has a near
+// end too, and this is it: when the browser did not even TAKE the file, the app knows,
+// and it must not describe the export as having happened.
+//
+// The filenames are Latin inside a Hebrew sentence and askTell writes textContent, so
+// each one travels wrapped in LRI…PDI or the bidi algorithm folds the dates backwards -
+// the same isolation the hand-over dialog uses on the workbook's name.
+//
+// It does NOT say "try another browser": on this app the record lives in THIS browser's
+// storage, so a person who follows that advice opens an app with no crew in it.
+function downloadRefusedNotice(refused, handed) {
+    const list = names => names.map(name => '\u2066' + name + '\u2069').join(', ');
+    return {
+        title: 'ההורדה נחסמה',
+        message: 'הדפדפן לא קיבל את ' + list(refused) + '. '
+            + (handed.length > 0 ? 'כן התקבלו: ' + list(handed) + '. ' : '')
+            + 'הרישום במכשיר לא השתנה. '
+            + 'נסה שוב; אם זה חוזר, ההורדות חסומות במכשיר הזה - בדוק את הגדרות ההורדה '
+            + 'בדפדפן, ובינתיים אפשר להוציא את הטבלה בכפתור «🖼️ שיתוף כתמונה».'
+    };
+}
+
 async function exportReports() {
     const stamp = `${REPORT_RANGE.from}_${REPORT_RANGE.to}`;
     const client = scopedExportPlace();
@@ -2625,9 +2650,33 @@ async function exportReports() {
     //
     // The client-scoped export stays scoped: only the billing sheet exists to fall back to.
     if (typeof XLSX === 'undefined') {
-        if (sheets.payroll) downloadCsv(sheets.payroll, `farkad-payroll_${stamp}.csv`);
-        downloadCsv(sheets.invoice, `farkad-invoice_${stamp}.csv`);
-        if (sheets.detail) downloadCsv(sheets.detail, `farkad-detail_${stamp}.csv`);
+        // WHICH OF THEM THE BROWSER ACTUALLY TOOK.
+        //
+        // downloadCsv used to return nothing and this branch used to say "the files were
+        // exported as CSV" whatever happened underneath. On a browser that refuses a
+        // programmatic download - a sandboxed frame, an embedded webview - the press
+        // threw, and because this branch sits ABOVE the try below, the exception left
+        // exportReports entirely: no file, no dialog, no error, a person tapping יצוא at
+        // the end of a fortnight and watching the screen do nothing. On a browser with no
+        // `download` on an anchor the press did not throw and did not save either, and
+        // the sentence claimed three files that did not exist.
+        //
+        // So each file is asked, and what is said afterwards is what happened.
+        const handed = [];
+        const refused = [];
+        const hand = (rows, filename) => {
+            (downloadCsv(rows, filename) ? handed : refused).push(filename);
+        };
+
+        if (sheets.payroll) hand(sheets.payroll, `farkad-payroll_${stamp}.csv`);
+        hand(sheets.invoice, `farkad-invoice_${stamp}.csv`);
+        if (sheets.detail) hand(sheets.detail, `farkad-detail_${stamp}.csv`);
+
+        if (refused.length > 0) {
+            askTell(downloadRefusedNotice(refused, handed));
+            return;
+        }
+
         askTell(client
             ? 'חלק מהאפליקציה חסר במכשיר, ולכן קובץ החיוב יוצא כ-CSV במקום Excel. '
                 + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.'

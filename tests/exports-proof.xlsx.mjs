@@ -29,9 +29,10 @@
 // it and Numbers ignores it is device acceptance, and is named as such in the report.
 
 import { suite, check, same, given, report } from './runner.mjs';
-import { phone, workbookOf, tags, attr, SHEETJS_PRESENT, SHEETJS_PATH } from './exports-proof.lib.mjs';
+import { phone, workbookOf, tags, attr, SHEETJS_PRESENT, SHEETJS_PATH, SHEETJS_REASON } from './exports-proof.lib.mjs';
 
-given(`SheetJS is in the tree (${SHEETJS_PATH})`, SHEETJS_PRESENT);
+given(`SheetJS is the shipped build (${SHEETJS_PATH})`, SHEETJS_PRESENT,
+    SHEETJS_REASON || 'vendor/, the copy sw.js precaches');
 
 // ------------------------------------------------------------- a name that is a formula
 //
@@ -465,6 +466,117 @@ const DANGEROUS = [
         ['2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13']);
     check('the detail sheet names the site as the roster names it today',
         sites.every(name => name === 'הרצליה (חדש)'), JSON.stringify(sites));
+}
+
+// ------------------------------------- a phone number, a date, and the order of the columns
+//
+// Three things a spreadsheet decides for itself unless the file tells it otherwise, and
+// each of them was a comment in this repository rather than a fact about a produced file.
+//
+//   A PHONE NUMBER. The roster is typed on a phone by whoever is holding it, and a man
+//   entered under his mobile - 0501234567, or 050-1234567 - is an ordinary row. If that
+//   cell leaves here typed as a NUMBER, the leading zero is gone before anybody opens the
+//   file, and 501234567 is not a number anyone can ring. Nothing in the workbook path
+//   defuses anything (the CSV path does; see csvCell), on the stated grounds that
+//   "SheetJS types a string cell as a string" - which is the same class of claim as the
+//   formula one, and is answered the same way: out of xl/worksheets/*.xml.
+//
+//   A DATE. Two sheets are dated. A date handed to a spreadsheet as a serial is 46264 in
+//   the cell and whatever the viewer's locale decides on the screen, and a bookkeeper
+//   reconciling a fortnight cannot tell a wrong one from a right one. Written as text in
+//   ISO order it reads as a date, sorts as a date, and means the same thing in every
+//   viewer that opens it.
+//
+//   THE ORDER. rightToLeft="1" turns the sheet round; it does not decide which column is
+//   first. In a right-to-left sheet the first column is the one on the RIGHT, where a
+//   Hebrew reader starts - so עובד first and לתשלום last is not a preference, it is what
+//   makes the flag worth setting. The print suite measures the same fact on paper by the
+//   x-coordinates of the headings; this is its half in the file.
+{
+    suite('a phone number is not a number, a date is not a serial, and the columns read right');
+
+    const typed = phone(`
+        ['w_01','w_02','w_03'].forEach(function (id) {
+            State.commit(assignPlace(State.schedule, '2026-08-10', id, 'actual', 'p_01'));
+        });`, {
+        from: '2026-08-07', to: '2026-08-20',
+        workers: [
+            { id: 'w_01', name: '050-1234567', active: true, dailyRate: 400, hourlyRate: 0 },
+            { id: 'w_02', name: '0501234567', active: true, dailyRate: 400, hourlyRate: 0 },
+            { id: 'w_03', name: 'דוד כהן', active: true, dailyRate: 350, hourlyRate: 0 }
+        ],
+        places: [{ id: 'p_01', name: 'הרצליה', active: true }]
+    });
+    const book = await typed.exportOnce();
+    const pay = book.sheets['שכר'];
+
+    // The order, on all three sheets, read off the header row of the file.
+    same('שכר begins with the man and ends with what he is owed and the note about it',
+        [pay.values[0][0], pay.values[0][pay.values[0].length - 2],
+            pay.values[0][pay.values[0].length - 1]],
+        ['עובד', 'לתשלום', 'הערה']);
+    same('חיוב begins with the date and ends with the total',
+        [book.sheets['חיוב'].values[0][0],
+            book.sheets['חיוב'].values[0][book.sheets['חיוב'].values[0].length - 1]],
+        ['תאריך', 'סה״כ']);
+    same('פירוט begins with the date and ends with what that day was worth',
+        [book.sheets['פירוט'].values[0][0],
+            book.sheets['פירוט'].values[0][book.sheets['פירוט'].values[0].length - 1]],
+        ['תאריך', 'לתשלום ליום']);
+
+    // The phone numbers, both spellings, out of the cell.
+    //
+    // `types` here is the cell's OOXML `t` attribute as the reader in
+    // exports-proof.lib.mjs found it: 'str' for a string, and 'number' where there is no
+    // attribute at all, which is what a numeric cell looks like. A cell that lost its
+    // type is a cell that lost the zero.
+    ['050-1234567', '0501234567'].forEach(written => {
+        const at = pay.values.findIndex(row => String(row[0]) === written);
+        check(`«${written}» reached the workbook exactly as it was typed`, at > 0,
+            JSON.stringify(pay.values.map(row => row[0])));
+        if (at > 0) {
+            same(`and its cell is text, so no viewer may drop the leading zero`,
+                pay.types[at][0], 'str');
+            same(`and it is a value, not a formula`, pay.formulas[at][0], null);
+        }
+    });
+    // The whole column, so a fourth spelling added later cannot slip through as a number.
+    check('every name on the pay sheet is a text cell',
+        pay.values.slice(1).every((row, at) => pay.types[at + 1][0] === 'str'),
+        JSON.stringify(pay.values.slice(1).map((row, at) => pay.types[at + 1][0])));
+    // And the Hebrew name beside them is still Hebrew, in the same file.
+    check('and the Hebrew name in the same column is Hebrew, not an escape',
+        pay.values.some(row => row[0] === 'דוד כהן'),
+        JSON.stringify(pay.values.map(row => row[0])));
+
+    // The dates, on both sheets that carry one.
+    const billing = book.sheets['חיוב'];
+    same('the billing sheet dates the day as a date somebody can read',
+        billing.values.slice(1, -1).map(row => row[0]), ['2026-08-10']);
+    check('and every one of those cells is text, never a serial',
+        billing.types.slice(1, -1).every(row => row[0] === 'str'),
+        JSON.stringify(billing.types.slice(1, -1).map(row => row[0])));
+
+    const detail = book.sheets['פירוט'];
+    same('the detail sheet dates every worker-day the same way',
+        detail.values.slice(1).map(row => row[0]),
+        ['2026-08-10', '2026-08-10', '2026-08-10']);
+    check('and those cells are text too',
+        detail.types.slice(1).every(row => row[0] === 'str'),
+        JSON.stringify(detail.types.slice(1).map(row => row[0])));
+    // Not asserted as decoration: the day name is what makes the ISO date legible to
+    // somebody checking a fortnight without a calendar beside them.
+    same('with the Hebrew day beside it', detail.values.slice(1).map(row => row[1]),
+        ['שני', 'שני', 'שני']);
+
+    // The money is still money. A fix that typed everything as text would pass every
+    // check above and hand a bookkeeper a file whose columns will not sum.
+    const net = pay.values[0].indexOf('לתשלום');
+    check('and the money beside the name is still a number a column can total',
+        pay.values.slice(1).every((row, at) => pay.types[at + 1][net] === 'number'),
+        JSON.stringify(pay.values.slice(1).map(row => row[net])));
+    same('adding up to what the three men are owed',
+        pay.values.slice(1).reduce((sum, row) => sum + row[net], 0), 1150);
 }
 
 report();

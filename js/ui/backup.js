@@ -663,12 +663,26 @@ function exportRecoveryData() {
 
     const name = `farkad-recovery-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = name;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    // Handed over through the one door every export in this app uses, and its answer is
+    // READ (handOverBlob, js/ui/share.js). A browser that refuses a programmatic download
+    // used to take this call down with it - the press threw, the exception left
+    // exportRecoveryData, and the person looking at a phone whose records will not parse
+    // was shown nothing at all. On this door that is the worst of the three: it is the
+    // only way the unreadable bytes leave the phone, and silence reads as "there is no
+    // rescue file", which is when somebody reinstalls the app.
+    if (!handOverBlob(blob, name)) {
+        if (typeof askTell === 'function') {
+            askTell({
+                title: 'ההורדה נחסמה',
+                message: 'הדפדפן לא קיבל את \u2066' + name + '\u2069, ולכן קובץ החילוץ לא יצא '
+                    + 'מהמכשיר. שום דבר לא נמחק - הרשומות עדיין כאן. '
+                    + 'נסה שוב; אם זה חוזר, ההורדות חסומות במכשיר הזה - בדוק את הגדרות '
+                    + 'ההורדה בדפדפן ואל תסיר את האפליקציה עד שהקובץ יוצא.'
+            });
+        }
+        return;
+    }
 
     // What is said afterwards, and what is carefully NOT said.
     //
@@ -731,16 +745,30 @@ function exportBackup() {
 
     const name = `farkad-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(State.schedule, null, 1)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = name;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    // The same door, and its answer read for the same reason (handOverBlob,
+    // js/ui/share.js). The stamp below is why this one mattered most: a refused press
+    // threw straight past it on some browsers and, on the ones where the press is merely
+    // ignored, did not throw at all - so the age line under this button read
+    // «גיבוי אחרון: היום» over a file that had never existed, on the one screen a person
+    // consults to decide whether their record is safe.
+    if (!handOverBlob(blob, name)) {
+        if (typeof askTell === 'function') {
+            askTell({
+                title: 'ההורדה נחסמה',
+                message: 'הדפדפן לא קיבל את \u2066' + name + '\u2069, ולכן לא נוצר קובץ גיבוי. '
+                    + 'הרישום במכשיר לא השתנה, והתאריך של "גיבוי אחרון" לא זז. '
+                    + 'נסה שוב; אם זה חוזר, ההורדות חסומות במכשיר הזה - בדוק את הגדרות '
+                    + 'ההורדה בדפדפן.'
+            });
+        }
+        return;
+    }
 
     // Recorded on the click, not on a confirmed download - the browser never says whether
     // the file was actually kept. It is a reminder, and a reminder that is one day
-    // optimistic is still worth far more than no reminder.
+    // optimistic is still worth far more than no reminder. It is NOT written for a file
+    // the browser refused outright: that is not an optimistic reminder, it is a false one.
     Store.set(LAST_BACKUP_KEY, todayStr());
     renderBackupAge();
 

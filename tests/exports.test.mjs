@@ -155,6 +155,32 @@ function csvRows(text) {
     });
 }
 
+// A browser that takes the anchor and does nothing useful with it.
+//
+// Two shapes, and both of them are a real phone. `throw` is the sandboxed frame and the
+// embedded webview, where a programmatic click on a download is refused outright;
+// `no-download-attribute` is the browser that never had `download` on an anchor at all,
+// which is the case js/ui/printout.js already tests for before it draws a picture. In
+// both, the app hands the file over and NOTHING lands - and the only question that
+// matters afterwards is whether the app said so.
+function refuseDownloads(device, how) {
+    const create = device.ctx.document.createElement;
+    device.ctx.document.createElement = tag => {
+        const node = create(tag);
+        if (String(tag).toLowerCase() !== 'a') return node;
+        if (how === 'no-download-attribute') delete node.download;
+        else node.click = () => { throw new Error('the browser refused the download'); };
+        return node;
+    };
+}
+
+const toldText = device => {
+    const said = device.ctx.told;
+    if (said === null || said === undefined) return '';
+    return typeof said === 'string' ? said
+        : `${said.title || ''} ${said.message || ''}`;
+};
+
 // ---------------------------------------------------------------- the seder on WhatsApp
 {
     suite('the message that goes out to the crew');
@@ -955,5 +981,124 @@ function csvRows(text) {
             === '📅 סידור עבודה – יום שני 10/08/2026\n\n📍 הרצליה\n• דוד',
         JSON.stringify(hebrewOnly));
 }
+
+// ------------------------------------------- a file that never left is never a file
+//
+// Every door out of this app ends in the same three lines: build a Blob, put it on an
+// anchor, press the anchor. None of them can see whether the file reached "קבצים" - the
+// browser never says - and every sentence in this app is already careful to claim only
+// that the browser was HANDED the file.
+//
+// What none of them checked is whether the browser took it at all. A programmatic click
+// on a download is refused outright in a sandboxed frame and in some embedded webviews,
+// and an anchor with no `download` property never downloads anything anywhere. In both,
+// the press throws or does nothing, and what the person then sees is either a dialog
+// saying the files were exported - over nothing - or, on the CSV path, no dialog at all,
+// because the press is outside exportReports' try and takes the whole call with it.
+//
+// The rule these four suites hold: a file the browser would not take is reported as a
+// file that did not leave, in words, every time. js/ui/printout.js has done this since it
+// was written (downloadPrintout returns false and the caller says so); this is the same
+// answer given by the other three doors.
+for (const how of ['throw', 'no-download-attribute']) {
+    {
+        suite(`the CSV fallback, on a browser that refuses the download (${how})`);
+
+        const device = phone();
+        seed(device);
+        refuseDownloads(device, how);
+
+        let escaped = null;
+        try {
+            await run(device, `exportReports()`);
+        } catch (error) {
+            escaped = String((error && error.message) || error);
+        }
+
+        check('the export does not throw out of the button and leave the screen silent',
+            escaped === null, String(escaped));
+        same('and no file was handed over', device.downloads.map(item => item.name), []);
+        check('the person is told something', toldText(device) !== '', toldText(device));
+        check('and is NOT told the files were exported',
+            !toldText(device).includes('יוצאו כ-CSV') && !toldText(device).includes('יוצא כ-CSV'),
+            toldText(device));
+        check('the sentence names the file the browser would not take',
+            toldText(device).includes(`farkad-payroll_${STAMP}.csv`), toldText(device));
+        check('and says the record on the device was not changed',
+            toldText(device).includes('לא השתנה'), toldText(device));
+    }
+
+    {
+        suite(`the backup file, on a browser that refuses the download (${how})`);
+
+        const device = phone();
+        seed(device);
+        const before = device.Store.get('scheduleData:lastBackup');
+        refuseDownloads(device, how);
+
+        let escaped = null;
+        try {
+            await run(device, `exportBackup()`);
+        } catch (error) {
+            escaped = String((error && error.message) || error);
+        }
+
+        check('the export does not throw out of the button', escaped === null, String(escaped));
+        same('and no file was handed over', device.downloads.map(item => item.name), []);
+        check('the person is told', toldText(device) !== '', toldText(device));
+        check('and is NOT told the browser received the file',
+            !toldText(device).includes('נמסר'), toldText(device));
+
+        // The age line under the backup button reads off this record. Stamping it for a
+        // file that never existed is the app telling somebody, tomorrow morning, that
+        // they have a backup from yesterday.
+        same('and "last backup" is not stamped for a file that never left',
+            device.Store.get('scheduleData:lastBackup'), before);
+    }
+
+    {
+        suite(`the rescue file, on a browser that refuses the download (${how})`);
+
+        const device = phone();
+        seed(device);
+        refuseDownloads(device, how);
+
+        let escaped = null;
+        try {
+            await run(device, `exportRecoveryData()`);
+        } catch (error) {
+            escaped = String((error && error.message) || error);
+        }
+
+        check('the export does not throw out of the button', escaped === null, String(escaped));
+        same('and no file was handed over', device.downloads.map(item => item.name), []);
+        check('the person is told', toldText(device) !== '', toldText(device));
+        check('and is NOT told the file was handed over',
+            !toldText(device).includes('הקובץ נמסר'), toldText(device));
+        // The one thing that must never be in doubt on this door.
+        check('and is told nothing was deleted from the device',
+            toldText(device).includes('לא נמחק'), toldText(device));
+    }
+}
+
+{
+    suite('a browser that takes the file is still told nothing more than that it took it');
+
+    // The other side of the same rule, so the fix above cannot be a dialog that fires
+    // whatever happened. The ordinary path is untouched: the files land, and the words
+    // are the words that were already pinned.
+    const device = phone();
+    seed(device);
+    await run(device, `exportReports()`);
+    same('the three CSVs are handed over as before',
+        device.downloads.map(item => item.name),
+        [`farkad-payroll_${STAMP}.csv`, `farkad-invoice_${STAMP}.csv`,
+            `farkad-detail_${STAMP}.csv`]);
+    same('and the sentence is the one the app pins for an incomplete build',
+        device.ctx.told,
+        'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
+            + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
+}
+
 
 report();
