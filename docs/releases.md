@@ -12,18 +12,19 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v103 (`21c8e08`).** The build at the top of this file is a candidate on a
-branch: verified, stamped, and NOT served. Every build below it has reached `main`.
+**`main` is at v104 (`67405c6`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
 v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## v104 — CANDIDATE, not served — the tip of `cd-work`
+## v104 — 10 September 2026 — `67405c6` (PR #18, the tree at `671843c`)
 
 Two lines in `js/sync/firebase-adapter.js`, found from the owner's phone
-(`features/cutover/findings.md`). Nothing on a phone runs it.
+(`features/cutover/findings.md`). Served from `main` since 10 September 2026; the owner's
+phone is the first to take it.
 
 **What it gives the crew that v103 does not**
 
@@ -40,8 +41,8 @@ Two lines in `js/sync/firebase-adapter.js`, found from the owner's phone
 
 **What this build is NOT known to do**
 
-- **It is not on `main`.** No phone has it. The owner's phone holds 194 queued operations
-  that will land on its first flush after taking this update.
+- **Being on `main` is not being on a phone.** The owner's phone holds 194 queued
+  operations that land on its first flush after taking this update.
 - From that flush on, a phone still on v86 is refused until it updates — and, measured
   this round, a v86 phone still SAYS «מסונכרן» while refused (it has no honest-status
   gate); its queue and screen are safe, the sentence is not. The other two phones are
