@@ -20,7 +20,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { suite, check, report } from './runner.mjs';
+import { suite, check, given, report } from './runner.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = name => readFileSync(join(ROOT, name), 'utf8');
@@ -258,6 +258,50 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     const page = readFileSync(join(ROOT, 'index.html'), 'utf8');
     check('nor does the page itself',
         !/FARKAD_FLAG_OVERRIDES/.test(page));
+}
+
+
+// ------------------------------------------- the production adapter hands over every operation
+{
+    suite('the production adapter hands the sync layer every operation it has');
+
+    // The one that reached a phone. firestoreOps() in js/sync/firebase-adapter.js is the
+    // adapter every emulator suite drives - and every one of them builds its own object
+    // from it, so none of them ever looked at the object literal the BROWSER branch passes
+    // to window.FarkadSync.connect(). That literal named update/save/create and nothing
+    // else. bootstrap() and read() were added to firestoreOps on 31 August (ce9d338, the
+    // cutover) and never wired in - so on the owner's iPhone `typeof adapter.bootstrap`
+    // was 'undefined', send.js skipped the cutover, the first batch of queued work went
+    // out at revision 1 carrying days, and firestore.rules refused it on every branch,
+    // for ever, with «הענן מסרב לקבל רישומים מהמכשיר הזה … (permission-denied)» - the
+    // same sentence the OLD rules had produced, so publishing the new ones looked like
+    // it did nothing. 194 operations were waiting on that phone when this was found.
+    //
+    // Read off the source rather than run: the literal lives in the branch that needs a
+    // real Firebase SDK, which no suite here has. Every method the returned object
+    // defines must be forwarded by the same name.
+    const adapter = read('js/sync/firebase-adapter.js');
+    const opsStart = adapter.indexOf('export function firestoreOps(');
+    const opsBody = adapter.slice(opsStart);
+    const retAt = opsBody.indexOf('\n    return {\n');
+    const retEnd = opsBody.indexOf('\n    };\n', retAt);
+    const returned = [...new Set([...opsBody.slice(retAt, retEnd)
+        .matchAll(/^\s{8}(?:async\s+)?(\w+)\s*\(/gm)].map(m => m[1]))].sort();
+    const litAt = adapter.indexOf('window.FarkadSync.connect({');
+    const litEnd = adapter.indexOf('\n        });', litAt);
+    const forwarded = [...adapter.slice(litAt, litEnd)
+        .matchAll(/^\s{12}(\w+):\s*ops\.(\w+)/gm)].map(m => m[2]);
+    given('firestoreOps returns the operations the protocol needs',
+        returned.includes('update') && returned.includes('bootstrap') && returned.includes('read'),
+        returned.join(', '));
+    const missing = returned.filter(name => !forwarded.includes(name));
+    check('and the browser branch forwards every one of them to connect()',
+        missing.length === 0, 'not forwarded: ' + missing.join(', '));
+    // The cutover in particular, by name, because it is the one a phone cannot do without.
+    check('the cutover reaches the phone', forwarded.includes('bootstrap'),
+        'forwarded: ' + forwarded.join(', '));
+    check('and so does the re-read a refused write is judged by', forwarded.includes('read'),
+        'forwarded: ' + forwarded.join(', '));
 }
 
 report();
