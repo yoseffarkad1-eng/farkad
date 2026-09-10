@@ -57,11 +57,25 @@ async function open() {
     // ERR_TUNNEL_CONNECTION_FAILED lines, and treating those as failures would make the
     // suite red for the network rather than for the app. The adapter is meant to fail
     // soft - see js/app.js - and that it does so is asserted elsewhere.
+    //
+    // THE SAME EVENT LEARNED A THIRD SPELLING. A cloud that could not be LOADED used to
+    // be a console.info and nothing else, which made it indistinguishable on every screen
+    // from a phone with no project configured - a phone recording all evening while the
+    // line under the board calls it local-only. It is reported properly now, through
+    // FarkadSync.fail, which writes «Sync error:» to the console on its way past.
+    //
+    // So the unreachable SDK reaches this filter under a name it did not know, and two
+    // checks that mean "pressing Save threw nothing" went red for the network. Same event,
+    // same reason, same filter - and deliberately narrow: it is matched by the adapter's
+    // OWN path, so a module that fails to import for any other reason is still a failure,
+    // and so is any other TypeError.
+    const ADAPTER_UNREACHABLE = /Failed to fetch dynamically imported module:.*js\/sync\/firebase-adapter\.js/;
     page.on('pageerror', error => errors.push(String(error && error.message)));
     page.on('console', message => {
         if (message.type() !== 'error') return;
         const text = message.text();
-        if (text.indexOf('ERR_') !== -1 || text.indexOf('Failed to load resource') !== -1) {
+        if (text.indexOf('ERR_') !== -1 || text.indexOf('Failed to load resource') !== -1
+            || ADAPTER_UNREACHABLE.test(text)) {
             noise.push(text);
             return;
         }
