@@ -9,10 +9,12 @@
 # suites cannot. Those rows need the app ON a phone, and the app is not deployed - so this
 # builds the smallest thing a person can serve themselves.
 #
-# WHAT IT IS NOT. It is not a deploy, it does not touch Firebase, and the copy it makes
-# carries `js/sync/firebase-config.js` exactly as the repository holds it: empty, which
-# means local-only. A bundle that reached a real project would put test taps on somebody's
-# real pay record, so the config is asserted empty below and the script refuses if it is not.
+# WHAT IT IS NOT. It is not a deploy and it does not touch Firebase. The repository DOES
+# carry the real farkad-schedule config - deliberately, a Firebase web config is public and
+# firestore.rules is what keeps people out - so the staged copy is overwritten with the
+# local-only shape and read back to prove it. Somebody working through the acceptance list
+# adds workers and deletes them again; every one of those taps would otherwise land in the
+# live pay record.
 #
 # WHAT IT CARRIES. The service worker's own SHELL list, read out of sw.js rather than typed
 # here - so a file that was added to the app and forgotten in the shell is a failure of this
@@ -37,13 +39,17 @@ if [ "$DIRTY" != "0" ]; then
     exit 1
 fi
 
-# THE CONFIG GATE. Local-only means the object has no apiKey and no projectId. A bundle
-# that could reach a real project is a bundle that could write to somebody's real record.
-if grep -qE '"?(apiKey|projectId)"?\s*:\s*["'"'"'][^"'"'"']+' js/sync/firebase-config.js; then
-    echo "REFUSED: js/sync/firebase-config.js carries a real project. This bundle is for" >&2
-    echo "         acceptance on a phone, and it must not be able to reach live data." >&2
-    exit 1
-fi
+# THE CONFIG IS NEUTRALISED, NOT REFUSED.
+#
+# js/sync/firebase-config.js carries the real farkad-schedule project, deliberately and
+# since the day sync was turned on - a Firebase web config is public by design and the
+# allowlist in firestore.rules is what actually keeps people out. That is fine for the
+# deployed app and wrong for this bundle: somebody tapping through an acceptance list is
+# going to add workers, record days and delete them again, and every one of those taps
+# would land in the real pay record.
+#
+# So the staged copy is replaced with the local-only shape and then read back to prove it.
+# Everything the bundle can do, it does on that phone and nowhere else.
 
 STAGE="$OUT/farkad-$BUILD-$SHORT"
 rm -rf "$STAGE"
@@ -76,6 +82,43 @@ while IFS= read -r f; do
     cp "$f" "$STAGE/$f"
 done <<< "$FILES"
 
+# The neutralised config, written over whatever was copied, then read back. A bundle that
+# could still reach the live project is the one thing this script exists to prevent, so it
+# is proven rather than assumed.
+if [ -f "$STAGE/js/sync/firebase-config.js" ]; then
+    cat > "$STAGE/js/sync/firebase-config.js" <<'CFG'
+// NEUTRALISED FOR ACCEPTANCE. The repository carries the real farkad-schedule project
+// here; this copy does not, on purpose.
+//
+// Somebody working through docs/iphone-acceptance.md adds workers, records days and
+// deletes them again. With the real config in place every one of those taps would land in
+// the live pay record. Empty apiKey and projectId means the app runs local-only: what is
+// recorded on that phone stays on that phone.
+//
+// It also means the rows that need two phones talking to each other CANNOT be checked
+// with this bundle. They need the deployed app. READ-ME-FIRST.txt says which ones.
+export const firebaseConfig = {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
+};
+
+export const SCHEDULE_DOC_PATH = 'schedules/current';
+CFG
+    if grep -qE '(apiKey|projectId)"?\s*:\s*"[^"]+"' "$STAGE/js/sync/firebase-config.js"; then
+        echo "REFUSED: the staged config still names a project after neutralising." >&2
+        exit 1
+    fi
+    echo "config : neutralised (local-only), verified"
+else
+    echo "REFUSED: js/sync/firebase-config.js is not in the shell, so the bundle cannot" >&2
+    echo "         guarantee which project the phone would reach." >&2
+    exit 1
+fi
+
 # The icons, which the shell does not always name but a home-screen install needs.
 for d in icons assets img; do
     [ -d "$d" ] && cp -r "$d" "$STAGE/" 2>/dev/null || true
@@ -98,8 +141,13 @@ cat > "$STAGE/READ-ME-FIRST.txt" <<TXT
 זו לא גרסה מותקנת ולא פרסום. זו בדיוק הקבצים שהטלפון היה מקבל, בשביל
 לבדוק אותם ביד לפי docs/iphone-acceptance.md.
 
-הסנכרון כבוי בחבילה הזאת (firebase-config ריק) - מה שנרשם פה נשאר על
-המכשיר הזה ולא נוגע בשום רישום אמיתי.
+הסנכרון כבוי בחבילה הזאת בכוונה - מה שנרשם פה נשאר על המכשיר הזה
+ולא נוגע ברישום האמיתי. בלי זה, כל עובד שתוסיף ותמחק תוך כדי הבדיקה
+היה נכנס לרישום השכר האמיתי.
+
+לכן: כל סעיף שדורש שני טלפונים שמדברים ביניהם - סנכרון, "ממתינים
+לשליחה", התנגשות בין מכשירים - **אי אפשר לבדוק עם החבילה הזאת**. הוא
+דורש את האפליקציה המותקנת. כל השאר כן.
 
 איך מריצים
 ----------
