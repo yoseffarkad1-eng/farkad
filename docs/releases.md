@@ -42,8 +42,14 @@ Two lines in `js/sync/firebase-adapter.js`, found from the owner's phone
 
 - **It is not on `main`.** No phone has it. The owner's phone holds 194 queued operations
   that will land on its first flush after taking this update.
-- From that flush on, a phone still on v86 is refused until it updates — the documented
-  cutover; the other two phones are not in use.
+- From that flush on, a phone still on v86 is refused until it updates — and, measured
+  this round, a v86 phone still SAYS «מסונכרן» while refused (it has no honest-status
+  gate); its queue and screen are safe, the sentence is not. The other two phones are
+  not in use and update before they are.
+- **Open, P1, for the next build**: the v86-written part of a queue can be sent over a
+  value another phone changed while this one was away, right after this phone's own
+  cutover signs the document, with both saying synced (`features/cutover/handoff.md`).
+  It needs another phone's write during the gap; none happened here.
 - The Codex review's two notes on `.github/workflows/rules.yml` (the site deploys before
   the rules job; two runs can finish out of order) are open; the workflow publishes
   nothing until the repository holds a key.
