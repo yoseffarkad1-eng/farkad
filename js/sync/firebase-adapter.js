@@ -440,6 +440,20 @@ if (!isConfigured()) {
 
             create: ops.create,
 
+            // THE CUTOVER, AND THE RE-READ. Both have been on firestoreOps since the
+            // protocol's bootstrap was written (ce9d338) and neither reached a phone:
+            // this literal was never extended, and every emulator suite builds its own
+            // adapter from firestoreOps, so none of them could see it. Without
+            // `bootstrap`, send.js skips the one protocol-only write that brings a
+            // legacy document into the protocol; the first batch of queued work then
+            // goes out at revision 1 carrying days, and firestore.rules refuses it on
+            // every branch, on every retry - the owner's iPhone, 194 operations
+            // waiting, after the new rules were published. Without `read`, a refused
+            // write cannot even be re-judged against the document it lost to.
+            // tests/build.test.mjs now reads this literal against firestoreOps.
+            bootstrap: ops.bootstrap,
+            read: ops.read,
+
             // Sync is not a backup: a deletion syncs as faithfully as a correction, and
             // by the time it is noticed every phone agrees with it. These are the copies
             // that disagree - one per day, written by whichever device opens first.
