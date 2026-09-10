@@ -992,7 +992,65 @@ Object.assign(FarkadSync, {
                 // this survives the app being closed as well as the network coming back.
                 this._sending = new Map();
                 this._sendBase = null;
+
+                // IS THERE STILL ANYTHING THIS REFUSAL IS ABOUT?
+                //
+                // Asked BEFORE the line is written, because a refusal whose work no
+                // longer exists must not leave a sentence standing that nothing will ever
+                // take down.
+                //
+                // Two tabs of one app share one disk and one queue. The older tab's write
+                // is open; the person corrects the same day on the other tab; that
+                // correction names the older operation, supersedes it, lands, is
+                // acknowledged and collected - and only then does the older request
+                // arrive, against a document that has moved. The server refuses it, which
+                // is right. What followed was not: the conflict branch reported the path
+                // as contested, fail() put «הנתונים השתנו במכשיר אחר» on the screen, and
+                // the retry ladder came round to a queue with nothing in it - flush()
+                // returns at once when nothing is owed, so no send ever answered, no
+                // snapshot ever followed, and the line stayed up for the rest of the
+                // evening. One person, their own two decisions, their own later one
+                // already in the cloud, and the app telling them there was a conflict to
+                // go and resolve. Measured in tests/races.tabs.test.mjs, R2b.
+                //
+                // So a refusal about work that is no longer owed is reported and then
+                // re-asked. `owed` is the whole question: anything the queue is still
+                // holding - held operations included, since a held one is unsent and
+                // therefore pending - a stamp that has not gone, or a replacement still
+                // outstanding. Where any of that stands, nothing changes: the failure is
+                // real, the ladder comes back, and the line is the truth.
+                //
+                // AND "NOTHING IS OWED" IS ONLY BELIEVED FROM A DEVICE THAT CAN SAY SO.
+                //
+                // pendingCount() reads the disk, and a disk that has stopped answering
+                // reads as an empty queue - Store.durableGet returns null for every key
+                // once storage has been taken away, which is exactly what happens when a
+                // browser refuses a write for a reason that is not lack of room. A phone
+                // whose hold marker was refused that way still owes its edit and still
+                // holds it in memory for the session; believing the empty read would put
+                // «מסונכרן» over it. Measured in tests/contested.test.mjs, «the marker
+                // write is refused».
+                //
+                // So the queue has to be accountable before its silence means anything:
+                // storage answering, no damaged record, no refused journal write, nothing
+                // held in this session's memory, and a journal that reads. Anything less
+                // is owed, which is the direction this app is wrong in on purpose.
+                //
+                // The honest answer is then decided at the ONE door that may say 'synced'
+                // - honestStatusFor - rather than asserted here. It refuses on a held
+                // path, on a dead listener, on a pending restore, on a queue that is not
+                // empty; all this line does is ask it, which nothing else was doing.
+                const accountable = Store.available === true
+                    && !this.outboxDamaged && !this.journalFailed
+                    && this._heldNow.size === 0
+                    && Array.isArray(this.durableJournalEntries());
+                const owed = !accountable || this.pendingCount() > 0
+                    || Boolean(this._stamp) || this.replacementOutstanding();
                 this.fail(error);
+                if (!owed) {
+                    this.setStatus('synced');
+                    return;
+                }
                 this.scheduleRetry();
             });
     },

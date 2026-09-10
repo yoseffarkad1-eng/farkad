@@ -171,8 +171,22 @@ Object.assign(FarkadSync, {
         let index = null;
         try {
             const normal = normaliseSchedule(stored.schedule);
+            // Object.create(null), not {}.
+            //
+            // A plain object answers `index.workers['toString']` with a Function, and the
+            // guard this index exists for - `if (!entity) return undefined`, the line that
+            // makes "the entity is REALLY in the durable roster" true - is satisfied by a
+            // method inherited from Object.prototype. Six ids do it: toString, valueOf,
+            // hasOwnProperty, isPrototypeOf, toLocaleString, propertyIsEnumerable. The
+            // mark then built is a fact about a worker nobody ever recorded, written into
+            // an operation as something this device has held - where the same path under
+            // an id that is merely unknown correctly records `absent` and is held.
+            //
+            // isSafeSegment stops __proto__, prototype and constructor, and it should not
+            // have to carry the rest. A null-prototype object has nothing to inherit, so
+            // the question cannot be asked wrongly rather than being asked and defended.
             const byId = list => {
-                const out = {};
+                const out = Object.create(null);
                 (list || []).forEach(item => {
                     if (item && item.id) out[String(item.id)] = item;
                 });
@@ -647,7 +661,7 @@ Object.assign(FarkadSync, {
         // where every v78 reader picks him up again. So the snapshot is not adopted, the
         // stale queue is barred from flushing, and the retry ladder comes back to it.
         if (!this.sanitiseQueuedRosters(gone, remote)) {
-            this.holdStaleRoster(gone);
+            this.holdStaleRoster(gone, remote);
             return;
         }
         this.releaseStaleRoster();
@@ -1096,9 +1110,30 @@ Object.assign(FarkadSync, {
     // document, so a device that is restarted learns them again the moment it reconnects.
     // What must not happen in between is a flush, and flush() asks this before sending.
     _staleRoster: null,
+    // THE OTHER HALF OF THE JOB, held with it.
+    //
+    // This used to store `gone` alone. `sanitiseQueuedRosters` does two things - it drops
+    // people the document buried, and it REFRESHES the value of people it did not - and
+    // only the first half was remembered. So a retry called it with `remote === undefined`
+    // and hit its own first line, `if (!buried && !remote) return true;`, which in the
+    // ordinary shape of this failure (a raised wage, nobody removed) is every time: no
+    // tombstones, no remote, "nothing to do". The hold was released, noteCloudHeard() was
+    // recorded, and the queue flushed the array it had never been cleaned of.
+    //
+    // What that costs: B raises a man 500 -> 600, A holds an upgraded disk whose queued
+    // legacy `workers` array still says 500, one refused journal write takes the hold, and
+    // a moment later A writes 500 back into the document and calls itself synced. The
+    // keyed map keeps 600 and the whole array - the one place a v78 reader looks - says
+    // 500. That is the exact failure the `remote` pass was added to close, reached one
+    // refused write later.
+    //
+    // `_staleRoster` being a truthy object of two empty sets was the smell: a hold that
+    // carried no information about what it was holding.
+    _staleRemote: null,
 
-    holdStaleRoster(gone) {
+    holdStaleRoster(gone, remote) {
         this._staleRoster = gone;
+        this._staleRemote = remote || null;
         this.fail(new Error(
             'a queued roster could not be cleaned of a removed worker; it is held back'));
         this.scheduleRetry();
@@ -1106,13 +1141,14 @@ Object.assign(FarkadSync, {
 
     releaseStaleRoster() {
         this._staleRoster = null;
+        this._staleRemote = null;
     },
 
     // Tried again from the retry ladder, with no second snapshot needed: the tombstones
     // were learned once and are remembered until the rewrite lands.
     staleRosterHeld() {
         if (!this._staleRoster) return false;
-        if (this.sanitiseQueuedRosters(this._staleRoster)) {
+        if (this.sanitiseQueuedRosters(this._staleRoster, this._staleRemote)) {
             this.releaseStaleRoster();
             // These tombstones came from a real snapshot, and the queue now agrees with
             // it. That is the whole of the first-snapshot barrier's question answered,

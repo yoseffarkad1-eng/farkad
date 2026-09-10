@@ -626,12 +626,32 @@ const SCHEDULE_KEY = 'scheduleData:v2';     // must match V2_KEY in state.js
 // restore does. What it must NOT get is a trip to the cloud when somebody signs in
 // weeks later: local-only means local-only, and a record that could not say so would
 // turn every offline restore into a push the person never asked for.
-function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud, supersedes) {
+//
+// `knownAdvances` is the last of the frozen facts, and the newest. It names every advance
+// this device could see AT THE MOMENT THE RESTORE WAS ASKED FOR, so that absorbCloudLedger
+// can tell the two reasons an advance can be in the cloud and not in the backup apart:
+//
+//   it was there before, and the backup does not have it   -> the restore is removing it,
+//                                                             which is what a restore is
+//   it arrived after the person chose the backup           -> it is money somebody was
+//                                                             handed in the window, and
+//                                                             the restore never meant it
+//
+// Without the list the two are the same shape and the second was silently lost - 800
+// shekels handed over while a restore was on the wire, gone from all three phones, every
+// one of them saying synced. See tests/overlap.restore.test.mjs O8b.
+//
+// null means an envelope written before this field existed. Absence is read as "this
+// device cannot tell the two apart", and nothing is absorbed - the behaviour that shipped
+// - rather than guessing in either direction over somebody's wages.
+function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud, supersedes,
+    knownAdvances) {
     return {
         version: REPLACE_VERSION,
         phase,
         transactionId,
         supersedesSeq: Number(supersedesSeq) || 0,
+        knownAdvances: Array.isArray(knownAdvances) ? knownAdvances.map(String) : null,
         // Every operation on the disk when the restore was asked for, named one by one.
         // A number is a statement about one tab's counter, and an edit made in another
         // tab AFTER the request could be handed the same number as the last one before it
@@ -1742,19 +1762,32 @@ const FarkadSync = {
             whole = false;
         });
 
-        // A winner may only go once everything it beat has been retired, and once
-        // everything it superseded by name has gone. Both are the same rule seen twice:
-        // never remove the record that is keeping an older value out of the way.
-        const beatenBy = new Map();
-        all.forEach(op => {
-            if (op.retired || retired.has(op.opId)) {
-                const winner = current.get(op.path);
-                if (winner) beatenBy.set(op.opId, winner.opId);
-            }
-        });
+        // A winner may only go once everything it beat is GONE, and once everything it
+        // superseded by name has gone. Both are the same rule seen twice: never remove
+        // the record that is keeping an older value out of the way.
+        //
+        // EVERY LOSER THAT IS STILL READABLE, retired or not - and the "or not" is the
+        // whole of this. It used to be built from the retired ones alone: a loser whose
+        // retirement the disk had just refused was not in the set, so its winner owed
+        // nothing and was collected in the same pass that had failed to write the one
+        // record keeping that loser defeated. The loser was then the only operation left
+        // for its path, became current at the next projection, went to the cloud, and
+        // replaced the value it had lost to. The paragraph above the retirement pass says
+        // the winner stays in exactly this case; it was the only thing that did not.
+        //
+        // Measured in tests/races.tabs.test.mjs, R14: two tabs racing one day, the disk
+        // refusing the retirement, and the beaten value current again on the next reopen -
+        // on a device whose only sign of trouble was a pass that returned false.
+        //
+        // Superseded-by-name is deliberately not counted here: the batch check below owes
+        // on `after` directly, which is the same guarantee written where that relationship
+        // lives.
         const owedRetirements = new Set();
-        beatenBy.forEach((winnerId, loserId) => {
-            if (present.has(loserId)) owedRetirements.add(winnerId);
+        all.forEach(op => {
+            if (superseded.has(op.opId)) return;
+            const winner = current.get(op.path);
+            if (!winner || winner.opId === op.opId) return;
+            owedRetirements.add(winner.opId);
         });
 
         const byBatch = new Map();

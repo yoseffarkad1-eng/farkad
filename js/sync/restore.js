@@ -20,6 +20,60 @@
 //   - be reached by an ordinary edit. One field path per edit is the rule; this file is the
 //     documented exception and must stay the only one.
 
+// ---------------------------------------------------------------- the disputed bodies
+//
+// One immutable id with two different bodies under it, kept side by side under a name
+// nothing folds. Three places write that map - receive(), prepareReplace and
+// absorbCloudLedger - and it has one property that has to be handled everywhere it is
+// read: normaliseSchedule tells Recovery about it, and Recovery blocks writing the moment
+// it is told. So a document carrying one cannot be normalised on the way TO the disk, only
+// on the way back off it. These two exist so that rule is spelled once.
+
+// The map, or null when there is nothing disputed.
+function disputedBodiesIn(document) {
+    const held = document && document.ledger && document.ledger.conflicted;
+    if (!held || typeof held !== 'object' || Array.isArray(held)) return null;
+    return Object.keys(held).length > 0 ? held : null;
+}
+
+// The same document with the map taken off, so normaliseSchedule can read it without
+// stopping the device before the bytes are anywhere durable. A shallow copy of the two
+// objects that change and nothing else: the entries themselves are not touched.
+function withoutDisputedBodies(document) {
+    if (!disputedBodiesIn(document)) return document;
+    const ledger = Object.assign({}, document.ledger);
+    delete ledger.conflicted;
+    return Object.assign({}, document, { ledger });
+}
+
+// What a ledger container actually SAYS, with its shape left out of the answer.
+//
+// An empty family is not a fact about anybody's money. normaliseSchedule stamps all four
+// of them onto everything it touches, so a document that has been through it carries
+// `unreadable: {}`, `migrations: {}` and `unreadableMigrations: {}` while one built
+// straight from a backup file may carry none of them - and comparing the two containers
+// byte for byte then answers "these differ" over a difference of nothing at all.
+//
+// Measured: absorbCloudLedger rewrote its envelope on every single restore because of it,
+// which on a device with no room to save the schedule turned an ordinary restore into a
+// refused one and lost the day that was in its queue - tests/data.test.mjs, «each critical
+// write, failed one at a time», the scheduleData:v2 reopen. An empty container is dropped
+// before the comparison, so what is compared is the entries.
+function ledgerSubstance(ledger) {
+    if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
+        return canonicalJson(null);
+    }
+    const said = {};
+    Object.keys(ledger).forEach(key => {
+        const value = ledger[key];
+        const emptyMap = value && typeof value === 'object' && !Array.isArray(value)
+            && Object.keys(value).length === 0;
+        if (emptyMap) return;
+        said[key] = value;
+    });
+    return canonicalJson(said);
+}
+
 Object.assign(FarkadSync, {
     // A whole-document replacement - a restore, an import - in two halves, because the
     // order is the guarantee and one function cannot express it.
@@ -120,9 +174,14 @@ Object.assign(FarkadSync, {
         // work the restore is replacing.
         const superseded = this.physicalOperations().map(op => op.opId);
 
+        // Frozen here and never recomputed, for the reason every other frozen field in
+        // this envelope is: computing it again at the retry would ask a question about a
+        // later moment and answer it as if it were this one.
+        const knownAdvances = Object.keys(
+            (typeof State !== 'undefined' && State.schedule && State.schedule.advances) || {});
         return this.rememberReplace(replacementEnvelope(
             document, 'prepared', replacementId(), this._seq, cloudOwed !== false,
-            superseded));
+            superseded, knownAdvances));
     },
 
     // Says the device now holds it. Best effort on purpose: the phase is a hint, and the
@@ -132,7 +191,8 @@ Object.assign(FarkadSync, {
         if (!envelope || envelope.phase === 'local-stored') return true;
         return this.rememberReplace(replacementEnvelope(
             envelope.document, 'local-stored', envelope.transactionId,
-            envelope.supersedesSeq, envelope.cloud, envelope.supersedes));
+            envelope.supersedesSeq, envelope.cloud, envelope.supersedes,
+            envelope.knownAdvances));
     },
 
     // Undoes a prepare when the caller could not store the new state. The restore is not
@@ -210,11 +270,32 @@ Object.assign(FarkadSync, {
     applyReplacementLocally(envelope) {
         const previous = State.schedule;
 
+        // THE DISPUTED BODIES COME OFF BEFORE NORMALISING AND GO BACK ON AFTER, and
+        // Recovery is told only once the disk has them. Same order as receive(), for the
+        // same reason and against the same trap.
+        //
+        // normaliseSchedule reports a conflicted map to Recovery the moment it reads one,
+        // and Recovery blocks writing the moment it is told - so normalising the
+        // envelope's document with the map still on it blocked the very save that was
+        // going to put those two bodies somewhere a person can reach them. Measured: a
+        // restore whose file disagreed with this phone about one entry id came back
+        // «stage: local» with the transaction cancelled, the record kept NEITHER body,
+        // and the hold did not survive a reopen - the phone carried on recording against
+        // an account where one of the two amounts had simply vanished, with nothing
+        // anywhere saying the other had ever been claimed.
+        //
+        // The bytes were still quarantined, so nothing was destroyed. What was lost was
+        // the record SAYING so, which is what makes the hold outlive the session.
+        const disputed = disputedBodiesIn(envelope.document);
         // The replacement, then the newer work back on top of it. Dropping straight to
         // the document deleted every edit made after the restore was asked for - the
         // person recorded a day, was told it was saved, and the restore removed it from
         // the screen, the disk and the cloud at once.
-        const next = normaliseSchedule(envelope.document);
+        const next = normaliseSchedule(withoutDisputedBodies(envelope.document));
+        if (disputed) {
+            next.ledger = next.ledger || { advances: {} };
+            next.ledger.conflicted = Object.assign({}, next.ledger.conflicted, disputed);
+        }
         // The DURABLE journal, so that what is stored here is exactly what the invariant
         // will look for afterwards. Reading it out of memory let the two disagree.
         if (!this.replayDurableJournal(next, envelope)) {
@@ -251,6 +332,26 @@ Object.assign(FarkadSync, {
 
         const pruned = this.dropSupersededEntries(envelope);
         if (typeof render === 'function') render();
+
+        // AFTER THE DISK HAS THEM, AND AFTER THE QUEUE IS FINISHED WITH.
+        //
+        // Recovery blocks every write on the device the moment it is told, and
+        // dropSupersededEntries is a write: telling it any earlier left the replacement on
+        // the disk with the entries it supersedes still queued, which is the one state
+        // that replays the superseded days back over the restore at the next open.
+        //
+        // So the transaction completes, the disputed bodies travel to the other phones
+        // inside the document this restore is sending - a disagreement one phone can see
+        // and the others cannot is not a disagreement anybody can settle - and the person
+        // is told last. From here on nothing new is recorded against that account until
+        // they have looked, and the map is on the record, so the next open says it again
+        // rather than starting clean.
+        if (disputed && typeof Recovery !== 'undefined') {
+            Recovery.damaged('scheduleData:v2:ledger:conflict',
+                JSON.stringify(next.ledger.conflicted),
+                'יש רשומת מקדמה עם אותו מזהה ותוכן אחר. שתי הגרסאות נשמרו כמו שהן ולא נמחק '
+                + 'דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי ותבדוק איזו מהן נכונה.');
+        }
         return { stored: true, pruned };
     },
 
@@ -342,13 +443,168 @@ Object.assign(FarkadSync, {
         return this.forgetReplace();
     },
 
+    // THE LEDGER THE CLOUD LEARNED WHILE THIS RESTORE WAS WAITING TO GO.
+    //
+    // prepareReplace unions THIS phone's ledger into the envelope once, and freezes it -
+    // read the long note there for why the freeze is right. That closes the sequential
+    // failure the contract was written for: a repayment this phone had already been told
+    // about is carried through its own restore.
+    //
+    // It cannot close the OVERLAPPING one, and this is where that one lives. While a
+    // replacement is pending, receive() adopts nothing - what is arriving is the state
+    // somebody asked to replace, and adopting it would undo their restore on the very
+    // device that asked for it. So a repayment another phone records while this restore
+    // is in flight reaches the cloud, is refused by nothing, and never reaches this
+    // phone's ledger at all - and then the whole-document save writes a document that has
+    // never heard of it over one that has.
+    //
+    // Measured, on the fake cloud, with both gates open through the test seam: A restores
+    // a backup, B hands a man's 500 back while A's write is open, and after the ladder has
+    // finished A and the cloud hold 5,000 while B holds 4,500 - all of them saying
+    // «מסונכרן», with the row that says the money moved gone from two of the three and no
+    // way for the third to put it back. That is the failure at the top of
+    // features/restore-ledger/contract.md, arriving by the one road the fix for it does
+    // not cover. See tests/overlap.restore.test.mjs, O6 through O10.
+    //
+    // So the union is asked AGAIN, against the newest document the server has actually
+    // shown this device, in the same turn as the write that carries it. Union only, and
+    // only the ledger:
+    //
+    //   nothing else about the envelope moves    the same transaction id, the same
+    //                                            boundary, the same operation id, the same
+    //                                            work record - a retry is still the same
+    //                                            decision, not a new one
+    //   an entry already there is left alone     mergeLedgerInto adds by id and never
+    //                                            overwrites, so absorbing twice absorbs
+    //                                            once and no event is counted twice
+    //   the device holds it BEFORE it is sent    the envelope is rewritten, verified and
+    //                                            applied here, which is the order the
+    //                                            whole file is built on
+    //   one id with two bodies is not decided    both are kept and a person is told, the
+    //                                            same shape receive() and prepareReplace
+    //                                            use - the three must not drift
+    //
+    // And the pairing with the revision is the whole guarantee. `_baseDoc` and `_revision`
+    // are set together by noteRevision, so the document read here IS the document at the
+    // revision the stamp is about to claim. Anything that lands between the two moves the
+    // revision, the compare-and-set refuses the write, and the ladder comes back and
+    // absorbs that too. There is no window in which a save lands on top of money it has
+    // not taken.
+    //
+    // Returns the envelope to send, or null when this device could not be made to hold
+    // the result - in which case nothing is sent, which is the careful direction.
+    absorbCloudLedger(envelope) {
+        if (!envelope || !envelope.document) return null;
+        if (typeof mergeLedgerInto !== 'function') return envelope;
+
+        // The last document the SERVER showed this device. Not the live schedule: this
+        // phone is deliberately not adopting anything while the replacement stands, so
+        // its own schedule is exactly the one place the newer money is not.
+        const base = this._baseDoc;
+        if (!base || typeof base !== 'object') return envelope;
+
+        let merged;
+        try {
+            merged = JSON.parse(JSON.stringify(envelope.document));
+        } catch (error) {
+            // A document that will not copy is one this device cannot reason about. The
+            // transaction stays on the disk and nothing is sent.
+            return null;
+        }
+
+        // THE MONEY THE SHIPPED BUILD ACTUALLY WRITES.
+        //
+        // With both gates shut - which is what is installed - recordNewAdvance writes the
+        // legacy `advances` map and no ledger entry at all. So the union below protects a
+        // ledger that no shipped phone populates, while the map that really holds the
+        // money is part of the work record this restore is about to replace.
+        //
+        // An advance is absorbed when, and only when, this device had never heard of it at
+        // the moment the restore was asked for. That is the whole distinction:
+        //
+        //   in knownAdvances       the person chose a backup that does not have it, so the
+        //                          restore is removing it on purpose. Untouched.
+        //   not in knownAdvances   it arrived in the window, after the choice was made.
+        //                          Nobody decided to remove it, and 800 shekels were
+        //                          handed to somebody.
+        //
+        // knownAdvances null is an envelope written before that field existed: the device
+        // cannot tell the two apart, so it does neither, which is what shipped.
+        const known = Array.isArray(envelope.knownAdvances)
+            ? new Set(envelope.knownAdvances.map(String)) : null;
+        const arrivedAdvances = [];
+        if (known) {
+            const theirs = (base && base.advances) || {};
+            Object.keys(theirs).forEach(id => {
+                if (known.has(String(id))) return;
+                // Never over the top of the restore's own copy: if the backup carries this
+                // id, the backup's body is the one the person chose.
+                if (Object.prototype.hasOwnProperty.call(merged.advances || {}, id)) return;
+                const body = theirs[id];
+                if (!body || typeof body !== 'object') return;
+                merged.advances = merged.advances || {};
+                merged.advances[id] = body;
+                arrivedAdvances.push(String(id));
+            });
+        }
+
+        const clash = [];
+        mergeLedgerInto(merged, base, clash);
+        if (clash.length > 0) {
+            merged.ledger = merged.ledger || { advances: {} };
+            merged.ledger.conflicted = merged.ledger.conflicted || {};
+            clash.forEach(item => {
+                // `mine` is the SOURCE of the merge and `theirs` is the target, and here
+                // the source is the cloud and the target is what this device is about to
+                // hold. Named from the person's side, the same way the other two doors
+                // name it: here is this phone's copy, arrived is the one that came in.
+                merged.ledger.conflicted[item.id] = {
+                    id: item.id, family: item.family,
+                    here: item.theirs, arrived: item.mine
+                };
+            });
+        }
+
+        // Compared on the ledger alone, and WITHOUT normalising: replacementContent
+        // normalises, and normalising a document that carries disputed bodies tells
+        // Recovery before anything durable has happened - see disputedBodiesIn. And
+        // compared on what the container SAYS rather than on its shape - see
+        // ledgerSubstance, which is a bug that cost a recorded day.
+        if (arrivedAdvances.length === 0
+            && ledgerSubstance(merged.ledger)
+            === ledgerSubstance(envelope.document.ledger)) {
+            return envelope;
+        }
+
+        const next = replacementEnvelope(merged, envelope.phase, envelope.transactionId,
+            envelope.supersedesSeq, envelope.cloud, envelope.supersedes,
+            envelope.knownAdvances);
+        if (!this.rememberReplace(next)) return null;
+
+        const applied = this.applyReplacementLocally(next);
+        if (!applied.stored || !applied.pruned) return null;
+        // Asked of the disk, like every other claim in this file.
+        if (!this.localDurableHolds(next)) return null;
+
+        // The stamp that save() just asked for, dropped again for the same reason
+        // executePreparedReplace drops it on the way in: the whole-document write about to
+        // go carries this moment already, and a second, stamp-only update saying nothing
+        // else is a write about a write.
+        this._stamp = null;
+        return next;
+    },
+
     executePreparedReplace() {
-        const envelope = this.pendingReplace();
+        // `let`, because absorbCloudLedger below can rewrite it: same transaction, same
+        // boundary, same operation, with the money another phone recorded while this one
+        // was waiting folded in. Everything after the write asks its questions of the
+        // envelope that was actually SENT, and reading the old one there reported a
+        // device that holds the restore as a device that does not.
+        let envelope = this.pendingReplace();
         if (!envelope) {
             return Promise.reject(new Error('no prepared replacement to send'));
         }
 
-        const document = envelope.document;
         // The gate. A phase can be stale after a crash; the disk cannot.
         if (!this.localDurableHolds(envelope)) {
             return Promise.reject(
@@ -404,8 +660,10 @@ Object.assign(FarkadSync, {
                     this._claiming = false;
                     return value;
                 };
-                // A whole-document save takes everybody out at once.
-                if (!this.markSent(document)) {
+                // A whole-document save takes everybody out at once. The roster it names
+                // is the same before and after the ledger union below, which touches
+                // nothing but the money.
+                if (!this.markSent(envelope.document)) {
                     done();
                     return Promise.reject(new Error(
                         'the record of what has been sent could not be stored; the replacement was not sent'));
@@ -417,6 +675,28 @@ Object.assign(FarkadSync, {
                         return Promise.reject(new Error(
                             'the right to send moved to another tab; the restore was not sent'));
                     }
+                    // THE MONEY ANOTHER PHONE RECORDED WHILE THIS RESTORE WAS WAITING.
+                    //
+                    // Read the note on absorbCloudLedger. It runs HERE, in the same turn
+                    // as the stamp below and with nothing awaited between them, because
+                    // the revision the write claims has to be the revision of the document
+                    // whose ledger it just took. A snapshot arriving in that gap would
+                    // move the base and the pair would no longer be one statement.
+                    const absorbed = this.absorbCloudLedger(envelope);
+                    if (!absorbed) {
+                        // Two different reasons, and the person can act on only one of
+                        // them. A held record is a person's decision waiting to be made -
+                        // the disputed bodies are on the disk and nothing more may be
+                        // written until somebody has looked - and naming that as a
+                        // storage failure sends them to delete photos that will not help.
+                        return Promise.reject(new Error(farkadWritesBlocked()
+                            ? 'the record is held until a person has looked at it; the '
+                                + 'restore was not sent'
+                            : 'the money recorded elsewhere while this restore waited '
+                                + 'could not be stored on this device; the restore was '
+                                + 'not sent'));
+                    }
+                    envelope = absorbed;
                     // The ordering envelope on the restore too. A whole-document
                     // replacement is a write like any other and takes the same fence -
                     // which is the point: a restore racing an ordinary edit used to have
@@ -430,10 +710,10 @@ Object.assign(FarkadSync, {
                     // restores that replace the same document with the same bytes are
                     // still two different decisions, and a receipt for one must not answer
                     // the other.
-                    this.stampProtocol(document,
+                    this.stampProtocol(envelope.document,
                         'r' + digestOf(String(envelope && envelope.transactionId)),
                         'restore', String((envelope && envelope.transactionId) || ''));
-                    return Promise.resolve(this.adapter.save(document)).then(value => {
+                    return Promise.resolve(this.adapter.save(envelope.document)).then(value => {
                         // And AGAIN, on the far side of the request. Reading the disk and
                         // then acting on what it said is two steps, and the other tab
                         // writes between them: the claim was mine at the check and
