@@ -52,6 +52,15 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 976a88b (v104: the production adapter hands the sync layer its bootstrap and its
+    read - the cutover reaches the phone), the cd-work worktree, clean at that commit, Node
+    v22.22.2, .gate-release.log there, copied from no other run - the WHOLE release gate:
+    npm test           43 suites   4384/4384   (build 32: one suite added, three checks red on the base)
+    npm run test:all   + 9 suites  + 2192      (smoke 1130, print 78, mobile 807, update 30, forms-browser 10, recovery-browser 25, handover 26, swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244      (sendclaim 43; rules 59, cas.emulator 24, rollout 17, bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    the whole gate     59 suites   6820/6820   exit 0
+    Per suite and verbatim: features/cutover/handoff.md.
+
     At 6011430 (v103: the app put in order - the week's empty screen naming the next
     move, three button classes that meant nothing, the rules review, and the documents),
     a clean detached worktree at that commit, Node v22.22.2, git diff --check clean:
