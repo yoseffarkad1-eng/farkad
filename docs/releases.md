@@ -13,9 +13,102 @@ commit is worse than no count at all, so a build whose run was not written down 
 time says so rather than borrowing a neighbour's.
 
 **`main` is at v103 (`21c8e08`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE. v91, v93 and v94 below were
+a candidate, when there is one, sits above them headed CANDIDATE. The current one is
+v105 (`b02ab36`). v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## CANDIDATE — v105 — what two phones do to each other, and the crew nobody could see
+
+**Not served. Not merged. On no phone.** On `claude/farkad-closeout-blockers`, built on
+`main` as served (`21c8e08`, v103). Both money gates are still `false`: `LEDGER_WRITES` in
+`js/model/ledger.js` and `carryAdvances` in `js/model/schema.js`. Code being ready is not
+permission to open them, and this build adds a reason to wait — see below.
+
+Measured on `b02ab36`, which is the last commit that changes any shipped or test byte;
+this entry is the only thing after it.
+
+**Seven defects, each with the failure that found it**
+
+- **A refused retirement let a beaten wage come back.** `collectQueueGarbage` owed its
+  winners only against RETIRED losers, so a loser whose retirement the disk had just
+  refused left its winner collectable — in the same pass that failed to write the one
+  record keeping that loser defeated. The loser then became current and went to the cloud
+  over the value it had lost to. `tests/races.tabs.test.mjs` R14.
+- **A phantom conflict that never cleared.** «הנתונים השתנו במכשיר אחר» stayed up all
+  evening on a phone where cloud, disk and screen agreed and nothing was pending. R2b.
+- **A restore erased money recorded while it was on the wire** — the ledger half (O6, O7,
+  O9, O10) and, on the build a person actually has with both gates shut, the legacy
+  `advances` half: 800 shekels gone from all three phones, every one saying synced. O8b.
+- **A stale wage written backwards after one refused write.** The stale-roster hold
+  remembered the tombstones and forgot the refresh, so the retry hit its own "nothing to
+  do" return. `tests/refute.roster.mjs` R2.2.
+- **An index that answered out of `Object.prototype`** — six ids resolved to methods, and
+  an operation recorded a mark for a worker nobody hired. R1.1.
+- **The export said files had left when they had not**, and stamped «גיבוי אחרון» over a
+  backup that was never written.
+- **At 200% text there was no crew on the screen** — 469px of chrome above and 263px of
+  bars below on a 667px screen: zero whole worker rows at every width.
+
+**And two instruments that were lying**
+
+`tests/build.test.mjs` compared the three stamps with each other and was structurally
+blind to whether they still described the BYTES — the half iron law 5 exists for. It asks
+git now. Its first answer was that eleven commits had changed thirteen cached files with
+the stamps still reading v104, which is a fix that ships green and never reaches the
+phone. That is what v105 is.
+
+`tests/gate.integrity.test.mjs` then gave a FALSE GREEN over the same question, because it
+took "the last commit touching index.html, js/app.js or sw.js" as its baseline and a
+commit to `js/app.js` moved it. Two instruments answering one question is the only reason
+anybody looked.
+
+**What was run, and on what**
+
+| gate | commit | result |
+|---|---|---|
+| `npm test` | `d77589b` | 54 suites, **5160/5160**, exit 0, 5m55s |
+| `npm run test:release` run 1 | `b02ab36` | 74 reporting blocks, **8318/8318**, exit 0, zero FAIL lines, 23m54s |
+| `npm run test:release` run 2 | `b02ab36` | 74 reporting blocks, **8318/8318**, exit 0, zero FAIL lines, 23m46s |
+| seeds 1 / 42 / 2026 | `d77589b` | `data` 1951/1951, `concurrency` 46/46, `probes` 35/35, `races.tabs` 109/109 — identical on all three |
+
+Both release runs from their own clean detached worktree at the exact commit, Node
+v22.22.2, tree clean, `git diff --check` silent, every tracked `.js`/`.mjs` parsing.
+
+**What this build is known NOT to cover**
+
+- **Nothing was checked on an iPhone.** Twenty-two rows in `docs/iphone-acceptance.md` are
+  marked NOT RUN. Eleven of them exist because Chromium anchors `position: fixed` to the
+  LAYOUT viewport and iOS to the VISUAL one — a measured limit, not an untried idea. The
+  200% pass is a uniform multiplier and is **not** Dynamic Type.
+- **`page-break-inside: avoid` on a payroll row is unfalsifiable here.** Headless Chromium
+  keeps a table row atomic by itself — five fixtures, identical PDFs — so no PDF in this
+  repository can tell the rule from its absence. WebKit is the only place it is a real
+  question.
+- **The download-refusal path has never met a real refusing browser.** It is proved in the
+  harness and against doubles.
+- **The service worker's ordering was not proved against a real iOS resume.**
+  `bringToFront()` produces zero `visibilitychange` events in headless Chromium, so that
+  event is dispatched rather than caused.
+- **`tests/smoke.mjs` does not neutralise `js/sync/firebase-config.js`.** On a machine with
+  a network it initialises the Firebase SDK against the live `farkad-schedule` project. It
+  reaches no business data — `connect` runs only for a signed-in user — but it is worth
+  knowing before running the browser gate on a networked machine.
+
+**And what it means for the two money gates — a NEW blocker**
+
+`firestore.rules` names `ledger` nowhere. Measured on the emulator against the real rules:
+on a LEGACY document (no `revision` yet) a whole-document write with no ledger is
+**accepted and the cloud ledger is gone**, and a null at a ledger field path lands. After
+cutover both are refused. So "no older client can overwrite ledger fields" is proven
+**after** cutover and **false before it**, and the flip must not happen while the shared
+document is still legacy — read the `revision`, do not assume somebody has written since
+the update. Recorded with two more findings in `features/gate-flip/contract.md`.
+
+Firestore protocol: **CODE COMPLETE — LIVE CUTOVER NOT PERFORMED.**
+Ledger: **LEDGER CANDIDATE READY — ACTIVATION BLOCKED BY ROLLOUT.**
 
 ---
 
