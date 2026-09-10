@@ -166,3 +166,81 @@ never re-entered because "it did not go".
 - It does not authorise the flip and does not schedule it.
 - It does not deploy rules, touch Firebase, or run anything on a phone.
 - It does not decide WHEN. The person decides when.
+
+---
+
+## Three things found after this list was written, and what each one does to it
+
+Measured during the final sprint against `696ee86` in a clean detached worktree, and
+recorded here rather than in a report nobody will be holding on the day. Two of them change
+the checklist above; the third is a shape somebody should know before they read a surplus
+and think it is a bug.
+
+### F2 — before cutover, the SERVER does not protect the ledger. **This is a new blocker.**
+
+`firestore.rules` names `ledger` nowhere. `fullDocumentOk()` requires only `workers`,
+`places` and `updatedAt`, and `legacyWrite()` opens the door to anything at all while
+`noRevisionYet()`. Measured directly on the emulator, against the real rules file:
+
+    document=LEGACY    wholeDocumentWrite(noLedger)          -> ACCEPTED   ledgerAfter=undefined
+    document=LEGACY    fieldWrite(ledger.advances.le_1=null) -> ACCEPTED   entryAfter={"le_1":null}
+    document=PROTOCOL  wholeDocumentWrite(noLedger)          -> REFUSED permission-denied  (ledger intact)
+    document=PROTOCOL  fieldWrite(ledger.advances.le_1=null) -> REFUSED permission-denied  (ledger intact)
+
+So "no older client can overwrite ledger fields" is **proven after cutover and false before
+it**. While the shared document still has no `revision`, an old client's restore or import
+erases the cloud ledger, and a null written at a ledger field path lands.
+
+What it does NOT mean: no phone loses its own history. The client half never subtracts
+(`mergeLedgerInto`, and `tests/ledger.truth.test.mjs §12`), so a v79 document with no
+`ledger` removes nothing locally and the disagreement surfaces in `ledgerParity()` instead
+of being silent. The window is also short — cutover happens on the first protocol write
+from any updated phone.
+
+**The consequence for this checklist:** the flip must not happen while the shared document
+is still legacy. Add to "what must be true first": *the shared document has a `revision`* —
+read it, do not assume it, and do not rely on "somebody has surely written since the
+update". Until then the cloud copy of the ledger has no server-side protection at all.
+
+### F3 — a poisoned snapshot keeps legitimate money out, and after a restart it does so silently
+
+A snapshot carrying one unreadable entry *alongside* a legitimate repayment and a new day is
+refused **whole**: memory and disk unchanged to the byte, writes blocked, the person told,
+the bytes quarantined and carried out on the rescue file. That is law 10 held tightly and it
+is the right refusal.
+
+The consequence is what nothing pins. Because nothing unreadable ever lands on this phone's
+own record, the write-block is not re-derived at the next boot: **session 2 opens unblocked
+and silent, still missing that repayment**, and every later snapshot is refused the same way
+for as long as the poisoned entry sits in the shared document. The phone looks well and is
+no longer receiving.
+
+No shipped build can create such an entry — both gates are shut, so nothing writes ledger
+entries at all — which is why this is recorded rather than repaired late. **It becomes
+reachable the moment the gates open.** Add to this checklist: before the flip, either the
+write-block is re-derived at boot from what the SNAPSHOT was refused for, or the person is
+told at every boot that this phone is refusing snapshots — not once, in the session it
+first happened.
+
+### F4 — two shapes of correction, both safe, answering the same human act differently
+
+`recordEventReversed` is idempotent by construction (`le_rev_<targetId>`): two phones
+correcting one mistake correct it once. `recordAdvanceReversed` — the untargeted advance
+reversal still wired to `openReversalForm` at `js/ui/reports.js:1226` — mints a **random**
+id, so two phones reversing one advance both land and the account goes to `overpaid` review.
+
+Neither is wrong. The second is deliberately non-deterministic so that the same cash entered
+twice shows as a surplus rather than being silently unified — which is the correct answer
+for money handed over, and the wrong one for a correction of a record. Worth knowing so that
+a surplus in review is read as the design working, not as a fault.
+
+### And one thing that was NOT true, now pinned
+
+`foldAdvance()`'s `repaid`/`reversed` accumulation and `currentAdvances()` — documented in
+`js/model/ledger.js` as "what every screen should read" — have no caller anywhere in `js/`
+outside `ledger.js` itself; every surface goes through `advanceOutstanding`/`advanceWalk`.
+Replacing the accumulation with a plain assignment left the ENTIRE repository green:
+repayment 240/240, closure 122/122, correction 33/33, money 40/40, adversarial 116/116. A
+man who handed back 800 in two payments would have read as 300 there the day anything looked
+at it. No wrong number reaches a person today, and `tests/ledger.truth.test.mjs §2` is what
+stops that being true by luck.

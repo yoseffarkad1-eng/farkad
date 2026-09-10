@@ -465,3 +465,76 @@ candidate, and not before. It must not be weakened to get there.
 
 Seven untracked suites are not yet named by any gate script. That is a registration step at
 integration, not a defect in the instrument — the instrument is what found them.
+
+---
+
+## Addendum 2 — startup and update, and two claims of my own that were wrong
+
+### A cloud that failed to LOAD looked exactly like a phone with no cloud — CLOSED
+
+`js/app.js` caught the adapter's dynamic-import failure with `cloudStarted = false` and a
+`console.info`. On every surface — the line under the board, the chip beside the app name,
+the ⋯ panel — that was indistinguishable from a phone with no project configured:
+
+    { "status": "off", "foot": "הנתונים נשמרים במכשיר הזה בלבד.",
+      "chip": "", "chipHidden": true, "reason": "", "reasonHidden": true }
+
+Which is a phone recording all evening while the screen calls it local-only and the other
+two phones see none of it. Now reported through the sync layer's own door
+(`FarkadSync.fail`), and only from status `'off'`, so a stale import failure cannot paint
+over a live status. Offline is untouched: with `navigator.onLine === false` the foot keeps
+the offline sentence, so no false alarm on a site with no signal.
+
+**Nothing was erased by the old behaviour and that is now pinned**, not assumed — the record
+on the disk is byte-for-byte what was planted, and a day recorded with no cloud is written
+beside the old one.
+
+### The two pinned strings that moved with it (law 6), and why the stated reason was wrong
+
+The suites' own author reported that `smoke.mjs:1105` "would fail on a machine with internet
+today too, since the adapter would connect." **Measured, that is not so.** `isConfigured()`
+is true in this repository, so the SDK initialises — but `FarkadSync.connect` is called only
+inside the auth-state callback, for a signed-in `user`. Unauthenticated, the adapter attaches
+a listener and connects nothing, so `FarkadSync.status` stays `'off'` and the check passes.
+
+It fails **here**, with no route to gstatic, because the import fails and the app now says
+so — which is the new behaviour working, not a regression. So the check was environment-
+dependent in the opposite direction from the one reported, and either way it was measuring
+the machine rather than the app. It now asks its own name's question: `FarkadSync.adapter`
+is `null` — what `connect()` sets and `disconnect()` clears — which is the same answer with
+a network and without one.
+
+The second (`smoke.mjs:7107`) claims the storage-space message did not ERASE the sync half
+of that line. The sync half is now put into a chosen state before the read, and **the pinned
+sentence is unchanged**. Loosening the string to accept either sentence would have turned it
+into "some sync sentence is present", which is exactly what it would say if the space message
+really had eaten it.
+
+### A related exposure, measured and recorded rather than alarmed about
+
+`tests/smoke.mjs` does not neutralise `js/sync/firebase-config.js`, which carries the real
+`farkad-schedule` project. On a machine with a network the suite therefore initialises the
+Firebase SDK against the live project. **It does not reach business data**: no `connect`
+without a signed-in user, so no read or write of `schedules/current`. The exposure is SDK
+initialisation and an anonymous auth-state check. Worth knowing before anyone runs the
+browser gate on a networked machine; not a data-safety defect, and not fixed here.
+
+### A documentation claim that overstated a safety property — CORRECTED
+
+`docs/rollout-checklist.md` told Yusuf that if he does not press «רענן עכשיו» the app
+"updates itself at the first moment nobody is typing." That is true of a second WINDOW and
+of nothing else: a phone is one window, there is no `controllerchange`, and `catchUpWhenSafe`
+is never reached. The code is right — reloading the only window somebody is looking at
+because a timer decided they had stopped typing is precisely what `js/ui/offline.js` refuses
+to do, and law 7 scopes the catch-up to every OTHER window. The document was wrong, and now
+says what `tests/update.test.mjs` measures: the offer waits, returns on every open, and lands
+when the app is closed completely and reopened — which is step (2) of the checklist already.
+
+### Not constructible in Chromium, and said so rather than claimed
+
+Real page visibility: in headless Chromium every page stays `visibilityState: 'visible'` and
+`bringToFront()` produces zero `visibilitychange` events, so the iOS resume cannot be
+produced here. The re-offer check dispatches the event and says so in its own comment —
+everything else it touches is real; only the tap on the app icon is pretended. And the case
+where `index.html` itself arrives truncated above `#bootBanner` is guarded structurally
+(the sentinel is parsed after the element it reveals) but is not measured end to end.
