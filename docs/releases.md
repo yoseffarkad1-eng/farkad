@@ -12,11 +12,45 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v103 (`21c8e08`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
+**`main` is at v103 (`21c8e08`).** The build at the top of this file is a candidate on a
+branch: verified, stamped, and NOT served. Every build below it has reached `main`.
 v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## v104 — CANDIDATE, not served — the tip of `cd-work`
+
+Two lines in `js/sync/firebase-adapter.js`, found from the owner's phone
+(`features/cutover/findings.md`). Nothing on a phone runs it.
+
+**What it gives the crew that v103 does not**
+
+- **A phone can join the protocol.** The browser branch's `connect({...})` never handed
+  the sync layer `bootstrap` or `read`, so no phone ever ran the cutover: over the v86
+  document its first batch went out at revision 1 carrying days, and the new rules
+  refused it on every branch, for ever, with the same sentence the old rules had
+  produced. With the two operations forwarded, the first flush bootstraps the document
+  (revision 1, protocol fields only) and the queued work lands at revision 2 — measured
+  on the emulator with a v86 document and a v86-queued disk: refused six times out of six
+  before, synced in 1.3 s after.
+- `tests/build.test.mjs` reads that literal against `firestoreOps` so an operation the
+  adapter defines can never again fail to reach a phone.
+
+**What this build is NOT known to do**
+
+- **It is not on `main`.** No phone has it. The owner's phone holds 194 queued operations
+  that will land on its first flush after taking this update.
+- From that flush on, a phone still on v86 is refused until it updates — the documented
+  cutover; the other two phones are not in use.
+- The Codex review's two notes on `.github/workflows/rules.yml` (the site deploys before
+  the rules job; two runs can finish out of order) are open; the workflow publishes
+  nothing until the repository holds a key.
+- Everything v103 lists, unchanged.
+
+**Checked before it was stamped**: the release gate on the stamped commit is in
+`features/cutover/handoff.md`. No number is copied here.
 
 ---
 

@@ -93,3 +93,8 @@ and `docs/rollout-checklist.md` names the sentence it produces.
 - **No document was corrected on the strength of the inference.** When the version arrives,
   `docs/releases.md`, `docs/iphone-acceptance.md` and this file get the fact rather than the
   reasoning.
+
+
+## The version arrived
+10 September 2026: the owner's ⋯ panel reads «גרסה v103», «מותקן על מסך הבית». The
+phone was on v103; the inference above is a reading now (`features/cutover/findings.md`).
