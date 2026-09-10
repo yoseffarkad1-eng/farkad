@@ -220,10 +220,12 @@ function updatedPhone(id) {
 
     const wired = adapterFor(as(ALLOWED), { holdSubscription: true });
     phone.Sync.connect(wired.adapter);
-    await settleUntil(async () => {
+    const reached = await settleUntil(async () => {
         const raw = await readDoc();
         return Number.isInteger(raw && raw.revision);
     }, 8000, 100);
+    given('the barrier this case rests on was actually reached', reached,
+        reached ? 'reached' : 'TIMED OUT - everything below is measured on a state that never arrived');
     await settle(400);
 
     const after = await readDoc();
@@ -264,10 +266,12 @@ function updatedPhone(id) {
         'actual', 'p_01'));
     const wired = adapterFor(as(ALLOWED), { holdSubscription: true });
     phone.Sync.connect(wired.adapter);
-    await settleUntil(async () => {
+    const reached = await settleUntil(async () => {
         const raw = await readDoc();
         return Number.isInteger(raw && raw.revision);
     }, 8000, 100);
+    given('the barrier this case rests on was actually reached', reached,
+        reached ? 'reached' : 'TIMED OUT - everything below is measured on a state that never arrived');
     await settle(400);
 
     const after = await readDoc();
@@ -327,10 +331,12 @@ function updatedPhone(id) {
         'actual', 'p_01'));
     const wired = adapterFor(as(ALLOWED), { holdSubscription: true });
     phone.Sync.connect(wired.adapter);
-    await settleUntil(async () => {
+    const reached = await settleUntil(async () => {
         const raw = await readDoc();
         return Boolean(raw && raw.days && raw.days['2026-08-18']);
     }, 10000, 100);
+    given('the barrier this case rests on was actually reached', reached,
+        reached ? 'reached' : 'TIMED OUT - everything below is measured on a state that never arrived');
     await settle(500);
 
     const after = await readDoc();
@@ -362,10 +368,12 @@ function updatedPhone(id) {
     const wiredB = adapterFor(as(ALLOWED), { holdSubscription: true });
     a.Sync.connect(wiredA.adapter);
     b.Sync.connect(wiredB.adapter);
-    await settleUntil(async () => {
+    const reached = await settleUntil(async () => {
         const raw = await readDoc();
         return Boolean(raw && raw.days && raw.days['2026-08-17'] && raw.days['2026-08-18']);
     }, 15000, 150);
+    given('the barrier this case rests on was actually reached', reached,
+        reached ? 'reached' : 'TIMED OUT - everything below is measured on a state that never arrived');
     await settle(700);
 
     const after = await readDoc();
@@ -418,10 +426,12 @@ function updatedPhone(id) {
 
     const wired = adapterFor(as(ALLOWED), { holdSubscription: true });
     reopened.Sync.connect(wired.adapter);
-    await settleUntil(async () => {
+    const reached = await settleUntil(async () => {
         const raw = await readDoc();
         return Number.isInteger(raw && raw.revision);
     }, 10000, 100);
+    given('the barrier this case rests on was actually reached', reached,
+        reached ? 'reached' : 'TIMED OUT - everything below is measured on a state that never arrived');
     await settle(500);
 
     const after = await readDoc();
