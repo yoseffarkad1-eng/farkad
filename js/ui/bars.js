@@ -15,6 +15,27 @@
 // the stylesheet adds up. Nothing here decides how much room to leave; it only reports
 // how much the bars are actually taking.
 function measureBottomBars() {
+    // FIRST, because it decides how tall the bars below are about to be. body.day-tight
+    // (further down this file) collapses the dock's phrases and the tab bar's words on a
+    // screen that cannot hold the crew otherwise, and publishing the heights before that
+    // decision would reserve room for a bar that is about to change size - the same
+    // one-tick-stale reading scheduleBarMeasure exists to avoid. It publishes too, from
+    // the layout it decided against; this call is what puts the chosen one on the page.
+    fitDayList();
+    publishBars();
+}
+
+// The four numbers, read off the page as it stands right now.
+//
+// IN THIS ORDER, and the order is the arithmetic. The dock is placed at `bottom:
+// var(--nav-h)` and the undo bar at `calc(var(--bars-h) + 10px)`, so each one's position
+// is a function of the properties written above it. Reading the dock before --nav-h has
+// been brought up to date reads it where it USED to be, which is how a bar that had just
+// changed height moved the room the page reserves by one whole tick - and, once the day
+// could collapse under itself (fitDayList below), flipped the collapse on and off between
+// two consistent-looking readings. Each read below forces the layout the write above it
+// invalidated, so one pass down this list settles the whole chain.
+function publishBars() {
     const root = document.documentElement;
     if (!root || !root.style) return;
 
@@ -44,6 +65,120 @@ function measureBottomBars() {
     // the day header pins itself right under it, and a written-down height would be
     // wrong on the first phone with a different inset.
     root.style.setProperty('--topbar-h', stickyHeight(document.querySelector('.topbar')) + 'px');
+}
+
+// ---------------------------------------------------------------- the crowded day
+//
+// THE ONE CASE WHERE THE WHOLE SCREEN DOES NOT FIT, and what gives way when it does not.
+//
+// Measured on this build, 320x667, text at twice its size, a crew of thirty with long
+// names: the strip above the day is 119px (the brand line and the sync chip take a second
+// row at that size), the folded account warning 113, the day header 276 - 469px of chrome
+// - and the dock and the tab bar cover 263 more. 469 + 263 = 732 against a 667px screen.
+// Not "a short list": NO whole worker row on the first screen at all, at any of the four
+// widths. The design board's 200% artboard (CD320Zoom) shows the ordinary layout with the
+// crew on it and the note "everything reflows to height"; at a real 200% it does not, and
+// this is the block that says so out loud instead of drawing it.
+//
+// So there is a second, smaller shape for the day, and body.day-tight turns it on. What it
+// collapses is written in the stylesheet, in the order features/compact-shell/findings.md
+// sets down: the selected date stays, the recording controls stay, the warning keeps its
+// meaning and its action, the last worker stays reachable, and what goes is the SECOND
+// COPY of a label a screen reader already has - the tab words, the dock's phrases, the
+// words beside the undo arrows. Every one of them stays in the accessibility tree; none of
+// them is display:none.
+//
+// THE DECISION IS MADE FROM THE LAYOUT WITH THE CLASS OFF, ALWAYS, and that is the whole
+// reason this reads the way it does. The class SHRINKS the chrome it is measuring; asked
+// again with the class on, the same page reports plenty of room, the class comes off, the
+// chrome grows back, and the page flickers between two layouts for as long as anybody
+// looks at it. A threshold with a gap in it would only make the flicker rarer. So the
+// class is taken off, the natural page is measured, and the class is put back if the
+// natural page still cannot hold the crew - all inside one frame, before any paint, so
+// nothing is ever drawn in the intermediate state.
+const TIGHT_ROWS = 2;
+
+// The unit the day is counted in: one worker's row where there is one, and otherwise the
+// row that carries the date - which is one 44px target at whatever size the text is set
+// to, and is the thing the by-site view has instead of a list of names.
+function dayRowUnit() {
+    const row = document.querySelector('#dayView .worker-list .wrow');
+    if (row) {
+        const height = row.getBoundingClientRect().height;
+        if (height > 0) return height;
+    }
+    const nav = document.querySelector('.day-nav');
+    const bar = nav ? nav.getBoundingClientRect().height : 0;
+    return bar > 0 ? bar : 0;
+}
+
+// How much of the FIRST screen is left for the crew: from where the list begins down to
+// whatever is covering the bottom of the viewport.
+//
+// The list's top is taken in DOCUMENT coordinates - its rectangle plus the scroll - so the
+// answer is the same whether this is asked before anybody has scrolled or halfway down the
+// list. Reading the rectangle alone would report a scrolled page as having acres of room,
+// which is exactly the page that has none.
+function firstScreenRoom() {
+    const first = document.querySelector('#dayView .worker-list .wrow')
+        || document.querySelector('#dayView .site-grid .site-card')
+        || document.querySelector('#dayView .setup-card');
+    if (!first) return null;
+
+    const scrolled = typeof window.scrollY === 'number' ? window.scrollY
+        : (document.documentElement ? document.documentElement.scrollTop : 0);
+    const top = first.getBoundingClientRect().top + scrolled;
+
+    // The deepest of the two, not their sum: they overlap, and bottomCoverage already
+    // answers "how far up from the bottom edge does this one reach".
+    //
+    // THE UNDO BAR IS DELIBERATELY NOT HERE, and it is the tallest of the three - 266px at
+    // 320 with a long name on it, measured. It is also gone twelve seconds later. Counting
+    // it made every ✕ on a worker's row take the words off the tab bar for twelve seconds
+    // and then put them back, which is churn a person watches rather than room a person
+    // gets. What the undo bar covers is already paid for, and paid for the right way: it
+    // is measured into --undo-h above and the page's own bottom padding clears it (see
+    // .app in the stylesheet), so the last worker stays reachable underneath it without
+    // the whole shell changing shape around him.
+    const covered = Math.max(
+        bottomCoverage(document.querySelector('.tabs')),
+        bottomCoverage(document.querySelector('.day-actions')));
+
+    return window.innerHeight - top - covered;
+}
+
+function fitDayList() {
+    const body = document.body;
+    if (!body || !body.classList || typeof window === 'undefined') return;
+
+    // Another screen is up. The answer for the day screen is the last one measured on the
+    // day screen; re-deciding it from the reports view would take the class off over a
+    // page that has no crew on it and hand it back the moment the day came round again.
+    const view = document.getElementById('dayView');
+    if (!view || typeof getComputedStyle !== 'function') return;
+    if (getComputedStyle(view).display === 'none') return;
+
+    const was = body.classList.contains('day-tight');
+    body.classList.remove('day-tight');
+    // The bars are a different size without the class, and the dock is placed off a
+    // property that says how tall the tab bar is. Publishing here is what makes the two
+    // reads below read the natural page rather than the natural bars sitting at the
+    // collapsed page's offsets.
+    publishBars();
+
+    // Both reads force the layout the removal above invalidated, which is the point: what
+    // is being measured is the page as it would be drawn WITHOUT the class.
+    const room = firstScreenRoom();
+    const unit = dayRowUnit();
+
+    // Nothing to measure - the day is drawn but empty, or the list has no height yet.
+    // The last answer stands rather than being replaced by a guess.
+    if (room === null || unit <= 0) {
+        body.classList.toggle('day-tight', was);
+        return;
+    }
+
+    body.classList.toggle('day-tight', room < TIGHT_ROWS * unit);
 }
 
 // Sticky occupies its strip while stuck; barHeight below deliberately counts only

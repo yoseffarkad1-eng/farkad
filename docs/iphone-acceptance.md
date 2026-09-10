@@ -271,3 +271,30 @@ Every one of these is **NOT RUN**.
 | P10 | Delete a worker's day so the undo bar appears carrying a long name, then tap the last man in the list | He is reached, not the undo bar | the fix is measured here; a real finger on a real 320px screen is not |
 | P11 | Send back the diagnostic block from the phone that produced the floating-bars screenshot | `page.build`, `app.build` and `sw.builds` all name the same version — or they do not, which is the answer | this is the one row that ends the guessing, and only the owner can run it |
 | P12 | On the smallest phone at AX2: delete a worker's day so the undo bar appears, then try to reach the last man in the list | If he cannot be reached, that is expected on that screen — the undo bar expires in twelve seconds and בטל stays in the header. What must NOT happen is the bar covering the screen with no way out | measured here as a geometric impossibility, not as a bug; a person's judgement of whether it is tolerable is not a measurement |
+
+## v105 — the rows this sprint added
+
+Every one of these is **NOT RUN — REQUIRES YUSUF'S IPHONE**. They are here because
+something was proved as far as it can be proved without a phone, and the last step is a
+finger on real glass. Where a suite already covers part of a row, the row says what is
+left over rather than repeating it.
+
+### The files that leave the phone
+
+| # | what to do | what must happen | why no suite here can say |
+|---|---|---|---|
+| P13 | Export the reports, then open the `.xlsx` in Excel on a Mac or a PC | The sheet opens right-to-left, with the man's name on the right | `rightToLeft="1"` is read back out of the produced workbook's XML here, on all three sheets. Whether Excel HONOURS it is a fact about Excel |
+| P14 | Open the same file in Numbers, in the iOS Files preview, and in WhatsApp's document preview | Probably laid out LEFT-to-right in all three. This is expected, and the hand-over dialog already says so in words | the dialog's words have never been checked against the devices they describe |
+| P15 | Export reports, backup and the rescue file, and in each case tap through the iOS share sheet to "Save to Files" | The file is actually in Files afterwards, under the name the app gave it | the app can only know the browser TOOK the file. Nothing in a page can know it was kept |
+| P16 | Cancel the iOS share sheet on the picture export (🖼️ שיתוף כתמונה) instead of completing it | The app carries on; the picture is offered as a download instead, and nothing is lost | `AbortError` from a real iOS share sheet has no Chromium equivalent |
+| P17 | Print the pay sheet from the home-screen app with a modal open | The sheet prints without the modal on it, and both bars come back after | print isolation is proved here against a real PDF, with a modal genuinely open — but Safari's print sheet is not Chromium's |
+| P18 | Print a pay sheet long enough to run to two pages, with long names | **No man's row is split across the page break, and the totals row is on one sheet** | measured on the paper here, but headless Chromium keeps a table row atomic BY ITSELF — five fixtures, identical PDFs — so nothing here can tell the rule from its absence. WebKit is the only place this is a real question |
+| P19 | On a phone where downloads are blocked or the browser ignores the press, try to export | The app says «ההורדה נחסמה» and names the files. It must NOT say the files were exported, and «גיבוי אחרון» must NOT move | the refusal path is proved against doubles and in the harness. It has never met a real browser that refuses |
+
+### Startup, and the build the phone is on
+
+| # | what to do | what must happen | why no suite here can say |
+|---|---|---|---|
+| P20 | Put the phone in airplane mode, then open the app from the home-screen icon | The day screen draws, and a day recorded then is still there after reopening. No white screen, no wait | proved here with every off-origin request held open for ever and with the origin shut down — but on the real device the cache is iOS's, not Chromium's |
+| P21 | With the app on a version that has an update waiting, press «אחר כך». Then open and close the app a few times | The offer comes back every time. It lands only when the app is closed COMPLETELY (swiped out of the app switcher) and opened again. It must not reload itself under your hands | `visibilitychange` cannot be produced by headless Chromium — measured, `bringToFront()` fires zero events — so the resume is dispatched here as an event, not caused by the OS |
+| P22 | After the update lands, ⋯ → מידע טכני → «העתק» | `page.build`, `app.build` and `sw.builds` all say v105 | the same reason as P11: only the phone knows what the phone is running |

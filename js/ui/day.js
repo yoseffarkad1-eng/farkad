@@ -621,8 +621,17 @@ function renderDayHeader() {
     // "קודם" and not "יום קודם": the word יום appeared three times on this one line, and
     // the two copies on the buttons were costing the day name sixty pixels it did not
     // have. The full wording stays as the label a screen reader announces.
-    const back = button('קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם');
-    back.insertBefore(chevronIcon('back'), back.firstChild);
+    //
+    // The word is in a span of its own, like the words beside the undo arrows: on the
+    // narrowest phone, and on any screen the day has had to collapse on (body.day-tight),
+    // the stylesheet drops the two words and keeps the chevrons, which hands the date back
+    // eighty pixels of a three-hundred-pixel row. Measured at 320: the pair of pills took
+    // 116px of the 304 the row has and the date had 127 - the two ways of LEAVING this day
+    // were as big as the day itself. The aria-labels below carry the full sentence either
+    // way, so nothing a screen reader says changes.
+    const back = button('', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם');
+    back.appendChild(chevronIcon('back'));
+    back.appendChild(el('span', 'nav-word', 'קודם'));
     nav.appendChild(back);
 
     // The title IS the date picker. A second full-width input row said the same date
@@ -636,7 +645,8 @@ function renderDayHeader() {
     label.addEventListener('click', () => openDayPicker());
     nav.appendChild(label);
 
-    const fwd = button('הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא');
+    const fwd = button('', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא');
+    fwd.appendChild(el('span', 'nav-word', 'הבא'));
     fwd.appendChild(chevronIcon('fwd'));
     nav.appendChild(fwd);
     header.appendChild(nav);

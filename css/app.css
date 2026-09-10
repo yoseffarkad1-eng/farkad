@@ -933,7 +933,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    pill in the middle of the header. */
 .day-label {
     flex: 1;
-    min-width: 0;
+    /* THE 44px FLOOR, on the one control that had been exempted from it by a min-width of
+       zero. The date's button is a button: it opens the picker, and a finger has to be
+       able to land on it. min-width: 0 alone let it be squeezed to whatever a flex line
+       had left over - measured at 568x320 with the day collapsed, the tools row fitted
+       beside the nav for the first time and the date came out ELEVEN pixels wide, still
+       announcing «יום רביעי 12/08/2026» to a screen reader and impossible to press.
+       With a floor the line cannot be shared when it does not fit, and the tools row
+       wraps under the nav instead, which is what it did before it fitted.
+       min-width, not width: at every ordinary size this rule does nothing at all - the
+       label is 154px at 320 and 213 at 430 - and the ellipsis below is still the backstop
+       for a day name longer than the room. */
+    min-width: 44px;
+    min-height: 44px;
     text-align: center;
     line-height: 1.3;
     background: none;
@@ -3529,7 +3541,126 @@ body.day-compact .day-header .progress .progress-line {
     .wrow-main { min-height: 66px; }
     .day-steps:has(.btn-today) .step-word { display: none; }
     .day-steps:has(.btn-today) .step-btn { padding: 8px 0; justify-content: center; }
+
+    /* «קודם» and «הבא» lose their words here and keep their chevrons. Measured at 320
+       before this rule: the two pills took 116px of the 304px row and the date, which is
+       the one thing on this screen that decides where every tap lands, had 127 - the two
+       ways of LEAVING the day were as wide as the day. Without the words they are 44px
+       each and the date has 205. The chevrons are drawn and already point the right way
+       for an RTL calendar (chevronIcon in dom.js), and the buttons' aria-labels still say
+       «יום קודם» and «יום הבא» in full, which is what a screen reader reads and what
+       tests/smoke.mjs finds them by.
+       min-width, spelled out: .btn-nav is not in the global 44px min-width list above, so
+       without the words it would be a 32px target - which is the floor this whole file is
+       about, broken by a rule meant to help. */
+    .day-nav .btn-nav .nav-word { display: none; }
+    .day-nav .btn-nav { min-width: 44px; justify-content: center; padding-inline: 4px; }
+    /* The room the words gave up, spent on the thing they were crowding. Two lines of
+       20 over 14 are 39px inside a 44px row, so this costs the header nothing at all. */
+    .day-label strong { font-size: 20px; }
 }
+
+/* ---------------------------------------------------------------- the crowded day (P3)
+
+   body.day-tight: the shape the day takes on a screen that cannot hold it otherwise.
+   fitDayList() in js/ui/bars.js puts the class on and takes it off, MEASURED - it counts
+   how much of the first screen is left for the crew once the chrome and the bars have
+   taken theirs, and turns this on when that is less than two worker rows. It is not a
+   media query, because the case it is for is not a width: at 320x667 with text at twice
+   its size this build puts 469px of chrome above the list and 263px of bars below it, on
+   a 667px screen - no whole row of the crew at all, at any of the four widths. A width
+   cannot see that; only a measurement can.
+
+   WHAT GIVES WAY, and in this order, which is the hierarchy in features/compact-shell/
+   findings.md read from the bottom up:
+
+     5. the second copy of a label. Every rule in this block takes away a word that a
+        screen reader still has - the tab words are clipped to a pixel and stay in the
+        accessibility tree, the dock's phrases and the switcher's are ellipsised and their
+        text nodes are untouched, and the words beside the undo arrows come off exactly as
+        they already do at 360px, where the buttons' aria-labels carry the sentence.
+        NOTHING here is display:none on the only name a control has.
+     4. the last worker stays reachable: nothing in this block moves a bar or the page's
+        bottom padding - those are measured (js/ui/bars.js) and stay measured.
+     3. the warning keeps its meaning and its action: the folded line loses its third
+        line, not its sentence, and לדוחות and ✕ are untouched. The full prose is one tap
+        down, in .banner-full, exactly as before.
+     2. the recording controls stay: the switcher, the fold's button, undo, redo and the
+        count are all still on the header, at their full 44px.
+     1. the selected date stays: .day-nav and .day-label are not mentioned in this block
+        at all.
+
+   Measured at 320x667 at 200% text, a crew of thirty with long Hebrew names: see
+   features/compact-shell/findings.md for the before and after of every cell. */
+
+/* The tab words. The bar keeps its four icons and its four 44px targets; the word under
+   each goes off the eyes and stays in the accessibility tree - the same clip the day
+   header uses for .now-editing and the landscape bar for the count, and for the same
+   reason. display:none here would take the tab's only accessible name with it. */
+body.day-tight .tabs .tab span:not(.tab-icon) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* The dock. Two phrases that wrap to two lines each at 200% and stand the bar up at
+   144px - more than a fifth of a 667px screen for two buttons. One line and an ellipsis
+   instead: the glyph that identifies each of them is the first character of its own
+   label, so it survives the clipping, and the whole phrase is still the button's text and
+   still its accessible name. The 64px floor above (.day-actions) is a floor, not a
+   height, and the bar comes down to it. */
+body.day-tight .day-actions button {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-block: 8px;
+}
+
+/* The switcher's pair, for the same reason and by the same means: at 200% each label
+   wraps to two lines and the line they share stands at 84px. Ellipsised they are 44,
+   which is the floor, and «לפי עובדים» is still what a screen reader reads out. */
+body.day-tight .day-tools .mode-toggle button {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The words beside the undo and redo arrows. This is the rule the 360px block already
+   applies when «היום» joins that line; here it applies whenever the screen is this
+   short, and for the same reason - the arrows are drawn, the buttons carry
+   aria-labels, and the words are the part that can be spared. */
+body.day-tight .day-steps .step-word { display: none; }
+body.day-tight .day-steps .step-btn { padding-inline: 4px; justify-content: center; }
+
+/* The two ways of leaving the day, on a screen that has had to collapse: the chevrons
+   stay, the words go, and the date takes the width back. Same rule as the 360px block
+   above, same reason, same aria-labels doing the talking - here it is the text SIZE
+   rather than the screen width that has made the row too small for both. */
+body.day-tight .day-nav .btn-nav .nav-word { display: none; }
+body.day-tight .day-nav .btn-nav { min-width: 44px; justify-content: center; padding-inline: 4px; }
+
+/* The folded warning loses its third line, not its sentence. Two lines of the summary at
+   200% is still the whole of «יום אחד עדיין פתוח בחשבון שנסגר מחר» on most days, the
+   dates are in .banner-full one tap down, and לדוחות and ✕ do not move. */
+body.day-tight .banner-summary { -webkit-line-clamp: 2; }
+
+/* The app's own name, which is the one thing above the day that is neither the day nor a
+   control. Not an accessible name being taken away: nothing here is tappable, and the
+   document's <title> still says which app this is. The ⋯ and the sync chip stay. */
+body.day-tight .topbar .brand { display: none; }
+
+/* The seams. Every one of these is a margin or a padding, none of them carries a word or
+   a target, and together they are worth about a fifth of a worker's row at 200% - which
+   is the difference between the last name on the first screen being whole and being cut.
+   The 44px floors above are untouched: what shrinks is the space AROUND them. */
+body.day-tight .day-header { padding: 2px 8px 6px; }
+body.day-tight .day-tools { margin-top: 0; }
+body.day-tight .worker-list { margin-top: 2px; }
+body.day-tight .banner-fold { min-height: 0; margin-bottom: 4px; }
+body.day-tight .topbar { margin-bottom: 2px; }
 
 /* With one client's site chosen (body.client-scoped, set by renderReports), the printed
    page follows the same rule as the export button: the client's grid, and nothing that
@@ -3572,10 +3703,33 @@ body.day-compact .day-header .progress .progress-line {
         /* 7 below: the track lives in the bottom 4px, and the tools must clear it. */
         padding: 3px 8px 7px;
     }
-    /* flex-basis 0: the nav asks for nothing, so the tools are never wrapped onto a
-       second line - the day name is what shrinks, by ellipsis, never the buttons. */
-    .day-nav { flex: 1 1 0; min-width: 0; gap: 4px; }
+    /* THE NAV KEEPS ITS MINIMUM, and what that rule replaced was measured before it was
+       replaced: `flex: 1 1 0; min-width: 0` said the nav asks for nothing, so that the
+       tools would never be wrapped onto a second line and the day NAME would be the half
+       that shrank. The tools have taken a line of their own since the switcher moved into
+       the header (v101) - this bar is 104px and two rows on a 568x320 screen, not the 62
+       and one row the comment below the block still describes - so the trade that rule
+       made is no longer on offer, and all it was still doing was giving the tools the
+       nav's width as well. Measured at 568x320 on the build before this line changed: the
+       nav was 155px for four controls whose floors add up to 188, and the date's button
+       came out at ZERO width - the date, on the bar that exists to keep the date, drawn
+       nowhere and skipped by the 44px checks because an element of no size is not measured
+       at all. flex-basis auto - the nav asks for the width its own contents want, and the
+       tools wrap under it as they were already doing rather than being handed the nav's
+       share. NOT min-width: min-content, which was tried and measured and is worse than
+       the bug: the day name is nowrap, so its min-content is the whole name, and at 200%
+       text on a 320px screen that made the nav 459px wide inside a 320px page - the
+       sideways scroll this suite exists to stop. min-width stays 0; the ellipsis below is
+       still what gives way when there is genuinely not enough room. */
+    .day-nav { flex: 1 1 auto; min-width: 0; gap: 4px; }
     .day-tools { margin-top: 0; flex: 0 0 auto; }
+    /* The switcher gives up its own line here. `flex: 1 1 100%` (the phone block above)
+       is what puts the pair on a line of its own in portrait, and it is right there; on a
+       bar that is meant to BE one line it took a second row and then a third, and the
+       header stood at 148px on a screen 320px tall - half the phone, pinned, above a list
+       that is the reason the phone is being held sideways. Measured at 568x320 with the
+       pair sharing the row: 58px, which is the one row this block was written for. */
+    .day-tools .day-switch { flex: 0 1 auto; min-width: 0; }
     .day-steps { gap: 4px; }
     .step-btn { padding: 8px 5px; }
     .btn-today { margin-inline-start: 0; padding: 6px 8px; }

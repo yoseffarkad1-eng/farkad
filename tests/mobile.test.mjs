@@ -3120,6 +3120,395 @@ for (const [width, height, what] of [[320, 667, 'portrait'], [667, 320, 'landsca
     await page.context().close();
 }
 
+// ================================================ the crowded day, every geometry, both text sizes
+//
+// THE TWELVE CELLS THIS SUITE HAD NEVER OPENED. Everything above measures each width at
+// ONE height - the height that phone ships with - and each text size at that same one
+// height. A person's phone is not the only shape that width comes in: an SE and a 15 Pro
+// are both "narrow", a Plus held by somebody with the text turned up is 430 wide and short
+// of room all the same. So this block is the cross product, four widths by three heights,
+// each opened twice: once at the size the text ships at and once at twice that size.
+//
+// WHAT IT FOUND, before the collapse below existed, measured with a home indicator, the
+// account warning up and a crew of thirty with long Hebrew names:
+//
+//   at 200% text, the chrome above the list came to 469px (320) and 493px (375-430), the
+//   dock stood at 144px and the tab bar at 119, and the number of WHOLE worker rows on the
+//   first screen was ZERO at every width at 667, and ONE at 844. Not a short list: no crew
+//   at all, on the screen this app exists to be.
+//
+// body.day-tight is the answer (fitDayList in js/ui/bars.js, and the block it drives at the
+// end of css/app.css), and the four things asked of each cell below are the four the design
+// board's 200% artboard claims without measuring: nothing scrolls sideways, nothing a finger
+// lands on is under 44px in either dimension, the first, middle and LAST man in the crew are
+// each the thing a tap at their centre hits, and - through the browser's own input path, not
+// elementFromPoint - a real tap on the last row opens HIS sheet.
+{
+    const CELLS = [];
+    for (const width of WIDTHS) {
+        for (const height of [667, 844, 932]) CELLS.push([width, height]);
+    }
+
+    // The long name is the point of the crew here: a short «עובד 12» leaves the row's
+    // second line unused and hides every wrap this block is about.
+    const longNames = page => page.evaluate(() => {
+        State.schedule.workers.forEach((worker, at) => {
+            worker.name = 'מוחמד עבד אל רחמן מחאמיד ' + (at + 1);
+        });
+        State.save();
+        render();
+    });
+
+    // The three men, each scrolled to, each clear of every bar that is floating over the
+    // bottom, each the thing a tap at his own centre lands on.
+    const eachMan = async (page, label) => {
+        for (const [where, index] of [['first', 0], ['middle', 14], ['last', -1]]) {
+            const row = await page.evaluate(async at => {
+                const rows = [...document.querySelectorAll('#dayView .worker-list .wrow')]
+                    .filter(node => node.offsetParent !== null);
+                const node = at < 0 ? rows[rows.length - 1] : rows[at];
+                if (!node) return { found: false };
+                node.scrollIntoView({ block: 'center' });
+                await new Promise(done => setTimeout(done, 220));
+                const box = node.getBoundingClientRect();
+                const hit = document.elementFromPoint(
+                    box.left + box.width / 2, box.top + box.height / 2);
+                // EVERY bar that is actually floating, the undo bar included - it is the
+                // tallest of the three and the one that went unmeasured until v104.
+                const bars = ['.tabs', '.day-actions', '#undoBar']
+                    .map(selector => document.querySelector(selector))
+                    .filter(bar => bar && getComputedStyle(bar).position === 'fixed'
+                        && getComputedStyle(bar).display !== 'none')
+                    .map(bar => bar.getBoundingClientRect().top);
+                return {
+                    found: true,
+                    hit: node === hit || node.contains(hit),
+                    by: hit ? String(hit.className || hit.tagName).slice(0, 24) : 'nothing',
+                    clear: bars.length === 0 || box.bottom <= Math.min(...bars) + 1,
+                    top: Math.round(box.top), bottom: Math.round(box.bottom)
+                };
+            }, index);
+            check(`${label}: the ${where} man in the crew can be tapped`,
+                row.found && row.hit && row.clear, JSON.stringify(row));
+        }
+    };
+
+    // What the chrome and the bars leave for the crew, and how much of it is whole rows.
+    const room = page => page.evaluate(async () => {
+        window.scrollTo(0, 0);
+        await new Promise(done => setTimeout(done, 200));
+        const height = selector => {
+            const node = document.querySelector(selector);
+            return node ? Math.round(node.getBoundingClientRect().height) : null;
+        };
+        const dock = document.querySelector('.day-actions');
+        const top = dock ? dock.getBoundingClientRect().top : window.innerHeight;
+        const rows = [...document.querySelectorAll('#dayView .worker-list .wrow')]
+            .map(node => node.getBoundingClientRect());
+        const banner = document.getElementById('accountBanner');
+        return {
+            tight: document.body.classList.contains('day-tight'),
+            warned: Boolean(banner) && banner.style.display !== 'none'
+                && banner.getBoundingClientRect().height > 0,
+            topbar: height('.topbar'), banner: height('#accountBanner'),
+            header: height('.day-header'), dock: height('.day-actions'),
+            tabs: height('.tabs'),
+            listTop: rows.length ? Math.round(rows[0].top) : null,
+            row: rows.length ? Math.round(rows[0].height) : null,
+            whole: rows.filter(box => box.bottom <= top + 0.5).length,
+            doc: document.documentElement.scrollWidth,
+            client: document.documentElement.clientWidth
+        };
+    });
+
+    for (const [width, height] of CELLS) {
+        for (const text of ['100%', '200%']) {
+            const label = `${width}×${height} at ${text}`;
+            suite(label);
+
+            const page = await open({ width, height });
+            await longNames(page);
+            await setInset(page, 34);
+            if (text === '200%') {
+                await doubleEveryFontSize(page);
+                await page.waitForTimeout(200);
+                await page.evaluate(() => render());
+            }
+            await page.waitForTimeout(300);
+
+            const m = await room(page);
+            // The warning is the block the owner's list calls out by name, and every
+            // number below is only worth something if it was measured with it up.
+            given(`${label}: the account warning is on the screen`, m.warned === true,
+                JSON.stringify(m));
+
+            check(`${label}: the page does not scroll sideways`,
+                m.doc <= m.client + 1, JSON.stringify({ doc: m.doc, client: m.client }));
+
+            const small = await undersized(page);
+            check(`${label}: everything a finger lands on is a finger's size`,
+                small.length === 0, JSON.stringify(small).slice(0, 220));
+
+            const faint = await unreadable(page);
+            check(`${label}: and nothing on it is too small to read`,
+                faint.length === 0, JSON.stringify(faint.slice(0, 4)));
+
+            await eachMan(page, label);
+            await tapsStillWork(page, label);
+
+            // THE COLLAPSE ITSELF. At the shipped text size no cell may take it - a phone
+            // that loses the words off its tab bar on an ordinary evening is a regression,
+            // not a rescue - and at 200% every cell that cannot hold two whole rows must.
+            if (text === '100%') {
+                check(`${label}: the day is NOT collapsed at the size the text ships at`,
+                    m.tight === false, JSON.stringify(m));
+                check(`${label}: at least three whole names above the dock`,
+                    m.whole >= 3, `${m.whole} whole rows, list starts at ${m.listTop}`);
+            } else {
+                // THE CONSEQUENCE, not the mechanism. The decision itself is taken from
+                // the page with the class OFF (fitDayList, js/ui/bars.js), so a count read
+                // off the COLLAPSED page cannot be turned back into the number that
+                // decided it - a collapsed day always looks roomy, which is the point of
+                // collapsing it. What can be held, and is what the crew actually feels, is
+                // the pair of promises either state has to keep: a day that did not
+                // collapse had room for two whole names without collapsing, and a day that
+                // did has at least one whole name on it - which is one more than every one
+                // of these twelve cells had before this block existed.
+                check(`${label}: a day that did NOT collapse had room for two whole names`,
+                    m.tight === true || m.whole >= 2,
+                    JSON.stringify({ tight: m.tight, whole: m.whole, listTop: m.listTop,
+                        header: m.header, banner: m.banner, dock: m.dock, tabs: m.tabs }));
+                check(`${label}: and a day that did has a whole name above the dock`,
+                    m.tight === false || m.whole >= 1,
+                    JSON.stringify({ tight: m.tight, whole: m.whole, listTop: m.listTop,
+                        header: m.header, banner: m.banner, dock: m.dock, tabs: m.tabs }));
+            }
+
+            // A COLLAPSE THAT CANNOT CHATTER. fitDayList decides from the page with the
+            // class OFF, every time, precisely so that the class shrinking the chrome it
+            // measures cannot talk it out of itself on the next tick. Asked twenty times
+            // in a row, the answer has to be one answer - anything else is a phone whose
+            // tab bar loses its words and gets them back while somebody is looking at it.
+            const settled = await page.evaluate(() => {
+                const seen = new Set();
+                for (let round = 0; round < 20; round += 1) {
+                    measureBottomBars();
+                    seen.add(document.body.classList.contains('day-tight'));
+                }
+                return { answers: [...seen], now: document.body.classList.contains('day-tight') };
+            });
+            check(`${label}: the collapse settles on one answer and stays there`,
+                settled.answers.length === 1, JSON.stringify(settled));
+
+            await page.context().close();
+        }
+    }
+}
+
+// ---------------------------------------------------------------- the collapse keeps every name
+//
+// Item 5 of the compact hierarchy, and the half of it that is easy to get wrong: a label
+// may be collapsed or visually hidden, but never at the cost of the only name a screen
+// reader has for the control it belongs to. Every rule in the day-tight block takes away a
+// WORD; this checks that every one of those words is still where an accessibility tree
+// would find it - as the control's own text, or as its aria-label.
+{
+    const label = '320×667 at 200%, collapsed';
+    suite(label);
+
+    const page = await open({ width: 320, height: 667 });
+    await setInset(page, 34);
+    await doubleEveryFontSize(page);
+    await page.waitForTimeout(200);
+    await page.evaluate(() => render());
+    await page.waitForTimeout(400);
+
+    const state = await page.evaluate(() => ({
+        tight: document.body.classList.contains('day-tight')
+    }));
+    given(`${label}: the day really has collapsed`, state.tight === true, JSON.stringify(state));
+
+    // The accessible name of a control, computed the way a screen reader computes it and
+    // NOT the way textContent does.
+    //
+    // This distinction is the whole check. `node.textContent` returns the text inside
+    // display:none children as happily as the text inside visible ones - so a suite that
+    // reads textContent would report a perfect set of names for a bar that had been made
+    // completely silent. What is in the accessibility tree is: the aria-label if there is
+    // one, and otherwise the text of the subtrees that are not display:none and not
+    // visibility:hidden. A box clipped to a pixel (clip-path, the pattern the day header
+    // and the landscape bar already use, and the one the tab words are collapsed with) IS
+    // in the tree; a box that is display:none is not. That is the line every rule in the
+    // day-tight block was written to stay on the right side of, and this is where it is
+    // measured rather than asserted in a comment.
+    const named = await page.evaluate(() => {
+        const spoken = node => {
+            if (node.nodeType === 3) return node.textContent;
+            if (node.nodeType !== 1) return '';
+            const style = getComputedStyle(node);
+            if (style.display === 'none' || style.visibility === 'hidden') return '';
+            if (node.getAttribute('aria-hidden') === 'true') return '';
+            return [...node.childNodes].map(spoken).join(' ');
+        };
+        const nameOf = node => {
+            const label = node.getAttribute('aria-label');
+            return (label || spoken(node)).replace(/\s+/g, ' ').trim();
+        };
+        return {
+            tabs: [...document.querySelectorAll('.tabs .tab')].map(nameOf),
+            dock: [...document.querySelectorAll('.day-actions button')].map(nameOf),
+            nav: [...document.querySelectorAll('.day-nav .btn-nav')].map(nameOf),
+            steps: [...document.querySelectorAll('.day-steps .step-btn')].map(nameOf),
+            modes: [...document.querySelectorAll('.day-header .mode-toggle button')].map(nameOf),
+            // Every control on the collapsed screen, and the ones a reader would meet
+            // with nothing to say about them.
+            nameless: [...document.querySelectorAll('button, [role="button"]')]
+                .filter(node => node.offsetParent !== null
+                    && node.getBoundingClientRect().width > 0
+                    && node.getAttribute('aria-hidden') !== 'true'
+                    && nameOf(node).length === 0)
+                .map(node => String(node.className).slice(0, 30))
+        };
+    });
+
+    check(`${label}: every tab still answers to its own word`,
+        named.tabs.every(name => name.length > 1)
+        && named.tabs.some(name => name.includes('היום')), JSON.stringify(named.tabs));
+    check(`${label}: the dock's two buttons still say what they send and what they copy`,
+        named.dock.length === 2 && named.dock.every(name => name.length > 3),
+        JSON.stringify(named.dock));
+    check(`${label}: קודם and הבא are still named in full`,
+        named.nav.length === 2 && named.nav.includes('יום קודם')
+        && named.nav.includes('יום הבא'), JSON.stringify(named.nav));
+    check(`${label}: undo and redo are still named`,
+        named.steps.length === 2 && named.steps.every(name => name.length > 3),
+        JSON.stringify(named.steps));
+    check(`${label}: both ways of looking at the day are still named in full`,
+        named.modes.length === 2 && named.modes.includes('לפי עובדים')
+        && named.modes.includes('לפי אתרים'), JSON.stringify(named.modes));
+    check(`${label}: and no control on the collapsed screen was left with nothing to say`,
+        named.nameless.length === 0, JSON.stringify(named.nameless));
+
+    // The date. Item 1 of the hierarchy - the first thing kept and the last thing given
+    // up - so on the most collapsed screen this app has, it is still on the row, still
+    // whole, and still a target a finger can land on.
+    const date = await page.evaluate(() => {
+        const node = document.querySelector('.day-label');
+        if (!node) return { found: false };
+        const box = node.getBoundingClientRect();
+        const day = node.querySelector('.day-date');
+        return {
+            found: true,
+            w: Math.round(box.width), h: Math.round(box.height),
+            text: node.textContent.replace(/\s+/g, ' ').trim(),
+            dateWhole: Boolean(day) && day.scrollWidth <= day.clientWidth + 1
+        };
+    });
+    check(`${label}: the selected date is still on the row, whole, and a finger's size`,
+        date.found && date.w >= 44 && date.h >= 44 && date.text.includes('12/08/2026')
+        && date.dateWhole === true, JSON.stringify(date));
+
+    // Item 3: the warning keeps its MEANING and its action. The fold loses a line of the
+    // summary, never the way to the report and never the way to put it away, and the full
+    // sentences are still in the DOM one tap down.
+    const warn = await page.evaluate(() => {
+        const banner = document.getElementById('accountBanner');
+        if (!banner || banner.style.display === 'none') return { found: false };
+        const sum = banner.querySelector('.banner-summary');
+        const go = banner.querySelector('.banner-go');
+        const full = banner.querySelector('.banner-full');
+        const box = banner.getBoundingClientRect();
+        return {
+            found: true,
+            h: Math.round(box.height),
+            summary: sum ? sum.textContent.trim() : '',
+            action: go ? Math.round(go.getBoundingClientRect().width) : 0,
+            actionHigh: go ? Math.round(go.getBoundingClientRect().height) : 0,
+            prose: full ? full.textContent.trim().length : 0
+        };
+    });
+    check(`${label}: the warning still says what it means and still opens the report`,
+        warn.found && warn.summary.length > 4 && warn.action >= 44 && warn.actionHigh >= 44
+        && warn.prose > 10, JSON.stringify(warn));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------------------------- the collapse and the two transients
+//
+// The undo bar and the keyboard both cover the bottom of the screen, and neither of them
+// may be allowed to change the SHAPE of the app.
+//
+// The undo bar is the tallest thing that ever floats over this page - 266px at 320 with a
+// long name in its label, measured - and it is gone twelve seconds later. Counting it as
+// room the crew does not have made every ✕ on a worker's row take the words off the tab
+// bar for twelve seconds and then put them back: churn a person watches, not room a person
+// gets. What it covers is paid for the other way, by --undo-h and the page's own bottom
+// padding, which is what keeps the last man tappable underneath it.
+for (const [width, height] of [[320, 667], [390, 844]]) {
+    const label = `${width}×${height}: the transients`;
+    suite(label);
+
+    const page = await open({ width, height });
+    await setInset(page, 34);
+    await page.waitForTimeout(200);
+
+    const before = await page.evaluate(() =>
+        document.body.classList.contains('day-tight'));
+    given(`${label}: the day is not collapsed to begin with`, before === false);
+
+    const undo = await page.evaluate(async () => {
+        offerUndo('הרישום של מוחמד עבד אל רחמן מחאמיד 30 נמחק', () => {});
+        await new Promise(done => setTimeout(done, 400));
+        const bar = document.getElementById('undoBar');
+        const box = bar.getBoundingClientRect();
+        return {
+            covering: Math.round(window.innerHeight - box.top),
+            published: getComputedStyle(document.documentElement)
+                .getPropertyValue('--undo-h').trim(),
+            tight: document.body.classList.contains('day-tight')
+        };
+    });
+    check(`${label}: the undo bar is measured into the page`,
+        undo.covering > 40 && undo.published === `${undo.covering}px`, JSON.stringify(undo));
+    check(`${label}: and it does not collapse the shell on its way past`,
+        undo.tight === false, JSON.stringify(undo));
+
+    // And the last man is still reachable UNDER it, which is what the measurement buys.
+    const row = await page.evaluate(async () => {
+        window.scrollTo(0, document.body.scrollHeight);
+        await new Promise(done => setTimeout(done, 250));
+        const rows = [...document.querySelectorAll('#dayView .worker-list .wrow')]
+            .filter(node => node.offsetParent !== null);
+        const node = rows[rows.length - 1];
+        if (!node) return { found: false };
+        const box = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return { found: true, hit: node === hit || node.contains(hit),
+            by: hit ? String(hit.className || hit.tagName).slice(0, 20) : 'nothing' };
+    });
+    check(`${label}: the last man clears the undo bar as well as the other two`,
+        row.found && row.hit, JSON.stringify(row));
+
+    // The keyboard. Both bottom bars go away under it, so the room the page has is
+    // suddenly larger, not smaller - and the shell must not start changing shape because
+    // somebody put the cursor in a field.
+    const keyboard = await page.evaluate(async () => {
+        applyKeyboardInset(291);
+        measureBottomBars();
+        await new Promise(done => setTimeout(done, 200));
+        const was = document.body.classList.contains('day-tight');
+        applyKeyboardInset(0);
+        measureBottomBars();
+        await new Promise(done => setTimeout(done, 200));
+        return { under: was, after: document.body.classList.contains('day-tight') };
+    });
+    check(`${label}: a keyboard does not collapse the shell either, and nothing is left behind`,
+        keyboard.under === false && keyboard.after === false, JSON.stringify(keyboard));
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();
