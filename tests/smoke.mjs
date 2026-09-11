@@ -5260,6 +5260,120 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- the held records, with both sides
+{
+  suite('the held records, with both sides, in the ⋯ panel');
+
+  // A hold is a write that lost a race while this phone was away: kept on the disk,
+  // sent by nothing, counted in «(N ממתינים לשליחה)». The line under the count said
+  // refresh, look at the screen, confirm again - but the screen shows THIS phone's value
+  // laid over the snapshot, so the person could not see what the other phone recorded,
+  // and re-recording the cell as told sent their own value over it blind. The owner's
+  // phone held six cells of one Thursday for a day before a rescue export named them
+  // (tests/held.test.mjs). This is the panel that names them on the phone, and the two
+  // buttons that are the two honest answers, measured through the real sheet.
+  const HELD_LEAD = 'רישומים שמכשיר אחר שינה בזמן שהטלפון הזה היה מנותק. כל שורה שמורה כאן ואינה נשלחת עד שתחליט.';
+  const HELD_PATH = 'days.2026-08-12.actual.w_01';
+  const page = await open();
+  await seedRoster(page);
+
+  // The race, staged on its record: this phone's edit is queued, the last snapshot heard
+  // holds the other phone's value at the same path, and the hold is written the way the
+  // pre-send pass writes it. holdContested is the production writer; _baseDoc is what a
+  // snapshot sets.
+  const staged = await page.evaluate(path => {
+    State.commit(assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01'));
+    FarkadSync._baseDoc = { revision: 3, days: { '2026-08-12': { actual: {
+      w_01: { entries: [{ placeId: 'p_02' }], rates: { daily: 400, hourly: 50 } } } } } };
+    const wrote = FarkadSync.holdContested([path]);
+    updateSyncNotice();
+    closeSettings();
+    openSettings();
+    return { held: wrote.held, durable: wrote.durable, contested: FarkadSync.holdingContested() };
+  }, HELD_PATH);
+  await page.waitForTimeout(300);
+  given('one record is held on the disk', staged.held && staged.durable && staged.contested,
+    JSON.stringify(staged));
+
+  const readPanel = () => page.evaluate(() => {
+    const box = document.getElementById('heldRecords');
+    if (!box) return { missing: true };
+    const buttons = [...box.querySelectorAll('button')].map(node => {
+      const rect = node.getBoundingClientRect();
+      return { text: node.textContent.trim(), secondary: node.classList.contains('btn-secondary'),
+        w: Math.round(rect.width), h: Math.round(rect.height) };
+    });
+    const primaries = [...document.querySelectorAll('#settingsPanel button')]
+      .filter(node => !node.classList.contains('btn-secondary') && !node.classList.contains('btn-icon'))
+      .map(node => node.textContent.trim());
+    return { hidden: box.hidden, shown: box.offsetParent !== null, text: box.textContent,
+      rows: box.querySelectorAll('.held-row').length, buttons, primaries };
+  });
+  const shown = await readPanel();
+  check('the panel lists the held record, once',
+    shown.missing !== true && shown.hidden === false && shown.shown === true && shown.rows === 1,
+    JSON.stringify(shown).slice(0, 300));
+  check('under the pinned lead sentence', String(shown.text).includes(HELD_LEAD),
+    String(shown.text).slice(0, 200));
+  check('titled with the weekday, the date and the person',
+    String(shown.text).includes('יום רביעי 12/08 · ⁨דוד⁩'), String(shown.text).slice(0, 200));
+  check('with this device\'s side and the cloud\'s, in the day screen\'s words',
+    String(shown.text).includes('במכשיר הזה: הרצליה') && String(shown.text).includes('בענן: תל אביב'),
+    String(shown.text).slice(0, 300));
+  check('two answers, both quiet, both a finger\'s size',
+    JSON.stringify((shown.buttons || []).map(b => b.text)) === JSON.stringify(['להשאיר את שלי', 'לקחת מהענן'])
+    && shown.buttons.every(b => b.secondary && b.w >= 44 && b.h >= 44),
+    JSON.stringify(shown.buttons));
+  check('and the export is still the only primary action on the sheet',
+    (shown.primaries || []).length === 1 && shown.primaries[0].includes('שמור קובץ גיבוי'),
+    JSON.stringify(shown.primaries));
+
+  // Keeping this device's value: a fresh operation on the same path, the day as it was.
+  await page.locator('#heldRecords button').filter({ hasText: 'להשאיר את שלי' }).click();
+  await page.waitForTimeout(300);
+  const kept = await page.evaluate(() => ({
+    hidden: document.getElementById('heldRecords').hidden,
+    contested: FarkadSync.holdingContested(),
+    sites: entriesFor(State.schedule, '2026-08-12', 'w_01', 'actual').map(e => e.placeId).join()
+  }));
+  check('keeping this device\'s value releases the hold and leaves the day as it was',
+    kept.hidden === true && kept.contested === false && kept.sites === 'p_01', JSON.stringify(kept));
+
+  // Taking the cloud's: through the app's own dialog, which names both sides.
+  await page.evaluate(path => {
+    FarkadSync.holdContested([path]);
+    closeSettings();
+    openSettings();
+  }, HELD_PATH);
+  await page.waitForTimeout(300);
+  given('the record is held again', (await readPanel()).rows === 1);
+  await page.locator('#heldRecords button').filter({ hasText: 'לקחת מהענן' }).click();
+  await page.waitForTimeout(300);
+  const dialog = await page.evaluate(() => ({
+    visible: document.getElementById('askModal').classList.contains('open')
+      || getComputedStyle(document.getElementById('askModal')).display !== 'none',
+    title: document.getElementById('askTitle').textContent,
+    message: document.getElementById('askMessage').textContent,
+    ok: document.getElementById('askOk').textContent.trim()
+  }));
+  check('taking the cloud\'s value asks first, naming both sides, with the answer on the button',
+    dialog.visible === true && dialog.message.includes('הרצליה') && dialog.message.includes('תל אביב')
+    && dialog.ok === 'לקחת מהענן', JSON.stringify(dialog));
+  await page.click('#askOk');
+  await page.waitForTimeout(300);
+  const taken = await page.evaluate(() => ({
+    hidden: document.getElementById('heldRecords').hidden,
+    contested: FarkadSync.holdingContested(),
+    record: JSON.stringify(State.schedule.days['2026-08-12'].actual.w_01)
+  }));
+  check('and replaces this device\'s record with the cloud\'s, bytes and all',
+    taken.hidden === true && taken.contested === false
+    && taken.record === JSON.stringify({ entries: [{ placeId: 'p_02' }], rates: { daily: 400, hourly: 50 } }),
+    JSON.stringify(taken));
+
+  await page.context().close();
+}
+
 // ------------------------------------------------- what a thumb can actually hit
 //
 // Measured on the real screens, not read off the stylesheet. The mode toggle was 26px
