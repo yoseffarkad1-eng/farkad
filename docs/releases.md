@@ -45,6 +45,16 @@ shekel on a report, not a day on a record, not a byte on the wire.
   where its way out is.
 - `FarkadSync.heldRecords()` is the one accessor, read off the projection: a path a
   fresh edit has already superseded is not listed, because the fresh edit is the answer.
+- The rescue export («ייצא נתונים גולמיים») carries the same list, raw — both sides,
+  bytes and all — so the next file read on a laptop can say what the cloud held, which
+  this round's file could not.
+- Two corrections in the sync layer, from the round's adversarial review, both pinned:
+  a hold whose marker the disk refused to write is released by the fresh edit in the
+  same session rather than at the next reopen (a day-screen edit had the same
+  session-long block), and the status line answers from the same set the panel reads,
+  so it no longer says «contested» over an empty panel. And a cloud that moves while
+  «לקחת מהענן?» is open is not answered: the row is re-read at the moment of the
+  decision and the person is told to look again.
 
 **What this build is NOT known to do**
 

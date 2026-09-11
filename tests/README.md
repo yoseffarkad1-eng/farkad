@@ -52,6 +52,15 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 1e20111 (v105: the held records shown with both sides in ⋯, and released by a person
+    one row at a time), /home/user/v105-gate, a detached worktree clean at that commit, Node
+    v22.22.2, .gate-release.log there, copied from no other run - the WHOLE release gate:
+    npm test           44 suites   4457/4457   (held 73 is new; smoke gains 13)
+    npm run test:all   + 9 suites  + 2204      (smoke 1142, print 78, mobile 807, update 30, forms-browser 10, recovery-browser 25, handover 26, swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244      (sendclaim 43; rules 59, cas.emulator 24, rollout 17, bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    the whole gate     60 suites   6905/6905   exit 0
+    Per suite and verbatim: features/held/handoff.md.
+
     At 976a88b (v104: the production adapter hands the sync layer its bootstrap and its
     read - the cutover reaches the phone), the cd-work worktree, clean at that commit, Node
     v22.22.2, .gate-release.log there, copied from no other run - the WHOLE release gate:
