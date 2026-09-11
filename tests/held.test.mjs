@@ -34,6 +34,8 @@ const UNHEARD = 'הענן טרם ענה - ההשוואה תוצג כשיענה.'
 const ELSEWHERE = 'לשחרור: ערוך את הרישום הזה שוב מהמסך שלו.';
 const KEEP = 'להשאיר את שלי';
 const TAKE = 'לקחת מהענן';
+const MOVED = 'הרישום בענן השתנה בזמן שהחלון היה פתוח. ההשוואה עודכנה - בדוק שוב והחלט.';
+const LEDGER_ROW = 'רישום כספי שהענן מחזיק אחרת. נשמר כאן ואינו נשלח; אין לו פתרון מהמסך הזה.';
 
 // js/ui/settings.js draws a sheet and is not in the harness's load order; the panel's
 // functions under test live there, so it is loaded over the device's stub document, the
@@ -138,6 +140,53 @@ async function race(day) {
         `${b.Sync._revision} of ${cloud.doc.revision}`);
     await settle(TICK * 20);
     return b.Sync.heldRecords();
+}
+
+// A cloud and two phones of their own, for a suite that breaks one of them: the module's
+// pair above is shared by the suites that only read.
+function crew(tag) {
+    const sky = makeCloud();
+    const won = phone(`d_${tag}_a`);
+    const lost = phone(`d_${tag}_b`);
+    const wall = tunnel(sky);
+    won.Sync.connect(sky.adapter);
+    lost.Sync.connect(wall.adapter);
+    const at = day => ((((sky.doc || {}).days || {})[day] || {}).actual || {}).w_01;
+    const c = {
+        cloud: sky, a: won, b: lost, gate: wall,
+        inCloud: day => {
+            const held = at(day);
+            if (held && held.absent === true) return 'ABSENT';
+            return ((held && held.entries) || []).map(item => item.placeId).sort().join();
+        },
+        accepted: () => sky.writes.filter(write => !write.replayed).length,
+        // The race of race() above, on this crew's own cloud.
+        race: async day => {
+            await settle(TICK * 10);
+            site(won, day, 'p_00');
+            await settleUntil(() => c.inCloud(day) === 'p_00'
+                && lost.Sync._revision === sky.doc.revision, 5000);
+            given(`${tag} ${day}: both phones read the same value at the same revision`,
+                c.inCloud(day) === 'p_00' && lost.Sync._revision === sky.doc.revision,
+                `cloud ${c.inCloud(day)}, B at ${lost.Sync._revision}`);
+            wall.close();
+            site(won, day, 'p_01');
+            await settleUntil(() => c.inCloud(day) === 'p_00,p_01', 5000);
+            site(lost, day, 'p_02');
+            lost.Sync.flush();
+            await settleUntil(() => lost.Sync.status === 'contested', 5000);
+            given(`${tag} ${day}: B lost and holds`, lost.Sync.status === 'contested'
+                && lost.Sync.holdingContested() === true, lost.Sync.status);
+            wall.release();
+            await settleUntil(() => lost.Sync._revision === sky.doc.revision, 5000);
+            given(`${tag} ${day}: and has now heard the winner`,
+                lost.Sync._revision === sky.doc.revision,
+                `${lost.Sync._revision} of ${sky.doc.revision}`);
+            await settle(TICK * 20);
+            return lost.Sync.heldRecords();
+        }
+    };
+    return c;
 }
 
 // --------------------------------------------------------------- both sides, on the record
@@ -346,6 +395,171 @@ async function race(day) {
     check('and the stamp the day was worked at stays on it',
         Boolean(b.State.schedule.days[DAY4].actual.w_01.rates),
         JSON.stringify(b.State.schedule.days[DAY4].actual.w_01));
+}
+
+// --------------------------------------------- the cloud moved while the question was open
+{
+    suite('a cloud that moved while the question was open is not answered');
+
+    // The row is what the base document held when the panel was drawn. A snapshot that
+    // arrives while the confirmation is open changes the cloud's side, and the answer
+    // the person gives is to the sentence they read, not to the record as it now is.
+    // Writing the value from the row would send it over the other phone's newer
+    // correction - and the sync layer would let it out, because `seen` is stamped at
+    // commit time with the new base. The same file already refuses this race for the
+    // carry approval. Measured by the reviewer's stale.mjs before this suite existed.
+    const c = crew('mv');
+    const rows = await c.race(DAY);
+    given('the record is held and heard', rows.length === 1 && rows[0].heard === true,
+        JSON.stringify(rows.map(sides)));
+    let answer = null;
+    const told = [];
+    c.b.ctx.askConfirm = () => new Promise(resolve => { answer = resolve; });
+    c.b.ctx.askTell = options => { told.push(options); return Promise.resolve(); };
+    const pending = c.b.call('resolveHeldRecord', rows[0], true);
+    await settle(TICK * 5);
+    given('the question is open', typeof answer === 'function');
+    // While the person reads it, the other phone marks the man absent, and this phone hears.
+    c.a.State.commit(c.a.call('markAbsent', c.a.State.schedule, DAY, 'w_01', 'actual'));
+    await settleUntil(() => c.inCloud(DAY) === 'ABSENT'
+        && c.b.Sync._revision === c.cloud.doc.revision, 5000);
+    given('the cloud moved under the open question', c.inCloud(DAY) === 'ABSENT'
+        && c.b.Sync._revision === c.cloud.doc.revision, c.inCloud(DAY));
+    const before = c.accepted();
+    answer(true);
+    const done = await pending;
+    await settle(TICK * 40);
+    check('the answer is refused', done === false, String(done));
+    check('and nothing was sent over the newer record',
+        c.accepted() === before && c.inCloud(DAY) === 'ABSENT', `${before} -> ${c.accepted()} ${c.inCloud(DAY)}`);
+    check('the person is told, in the pinned sentence',
+        told.some(item => (item && item.message) === MOVED), JSON.stringify(told));
+    const again = c.b.Sync.heldRecords();
+    check('the record is still held, and its cloud side is the new one',
+        again.length === 1 && again[0].cloud && again[0].cloud.absent === true,
+        JSON.stringify(again.map(sides)));
+
+    // The same for keeping: a row drawn before the move is not acted on either.
+    c.b.ctx.askConfirm = () => Promise.resolve(true);
+    const kept = await c.b.call('resolveHeldRecord', rows[0], false);
+    await settle(TICK * 20);
+    check('keeping from a row drawn before the move is refused too',
+        kept === false && c.accepted() === before, `${kept} ${before} -> ${c.accepted()}`);
+    check('and said so', told.filter(item => (item && item.message) === MOVED).length === 2,
+        String(told.length));
+    // A row drawn now is acted on.
+    const fresh = c.b.Sync.heldRecords()[0];
+    const ok = await c.b.call('resolveHeldRecord', fresh, false);
+    await settleUntil(() => c.inCloud(DAY) === 'p_00,p_02', 8000);
+    check('a row drawn after the move goes through', ok === true && c.inCloud(DAY) === 'p_00,p_02',
+        `${ok} ${c.inCloud(DAY)}`);
+}
+
+// ------------------------------------------- a hold the disk would not take, released here
+{
+    suite('a hold the disk would not take is released by the same decision, in the same session');
+
+    // The marker is refused; the hold lives in _heldNow, a Set in memory that nothing ever
+    // removed a path from. The fresh operation named the held one in `after` and carried
+    // the current base in `seen` - and the pre-send pass still withheld it BY PATH, so
+    // the button committed, sent nothing, and re-listed the row until a reopen. A
+    // day-screen edit had the same session-long block; measured by heldnow.mjs.
+    const c = crew('hn');
+    c.b.setQuota(key => key.indexOf(':hold:') !== -1);
+    const rows = await c.race(DAY);
+    given('the hold is in memory only', c.b.Sync._heldNow.size === 1
+        && rows.length === 1 && c.b.Sync._outbox.get(PATH).held !== true,
+        `${c.b.Sync._heldNow.size} in memory, held flag ${c.b.Sync._outbox.get(PATH).held}`);
+    const before = c.accepted();
+    const done = await c.b.call('resolveHeldRecord', rows[0], false);
+    await settleUntil(() => c.inCloud(DAY) === 'p_00,p_02', 8000);
+    await settle(TICK * 40);
+    check('the decision committed', done === true, String(done));
+    check('and this device\'s value landed, in this session', c.inCloud(DAY) === 'p_00,p_02',
+        c.inCloud(DAY));
+    check('as exactly one write', c.accepted() === before + 1, `${before} -> ${c.accepted()}`);
+    check('nothing is held, nothing is pending, and the phone may say synced',
+        c.b.Sync.heldRecords().length === 0 && c.b.Sync.holdingContested() === false
+        && c.b.Sync.pendingCount() === 0 && c.b.Sync.status === 'synced',
+        `${c.b.Sync.heldRecords().length} held, ${c.b.Sync.pendingCount()} pending, ${c.b.Sync.status}`);
+}
+
+// --------------------------------------------- the status and the panel read the same set
+{
+    suite('the status line and the panel answer from the same set');
+
+    // holdingContested asked the PHYSICAL set (any op with the hold mark, not retired)
+    // while the panel reads the projection. A held operation superseded by a fresh edit
+    // is out of the projection and can never be sent - but while the collection of its
+    // batch is refused by the disk it is still physical, so the line said «contested»
+    // over an empty panel. Measured by physical.mjs.
+    const c = crew('ph');
+    const rows = await c.race(DAY);
+    given('the record is held, durably', rows.length === 1 && c.b.Sync._outbox.get(PATH).held === true);
+    c.cloud.online = false;
+    const OP = c.b.global('OP_MARK');
+    c.b.blockRemoval(key => key.indexOf(OP) !== -1);
+    const done = await c.b.call('resolveHeldRecord', rows[0], false);
+    await settle(TICK * 40);
+    check('the decision committed', done === true, String(done));
+    const physicalHeld = c.b.Sync.physicalOperations().filter(op => op.held && !op.retired).length;
+    given('the superseded operation is still on the disk, its mark with it', physicalHeld === 1,
+        String(physicalHeld));
+    check('the panel lists nothing', c.b.Sync.heldRecords().length === 0,
+        String(c.b.Sync.heldRecords().length));
+    check('and the status does not say contested over it',
+        c.b.Sync.holdingContested() === false && c.b.Sync.status !== 'contested',
+        `${c.b.Sync.holdingContested()} ${c.b.Sync.status}`);
+}
+
+// --------------------------------------------------------------- the sentences, once more
+{
+    suite('a rate that differs is said whatever the sites say');
+
+    const row = { path: PATH, opId: 'r', heard: true,
+        mine: { entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } },
+        cloud: { entries: [{ placeId: 'p_02' }], rates: { daily: 450, hourly: 0 } } };
+    const said = b.call('describeHeldRecord', row, b.State.schedule);
+    check('both sides carry their stamp when the stamps differ',
+        said.mine.indexOf('תעריף 400') !== -1 && said.cloud.indexOf('תעריף 450') !== -1,
+        JSON.stringify(said));
+    const same = b.call('describeHeldRecord', { path: PATH, opId: 'r', heard: true,
+        mine: { entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } },
+        cloud: { entries: [{ placeId: 'p_02' }], rates: { daily: 400, hourly: 0 } } }, b.State.schedule);
+    check('and neither does when they agree', same.mine.indexOf('תעריף') === -1
+        && same.cloud.indexOf('תעריף') === -1, JSON.stringify(same));
+
+    suite('a worker no longer on the roster is named as such');
+    const gone = b.call('describeHeldRecord', { path: `days.${DAY}.actual.w_77`, opId: 'g', heard: true,
+        mine: { entries: [{ placeId: 'p_01' }] }, cloud: { entries: [] } }, b.State.schedule);
+    check('the title says so rather than showing an id',
+        gone.title === 'יום רביעי 12/08 · \u2068עובד שאינו ברשימה\u2069', JSON.stringify(gone.title));
+
+    suite('a held advance is named; a held ledger entry says it has no way out here');
+    const advance = b.call('describeHeldRecord', { path: 'advances.a_1', opId: 'v', heard: true,
+        mine: { id: 'a_1', workerId: 'w_01', date: DAY, amount: 500 },
+        cloud: { id: 'a_1', workerId: 'w_01', date: DAY, amount: 450 } }, b.State.schedule);
+    check('the advance is titled with the person, the day and the sum',
+        advance.title === 'מקדמה: \u2068דוד\u2069 · 12/08 · 500 ₪', JSON.stringify(advance.title));
+    const ledger = b.call('describeHeldRecord', { path: 'ledger.advances.le_1', opId: 'l', heard: true,
+        mine: { kind: 'advance', amount: 500 }, cloud: { kind: 'advance', amount: 450 } }, b.State.schedule);
+    check('the ledger row carries its own sentence', ledger.title === 'רישום כספי'
+        && ledger.note === LEDGER_ROW && ledger.decidable === false, JSON.stringify(ledger));
+
+    suite('with no dialog to ask through, taking the cloud\'s is refused');
+    const DAY6 = '2026-08-18';
+    const rows = await race(DAY6);
+    given('a record is held', rows.length === 1);
+    b.ctx.askConfirm = undefined;
+    const before = accepted();
+    const done = await b.call('resolveHeldRecord', rows[0], true);
+    await settle(TICK * 20);
+    check('nothing is taken', done === false && accepted() === before
+        && b.Sync.heldRecords().length === 1, `${done} ${before} -> ${accepted()}`);
+    b.ctx.askConfirm = () => Promise.resolve(true);
+    const kept = await b.call('resolveHeldRecord', b.Sync.heldRecords()[0], false);
+    await settleUntil(() => accepted() > before, 8000);
+    check('and keeping still works', kept === true && accepted() === before + 1, `${kept}`);
 }
 
 report();
