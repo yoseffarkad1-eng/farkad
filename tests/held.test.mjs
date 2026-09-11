@@ -175,6 +175,31 @@ async function race(day) {
         && b.global('HELD_TAKE') === TAKE, `${b.global('HELD_KEEP')} / ${b.global('HELD_TAKE')}`);
 }
 
+// ------------------------------------------------------------- and in the rescue export
+{
+    suite('the rescue export carries the held records, both sides, raw');
+
+    // The owner's six were named FROM this file, and the file could not say what the
+    // cloud held at those paths: the base document is memory. So the hunt for how the
+    // cloud came to hold a third value, with one phone writing, had nothing to read.
+    b.call('exportRecoveryData');
+    check('the file was handed over', b.downloads.length === 1,
+        JSON.stringify(b.downloads.map(file => file.name)));
+    const file = JSON.parse((b.downloads[0] || { text: '{}' }).text);
+    check('it carries the held records', Array.isArray(file.held) && file.held.length === 1,
+        JSON.stringify(file.held));
+    const row = (file.held || [])[0] || {};
+    check('with this device\'s side, bytes and all',
+        row.path === PATH && JSON.stringify(row.mine) === JSON.stringify(b.State.schedule.days[DAY].actual.w_01),
+        JSON.stringify(row));
+    check('and the cloud\'s side, bytes and all',
+        JSON.stringify(row.cloud) === JSON.stringify(cloud.doc.days[DAY].actual.w_01) && row.heard === true,
+        JSON.stringify(row));
+    check('and the hold is still in force: the export decided nothing',
+        b.Sync.holdingContested() === true && b.Sync.heldRecords().length === 1,
+        String(b.Sync.heldRecords().length));
+}
+
 // ------------------------------------------------------------------ keeping this device's
 {
     suite('keeping this device\'s value sends it once, as a fresh operation');
@@ -274,6 +299,13 @@ async function race(day) {
     check('and its disk is as it was', blind.Sync.pendingCount() === pending
         && onPhone(blind, DAY3) === mine && blind.Sync.heldRecords().length === 1,
         `${blind.Sync.pendingCount()} pending, ${onPhone(blind, DAY3)}`);
+    blind.call('exportRecoveryData');
+    const file = JSON.parse((blind.downloads[0] || { text: '{}' }).text);
+    const exported = (file.held || [])[0] || {};
+    check('its rescue export carries the record and says the cloud was not heard',
+        (file.held || []).length === 1 && exported.heard === false && !('cloud' in exported)
+        && JSON.stringify(exported.mine) === JSON.stringify(row.mine),
+        JSON.stringify(file.held));
 }
 
 // ------------------------------------------------------------------- a record of another kind
