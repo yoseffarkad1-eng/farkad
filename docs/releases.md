@@ -61,7 +61,15 @@ shekel on a report, not a day on a record, not a byte on the wire.
 **What this build is NOT known to do**
 
 - **Being on `main` is not being on a phone.** The owner's phone holds six records for
-  Thursday 3 September; this is the build that shows them.
+  Thursday 3 September; this is the build that shows them — and it did: «בענן: אילון» on
+  all six rows. The hunt (`features/held/findings.md`) reproduced the one mechanism that
+  survives refutation: a second window of the same person, still on the cached v86
+  build, wrote 3 September at אילון and the v86 rules accepted it while this app's
+  newer writes were refused. The hold was right. The decision is the owner's, per row.
+- **Open for v106**: the hold cannot say who wrote the cloud's value (the bootstrap signs
+  the document before the base is read) — capture the pre-cutover stamp in the bootstrap
+  transaction and carry it to the panel and the export; and the panel's lead sentence
+  names «מכשיר אחר» where the writer can be another window of the same person.
 - It does not resolve a held roster record, advance or ledger entry from the panel: those
   rows are listed and point at their own screens.
 - Everything v104 lists, unchanged: the P1 for a v86-written queue after this phone's own

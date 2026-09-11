@@ -177,16 +177,28 @@ record's shape changed. Not claimed: the owner's phone taking the update and the
 being decided there — that is the acceptance, and it is the owner's. Not claimed either:
 what the cloud holds at the six paths; the build shows it, this file does not know it.
 
-## The owner's statement, and what it changes
-The owner says no phone but theirs has touched the app. Then the cloud's value at the six
-paths - a value this phone had never seen - was written by this phone, under a build or
-a door the queue's `seen` record does not cover, and the hold is either false (a record
-the comparison should have recognised as this phone's own) or a real stale copy of this
-phone's earlier state. Either way the six rows resolve the same way: «להשאיר את שלי» on
-each, because this phone's record is the only human record there is. What the cloud
-holds is the evidence for the hunt, and it is not in this round's file; v105 shows it
-on the phone and carries it in the next rescue export. Not settled here, deliberately:
-a mechanism named without the bytes would be a guess written as a fact.
+## The owner's statement, and what it changed
+The owner said no phone but theirs had touched the app; then the v105 panel on that phone
+showed «בענן: אילון» on all six rows — the cloud holds the six at one site, אילון (p_02),
+where the phone holds גדרה / פרסדיה / אלעד / נעדר. A hunt of five hypotheses with
+refuters (`findings.md` in this directory) reproduced one mechanism and refuted the
+rest: a SECOND WINDOW of the same person — the Safari tab beside the home-screen app on
+one iPhone, or a laptop tab — still running the cached v86 build recorded 3 September at
+אילון for those six, and the v86 rules accepted it, while every write from this app's
+v95+ builds was refused until v104. The hold was correct; the comparison was not at
+fault; and "one writer" did not make this phone's value the true one — the two records
+disagree on money (מוני absent here, a paid day at אילון there). The decision stays with
+the person, per row, through the v105 panel; the owner recognised the אילון rows as the
+old build's scrambling.
+
+For v106, from the findings: (1) the hold cannot SAY who wrote the value — the bootstrap
+signs the document with this phone's id before the base is read — so the bootstrap
+transaction should capture the pre-cutover `updatedBy`/`updatedAt` and the hold record,
+`heldRecords()`, the panel and the rescue export should carry them; (2) the panel's lead
+sentence says «מכשיר אחר», and the other writer can be another window of the same
+person — the wording moves with its pins; (3) operationally, every other window or tab
+of the app is closed, and the Firebase console's `history/2026-09-03` copy names the
+context that opened that day first.
 
 ## Known gaps, measured and named
 - A held roster record, advance or ledger entry is listed with «לשחרור: ערוך את הרישום
