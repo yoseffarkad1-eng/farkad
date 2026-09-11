@@ -551,6 +551,18 @@ const LAST_BACKUP_KEY = 'scheduleData:lastBackup';
 // so that whatever is inside them leaves the phone before anything else happens to it,
 // and so somebody can look at it later. JSON a parser refuses is usually a truncated
 // write, and the days in it are plain text.
+// The held records as the rescue file carries them - see `held` in exportRecoveryData.
+function heldRecordsForExport() {
+    if (typeof FarkadSync === 'undefined' || typeof FarkadSync.heldRecords !== 'function') {
+        return [];
+    }
+    try {
+        return FarkadSync.heldRecords();
+    } catch (error) {
+        return { unreadable: true, message: String(error && error.message ? error.message : error) };
+    }
+}
+
 function exportRecoveryData() {
     // The handover FIRST, and the records read after it.
     //
@@ -658,6 +670,16 @@ function exportRecoveryData() {
         // Same reason: the decisions the migration refused to guess are only on the disk
         // when the migration was allowed to write, and on a held device it never is.
         pendingDecisions: Array.isArray(State.migrationIssues) ? State.migrationIssues : [],
+        // THE HELD RECORDS, both sides, raw. A held operation is the one thing on this
+        // disk the screen cannot show fairly - the day screen shows this phone's value
+        // laid over the snapshot - and the cloud's side lives in memory only, in the base
+        // document a snapshot set. The owner's six held cells of one Thursday were named
+        // from this file on 11 September 2026, and the file could not say what the cloud
+        // held there; the hunt for how the cloud came to hold a third value, with one
+        // phone writing, had nothing to read. Bytes and all, because that hunt compares
+        // bytes; `heard` false and no cloud side on a phone that has heard nothing. A
+        // queue that will not read is reported as itself rather than as an empty list.
+        held: heldRecordsForExport(),
         records
     };
 

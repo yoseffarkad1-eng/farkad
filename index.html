@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v104">
+<meta name="farkad-build" content="v105">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -182,6 +182,14 @@
                  nothing on the screen names it. renderSettingsSyncLine reads
                  FarkadSync.lastError into this; textContent only. -->
             <p class="hint" id="settingsSyncReason" hidden></p>
+            <!-- THE HELD RECORDS. A write that lost a race while this phone was away is
+                 kept on the disk and sent by nothing; the screen shows THIS phone's
+                 value laid over the snapshot, so nothing on the phone said which records
+                 or what the cloud held - the owner's phone held six cells of one
+                 Thursday until a rescue export named them. renderHeldRecords
+                 (js/ui/settings.js) draws every held record here with both sides and
+                 the two answers; hidden, box and all, while nothing is held. -->
+            <div id="heldRecords" hidden></div>
             <!-- Ships hidden and is shown by the adapter once a project actually answers:
                  with no Firebase behind it, a "connect to the cloud" button is a door
                  onto nothing. It lived in the header, where it was the widest thing on a

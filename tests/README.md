@@ -52,6 +52,15 @@ test broke, not the app — fix the setup before reading anything into the run.
 MEASURED, and each number names the commit it was measured on, because a count that
 does not is a count from some other tree:
 
+    At 1e20111 (v105: the held records shown with both sides in ⋯, and released by a person
+    one row at a time), /home/user/v105-gate, a detached worktree clean at that commit, Node
+    v22.22.2, .gate-release.log there, copied from no other run - the WHOLE release gate:
+    npm test           44 suites   4457/4457   (held 73 is new; smoke gains 13)
+    npm run test:all   + 9 suites  + 2204      (smoke 1142, print 78, mobile 807, update 30, forms-browser 10, recovery-browser 25, handover 26, swrestart 31, swidentity 55)
+    test:release       + 7 suites  + 244      (sendclaim 43; rules 59, cas.emulator 24, rollout 17, bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50)
+    the whole gate     60 suites   6905/6905   exit 0
+    Per suite and verbatim: features/held/handoff.md.
+
     At 976a88b (v104: the production adapter hands the sync layer its bootstrap and its
     read - the cutover reaches the phone), the cd-work worktree, clean at that commit, Node
     v22.22.2, .gate-release.log there, copied from no other run - the WHOLE release gate:
@@ -328,6 +337,7 @@ several waves of tests and is stale.)
 | poison | `poison.test.mjs` | A ledger id that would land on a prototype — `__proto__`, `prototype`, `constructor` — through every door and every writer. The fixtures are built with `JSON.parse` so the key is a real own property and not a setter; the entry is refused before memory, disk or outbox move; a raw entry is judged before it is normalised; an entry whose `id` disagrees with its map key is not silently re-pointed; and nothing reparents the map it was aimed at. |
 | merge | `merge.test.mjs` | What adopting somebody else's document takes off this one. All four append-only families survive a snapshot that has never heard of them, so do parts of the container this build does not name; existence is asked with an own-key check, so an entry legitimately named `toString` is not dropped; and one immutable id arriving with two different bodies is a disagreement a person is told about, not a winner picked at random. Driven through `Sync.receive()`, a commit and a reopen — not through the helper. |
 | contested | `contested.test.mjs` | The write that lost a race, and every trigger that must not resend it: the winner's snapshot, the retry timer, `scheduleFlush()`, `flush()`, coming back online, a recreated adapter, and a close-and-reopen. The losing bytes stay durable and still owed, the cloud keeps the winner's value, the line never says synced, an unrelated edit in its own batch still leaves the phone, and the way out is a fresh explicit edit by a person. |
+| held | `held.test.mjs` | The held records, on the phone: every operation that lost a race while the phone was away is listed in ⋯ with both sides - this device's value and the cloud's last-heard value at the path, in the day screen's words - and released by a person, one row at a time, through the same fresh explicit edit that has always been the way out. A phone that has heard nothing lists the record and offers no decision. |
 | receipt | `receipt.test.mjs` | A receipt names the OPERATION, not just the revision it reached. The schedule and its receipt carry the same fingerprint; an honest replay of identical bytes is still answered from the receipt; a request wearing a landed operation's name while doing something else is refused as `receipt-mismatch`, never acknowledged and never pruned; and a batch's own name changes when its value changes. |
 | bootstrap-rules | `bootstrap.rules.test.mjs` | The SERVER's answer to a bootstrap that carries business data. Nineteen smuggling attempts — days, advances, ledger entries, workers, places, roster, `schemaVersion`, unknown fields, each alone and in combination — against the local emulator, plus the acceptance list of what a bootstrap may legitimately touch. Every row reports: the helper returns a verdict rather than throwing, so one refusal does not hide the eighteen behind it. |
 

@@ -218,6 +218,7 @@ written down so it cannot happen twice.
     tests/poison.test.mjs      a ledger id that would land on a prototype, through every writer
     tests/merge.test.mjs       what adopting somebody else's document takes off this one
     tests/contested.test.mjs   the write that lost a race, and every trigger that must not send it
+    tests/held.test.mjs        the held records shown with both sides in ⋯, and released by a person one at a time
     tests/receipt.test.mjs     a receipt names the operation, not just the revision it reached
     tests/bootstrap.rules.test.mjs the server's own answer to a bootstrap carrying business data
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
