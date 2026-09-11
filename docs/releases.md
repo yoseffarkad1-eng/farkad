@@ -12,17 +12,19 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v104 (`67405c6`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE, and v105 is one now.
+**`main` is at v105 (`be4e610`).** Every build at the top of this file has reached `main`;
+a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
 v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
 
-## CANDIDATE — v105 — 11 September 2026 — not on `main`
+## v105 — 11 September 2026 — `be4e610` (PR #20, the tree at `1477c79`)
 
-The held records, shown. Built on v104 as served (`67405c6`). **No number moved** — not a
+The held records, shown. Built on v104 as served (`67405c6`). On `main` since 11 September
+2026; the Pages deployment for `be4e610` completed at 05:51 UTC. **Being on `main` is not
+being on a phone**: the owner's phone takes it at its next open. **No number moved** — not a
 shekel on a report, not a day on a record, not a byte on the wire.
 
 **What it gives the crew that v104 does not**
