@@ -75,6 +75,7 @@ function renderSettingsIfOpen() {
 // Redrawn every time it opens, and again after anything on it changes something.
 function renderSettings() {
     renderSettingsSyncLine();
+    renderHeldRecords();
     if (typeof renderRestorePoints === 'function') renderRestorePoints();
     if (typeof renderCloudRestorePoints === 'function') renderCloudRestorePoints();
     if (typeof renderBackupAge === 'function') renderBackupAge();
@@ -315,6 +316,232 @@ function renderSettingsSyncReason() {
     }
     line.textContent = reason;
     line.hidden = reason === '';
+}
+
+// THE HELD RECORDS, with both sides, and a decision per row.
+//
+// A hold is the sync layer refusing to decide: somebody else changed the same record
+// while this phone was away (HOLD_MARK, js/sync/sync.js), so this phone's own value is
+// kept on its disk, sent by nothing, and counted in «(6 ממתינים לשליחה)». The sentence
+// under that count said: refresh, look at the screen, confirm again. But the screen shows
+// THIS phone's value laid over the snapshot - the held operation is still current on the
+// disk - so the person could not see what the other phone had recorded, and re-recording
+// the cell as told would have sent their own value over it, blind. The owner's phone
+// held six cells of one Thursday for a day before a rescue export named them.
+//
+// So every held record is laid out here: the day and the person, what this device
+// recorded, what the cloud was last heard to hold, and two buttons that are the two
+// honest answers. Both go through State.commit on the same path - a fresh explicit edit
+// is the one sanctioned way out of a hold (tests/contested.test.mjs), and nothing here
+// invents a third door. Taking the cloud's value discards this phone's record of a day
+// somebody worked, so that one is confirmed first, with both sides in the question;
+// keeping this phone's value is what the screen already shows.
+//
+// A row whose other side has not been heard - an open with no signal - is listed with
+// no buttons: a decision offered without the thing to decide against is a coin toss.
+// A held record that is not a worker's day (a roster record, an advance) is listed so
+// that nothing held is invisible, and says where its way out is.
+//
+// The sentences are pinned (tests/held.test.mjs, tests/smoke.mjs). The sides are read
+// in the day screen's own words - site names, «נעדר», «טרם נרשם» - and never as JSON.
+const HELD_LEAD = 'רישומים שמכשיר אחר שינה בזמן שהטלפון הזה היה מנותק. '
+    + 'כל שורה שמורה כאן ואינה נשלחת עד שתחליט.';
+const HELD_MINE = 'במכשיר הזה:';
+const HELD_CLOUD = 'בענן:';
+const HELD_KEEP = 'להשאיר את שלי';
+const HELD_TAKE = 'לקחת מהענן';
+const HELD_UNHEARD = 'הענן טרם ענה - ההשוואה תוצג כשיענה.';
+const HELD_ELSEWHERE = 'לשחרור: ערוך את הרישום הזה שוב מהמסך שלו.';
+const HELD_NOTHING = 'אין רישום';
+const HELD_ABSENT = 'נעדר';
+const HELD_EMPTY = 'טרם נרשם';
+const HELD_SAME = '(הענן כבר מחזיק את אותו רישום)';
+const HELD_UNSEEN = '(ההבדל בפרט שאינו מוצג כאן)';
+const HELD_UNREADABLE = 'הרישום שבענן אינו קריא במכשיר הזה, ולכן לא הועתק. '
+    + 'הרישום של המכשיר הזה נשאר כפי שהוא.';
+
+// A worker's day record, in the words the day screen uses for the same record.
+function describeDayValue(value, schedule) {
+    if (value === undefined || value === null || typeof value !== 'object') return HELD_NOTHING;
+    if (value.absent === true) return HELD_ABSENT;
+    const entries = Array.isArray(value.entries) ? value.entries : [];
+    if (entries.length === 0) return HELD_EMPTY;
+    const labels = placeLabelsIn(schedule);
+    return entries.map(entry => {
+        let said = isolate(placeLabelFrom(labels, entry && entry.placeId));
+        const rate = entryRate(entry);
+        if (rate === RATE_DOUBLE) said += ' (כפול)';
+        else if (rate === RATE_EXTRA) {
+            const hours = entryExtraHours(entry);
+            said += hours ? ` (נוספות ${plusAmount(hours)})` : ' (נוספות)';
+        }
+        return said;
+    }).join(' + ');
+}
+
+// The two records as bytes, the way the queue compares them - so a row that says "the
+// same" says it on the same evidence the hold was decided on.
+function sameHeldBytes(one, other) {
+    const spell = typeof canonicalJson === 'function' ? canonicalJson : JSON.stringify;
+    return spell(one === undefined ? null : one) === spell(other === undefined ? null : other);
+}
+
+// What a held row says: a title, the two sides, and whether a decision is offered.
+// Pure over the row and the schedule, so the harness can ask it without a screen.
+function describeHeldRecord(row, schedule) {
+    const parts = String(row && row.path).split('.');
+    const roster = schedule || {};
+    if (parts[0] !== 'days' || parts.length !== 4) {
+        let title = isolateLtr(parts.join('.'));
+        const named = kind => {
+            const own = row && row[kind];
+            return own && typeof own === 'object' && typeof own.name === 'string' ? own.name : '';
+        };
+        if (parts[0] === 'roster' && parts[1] === 'workers' && parts.length === 3) {
+            title = `עובד: ${isolate(named('mine') || named('cloud') || parts[2])}`;
+        } else if (parts[0] === 'roster' && parts[1] === 'places' && parts.length === 3) {
+            title = `אתר: ${isolate(named('mine') || named('cloud') || parts[2])}`;
+        } else if (parts[0] === 'roster' && parts[1] === 'workerOrder') title = 'סדר העובדים';
+        else if (parts[0] === 'roster' && parts[1] === 'placeOrder') title = 'סדר האתרים';
+        else if (parts[0] === 'roster' && parts[1] === 'workers') title = 'רשימת העובדים';
+        else if (parts[0] === 'roster' && parts[1] === 'places') title = 'רשימת האתרים';
+        else if (parts[0] === 'advances') title = 'מקדמה';
+        else if (parts[0] === 'ledger') title = 'רישום כספי';
+        return { kind: 'other', title, mine: '', cloud: '', note: HELD_ELSEWHERE,
+            decidable: false, takeable: false };
+    }
+    const parsed = parseLocalDate(parts[1]);
+    const worker = (roster.workers || []).find(item => item && item.id === parts[3]);
+    const who = worker && typeof worker.name === 'string' ? worker.name : parts[3];
+    const layer = parts[2] === 'plan' ? ' (תכנון)' : '';
+    const title = `${hebrewDayName(parsed)} ${formatShortDate(parsed)} · ${isolate(who)}${layer}`;
+    const heard = Boolean(row && row.heard);
+    // A day record the queue would never have accepted is not one to re-issue on a tap:
+    // listed, with no decision. The queue validates every day value on its way in, so
+    // this is a guard on the shape of the row, not a state the app produces.
+    const readable = Boolean(row && row.mine && typeof row.mine === 'object');
+    let mine = describeDayValue(row.mine, roster);
+    let cloud = heard ? describeDayValue(row.cloud, roster) : HELD_UNHEARD;
+    let takeable = heard && readable;
+    if (heard && sameHeldBytes(row.mine, row.cloud)) {
+        // The cloud caught up with this value after the hold was written. There is
+        // nothing to take; keeping this one sends it, changes nothing, and clears the row.
+        cloud += ' ' + HELD_SAME;
+        takeable = false;
+    } else if (heard && mine === cloud) {
+        // The same sites, different bytes: the stamp, usually. Say the number, since
+        // that is the difference the person is being asked to decide.
+        const stamp = value => (value && value.rates && Number.isFinite(Number(value.rates.daily))
+            ? ` · תעריף ${Number(value.rates.daily)}` : '');
+        if (stamp(row.mine) !== stamp(row.cloud)) {
+            mine += stamp(row.mine);
+            cloud += stamp(row.cloud);
+        } else cloud += ' ' + HELD_UNSEEN;
+    }
+    return { kind: 'day', title, mine, cloud, note: '', decidable: heard && readable, takeable };
+}
+
+// One row's decision. Resolves to true when a commit was made, false when nothing was.
+//
+// Keeping this device's value re-issues the SAME BYTES as a new operation - one that
+// names the held one in `after` and has seen the cloud's value - so the pre-send pass
+// reads the person's decision rather than the stale race, and the held operation is
+// collected as superseded. Taking the cloud's writes the cloud's record exactly, stamp
+// and all: it is the other phone's record of that day, adopted whole, the way a snapshot
+// would have been adopted had this phone had nothing queued. A cloud that holds nothing
+// at the path is a side too - the other phone cleared the day - and taking it clears the
+// day here the way the ✕ on the day screen does, which keeps the stamp on the record.
+function resolveHeldRecord(row, takeCloud) {
+    if (!row || row.heard !== true) return Promise.resolve(false);
+    const parts = String(row.path).split('.');
+    if (parts[0] !== 'days' || parts.length !== 4) return Promise.resolve(false);
+    if (typeof State === 'undefined' || !State.schedule) return Promise.resolve(false);
+    const date = parts[1];
+    const layer = parts[2];
+    const workerId = parts[3];
+    const write = value => {
+        const side = ensureDay(State.schedule, date, layer);
+        side[workerId] = value;
+        return State.commit({ path: row.path, value }) === true;
+    };
+    if (!row.mine || typeof row.mine !== 'object') return Promise.resolve(false);
+    if (!takeCloud) return Promise.resolve(write(JSON.parse(JSON.stringify(row.mine))));
+
+    const theirs = row.cloud === undefined || row.cloud === null
+        ? null : JSON.parse(JSON.stringify(row.cloud));
+    // A record this build cannot read is not adopted into the pay record on a tap. It
+    // arrived through the snapshot, so this should never fire; when it does, the row
+    // stays and the reason is said.
+    if (theirs !== null && typeof journalEntryProblems === 'function'
+        && journalEntryProblems(row.path, theirs).length > 0) {
+        if (typeof askTell === 'function') {
+            askTell({ title: 'הרישום שבענן לא הועתק', message: HELD_UNREADABLE });
+        }
+        return Promise.resolve(false);
+    }
+    const said = describeHeldRecord(row, State.schedule);
+    const ask = typeof askConfirm === 'function' ? askConfirm({
+        title: 'לקחת את הרישום מהענן?',
+        message: `${said.title}. ${HELD_MINE} ${said.mine}. ${HELD_CLOUD} ${said.cloud}. `
+            + 'הרישום של המכשיר הזה יוחלף ברישום שבענן.',
+        ok: HELD_TAKE,
+        cancel: 'ביטול'
+    }) : Promise.resolve(true);
+    return Promise.resolve(ask).then(yes => {
+        if (yes !== true) return false;
+        if (theirs === null) {
+            return State.commit(clearWorkerDay(State.schedule, date, workerId, layer)) === true;
+        }
+        return write(theirs);
+    });
+}
+
+// The rows, drawn into the ענן וסנכרון group under the reason line. Hidden - the box
+// itself, not only its rows - while nothing is held, so an empty warning never stands.
+function renderHeldRecords() {
+    const box = document.getElementById('heldRecords');
+    if (!box) return;
+    clear(box);
+    let rows = [];
+    if (typeof FarkadSync !== 'undefined' && typeof FarkadSync.heldRecords === 'function'
+        && typeof State !== 'undefined' && State.schedule) {
+        try { rows = FarkadSync.heldRecords(); } catch (error) { rows = []; }
+    }
+    box.hidden = rows.length === 0;
+    if (rows.length === 0) return;
+
+    box.appendChild(el('p', 'hint hint-warn', HELD_LEAD));
+    const list = el('div', 'held-list');
+    const sideLine = (label, text) => {
+        const line = el('p', 'held-side');
+        line.appendChild(el('b', null, label));
+        line.appendChild(el('span', null, ' ' + text));
+        return line;
+    };
+    rows.forEach(row => {
+        const said = describeHeldRecord(row, State.schedule);
+        const card = el('div', 'held-row');
+        card.appendChild(el('div', 'held-title', said.title));
+        if (said.kind !== 'day') {
+            card.appendChild(el('p', 'hint', said.note));
+            list.appendChild(card);
+            return;
+        }
+        card.appendChild(sideLine(HELD_MINE, said.mine));
+        card.appendChild(sideLine(HELD_CLOUD, said.cloud));
+        if (said.decidable) {
+            const actions = el('div', 'held-actions');
+            actions.appendChild(button(HELD_KEEP, 'btn-secondary',
+                () => { resolveHeldRecord(row, false); }));
+            if (said.takeable) {
+                actions.appendChild(button(HELD_TAKE, 'btn-secondary',
+                    () => { resolveHeldRecord(row, true); }));
+            }
+            card.appendChild(actions);
+        }
+        list.appendChild(card);
+    });
+    box.appendChild(list);
 }
 
 // Installed to the home screen, or visiting in a tab. On an iPhone that difference is

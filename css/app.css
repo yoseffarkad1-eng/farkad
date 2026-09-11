@@ -706,6 +706,26 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    that gets a copy OFF the phone. */
 .settings-group-backup { border-color: var(--accent); }
 
+/* The held records, one card per record, inside the cloud group. The warning colour on
+   the border, not on the text: the card is a decision waiting, not an error. The two
+   answers share a row and wrap on a narrow phone; each keeps the 44px floor every button
+   in this app has, and both are quieted with btn-secondary so the export stays the one
+   primary action on the sheet (tests/smoke.mjs). */
+.held-list { display: flex; flex-direction: column; gap: 10px; }
+.held-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border: 1px solid var(--warn);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+}
+.held-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+.held-side { margin: 0; font-size: 14px; color: var(--ink-2); }
+.held-side b { color: var(--ink); font-weight: 600; }
+.held-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.held-actions button { flex: 1 1 140px; }
+
 /* The one primary action on the sheet: full width, its own row, nothing beside it to
    mis-tap. It keeps the default button colours - everything else here is quieted with
    btn-secondary instead - so this class carries SIZE and nothing else, which is why it

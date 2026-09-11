@@ -5318,7 +5318,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('titled with the weekday, the date and the person',
     String(shown.text).includes('יום רביעי 12/08 · ⁨דוד⁩'), String(shown.text).slice(0, 200));
   check('with this device\'s side and the cloud\'s, in the day screen\'s words',
-    String(shown.text).includes('במכשיר הזה: הרצליה') && String(shown.text).includes('בענן: תל אביב'),
+    String(shown.text).includes('במכשיר הזה: \u2068הרצליה\u2069') && String(shown.text).includes('בענן: \u2068תל אביב\u2069'),
     String(shown.text).slice(0, 300));
   check('two answers, both quiet, both a finger\'s size',
     JSON.stringify((shown.buttons || []).map(b => b.text)) === JSON.stringify(['להשאיר את שלי', 'לקחת מהענן'])

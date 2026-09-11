@@ -19,6 +19,8 @@
 // Both are a fresh explicit edit of the same path through State.commit, which is the one
 // sanctioned way out of a hold; nothing here invents a third door.
 
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
 import { makeDevice, makeCloud, settle, settleUntil } from './harness.mjs';
 import { suite, check, given, report } from './runner.mjs';
 
@@ -33,8 +35,17 @@ const ELSEWHERE = 'לשחרור: ערוך את הרישום הזה שוב מהמ
 const KEEP = 'להשאיר את שלי';
 const TAKE = 'לקחת מהענן';
 
+// js/ui/settings.js draws a sheet and is not in the harness's load order; the panel's
+// functions under test live there, so it is loaded over the device's stub document, the
+// way tests/status.test.mjs loads it for the reason line.
+function withPanel(device) {
+    vm.runInContext(readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8'),
+        device.ctx, { filename: 'js/ui/settings.js' });
+    return device;
+}
+
 function phone(id) {
-    const device = makeDevice({ deviceId: id });
+    const device = withPanel(makeDevice({ deviceId: id }));
     device.Sync.pushDelayMs = TICK;
     device.setToday('2026-08-20');
     device.ctx.askTell = () => Promise.resolve();
@@ -51,7 +62,7 @@ function phone(id) {
 // The same phone, opened again from what its disk holds, with no adapter: an open with no
 // signal, which on a building site is the ordinary open.
 function reopen(id, storage) {
-    const device = makeDevice({ deviceId: id, storage });
+    const device = withPanel(makeDevice({ deviceId: id, storage }));
     device.Sync.pushDelayMs = TICK;
     device.setToday('2026-08-20');
     device.ctx.askTell = () => Promise.resolve();
@@ -152,9 +163,9 @@ async function race(day) {
     const said = b.call('describeHeldRecord', row, b.State.schedule);
     check('the row is titled with the weekday, the date and the person',
         said.title === 'יום רביעי 12/08 · ⁨דוד⁩', JSON.stringify(said.title));
-    check('this device\'s side reads as sites, in the day screen\'s words',
-        said.mine === 'התחלה + תל אביב', JSON.stringify(said.mine));
-    check('the cloud\'s side reads the same way', said.cloud === 'התחלה + הרצליה',
+    check('this device\'s side reads as sites, each name isolated as every name in a sentence is',
+        said.mine === '\u2068התחלה\u2069 + \u2068תל אביב\u2069', JSON.stringify(said.mine));
+    check('the cloud\'s side reads the same way', said.cloud === '\u2068התחלה\u2069 + \u2068הרצליה\u2069',
         JSON.stringify(said.cloud));
     check('and the row offers a decision', said.kind === 'day' && said.decidable === true
         && said.takeable === true, JSON.stringify(said));
@@ -200,8 +211,8 @@ async function race(day) {
     const done = await b.call('resolveHeldRecord', rows[0], true);
     check('the resolution reports that it committed', done === true, String(done));
     check('the person was asked first, and told both sides', asked.length === 1
-        && String(asked[0].message).indexOf('התחלה + הרצליה') !== -1
-        && String(asked[0].message).indexOf('התחלה + תל אביב') !== -1
+        && String(asked[0].message).indexOf('\u2068התחלה\u2069 + \u2068הרצליה\u2069') !== -1
+        && String(asked[0].message).indexOf('\u2068התחלה\u2069 + \u2068תל אביב\u2069') !== -1
         && asked[0].ok === TAKE, JSON.stringify(asked));
     await settle(TICK * 60);
     check('this device now holds the cloud\'s record', onPhone(b, DAY2) === 'p_00,p_01',

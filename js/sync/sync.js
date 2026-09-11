@@ -1911,6 +1911,44 @@ const FarkadSync = {
         return this.physicalOperations().some(op => op.held && !op.retired);
     },
 
+    // Every held record, for a person to look at: the path, what this device recorded
+    // there, and what the cloud was last heard to hold there.
+    //
+    // A hold is this layer refusing to decide - somebody else changed the record while
+    // this phone was away - and until v105 the only trace of it on the screen was the
+    // count in «(6 ממתינים לשליחה)» and one sentence: refresh, check the screen, confirm
+    // again. But the screen shows THIS device's value: the held operation is current on
+    // the disk and the journal lays it over every snapshot. So the person could not see
+    // what the other phone had recorded, and re-recording the cell as advised would have
+    // sent their own value over it, blind. The owner's phone held six cells of one
+    // Thursday for a day before a rescue export, read on a laptop, named them.
+    //
+    // Read off the projection: a path whose held operation has been superseded by a
+    // fresh edit is not listed, because the fresh edit IS the decision and goes out on
+    // its own. `cloud` is the base document's value at the path - undefined where the
+    // cloud holds nothing there - and `heard` says whether there is a base document to
+    // read at all: an open with no signal has none, and a row without its other side is
+    // shown without a decision, since a decision offered against nothing is a coin toss.
+    // Values are cloned on the way out, like everything the queue hands to the app: a
+    // row the panel holds must not be a handle on the parsed queue.
+    heldRecords() {
+        this.loadOutbox();
+        const heard = this._baseDoc !== null;
+        const rows = [];
+        this._outbox.forEach((item, path) => {
+            if (item.sent) return;
+            if (!item.held && !this._heldNow.has(String(path))) return;
+            rows.push({
+                path: String(path),
+                opId: item.opId,
+                mine: cloneValue(item.value),
+                cloud: heard ? cloneValue(this.baseValueAt(path)) : undefined,
+                heard
+            });
+        });
+        return rows.sort((one, other) => (one.path < other.path ? -1 : one.path > other.path ? 1 : 0));
+    },
+
     // Write the hold down, and read it back.
     //
     // Returns whether the disk holds it. A hold that cannot be made durable is the one
