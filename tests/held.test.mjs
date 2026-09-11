@@ -375,26 +375,41 @@ function crew(tag) {
     check('the resolution refuses it', done === false && accepted() === before,
         `${done} ${before} -> ${accepted()}`);
 
-    // The cloud holding NOTHING at the path is a side too - the other phone cleared the
-    // day - and taking it clears the day here the way the ✕ on the day screen does.
+    // The cloud holding NOTHING at the path is a side too - a restore replaced the
+    // document with one that has no such day - and taking it clears the day here the
+    // way the ✕ on the day screen does, which keeps the stamp on the record.
     suite('taking a cloud that holds nothing clears the day');
 
-    const DAY4 = '2026-08-17';
-    site(b, DAY4, 'p_02');
-    await settleUntil(() => inCloud(DAY4) === 'p_02', 5000);
-    b.ctx.askConfirm = () => Promise.resolve(true);
-    const gone = { path: `days.${DAY4}.actual.w_01`, opId: 'y', heard: true,
-        mine: b.State.schedule.days[DAY4].actual.w_01, cloud: undefined };
-    const described = b.call('describeHeldRecord', gone, b.State.schedule);
+    const c = crew('nh');
+    const rows = await c.race(DAY);
+    given('a record is held and heard', rows.length === 1 && rows[0].heard === true,
+        JSON.stringify(rows.map(sides)));
+    // The document loses the day under the hold, and the next snapshot says so.
+    delete c.cloud.doc.days[DAY];
+    site(c.a, '2026-08-19', 'p_01');
+    await settleUntil(() => {
+        const row = c.b.Sync.heldRecords()[0];
+        return row && row.heard === true && row.cloud === undefined
+            && c.b.Sync._revision === c.cloud.doc.revision;
+    }, 5000);
+    const gone = c.b.Sync.heldRecords()[0] || {};
+    given('this phone has heard a cloud with nothing at the path',
+        gone.heard === true && gone.cloud === undefined, sides(gone));
+    const described = c.b.call('describeHeldRecord', gone, c.b.State.schedule);
     check('the cloud\'s side reads as no record', described.cloud === 'אין רישום',
         JSON.stringify(described.cloud));
-    const done2 = await b.call('resolveHeldRecord', gone, true);
-    await settle(TICK * 40);
-    check('the day is cleared here', done2 === true && onPhone(b, DAY4) === '',
-        `${done2} ${onPhone(b, DAY4)}`);
+    c.b.ctx.askConfirm = () => Promise.resolve(true);
+    const stamp = JSON.stringify(c.b.State.schedule.days[DAY].actual.w_01.rates);
+    const done2 = await c.b.call('resolveHeldRecord', gone, true);
+    await settleUntil(() => c.inCloud(DAY) === '' && c.b.Sync.pendingCount() === 0, 8000);
+    check('the day is cleared here', done2 === true && onPhone(c.b, DAY) === '',
+        `${done2} ${onPhone(c.b, DAY)}`);
     check('and the stamp the day was worked at stays on it',
-        Boolean(b.State.schedule.days[DAY4].actual.w_01.rates),
-        JSON.stringify(b.State.schedule.days[DAY4].actual.w_01));
+        JSON.stringify(c.b.State.schedule.days[DAY].actual.w_01.rates) === stamp,
+        JSON.stringify(c.b.State.schedule.days[DAY].actual.w_01));
+    check('the cleared day went out and nothing is held',
+        c.inCloud(DAY) === '' && Boolean(c.cloud.doc.days[DAY]) && c.b.Sync.heldRecords().length === 0,
+        `${c.inCloud(DAY)} ${c.b.Sync.heldRecords().length}`);
 }
 
 // --------------------------------------------- the cloud moved while the question was open
@@ -548,18 +563,24 @@ function crew(tag) {
 
     suite('with no dialog to ask through, taking the cloud\'s is refused');
     const DAY6 = '2026-08-18';
+    const PATH6 = `days.${DAY6}.actual.w_01`;
+    // The shared phone still holds the cancelled day from an earlier suite; this one is
+    // found by its path.
     const rows = await race(DAY6);
-    given('a record is held', rows.length === 1);
+    const row6 = rows.find(item => item.path === PATH6);
+    given('the record is held', Boolean(row6), JSON.stringify(rows.map(sides)));
     b.ctx.askConfirm = undefined;
     const before = accepted();
-    const done = await b.call('resolveHeldRecord', rows[0], true);
+    const done = await b.call('resolveHeldRecord', row6, true);
     await settle(TICK * 20);
     check('nothing is taken', done === false && accepted() === before
-        && b.Sync.heldRecords().length === 1, `${done} ${before} -> ${accepted()}`);
+        && b.Sync.heldRecords().some(item => item.path === PATH6), `${done} ${before} -> ${accepted()}`);
     b.ctx.askConfirm = () => Promise.resolve(true);
-    const kept = await b.call('resolveHeldRecord', b.Sync.heldRecords()[0], false);
+    const kept = await b.call('resolveHeldRecord',
+        b.Sync.heldRecords().find(item => item.path === PATH6), false);
     await settleUntil(() => accepted() > before, 8000);
-    check('and keeping still works', kept === true && accepted() === before + 1, `${kept}`);
+    check('and keeping still works', kept === true && accepted() === before + 1
+        && inCloud(DAY6) === 'p_00,p_02', `${kept} ${inCloud(DAY6)}`);
 }
 
 report();

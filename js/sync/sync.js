@@ -1492,6 +1492,23 @@ const FarkadSync = {
             return false;
         }
 
+        // A PATH HELD IN MEMORY IS RELEASED BY THE FRESH OPERATION THAT LANDED ON IT.
+        //
+        // _heldNow is the hold the disk refused to write down - the loser's operation is
+        // still on the disk unmarked, so for this session the PATH was withheld by name
+        // (send.js). Nothing ever removed a path from it, so the way out of a hold - a
+        // fresh explicit edit of the same path - was blocked until a reopen: the button in
+        // the ⋯ panel committed, sent nothing, and re-listed the row; a day-screen edit had
+        // the same session-long block. Measured in tests/held.test.mjs «a hold the disk
+        // would not take is released by the same decision, in the same session».
+        //
+        // Safe to release HERE and only here: the batch above is on the disk, its
+        // operations name every live operation on the path in `after` - the loser
+        // included - and carry the current base in `seen`, so the loser is superseded by
+        // record and can never be sent, and the pre-send pass asks movedUnder of the
+        // fresh operation on its own evidence.
+        ops.forEach(op => this._heldNow.delete(String(op.path)));
+
         // The mark, raised and never lowered. Its own write, and its own failure: the
         // work is already down, and a mark that could not move costs a number, not a day.
         this._seq = seq;
@@ -1902,13 +1919,21 @@ const FarkadSync = {
     //
     // Asked of the physical set rather than of memory: the hold is a record on the disk,
     // and a session that has just opened has to know about it before it sends anything.
+    // Asked of the PROJECTION, which is read off the disk too - a session that has just
+    // opened sees the hold before it sends anything. It used to ask the physical set
+    // (any operation carrying the mark, not retired), and the two disagree exactly when
+    // a held operation has been superseded by a fresh edit whose batch is on the disk
+    // while the collection of the held one's batch is refused: superseded, it is out of
+    // the projection and can never be sent, but it is still physical, so the line said
+    // «contested» over a panel that listed nothing. Measured in tests/held.test.mjs «the
+    // status line and the panel answer from the same set».
     holdingContested() {
         this.loadOutbox();
+        const live = this._outbox;
         if (this._heldNow.size > 0) {
-            const live = new Set([...this._outbox.keys()]);
             if ([...this._heldNow].some(path => live.has(path))) return true;
         }
-        return this.physicalOperations().some(op => op.held && !op.retired);
+        return [...live.values()].some(item => item.held && !item.sent);
     },
 
     // Every held record, for a person to look at: the path, what this device recorded

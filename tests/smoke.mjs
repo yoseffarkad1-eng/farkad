@@ -5370,6 +5370,24 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     && taken.record === JSON.stringify({ entries: [{ placeId: 'p_02' }], rates: { daily: 400, hourly: 50 } }),
     JSON.stringify(taken));
 
+  // A list that will not read is said, not hidden: "nothing held" over a queue that
+  // could not be asked is the wrong sentence in the wrong colour.
+  const unreadable = await page.evaluate(() => {
+    const original = FarkadSync.heldRecords;
+    FarkadSync.heldRecords = () => { throw new Error('the queue would not read'); };
+    closeSettings();
+    openSettings();
+    const box = document.getElementById('heldRecords');
+    const out = { hidden: box.hidden, shown: box.offsetParent !== null, text: box.textContent };
+    FarkadSync.heldRecords = original;
+    closeSettings();
+    return out;
+  });
+  check('a held list that will not read is said, not hidden',
+    unreadable.hidden === false && unreadable.shown === true
+    && unreadable.text.includes('רשימת הרישומים המוחזקים לא נקראה במכשיר הזה.'),
+    JSON.stringify(unreadable));
+
   await page.context().close();
 }
 

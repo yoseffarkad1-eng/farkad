@@ -359,6 +359,18 @@ const HELD_SAME = '(הענן כבר מחזיק את אותו רישום)';
 const HELD_UNSEEN = '(ההבדל בפרט שאינו מוצג כאן)';
 const HELD_UNREADABLE = 'הרישום שבענן אינו קריא במכשיר הזה, ולכן לא הועתק. '
     + 'הרישום של המכשיר הזה נשאר כפי שהוא.';
+// The cloud moved while the question was open. The row is what the base document held
+// when the panel was drawn, and the answer the person gives is to the sentence they
+// read - so a snapshot that arrives in between makes the answer an answer to nothing,
+// and the value from the row would go out over the other phone's newer correction (the
+// sync layer lets it: `seen` is stamped at commit time with the new base). The carry
+// approval on this same sheet refuses the same race the same way.
+const HELD_MOVED = 'הרישום בענן השתנה בזמן שהחלון היה פתוח. ההשוואה עודכנה - בדוק שוב והחלט.';
+// A held ledger entry has no fresh-edit way out: the ledger is append-only and its ids
+// are deterministic, so "edit it again from its screen" would be a lie.
+const HELD_LEDGER = 'רישום כספי שהענן מחזיק אחרת. נשמר כאן ואינו נשלח; אין לו פתרון מהמסך הזה.';
+const HELD_LIST_UNREADABLE = 'רשימת הרישומים המוחזקים לא נקראה במכשיר הזה.';
+const HELD_UNLISTED_WORKER = 'עובד שאינו ברשימה';
 
 // A worker's day record, in the words the day screen uses for the same record.
 function describeDayValue(value, schedule) {
@@ -405,14 +417,29 @@ function describeHeldRecord(row, schedule) {
         else if (parts[0] === 'roster' && parts[1] === 'placeOrder') title = 'סדר האתרים';
         else if (parts[0] === 'roster' && parts[1] === 'workers') title = 'רשימת העובדים';
         else if (parts[0] === 'roster' && parts[1] === 'places') title = 'רשימת האתרים';
-        else if (parts[0] === 'advances') title = 'מקדמה';
-        else if (parts[0] === 'ledger') title = 'רישום כספי';
+        else if (parts[0] === 'advances') {
+            // The person, the day and the sum, from whichever side carries them - two
+            // held advances read as one line each otherwise.
+            const record = (row && row.mine && typeof row.mine === 'object') ? row.mine
+                : ((row && row.cloud && typeof row.cloud === 'object') ? row.cloud : {});
+            const worker = (roster.workers || []).find(item => item && item.id === record.workerId);
+            const who = worker && typeof worker.name === 'string' ? worker.name : HELD_UNLISTED_WORKER;
+            const when = typeof record.date === 'string' && typeof isRealDate === 'function'
+                && isRealDate(record.date) ? ` · ${formatShortDate(parseLocalDate(record.date))}` : '';
+            const sum = Number.isFinite(Number(record.amount))
+                ? ` · ${typeof moneyText === 'function' ? moneyText(Number(record.amount)) : Number(record.amount)} ₪`
+                : '';
+            title = `מקדמה: ${isolate(who)}${when}${sum}`;
+        } else if (parts[0] === 'ledger') {
+            return { kind: 'other', title: 'רישום כספי', mine: '', cloud: '', note: HELD_LEDGER,
+                decidable: false, takeable: false };
+        }
         return { kind: 'other', title, mine: '', cloud: '', note: HELD_ELSEWHERE,
             decidable: false, takeable: false };
     }
     const parsed = parseLocalDate(parts[1]);
     const worker = (roster.workers || []).find(item => item && item.id === parts[3]);
-    const who = worker && typeof worker.name === 'string' ? worker.name : parts[3];
+    const who = worker && typeof worker.name === 'string' ? worker.name : HELD_UNLISTED_WORKER;
     const layer = parts[2] === 'plan' ? ' (תכנון)' : '';
     const title = `${hebrewDayName(parsed)} ${formatShortDate(parsed)} · ${isolate(who)}${layer}`;
     const heard = Boolean(row && row.heard);
@@ -423,20 +450,24 @@ function describeHeldRecord(row, schedule) {
     let mine = describeDayValue(row.mine, roster);
     let cloud = heard ? describeDayValue(row.cloud, roster) : HELD_UNHEARD;
     let takeable = heard && readable;
+    // The stamped rate is said whenever the two stamps differ, whatever the sites say:
+    // taking the cloud's record adopts its stamp, and a dialog that names the site and
+    // not the number omits the one figure that changes somebody's pay.
+    const stamp = value => (value && value.rates && Number.isFinite(Number(value.rates.daily))
+        ? ` · תעריף ${Number(value.rates.daily)}` : '');
+    const stampsDiffer = heard && stamp(row.mine) !== stamp(row.cloud);
     if (heard && sameHeldBytes(row.mine, row.cloud)) {
         // The cloud caught up with this value after the hold was written. There is
         // nothing to take; keeping this one sends it, changes nothing, and clears the row.
         cloud += ' ' + HELD_SAME;
         takeable = false;
+    } else if (stampsDiffer) {
+        mine += stamp(row.mine);
+        cloud += stamp(row.cloud);
     } else if (heard && mine === cloud) {
-        // The same sites, different bytes: the stamp, usually. Say the number, since
-        // that is the difference the person is being asked to decide.
-        const stamp = value => (value && value.rates && Number.isFinite(Number(value.rates.daily))
-            ? ` · תעריף ${Number(value.rates.daily)}` : '');
-        if (stamp(row.mine) !== stamp(row.cloud)) {
-            mine += stamp(row.mine);
-            cloud += stamp(row.cloud);
-        } else cloud += ' ' + HELD_UNSEEN;
+        // The same sites and the same stamp, different bytes: a field this line does not
+        // show. Said, rather than two identical lines with a decision under them.
+        cloud += ' ' + HELD_UNSEEN;
     }
     return { kind: 'day', title, mine, cloud, note: '', decidable: heard && readable, takeable };
 }
@@ -456,6 +487,9 @@ function resolveHeldRecord(row, takeCloud) {
     const parts = String(row.path).split('.');
     if (parts[0] !== 'days' || parts.length !== 4) return Promise.resolve(false);
     if (typeof State === 'undefined' || !State.schedule) return Promise.resolve(false);
+    if (typeof FarkadSync === 'undefined' || typeof FarkadSync.heldRecords !== 'function') {
+        return Promise.resolve(false);
+    }
     const date = parts[1];
     const layer = parts[2];
     const workerId = parts[3];
@@ -464,8 +498,32 @@ function resolveHeldRecord(row, takeCloud) {
         side[workerId] = value;
         return State.commit({ path: row.path, value }) === true;
     };
+    // STILL WHAT THE PANEL DREW, asked at the moment of the decision - after the
+    // confirmation, not before it. A row is a reading of the base document; the base
+    // moves with every snapshot, and an answer to a sentence the cloud has since
+    // changed is an answer to nothing. The panel is redrawn and the person is told.
+    // A row that is no longer held at all - a second tap after the first went through
+    // - is refused quietly: there is nothing to decide.
+    const asDrawn = () => {
+        const fresh = FarkadSync.heldRecords().find(item => item.path === row.path);
+        if (!fresh) return 'gone';
+        if (!fresh.heard || !sameHeldBytes(fresh.cloud, row.cloud)
+            || !sameHeldBytes(fresh.mine, row.mine)) return 'moved';
+        return 'same';
+    };
+    const refuse = why => {
+        if (why === 'moved' && typeof askTell === 'function') {
+            askTell({ title: 'הרישום השתנה', message: HELD_MOVED });
+        }
+        if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
+        return false;
+    };
     if (!row.mine || typeof row.mine !== 'object') return Promise.resolve(false);
-    if (!takeCloud) return Promise.resolve(write(JSON.parse(JSON.stringify(row.mine))));
+    if (!takeCloud) {
+        const state = asDrawn();
+        if (state !== 'same') return Promise.resolve(refuse(state));
+        return Promise.resolve(write(JSON.parse(JSON.stringify(row.mine))));
+    }
 
     const theirs = row.cloud === undefined || row.cloud === null
         ? null : JSON.parse(JSON.stringify(row.cloud));
@@ -480,15 +538,19 @@ function resolveHeldRecord(row, takeCloud) {
         return Promise.resolve(false);
     }
     const said = describeHeldRecord(row, State.schedule);
+    // No dialog to ask through - an incomplete shell - is a refusal, never a yes: this
+    // replaces somebody's record of a day. The backup import refuses the same way.
     const ask = typeof askConfirm === 'function' ? askConfirm({
         title: 'לקחת את הרישום מהענן?',
         message: `${said.title}. ${HELD_MINE} ${said.mine}. ${HELD_CLOUD} ${said.cloud}. `
             + 'הרישום של המכשיר הזה יוחלף ברישום שבענן.',
         ok: HELD_TAKE,
         cancel: 'ביטול'
-    }) : Promise.resolve(true);
+    }) : Promise.resolve(false);
     return Promise.resolve(ask).then(yes => {
         if (yes !== true) return false;
+        const state = asDrawn();
+        if (state !== 'same') return refuse(state);
         if (theirs === null) {
             return State.commit(clearWorkerDay(State.schedule, date, workerId, layer)) === true;
         }
@@ -501,13 +563,29 @@ function resolveHeldRecord(row, takeCloud) {
 function renderHeldRecords() {
     const box = document.getElementById('heldRecords');
     if (!box) return;
-    clear(box);
     let rows = [];
+    let unreadable = false;
     if (typeof FarkadSync !== 'undefined' && typeof FarkadSync.heldRecords === 'function'
         && typeof State !== 'undefined' && State.schedule) {
-        try { rows = FarkadSync.heldRecords(); } catch (error) { rows = []; }
+        // A list that will not read is said, not hidden: "nothing held" over a queue
+        // that could not be asked is the wrong sentence in the wrong colour.
+        try { rows = FarkadSync.heldRecords(); } catch (error) { rows = []; unreadable = true; }
     }
-    box.hidden = rows.length === 0;
+    // NOT REBUILT WHEN NOTHING CHANGED. This runs on every render while the sheet is
+    // open - every snapshot, every save - and a button rebuilt under a finger is a tap
+    // that lands on nothing. The signature is the rows as drawn, both sides, bytes and
+    // all, so a snapshot that moves a row still redraws it.
+    const signature = unreadable ? 'unreadable' : JSON.stringify(rows.map(row =>
+        [row.path, row.heard, row.mine === undefined ? null : row.mine,
+            row.cloud === undefined ? null : row.cloud]));
+    if (box.getAttribute('data-held') === signature) return;
+    box.setAttribute('data-held', signature);
+    clear(box);
+    box.hidden = rows.length === 0 && !unreadable;
+    if (unreadable) {
+        box.appendChild(el('p', 'hint hint-warn', HELD_LIST_UNREADABLE));
+        return;
+    }
     if (rows.length === 0) return;
 
     box.appendChild(el('p', 'hint hint-warn', HELD_LEAD));
