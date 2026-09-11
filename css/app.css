@@ -724,7 +724,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .held-side { margin: 0; font-size: 14px; color: var(--ink-2); }
 .held-side b { color: var(--ink); font-weight: 600; }
 .held-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-.held-actions button { flex: 1 1 140px; }
+.held-actions button { flex: 1 1 140px; min-height: 44px; }
 
 /* The one primary action on the sheet: full width, its own row, nothing beside it to
    mis-tap. It keeps the default button colours - everything else here is quieted with

@@ -5262,8 +5262,6 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
 // ------------------------------------------------- the held records, with both sides
 {
-  suite('the held records, with both sides, in the ⋯ panel');
-
   // A hold is a write that lost a race while this phone was away: kept on the disk,
   // sent by nothing, counted in «(N ממתינים לשליחה)». The line under the count said
   // refresh, look at the screen, confirm again - but the screen shows THIS phone's value
@@ -5292,7 +5290,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     return { held: wrote.held, durable: wrote.durable, contested: FarkadSync.holdingContested() };
   }, HELD_PATH);
   await page.waitForTimeout(300);
-  given('one record is held on the disk', staged.held && staged.durable && staged.contested,
+  check('one record is held on the disk, the way the pre-send pass holds it',
+    staged.held === true && staged.durable === true && staged.contested === true,
     JSON.stringify(staged));
 
   const readPanel = () => page.evaluate(() => {
@@ -5346,7 +5345,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     openSettings();
   }, HELD_PATH);
   await page.waitForTimeout(300);
-  given('the record is held again', (await readPanel()).rows === 1);
+  check('the record is held again, and listed again', (await readPanel()).rows === 1);
   await page.locator('#heldRecords button').filter({ hasText: 'לקחת מהענן' }).click();
   await page.waitForTimeout(300);
   const dialog = await page.evaluate(() => ({
