@@ -13,10 +13,50 @@ commit is worse than no count at all, so a build whose run was not written down 
 time says so rather than borrowing a neighbour's.
 
 **`main` is at v104 (`67405c6`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
+a candidate, when there is one, sits above them headed CANDIDATE, and v105 is one now.
 v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
+
+---
+
+## CANDIDATE — v105 — 11 September 2026 — not on `main`
+
+The held records, shown. Built on v104 as served (`67405c6`). **No number moved** — not a
+shekel on a report, not a day on a record, not a byte on the wire.
+
+**What it gives the crew that v104 does not**
+
+- **A held record is named on the phone, with both sides.** A write that lost a race
+  while the phone was away has been kept on the disk and sent by nothing since v91, and
+  counted in «(N ממתינים לשליחה)»; the line under the count said refresh, look at the
+  screen, confirm again. But the screen shows THIS phone's value laid over the snapshot,
+  so nothing on the phone said which records were held or what the cloud held there —
+  and re-recording the cells as advised would have sent this phone's value over the other
+  phone's record, blind. The owner's phone held six cells of one Thursday for a day
+  before a rescue export, read on a laptop, named them. The ⋯ panel now lists every held
+  record under «ענן וסנכרון»: the weekday, the date and the person; «במכשיר הזה:» and
+  «בענן:», each in the day screen's own words (site names, «נעדר», «טרם נרשם»); and two
+  buttons, «להשאיר את שלי» and «לקחת מהענן». Both are a fresh explicit edit of the same
+  path through `State.commit` — the way out a hold has always had — so nothing new
+  touches the wire. Taking the cloud's asks first and names both sides in the question.
+- A phone that has heard nothing this session lists the record and offers no decision
+  until the cloud answers. A held record that is not a worker's day is listed and says
+  where its way out is.
+- `FarkadSync.heldRecords()` is the one accessor, read off the projection: a path a
+  fresh edit has already superseded is not listed, because the fresh edit is the answer.
+
+**What this build is NOT known to do**
+
+- **Being on `main` is not being on a phone.** The owner's phone holds six records for
+  Thursday 3 September; this is the build that shows them.
+- It does not resolve a held roster record, advance or ledger entry from the panel: those
+  rows are listed and point at their own screens.
+- Everything v104 lists, unchanged: the P1 for a v86-written queue after this phone's own
+  cutover; the two Codex notes on the rules workflow; the other two phones on v86.
+
+**Checked before it was stamped**: the release gate on the stamped commit is in
+`features/held/handoff.md`. No number is copied here.
 
 ---
 
