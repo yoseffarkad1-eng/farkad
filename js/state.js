@@ -901,6 +901,9 @@ function normaliseSchedule(raw, hints) {
     // Run after the entries are in, because judging one closure needs all the others.
     // Held aside rather than corrected: nothing here invents a number to replace it, and
     // the bytes stay exactly as they arrived.
+    // Recover the worker (including cycle history) before judging a late closure.
+    // Otherwise a valid weekly closure is judged against a missing, fortnightly worker.
+    reinstateReferenced(schedule, rememberedEntities(raw, hints));
     if (typeof impossibleClosures === 'function') {
         impossibleClosures(schedule).forEach(id => {
             keepUnder(schedule.ledger.unreadable, id, schedule.ledger.advances[id]);

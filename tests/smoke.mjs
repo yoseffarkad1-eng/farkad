@@ -692,14 +692,8 @@ async function seedRoster(page) {
     (await page.textContent('.roster-archive')).includes('דוד'),
     await page.textContent('.roster-archive'));
 
-  // A name typed by mistake, with nothing recorded against it, is the ONE case permanent
-  // deletion was ever for - and in this build it is not offered either. The gate is
-  // FARKAD_FLAGS in js/model/schema.js and it is shut; what this reads is the screen a
-  // person actually gets, which is the archive and a sentence saying why.
-  //
-  // The machinery behind the gate is exercised in tests/data.test.mjs against a device
-  // built with the flag on. This is the shipped reading, and the two are deliberately
-  // different tests.
+  // v119: the owner requested permanent deletion of accidental unused names.
+  // Exercise the actual typed confirmation, cancellation and durable removal.
   await page.evaluate(() => {
     State.schedule.workers.push({
       id: State.nextWorkerId(), name: 'טעות', active: true, dailyRate: 0, hourlyRate: 0
@@ -714,34 +708,21 @@ async function seedRoster(page) {
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
 
-  check('the shipped build offers no delete, even for a name typed by mistake',
-    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0,
-    await page.textContent('#workerFormDanger'));
-  check('and says why, rather than leaving a gap where a button was',
-    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת בגרסה הזו'),
-    await page.textContent('#workerFormDanger'));
-  check('the archive is what it does offer instead',
-    (await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).count()) > 0);
-
-  // And the write path, called the way a screen drawn by an older build would call it.
-  // NOT awaited inside the page: the refusal opens a dialog and waits for somebody to
-  // read it, so returning that promise would hang until the test timed out. What is being
-  // read here is what the call DID, which is nothing.
-  await page.evaluate(() => {
-    const typo = State.schedule.workers.find(worker => worker.name === 'טעות');
-    deleteWorker(typo.id);
-  });
-  await page.waitForTimeout(400);
-  check('and it says why rather than failing silently',
-    (await page.textContent('#askMessage')).includes('מחיקה סופית מושבתת'),
-    await page.textContent('#askMessage'));
+  check('unused names offer permanent deletion',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק עובד לצמיתות/ }).count() === 1);
+  check('temporary disable remains available',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).count() === 1);
+  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק עובד לצמיתות/ }).click();
+  check('confirmation asks for the exact name', (await page.textContent('#askMessage')).includes('הקלד את שם העובד'));
+  await page.click('#askCancel');
+  check('cancelling keeps worker', await page.evaluate(() => State.schedule.workers.length) === before);
+  await page.locator('#workerFormDanger').getByRole('button', { name: /מחק עובד לצמיתות/ }).click();
+  await page.fill('#askInput', 'טעות');
   await page.click('#askOk');
-  await page.waitForTimeout(200);
-  check('and calling the deletion directly does not remove him either',
-    (await page.evaluate(() => State.schedule.workers.length)) === before,
-    String(await page.evaluate(() => State.schedule.workers.length)));
-  check('he is still on the disk, not only on the screen',
-    (await page.evaluate(() => localStorage.getItem('scheduleData:v2') || '')).includes('טעות'));
+  await page.waitForTimeout(250);
+  check('confirmed deletion removes worker', await page.evaluate(() => State.schedule.workers.length) === before - 1);
+  check('and the name is absent from the saved roster',
+    !(await page.evaluate(() => JSON.parse(localStorage.getItem('scheduleData:v2')).workers.some(w => w.name === 'טעות'))));
 
   // Vehicles are retired in this build too, and the roster is where they were managed.
   check('no vehicle panel is drawn',
@@ -1572,16 +1553,14 @@ async function seedRoster(page) {
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
 
-  // An archived typo is offered no permanent delete either - the gate is shut for the
-  // archive as much as for the working list, which is the point of putting it first in
-  // deletionBlockers rather than at the end.
-  check('an archived typo is offered no permanent delete',
-    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0,
+  // v119 offers the same permanent-delete option for unused inactive names.
+  check('an archived typo offers permanent deletion',
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק עובד לצמיתות/ }).count()) === 1,
     await page.textContent('#workerFormDanger'));
-  check('and the restore button is what is there instead',
+  check('reactivation remains available beside deletion',
     await page.locator('#workerFormDanger').getByRole('button', { name: /החזר/ }).isVisible());
-  check('with the reason named',
-    (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת בגרסה הזו'),
+  check('the explanation identifies the absence of history',
+    (await page.textContent('#workerFormDanger')).includes('אין לו ימים, מקדמות או חשבונות שמורים'),
     await page.textContent('#workerFormDanger'));
 
   check('and he is still in the archive rather than gone',

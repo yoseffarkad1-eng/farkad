@@ -1,3 +1,22 @@
+## v119 — remove accidental unused workers
+
+Owner requested permanent removal of old names entered by mistake. The worker card now
+has `מחק עובד לצמיתות` for active or inactive workers with no day/absence records,
+advances, immutable financial history, or vehicle ownership. Confirmation requires typing
+the exact name. Shared names require completed protocol sync; local-only typos can be
+removed offline. Recovery holds, unreadable queues, pending restores and unavailable
+storage prevent deletion. Confirmation rechecks current history and the captured name.
+
+Deletion uses the existing atomic roster journal/tombstone operation. Old roster arrays
+cannot revive an unused name. Work arriving later from an offline phone restores the
+identity as inactive and retains the work, wage and pay-cycle history. Ledger-only history
+also restores the identity before weekly closures are validated. No live worker is deleted
+by installing this release, and no Firebase rule or financial gate changes.
+
+Validation is recorded against the exact clean commit in the release PR; counts are not
+inherited here. Added worker-deletion scenarios and updated the browser's shipped-default
+expectations. Existing disabled-client behavior remains an explicit fixture.
+
 # What has actually been served
 
 One line per build that reached `main`, newest first. `main` is what the live site

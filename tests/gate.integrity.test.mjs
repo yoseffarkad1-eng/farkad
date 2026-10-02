@@ -313,7 +313,7 @@ function commitSubject(git, sha) {
 // of every one of them in one place, so a flag added to the object arrives with a decision
 // about its default rather than without one.
 {
-    suite('only the owner-authorized financial pair is enabled');
+    suite('owner-authorized money and deletion enabled; vehicles stay off');
 
     const schema = readFileSync(join(ROOT, 'js/model/schema.js'), 'utf8');
     const start = schema.indexOf('const FARKAD_SHIPPED_FLAGS');
@@ -326,7 +326,7 @@ function commitSubject(git, sha) {
     given('the block declares flags', declared.length > 0, String(declared.length));
 
     const open = declared.filter(one => one.value !== 'false').map(one => one.flag);
-    same('only carry is enabled; deletion and vehicles remain off', open, ['carryAdvances']);
+    same('carry and deletion are authorized', open, ['permanentDeletion', 'carryAdvances']);
     same('and the shipped flags are the three that were argued over',
         declared.map(one => one.flag).sort(),
         ['carryAdvances', 'permanentDeletion', 'vehicles']);

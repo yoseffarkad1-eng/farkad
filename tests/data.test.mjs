@@ -5655,7 +5655,7 @@ const DELETION_ON = { permanentDeletion: true };
 function crew(options = {}) {
     const device = makeDevice({
         deviceId: options.deviceId || 'd_here',
-        flags: Object.assign({}, options.canDelete === false ? {} : DELETION_ON, options.flags || {})
+        flags: Object.assign({}, options.canDelete === false ? { permanentDeletion: false } : DELETION_ON, options.flags || {})
     });
     device.State.schedule.workers = [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
@@ -5676,8 +5676,7 @@ function crew(options = {}) {
     device.ctx.askText = question => {
         asked.push(question);
         if (options.typed !== undefined) return Promise.resolve(options.typed);
-        const title = String((question && question.title) || '');
-        const name = title.replace('למחוק את ', '').replace('?', '');
+        const name = question.placeholder;
         return Promise.resolve(name);
     };
     device.ctx.askTell = message => {
@@ -5710,12 +5709,10 @@ function a_nameInDocument(document, id) {
 }
 
 {
-    suite('permanent deletion is off in this build, and nothing reaches past it');
+    suite('an explicitly disabled legacy deletion gate cannot be bypassed');
 
-    // The gate is shut and this is the test that says so. Every suite around it opens it
-    // on purpose to keep the machinery behind it honest; this one is the only reading of
-    // what the build a person actually installs will do.
-    const device = makeDevice({ deviceId: 'd_shut' });
+    // Model an older build explicitly; v119's enabled default is tested separately.
+    const device = makeDevice({ deviceId: 'd_shut', flags: { permanentDeletion: false } });
     device.State.schedule.workers = [
         { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 }
     ];
@@ -5941,17 +5938,14 @@ for (const [label, record] of [
     await wait();
     given(`B has a queued ${label}`, b.Sync.pendingCount() > 0);
 
-    // A, which can see none of that, is asked to delete him. The screen refuses,
-    // because he has been shared - that is the whole point of the rule.
+    // v119 allows unused shared names after sync. The later offline work must survive
+    // a real UI deletion, not only a tombstone injected below the screen.
     const blockers = a.global('deletionBlockers');
-    check('the model refuses a permanent deletion for a shared worker',
-        blockers(doomed).some(reason => reason.includes('אי אפשר להוכיח')),
+    check('the synced unused name offers deletion',
+        blockers(doomed).length === 0,
         JSON.stringify(blockers(doomed)));
 
-    // Driven past the screen anyway, which is the state an older build could reach and
-    // the state a document may already be in. The work still has to survive it.
-    a.State.schedule.workers = a.State.schedule.workers.filter(item => item.id !== doomed);
-    a.State.commitRoster({ workers: [doomed] });
+    await a.call('deleteWorker', doomed);
     await wait();
 
     await bLink.back();
@@ -6406,7 +6400,7 @@ for (const [label, arm] of [
     device.ctx.askText = question => {
         device.State.commit(device.call('assignPlace',
             device.State.schedule, '2026-08-12', added, 'actual', 'p_01'));
-        return Promise.resolve(String(question.title).replace('למחוק את ', '').replace('?', ''));
+        return Promise.resolve(String(question.placeholder));
     };
 
     await device.call('deleteWorker', added);
@@ -6578,7 +6572,7 @@ for (const [label, act] of [
 
     const blockers = device.global('deletionBlockers');
     check('so the screen stops offering to delete him',
-        blockers(added).some(reason => reason.includes('אי אפשר להוכיח')),
+        blockers(added).some(reason => reason.includes('המתן לסיום הסנכרון')),
         JSON.stringify(blockers(added)));
 
     await device.call('deleteWorker', added);
@@ -6618,7 +6612,7 @@ for (const [label, act] of [
     });
     device.ctx.askConfirm = () => Promise.resolve(true);
     device.ctx.askText = question => Promise.resolve(
-        String(question.title).replace('למחוק את ', '').replace('?', ''));
+        String(question.placeholder));
     const said = [];
     device.ctx.askTell = message => {
         said.push(typeof message === 'string' ? message : String(message.title || ''));
@@ -6641,8 +6635,8 @@ for (const [label, act] of [
     const blockers = device.global('deletionBlockers');
     check('so the screen has a reason not to offer deletion',
         blockers('w_01').length > 0, JSON.stringify(blockers('w_01')));
-    check('and the reason is the provenance, not a footprint',
-        blockers('w_01').some(reason => reason.includes('אי אפשר להוכיח')),
+    check('and he needs completed sync before deletion',
+        blockers('w_01').some(reason => reason.includes('המתן לסיום הסנכרון')),
         JSON.stringify(blockers('w_01')));
 
     await device.call('deleteWorker', 'w_01');
@@ -6721,7 +6715,7 @@ for (const [label, act] of [
     again.ctx.askConfirm = () => Promise.resolve(true);
     again.ctx.askTell = () => Promise.resolve();
     again.ctx.askText = question => Promise.resolve(
-        String(question.title).replace('למחוק את ', '').replace('?', ''));
+        String(question.placeholder));
 
     check('the proof survived the close and reopen',
         again.Sync.provenLocalOnly('workers', added) === true);
@@ -7388,7 +7382,7 @@ for (const [label, act] of [
 
     const { device } = crew();
     device.ctx.askText = question => Promise.resolve(
-        String(question.title).replace('למחוק את ', '').replace('?', ''));
+        String(question.placeholder));
 
     // Made here, never sent, nothing recorded - and then archived.
     const typo = device.State.nextWorkerId();
@@ -7849,7 +7843,7 @@ function catchDownloads(device) {
         device.Sync.provenLocalOnly('workers', mine) === false);
     check('so the screen offers the archive rather than the delete',
         device.call('deletionBlockers', mine)
-            .includes('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום'),
+            .includes('למחיקת שם שכבר נשמר, התחבר והמתן לסיום הסנכרון'),
         JSON.stringify(device.call('deletionBlockers', mine)));
     check('and nothing claims the file reached anywhere',
         said.every(message => !/נשמר בקבצים|נשמר במכשיר|הקובץ נשמר/.test(message)),
@@ -8393,7 +8387,7 @@ for (const [label, run] of [
     third.ctx.askConfirm = () => Promise.resolve(true);
     third.ctx.askTell = () => Promise.resolve();
     third.ctx.askText = question => Promise.resolve(
-        String(question.title).replace('למחוק את ', '').replace('?', ''));
+        String(question.placeholder));
 
     const retried = await run(third);
     await wait();
