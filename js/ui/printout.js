@@ -357,17 +357,33 @@ function readReportPrintout() {
     const kind = section.classList.contains('report-invoice') ? 'חיוב' : 'שכר';
     const heading = printoutText(section.querySelector('h2'));
     const period = printoutText(section.querySelector('.report-period'));
-    const table = section.querySelector('table.report-table');
+    const tables = [...section.querySelectorAll('table.report-table')];
     const cellsOf = tr => [...tr.children].map(printoutText);
+    // Weekly and fortnightly payroll have separate tables, often with different
+    // columns. Reading only the first silently omitted the whole second crew.
+    const groups = tables.map(table => {
+        const wrap = table.closest('.report-payroll-group');
+        let heading = wrap && wrap.previousElementSibling;
+        while (heading && !heading.matches('h3.report-group')) heading = heading.previousElementSibling;
+        return {
+            groupTitle: printoutText(heading),
+            headers: [...table.querySelectorAll('thead th')].map(printoutText),
+            rows: [...table.querySelectorAll('tbody tr')].map(cellsOf),
+            totals: [...table.querySelectorAll('tfoot tr')].map(cellsOf)
+        };
+    });
+    const first = groups[0];
 
     return {
         title: heading,
         subtitle: period,
         name: `farkad-דוח-${kind}-${printoutStamp(period)}.png`,
-        headers: table ? [...table.querySelectorAll('thead th')].map(printoutText) : [],
-        rows: table ? [...table.querySelectorAll('tbody tr')].map(cellsOf) : [],
-        totals: table ? [...table.querySelectorAll('tfoot tr')].map(cellsOf) : [],
-        empty: table ? '' : printoutText(section.querySelector('.empty-hint')),
+        groups,
+        groupTitle: first ? first.groupTitle : '',
+        headers: first ? first.headers : [],
+        rows: first ? first.rows : [],
+        totals: first ? first.totals : [],
+        empty: first ? '' : printoutText(section.querySelector('.empty-hint')),
         notes: [...section.querySelectorAll('.hint-warn, .hint-money')]
             .map(printoutText).filter(Boolean)
     };
@@ -644,10 +660,42 @@ function planWeekPrintout(spec, probe, family) {
 // A plain table: the header row in bold on a band, a rule under every row, the totals
 // in bold under a heavier rule, and the notes the paper keeps beneath. Numbers are
 // drawn as the cells read them - the LRM before a minus included.
+// Stack each displayed group with its own headers and totals. Align their right
+// edges, preserve the common title once, and keep every row inside one shared PNG.
+function planGroupedReportPrintout(spec, probe, family) {
+    const plans = spec.groups.map((group, index) => planReportPrintout({
+        ...group,
+        title: index === 0 ? spec.title : '',
+        subtitle: index === 0 ? spec.subtitle : '',
+        empty: '',
+        notes: index === spec.groups.length - 1 ? spec.notes : []
+    }, probe, family));
+    const width = Math.max(...plans.map(plan => plan.width));
+    const height = plans.reduce((sum, plan) => sum + plan.height, 0);
+    return { width, height, draw(ctx) {
+        const layout = { title: null, header: null, rows: [], chips: [] };
+        let y = 0;
+        plans.forEach(plan => {
+            const x = width - plan.width;
+            ctx.save(); ctx.translate(x, y);
+            const drawn = plan.draw(ctx);
+            ctx.restore();
+            const shifted = box => box ? { ...box, x: box.x + x, y: box.y + y } : null;
+            if (!layout.title) layout.title = shifted(drawn.title);
+            if (!layout.header) layout.header = shifted(drawn.header);
+            layout.rows.push(...drawn.rows.map(shifted));
+            y += plan.height;
+        });
+        return layout;
+    } };
+}
+
 function planReportPrintout(spec, probe, family) {
+    if (spec.groups && spec.groups.length > 1) return planGroupedReportPrintout(spec, probe, family);
     const PAD = 20;
-    const TITLE_H = 32;
+    const TITLE_H = spec.title ? 32 : 0;
     const SUB_H = 24;
+    const GROUP_H = spec.groupTitle ? 28 : 0;
     const HEAD_H = 38;
     const ROW_H = 36;
     const NOTE_LINE = 20;
@@ -680,7 +728,8 @@ function planReportPrintout(spec, probe, family) {
     const noteLines = spec.notes.map(note => printoutWrap(probe, note, inner));
     const noteCount = noteLines.reduce((sum, lines) => sum + lines.length, 0);
 
-    const tableTop = PAD + TITLE_H + (spec.subtitle ? SUB_H : 0) + 10;
+    const groupTop = PAD + TITLE_H + (spec.subtitle ? SUB_H : 0);
+    const tableTop = groupTop + GROUP_H + 10;
     const hasTable = spec.headers.length > 0;
     const bodyTop = tableTop + (hasTable ? HEAD_H : 0);
     const footTop = bodyTop + spec.rows.length * ROW_H;
@@ -698,8 +747,14 @@ function planReportPrintout(spec, probe, family) {
         ctx.fillStyle = paper.ink;
         ctx.font = printoutFont(700, 20, family);
         ctx.textAlign = 'right';
-        ctx.fillText(printoutFit(ctx, spec.title, inner), right, PAD + TITLE_H / 2);
-        layout.title = { x: left, y: PAD, w: inner, h: TITLE_H };
+        if (spec.title) {
+            ctx.fillText(printoutFit(ctx, spec.title, inner), right, PAD + TITLE_H / 2);
+            layout.title = { x: left, y: PAD, w: inner, h: TITLE_H };
+        }
+        if (spec.groupTitle) {
+            ctx.font = printoutFont(700, 16, family);
+            ctx.fillText(printoutFit(ctx, spec.groupTitle, inner), right, groupTop + GROUP_H / 2);
+        }
 
         if (spec.subtitle) {
             ctx.fillStyle = paper.ink2;

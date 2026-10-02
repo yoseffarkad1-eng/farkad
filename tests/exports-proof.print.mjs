@@ -399,6 +399,66 @@ async function seedReport(page) {
     await page.context().close();
 }
 
+
+// Mixed payroll groups have independent columns and totals. The image must not stop
+// at the first table, even when that table belongs to the four weekly workers.
+{
+    suite('mixed weekly and fortnightly workers all reach the shared image');
+    const page = await open({ viewport: { width: 390, height: 844 } });
+    await page.evaluate(() => {
+        State.schedule.workers = [
+            { id: 'w_week', name: 'WEEKLY', active: true, dailyRate: 400, payCycles: '2026-10-02=weekly' },
+            { id: 'w_fort', name: 'FORTNIGHT', active: true, dailyRate: 500 }
+        ];
+        State.schedule.places = [{ id: 'p_site', name: 'SITE', active: true }];
+        assignPlace(State.schedule, '2026-10-04', 'w_week', 'actual', 'p_site');
+        assignPlace(State.schedule, '2026-10-04', 'w_fort', 'actual', 'p_site');
+        markAbsent(State.schedule, '2026-10-05', 'w_fort', 'actual');
+        State.save(); showView('reports');
+        REPORT_RANGE.from = '2026-10-02'; REPORT_RANGE.to = '2026-10-08';
+        REPORT_WORKERS = null; REPORT_SECTION = 'workers'; render();
+    });
+    const capture = () => page.evaluate(async () => {
+        const words = [], proto = CanvasRenderingContext2D.prototype, real = proto.fillText;
+        proto.fillText = function(text, ...args) { words.push(String(text)); return real.call(this, text, ...args); };
+        let out;
+        try { out = printoutImage('report'); } finally { proto.fillText = real; }
+        const bitmap = await createImageBitmap(out.blob);
+        const canvas = document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+        const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0);
+        const ink=out.layout.rows.map(box=>{
+            const pixels=ctx.getImageData(box.x,box.y,box.w,Math.max(1,box.h-3)).data;
+            let count=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]<180&&pixels[i+1]<180&&pixels[i+2]<180)count++;
+            return count;
+        });
+        return {words,layout:out.layout,height:out.height,width:out.width,ink,
+            rows:[...document.querySelectorAll('.report-payroll tbody tr')].map(row=>[...row.children].map(printoutText)),
+            totals:[...document.querySelectorAll('.report-payroll tfoot tr')].map(row=>[...row.children].map(printoutText))};
+    });
+    const mixed = await capture();
+    same('both worker names are drawn exactly once',mixed.words.filter(w=>['WEEKLY','FORTNIGHT'].includes(w)),['WEEKLY','FORTNIGHT']);
+    check('both payment frequency headings reach the image',mixed.words.includes('שבועי')&&mixed.words.includes('דו־שבועי'));
+    same('each group carries its own total row',mixed.words.filter(w=>w.startsWith('סה״כ')).length,mixed.totals.length);
+    check('the fortnightly absence column is retained',mixed.words.includes('נעדר'));
+    same('every on-screen worker has an image row',mixed.layout.rows.length,mixed.rows.length);
+    check('both image rows contain actual ink',mixed.ink.length===2&&mixed.ink.every(n=>n>30));
+    check('last worker row fits inside the PNG',mixed.layout.rows.length===2&&mixed.layout.rows.at(-1).y+mixed.layout.rows.at(-1).h<mixed.height);
+    check('distinct group totals are both drawn',mixed.words.includes('400')&&mixed.words.includes('500'));
+    // Change the DOM after rendering: the exporter must carry these exact displayed
+    // values, not recalculate payroll or put a fortnight into the weekly columns.
+    await page.evaluate(()=>{
+        const rows=[...document.querySelectorAll('.report-payroll tbody tr')];
+        rows[0].children[0].textContent='SCREEN WEEK';rows[1].children[0].textContent='SCREEN FORT';
+    });
+    const screen=await capture();
+    check('both groups are read from their displayed cells',screen.words.includes('SCREEN WEEK')&&screen.words.includes('SCREEN FORT'));
+    await page.evaluate(()=>{REPORT_WORKERS=new Set(['w_fort']);render();});
+    const selected=await capture();
+    check('choosing fortnightly alone exports that worker only',selected.words.includes('FORTNIGHT')&&!selected.words.includes('WEEKLY'));
+    check('a single selected group retains its payment heading',selected.words.includes('דו־שבועי'));
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();
