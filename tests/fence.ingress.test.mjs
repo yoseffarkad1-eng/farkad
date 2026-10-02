@@ -43,7 +43,9 @@ function locateTests() {
     const found = tried.find(dir =>
         existsSync(join(dir, 'harness.mjs')) && existsSync(join(dir, 'runner.mjs')));
     if (!found) {
-        throw new Error('cannot find the checkout: run from inside it, or set FARKAD_ROOT');
+        throw new Error('cannot find the checkout from ' + HERE + ': this suite reads its\n'
+            + 'own tree and has no override - FARKAD_REPO, bound to a commit by\n'
+            + 'tests/treecheck.mjs, is the only re-rooting seam in this repository.');
     }
     return found;
 }

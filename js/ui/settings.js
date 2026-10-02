@@ -83,6 +83,9 @@ function renderSettings() {
     if (typeof renderAppVersion === 'function') renderAppVersion();
     renderInstallState();
     renderLedgerParity();
+    // The numbers a person can read out or paste when the screen itself looks wrong. See
+    // the block at the foot of this file for what it may and may not carry.
+    renderDiagnostic();
     renderCarryMigration();
 }
 
@@ -403,6 +406,25 @@ function sameHeldBytes(one, other) {
 function describeHeldRecord(row, schedule) {
     const parts = String(row && row.path).split('.');
     const roster = schedule || {};
+    if (parts[0] === 'days' && parts.length === 4 && parts[2] === 'vehicleRuns') {
+        const record = row.mine || row.cloud || {};
+        const vehicle = (roster.vehicles || []).find(item => item.id === parts[3]);
+        const describe = value => {
+            if (value === null || value === undefined) return HELD_NOTHING;
+            if (vehicleRunProblems(value).length) return HELD_UNREADABLE;
+            const owner = (roster.workers || []).find(item => item.id === value.ownerId);
+            const sites = value.siteIds.map(id => isolate(placeLabelFrom(placeLabelsIn(roster), id))).join(' + ');
+            return `${value.out ? 'יצא' : 'לא יצא'} · ${value.amount} ₪ · `
+                + `${isolate(owner ? owner.name : 'בעל רכב שאינו ברשימה')}${sites ? ' · ' + sites : ''}`;
+        };
+        const readable = [row.mine, row.cloud].every(value => value == null || vehicleRunProblems(value).length === 0);
+        const closed = [row.mine, row.cloud].some(value => value && vehicleDateClosed(roster, value.ownerId, parts[1]));
+        const decidable = vehiclesEnabled() && isRealDate(parts[1]) && row.heard === true && readable && !closed;
+        return { kind: 'vehicle', title: `${parts[1]} · ${isolate(record.name || (vehicle && vehicle.name) || 'רכב')}`,
+            mine: describe(row.mine), cloud: row.heard ? describe(row.cloud) : HELD_UNHEARD,
+            note: closed ? 'החשבון נסגר. רישום הרכב נשמר לבדיקה ולא ישתנה כאן.' : !vehiclesEnabled() ? HELD_ELSEWHERE : '',
+            decidable, takeable: decidable && !sameHeldBytes(row.mine, row.cloud) };
+    }
     if (parts[0] !== 'days' || parts.length !== 4) {
         let title = isolateLtr(parts.join('.'));
         const named = kind => {
@@ -493,7 +515,11 @@ function resolveHeldRecord(row, takeCloud) {
     const date = parts[1];
     const layer = parts[2];
     const workerId = parts[3];
+    const vehicle = layer === 'vehicleRuns';
+    if (vehicle && !describeHeldRecord(row, State.schedule).decidable) return Promise.resolve(false);
+    if (!vehicle && layer !== 'plan' && layer !== 'actual') return Promise.resolve(false);
     const write = value => {
+        if (vehicle && !describeHeldRecord(row, State.schedule).decidable) return false;
         const side = ensureDay(State.schedule, date, layer);
         side[workerId] = value;
         return State.commit({ path: row.path, value }) === true;
@@ -518,11 +544,11 @@ function resolveHeldRecord(row, takeCloud) {
         if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
         return false;
     };
-    if (!row.mine || typeof row.mine !== 'object') return Promise.resolve(false);
+    if (!vehicle && (!row.mine || typeof row.mine !== 'object')) return Promise.resolve(false);
     if (!takeCloud) {
         const state = asDrawn();
         if (state !== 'same') return Promise.resolve(refuse(state));
-        return Promise.resolve(write(JSON.parse(JSON.stringify(row.mine))));
+        return Promise.resolve(write(row.mine == null ? null : JSON.parse(JSON.stringify(row.mine))));
     }
 
     const theirs = row.cloud === undefined || row.cloud === null
@@ -551,6 +577,7 @@ function resolveHeldRecord(row, takeCloud) {
         if (yes !== true) return false;
         const state = asDrawn();
         if (state !== 'same') return refuse(state);
+        if (theirs === null && vehicle) return write(null);
         if (theirs === null) {
             return State.commit(clearWorkerDay(State.schedule, date, workerId, layer)) === true;
         }
@@ -600,13 +627,14 @@ function renderHeldRecords() {
         const said = describeHeldRecord(row, State.schedule);
         const card = el('div', 'held-row');
         card.appendChild(el('div', 'held-title', said.title));
-        if (said.kind !== 'day') {
+        if (said.kind !== 'day' && said.kind !== 'vehicle') {
             card.appendChild(el('p', 'hint', said.note));
             list.appendChild(card);
             return;
         }
         card.appendChild(sideLine(HELD_MINE, said.mine));
         card.appendChild(sideLine(HELD_CLOUD, said.cloud));
+        if (said.note) card.appendChild(el('p', 'hint', said.note));
         if (said.decidable) {
             const actions = el('div', 'held-actions');
             actions.appendChild(button(HELD_KEEP, 'btn-secondary',
@@ -698,5 +726,313 @@ function renderLedgerParity() {
         line.textContent = 'היסטוריית המקדמות אינה תואמת את המקדמות הרשומות - ' +
             'אין להפעיל את הכתיבה החדשה לפני בדיקה.';
         line.className = 'hint hint-warn';
+    }
+}
+
+// ---------------------------------------------------------------- the diagnostic
+//
+// WHAT THIS IS FOR, because it is not a feature and should not grow into one.
+//
+// One iPhone, on the home screen, is the only phone this app has ever been seen on, and
+// nothing in this repository can look at it. Two rounds of work have now been argued from
+// two screenshots: two bottom bars floating in the middle of the screen with page content
+// underneath them, and a chip reading «(59 ממתינים לשליחה)». Both rounds had to guess at
+// the build - one of them guessed it from the pixel dimensions of the image, which is not
+// evidence and cost a day. The owner has been asked twice, in Hebrew and in Arabic, which
+// version is running, and the answer has not come back, because the question is
+// «⋯ ← גרסה» and the screenshot that would answer it is a different screenshot from the
+// one showing the fault.
+//
+// So: one block, one tap, one paste. It reports the numbers that decide every question
+// this round has been unable to answer - which build the page is, which build the scripts
+// are, which builds the service worker is still holding, what the two viewports say, what
+// has focus, where each bottom bar actually IS, how deep the queue is and why the cloud
+// said no.
+//
+// AND IT CARRIES NOTHING ELSE. It is pasted into WhatsApp by somebody who is not thinking
+// about privacy at the moment they paste it, so the guarantee cannot be care: no worker's
+// name, no site's name, no amount, no e-mail, no password, no device id. Every value goes
+// through ascii() below and the whole report is ASCII by construction, which a Hebrew name
+// cannot survive; tests/mobile.test.mjs seeds a roster with Hebrew AND Latin names and
+// asserts that none of them appears, because ASCII alone would not have caught the Latin
+// one.
+
+// One value, made safe to print: printable ASCII only, one line, and short.
+//
+// The cap is not tidiness. An error message arrives from a cloud this code does not
+// control and is the one field here whose content nobody has written down.
+function diagnosticAscii(value, limit) {
+    const text = value === null || value === undefined ? '' : String(value);
+    let out = '';
+    for (const ch of text) {
+        const code = ch.codePointAt(0);
+        if (code >= 0x20 && code <= 0x7e) out += ch;
+    }
+    const max = limit || 60;
+    return out.length > max ? out.slice(0, max - 1) + '~' : out;
+}
+
+// A rectangle as one field, or the word for "not there". Rounded, because a fixed bar's
+// sub-pixel position is not what anybody is going to read out over the phone.
+function diagnosticRect(node) {
+    if (!node) return 'missing';
+    if (typeof getComputedStyle !== 'function') return 'unknown';
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return 'hidden';
+    const box = node.getBoundingClientRect();
+    if (box.width === 0 && box.height === 0) return 'empty';
+    return `${style.position} top=${Math.round(box.top)} bottom=${Math.round(box.bottom)}`
+        + ` h=${Math.round(box.height)}`;
+}
+
+// What has focus, named by its SHAPE and never by its contents. A field's value is the
+// one thing on this screen that could be somebody's name, and it is not read here.
+function diagnosticFocus() {
+    if (typeof document === 'undefined') return 'none';
+    const node = document.activeElement;
+    if (!node || node === document.body) return 'body';
+    let out = node.tagName || 'unknown';
+    if (node.tagName === 'INPUT') out += `[${diagnosticAscii(node.type || 'text', 16)}]`;
+    if (node.id) out += `#${diagnosticAscii(node.id, 30)}`;
+    // The class list, which in this app is always Latin and always written in the
+    // stylesheet - never a name, never a number somebody typed.
+    const cls = diagnosticAscii(String(node.className || '').replace(/\s+/g, '.'), 40);
+    if (cls) out += `.${cls}`;
+    return out;
+}
+
+// The sync failure as a CODE rather than as its sentence.
+//
+// Derived from syncFailureReason's own answer rather than from a second walk over the same
+// fields, so the two can never disagree about what this phone is doing - and so the report
+// stays ASCII while the sentence the person is reading stays Hebrew.
+function syncReasonCode(sync) {
+    const sentence = typeof syncFailureReason === 'function' ? syncFailureReason(sync) : '';
+    if (!sentence) return 'none';
+    if (sentence.indexOf(SYNC_REASON_BLIND) === 0) return 'blind';
+    if (sentence.indexOf(SYNC_REASON_REFUSED) === 0) return 'refused';
+    if (sentence.indexOf(SYNC_REASON_SIGNIN) === 0) return 'signin';
+    if (sentence.indexOf(SYNC_REASON_UNREACHABLE) === 0) return 'unreachable';
+    if (sentence.indexOf(SYNC_REASON_DEAF) === 0) return 'deaf';
+    if (sentence.indexOf(SYNC_REASON_UNRECORDED) === 0) return 'unrecorded';
+    return 'message';
+}
+
+// The whole report, as one block of text.
+//
+// `extra` carries the one answer this function cannot get synchronously - the builds the
+// service worker says are still open on this device - so that everything else is readable
+// without waiting for anything, and a worker that never answers costs the report one line
+// rather than all of it.
+function diagnosticText(extra) {
+    const said = extra || {};
+    const lines = [];
+    const put = (key, value) => lines.push(`${key}=${diagnosticAscii(value, 80)}`);
+
+    lines.push('--- farkad diagnostic ---');
+
+    // THE VERSION QUESTION, first, because it is the one that has been asked twice.
+    const meta = typeof document !== 'undefined'
+        ? document.querySelector('meta[name="farkad-build"]') : null;
+    const page = meta ? meta.getAttribute('content') : '';
+    const app = typeof APP_VERSION === 'string' ? APP_VERSION : '';
+    put('page.build', page || 'unknown');
+    put('app.build', app || 'unknown');
+    put('build.agree', page && app ? (page === app ? 'yes' : 'NO') : 'unknown');
+    const controller = typeof navigator !== 'undefined' && navigator.serviceWorker
+        ? navigator.serviceWorker.controller : null;
+    put('sw.controller', navigator && navigator.serviceWorker ? (controller ? 'yes' : 'no') : 'none');
+    put('sw.builds', said.builds === undefined ? 'not-asked' : (said.builds || 'no-answer'));
+
+    // THE TWO VIEWPORTS, which is what the floating-bars screenshot is a picture of.
+    // innerHeight is the layout viewport a fixed bar is placed in; visualViewport.height
+    // is what is actually left to see through, and on a home-screen iPhone they disagree
+    // for reasons that are not always a keyboard.
+    if (typeof window !== 'undefined') {
+        put('window', `${window.innerWidth}x${window.innerHeight}`);
+        const vv = window.visualViewport;
+        put('visual', vv
+            ? `${Math.round(vv.width)}x${Math.round(vv.height)} scale=${vv.scale.toFixed(2)}`
+                + ` offsetTop=${Math.round(vv.offsetTop)} pageTop=${Math.round(vv.pageTop)}`
+            : 'unsupported');
+        put('scroll', `${Math.round(window.scrollY)}`);
+        put('dpr', String(window.devicePixelRatio || 1));
+        put('standalone', typeof isStandalone === 'function' ? (isStandalone() ? 'yes' : 'no') : 'unknown');
+        put('scheme', window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark' : 'light');
+        put('orientation', window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+    }
+
+    put('focus', diagnosticFocus());
+
+    // WHERE THE BARS ACTUALLY ARE. Read off the elements, not off the custom properties -
+    // the properties are what the last measurement believed and these are what the browser
+    // is drawing, and the screenshot this block exists for is the case where they differ.
+    if (typeof document !== 'undefined') {
+        put('bar.tabs', diagnosticRect(document.querySelector('.tabs')));
+        put('bar.dock', diagnosticRect(document.querySelector('.day-actions')));
+        put('bar.undo', diagnosticRect(document.getElementById('undoBar')));
+        const root = document.documentElement;
+        const css = name => {
+            const value = getComputedStyle(root).getPropertyValue(name);
+            return (value || '').trim() || '-';
+        };
+        put('css.bars', `nav=${css('--nav-h')} dock=${css('--day-actions-h')}`
+            + ` undo=${css('--undo-h')} topbar=${css('--topbar-h')}`
+            + ` kb=${css('--kb-h')} safe=${css('--safe-bottom')}`);
+        put('body.kbd-open', document.body && document.body.classList.contains('kbd-open') ? 'yes' : 'no');
+        put('body.day-compact', document.body && document.body.classList.contains('day-compact') ? 'yes' : 'no');
+    }
+
+    // THE QUEUE, and why it is not moving.
+    if (typeof FarkadSync !== 'undefined' && FarkadSync) {
+        let pending = 'unknown';
+        try { pending = String(FarkadSync.pendingCount()); } catch (error) { pending = 'unreadable'; }
+        put('sync.pending', pending);
+        put('sync.status', FarkadSync.status || 'none');
+        put('sync.reason', syncReasonCode(FarkadSync));
+        const error = FarkadSync.lastError;
+        put('sync.code', error && typeof error.code === 'string' ? error.code : '-');
+    } else {
+        put('sync.pending', 'no-sync');
+    }
+    put('writes.blocked',
+        typeof farkadWritesBlocked === 'function' && farkadWritesBlocked() ? 'yes' : 'no');
+    put('save.failed', typeof State !== 'undefined' && State.saveFailed ? 'yes' : 'no');
+    put('navigator.online', typeof navigator !== 'undefined' && navigator.onLine === false ? 'no' : 'yes');
+
+    lines.push('--- end ---');
+    return lines.join('\n');
+}
+
+// The builds this device still has windows on, asked of the service worker.
+//
+// The same census js/ui/offline.js runs, on a channel of its own so the answer comes back
+// here. It is the ONLY way to learn that a phone is running a page from one build under a
+// worker from another - which is the state two rounds of this work have been unable to
+// rule out. A worker that does not answer within the timeout leaves the line saying so;
+// waiting longer than that for a diagnostic is how a diagnostic stops being pressed.
+function askServiceWorkerBuilds() {
+    return new Promise(resolve => {
+        const container = typeof navigator !== 'undefined' ? navigator.serviceWorker : null;
+        const worker = container ? container.controller : null;
+        if (!worker || typeof MessageChannel !== 'function') { resolve(''); return; }
+        let done = false;
+        const finish = value => { if (!done) { done = true; resolve(value); } };
+        try {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = event => {
+                const said = event.data;
+                if (!said || said.type !== 'builds') return;
+                const builds = (said.builds || []).join(',');
+                finish(said.unknown ? `${builds}+unknown` : builds);
+            };
+            worker.postMessage({ type: 'which-builds' }, [channel.port2]);
+        } catch (error) {
+            finish('');
+        }
+        setTimeout(() => finish(''), 900);
+    });
+}
+
+// Open or shut is a posture for the life of the panel, like every other fold in this app.
+let diagnosticOpen = false;
+let diagnosticBuilds;
+
+// The block itself. Built into the settings sheet by JS rather than written into
+// index.html, because it is drawn only when somebody asks for it and because index.html
+// belongs to the shell rather than to this screen.
+function renderDiagnostic() {
+    const body = document.querySelector('#settingsPanel .settings-body');
+    if (!body) return;
+
+    let group = document.getElementById('diagnosticGroup');
+    if (!group) {
+        group = el('section', 'settings-group');
+        group.id = 'diagnosticGroup';
+        group.appendChild(el('h3', null, 'מידע טכני'));
+        group.appendChild(el('p', 'hint',
+            'שורות טכניות לצילום או להעתקה, כשמשהו נראה לא במקום על המסך. '
+            + 'אין בהן שמות של עובדים או אתרים, אין סכומים ואין סיסמאות.'));
+        const toggle = button('', 'btn-secondary', () => {
+            diagnosticOpen = !diagnosticOpen;
+            if (diagnosticOpen && diagnosticBuilds === undefined) {
+                // Asked once per opening, not on every redraw: this panel redraws with the
+                // rest of the app, and a message to the worker on every render is a message
+                // every second.
+                diagnosticBuilds = '';
+                askServiceWorkerBuilds().then(value => {
+                    diagnosticBuilds = value;
+                    if (settingsOpen) renderDiagnostic();
+                });
+            }
+            renderDiagnostic();
+        });
+        toggle.id = 'diagnosticToggle';
+        toggle.setAttribute('aria-controls', 'diagnosticBox');
+        group.appendChild(toggle);
+
+        const box = el('div', 'diagnostic-box');
+        box.id = 'diagnosticBox';
+        const field = document.createElement('textarea');
+        field.id = 'diagnosticText';
+        field.className = 'diagnostic-text';
+        field.readOnly = true;
+        field.rows = 10;
+        field.setAttribute('dir', 'ltr');
+        field.setAttribute('aria-label', 'מידע טכני להעתקה');
+        // Selecting the whole block by touching it: on a phone the alternative is a
+        // long-press and two drag handles, over ten lines, one-handed, at night.
+        field.addEventListener('focus', () => field.select());
+        box.appendChild(field);
+        const copy = button('העתק', 'btn-secondary', copyDiagnostic, 'העתק את המידע הטכני');
+        copy.id = 'diagnosticCopy';
+        box.appendChild(copy);
+        group.appendChild(box);
+
+        // Above the carry review, which is a screen about money and belongs last.
+        const carry = document.getElementById('carryMigrationBox');
+        if (carry && carry.parentNode === body) body.insertBefore(group, carry);
+        else body.appendChild(group);
+    }
+
+    const toggle = document.getElementById('diagnosticToggle');
+    const box = document.getElementById('diagnosticBox');
+    const field = document.getElementById('diagnosticText');
+    toggle.textContent = diagnosticOpen ? 'הסתר מידע טכני' : '🛠️ הצג מידע טכני';
+    toggle.setAttribute('aria-expanded', String(diagnosticOpen));
+    box.style.display = diagnosticOpen ? '' : 'none';
+    if (!diagnosticOpen) return;
+
+    const text = diagnosticText({ builds: diagnosticBuilds });
+    // Never over a selection somebody is in the middle of making. This panel redraws on
+    // every render, and rewriting the field's value collapses the selection to nothing -
+    // which on a phone is the difference between one paste and four attempts.
+    if (document.activeElement !== field && field.value !== text) field.value = text;
+}
+
+// One tap, and it says which of the three things happened.
+//
+// The clipboard is refused in plenty of real situations (no permission, an insecure
+// origin, a browser that has none), and the answer to that is not silence: the text is
+// already in a field that has just been selected, so the fallback is to say so. Not
+// alert() - law 11.
+async function copyDiagnostic() {
+    const field = document.getElementById('diagnosticText');
+    if (!field) return;
+    const text = field.value;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            if (typeof askTell === 'function') await askTell('המידע הטכני הועתק.');
+            return;
+        }
+    } catch (error) {
+        // Falls through to the selection below, which is the answer that always works.
+    }
+    field.focus();
+    field.select();
+    if (typeof askTell === 'function') {
+        await askTell('לא הצלחתי להעתיק לבד. הטקסט מסומן - לחץ עליו לחיצה ארוכה ובחר "העתק".');
     }
 }

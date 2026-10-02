@@ -453,6 +453,29 @@ function decodeQueue(records) {
     return { operations, unreadable, acknowledged, retired, holds };
 }
 
+// Two readings of this device's queue keys, compared by key and by byte.
+//
+// The whole of `decodedQueue`'s honesty rests here, so it is written to fail towards
+// re-decoding: any key on one side and not the other, any value that differs, any
+// difference in how many keys there are at all, and the answer is no. A key can only be
+// one of this queue's exact shapes (`queueKeyKind`), so nothing that lands in one of these
+// maps can name a property of Object.prototype and read as present when it is absent.
+//
+// Comparing the VALUES rather than counting the keys is the point of it. An operation the
+// other tab acknowledged adds a key; an operation it retired adds a key; a slot mark it
+// raised changes bytes under a key that was already there and moves no count at all - and
+// that last one is why nothing here may be a length or a tick.
+function sameQueueRecords(before, after) {
+    if (before === after) return true;
+    if (!before || !after) return false;
+    const keys = Object.keys(before);
+    if (keys.length !== Object.keys(after).length) return false;
+    for (let i = 0; i < keys.length; i += 1) {
+        if (before[keys[i]] !== after[keys[i]]) return false;
+    }
+    return true;
+}
+
 // A value on its way out of the parse cache. Plain JSON, so this is all it takes - and
 // doing it here means no caller anywhere can be holding the cached parse.
 function cloneValue(value) {
@@ -626,12 +649,32 @@ const SCHEDULE_KEY = 'scheduleData:v2';     // must match V2_KEY in state.js
 // restore does. What it must NOT get is a trip to the cloud when somebody signs in
 // weeks later: local-only means local-only, and a record that could not say so would
 // turn every offline restore into a push the person never asked for.
-function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud, supersedes) {
+//
+// `knownAdvances` is the last of the frozen facts, and the newest. It names every advance
+// this device could see AT THE MOMENT THE RESTORE WAS ASKED FOR, so that absorbCloudLedger
+// can tell the two reasons an advance can be in the cloud and not in the backup apart:
+//
+//   it was there before, and the backup does not have it   -> the restore is removing it,
+//                                                             which is what a restore is
+//   it arrived after the person chose the backup           -> it is money somebody was
+//                                                             handed in the window, and
+//                                                             the restore never meant it
+//
+// Without the list the two are the same shape and the second was silently lost - 800
+// shekels handed over while a restore was on the wire, gone from all three phones, every
+// one of them saying synced. See tests/overlap.restore.test.mjs O8b.
+//
+// null means an envelope written before this field existed. Absence is read as "this
+// device cannot tell the two apart", and nothing is absorbed - the behaviour that shipped
+// - rather than guessing in either direction over somebody's wages.
+function replacementEnvelope(document, phase, transactionId, supersedesSeq, cloud, supersedes,
+    knownAdvances) {
     return {
         version: REPLACE_VERSION,
         phase,
         transactionId,
         supersedesSeq: Number(supersedesSeq) || 0,
+        knownAdvances: Array.isArray(knownAdvances) ? knownAdvances.map(String) : null,
         // Every operation on the disk when the restore was asked for, named one by one.
         // A number is a statement about one tab's counter, and an edit made in another
         // tab AFTER the request could be handed the same number as the last one before it
@@ -758,10 +801,30 @@ function marksOf(path, value) {
     return marks;
 }
 
-// The families where a queued value REPLACES what is there: a day, or a ledger entry.
-// See the pre-send check in sendClaimed for why the roster is not one of them.
+// The families where a queued value REPLACES what is there: a day, a ledger entry, or -
+// since v104 - one field of one person. See the pre-send check in sendClaimed, and the
+// paragraph below for why a WHOLE roster record is still not one of them.
 function replacesWhole(path) {
-    return String(path).indexOf('days.') === 0 || String(path).indexOf('ledger.') === 0;
+    const text = String(path);
+    if (text.indexOf('days.') === 0 || text.indexOf('ledger.') === 0) return true;
+    // ONE FIELD OF ONE PERSON, and it is in this family for the same reason a day is.
+    //
+    // The roster used to be excluded whole, and the reason given was that it merges per
+    // id and that an added worker is additive rather than a correction of a value
+    // somebody was looking at. That is still exactly true of `roster.workers.<id>` - a
+    // whole record, usually a man who has just been added, and holding those is what
+    // would have stopped a worker added after a prepared restore from ever reaching the
+    // cloud (G12-G14).
+    //
+    // It is not true of `roster.workers.<id>.dailyRate`. That path names one value, it
+    // REPLACES what is there, and what is there is what somebody is paid. Two phones
+    // disagreeing about it is not a merge and there is no arithmetic that resolves it:
+    // one of the two numbers is wrong and only a person knows which. So it is recorded
+    // with what this device had seen there, asked before it goes out, and HELD when the
+    // server holds something this device never saw - the same treatment a day gets, for
+    // the same reason. A phone number and a rate are held alike; the field that is
+    // contested is the only one held, because the paths are one field wide.
+    return text.indexOf('roster.') === 0 && text.split('.').length === 4;
 }
 
 // What two schedules have to agree on for one to BE the other.
@@ -1182,6 +1245,10 @@ const FarkadSync = {
     // A journal entry at or below this is already in the record, so once the cloud has it
     // too there is nothing left for it to protect.
     _savedSeq: 0,
+    // The last decode of this device's queue, and the exact bytes it was made from. Not a
+    // record of what this tab did - a record of what the disk said, checked against the
+    // disk again before it is used. See decodedQueue.
+    _queueCache: null,
     // The queue on disk will not parse. Not the same as an empty queue, and the
     // difference is whether writing over it is allowed.
     outboxDamaged: false,
@@ -1302,12 +1369,64 @@ const FarkadSync = {
     // exists beside it is how a newer edit from an old client gets overruled.
     physicalOperations() {
         if (!this._activeKey && !this._loaded) return [];
+        return this.operationsFrom(this.decodedQueue());
+    },
 
-        const decoded = decodeQueue(this.durableQueueRecords());
+    // THE DECODE, KEPT AGAINST THE EXACT BYTES IT WAS MADE FROM.
+    //
+    // The disk is read here on every call, every time, through `durableQueueRecords` and
+    // therefore through `Store.durableGet` - the accessor that deliberately bypasses
+    // `Store.memory` so that what ANOTHER TAB wrote is what comes back. Nothing about that
+    // read is skipped or shortened, and nothing here consults a counter, an event or this
+    // tab's belief about what it did last. The cached decode is discarded the moment the
+    // freshly-read records differ from the ones it was built from, by so much as one byte
+    // under one key - so a second tab's edit, acknowledgement, retirement or removal
+    // invalidates it by arithmetic rather than by notification. There is no signal being
+    // trusted, and so no signal to get wrong; see features/queue-cost/contract.md and
+    // tests/queuecost.test.mjs, which asks the other tab all four questions.
+    //
+    // Same pattern as `storedSchedule` below and `_localRosterBaselineText` above: the
+    // bytes are the key. What it buys is that the queue is DECODED once per change rather
+    // than once per question, and the questions are many - `queueOperations` asks twice
+    // before a single edit can be written, `collectQueueGarbage` asks on the save that
+    // follows, and `pendingCount` asks for the number on the status line on every render.
+    // On the phone this was written for that was four full rebuilds of every operation on
+    // the disk per tap, growing by one operation per edit for as long as the writes are
+    // being refused. NOTHING IS FORGOTTEN TO PAY FOR IT: this changes how often the queue
+    // is read, and not by one entry what the queue holds.
+    //
+    // `decodeQueue` is a pure function of the record map - `queueKeyKind`,
+    // `readBatchCached`, `legacyOpId` and the two orderings are all deterministic in it -
+    // so reusing one decode of some bytes in place of another decode of the same bytes is
+    // not a claim about anything.
+    //
+    // Unbounded on purpose, unlike BATCH_CACHE above: it holds exactly one decode of one
+    // disk, and a disk is bounded by the browser's own quota. A ceiling here would mean
+    // the deepest queues - the only ones this is for - were the ones it stopped helping.
+    decodedQueue() {
+        const records = this.durableQueueRecords();
+        const cached = this._queueCache;
+        if (cached && sameQueueRecords(cached.records, records)) return cached.decoded;
+        const decoded = decodeQueue(records);
+        this._queueCache = { records, decoded };
+        return decoded;
+    },
 
+    // The operations out of a decode, held aside first and copied on the way out.
+    //
+    // COPIED, and that is not a detail. `decodeQueue` clones each value out of the parse
+    // cache because a value that reaches State is a value ordinary app code edits in place
+    // before it commits anything; a cached decode handed straight to two callers would put
+    // that guarantee back exactly where it was. So the cached operations never leave: each
+    // call gets its own shallow copy of every operation, its own clone of the value, and
+    // its own copy of `after`. Measured at six hundred operations that is 0.4ms against
+    // the 4ms it replaces.
+    operationsFrom(decoded) {
         // A record that will not read is held, not skipped. The mark of a slot is
         // handled by loadOutbox, which has to decide where recording continues; a BATCH
-        // is quarantined here, because nothing else reads one.
+        // is quarantined here, because nothing else reads one. Asked on every call, not
+        // once per decode: what this reports about a damaged record must not depend on
+        // whether the bytes beside it happened to move.
         decoded.unreadable.forEach(key => {
             if (slotIndexOf(key) !== -1) return;
             console.error('Queued batch does not read as one, holding it:', key);
@@ -1316,7 +1435,10 @@ const FarkadSync = {
                 `קבוצת עריכות בתור השליחה לא נקראה: ${key}.`);
         });
 
-        return decoded.operations;
+        return decoded.operations.map(op => Object.assign({}, op, {
+            value: cloneValue(op.value),
+            after: (op.after || []).slice()
+        }));
     },
 
     // Every key this queue is written across, on THIS device, across every slot.
@@ -1396,6 +1518,18 @@ const FarkadSync = {
 
         // What is live for each path RIGHT NOW, read off the disk. Naming them is what
         // makes this batch later than them - by record rather than by clock.
+        //
+        // TWO READINGS, DELIBERATELY, and collapsing them into one is a change to
+        // something other than speed. The gap between them is the window in which the
+        // other tab's write lands unseen by this one, so that neither names the other and
+        // the two are GENUINELY concurrent - which is the state A1 and C1-C5 are about,
+        // and both suites open their races on the second of these two reads
+        // (`twoTabsRace`, tests/adversarial.test.mjs and tests/concurrency.test.mjs).
+        // Narrowing that window narrows the only case where the projection has to decide
+        // between two operations by rule rather than by record, and this file is not the
+        // place to make a race rarer instead of correct. It costs a re-read of the disk,
+        // which is what it was always for; the decode behind it is shared - see
+        // decodedQueue.
         const live = this.projectedQueue();
         const all = this.physicalOperations();
         const bySameId = new Map();
@@ -1695,8 +1829,12 @@ const FarkadSync = {
         if (!this._activeKey || this.replaceHeld) return true;
         if (farkadWritesBlocked()) return true;
 
-        const all = this.physicalOperations();
-        const decodedUnreadable = decodeQueue(this.durableQueueRecords()).unreadable.length > 0;
+        // One reading of the disk, two questions of it: what this device holds, and
+        // whether anything on it would not read. They were two readings and two decodes,
+        // which is the one arrangement where the answers can be about different disks.
+        const decoded = this.decodedQueue();
+        const all = this.operationsFrom(decoded);
+        const decodedUnreadable = decoded.unreadable.length > 0;
         const present = new Set(all.map(op => op.opId));
         const superseded = new Set();
         all.forEach(op => (op.after || []).forEach(id => superseded.add(String(id))));
@@ -1739,19 +1877,32 @@ const FarkadSync = {
             whole = false;
         });
 
-        // A winner may only go once everything it beat has been retired, and once
-        // everything it superseded by name has gone. Both are the same rule seen twice:
-        // never remove the record that is keeping an older value out of the way.
-        const beatenBy = new Map();
-        all.forEach(op => {
-            if (op.retired || retired.has(op.opId)) {
-                const winner = current.get(op.path);
-                if (winner) beatenBy.set(op.opId, winner.opId);
-            }
-        });
+        // A winner may only go once everything it beat is GONE, and once everything it
+        // superseded by name has gone. Both are the same rule seen twice: never remove
+        // the record that is keeping an older value out of the way.
+        //
+        // EVERY LOSER THAT IS STILL READABLE, retired or not - and the "or not" is the
+        // whole of this. It used to be built from the retired ones alone: a loser whose
+        // retirement the disk had just refused was not in the set, so its winner owed
+        // nothing and was collected in the same pass that had failed to write the one
+        // record keeping that loser defeated. The loser was then the only operation left
+        // for its path, became current at the next projection, went to the cloud, and
+        // replaced the value it had lost to. The paragraph above the retirement pass says
+        // the winner stays in exactly this case; it was the only thing that did not.
+        //
+        // Measured in tests/races.tabs.test.mjs, R14: two tabs racing one day, the disk
+        // refusing the retirement, and the beaten value current again on the next reopen -
+        // on a device whose only sign of trouble was a pass that returned false.
+        //
+        // Superseded-by-name is deliberately not counted here: the batch check below owes
+        // on `after` directly, which is the same guarantee written where that relationship
+        // lives.
         const owedRetirements = new Set();
-        beatenBy.forEach((winnerId, loserId) => {
-            if (present.has(loserId)) owedRetirements.add(winnerId);
+        all.forEach(op => {
+            if (superseded.has(op.opId)) return;
+            const winner = current.get(op.path);
+            if (!winner || winner.opId === op.opId) return;
+            owedRetirements.add(winner.opId);
         });
 
         const byBatch = new Map();
@@ -2253,10 +2404,16 @@ const FarkadSync = {
                 fromList(parts[0], value);
                 return;
             }
-            if (parts[0] === 'roster' && parts.length === 3
+            if (parts[0] === 'roster' && (parts.length === 3 || parts.length === 4)
                 && (parts[1] === 'workers' || parts[1] === 'places')) {
                 // The tombstone too. A null names the id just as loudly as a record does,
                 // and it is the write that tells the other phones he existed.
+                //
+                // And one FIELD of him names him just as loudly again - four segments,
+                // the ordinary shape of a roster edit since v104. Missing it here would
+                // let a man leave this device with no record that he ever did, and the
+                // permanent-deletion offer reads exactly that record: he would be offered
+                // for deletion as though he had never been anywhere but here.
                 found[parts[1]].add(String(parts[2]));
                 return;
             }

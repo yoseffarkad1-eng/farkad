@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v105">
+<meta name="farkad-build" content="v116">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -124,15 +124,32 @@
 
     <p class="storage-notice" id="storageNotice" role="status" aria-live="polite">הנתונים נשמרים במכשיר הזה בלבד.</p>
 
+    <!-- What the day screen's progress line SAYS, announced from a node that survives
+         the render that redraws it. The line itself is built from scratch every time -
+         renderProgress fills it and only then inserts it - so a live region on it was a
+         different node each render, which is the same mistake the note above #reorderLive
+         describes and the reason that panel's region lives outside its list. js/ui/day.js
+         reads the words off the line rather than composing them again, so the announced
+         sentence and the drawn one cannot drift apart. Out here, not inside #dayView:
+         renderDay empties that section on every render. -->
+    <div class="day-live" id="dayLive" role="status" aria-live="polite"></div>
+
     <!-- The side drawer of days: every working day of the account period, by full name,
          one tap away - and costing the main screen nothing until the ☰ is pressed. -->
     <div class="drawer-backdrop" id="dayDrawerBack" onclick="closeDayDrawer()"></div>
     <!-- The clip box: a fixed, overflow-hidden viewport layer, so the parked panel can
          never widen the document - the exact bug the page-width tests exist to stop. -->
     <div class="drawer-wrap" id="dayDrawerWrap">
-    <aside class="day-drawer" id="dayDrawer" aria-label="בחירת יום">
+    <!-- role="dialog" and aria-modal, because that is what it is: a backdrop over the
+         whole screen and one way out. It used to be an <aside> with a label, which makes
+         it a permanent landmark that comes and goes - a reader is told there is a
+         "בחירת יום" region on every screen and never told it has arrived in one.
+         The label itself does not move: it is the name announced, and it was argued over.
+         The heading takes an id and tabindex="-1" so focus can enter at it, exactly as
+         #settingsTitle and #reorderTitle do. -->
+    <aside class="day-drawer" id="dayDrawer" role="dialog" aria-modal="true" aria-label="בחירת יום">
         <div class="drawer-head">
-            <h3>לאיזה יום?</h3>
+            <h3 id="dayDrawerTitle" tabindex="-1">לאיזה יום?</h3>
             <button type="button" class="btn-icon" onclick="closeDayDrawer()" aria-label="סגור">✕</button>
         </div>
         <div id="dayDrawerList"></div>
@@ -418,6 +435,21 @@
             <input dir="ltr" id="workerFormHourly" inputmode="decimal" placeholder="שכר לשעה נוספת" type="number" min="0" step="1"/>
         </details>
         <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום. שינוי שכר חל מהיום והלאה - ימים שכבר נרשמו שומרים את השכר שהיה בזמן הרישום.</p>
+        <!-- HOW OFTEN THIS MAN IS SETTLED. Two controls, never one: a cycle with no date
+             is not in force, because a change that took effect "always" would re-cut
+             fortnights he has already been paid for. The date is a Friday - both cycles
+             open on one - and the line under them says, before anything is saved, which
+             days the change moves and what it leaves behind. -->
+        <label class="field-label" for="workerFormCycle">כל כמה זמן משלמים?</label>
+        <select id="workerFormCycle" onchange="workerCycleTyped()">
+            <option value="">בחר: כל שבוע או כל שבועיים</option>
+            <option value="biweekly">כל שבועיים</option>
+            <option value="weekly">כל שבוע</option>
+        </select>
+        <label class="field-label" for="workerFormCycleFrom">מתאריך (יום שישי)</label>
+        <input dir="ltr" id="workerFormCycleFrom" type="date" onchange="workerCycleTyped()"/>
+        <p class="hint" id="workerFormCycleHint"></p>
+        <p class="hint" id="workerFormCycleHistory"></p>
         <div class="modal-actions">
             <button type="button" onclick="saveWorkerForm()">שמור</button>
             <button type="button" class="btn-secondary" onclick="closeWorkerForm()">ביטול</button>

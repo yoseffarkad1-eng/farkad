@@ -32,32 +32,47 @@
 
 import { existsSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
+import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
 
-// The repository, found rather than spelled: this file runs from inside tests/ and from a
-// scratch directory beside the checkout, so nothing here names a path. It walks up from
-// itself, then up from wherever it was started, and takes the first directory that holds
-// tests/harness.mjs. FARKAD_ROOT overrides.
+// The repository, found rather than spelled: this file runs from inside tests/, so it
+// climbs from its OWN location and takes the first directory holding tests/harness.mjs.
+//
+// IT NO LONGER CLIMBS FROM THE WORKING DIRECTORY. That second climb could only ever win
+// if the climb from this file failed, which cannot happen - this file IS in tests/ - so
+// it was unreachable in the ordinary case and a hazard in every other: run from inside
+// some other checkout, it was one missing file away from silently gating a tree nobody
+// asked about. A suite must not be able to choose its bytes by where somebody stood.
+//
+// AND THE OVERRIDE IS THE ONE THE REST OF THE REPOSITORY USES. This file used to take
+// FARKAD_ROOT: a second name for re-rooting that tests/treecheck.mjs had never heard of,
+// pointing this suite at any tree at all with nothing checking it was the commit being
+// reported on - the exact escape treecheck exists to close, written where the rule that
+// bans it (tests/isolation.test.mjs, which knows FARKAD_REPO and FARKAD_EXPECT_SHA) could
+// not see the name. So the seam is FARKAD_REPO now, and it must name its commit.
 function findRoot() {
-    const seen = [];
-    const climb = start => {
-        let at = start;
-        for (;;) {
-            seen.push(at);
-            const up = dirname(at);
-            if (up === at) return;
-            at = up;
+    let at = dirname(fileURLToPath(import.meta.url));
+    for (;;) {
+        if (existsSync(join(at, 'tests', 'harness.mjs'))) return at;
+        const up = dirname(at);
+        if (up === at) {
+            throw new Error('cannot find the farkad checkout from ' + import.meta.url);
         }
-    };
-    if (process.env.FARKAD_ROOT) seen.push(resolve(process.env.FARKAD_ROOT));
-    climb(dirname(fileURLToPath(import.meta.url)));
-    climb(resolve(process.cwd()));
-    const found = seen.find(dir => existsSync(join(dir, 'tests', 'harness.mjs')));
-    if (!found) throw new Error('cannot find the farkad checkout: set FARKAD_ROOT');
-    return found;
+        at = up;
+    }
 }
 
-const TESTS = join(findRoot(), 'tests');
+const chosen = rootFromEnv(findRoot());
+const refusal = refuseUnlessVerified(chosen.root, chosen.overridden, chosen.expect);
+if (refusal) {
+    // Not a failed check - a setup that cannot be trusted to be about anything. A suite
+    // that went on from here would count its checks against an unknown tree and report
+    // them as if they were about the commit in hand.
+    console.error(refusal);
+    process.exit(1);
+}
+
+const TESTS = join(chosen.root, 'tests');
 const from = name => pathToFileURL(join(TESTS, name)).href;
 
 const { makeDevice, makeCloud, settle, sharedStore, deferred } = await import(from('harness.mjs'));

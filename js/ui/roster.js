@@ -49,7 +49,8 @@ function renderWorkerList() {
     if (!container) return;
     // Whether the archive fold was open before this redraw. A restore renders, and a
     // person putting two men back should not have to reopen the fold between them.
-    const archiveWasOpen = Boolean(container.querySelector('.roster-archive[open]'));
+    const previousFold = container.querySelector('.roster-archive');
+    const archiveWasOpen = !previousFold || previousFold.open;
     clear(container);
 
     if (State.schedule.workers.length === 0) {
@@ -61,7 +62,7 @@ function renderWorkerList() {
     const archived = State.schedule.workers.filter(worker => worker.active === false);
 
     if (active.length === 0) {
-        container.appendChild(emptyHint('כל העובדים בארכיון.'));
+        container.appendChild(emptyHint('כל העובדים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.'));
     }
     active.forEach(worker => container.appendChild(workerRow(worker)));
 
@@ -96,8 +97,8 @@ function renderWorkerList() {
     });
     const owing = archived.filter(worker => advanceTotals.has(worker.id)).length;
     const summary = el('summary', null, owing === 0
-        ? `ארכיון עובדים (${archived.length})`
-        : `ארכיון עובדים (${archived.length}) · ` +
+        ? `עובדים כבויים (${archived.length})`
+        : `עובדים כבויים (${archived.length}) · ` +
             (owing === 1 ? 'לאחד מהם יש מקדמה רשומה' : `ל-${owing} מהם יש מקדמות רשומות`));
     box.appendChild(summary);
     archived.forEach(worker => box.appendChild(workerRow(worker, advanceTotals)));
@@ -170,18 +171,16 @@ function workerRow(worker, archiveAdvances) {
     // place in that order, and an arrow that lifted one out of the archive and back into
     // the crew would be a very quiet way to put somebody back to work.
 
-    // No archive icon here any more. Beside every name it was one mis-tap away from
-    // taking a man off the daily screen mid-evening, and the pencil next to it opens
-    // the screen where the same thing can be done deliberately, with his name on it.
-    //
-    // Restore is the one row action, and only on archived rows - see the note at the top
-    // of this file. Not a fork of the flow: the same setWorkerArchived the form button
-    // calls, four rounds of name and phone re-checks included.
-    if (worker.active === false) {
-        actions.appendChild(button('↩️ החזרה', 'btn-secondary roster-restore',
-            () => setWorkerArchived(worker.id, false),
-            `החזר את ${isolate(worker.name)} לעבודה`));
-    }
+    // A reversible visibility switch; the existing active field syncs with old phones.
+    // Turning a worker off never removes his days, pay, advances or identity.
+    const enabled = worker.active !== false;
+    const toggle = button(enabled ? 'פעיל' : 'כבוי',
+        'worker-active-toggle' + (enabled ? ' is-active' : ' roster-restore'),
+        () => setWorkerArchived(worker.id, enabled, true),
+        `${enabled ? 'הסתר זמנית את' : 'הפעל את'} ${isolate(worker.name)}`);
+    toggle.setAttribute('role', 'switch');
+    toggle.setAttribute('aria-checked', String(enabled));
+    actions.appendChild(toggle);
     actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
     row.appendChild(actions);
 
@@ -241,7 +240,22 @@ function openReorder() {
 function closeReorder() {
     reorderDraft = null;
     reorderBase = null;
-    reorderHeld = null;
+    // A drag still in the air when the mode closes. Escape under a held finger, a tab
+    // tapped mid-sort, the foot's own «יציאה בלי לשמור» - three doors that all end
+    // here, and none of them ends at a pointerup. This used to clear the draft and walk
+    // away from the rest: reorderDragging stayed non-null, its 16ms autoscroll interval
+    // went on ticking on a list nobody can see, and three document listeners stayed
+    // attached. The leak is not the harm; the NEXT open of the panel is - the foot reads
+    // reorderDragging to decide whether the save button may be pressed, so it opened
+    // disabled. That is exactly the failure the comment in startReorderDrag was written
+    // about, reached through a door it does not cover.
+    //
+    // endReorderDrag IS the teardown, so it is the teardown here too rather than a
+    // second copy of it that can drift. Called after the draft is cleared, so the
+    // renderReorderList at the end of it takes its null branch instead of drawing a list
+    // this function is closing; it is safe with no drag in flight, where every line of it
+    // is a no-op.
+    endReorderDrag();
     const line = document.getElementById('reorderLive');
     if (line) line.textContent = '';
     document.removeEventListener('keydown', reorderKeydown);
@@ -552,7 +566,10 @@ function startReorderDrag(event, workerId) {
 
     event.preventDefault();
     reorderHeld = workerId;
-    reorderDragging = { workerId, scrolling: null };
+    // `step` is how far each autoscroll tick moves the list, and which way; it is
+    // held here rather than closed over, so a finger that crosses to the other band
+    // turns the scroll around. See autoScrollWhileDragging.
+    reorderDragging = { workerId, scrolling: null, step: 0 };
     // The edge bands appear only while a row is actually in the air - painted, they say
     // where holding the row will scroll, and gone the moment the finger lets go.
     if (document.body && document.body.classList) document.body.classList.add('reorder-dragging');
@@ -607,8 +624,27 @@ function autoScrollWhileDragging(clientY) {
         }
         return;
     }
-    if (!reorderDragging || reorderDragging.scrolling) return;
-    reorderDragging.scrolling = setInterval(() => { box.scrollTop += step; }, 16);
+    if (!reorderDragging) return;
+
+    // THE DIRECTION IS READ AT EVERY TICK, not captured when the interval was made.
+    //
+    // It used to close over `step`, and the guard below returns early whenever an
+    // interval is already running - so the direction was decided by the first sample
+    // that landed in a band and never revised. A finger going from the top band to the
+    // bottom one with no sample in the dead zone between them left the list running UP
+    // while it was being held against the bottom edge, and only a sample in the middle
+    // could stop it. That is not an exotic path: pointermove is delivered once a frame
+    // at best and the browser coalesces the rest, so a flick down the length of the
+    // panel IS two samples - and on a panel shorter than the two 90px bands there is no
+    // dead zone to land in at all.
+    reorderDragging.step = step;
+    if (reorderDragging.scrolling) return;
+    reorderDragging.scrolling = setInterval(() => {
+        // The drag can end between two ticks; the teardown clears this interval, but a
+        // tick already queued must not scroll a list that nobody is holding.
+        if (!reorderDragging) return;
+        box.scrollTop += reorderDragging.step;
+    }, 16);
 }
 
 function endReorderDrag() {
@@ -884,6 +920,15 @@ function showAddWorkerModal() {
     document.getElementById('workerFormDaily').value = '';
     document.getElementById('workerFormHourly').value = '';
     document.getElementById('workerFormError').textContent = '';
+    // A fresh form must not inherit a previous worker's unsaved cycle choice.
+    document.getElementById('workerFormCycle').value = '';
+    const friday = parseLocalDate(todayStr());
+    friday.setDate(friday.getDate() - ((friday.getDay() + 2) % 7));
+    document.getElementById('workerFormCycleFrom').value = toLocalDateStr(friday);
+    const choice = (document.getElementById('workerFormCycle').options || [])[0];
+    if (choice) choice.textContent = 'בחר: כל שבוע או כל שבועיים';
+    renderWorkerCycleHistory(null);
+    workerCycleTyped();
     workerPhoneTyped();
     renderWorkerFormActions();
     document.getElementById('workerFormModal').style.display = 'flex';
@@ -900,6 +945,14 @@ function editWorker(workerId) {
     document.getElementById('workerFormPhone').value = worker.phone || '';
     document.getElementById('workerFormDaily').value = worker.dailyRate || '';
     document.getElementById('workerFormHourly').value = worker.hourlyRate || '';
+    // The two inputs ADD a boundary; they never hold the whole answer. What the man's
+    // record already says is shown beneath them, read-only - a change to how somebody is
+    // paid is a new fact about the future, not an edit of the past.
+    document.getElementById('workerFormCycle').value = '';
+    const choice = (document.getElementById('workerFormCycle').options || [])[0];
+    if (choice) choice.textContent = 'ללא שינוי במחזור התשלום';
+    document.getElementById('workerFormCycleFrom').value = '';
+    renderWorkerCycleHistory(worker);
     document.getElementById('workerFormError').textContent = '';
     // Folded details that hold data would look like data that was lost.
     document.getElementById('workerFormMore').open =
@@ -990,6 +1043,45 @@ async function saveWorkerForm() {
             return;
         }
 
+        // Re-read the choice and current history after every awaited confirmation.
+        const addCycle = document.getElementById('workerFormCycle').value;
+        const addFrom = document.getElementById('workerFormCycleFrom').value;
+        if (!editingWorkerId && !addCycle) {
+            problem.textContent = 'בחר כל כמה זמן משלמים לעובד: כל שבוע או כל שבועיים.';
+            document.getElementById('workerFormCycle').focus();
+            return;
+        }
+        if (addCycle && !addFrom) {
+            problem.textContent = 'בחר מאיזה יום שישי מתחיל המחזור החדש.';
+            document.getElementById('workerFormCycleFrom').focus();
+            return;
+        }
+        if (addFrom && !addCycle) {
+            problem.textContent = 'בחר מחזור תשלום, או נקה את התאריך.';
+            document.getElementById('workerFormCycle').focus();
+            return;
+        }
+        if (addCycle && !isPayCycle(addCycle)) {
+            problem.textContent = 'בחר מחזור תשלום שבועי או כל שבועיים.';
+            document.getElementById('workerFormCycle').focus();
+            return;
+        }
+        if (addFrom && typeof isWeekStart === 'function' && !isWeekStart(addFrom)) {
+            problem.textContent = 'מחזור התשלום מתחיל ביום שישי. בחר יום שישי.';
+            document.getElementById('workerFormCycleFrom').focus();
+            return;
+        }
+        let nextCycles = null;
+        if (addCycle && addFrom) {
+            const refusal = payCycleAddProblem(editingWorkerId, addFrom, addCycle);
+            if (refusal) {
+                problem.textContent = refusal;
+                document.getElementById('workerFormCycleFrom').focus();
+                return;
+            }
+            nextCycles = payCyclesWith(editingWorkerId, addFrom, addCycle);
+        }
+
         const clash = State.schedule.workers.find(worker =>
             worker.id !== editingWorkerId && worker.active !== false
             && worker.name === typed.name);
@@ -1044,12 +1136,17 @@ async function saveWorkerForm() {
             if (!worker) continue;
             const before = {
                 name: worker.name, idNumber: worker.idNumber, phone: worker.phone,
-                dailyRate: worker.dailyRate, hourlyRate: worker.hourlyRate
+                dailyRate: worker.dailyRate, hourlyRate: worker.hourlyRate,
+                payCycles: worker.payCycles
             };
             undo = () => Object.assign(worker, before);
             Object.assign(worker, typed);
+            // Appended, not replaced: the boundaries already on his record are what makes
+            // a closure written under an older cycle still accountable for.
+            if (nextCycles !== null) worker.payCycles = nextCycles;
         } else {
             const added = Object.assign({ id: State.nextWorkerId(), active: true }, typed);
+            if (nextCycles !== null) added.payCycles = nextCycles;
             State.schedule.workers.push(added);
             undo = () => {
                 State.schedule.workers = State.schedule.workers.filter(item => item !== added);
@@ -1176,7 +1273,7 @@ function renderWorkerFormActions() {
 
     const blocked = deletionBlockers(worker.id);
 
-    box.appendChild(button('🗄️ העבר לארכיון', 'btn-secondary',
+    box.appendChild(button('כבה עובד זמנית', 'btn-secondary',
         () => setWorkerArchived(worker.id, true)));
 
     // Deleting is offered only when nothing anywhere names him and nowhere else has ever
@@ -1260,14 +1357,14 @@ function workerMovedAway() {
 // replaces State.schedule outright - so the worker captured before the question was
 // asked can be an object no longer in the list, and writing to it changes nothing that
 // is on screen while every line here reports success.
-async function setWorkerArchived(workerId, archived) {
+async function setWorkerArchived(workerId, archived, quickToggle = false) {
     const before = State.worker(workerId);
     if (!before) return;
 
-    if (archived) {
+    if (archived && !quickToggle) {
         const owed = openAdvanceBalance(State.schedule, workerId);
         const go = await askConfirm({
-            title: `להעביר את ${before.name} לארכיון?`,
+            title: `להסתיר זמנית את ${before.name}?`,
             message: 'הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.'
                 // What the record actually says, and nothing beyond it. It used to read
                 // "שטרם קוזזו" - not yet deducted - and the schema has no such state:
@@ -1275,7 +1372,7 @@ async function setWorkerArchived(workerId, archived) {
                 // paid, open or settled. The sentence was inventing a fact about
                 // somebody's money in the one dialog people read carefully.
                 + (owed ? `\n\nרשומות לו ${owed.count} מקדמות בסך ${Math.round(owed.total)} ₪.` : ''),
-            ok: 'לארכיון'
+            ok: 'כבה עובד'
         });
         if (!go) return;
     }
@@ -1364,7 +1461,7 @@ async function setWorkerArchived(workerId, archived) {
             await askTell({
                 title: 'לא הוחזר לעבודה',
                 message: 'הצוות משתנה כרגע ממכשיר אחר, ולכן לא הצלחנו לבדוק התנגשויות. ' +
-                    'נסה שוב בעוד רגע - הוא נשאר בארכיון, וכל הימים והמקדמות שלו שמורים.'
+                    'נסה שוב בעוד רגע - הוא נשאר כבוי, וכל הימים והמקדמות שלו שמורים.'
             });
             return;
         }
@@ -1514,7 +1611,7 @@ async function togglePlaceActive(placeId) {
         const yes = await askConfirm({
             title: `להעביר את ${isolate(place.name)} לארכיון?`,
             message: 'הימים שכבר נרשמו יישמרו, והאתר לא יופיע ברשימת האתרים.',
-            ok: 'לארכיון'
+            ok: 'כבה עובד'
         });
         if (!yes) return;
     }
@@ -1522,4 +1619,145 @@ async function togglePlaceActive(placeId) {
     place.active = place.active === false;
     State.commitRoster();
     render();
+}
+
+
+// WHAT THE CHANGE WILL DO, said before it is saved and not after.
+//
+// A cycle change is the one roster edit that moves money without touching a wage: it
+// decides which days are settled together, so it decides which payday a man's days land
+// on and which advance comes off which wage. The person making it is entitled to see the
+// period it opens and the stub it leaves behind BEFORE they press save.
+//
+// It never says a past week was paid. Nothing here knows that, and guessing would be the
+// one sentence on this screen that could cost somebody real money.
+function workerCycleTyped() {
+    const hint = document.getElementById('workerFormCycleHint');
+    if (!hint) return;
+    const cycle = document.getElementById('workerFormCycle').value;
+    const from = document.getElementById('workerFormCycleFrom').value;
+
+    if (!editingWorkerId && !cycle) {
+        hint.textContent = 'כל כמה זמן משלמים לעובד? בחר כל שבוע או כל שבועיים. התקופה מתחילה ביום שישי.';
+        return;
+    }
+    if (!cycle && !from) {
+        hint.textContent = 'בלי שינוי - העובד ממשיך כמו שהוא רשום עכשיו.';
+        return;
+    }
+    if (cycle && !from) {
+        hint.textContent = 'בחר יום שישי שממנו המחזור החדש מתחיל. עד אז שום דבר לא משתנה.';
+        return;
+    }
+    if (from && typeof isWeekStart === 'function' && !isWeekStart(from)) {
+        hint.textContent = 'התאריך הזה אינו יום שישי. שני המחזורים נפתחים ביום שישי.';
+        return;
+    }
+    if (!cycle) {
+        hint.textContent = 'בחר מחזור תשלום, או נקה את התאריך.';
+        return;
+    }
+
+    const refusal = payCycleAddProblem(editingWorkerId, from, cycle);
+    if (refusal) { hint.textContent = refusal; return; }
+
+    const proposed = { payCycles: payCyclesWith(editingWorkerId, from, cycle) };
+    const opens = typeof periodRangeFor === 'function'
+        ? periodRangeFor(proposed, from) : null;
+    const stub = typeof periodRangeFor === 'function'
+        ? periodRangeFor(proposed, shiftDate(from, -1)) : null;
+
+    const said = [];
+    if (opens) said.push(`התקופה הראשונה במחזור החדש: ${opens.from} עד ${opens.to}.`);
+    if (stub && stub.transition) {
+        said.push(`לפניה נשארת תקופת מעבר ${stub.from} עד ${stub.to} - הימים מהמחזור `
+            + 'הקודם שעדיין לא נסגרו. היא מדווחת בנפרד.');
+    }
+    said.push('תקופות שכבר נסגרו לא משתנות, ושום תשלום לא נוצר מכאן.');
+    hint.textContent = said.join(' ');
+}
+
+// What his record already says, in the order it says it. Read-only, because a boundary
+// that has already governed a payday is not something to edit in place.
+function renderWorkerCycleHistory(worker) {
+    const box = document.getElementById('workerFormCycleHistory');
+    if (!box) return;
+    if (!worker) { box.textContent = ''; return; }
+    const history = typeof payCycleHistory === 'function' ? payCycleHistory(worker) : [];
+    if (history === null) {
+        box.textContent = 'רשום כאן מחזור תשלום שהאפליקציה לא מצליחה לקרוא. '
+            + 'הרישום נשמר כמו שהוא ולא נמחק - העובד מחושב בינתיים כל שבועיים.';
+        return;
+    }
+    if (history.length === 0) {
+        box.textContent = 'כרגע: כל שבועיים (ברירת מחדל).';
+        return;
+    }
+    box.textContent = 'רשום: ' + history
+        .map(entry => `מ-${entry.from} ${PAY_CYCLE_NAMES[entry.cycle] || entry.cycle}`)
+        .join(' · ');
+}
+
+const PAY_CYCLE_NAMES = { weekly: 'שבועי', biweekly: 'דו־שבועי' };
+
+// The history this man would have with one more boundary on it.
+function payCyclesWith(workerId, from, cycle) {
+    const worker = workerId ? State.worker(workerId) : null;
+    const history = (typeof payCycleHistory === 'function' ? payCycleHistory(worker) : [])
+        || [];
+    // An existing boundary is history, not a setting to overwrite.
+    // payCycleAddProblem explains a different choice for this same Friday.
+    if (history.some(entry => entry.from === from)) return formatPayCycles(history);
+    return formatPayCycles(history.concat([{ from, cycle }]));
+}
+
+// WHY A BOUNDARY CAN BE REFUSED, in the person's own words.
+//
+// A change that lands on or before a period this man has already been settled over would
+// re-cut a fortnight somebody was paid from - and a closure is «סופית» by design, so the
+// re-cut would not even move the frozen payslip, it would just make the record disagree
+// with itself for ever. Refused rather than adjusted: which period is the right one to
+// settle him on is a decision about a person.
+//
+// A history this build cannot read is refused too. Appending to something nobody can
+// parse would write a second unreadable record over the first.
+function payCycleAddProblem(workerId, from, cycle) {
+    const worker = workerId ? State.worker(workerId) : null;
+    if (!worker) return '';
+
+    const history = typeof payCycleHistory === 'function' ? payCycleHistory(worker) : [];
+    if (history === null) {
+        return 'רשום כאן מחזור תשלום שאי אפשר לקרוא, ולכן אי אפשר להוסיף עליו. '
+            + 'ייצא גיבוי ופנה לתמיכה לפני שינוי.';
+    }
+
+    const existing = history.find(entry => entry.from === from);
+    if (existing && cycle && existing.cycle !== cycle) {
+        return `כבר רשום מחזור אחר מ-${from}. ההיסטוריה לא הוחלפה; `
+            + 'הבחירה שלך נשארה בטופס. בדוק את הרישום ובחר תאריך שינוי חדש.';
+    }
+
+    if (typeof closedPeriods !== 'function') return '';
+    const closed = closedPeriods(State.schedule, workerId) || {};
+    const clashes = Object.keys(closed).filter(key => {
+        const period = closed[key] || {};
+        const to = period.periodTo === undefined ? key : String(period.periodTo);
+        // The boundary opens a new period ON `from`, so it re-cuts anything still running
+        // on that day or later.
+        return to >= from;
+    }).sort();
+    if (clashes.length > 0) {
+        return `לעובד הזה כבר נסגרה תקופה שמגיעה עד ${from} או אחריו `
+            + `(${clashes[0]}). שינוי מחזור מאותו תאריך היה מחלק מחדש ימים ששולמו - `
+            + 'בחר יום שישי אחרי התקופה הסגורה האחרונה.';
+    }
+    return '';
+}
+
+// One day either side of a date string, without going through the report's own helpers -
+// this runs while somebody is typing into a form and must not depend on a report range.
+function shiftDate(value, days) {
+    const day = parseLocalDate(value);
+    day.setDate(day.getDate() + days);
+    return toLocalDateStr(day);
 }

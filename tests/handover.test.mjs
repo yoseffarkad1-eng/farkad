@@ -1,3 +1,4 @@
+import { launchLocalBrowser } from './network-guard.mjs';
 // The v86 -> v87 handover, driven between two REAL trees.
 //
 //   npm run test:handover
@@ -252,7 +253,7 @@ function origin() {
 
 const server = await origin();
 const BASE = server.url;
-const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
+const browser = await launchLocalBrowser(chromium, EXEC ? { executablePath: EXEC } : {});
 
 async function openPhone() {
     const ctx = await browser.newContext();

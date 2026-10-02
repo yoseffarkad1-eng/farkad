@@ -1,3 +1,4 @@
+import { launchLocalBrowser } from './network-guard.mjs';
 // The durable client-to-build record, and every way it fails OPEN.
 //
 //   node swfailclosed.test.mjs
@@ -304,7 +305,7 @@ function origin() {
 
 const server = await origin();
 const BASE = server.url;
-const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
+const browser = await launchLocalBrowser(chromium, EXEC ? { executablePath: EXEC } : {});
 const browserCdp = await browser.newBrowserCDPSession();
 
 // ---------------------------------------------------------------- the instruments

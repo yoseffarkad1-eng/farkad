@@ -691,6 +691,52 @@ function rebuild(device, payload) {
         JSON.stringify(reopened.State.migrationIssues));
 }
 
+{
+    suite('R6: a question that will not parse is not read as "there were none"');
+
+    // Law 10, on the one record family that had no answer to it at all.
+    //
+    // parseIssuesRecord answered { issues: [], found: false } for bytes it could not
+    // parse - the same answer it gives for a key that is not there. No console line, no
+    // copy, no report, no hold; the migration screen drew "nothing left to decide", and
+    // the next writeIssues put an empty list over the only place those questions existed.
+    //
+    // They are not derivable from the schedule beside them. js/recovery.js says it in its
+    // own words: a question about somebody's day that is still waiting for a person.
+    const phone = makeDevice({ deviceId: 'd_questions' });
+    seed(phone);
+    phone.putRaw('scheduleData:migrationIssues',
+        '{"issues":[{"kind":"unknown-place","value":"MARCH-CELL-NOBODY-ANSWERED"');
+    given('the questions on the disk will not parse',
+        String(phone.raw('scheduleData:migrationIssues')).indexOf('MARCH-CELL') !== -1);
+
+    const reopened = makeDevice({ storage: phone.dump(), deviceId: 'd_questions' });
+    reopened.State.load();
+
+    check('the damage is reported, not read as an empty list',
+        reopened.global('Recovery').problems
+            .some(problem => problem.key === 'scheduleData:migrationIssues'),
+        JSON.stringify(reopened.global('Recovery').problems.map(problem => problem.key)));
+    check('a copy is put aside under its own name',
+        Object.keys(reopened.dump())
+            .some(key => key.indexOf('scheduleData:migrationIssues:damaged') === 0),
+        JSON.stringify(Object.keys(reopened.dump())
+            .filter(key => key.indexOf('migrationIssues') !== -1)));
+    check('and the device is held until somebody has been told',
+        reopened.call('farkadWritesBlocked') === true);
+
+    const wrote = reopened.call('writeIssues', []);
+    check('an empty list is refused rather than written over them',
+        wrote === false, String(wrote));
+    check('and the March cell is still on the device',
+        Object.keys(reopened.dump()).some(key =>
+            String(reopened.dump()[key]).indexOf('MARCH-CELL-NOBODY-ANSWERED') !== -1),
+        String(reopened.raw('scheduleData:migrationIssues')).slice(0, 60));
+    check('so the rescue file has something to carry',
+        JSON.stringify(reopened.global('Recovery').rawRecords())
+            .indexOf('MARCH-CELL-NOBODY-ANSWERED') !== -1);
+}
+
 // ================================================================ P1: dormant money
 {
     suite('R7: money the app does not draw is still money, and survives the rescue');

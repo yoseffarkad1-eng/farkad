@@ -1,3 +1,4 @@
+import { launchLocalBrowser } from './network-guard.mjs';
 // A screenshot of one screen at phone size. Not a test - nothing here asserts anything.
 //
 //   node tests/shot.mjs out.png [day|week|roster|reports] [width] [height]
@@ -15,7 +16,7 @@ import { serve } from './serve.mjs';
 const { chromium } = await import('playwright');
 const [out = 'shot.png', view = 'day', w = '390', h = '844'] = process.argv.slice(2);
 const server = await serve(new URL('..', import.meta.url).pathname);
-const browser = await chromium.launch();
+const browser = await launchLocalBrowser(chromium, );
 const ctx = await browser.newContext({
   viewport: { width: Number(w), height: Number(h) },
   deviceScaleFactor: 2,

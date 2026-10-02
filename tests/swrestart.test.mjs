@@ -1,3 +1,4 @@
+import { launchLocalBrowser } from './network-guard.mjs';
 // A service worker process that was restarted, and the windows it no longer recognises.
 //
 //   node tests/swrestart.test.mjs
@@ -242,7 +243,7 @@ function origin() {
 
 const server = await origin();
 const BASE = server.url;
-const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
+const browser = await launchLocalBrowser(chromium, EXEC ? { executablePath: EXEC } : {});
 
 async function newPhone() {
     const ctx = await browser.newContext();

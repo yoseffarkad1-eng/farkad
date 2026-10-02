@@ -277,7 +277,7 @@ const reopen = (device, id) => {
 
     const run = reportsIn(device);
     const sheet = run('payrollSheetRows()');
-    const note = String((sheet.find(line => line[0] === 'דוד') || [])[sheet[0].length - 1]);
+    const note = String((sheet.find(line => line[0] === 'דוד') || [])[sheet[0].indexOf('הערה')]);
     check('and the sheet prints both, and says why they differ',
         note.indexOf('1950') !== -1 && note.indexOf('1550') !== -1
         && note.indexOf('הגיעה תנועה אחרי סגירת התקופה') !== -1, note);
@@ -857,11 +857,11 @@ const reopen = (device, id) => {
     const closer = closed('d_gate_open');
     const disk = closer.dump();
 
-    const shut = makeDevice({ deviceId: 'd_gate_shut', storage: disk });
+    const shut = makeDevice({ deviceId: 'd_gate_shut', storage: disk, flags: {ledgerWrites:false,carryAdvances:false} });
     shut.setToday('2026-08-26');
     shut.ctx.askTell = () => Promise.resolve();
     shut.State.load();
-    given('the shut phone is what a person installs',
+    given('the explicitly modelled older phone keeps both gates shut',
         shut.call('advanceCarryEnabled') === false
             && shut.call('ledgerWritesEnabled') === false,
         JSON.stringify([shut.call('advanceCarryEnabled'), shut.call('ledgerWritesEnabled')]));

@@ -83,6 +83,12 @@ function loaded(options = {}) {
         device.State.schedule, '2026-08-13', 'w_01', 'actual', 'p_01'));
     device.State.schedule.days['2026-08-12'].vehiclesOff = ['v_02'];
     device.State.save({ silent: true });
+    if (options.flags && options.flags.vehicles) {
+        for (const date of ['2026-08-12', '2026-08-13']) {
+            for (const v of device.State.schedule.vehicles.filter(v => v.active !== false))
+                device.State.commit(device.call('setVehicleOut', device.State.schedule, date, v.id, true, ['p_01']));
+        }
+    }
     stubDialogs(device);
     return device;
 }
@@ -337,11 +343,11 @@ async function staged(options = {}) {
         paper.indexOf('רכב') === -1, paper.slice(0, 160));
 
     const sheet = run('payrollSheetRows()');
-    same('the exported pay sheet is the eleven columns and no others', sheet[0],
+    same('the exported pay sheet is the twelve columns and no others', sheet[0],
         ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר',
-            'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']);
-    check('and every row is eleven cells wide',
-        sheet.every(row => row.length === 11), JSON.stringify(sheet[1]));
+            'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה', 'מחזור תשלום']);
+    check('and every row is twelve cells wide',
+        sheet.every(row => row.length === 12), JSON.stringify(sheet[1]));
 
     const bundle = JSON.stringify(run('reportSheets()'));
     check('no sheet in the workbook mentions a vehicle',
@@ -367,10 +373,10 @@ async function staged(options = {}) {
     check('and not one of them has a vehicle column',
         csv.files.every(file => file.text.indexOf('רכב') === -1),
         csv.files.map(f => f.text.split('\r\n')[0]).join(' | ').slice(0, 160));
-    check('the pay sheet CSV opens with the same eleven headings as the screen',
+    check('the pay sheet CSV opens with the same twelve headings as the screen',
         csv.files[0].text.split('\r\n')[0]
             === '﻿"עובד","ימי נוכחות","ימי שכר","מתוכם כפולים","שעות נוספות","נעדר",'
-            + '"שכר יומי","נצבר","מקדמות","לתשלום","הערה"',
+            + '"שכר יומי","נצבר","מקדמות","לתשלום","הערה","מחזור תשלום"',
         csv.files[0].text.split('\r\n')[0]);
 
     // The workbook itself, built by the app's own code with the library standing in for
@@ -533,7 +539,7 @@ async function staged(options = {}) {
     const device = loaded({ flags: { vehicles: true }, deviceId: 'd_open' });
     const s = device.State.schedule;
 
-    same('an ordinary worked evening sends every active vehicle out',
+    same('explicitly registered departures pay each vehicle once',
         device.call('vehiclesOutOn', s, '2026-08-13').map(item => [item.vehicle.id, item.amount]),
         [['v_01', 300], ['v_03', 300]]);
     check('the archived one earns nothing, then or ever',
@@ -549,6 +555,7 @@ async function staged(options = {}) {
     const july = loaded({ flags: { vehicles: true }, deviceId: 'd_july' });
     july.State.commit(july.call('assignPlace',
         july.State.schedule, '2026-07-15', 'w_01', 'actual', 'p_01'));
+    july.State.commit(july.call('setVehicleOut', july.State.schedule, '2026-07-15', 'v_01', true, ['p_01']));
     same('a day in July is paid at the price it was worth in July',
         july.call('vehiclePayFor', july.State.schedule, 'w_01', '2026-07-15', '2026-07-15'),
         { days: 1, amount: 250 });
@@ -570,10 +577,10 @@ async function staged(options = {}) {
         paper.indexOf('ימי רכב') !== -1 && paper.indexOf('שכר רכב') !== -1,
         paper.slice(0, 120));
     const sheet = open.run('payrollSheetRows()');
-    same('and the exported pay sheet grows to thirteen, in their old places', sheet[0],
+    same('and the exported pay sheet grows to fourteen, in their old places', sheet[0],
         ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר',
             'ימי רכב', 'שכר רכב',
-            'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה']);
+            'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה', 'מחזור תשלום']);
     check('the tray is drawn on the day screen again',
         open.run('renderVehicleTray()') !== null);
 
@@ -610,6 +617,10 @@ async function staged(options = {}) {
     ];
     device.State.save({ silent: true });
 
+    for (const date of ['2026-08-12', '2026-08-13']) {
+        device.State.schedule.days[date].vehicleRuns = {};
+        device.State.commit(device.call('setVehicleOut', device.State.schedule, date, 'v_h', true, ['p_01']));
+    }
     const rows = device.call('payrollReport', device.State.schedule, '2026-08-01', '2026-08-31');
     const david = rows.find(row => row.workerId === 'w_01');
     given('the van went out on the two worked days, at 312.50 each',
@@ -624,6 +635,7 @@ async function staged(options = {}) {
 
     const staged1 = await staged({ flags: { vehicles: true }, deviceId: 'd_half_ui' });
     staged1.device.State.schedule.vehicles = device.State.schedule.vehicles;
+    staged1.device.State.schedule.days = JSON.parse(JSON.stringify(device.State.schedule.days));
     staged1.device.State.save({ silent: true });
     staged1.run(`REPORT_RANGE.from = '2026-08-13'; REPORT_RANGE.to = '2026-08-13';`);
     const sheet = staged1.run('payrollSheetRows()');
@@ -632,6 +644,110 @@ async function staged(options = {}) {
     check('the exported vehicle cell carries the agora, like every cell beside it',
         row && Number(row[at]) === 312.5,
         JSON.stringify({ cell: row ? row[at] : null, headers: sheet[0] }));
+}
+
+
+// The revised product contract: no implicit departures, one flat payment per car,
+// dated owner/rate snapshots, several sites, and durable per-entity sync.
+{
+    suite('explicit departures: missing, double day, two sites, two cars, archive and reopen');
+    const d = makeDevice({ flags: { vehicles: true } }); seed(d);
+    const s = d.State.schedule;
+    s.vehicles = fixtureVehicles().filter(v => v.active !== false);
+    s.vehicles[1].ownerId = 'w_01';
+    d.State.save({ silent: true });
+    d.State.commit(d.call('assignPlace', s, '2026-08-13', 'w_01', 'actual', 'p_01'));
+    same('no departure is no money even though a worker attended',
+        d.call('vehiclePayFor', s, 'w_01', '2026-08-13', '2026-08-13'), { days: 0, amount: 0 });
+    s.days['2026-08-13'].actual.w_01.entries[0].rate = d.global('RATE_DOUBLE');
+    const first = d.call('setVehicleOut', s, '2026-08-13', 'v_01', true, ['p_01', 'p_02']);
+    check('two-site departure commits durably', d.State.commit(first));
+    same('two sites and a double day still pay a single daily vehicle rate',
+        d.call('vehiclePayFor', s, 'w_01', '2026-08-13', '2026-08-13'), { days: 1, amount: 300 });
+    check('the sites are retained together', first.value.siteIds.join(',') === 'p_01,p_02');
+    d.State.commit(d.call('setVehicleOut', s, '2026-08-13', 'v_03', true, ['p_01']));
+    same('one owner is paid for both vehicles', d.call('vehiclePayFor', s, 'w_01', '2026-08-13', '2026-08-13'),
+        { days: 2, amount: 600 });
+    s.vehicles[0].active = false; s.vehicles[0].ownerId = 'w_02'; s.vehicles[0].rates[1].amount = 900;
+    d.State.save({ silent: true });
+    same('later archive, owner and rate edits cannot reprice that day',
+        d.call('vehiclePayFor', s, 'w_01', '2026-08-13', '2026-08-13'), { days: 2, amount: 600 });
+    const r = makeDevice({ flags: { vehicles: true }, storage: d.dump() }); r.State.load();
+    same('the same stamped pay survives a reopen',
+        r.call('vehiclePayFor', r.State.schedule, 'w_01', '2026-08-13', '2026-08-13'), { days: 2, amount: 600 });
+    check('the backup document accepts explicit departures',
+        r.call('fullScheduleProblems', r.State.schedule).length === 0, JSON.stringify(r.call('fullScheduleProblems', r.State.schedule)));
+    check('duplicate sites are refused before mutation', !r.call('setVehicleOut', r.State.schedule,
+        '2026-08-13', 'v_03', true, ['p_01', 'p_01']).path);
+    const malformed = JSON.parse(JSON.stringify(r.State.schedule));
+    malformed.days['2026-08-13'].vehicleRuns.v_03.amount = '900';
+    check('non-numeric vehicle money is rejected at the whole-document door',
+        r.call('fullScheduleProblems', malformed).length > 0);
+    r.Sync.receive(malformed);
+    check('a malformed cloud departure blocks writes and is retained', r.call('farkadWritesBlocked'));
+}
+{
+    suite('two devices recording different vehicles retain both departures');
+    const a = makeDevice({ flags: { vehicles: true }, deviceId: 'd_vehicle_a' }); seed(a);
+    a.State.schedule.vehicles = fixtureVehicles(); a.State.save({ silent: true });
+    const b = makeDevice({ flags: { vehicles: true }, deviceId: 'd_vehicle_b', storage: a.dump() }); b.State.load();
+    const cloud = makeCloud({ doc: JSON.parse(JSON.stringify(a.State.schedule)) });
+    a.Sync.pushDelayMs = TICK; b.Sync.pushDelayMs = TICK;
+    a.Sync.connect(cloud.adapter); b.Sync.connect(cloud.adapter); await SYNCED();
+    a.State.commit(a.call('setVehicleOut', a.State.schedule, '2026-08-13', 'v_01', true, ['p_01']));
+    b.State.commit(b.call('setVehicleOut', b.State.schedule, '2026-08-13', 'v_03', true, ['p_01']));
+    await SYNCED();
+    for (const d of [a,b]) {
+        same('both per-vehicle edits reach each phone', d.call('vehiclesOutOn', d.State.schedule,
+            '2026-08-13').map(x => x.vehicle.id).sort(), ['v_01','v_03']);
+        const r = makeDevice({ storage: d.dump(), flags: { vehicles: true } }); r.State.load();
+        same('both edits survive reopening', r.call('vehiclesOutOn', r.State.schedule,
+            '2026-08-13').map(x => x.vehicle.id).sort(), ['v_01','v_03']);
+    }
+}
+
+
+{
+    suite('explicit vehicle records survive backup and raw rescue imports with gates shut');
+    for (const exportName of ['exportBackup', 'exportRecoveryData']) {
+        const source = loaded({ flags: { vehicles: true } });
+        const expected = JSON.stringify(source.State.schedule.days['2026-08-13'].vehicleRuns);
+        source.call(exportName);
+        const file = source.downloads.at(-1);
+        given(exportName + ' creates a real file body', !!(file && file.text));
+        const imported = makeDevice(); seed(imported); stubDialogs(imported);
+        imported.call('importBackup', imported.fileEvent(file.name, file.text));
+        await settle(120);
+        same(exportName + ': import preserves departure bytes even with the gate shut',
+            JSON.stringify(imported.State.schedule.days['2026-08-13'].vehicleRuns), expected);
+        const reopened = makeDevice({ storage: imported.dump(), flags: { vehicles: true } }); reopened.State.load();
+        same(exportName + ': reopening reads the same stamped owner and charge',
+            reopened.call('vehiclePayFor', reopened.State.schedule, 'w_01', '2026-08-13', '2026-08-13'),
+            { days: 1, amount: 300 });
+    }
+}
+{
+    suite('a refused vehicle write cannot leave a phantom paid departure');
+    const d = loaded({ flags: { vehicles: true } });
+    const before = d.raw('scheduleData:v2');
+    d.setQuota(() => true);
+    const ok = d.State.commit(d.call('setVehicleOut', d.State.schedule, '2026-08-20', 'v_01', true, ['p_01']));
+    check('the commit returns refusal', ok === false);
+    check('the durable schedule is unchanged', d.raw('scheduleData:v2') === before);
+    same('memory also prices the unrecorded day at zero',
+        d.call('vehiclePayFor', d.State.schedule, 'w_01', '2026-08-20', '2026-08-20'), { days: 0, amount: 0 });
+}
+
+{
+    suite('a closed payroll period cannot gain or lose a vehicle charge');
+    const d = loaded({ flags: { vehicles: true } });
+    d.State.schedule.ledger.advances.closed_test = {
+        kind: 'closed', workerId: 'w_01', periodFrom: '2026-08-07', periodTo: '2026-08-20' };
+    const before = JSON.stringify(d.State.schedule.days);
+    check('the owner’s closed date is recognised', d.call('vehicleDateClosed', d.State.schedule, 'w_01', '2026-08-13'));
+    check('changing an existing departure is refused', !d.call('setVehicleOut', d.State.schedule,
+        '2026-08-13', 'v_01', false).path);
+    check('the closed day remains byte identical', JSON.stringify(d.State.schedule.days) === before);
 }
 
 report();

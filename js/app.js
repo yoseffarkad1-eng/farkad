@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v105';
+const APP_VERSION = 'v116';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -50,8 +50,17 @@ function showView(view) {
     // unsaved order away without a word; now the mode asks its three-answer question
     // and the switch proceeds only once the draft is saved or knowingly discarded.
     if (typeof reorderDraft !== 'undefined' && reorderDraft && view !== 'roster') {
-        confirmReorderExit().then(allowed => { if (allowed) showView(view); })
-            .catch(() => {});
+        // NOT CAUGHT, on purpose. This chain used to end in `.catch(() => {})` - the one
+        // empty catch in this app sitting on a user tap, on the most-tapped control
+        // there is. watchForCrashes listens for unhandledrejection precisely so that a
+        // throw inside an async click handler becomes the crash banner instead of a
+        // tap that does nothing; catching here cut that net, and a TypeError inside
+        // saveReorder left the person looking at a panel that would not close, a tab
+        // that would not switch, and nothing anywhere saying why. Nothing on this path
+        // rejects in the ordinary course - confirmReorderExit answers true or false and
+        // askChoice resolves null when it is displaced - so a rejection here IS a
+        // programming error, and the app already has one place to put those.
+        confirmReorderExit().then(allowed => { if (allowed) showView(view); });
         return;
     }
     // The offer to undo belongs to the screen the change was made on. Left floating over
@@ -322,7 +331,27 @@ function boot() {
     // the three had gone.
     watchSyncNotice();
 
-    if (result.migrated) {
+    // AND NOT DAMAGED. Both branches read one `result` and both used to fire, in this
+    // order, in the same tick.
+    //
+    // A boot that migrates BECAUSE the v2 record would not parse has migrated nothing to
+    // the disk: js/state.js keeps the migrated week in memory and deliberately does not
+    // save it, because saving it would put pre-migration data over the newest record
+    // there is. «הנתונים הועברו לגרסה החדשה» describes something that happened to this
+    // device; on that boot nothing happened to it. The sentence was then displaced by the
+    // damage notice a few lines down, in the same tick, which is what made this invisible
+    // - a claim made and withdrawn leaves no trace for a check that reads the screen at
+    // the end. See tests/status.test.mjs for where that lesson is written down, and
+    // tests/boot.browser.mjs for this one.
+    //
+    // It was not only invisible. The count>0 arm chains openMigrationModal onto its
+    // dialog, and a DISPLACED dialog resolves - as a dismissal - so the questions modal
+    // opened by itself over the damage notice: a device that is holding its writes,
+    // asking somebody to answer questions about a migration it never recorded and could
+    // not record the answers to. Nothing is lost by staying quiet here. The migration was
+    // not written down and neither were its questions, so the next boot that reads a
+    // healthy record raises both again, from the top.
+    if (result.migrated && !result.damaged) {
         const count = (result.issues || []).length;
         // The counts are stated so they can be checked against the old board rather than
         // taken on trust - a migration that quietly lost a week would look identical to
@@ -407,13 +436,41 @@ function connectCloudLater() {
             // later resume try again is the difference between a phone that reconnects
             // when the signal comes back and one that has to be closed and reopened.
             cloudStarted = false;
+            noteCloudUnavailable(error);
             console.info('Cloud sync is not available in this session:', error && error.message);
         });
     } catch (error) {
         cloudStarted = false;
+        noteCloudUnavailable(error);
         console.info('Cloud sync could not be started:', error && error.message);
     }
     return cloudStarted;
+}
+
+// AN IMPORT THAT DID NOT ARRIVE IS NOT A PHONE WITHOUT A CLOUD.
+//
+// This used to be a console.info and nothing else, and the two situations were then
+// indistinguishable on every screen: the line under the board read
+// «הנתונים נשמרים במכשיר הזה בלבד», the chip stayed off, and the ⋯ panel said the same.
+// That sentence is true of a build with no project configured. On a phone that HAS one it
+// is the opposite of the truth - the record is on this disk, the other two phones are not
+// getting it, and nothing anywhere says so. It is the same failure holdForRecovery was
+// given a status of its own for (js/sync/status.js): recording all evening while the
+// screen calls it local-only.
+//
+// Reported through the sync layer's own door rather than a banner of this file's own, so
+// it arrives in the words the app already has: the foot line says the sync failed, the
+// chip beside the name goes red, and the reason under it in ⋯ ← ענן וסנכרון is
+// «אין כרגע גישה לענן - הניסיון יחזור מעצמו.» - which is exactly what happened and
+// exactly what will happen, because the failed import is retried on the next resume.
+//
+// Only from 'off'. Anything else is a status something better informed has already set,
+// and a stale import failure must not paint over a live one.
+function noteCloudUnavailable(error) {
+    if (typeof FarkadSync === 'undefined' || typeof FarkadSync.fail !== 'function') return;
+    if (FarkadSync.status !== 'off') return;
+    FarkadSync.fail(error instanceof Error ? error
+        : new Error(String((error && error.message) || error || 'import failed')));
 }
 
 // Once, and never twice. A script that arrives after the document is already parsed gets

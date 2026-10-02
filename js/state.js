@@ -25,6 +25,7 @@ const State = {
     migrationIssues: [],
 
     load() {
+        Recovery.restoreSnapshotWarnings();
         const result = this.loadRecord();
 
         // A restore performed with no cloud connected is a transaction like any other -
@@ -109,7 +110,26 @@ const State = {
         try {
             result = migrateV1(JSON.parse(v1));
         } catch (error) {
+            // The v2 branch above copies the bytes, keeps the original and blocks
+            // writing. This one used to do none of the three: a console line nobody on a
+            // building site can open, and emptySchedule() - which is law 10's third verb,
+            // treated as empty.
+            //
+            // What made it survivable was luck, not a guarantee. Nothing in the app
+            // writes this key, so the bytes stayed and the export sweeps them up by name.
+            // What was lost was anybody's chance of noticing after the one boot dialog,
+            // on a blank screen that invites being re-typed - and re-typing the week onto
+            // an empty schedule and saving it is the sequence the v2 branch was rewritten
+            // to stop. The same sequence, one branch down, was still open.
+            //
+            // So: the same three things, and deliberately the same sentence the v2 branch
+            // says. It is the same failure told to the same person, and there is no
+            // reason for them to read two wordings of it. The load still reports `failed`
+            // rather than `damaged`, so js/app.js says «לא הצלחנו לפתוח את הרישום» - the
+            // dialog written for a screen that opens blank, which is what this one does.
             console.error('v1 schedule unreadable:', error);
+            Recovery.damaged(V1_KEY, v1,
+                'הרישום השמור במכשיר לא נקרא: ' + String(error && error.message || error));
             this.schedule = emptySchedule();
             return { migrated: false, failed: true, damaged };
         }
@@ -600,6 +620,16 @@ function normaliseSchedule(raw, hints) {
             // string "0" and quietly multiplying to nothing.
             dailyRate: Number(w.dailyRate) || 0,
             hourlyRate: Number(w.hourlyRate) || 0,
+            // HOW OFTEN THIS MAN IS SETTLED - the ordered history of it, in one field.
+            //
+            // Empty means every second Thursday, which is what every worker was before
+            // this existed, so a backup written last month opens cut the same way it was
+            // cut when it was written. A history this reader cannot parse is kept BYTE FOR
+            // BYTE rather than dropped: it is somebody's record of how a man is paid, and
+            // law 10 says an unreadable record is still the only record there is. Every
+            // reader that prices a day treats it as the default; the validator refuses it
+            // and says so, which is how a person finds out.
+            payCycles: formatPayCycles(payCycleHistory(w)) || String(w.payCycles || ''),
             active: w.active !== false
         }));
 
@@ -652,6 +682,11 @@ function normaliseSchedule(raw, hints) {
             plan: normaliseLayer(day.plan),
             actual: normaliseLayer(day.actual)
         };
+        if (day.vehicleRuns !== undefined) {
+            // Preserve every byte, including unfamiliar evidence; validation holds it
+            // instead of normalisation silently discarding a future financial record.
+            schedule.days[date].vehicleRuns = JSON.parse(JSON.stringify(day.vehicleRuns));
+        }
         // Which vehicles stayed in the yard that evening. Carried through even though
         // this build does not do vehicles: it is a fact somebody recorded about a day,
         // this function keeps only what it names, and a field it does not name is a field
@@ -1059,9 +1094,25 @@ function normaliseSchedule(raw, hints) {
 // form last.
 function rememberedEntities(raw, hints) {
     const out = { workers: {}, places: {} };
+    // MERGED, not overwritten. Since v104 the keyed map can hold a FRAGMENT - what one
+    // per-field write leaves on a document whose map had no entry for that man,
+    // `{ phone: … }` and nothing else - and it is the most authoritative form, so it went
+    // last and took his name, his identity number and both his rates off the copy the
+    // array still had. This function exists so a reinstated man keeps all of that. Later
+    // sources still win field by field, which is what "authoritative" was ever meant to
+    // say; what they cannot do any more is win by being silent.
     const keep = (kind, id, item) => {
-        if (!item) return;
-        out[kind][String(id)] = item;
+        if (!item || typeof item !== 'object') return;
+        const key = String(id);
+        const merged = {};
+        [out[kind][key], item].forEach(source => {
+            if (!source) return;
+            Object.keys(source).forEach(field => {
+                if (POISON_SEGMENTS.indexOf(field) !== -1) return;
+                merged[field] = source[field];
+            });
+        });
+        out[kind][key] = merged;
     };
 
     ['workers', 'places'].forEach(kind => {
@@ -1145,16 +1196,25 @@ function scheduleFingerprint() {
 //   unbound    a bare array, the way a build before the binding wrote one. It is all
 //              there is, so it is carried - and it is NOT evidence about this week
 //   stale      the list names a different schedule: not adopted
+//   unreadable bytes that will not parse. NOT the same as "there were no questions",
+//              which is what this answered before, in the same words it uses for a key
+//              that is not there
 //
 // The version this replaced returned a bare array for all three, and its caller could not
 // tell them apart.
+//
+// It stays a PARSER: nothing here quarantines and nothing here holds. Two callers read
+// through it, and only one of them is reading this device's record - js/ui/backup.js
+// reads a rescue file through it, and a report raised from in here would file another
+// phone's bytes as damage found on this one. Recovery.collect's comment is about exactly
+// that mistake. So the reading caller is told, and decides.
 function parseIssuesRecord(raw, fingerprint) {
     if (!raw) return { issues: [], bound: true, found: false };
     let parsed;
     try {
         parsed = JSON.parse(raw);
     } catch (error) {
-        return { issues: [], bound: true, found: false };
+        return { issues: [], bound: true, found: false, unreadable: true };
     }
     if (Array.isArray(parsed)) return { issues: parsed, bound: false, found: true };
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.issues)) {
@@ -1169,8 +1229,26 @@ function parseIssuesRecord(raw, fingerprint) {
     return { issues: parsed.issues, bound: true, found: true };
 }
 
+// The record on THIS device, and law 10 applies to it like any other.
+//
+// An unreadable list used to come back as [] with nothing said: the migration screen drew
+// "nothing left to decide", the banner said nothing, no copy was made, and the next
+// writeIssues put an empty list over the only place those questions existed. They are not
+// derivable from the schedule beside them - js/recovery.js calls them a question about
+// somebody's day that is still waiting for a person - so losing them loses the half
+// nobody can reconstruct.
+//
+// Reported the way every other damaged record on this device is: the bytes copied under
+// their own name and read back, the original left where it is, the person told, and the
+// device held until they are. The screen still opens, because the questions are not the
+// record - what is refused is writing over them.
 function readIssues() {
-    const read = parseIssuesRecord(Store.get(ISSUES_KEY), scheduleFingerprint());
+    const raw = Store.get(ISSUES_KEY);
+    const read = parseIssuesRecord(raw, scheduleFingerprint());
+    if (read.unreadable && typeof Recovery !== 'undefined' && Recovery && Recovery.damaged) {
+        Recovery.damaged(ISSUES_KEY, raw,
+            'רשימת הרישומים הממתינים להחלטה לא נקראה.');
+    }
     return read.issues;
 }
 
@@ -1183,6 +1261,12 @@ function readIssues() {
 // questions are still somebody's questions and are kept, but nothing here pretends to
 // know which week they are about.
 function writeIssues(issues, options) {
+    // The same line State.save and State.persist carry, for the same reason. The record
+    // under this key may BE the unreadable one, and a device that has not yet told
+    // somebody about it must not write anything over it - least of all an empty list,
+    // which is what a reader that could not parse it hands straight back.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+
     const bound = !options || options.bound !== false;
     const record = { issues: issues || [] };
     if (bound) record.forSchedule = scheduleFingerprint();

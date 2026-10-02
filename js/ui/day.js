@@ -100,6 +100,8 @@ function renderDay() {
         return;
     }
     if (State.activePlaces().length === 0) {
+        root.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
+            markAllHoliday, 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
         root.appendChild(renderSetupCard(
             '🏗️',
             'עוד אין אתרי עבודה',
@@ -174,8 +176,12 @@ function renderAccountBanner() {
     const banner = document.getElementById('accountBanner');
     if (!banner) return;
 
+    // Hidden AND forgotten, the same pair showStorageBanner keeps: the memo below must
+    // not turn the next genuine appearance into silence.
+    const hide = () => { banner.style.display = 'none'; delete banner.dataset.drawn; };
+
     if (State.activeWorkers().length === 0 || State.activePlaces().length === 0) {
-        banner.style.display = 'none';
+        hide();
         return;
     }
 
@@ -214,16 +220,26 @@ function renderAccountBanner() {
         notes.push(`החשבון נסגר ${closing} - בדוק את השכר ושמור קובץ גיבוי.`);
     }
 
-    if (notes.length === 0) { banner.style.display = 'none'; return; }
+    if (notes.length === 0) { hide(); return; }
 
     // Dismissed for today, and back tomorrow if it still applies. A notice that cannot
     // be put away is read once and then looked past for good - and this one has to keep
     // working on the day it actually matters.
     const text = notes.join(' · ');
     if (Store.get(ACCOUNT_BANNER_KEY) === todayStr() + '|' + text) {
-        banner.style.display = 'none';
+        hide();
         return;
     }
+
+    // REBUILT ONLY WHEN WHAT IT SAYS HAS CHANGED. clear() and eight appendChilds inside
+    // an aria-live region is eight announcements, and render() runs on every tap:
+    // measured at 24 mutations across three renders that changed nothing at all. This
+    // banner is a financial warning and it earns being heard once, not once per name.
+    // Keyed on the fold's posture too, because that is the other thing that changes what
+    // is drawn here - and the ✕ hides without forgetting, so a dismissal stays dismissed.
+    const drawn = `${text}|${accountOpen}`;
+    if (banner.dataset.drawn === drawn && banner.style.display !== 'none') return;
+    banner.dataset.drawn = drawn;
 
     clear(banner);
     // Folded by default: one strong line, the report door and ✕ - a 60px row, not the
@@ -324,14 +340,46 @@ function renderProgress() {
     }
     // Announced politely on change - the day switch and the climbing count are the two
     // things a person not looking at the screen most needs to hear.
-    line.setAttribute('role', 'status');
-    line.setAttribute('aria-live', 'polite');
-
-    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
-        line.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
-    }
 
     wrap.appendChild(line);
+
+    // OUTSIDE the line, and that is the whole point of these five lines.
+    //
+    // «הרישום מושבת» used to be the last child of .progress-line - and .progress-line is
+    // the element the compact header (v101) and the landscape bar both clip to one pixel
+    // once the list is moving. So the moment somebody scrolled, the only thing on the
+    // screen saying that this phone is refusing to record anything went away, and the
+    // banner that explains WHY had scrolled off the top a moment earlier. A day's work
+    // could be tapped in against a screen that looked ordinary.
+    //
+    // A folded warning is a warning that can be opened again. A clipped one is not. The
+    // account notice folds because a person can unfold it; this is not that kind of
+    // notice, so it sits on .progress, which survives both states, and the stylesheet
+    // keeps it visible in each of them.
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        wrap.appendChild(el('span', 'progress-blocked', 'הרישום מושבת'));
+    }
+
+    // ANNOUNCED FROM A NODE THAT IS NOT REBUILT.
+    //
+    // The role="status" and aria-live used to go on `line` - a node built from scratch,
+    // filled, and only then inserted, so it was a different node on every render: three
+    // distinct .progress-line nodes across three ordinary edits, measured. index.html
+    // states the rule about the panel beside the reorder list - "the list is redrawn on
+    // every move and a live region that is destroyed and rebuilt is a live region that
+    // announces nothing" - and this was the same mistake one screen over, on the region
+    // the design leans on hardest: the day switch and the climbing count, which are the
+    // two things a person not looking at the screen most needs to hear, and the
+    // הרישום מושבת badge, which is the only text anywhere saying writing is held.
+    //
+    // #dayLive is in index.html and outlives every render. The words are READ OFF the
+    // line rather than composed a second time: the line is the visible answer and the
+    // two may not drift apart - which is also why the badge is appended above this and
+    // not below it. sayOnce (js/sync/status.js) is the guard the storage banner has
+    // always had: writing the same sentence again is a change, to a live region.
+    sayOnce(document.getElementById('dayLive'), [...line.children, wrap.querySelector('.progress-blocked')]
+        .filter(Boolean).map(node => (node.textContent || '').trim()).filter(Boolean).join(' · '));
+
 
     const bar = el('div', 'progress-bar');
     const fill = el('div', 'progress-fill');
@@ -448,21 +496,59 @@ function bulkAssign(place) {
 // its last Thursday, with the account before it underneath for late corrections. A
 // jump-to-today on top, full day names throughout.
 
+// THE SAME KEYBOARD CONTRACT AS EVERY OTHER DIALOG IN THE APP.
+//
+// This was the one that had only half of it. Escape closed it and nothing else was true:
+// focus never entered, so pressing ☰ moved a reader nowhere and the next Tab went to the
+// tab bar BEHIND the panel that had just opened; Tab was not held, so it walked out into
+// the day list; and closing returned the keyboard to <body> rather than to the ☰.
+//
+// settingsPanel and reorderPanel are not .modal elements either, and both do this by
+// hand. The two pieces that matter are already written once, in js/ui/modal.js, so this
+// borrows them rather than growing a third copy: focus enters at the heading (a reader is
+// told where it has arrived before it is read twenty-four dates), and trapTab keeps it
+// there. The other half - a CLOSED drawer being genuinely absent rather than parked off
+// the edge - is in css/app.css, on .day-drawer, and says so there.
+let drawerOpener = null;
+
 function openDayDrawer() {
+    // Remembered BEFORE the drawer can take focus off it. document.activeElement after a
+    // real tap is the ☰ on a desktop and <body> on iOS, which is why there is a fallback
+    // rather than a stored node: the way back has to exist either way.
+    drawerOpener = document.activeElement;
+
     renderDayDrawer();
     ['dayDrawer', 'dayDrawerBack', 'dayDrawerWrap'].forEach(id =>
         document.getElementById(id).classList.add('drawer-open'));
     document.addEventListener('keydown', drawerKeydown);
+
+    const drawer = document.getElementById('dayDrawer');
+    const title = document.getElementById('dayDrawerTitle');
+    // The class has to be IN EFFECT before the focus call: a visibility:hidden element
+    // cannot take focus, and the style has only been asked for, not computed. Reading a
+    // layout property forces that, and it is one read on a tap.
+    if (drawer) void drawer.offsetHeight;
+    // preventScroll for the same reason the modal helper gives: the heading is at the top
+    // and a focus that scrolls the panel is the bug, not the fix.
+    if (title && title.focus) title.focus({ preventScroll: true });
 }
 
 function closeDayDrawer() {
     ['dayDrawer', 'dayDrawerBack', 'dayDrawerWrap'].forEach(id =>
         document.getElementById(id).classList.remove('drawer-open'));
     document.removeEventListener('keydown', drawerKeydown);
+
+    const opener = (drawerOpener && document.contains(drawerOpener))
+        ? drawerOpener : document.querySelector('.day-nav .drawer-btn');
+    drawerOpener = null;
+    if (opener && opener.focus) opener.focus();
 }
 
 function drawerKeydown(event) {
-    if (event.key === 'Escape') { event.preventDefault(); closeDayDrawer(); }
+    if (event.key === 'Escape') { event.preventDefault(); closeDayDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const drawer = document.getElementById('dayDrawer');
+    if (drawer && typeof trapTab === 'function') trapTab(event, drawer);
 }
 
 function renderDayDrawer() {
@@ -608,8 +694,17 @@ function renderDayHeader() {
     // "קודם" and not "יום קודם": the word יום appeared three times on this one line, and
     // the two copies on the buttons were costing the day name sixty pixels it did not
     // have. The full wording stays as the label a screen reader announces.
-    const back = button('קודם', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם');
-    back.insertBefore(chevronIcon('back'), back.firstChild);
+    //
+    // The word is in a span of its own, like the words beside the undo arrows: on the
+    // narrowest phone, and on any screen the day has had to collapse on (body.day-tight),
+    // the stylesheet drops the two words and keeps the chevrons, which hands the date back
+    // eighty pixels of a three-hundred-pixel row. Measured at 320: the pair of pills took
+    // 116px of the 304 the row has and the date had 127 - the two ways of LEAVING this day
+    // were as big as the day itself. The aria-labels below carry the full sentence either
+    // way, so nothing a screen reader says changes.
+    const back = button('', 'btn-secondary btn-nav nav-back', () => stepDay(-1), 'יום קודם');
+    back.appendChild(chevronIcon('back'));
+    back.appendChild(el('span', 'nav-word', 'קודם'));
     nav.appendChild(back);
 
     // The title IS the date picker. A second full-width input row said the same date
@@ -623,7 +718,8 @@ function renderDayHeader() {
     label.addEventListener('click', () => openDayPicker());
     nav.appendChild(label);
 
-    const fwd = button('הבא', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא');
+    const fwd = button('', 'btn-secondary btn-nav nav-fwd', () => stepDay(1), 'יום הבא');
+    fwd.appendChild(el('span', 'nav-word', 'הבא'));
     fwd.appendChild(chevronIcon('fwd'));
     nav.appendChild(fwd);
     header.appendChild(nav);
@@ -723,6 +819,8 @@ function appendModeSwitch(tools, bulkRow) {
     modes.appendChild(modeButton('workers', 'לפי עובדים'));
     modes.appendChild(modeButton('sites', 'לפי אתרים'));
     line.appendChild(modes);
+    line.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
+        markAllHoliday, 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
     if (bulkRow && bulkRow.classList && bulkRow.classList.contains('bulk-row')) {
         line.appendChild(bulkToggle(bulkRow));
     }
@@ -740,6 +838,12 @@ function openDayPicker() {
 function modeButton(mode, text) {
     const btn = button(text, dayMode === mode ? 'layer-on' : 'layer-off', () => setDayMode(mode));
     btn.setAttribute('aria-pressed', dayMode === mode ? 'true' : 'false');
+    btn.setAttribute('aria-label', text);
+    if (text.startsWith('לפי ')) {
+        btn.textContent = '';
+        btn.appendChild(el('span', 'mode-prefix', 'לפי '));
+        btn.appendChild(el('span', null, text.slice(4)));
+    }
     return btn;
 }
 
@@ -846,7 +950,11 @@ function renderAssignmentRow(place, workerId) {
 
     // The record is what pay is calculated from, so the rate sits on the row itself
     // rather than behind a dialog nobody will open thirty times an evening.
-    row.appendChild(renderRateControl(place.id, workerId, entry));
+    //
+    // The whole place, not its id: the control needs the site's NAME for its own label,
+    // and this is the one caller, which already holds a roster entry rather than a key
+    // off a day record.
+    row.appendChild(renderRateControl(place, workerId, entry));
 
     row.appendChild(button('✕', 'btn-icon', () => {
         editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
@@ -856,11 +964,27 @@ function renderAssignmentRow(place, workerId) {
     return row;
 }
 
-function renderRateControl(placeId, workerId, entry) {
+function renderRateControl(place, workerId, entry) {
+    const placeId = place.id;
     const wrap = el('span', 'rate-control');
 
     const select = document.createElement('select');
     select.className = 'rate-select';
+    // THE ONE CONTROL IN THE APP THAT HAD NO NAME. Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼,
+    // ⤓, ₪, 🗄️ and ↩️ carries a Hebrew name, most of them with the worker's or the site's
+    // folded in. This one announced as "רגיל, תיבה משולבת" and nothing else - on a screen
+    // where four of them are visible at once, one per recorded man, and where what it
+    // sets is what the day is PRICED at.
+    //
+    // Shaped like its neighbours: the ✕ beside it says הסר את <X> מ<Y>, and the hours box
+    // in the assign sheet says שעות נוספות ב<Y>, so a site is named with ב and a man with
+    // his name. תעריף is the app's own word for the thing this picks - js/model/schema.js
+    // says תעריף שאינו מוכר when a day arrives with a rate it does not recognise - rather
+    // than a new one invented at the point of labelling. Both names are bidi-isolated,
+    // like every other name in every other label (js/ui/dom.js).
+    const worker = State.worker(workerId);
+    select.setAttribute('aria-label',
+        `תעריף של ${isolate(worker ? worker.name : workerId)} ב${isolate(place.name)}`);
     RATES.forEach(rate => {
         const option = document.createElement('option');
         option.value = rate;
@@ -921,57 +1045,102 @@ function renderUnassignedTray(unrecorded) {
     return tray;
 }
 
-// The vehicles, on the evenings where one of them did not go out.
-//
-// They all went out is the ordinary day and is what the pay sheet assumes, so this tray
-// exists for the exception - and shows every vehicle rather than only the ones staying
-// behind, because a list of what did NOT happen is a list nobody can check against the
-// yard. Green for went out, and one tap to say otherwise.
-//
-// Returns null when there are no vehicles at all: an empty tray on the busiest screen in
-// the app is a row of nothing to read every evening.
+// Explicit departures. Missing records are shown as missing and never priced.
 function renderVehicleTray() {
-    // The feature is retired; see vehiclesEnabled in js/model/schema.js. The tray is the
-    // busiest screen in the app and every chip on it writes a day record, so it is not
-    // drawn at all rather than drawn and made inert.
     if (!vehiclesEnabled()) return null;
-
     const vehicles = (State.schedule.vehicles || []).filter(item => item.active !== false);
-    if (vehicles.length === 0) return null;
-
-    const off = (State.schedule.days[State.date] || {}).vehiclesOff || [];
+    if (!vehicles.length) return null;
+    const runs = (State.schedule.days[State.date] || {}).vehicleRuns || {};
     const tray = el('div', 'tray');
-    tray.appendChild(el('h4', null, 'רכבים'));
-
+    tray.appendChild(el('h4', null, 'רכבים — נרשמים בנפרד'));
+    const missing = vehicles.filter(vehicle => !runs[vehicle.id]);
+    if (missing.length) tray.appendChild(el('p', 'hint',
+        `${missing.length} רכבים טרם נרשמו היום ולא נכללו בתשלום.`));
     const chips = el('div', 'chips');
     vehicles.forEach(vehicle => {
-        const out = !off.includes(vehicle.id);
-        const chip = el('div', out ? 'chip chip-vehicle' : 'chip chip-vehicle chip-absent');
-        chip.appendChild(button(
-            `${vehicle.name} · ${out ? 'יצא' : 'לא יצא'}`,
-            'chip-main',
-            () => {
-                // offerUndo rather than editWithUndo: that one snapshots a WORKER's day
-                // and puts it back, and a vehicle is not a worker - handing it an id no
-                // worker has would take a snapshot of nothing and restore it over
-                // somebody. The way back here is simply the same switch thrown again.
-                const date = State.date;
-                if (!State.commit(setVehicleOut(State.schedule, date, vehicle.id, !out))) return;
-                render();
-                offerUndo(
-                    out ? `${isolate(vehicle.name)} סומן כלא יצא`
-                        : `${isolate(vehicle.name)} סומן כיצא`,
-                    () => State.commit(setVehicleOut(State.schedule, date, vehicle.id, out)),
-                    () => State.commit(setVehicleOut(State.schedule, date, vehicle.id, !out)));
-            },
-            out
-                ? `סמן ש${isolate(vehicle.name)} לא יצא היום`
-                : `סמן ש${isolate(vehicle.name)} יצא היום`));
+        const run = runs[vehicle.id];
+        const status = !run ? 'טרם נרשם' : run.out ? 'יצא' : 'לא יצא';
+        const chip = el('div', run && run.out ? 'chip chip-vehicle' : 'chip chip-vehicle chip-absent');
+        chip.appendChild(button(`${vehicle.name} · ${status}`, 'chip-main',
+            () => editVehicleDeparture(vehicle.id), `רישום נסיעה של ${isolate(vehicle.name)}`));
+        if (run && run.out) {
+            const labels = placeLabelsIn(State.schedule, State.date, State.date);
+            chip.appendChild(el('span', 'hint', run.siteIds.map(id => placeLabelFrom(labels, id)).join(' · ')));
+        }
         chips.appendChild(chip);
     });
-
     tray.appendChild(chips);
     return tray;
+}
+
+async function editVehicleDeparture(vehicleId) {
+    if (!vehiclesEnabled() || farkadWritesBlocked()) return;
+    const date = State.date;
+    const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId && item.active !== false);
+    if (!vehicle) return;
+    const old = ((State.schedule.days[date] || {}).vehicleRuns || {})[vehicleId] || null;
+    const baseline = JSON.stringify(old);
+    const rosterBaseline = JSON.stringify(vehicle);
+    const owner = State.worker(old && old.out ? old.ownerId : vehicle.ownerId);
+    if (vehicleDateClosed(State.schedule, old && old.out ? old.ownerId : vehicle.ownerId, date)) {
+        await askTell('החשבון לתאריך הזה נסגר. אי אפשר לשנות בו רישום רכב.');
+        return;
+    }
+    const selected = new Set(old && old.out ? old.siteIds : []);
+    let out = old ? old.out : true;
+    let failed = false;
+    // A failed durable commit reopens with the draft intact. No "saved" or undo
+    // is offered until commit returns true. The selected date is captured once.
+    for (;;) {
+        const pending = askConfirm({ title: `${vehicle.name} · ${date}`,
+            message: (failed ? 'השמירה לא הושלמה. הבחירה נשמרה בחלון; נסה שוב. ' : '')
+                + `${old && old.out ? old.amount : vehicleRateOn(vehicle, date)} ₪ פעם אחת ביום לבעל הרכב: ${owner ? owner.name : 'בעל הרכב'}. `
+                + 'גם ביום כפול וגם בנסיעה למספר אתרים.', ok: 'שמירת רישום הרכב' });
+        const parts = askElements();
+        if (!parts.choices) return;
+        parts.choices.style.display = '';
+        const departure = document.createElement('input');
+        departure.type = 'checkbox'; departure.checked = out;
+        const stateLabel = el('label', 'vehicle-option');
+        stateLabel.appendChild(departure); stateLabel.appendChild(el('span', null, 'הרכב יצא לעבודה'));
+        departure.onchange = () => { out = departure.checked; };
+        parts.choices.appendChild(stateLabel);
+        const places = (State.schedule.places || []).filter(p => p.active !== false || selected.has(p.id));
+        places.forEach(place => {
+            const label = el('label', 'vehicle-option');
+            const input = document.createElement('input'); input.type = 'checkbox'; input.checked = selected.has(place.id);
+            input.onchange = () => { if (input.checked) selected.add(place.id); else selected.delete(place.id); };
+            label.appendChild(input); label.appendChild(el('span', null, place.name));
+            parts.choices.appendChild(label);
+        });
+        if (!await pending) return;
+        if (farkadWritesBlocked()) return;
+        const current = ((State.schedule.days[date] || {}).vehicleRuns || {})[vehicleId] || null;
+        const currentVehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId);
+        if (JSON.stringify(current) !== baseline || JSON.stringify(currentVehicle) !== rosterBaseline) {
+            await askTell('רישום הרכב השתנה בזמן שהחלון היה פתוח. פתח אותו שוב כדי לבדוק את העדכון.');
+            return;
+        }
+        if (out && selected.size === 0) {
+            await askTell('בחר לפחות אתר אחד שאליו הרכב יצא.');
+            continue;
+        }
+        const change = setVehicleOut(State.schedule, date, vehicleId, out, [...selected]);
+        if (!change.path) { await askTell('הרכב אינו זמין לרישום. בדוק את רשימת הרכבים.'); return; }
+        if (!State.commit(change)) { failed = true; continue; }
+        const saved = JSON.parse(JSON.stringify(change.value));
+        render();
+        const restore = value => {
+            const now = ((State.schedule.days[date] || {}).vehicleRuns || {})[vehicleId] || null;
+            const expected = value === old ? saved : old;
+            if (JSON.stringify(now) !== JSON.stringify(expected)
+                || vehicleDateClosed(State.schedule, (now || saved).ownerId, date)) return false;
+            State.schedule.days[date].vehicleRuns[vehicleId] = value;
+            return State.commit({ path: change.path, value });
+        };
+        offerUndo(`${vehicle.name} — רישום הרכב נשמר`, () => restore(old), () => restore(saved));
+        return;
+    }
 }
 
 function renderAbsentTray() {
@@ -998,4 +1167,31 @@ function renderAbsentTray() {
     });
     tray.appendChild(chips);
     return tray;
+}
+
+// Holiday fills only missing records. The date and crew are captured before confirmation;
+// records are re-read afterwards so another phone's work is never replaced by this action.
+async function markAllHoliday() {
+    const date = State.date;
+    const ids = State.activeWorkers().map(worker => worker.id);
+    const missing = id => {
+        if (vehicleDateClosed(State.schedule, id, date)) return false;
+        const record = workerDay(State.schedule, date, id, 'actual');
+        return !record || (!record.absent && !(record.entries || []).length);
+    };
+    const count = ids.filter(missing).length;
+    if (!count) {
+        await askTell('לכל העובדים כבר יש רישום ביום הזה. שום רישום לא שונה.');
+        return false;
+    }
+    const yes = await askConfirm({
+        title: `הכל חופש · ${formatFullDate(parseLocalDate(date))}`,
+        message: `לרשום חופש ל-${count} עובדים בלי רישום? חופש ללא שכר. עבודה, היעדרויות וחשבונות סגורים יישמרו.`,
+        ok: 'רשום חופש'
+    });
+    if (!yes) return false;
+    const changes = ids.filter(id => State.worker(id) && State.worker(id).active !== false && missing(id))
+        .map(id => markAbsent(State.schedule, date, id, 'actual'));
+    if (!changes.length) return false;
+    return State.commitMany(changes);
 }

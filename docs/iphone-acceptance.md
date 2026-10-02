@@ -1,10 +1,8 @@
 # בדיקת קבלה במכשיר אמיתי — רשימה ליוסף
 
 > **NOT YET PHYSICALLY VERIFIED.** Nothing in this list has been performed on a real
-> iPhone for the current build, and that has been true of every build since v86. Fifty-nine
-> rows, none of them run — row 59 is the exception that proves the point: it exists BECAUSE a
-> real screenshot arrived showing something no suite here can produce, and it is still NOT RUN
-> as a deliberate check. The number is written here rather than left to be counted, because
+> iPhone for this integration candidate. All acceptance rows below remain NOT RUN.
+> Historical branch counts are not measurements of this combined build, because
 > "the suites are green" and "somebody looked at it on a phone" are two different claims and
 > only one of them is true of this repository.
 >
@@ -234,3 +232,79 @@
 ابعت لكل بند: **مرق / ما مرق**، وإذا ما مرق — صورة شاشة وشو بالضبط صار.
 
 ما بدنا منك تفتح كود ولا سجلات. بس تفتح، تضغط، وتشوف.
+
+---
+
+## إذا إشي ما مرق — شو تبعت بالضبط
+
+**تلات إشيا، ولا إشي غيرها:**
+
+1. **رقم البند** (مثلًا «بند 14»).
+2. **صورة شاشة** للحظة الي صار فيها الإشي — مش بعدها.
+3. **كتلة التشخيص:** ⋯ ← **מידע טכני** ← **«העתק»**، وبعدين الصق بالرسالة.
+
+الكتلة الثالثة هي الي بتوفّر جولة أسئلة كاملة. بتحمل رقم بناء الصفحة، ورقم بناء
+التطبيق، **وتعداد الـservice worker لبناءاته** (`sw.builds`) — وهاد بالضبط الي بيحسم
+«أي نسخة على هالتلفون» بدل التخمين من أبعاد صورة. وكمان بتحمل مقاس الشاشة الحقيقي
+ومقياس التكبير ومستطيلات الشريطين مقيسة، وعدد المعلّق وسبب المزامنة.
+
+**وما بتحمل ولا اسم عامل، ولا اسم موقع، ولا مبلغ، ولا كلمة سر.** هاد مقيس باختبار
+بيزرع اسمًا عبريًا واسمًا لاتينيًا ومبالغ، وبيتأكد إنه ولا واحد فيهم بيطلع بالكتلة —
+الاسم اللاتيني موجود بالاختبار عن قصد، لأن الكتلة ASCII بالبناء فالعبري ما بيظهر
+أصلًا، واللاتيني وحده بيختبر الضمانة مش الآلية.
+
+فتقدر تبعتها بواتساب بدون ما تفكر فيها.
+
+---
+
+## v104 — the twelve rows this round could not run
+
+Added by the closeout round. The first eleven exist because Chromium anchors
+`position: fixed` to the LAYOUT viewport and iOS anchors it to the VISUAL one, so the
+shape in the screenshot cannot be produced by any suite in this repository - that is a
+measured limit, not an untried idea. **P11 is the row that ends the guessing about which
+build the phone is on, and only the owner can run it.**
+
+Every one of these is **NOT RUN**.
+
+| # | what to do | what must happen | why no suite here can say |
+|---|---|---|---|
+| P1 | On the home-screen app: scroll the day list, then pull the page down and let it settle | Both bottom bars stay ON the bottom edge. If either floats mid-screen with content under it, that is the original fault | Chromium anchors `position: fixed` to the layout viewport, iOS to the visual viewport. The geometry cannot be produced here |
+| P2 | Pinch to zoom in, pan to the bottom of the list, tap the last man | His sheet opens, with his name on it | `visualViewport.offsetTop` stays 0 in headless Chromium; `Input.synthesizeScrollGesture` is refused at the coordinates that would pan it |
+| P3 | Open a field, dismiss the keyboard **with the page scrolled**, then tap the last man | Both bars return, and the tap reaches him | the return is measured here through the app's own seam; that Safari fires the events that seam is driven by is an assumption |
+| P4 | Press «הדפס», then close the sheet iOS opens (or does not) | Both bars return without killing the app | Safari's print sheet has no Chromium equivalent |
+| P5 | Background the app for a minute, bring it back, tap the last man | Bars in place, no empty strip at the bottom, the tap reaches him | `visibilitychange`/`pageshow` are dispatched here as events, not produced by the OS |
+| P6 | Turn the phone sideways, scroll to the end of the list, tap the last man, in **both** orientations | Reached, in both | a real finger on real glass — the board says this too and does not claim it |
+| P7 | iOS → Display → Text Size → largest (AX2), then open the day screen and the assign sheet | Nothing clipped, no button gone, every target still a finger's size | the 200% pass rewrites the CSS cascade; it is a real reflow and it is not Dynamic Type |
+| P8 | ⋯ → מידע טכני → «העתק», paste into WhatsApp | The block pastes whole, and `sw.builds` names a build | `navigator.clipboard` behaves differently inside a home-screen web app; the fallback path is written and unexercised on a phone |
+| P9 | With writes held (quarantine), scroll the day list | «הרישום מושבת» stays on the screen | measured here in Chromium; the compact header under Safari's own scroll is not |
+| P10 | Delete a worker's day so the undo bar appears carrying a long name, then tap the last man in the list | He is reached, not the undo bar | the fix is measured here; a real finger on a real 320px screen is not |
+| P11 | Send back the diagnostic block from the phone that produced the floating-bars screenshot | `page.build`, `app.build` and `sw.builds` all name the same version — or they do not, which is the answer | this is the one row that ends the guessing, and only the owner can run it |
+| P12 | On the smallest phone at AX2: delete a worker's day so the undo bar appears, then try to reach the last man in the list | If he cannot be reached, that is expected on that screen — the undo bar expires in twelve seconds and בטל stays in the header. What must NOT happen is the bar covering the screen with no way out | measured here as a geometric impossibility, not as a bug; a person's judgement of whether it is tolerable is not a measurement |
+
+## v105 — the rows this sprint added
+
+Every one of these is **NOT RUN — REQUIRES YUSUF'S IPHONE**. They are here because
+something was proved as far as it can be proved without a phone, and the last step is a
+finger on real glass. Where a suite already covers part of a row, the row says what is
+left over rather than repeating it.
+
+### The files that leave the phone
+
+| # | what to do | what must happen | why no suite here can say |
+|---|---|---|---|
+| P13 | Export the reports, then open the `.xlsx` in Excel on a Mac or a PC | The sheet opens right-to-left, with the man's name on the right | `rightToLeft="1"` is read back out of the produced workbook's XML here, on all three sheets. Whether Excel HONOURS it is a fact about Excel |
+| P14 | Open the same file in Numbers, in the iOS Files preview, and in WhatsApp's document preview | Probably laid out LEFT-to-right in all three. This is expected, and the hand-over dialog already says so in words | the dialog's words have never been checked against the devices they describe |
+| P15 | Export reports, backup and the rescue file, and in each case tap through the iOS share sheet to "Save to Files" | The file is actually in Files afterwards, under the name the app gave it | the app can only know the browser TOOK the file. Nothing in a page can know it was kept |
+| P16 | Cancel the iOS share sheet on the picture export (🖼️ שיתוף כתמונה) instead of completing it | The app carries on; the picture is offered as a download instead, and nothing is lost | `AbortError` from a real iOS share sheet has no Chromium equivalent |
+| P17 | Print the pay sheet from the home-screen app with a modal open | The sheet prints without the modal on it, and both bars come back after | print isolation is proved here against a real PDF, with a modal genuinely open — but Safari's print sheet is not Chromium's |
+| P18 | Print a pay sheet long enough to run to two pages, with long names | **No man's row is split across the page break, and the totals row is on one sheet** | measured on the paper here, but headless Chromium keeps a table row atomic BY ITSELF — five fixtures, identical PDFs — so nothing here can tell the rule from its absence. WebKit is the only place this is a real question |
+| P19 | On a phone where downloads are blocked or the browser ignores the press, try to export | The app says «ההורדה נחסמה» and names the files. It must NOT say the files were exported, and «גיבוי אחרון» must NOT move | the refusal path is proved against doubles and in the harness. It has never met a real browser that refuses |
+
+### Startup, and the build the phone is on
+
+| # | what to do | what must happen | why no suite here can say |
+|---|---|---|---|
+| P20 | Put the phone in airplane mode, then open the app from the home-screen icon | The day screen draws, and a day recorded then is still there after reopening. No white screen, no wait | proved here with every off-origin request held open for ever and with the origin shut down — but on the real device the cache is iOS's, not Chromium's |
+| P21 | With the app on a version that has an update waiting, press «אחר כך». Then open and close the app a few times | The offer comes back every time. It lands only when the app is closed COMPLETELY (swiped out of the app switcher) and opened again. It must not reload itself under your hands | `visibilitychange` cannot be produced by headless Chromium — measured, `bringToFront()` fires zero events — so the resume is dispatched here as an event, not caused by the OS |
+| P22 | After the update lands, ⋯ → מידע טכני → «העתק» | `page.build`, `app.build` and `sw.builds` all say v105 | the same reason as P11: only the phone knows what the phone is running |

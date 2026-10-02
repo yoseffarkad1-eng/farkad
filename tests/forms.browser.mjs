@@ -1,3 +1,4 @@
+import { launchLocalBrowser } from './network-guard.mjs';
 // The two correction forms, driven by real clicks in a real browser.
 //
 //   npm run test:forms
@@ -32,7 +33,7 @@ const SERVED = await verifyServedAssets(server.url, SERVED_ROOT, SERVED_SHA);
 check('the origin served this commit, byte for byte',
     SERVED.ok, `${SERVED.checked} assets; ${SERVED.wrong.slice(0, 3).join(' | ')}`);
 
-const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
+const browser = await launchLocalBrowser(chromium, EXEC ? { executablePath: EXEC } : {});
 
 // Every uncaught error and every console error, collected for the whole session. A form
 // that throws on Save and leaves the page otherwise intact is exactly the failure this
@@ -50,18 +51,32 @@ async function open() {
     // assignment into the frozen FARKAD_FLAGS never did: that line was a silent no-op
     // that only looked like it worked because the branch shipped the flag open.
     await page.addInitScript(() => {
-        window.FARKAD_FLAG_OVERRIDES = { carryAdvances: true, ledgerWrites: true };
+        window.FARKAD_FLAG_OVERRIDES = { carryAdvances: true, ledgerWrites: true, vehicles: true };
     });
     // An UNCAUGHT PAGE ERROR is the thing this file exists to catch. Console errors are
     // not: this origin cannot reach the Firebase SDK at all, so every run logs several
     // ERR_TUNNEL_CONNECTION_FAILED lines, and treating those as failures would make the
     // suite red for the network rather than for the app. The adapter is meant to fail
     // soft - see js/app.js - and that it does so is asserted elsewhere.
+    //
+    // THE SAME EVENT LEARNED A THIRD SPELLING. A cloud that could not be LOADED used to
+    // be a console.info and nothing else, which made it indistinguishable on every screen
+    // from a phone with no project configured - a phone recording all evening while the
+    // line under the board calls it local-only. It is reported properly now, through
+    // FarkadSync.fail, which writes «Sync error:» to the console on its way past.
+    //
+    // So the unreachable SDK reaches this filter under a name it did not know, and two
+    // checks that mean "pressing Save threw nothing" went red for the network. Same event,
+    // same reason, same filter - and deliberately narrow: it is matched by the adapter's
+    // OWN path, so a module that fails to import for any other reason is still a failure,
+    // and so is any other TypeError.
+    const ADAPTER_UNREACHABLE = /Failed to fetch dynamically imported module:.*js\/sync\/firebase-adapter\.js/;
     page.on('pageerror', error => errors.push(String(error && error.message)));
     page.on('console', message => {
         if (message.type() !== 'error') return;
         const text = message.text();
-        if (text.indexOf('ERR_') !== -1 || text.indexOf('Failed to load resource') !== -1) {
+        if (text.indexOf('ERR_') !== -1 || text.indexOf('Failed to load resource') !== -1
+            || ADAPTER_UNREACHABLE.test(text)) {
             noise.push(text);
             return;
         }
@@ -267,6 +282,120 @@ const canWrite = page => page.evaluate(() =>
         JSON.stringify([done.date, done.targetDate]));
 
     await page.context().close();
+}
+
+
+{
+    suite('vehicle departure form: explicit sites and failed save keeps the draft');
+    const page = await open();
+    await page.evaluate(() => {
+        State.date = '2026-08-26';
+        State.schedule.vehicles = [{ id: 'v_test', name: 'רכב בדיקה', ownerId: 'w_01',
+            active: true, rates: [{ from: '2026-01-01', amount: 300 }] }];
+        State.schedule.places.push({ id: 'p_second', name: 'אתר שני', active: true });
+        State.save(); render();
+    });
+    await page.evaluate(() => { editVehicleDeparture('v_test'); });
+    await page.locator('#askChoices label').filter({ hasText: 'אתר שני' }).locator('input').check();
+    const firstSite = page.locator('#askChoices input').nth(1);
+    await firstSite.check();
+    await page.evaluate(() => {
+        const commit = State.commit;
+        State.commit = function(change) { State.commit = commit; State.schedule = normaliseSchedule(JSON.parse(localStorage.getItem('scheduleData:v2'))); return false; };
+    });
+    await page.locator('#askOk').click();
+    await page.waitForTimeout(100);
+    check('a refused commit keeps the modal and both selected sites',
+        await page.locator('#askModal').isVisible()
+        && await page.locator('#askChoices input:checked').count() === 3);
+    check('a refused commit shows no durable departure', await page.evaluate(() =>
+        !JSON.parse(localStorage.getItem('scheduleData:v2')).days['2026-08-26'].vehicleRuns));
+    await page.locator('#askOk').click();
+    await page.waitForTimeout(100);
+    const run = await page.evaluate(() => JSON.parse(localStorage.getItem('scheduleData:v2'))
+        .days['2026-08-26'].vehicleRuns.v_test);
+    check('one successful click stores both sites and only one flat charge',
+        run && run.out && run.amount === 300 && run.ownerId === 'w_01' && run.siteIds.length === 2,
+        JSON.stringify(run));
+    check('successful save closes the form', !await page.locator('#askModal').isVisible());
+    await page.evaluate(() => { State.date = '2026-08-27'; editVehicleDeparture('v_test'); });
+    await page.locator('#askChoices input').nth(1).check();
+    await page.evaluate(() => { State.schedule.vehicles[0].rates[0].amount = 900; });
+    await page.locator('#askOk').click();
+    await page.waitForTimeout(100);
+    check('a roster price change while the form was open requires a fresh review',
+        (await page.locator('#askMessage').textContent()).includes('השתנה'));
+    check('a stale quote creates no departure', await page.evaluate(() =>
+        !((State.schedule.days['2026-08-27'] || {}).vehicleRuns || {}).v_test));
+    await page.reload();
+    check('the departure survives a real page reload', await page.evaluate(() =>
+        State.schedule.days['2026-08-26'].vehicleRuns.v_test.amount === 300));
+    await page.evaluate(() => {
+        const run = State.schedule.days['2026-08-26'].vehicleRuns.v_test;
+        FarkadSync.heldRecords = () => [{ path: 'days.2026-08-26.vehicleRuns.v_test',
+            heard: true, mine: run, cloud: null }];
+        renderHeldRecords();
+    });
+    const held = page.locator('#heldRecords');
+    check('a vehicle conflict renders both sides and decision buttons in the real panel',
+        (await held.textContent()).includes('רכב בדיקה')
+        && (await held.textContent()).includes('300')
+        && await held.locator('.held-side').count() === 2
+        && await held.locator('button').count() === 2);
+    await page.context().close();
+}
+
+
+// v116: real mobile controls with SHIPPED defaults, not a feature-flag override.
+{
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const faults=[]; page.on('pageerror',error=>faults.push(error.message));
+    await page.goto(`${server.url}/index.html`, {waitUntil:'load'});
+    await page.evaluate(()=>{
+        todayStr=()=> '2026-10-02';
+        State.date='2026-10-02';
+        State.schedule.workers=[{id:'w_a',name:'עובד קיים',active:true,dailyRate:500}];
+        State.schedule.places=[{id:'p_a',name:'אתר',active:true}];
+        State.commitRoster();showView('roster');showAddWorkerModal();
+    });
+    await page.fill('#workerFormName','עובד שבועי');
+    await page.fill('#workerFormDaily','500');
+    await page.locator('#workerFormModal').getByRole('button',{name:'שמור',exact:true}).click();
+    check('new worker must choose how often he is paid',
+        (await page.textContent('#workerFormError')).includes('כל שבוע'));
+    await page.selectOption('#workerFormCycle','weekly');
+    check('new worker starts on current Friday by default',await page.inputValue('#workerFormCycleFrom')==='2026-10-02');
+    await page.locator('#workerFormModal').getByRole('button',{name:'שמור',exact:true}).click();
+    const row=page.locator('#workerList .roster-row').filter({hasText:'עובד שבועי'});
+    const toggle=row.getByRole('switch');
+    const rect=await toggle.boundingBox();
+    check('worker switch is a finger-sized target',rect.width>=44 && rect.height>=44);
+    await toggle.click();
+    check('one tap turns worker off, still visible in roster',await toggle.getAttribute('aria-checked')==='false');
+    await toggle.click();
+    check('one tap turns worker back on',await toggle.getAttribute('aria-checked')==='true');
+    await page.evaluate(()=>showView('day'));
+    await page.getByRole('button',{name:'רשום חופש לעובדים בלי רישום ביום הנבחר'}).click();
+    check('holiday confirmation names the selected date', (await page.textContent('#askTitle')).includes('02/10'));
+    await page.locator('#askOk').click();
+    check('holiday recorded for both active workers',await page.evaluate(()=>State.activeWorkers().every(w=>isAbsent(State.schedule,'2026-10-02',w.id,'actual'))));
+    await page.evaluate(()=>{
+        const w=State.schedule.workers.find(w=>w.name==='עובד שבועי');
+        State.commit(assignPlace(State.schedule,'2026-10-03',w.id,'actual','p_a'));
+        Object.assign(REPORT_RANGE,{from:'2026-10-02',to:'2026-10-08'});
+        openWorkerDays(w.id);
+    });
+    await page.getByRole('button',{name:'+ מקדמה',exact:true}).click();
+    const date=page.locator('.advance-form input[type=date]');
+    check('weekly advance form ends on Thursday',await date.getAttribute('max')==='2026-10-08');
+    await page.locator('.advance-form input').first().fill('300');
+    await page.getByRole('button',{name:'שמור מקדמה',exact:true}).click();
+    check('repayment is available without a test override',await page.getByRole('button',{name:'רישום החזר מזומן'}).isVisible());
+    await page.getByRole('button',{name:'רישום החזר מזומן'}).click();
+    check('weekly repayment form ends on Thursday',await page.locator('.advance-form input[type=date]').getAttribute('max')==='2026-10-08');
+    check('mobile controls produce no uncaught errors',faults.length===0,JSON.stringify(faults));
+    await context.close();
 }
 
 await browser.close();

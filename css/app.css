@@ -54,11 +54,34 @@
     --line-soft: #e6eaef;
     --ink: #17202b;
     --ink-2: #4d5a69;
-    --ink-3: #7a8797;
+    /* The third ink, and a floor under it: 4.5:1 against the darkest ground this
+       stylesheet can put text on. It was #7a8797, which measured 3.66 on --surface,
+       3.23 on --paper and 3.00 on --surface-2 - fine on the desk it was chosen at, and
+       not on a phone held up on a site at four in the afternoon. Still the QUIET ink,
+       by measurement as well as by intent: 5.17 on paper against --ink-2's 6.22. Going
+       darker than this collapses three inks into two. */
+    --ink-3: #5a6673;
 
     --accent: #1f4b7a;
     --accent-soft: #dce7f3;
     --on-accent: #ffffff;
+
+    /* THE FOCUS RING'S SECOND STROKE, and it is a second stroke rather than a better
+       colour because there is no colour that would do.
+
+       The ring sits OUTSIDE the box it marks, so what it is drawn on is whatever is
+       behind the box - and since v101 that includes the site's own colour, which is an
+       inline style off js/ui/sitecolor.js that no stylesheet knows the value of.
+       --accent against the ten palette colours measured 1.34 1.73 1.78 1.28 1.82 1.67
+       1.38 1.48 1.64 1.13 in the light scheme. On slot 10 that is 1.13:1, which is not a
+       ring; against the paper everywhere else it is 7.90:1, so the token is right and the
+       assumption under it - that the stylesheet knows its own ground - is not.
+
+       One stroke cannot clear 3:1 against a near-white paper AND a mid-saturated blue,
+       and this app draws focusable things on both. Two can: the accent is dark in this
+       scheme, so its partner is white, and whichever ground the ring lands on, one of
+       the pair stands on it. The dark scheme flips both, for the same reason. */
+    --focus-edge: #ffffff;
 
     --warn: #9a5b0e;
     --warn-bg: #fbf0dd;
@@ -95,10 +118,14 @@
         --line-soft: #232b35;
         --ink: #e6eaf0;
         --ink-2: #a7b2c0;
-        --ink-3: #7c8796;
+        /* Lifted rather than darkened, to the same floor: #7c8796 read 4.03 against
+       --surface-2, which is the week grid's band and the dates written across it. */
+    --ink-3: #8a95a3;
         --accent: #8ab4e2;
         --accent-soft: #1d2b3b;
         --on-accent: #0f1319;
+        /* The accent is the LIGHT one here, so the ring's other stroke is the dark one. */
+        --focus-edge: #0a0e13;
         --warn: #dfa259;
         --warn-bg: #2c2315;
         --danger: #e18a80;
@@ -130,10 +157,14 @@
     --line-soft: #232b35;
     --ink: #e6eaf0;
     --ink-2: #a7b2c0;
-    --ink-3: #7c8796;
+    /* Lifted rather than darkened, to the same floor: #7c8796 read 4.03 against
+       --surface-2, which is the week grid's band and the dates written across it. */
+    --ink-3: #8a95a3;
     --accent: #8ab4e2;
     --accent-soft: #1d2b3b;
     --on-accent: #0f1319;
+    /* The accent is the LIGHT one here, so the ring's other stroke is the dark one. */
+    --focus-edge: #0a0e13;
     --warn: #dfa259;
     --warn-bg: #2c2315;
     --danger: #e18a80;
@@ -216,11 +247,25 @@ body {
    calculation that is a choice rather than a measurement. */
 :root { --nav-h: 0px; --day-actions-h: 0px; --bars-h: calc(var(--nav-h) + var(--day-actions-h)); }
 
+/* The undo bar's own strip, measured the same way and by the same file (bottomCoverage in
+   js/ui/bars.js): the distance from its top edge to the bottom of the viewport, which is
+   its height AND the 10px it is lifted by below. It is deliberately NOT folded into
+   --bars-h: the bar positions itself off --bars-h, and a variable that contained the bar
+   would move the bar. It is a THIRD term in the page's bottom padding instead. */
+:root { --undo-h: 0px; }
+
 .app {
     max-width: 1180px;
     margin: 0 auto;
     padding: 0 16px;
-    padding-bottom: max(calc(var(--bars-h) + 24px), calc(24px + var(--safe-bottom)));
+    /* Three claims on the bottom of the page, and the page clears whichever is deepest:
+       the two docked bars, the undo bar floating above them, and - when there is no fixed
+       bar at all (printing, a wide screen) - the home indicator on its own. The 24px is
+       the gap between the last row and whatever is under it, and is the only number in
+       this calculation that is a choice rather than a measurement. */
+    padding-bottom: max(calc(var(--bars-h) + 24px),
+                        calc(var(--undo-h) + 24px),
+                        calc(24px + var(--safe-bottom)));
 }
 
 h2 { font-size: 18px; margin: 0; }
@@ -380,7 +425,22 @@ button {
 }
 
 button:hover { filter: brightness(1.08); }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Every focusable thing, not only <button>. The rule used to name buttons alone and
+   everything else took the browser's own ring - which on the rate <select>, in the dark
+   scheme, measured 1.12:1 against the row it sits on. An app that draws its own ring
+   draws it everywhere or it has not drawn one. The two strokes are adjacent: the 2px
+   spread exactly fills the 2px the outline is offset by. */
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+a[href]:focus-visible,
+[role="button"]:focus-visible,
+[tabindex="0"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--focus-edge);
+}
 
 .btn-secondary {
     background: var(--surface);
@@ -411,9 +471,24 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-icon:hover { background: var(--surface-2); color: var(--ink); }
 
 /* The one icon button that is a way IN rather than a way out, so it is written in the
-   text colour rather than the quiet one: --ink-3 on paper is 3.2:1, which is under the
+   text colour rather than the quiet one. That, and only that, is what this line is for
+   now: EMPHASIS. It used to be the contrast repair as well, and it was the wrong shape
+   for one.
+
+   The sentence that used to sit here - "--ink-3 on paper is 3.2:1, which is under the
    4.5:1 a small glyph needs and exactly the sort of thing that reads fine to whoever
-   chose it and not at all on a site at four in the afternoon. */
+   chose it and not at all on a site at four in the afternoon" - was a diagnosis of the
+   TOKEN, and the cure was applied to one id. .btn-icon eight lines above kept the colour
+   that sentence had just condemned, and so did thirty-one other rules: the date on the
+   day header at 3.66, the line that says whether the other two phones have seen tonight's
+   work at 3.23, the dates across the week grid at 3.00. A correct diagnosis cured at one
+   call site is worse than none, because it reads to the next person as already handled.
+
+   So the token moved instead (see :root, both schemes), which fixes .btn-icon and the
+   other thirty-two at once. The measurement is in tests/mobile.test.mjs, "the quiet ink":
+   --ink-3 against all seven grounds this stylesheet can put text on, and separately every
+   element the browser is actually painting in it, across the four screens and the ⋯ panel.
+   Neither of those can be made green by moving one rule. That is the point of them. */
 #settingsBtn { color: var(--ink-2); font-size: 20px; letter-spacing: 2px; }
 
 /* ---------------------------------------------------------------- a thumb's worth
@@ -519,7 +594,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .reorder-titles h2 { font-size: 18px; }
 /* The heading takes focus when the panel opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
-.reorder-titles h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.reorder-titles h2:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 .reorder-sub { margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
 .reorder-head-end { width: 44px; flex: none; }
 
@@ -528,6 +608,18 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     padding: 10px 12px 14px;
+}
+
+/* Announced, not drawn - the progress line is the visible answer, and on the two phone
+   layouts that clip the line away entirely this is the only channel left. Same box
+   .reorder-live takes below, for the same reason. */
+.day-live {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .reorder-live {
@@ -669,9 +761,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-head h2 { font-size: 18px; }
 /* The heading takes focus when the sheet opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
-.settings-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.settings-head h2:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 /* The worker's account is entered at its heading too (modal.js). */
-#workerDaysTitle:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+#workerDaysTitle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    /* Four, to meet the outline this one holds further out. */
+    box-shadow: 0 0 0 4px var(--focus-edge);
+}
 
 .settings-body {
     flex: 1;
@@ -737,6 +839,34 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     font-size: 16px;
     font-weight: 600;
 }
+
+/* The technical block. Latin, left-to-right and monospaced inside a Hebrew RTL sheet,
+   because that is what its contents are - and because a rectangle read out over the
+   phone must not be reordered by the bidi algorithm on its way to somebody's ear.
+
+   16px is the floor, not a taste: below it an iPhone magnifies the whole page the moment
+   this field takes focus, and it takes focus on purpose - touching it selects the whole
+   report, which is the alternative to a long-press and two drag handles over ten lines,
+   one-handed, at night. */
+.diagnostic-box { display: flex; flex-direction: column; gap: 10px; }
+.diagnostic-text {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 180px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    line-height: 1.45;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--ink);
+    /* It is read, selected and copied; it is never typed into. */
+    white-space: pre;
+    overflow: auto;
+}
+#diagnosticCopy { min-height: 48px; }
 
 @media (min-width: 701px) {
     .settings-panel.open {
@@ -911,7 +1041,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    pill in the middle of the header. */
 .day-label {
     flex: 1;
-    min-width: 0;
+    /* THE 44px FLOOR, on the one control that had been exempted from it by a min-width of
+       zero. The date's button is a button: it opens the picker, and a finger has to be
+       able to land on it. min-width: 0 alone let it be squeezed to whatever a flex line
+       had left over - measured at 568x320 with the day collapsed, the tools row fitted
+       beside the nav for the first time and the date came out ELEVEN pixels wide, still
+       announcing «יום רביעי 12/08/2026» to a screen reader and impossible to press.
+       With a floor the line cannot be shared when it does not fit, and the tools row
+       wraps under the nav instead, which is what it did before it fitted.
+       min-width, not width: at every ordinary size this rule does nothing at all - the
+       label is 154px at 320 and 213 at 430 - and the ellipsis below is still the backstop
+       for a day name longer than the room. */
+    min-width: 44px;
+    min-height: 44px;
     text-align: center;
     line-height: 1.3;
     background: none;
@@ -1010,8 +1152,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding-bottom: 8px;
     border-bottom: 1px solid var(--line-soft);
 }
-/* The card head carries the site's colour, so the count sits on a translucent white
-   rather than a theme surface that would clash with ten different backgrounds. */
+/* The card head carries the site's colour, so the count sits on a scrim of its own
+   rather than a theme surface that would clash with ten different backgrounds. See the
+   .site-count rule below for which scrim, and why it is not the white one this comment
+   used to name. */
 .site-head-color {
     border-radius: var(--radius);
     /* Was 8px top and bottom, for a head that held only text. It now holds two 44px
@@ -1023,7 +1167,25 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-bottom: none;
     margin-bottom: 10px;
 }
-.site-head-color .site-count { background: rgba(255, 255, 255, .22); color: #fff; }
+/* The SAME dark scrim as the two buttons beside it, and for the reason written out at
+   length above .site-head-btn: a white overlay only ever LIGHTENS, so what white ink is
+   written on depends on the colour underneath, and the palette has ten of those.
+
+   That paragraph was written ABOUT this element - it says so, "the translucent WHITE the
+   count beside it uses" - and then the cure went to the buttons and the count kept the
+   wash, at 22% rather than the 18% the paragraph had measured and refused. Measured on
+   the rendered page, white on the 22% white wash: 4.24 3.60 3.37 4.56 3.29 3.53 4.50
+   4.29 3.57 4.75 in the light scheme, nine of the ten under the floor, and 3.49 3.39
+   3.22 3.73 3.17 3.25 3.66 3.57 3.22 3.55 in the dark, all ten under. On the same dark
+   scrim it is 9.26 to 10.53 light and 6.86 to 7.76 dark - the buttons' own numbers,
+   because it is now the buttons' own ground.
+
+   A dark scrim can only ever darken, so this holds for any colour added to the palette
+   later, which is the property that made it right for the buttons and makes it right
+   here. tests/mobile.test.mjs, "the count on the site head", reads every card on the
+   screen rather than the first one: the failure was a function of which of the ten was
+   underneath, and one sample cannot see that. */
+.site-head-color .site-count { background: rgba(0, 0, 0, .22); color: #fff; }
 /* The name takes the room that is left and the tools keep theirs: a long site name used
    to have the whole head to itself, and without min-width:0 a flex item refuses to go
    under its content's width - it would push the two buttons off the end of a 320px card
@@ -1083,15 +1245,36 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .site-empty { color: var(--ink-3); font-size: 14px; margin: 4px 0; }
 .site-list { display: flex; flex-direction: column; gap: 4px; }
 
+/* THE ROW WRAPS, and the name has a floor under it. Both halves are one repair.
+
+   The rate <select> will not go under its longest option (שעות נוספות), so with the text
+   turned up it wants 215px on a 320px phone. The row used to answer that by refusing to
+   be narrower, which pushed the whole card - and the two buttons on its head - off the
+   side of the screen (see .site-grid in the phone block below). Letting the track be
+   narrower than the card only moves the failure: measured, `minmax(0, 1fr)` alone crushed
+   .assign-name to ZERO at 320 at twice the text, which is a row that has lost the name of
+   the man it prices in order to keep a dropdown whole.
+
+   So the name may shrink to a name and no further, and when the rate control cannot fit
+   beside it the row wraps instead. 4em, because min-width takes part in flex line
+   breaking (it clamps the hypothetical main size) and because it scales with the text:
+   68px at the ordinary size, which is what the name box already measures on a 320 phone -
+   so nothing about the ordinary day moves, measured at all four widths - and 136px at
+   twice it, which is wide enough to force the wrap and wide enough to read.
+
+   tests/mobile.test.mjs, "${width}px at 200% text, by site", measures both halves: the
+   page fitting across AND the name still having a box. A fix for one that breaks the
+   other goes red. */
 .assign-row {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 5px 6px;
     border-radius: var(--radius);
+    flex-wrap: wrap;
 }
 .assign-row:hover { background: var(--surface-2); }
-.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 4em; }
 
 .rate-control { display: flex; gap: 4px; align-items: center; }
 /* 16px is not a taste here, it is the threshold below which iOS magnifies the whole page
@@ -1345,7 +1528,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .week-cell { cursor: pointer; min-width: 88px; font-size: 13px; }
 .week-cell:hover { background: var(--accent-soft); }
-.week-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The one ring drawn INSIDE its own box - a grid of cells with no gap between them has
+   nowhere to put a ring outside - so its second stroke is inset too, in the 2px the
+   outline leaves at the edge. */
+.week-cell:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 2px var(--focus-edge);
+}
 .cell-filled { background: var(--surface); }
 .col-rest { background: var(--surface-2) !important; opacity: .65; }
 
@@ -2075,8 +2265,33 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         border-radius: 5px;
     }
     .week-cell .cell-line .site-name,
-    .week-cell .cell-line .tag-rate,
-    .week-cell .cell-line .site-mark { display: none; }
+    .week-cell .cell-line .tag-rate { display: none; }
+
+    /* THE MARK STAYS, and it is the one of the three that has no stand-in.
+       The name has the legend under the grid; the rate word has the dot and the plus
+       below. The cycle mark had nothing, and it is the only thing in the app that tells
+       the eleventh site from the first - js/ui/sitecolor.js paints them the same colour
+       ON PURPOSE ("the palette repeats and the second lap is marked with a diamond
+       instead"), so hiding it here left two sites painting one identical 16px block on
+       the single screen a whole week is read off.
+
+       A corner, because the middle of the block belongs to the rate: a doubled day draws
+       a 6px white dot through it and extra hours a plus, and those are the common marks.
+       The dark halo is the same reasoning as the scrim under .site-head-btn - a white
+       overlay only ever lightens, so white ink needs something dark of its own to hold
+       on all ten colours - and it does a second job here: where the corner glyph comes
+       within a pixel or two of the white dot, what is between them is dark, so the two
+       marks cannot merge into one blob. */
+    .week-cell .cell-line .site-mark {
+        position: absolute;
+        inset-block-start: 0;
+        inset-inline-start: 1px;
+        font-size: 9px;
+        line-height: 1;
+        color: #fff;
+        opacity: 1;
+        text-shadow: 0 0 2px rgba(0, 0, 0, .95);
+    }
 
     /* No room for the word, so the mark: a white dot is a doubled day, a plus is extra
        hours. White clears every one of the ten site colours by design. */
@@ -2287,7 +2502,18 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     /* --page-pad is the ONE place the phone's page padding is written; the week strip
        gives it back with the same property, so the two cannot drift apart. */
     .app { --page-pad: 12px; padding-inline: var(--page-pad); }
-    .site-grid { grid-template-columns: 1fr; }
+    /* minmax(0, 1fr), not 1fr. `1fr` is `minmax(auto, 1fr)`, and `auto` as a track
+       MINIMUM is the item's min-content - so the column refused to be narrower than the
+       card, the card refused to be narrower than the rate <select> inside it, and at
+       twice the text size the day screen came out 398px wide inside 390, 375 and 320.
+       What went off the edge was the inline end of every site card: the ＋ that adds a
+       man to that site and the 💬 that sends that gate its seder, with nothing on screen
+       saying the page could be dragged sideways to reach them.
+
+       The zero minimum is only half of it - on its own it hands the squeeze to the row
+       inside, and the row gave it all to the worker's name. .assign-row above wraps, and
+       .assign-name has a floor; the two are one repair and the comment there says so. */
+    .site-grid { grid-template-columns: minmax(0, 1fr); }
     /* min-width, because the buttons inside are flex: 1 from a zero basis - so the
        toggle's own natural size collapses to almost nothing. It never looks too big for
        the line it is on, so when undo, redo and "היום" joined that line it stayed put and
@@ -2387,6 +2613,21 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 }
 .drawer-wrap.drawer-open { pointer-events: auto; }
 
+/* CLOSED MEANS ABSENT, not parked off the edge.
+
+   A transform moves a thing on the screen and moves nothing else about it. Closed, this
+   panel was display:flex and visibility:visible with a live offsetParent, so its buttons
+   stayed in the tab order and in the accessibility tree of every screen in the app:
+   before it had ever been opened its ✕ was already a tab stop, and after one open and
+   close it was twenty-six day buttons sitting behind the day list, none of them visible
+   and all of them reachable.
+
+   visibility, not display, and not aria-hidden. aria-hidden takes a thing out of the
+   accessibility tree and leaves it in the tab order, which is the worse of the two
+   halves; display:none takes both but cannot be animated, and this panel slides. So:
+   hidden while closed, visible while open, and the transition delays the flip back to
+   hidden until the slide has finished - which is why the visibility line carries a delay
+   on the way out and none on the way in. */
 .day-drawer {
     position: absolute;
     top: 0;
@@ -2395,13 +2636,18 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     width: min(310px, 84vw);
     background: var(--surface);
     transform: translateX(100%);
-    transition: transform .2s ease-out;
+    visibility: hidden;
+    transition: transform .2s ease-out, visibility 0s linear .2s;
     box-shadow: var(--shadow-lift);
     display: flex;
     flex-direction: column;
     padding-bottom: var(--safe-bottom);
 }
-.day-drawer.drawer-open { transform: translateX(0); }
+.day-drawer.drawer-open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform .2s ease-out, visibility 0s linear 0s;
+}
 
 .drawer-head {
     display: flex;
@@ -2498,7 +2744,23 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     box-shadow: var(--shadow);
     font-size: 14px;
 }
-.undo-bar span { flex: 1; }
+/* THE BAR CANNOT BE TALLER THAN THE SCREEN IT FLOATS OVER.
+   Measured at 200% text on a 320x667 phone: the label «הרישום של <שם> נמחק» - built from
+   a real worker's name by editWithUndo - wrapped to a bar covering 727px of a 667px
+   viewport. The page dutifully reserved room for all of it (--undo-h is a measurement,
+   and it was telling the truth), and there was nowhere left for the last man's row to be:
+   it could not be scrolled clear of the bar at any scroll position, because the bar was
+   bigger than the screen. Three lines and an ellipsis. The FULL sentence stays in the
+   element, so the live region still reads it out whole; what is capped is how much of the
+   screen a message about something that already happened may take from the list. */
+.undo-bar span {
+    flex: 1;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 .undo-bar .btn-secondary { padding: 6px 14px; font-weight: 600; }
 .undo-bar .btn-icon { color: var(--paper); }
 .undo-bar .btn-icon:hover { background: transparent; color: var(--paper); }
@@ -2669,6 +2931,17 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
    this gets tapped thirty times an evening. */
 .wrow-main {
     flex: 1;
+    /* MEASURED, and it is not a tidy-up. A flex item's min-width defaults to `auto`,
+       which is its MIN-CONTENT - and the min-content of an unbreakable Hebrew or Arabic
+       name is the whole word. So `flex: 1` did not hold this button to the row: at twice
+       the text size with a long name on a 320px screen it grew to 885px inside a 320px
+       row, 565 of them off the start edge, and `.wrow-name`'s ellipsis never fired
+       because the button had already made room. The list clips the overflow, so the page
+       does not scroll sideways and every check in the mobile suite passed - what went off
+       the screen was the END of the row: the ✕ that clears a man's day, and the tags
+       saying where he was. min-width: 0 lets the button be the row's width and the NAME
+       shorten, which is what the ellipsis was put there for. */
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3173,13 +3446,20 @@ body.writes-blocked .day-actions button { opacity: .5; }
    reach the crew from somewhere. */
 body.writes-blocked .day-actions #copyDayBtn { pointer-events: none; }
 body.writes-blocked .day-actions .btn-success { opacity: 1; }
+/* 14px, not the 12 it was born at: this is the app telling somebody that nothing they
+   type tonight is being recorded, and it is read at the end of a working day. The floor
+   the mobile suite holds every other sentence to applies to the most serious one too. */
 .progress-blocked {
     display: inline-flex;
     align-items: center;
-    height: 22px;
-    padding: 0 8px;
+    /* Its own line inside .progress, so the count beside it is not pushed out of the
+       header on the narrowest phone. Height by its content, not a written-down number,
+       so it still fits its own text at twice the size. */
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 2px 8px;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 700;
     background: var(--danger-bg);
     color: var(--danger);
@@ -3432,6 +3712,25 @@ body.day-compact .day-header .progress .progress-line {
     .wrow-main { padding: 6px 12px; min-height: 68px; gap: 8px; font-size: 16.5px; }
     .wrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wrow .btn-icon { align-self: center; }
+    /* At ordinary sizes the name and its badges share one line and nothing here does
+       anything at all. At twice the text size with a long name they cannot: measured at
+       320, the badge «אתר עם שם ארוך מאוד» at 26px took the whole row and the name was
+       ellipsised to ZERO width - a row identifying nobody. The row gets a second line
+       instead, which is what the design board says happens at 200% ("rows grow in
+       height; no target shrinks below 44") and is the only answer that keeps BOTH the
+       man's name and where he was. The name asks for a full line; the badges take what
+       is left, on this line or the next. */
+    .wrow-main { flex-wrap: wrap; }
+    /* HALF, and the half is what makes this cheap. `flex: 1 1 auto` also protects the
+       name, by asking for the whole word - and a long name then demanded a line of its
+       own at ORDINARY text too, which took every row from 69px to 71 and cost a 375px
+       phone a whole name off the first screen (3 -> 2). Asking for half instead: at
+       ordinary sizes the badges fit in the other half, nothing wraps, and the name is
+       ellipsised exactly as before (measured 375: 69px rows, 3 whole names, the name
+       165px wide); at 200% the badge alone is wider than the row, the wrap happens, and
+       the name keeps its 303px instead of being squeezed to nothing. */
+    .wrow-name { flex: 1 1 50%; }
+    .wrow-value { flex: 0 1 auto; min-width: 0; }
 }
 
 /* The narrowest phone - AFTER the compact block above, whose same-specificity rules would
@@ -3454,7 +3753,126 @@ body.day-compact .day-header .progress .progress-line {
     .wrow-main { min-height: 66px; }
     .day-steps:has(.btn-today) .step-word { display: none; }
     .day-steps:has(.btn-today) .step-btn { padding: 8px 0; justify-content: center; }
+
+    /* «קודם» and «הבא» lose their words here and keep their chevrons. Measured at 320
+       before this rule: the two pills took 116px of the 304px row and the date, which is
+       the one thing on this screen that decides where every tap lands, had 127 - the two
+       ways of LEAVING the day were as wide as the day. Without the words they are 44px
+       each and the date has 205. The chevrons are drawn and already point the right way
+       for an RTL calendar (chevronIcon in dom.js), and the buttons' aria-labels still say
+       «יום קודם» and «יום הבא» in full, which is what a screen reader reads and what
+       tests/smoke.mjs finds them by.
+       min-width, spelled out: .btn-nav is not in the global 44px min-width list above, so
+       without the words it would be a 32px target - which is the floor this whole file is
+       about, broken by a rule meant to help. */
+    .day-nav .btn-nav .nav-word { display: none; }
+    .day-nav .btn-nav { min-width: 44px; justify-content: center; padding-inline: 4px; }
+    /* The room the words gave up, spent on the thing they were crowding. Two lines of
+       20 over 14 are 39px inside a 44px row, so this costs the header nothing at all. */
+    .day-label strong { font-size: 20px; }
 }
+
+/* ---------------------------------------------------------------- the crowded day (P3)
+
+   body.day-tight: the shape the day takes on a screen that cannot hold it otherwise.
+   fitDayList() in js/ui/bars.js puts the class on and takes it off, MEASURED - it counts
+   how much of the first screen is left for the crew once the chrome and the bars have
+   taken theirs, and turns this on when that is less than two worker rows. It is not a
+   media query, because the case it is for is not a width: at 320x667 with text at twice
+   its size this build puts 469px of chrome above the list and 263px of bars below it, on
+   a 667px screen - no whole row of the crew at all, at any of the four widths. A width
+   cannot see that; only a measurement can.
+
+   WHAT GIVES WAY, and in this order, which is the hierarchy in features/compact-shell/
+   findings.md read from the bottom up:
+
+     5. the second copy of a label. Every rule in this block takes away a word that a
+        screen reader still has - the tab words are clipped to a pixel and stay in the
+        accessibility tree, the dock's phrases and the switcher's are ellipsised and their
+        text nodes are untouched, and the words beside the undo arrows come off exactly as
+        they already do at 360px, where the buttons' aria-labels carry the sentence.
+        NOTHING here is display:none on the only name a control has.
+     4. the last worker stays reachable: nothing in this block moves a bar or the page's
+        bottom padding - those are measured (js/ui/bars.js) and stay measured.
+     3. the warning keeps its meaning and its action: the folded line loses its third
+        line, not its sentence, and לדוחות and ✕ are untouched. The full prose is one tap
+        down, in .banner-full, exactly as before.
+     2. the recording controls stay: the switcher, the fold's button, undo, redo and the
+        count are all still on the header, at their full 44px.
+     1. the selected date stays: .day-nav and .day-label are not mentioned in this block
+        at all.
+
+   Measured at 320x667 at 200% text, a crew of thirty with long Hebrew names: see
+   features/compact-shell/findings.md for the before and after of every cell. */
+
+/* The tab words. The bar keeps its four icons and its four 44px targets; the word under
+   each goes off the eyes and stays in the accessibility tree - the same clip the day
+   header uses for .now-editing and the landscape bar for the count, and for the same
+   reason. display:none here would take the tab's only accessible name with it. */
+body.day-tight .tabs .tab span:not(.tab-icon) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* The dock. Two phrases that wrap to two lines each at 200% and stand the bar up at
+   144px - more than a fifth of a 667px screen for two buttons. One line and an ellipsis
+   instead: the glyph that identifies each of them is the first character of its own
+   label, so it survives the clipping, and the whole phrase is still the button's text and
+   still its accessible name. The 64px floor above (.day-actions) is a floor, not a
+   height, and the bar comes down to it. */
+body.day-tight .day-actions button {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-block: 8px;
+}
+
+/* The switcher's pair, for the same reason and by the same means: at 200% each label
+   wraps to two lines and the line they share stands at 84px. Ellipsised they are 44,
+   which is the floor, and «לפי עובדים» is still what a screen reader reads out. */
+body.day-tight .day-tools .mode-toggle button {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The words beside the undo and redo arrows. This is the rule the 360px block already
+   applies when «היום» joins that line; here it applies whenever the screen is this
+   short, and for the same reason - the arrows are drawn, the buttons carry
+   aria-labels, and the words are the part that can be spared. */
+body.day-tight .day-steps .step-word { display: none; }
+body.day-tight .day-steps .step-btn { padding-inline: 4px; justify-content: center; }
+
+/* The two ways of leaving the day, on a screen that has had to collapse: the chevrons
+   stay, the words go, and the date takes the width back. Same rule as the 360px block
+   above, same reason, same aria-labels doing the talking - here it is the text SIZE
+   rather than the screen width that has made the row too small for both. */
+body.day-tight .day-nav .btn-nav .nav-word { display: none; }
+body.day-tight .day-nav .btn-nav { min-width: 44px; justify-content: center; padding-inline: 4px; }
+
+/* The folded warning loses its third line, not its sentence. Two lines of the summary at
+   200% is still the whole of «יום אחד עדיין פתוח בחשבון שנסגר מחר» on most days, the
+   dates are in .banner-full one tap down, and לדוחות and ✕ do not move. */
+body.day-tight .banner-summary { -webkit-line-clamp: 2; }
+
+/* The app's own name, which is the one thing above the day that is neither the day nor a
+   control. Not an accessible name being taken away: nothing here is tappable, and the
+   document's <title> still says which app this is. The ⋯ and the sync chip stay. */
+body.day-tight .topbar .brand { display: none; }
+
+/* The seams. Every one of these is a margin or a padding, none of them carries a word or
+   a target, and together they are worth about a fifth of a worker's row at 200% - which
+   is the difference between the last name on the first screen being whole and being cut.
+   The 44px floors above are untouched: what shrinks is the space AROUND them. */
+body.day-tight .day-header { padding: 2px 8px 6px; }
+body.day-tight .day-tools { margin-top: 0; }
+body.day-tight .worker-list { margin-top: 2px; }
+body.day-tight .banner-fold { min-height: 0; margin-bottom: 4px; }
+body.day-tight .topbar { margin-bottom: 2px; }
 
 /* With one client's site chosen (body.client-scoped, set by renderReports), the printed
    page follows the same rule as the export button: the client's grid, and nothing that
@@ -3497,10 +3915,33 @@ body.day-compact .day-header .progress .progress-line {
         /* 7 below: the track lives in the bottom 4px, and the tools must clear it. */
         padding: 3px 8px 7px;
     }
-    /* flex-basis 0: the nav asks for nothing, so the tools are never wrapped onto a
-       second line - the day name is what shrinks, by ellipsis, never the buttons. */
-    .day-nav { flex: 1 1 0; min-width: 0; gap: 4px; }
+    /* THE NAV KEEPS ITS MINIMUM, and what that rule replaced was measured before it was
+       replaced: `flex: 1 1 0; min-width: 0` said the nav asks for nothing, so that the
+       tools would never be wrapped onto a second line and the day NAME would be the half
+       that shrank. The tools have taken a line of their own since the switcher moved into
+       the header (v101) - this bar is 104px and two rows on a 568x320 screen, not the 62
+       and one row the comment below the block still describes - so the trade that rule
+       made is no longer on offer, and all it was still doing was giving the tools the
+       nav's width as well. Measured at 568x320 on the build before this line changed: the
+       nav was 155px for four controls whose floors add up to 188, and the date's button
+       came out at ZERO width - the date, on the bar that exists to keep the date, drawn
+       nowhere and skipped by the 44px checks because an element of no size is not measured
+       at all. flex-basis auto - the nav asks for the width its own contents want, and the
+       tools wrap under it as they were already doing rather than being handed the nav's
+       share. NOT min-width: min-content, which was tried and measured and is worse than
+       the bug: the day name is nowrap, so its min-content is the whole name, and at 200%
+       text on a 320px screen that made the nav 459px wide inside a 320px page - the
+       sideways scroll this suite exists to stop. min-width stays 0; the ellipsis below is
+       still what gives way when there is genuinely not enough room. */
+    .day-nav { flex: 1 1 auto; min-width: 0; gap: 4px; }
     .day-tools { margin-top: 0; flex: 0 0 auto; }
+    /* The switcher gives up its own line here. `flex: 1 1 100%` (the phone block above)
+       is what puts the pair on a line of its own in portrait, and it is right there; on a
+       bar that is meant to BE one line it took a second row and then a third, and the
+       header stood at 148px on a screen 320px tall - half the phone, pinned, above a list
+       that is the reason the phone is being held sideways. Measured at 568x320 with the
+       pair sharing the row: 58px, which is the one row this block was written for. */
+    .day-tools .day-switch { flex: 0 1 auto; min-width: 0; }
     .day-steps { gap: 4px; }
     .step-btn { padding: 8px 5px; }
     .btn-today { margin-inline-start: 0; padding: 6px 8px; }
@@ -3552,3 +3993,23 @@ body.day-compact .day-header .progress .progress-line {
         margin: 0;
     }
 }
+
+/* Only a measured displacement enables this. Desktop navigation stays in flow. */
+@media screen and (max-width: 700px) {
+    body.bars-lowered .tabs,
+    body.bars-lowered .day-actions,
+    body.bars-lowered .undo-bar { transform: translateY(var(--bar-drop, 0px)); }
+}
+
+/* A vehicle may serve several sites; each choice remains a full touch target. */
+.vehicle-option { display:flex; align-items:center; gap:12px; min-block-size:44px; padding:8px; text-align:start; }
+.vehicle-option input { inline-size:24px; block-size:24px; flex:0 0 24px; }
+
+/* Reversible worker visibility: status is conveyed by words and aria, as well as color. */
+.worker-active-toggle { min-width: 64px; min-height: 44px; border: 2px solid #697586;
+    border-radius: 24px; background: #eef1f4; color: #283343; font-weight: 700; padding: 8px 12px; }
+.worker-active-toggle.is-active { background: #16713b; border-color: #16713b; color: #fff; }
+.worker-active-toggle:focus-visible { outline: 3px solid #2962ff; outline-offset: 3px; }
+.day-holiday-action { margin: 0; min-height: 44px; padding: 6px; flex-shrink: 0; }
+
+@media (max-width: 360px) { .day-tools .mode-prefix { display: none; } }
