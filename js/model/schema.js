@@ -31,11 +31,11 @@
 // writes to this object; there is no setting, no URL parameter and no dialog that reaches
 // it. It is changed by editing this line, in a commit, with the reason in the message.
 const FARKAD_SHIPPED_FLAGS = {
-    // The one action with nothing behind it. Off because the proof it depends on - "made
-    // here and never sent anywhere" - is a statement about what two OTHER phones hold,
-    // and the evidence for it lives on this one. Getting it wrong deletes a man the other
-    // two are still recording days against. The archive does everything this was for.
-    permanentDeletion: false,
+    // v119: the owner requested removing accidental, unused names. Local-only typos
+    // may go offline; shared names require completed protocol sync. Any recorded work,
+    // advance, financial history or vehicle ownership blocks deletion. Late work keeps
+    // its identity through reinstateReferenced; a stale roster alone cannot revive it.
+    permanentDeletion: true,
 
     // Explicit departures are implemented for review. Keep activation separate from
     // preparing the code: old phones do not understand vehicleRuns and must update first.
@@ -1370,7 +1370,19 @@ function workerFootprint(schedule, workerId) {
         });
     }
 
-    return { days, advances };
+    // The fold alone forgets cancelled advances and previous owners after a correction.
+    // Those immutable entries, and zero-advance period closures, are still history.
+    const ledger = Object.keys((schedule && schedule.ledger && schedule.ledger.advances) || {})
+        .filter(key => String(schedule.ledger.advances[key]?.workerId) === id);
+    const vehicles = ((schedule && schedule.vehicles) || [])
+        .filter(vehicle => String(vehicle.ownerId) === id).map(vehicle => vehicle.id);
+    Object.keys(allDays).forEach(date => {
+        const runs = allDays[date]?.vehicleRuns || {};
+        Object.keys(runs).forEach(key => {
+            if (String(runs[key]?.ownerId) === id) vehicles.push(`${date}:${key}`);
+        });
+    });
+    return { days, advances, ledger, vehicles };
 }
 
 // What still has to be settled with a man before he is put away, said in a sentence, or
@@ -1599,6 +1611,18 @@ function referencedEntityIds(schedule) {
         }
     });
 
+    // Financial history can arrive after a deletion too, including a closure with no
+    // advance. Keep every identity the immutable history names, even after cancellation.
+    Object.values((schedule && schedule.ledger && schedule.ledger.advances) || {})
+        .forEach(entry => {
+            if (entry && isSafeId(String(entry.workerId || ''))) workers.add(String(entry.workerId));
+        });
+    ((schedule && schedule.vehicles) || []).forEach(vehicle => {
+        if (isSafeId(String(vehicle.ownerId || ''))) workers.add(String(vehicle.ownerId));
+    });
+    Object.values(days).forEach(day => Object.values(day?.vehicleRuns || {}).forEach(run => {
+        if (run && isSafeId(String(run.ownerId || ''))) workers.add(String(run.ownerId));
+    }));
     return { workers, places };
 }
 
@@ -1713,6 +1737,7 @@ function reinstateReferenced(schedule, remembered) {
             phone: String((was && was.phone) || ''),
             dailyRate: Number(was && was.dailyRate) || 0,
             hourlyRate: Number(was && was.hourlyRate) || 0,
+            payCycles: formatPayCycles(payCycleHistory(was || {})) || String((was && was.payCycles) || ''),
             active: false
         };
     };

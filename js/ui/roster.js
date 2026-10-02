@@ -1253,18 +1253,12 @@ function renderWorkerFormActions() {
         box.appendChild(el('p', 'hint',
             'הימים והמקדמות שלו נשמרו כל הזמן הזה, והם יופיעו שוב במסך היומי.'));
 
-        // A typo does not become undeletable by being archived. If the same proof holds -
-        // made here, never sent anywhere, no day, no advance, nothing queued and no
-        // restore in flight - then he is still a name that was typed by mistake, and
-        // leaving him in the archive for ever is not tidier, it is just clutter that
-        // somebody has to read past every time they open this screen.
-        //
-        // Everybody else stays archive-only, and the sentence says which of the two he is.
+        // Inactive accidental names follow the same deletion checks as active ones.
         const archivedBlockers = deletionBlockers(worker.id);
         if (archivedBlockers.length === 0) {
-            box.appendChild(button('🗑️ מחק עובד', 'btn-danger', () => deleteWorker(worker.id)));
+            box.appendChild(button('🗑️ מחק עובד לצמיתות', 'btn-danger', () => deleteWorker(worker.id)));
             box.appendChild(el('p', 'hint',
-                'הוא לא נשלח לשום מכשיר אחר ואין לו רישומים, ולכן אפשר למחוק אותו לגמרי.'));
+                'אין לו ימים, מקדמות או חשבונות שמורים. השם יוסר גם מהמכשירים המסונכרנים.'));
         } else {
             box.appendChild(el('p', 'hint', whyNotDeletable(archivedBlockers)));
         }
@@ -1276,13 +1270,11 @@ function renderWorkerFormActions() {
     box.appendChild(button('כבה עובד זמנית', 'btn-secondary',
         () => setWorkerArchived(worker.id, true)));
 
-    // Deleting is offered only when nothing anywhere names him and nowhere else has ever
-    // heard of him. Anything else and the button is not there to be pressed by mistake -
-    // the sentence under it says which of those it is.
+    // A name with history stays; accidental names may be removed after sync.
     if (blocked.length === 0) {
-        box.appendChild(button('🗑️ מחק עובד', 'btn-danger', () => deleteWorker(worker.id)));
+        box.appendChild(button('🗑️ מחק עובד לצמיתות', 'btn-danger', () => deleteWorker(worker.id)));
         box.appendChild(el('p', 'hint',
-            'הוא לא נשלח לשום מכשיר אחר ואין לו רישומים, ולכן אפשר למחוק אותו לגמרי.'));
+            'אין לו ימים, מקדמות או חשבונות שמורים. השם יוסר גם מהמכשירים המסונכרנים.'));
         return;
     }
 
@@ -1293,13 +1285,6 @@ function renderWorkerFormActions() {
 // queue rather than of the screen. Empty means deletable. Read in two places on purpose:
 // once to decide what to draw, and again at the moment of the write - a snapshot can
 // arrive while the confirmation is open.
-// Permanent deletion is OFF in this build; the switch is FARKAD_FLAGS in the model.
-//
-// Everything below it - the footprint, the queue, the provenance, the typed name - stays
-// exactly as it is and goes on being tested, because the day this is turned back on it
-// has to be the same gate it was. What the flag changes is only whether the gate can ever
-// open: while it is false the archive is the whole of what this screen offers, and the
-// one action with nothing behind it is not reachable by any path.
 function permanentDeletionEnabled() {
     return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.permanentDeletion === true;
 }
@@ -1321,22 +1306,26 @@ function deletionBlockers(workerId) {
     if (sync && sync.pendingReplace && sync.pendingReplace()) {
         blocked.push('שחזור שממתין להסתיים');
     }
-    // The one that is not about this device at all: unless this device can PROVE it made
-    // him and PROVE he never left, he is archived. Absent proof is not proof of absence -
-    // a phone upgrading from v78 has no record of anybody, and every one of those workers
-    // may be on two other phones right now.
-    if (!(sync && sync.provenLocalOnly && sync.provenLocalOnly('workers', workerId))) {
-        blocked.push('אי אפשר להוכיח שהוא נוצר כאן ולא נשלח לשום מקום');
+    if (footprint.ledger.length > 0) blocked.push('היסטוריית תשלומים או חשבונות שמורים');
+    if (footprint.vehicles.length > 0) blocked.push('רכב או נסיעות שרשומים על שמו');
+    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
+        blocked.push('יש נתונים שדורשים בדיקה לפני שינוי');
+    }
+    if (!Store.available) blocked.push('אין אפשרות לשמור את המחיקה במכשיר');
+    const localOnly = sync && sync.provenLocalOnly && sync.provenLocalOnly('workers', workerId);
+    const sharedReady = sync && sync.adapter && sync._heardFromCloud
+        && Number.isInteger(sync._revision) && sync._revision >= 1
+        && sync.status === 'synced' && sync.honestStatusFor('synced') === 'synced'
+        && (typeof navigator === 'undefined' || navigator.onLine !== false);
+    if (!localOnly && !sharedReady) {
+        blocked.push('למחיקת שם שכבר נשמר, התחבר והמתן לסיום הסנכרון');
     }
     return blocked;
 }
 
 function whyNotDeletable(blocked) {
-    // The enumeration names WHICH blocker; the rule after it stays causeless, because
-    // the blockers are not all history - a provenance gap is not היסטוריה, and a
-    // sentence that asserts the wrong cause teaches the wrong rule.
-    return `${blocked.join(', ')}. אי אפשר למחוק, רק להעביר לארכיון - ` +
-        'כך דוחות ותשלומי עבר נשמרים תמיד.';
+    return `${blocked.join(', ')}. בינתיים אפשר לכבות את העובד בכפתור הפעילות; ` +
+        'הימים, הדוחות והמקדמות נשמרים.';
 }
 
 // Said out loud, every time. Returning in silence here leaves somebody looking at a
@@ -1491,7 +1480,7 @@ async function deleteWorker(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
 
-    if (deletionBlockers(workerId).length > 0) return refuseDeletion();
+    if (deletionBlockers(workerId).length > 0) return refuseDeletion(workerId);
 
     // By NAME, typed. The button was drawn once and this is permanent: a confirmation
     // that is one more tap in the same place as the last tap is not a decision, and the
@@ -1500,24 +1489,26 @@ async function deleteWorker(workerId) {
     // nothing queued - because "it is final" alone does not say WHY this one man may be
     // deleted when every other one may not. The footer makes the one promise the write
     // path actually keeps.
+    const confirmedName = String(worker.name).trim();
     const typed = await askText({
         title: 'מחיקת עובד',
         message: `ל${isolate(worker.name)} אין אף יום רשום, אף מקדמה ואף רישום שממתין ` +
-            'לשליחה. המחיקה סופית ולא ניתנת לשחזור. לאישור, הקלד את שם העובד במדויק:',
+            'לשליחה. השם יימחק גם מהמכשירים המסונכרנים. אם יגיע בהמשך רישום ממכשיר אחר, ' +
+            'העובד יישמר כלא פעיל כדי לשמור את הרישום. לאישור, הקלד את שם העובד במדויק:',
         placeholder: worker.name,
         ok: 'מחיקה סופית',
         footer: 'נשמר במכשיר ויסתנכרן כשיש חיבור.',
-        validate: value => (String(value).trim() === String(worker.name).trim()
+        validate: value => (String(value).trim() === confirmedName
             ? null : 'השם אינו זהה.')
     });
-    if (typed === null) return;
+    if (typed === null || String(typed).trim() !== confirmedName) return;
 
     // Everything, again, against the schedule as it is now - including the man himself,
     // who can have been archived or removed on another phone while the box was open.
     const live = State.worker(workerId);
     if (!live) { render(); return; }
-    if (String(live.name).trim() !== String(worker.name).trim()) return refuseDeletion();
-    if (deletionBlockers(workerId).length > 0) return refuseDeletion();
+    if (String(live.name).trim() !== confirmedName) return refuseDeletion(workerId);
+    if (deletionBlockers(workerId).length > 0) return refuseDeletion(workerId);
 
     const before = State.schedule.workers.slice();
     State.schedule.workers = State.schedule.workers.filter(item => item.id !== workerId);
@@ -1542,7 +1533,7 @@ async function deleteWorker(workerId) {
 // confirmation was open, and false - and confusing - when the reason is that this build
 // does not do permanent deletion at all. Somebody reading the second sentence goes
 // looking for the change that was never made.
-function refuseDeletion() {
+function refuseDeletion(workerId) {
     renderWorkerFormActions();
     if (!permanentDeletionEnabled()) {
         return askTell({
@@ -1553,8 +1544,9 @@ function refuseDeletion() {
     }
     return askTell({
         title: 'לא נמחק',
-        message: 'בינתיים השתנה משהו על שמו, ולכן אי אפשר למחוק אותו. אפשר להעביר לארכיון - ' +
-            'כל הימים והמקדמות שלו יישמרו.'
+        message: deletionBlockers(workerId).length > 0
+            ? whyNotDeletable(deletionBlockers(workerId))
+            : 'פרטי העובד השתנו בינתיים. פתח את הכרטיס מחדש ובדוק לפני מחיקה.'
     });
 }
 

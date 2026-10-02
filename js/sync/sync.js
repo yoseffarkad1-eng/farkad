@@ -2183,7 +2183,7 @@ const FarkadSync = {
         return entries.some(([path, item]) => {
             const parts = path.split('.');
             if (parts[0] === 'days' && parts.length === 4) return parts[3] === id;
-            if (parts[0] === 'advances') {
+            if (parts[0] === 'advances' || parts[0] === 'ledger') {
                 return Boolean(item && item.value && String(item.value.workerId) === id);
             }
             return false;
@@ -2192,11 +2192,10 @@ const FarkadSync = {
 
     // ------------------------------------------------------------ provenance
     //
-    // A permanent deletion is offered for one kind of entity only: one this device can
-    // PROVE it made and PROVE never left. Everything else is archived, because once an id
-    // is on another phone there is no statement this device can make about the future -
-    // that phone can be holding a day for him right now, recorded offline, and nothing
-    // here can see it.
+    // This proof permits deleting a local typo without cloud sync. Since v119 a shared
+    // unused worker may also be deleted, but only after protocol sync has completed.
+    // Neither case licenses destroying later offline work: that restores the identity
+    // as inactive through reinstateReferenced.
     //
     // Two facts, both written down when they happen, and BOTH required:
     //

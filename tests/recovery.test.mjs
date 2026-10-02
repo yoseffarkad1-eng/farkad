@@ -433,27 +433,26 @@ function rebuild(device, payload) {
         Boolean(file.records) && Object.keys(file.records).length > 0,
         JSON.stringify(Object.keys(file.records || {})));
 
-    // The disk heals and the app opens again.
-    //
-    // Nothing durable could be written while it was refusing, so there is no record of
-    // the handover for this session to find - and no honest way to make one. That is not
-    // a hole to be papered over with a message: it is the reason permanent deletion is
-    // shipped OFF, and the two checks below say so in the only way a test can.
+    // The disk heals without any durable proof that the export left. v119 must not
+    // depend on provenance being infallible: even a deletion made under that stale
+    // belief must retain real work that arrives later from the exported copy.
     const reopened = makeDevice({ storage: device.dump(), deviceId: 'd_liar' });
     reopened.State.load();
-    check('permanent deletion is unavailable, which is the whole of what saves this',
-        reopened.call('deletionBlockers', mine)
-            .includes('מחיקה סופית מושבתת בגרסה הזו'),
-        JSON.stringify(reopened.call('deletionBlockers', mine)));
-    check('and with the gate open this device WOULD destroy him - so it stays shut',
-        (() => {
-            const open = makeDevice({
-                storage: device.dump(), deviceId: 'd_liar', flags: { permanentDeletion: true }
-            });
-            open.State.load();
-            return open.call('deletionBlockers', mine).length === 0;
-        })(),
-        JSON.stringify({ gen: reopened.raw('farkad:prov:gen'), was: genBefore }));
+    const remembered = JSON.parse(JSON.stringify(reopened.State.schedule));
+    reopened.ctx.askText = async question => question.placeholder;
+    reopened.ctx.askTell = async () => {};
+    await reopened.call('deleteWorker', mine);
+    check('the unused typo can be removed with the shipped gate', !reopened.State.worker(mine));
+    const late = JSON.parse(JSON.stringify(reopened.State.schedule));
+    late.roster = { workers: { [mine]: null } };
+    late.days['2026-08-12'] = { plan: {}, actual: { [mine]: dayValue('p_01') } };
+    const recovered = reopened.call('normaliseSchedule', late, reopened.call('rememberedEntities', remembered));
+    check('late work restores an inactive identity despite the stale provenance',
+        recovered.workers.some(worker => worker.id === mine && worker.name === 'חדש' && worker.active === false));
+    check('and the wage is not lost with the deleted name',
+        reopened.call('payrollReport', recovered, '2026-08-01', '2026-08-31')
+            .find(row => row.workerId === mine)?.amount === 300);
+
 }
 
 {
@@ -824,11 +823,11 @@ function rebuild(device, payload) {
     const device = makeDevice({ deviceId: 'd_frozen' });
     seed(device);
     const flags = device.global('FARKAD_FLAGS');
-    try { flags.permanentDeletion = true; } catch (error) { /* frozen throws in strict */ }
+    try { flags.permanentDeletion = false; } catch (error) { /* frozen throws in strict */ }
     try { flags.vehicles = true; } catch (error) { /* the same */ }
 
-    check('permanent deletion is still off',
-        device.global('FARKAD_FLAGS').permanentDeletion === false,
+    check('authorized permanent deletion cannot be changed at runtime',
+        device.global('FARKAD_FLAGS').permanentDeletion === true,
         String(device.global('FARKAD_FLAGS').permanentDeletion));
     check('and so are vehicles',
         device.global('FARKAD_FLAGS').vehicles === false,

@@ -345,8 +345,8 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     const schema = readFileSync(join(ROOT, 'js/model/schema.js'), 'utf8');
 
     check('the flags object is frozen', /const FARKAD_FLAGS = Object\.freeze\(/.test(schema));
-    check('and both gates are shut in the shipped defaults',
-        /permanentDeletion: false/.test(schema) && /vehicles: false/.test(schema),
+    check('authorized deletion is enabled while vehicles remain shut',
+        /permanentDeletion: true/.test(schema) && /vehicles: false/.test(schema),
         schema.slice(schema.indexOf('const FARKAD_SHIPPED_FLAGS'),
             schema.indexOf('const FARKAD_FLAGS')).match(/\w+: (true|false)/g).join(', '));
 
