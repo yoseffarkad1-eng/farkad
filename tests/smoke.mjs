@@ -5019,8 +5019,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
   await seedRoster(page);
 
-  check('there are still four tabs, not five',
-    (await page.locator('.tabs .tab').count()) === 4);
+  check('five tabs include the owner-requested separate advances screen',
+    (await page.locator('.tabs .tab').count()) === 5);
   check('and the ⋯ is in the header instead',
     await page.locator('#settingsBtn').isVisible());
 

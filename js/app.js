@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v116';
+const APP_VERSION = 'v117';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -42,7 +42,7 @@ function checkBuildConsistency() {
 
 let currentView = 'day';
 
-const VIEWS = ['day', 'week', 'roster', 'reports'];
+const VIEWS = ['day', 'week', 'roster', 'advances', 'reports'];
 
 function showView(view) {
     if (!VIEWS.includes(view)) return;
@@ -102,6 +102,7 @@ function render() {
     if (currentView === 'week') renderWeek();
     if (currentView === 'roster') renderRoster();
     if (currentView === 'reports') renderReports();
+    if (currentView === 'advances') renderAdvances();
 
     renderMigration();
     // The day header is rebuilt from scratch on every render, so the ↶ comes back

@@ -41,8 +41,8 @@ different from what was done.
 ## The iron laws
 
 1. **The ledger is append-only.** Yosef authorized enabling repayment and correction
-   on 2026-10-02. v116 is an enabled LOCAL release candidate; production deployment
-   remains held until live rules/protocol and all three devices are verified. The boot-time mirror in `state.js` is the ONE sanctioned
+   on 2026-10-02. v116 was published on 2026-10-02 after owner-supplied rules/protocol evidence.
+   The owner currently has two active phones. Both must update before new financial use. The boot-time mirror in `state.js` is the ONE sanctioned
    write; ledger entries are never edited, never deleted, and merged by union.
    `carryAdvances` in `js/model/schema.js` moves with it, in the same commit and the
    same direction - one gate open without the other ships a lie - and

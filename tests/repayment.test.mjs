@@ -1792,7 +1792,7 @@ function omer(flags) {
 }
 
 {
-    suite('L3: the screen exists, and it is the only thing that approves');
+    suite('L3: changed balances require review; an unchanged plan can travel with a financial action');
 
     const settings = readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8');
     check('the review screen is drawn from the plan',
@@ -1811,11 +1811,14 @@ function omer(flags) {
     check('and the comparison is of the numbers, not of how many rows there are',
         /function carryPlanFingerprint[\s\S]{0,600}row\.deducted[\s\S]{0,200}row\.carriedOut/
             .test(settings));
-    check('recordCarryApproval is called from exactly one place in the app',
+    // v117 also records the zero-row, already-clear decision with the first financial
+    // action, so that the action itself cannot make the next render revert to legacy.
+    // The functional refusal of a nonempty plan is in simple-advances.test.mjs.
+    check('recordCarryApproval is limited to review and the guarded financial action',
         ((readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8')
             + readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8')
             + readFileSync(new URL('../js/ui/share.js', import.meta.url), 'utf8'))
-            .split('recordCarryApproval(').length - 1) === 1);
+            .split('recordCarryApproval(').length - 1) === 2);
     check('and the row that has no recorded closure says so on the screen',
         settings.indexOf('אין רישום סגירה לתקופה הזו') !== -1);
 }

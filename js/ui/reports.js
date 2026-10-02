@@ -6,6 +6,190 @@
 // reach someone, not so they can travel out in a spreadsheet.
 
 const REPORT_RANGE = { from: null, to: null };
+// null means all workers; an empty set deliberately means nobody. This is a report
+// filter only and never changes a worker's active status or anything in shared data.
+let REPORT_WORKERS = null;
+const REPORT_DEDUCTIONS = new Map();
+let ADVANCE_WORKER = null;
+let ADVANCE_SEARCH = '';
+
+function workerAdvanceItems(workerId) {
+    return advancesFor(State.schedule, workerId, '0000-01-01', '9999-12-31');
+}
+
+function workerAdvanceSummary(workerId) {
+    return workerAdvanceItems(workerId).reduce((sum, item) => {
+        const state = advanceOutstanding(State.schedule, item.id);
+        ['given', 'repaid', 'deducted', 'left', 'overpaid'].forEach(key => {
+            sum[key] = agoraRound(sum[key] + state[key]);
+        });
+        return sum;
+    }, { given: 0, repaid: 0, deducted: 0, left: 0, overpaid: 0 });
+}
+
+function showWorkerAdvances(id) {
+    ADVANCE_WORKER = id;
+    const root = document.getElementById('advancesView');
+    if (root) clear(root);
+    showView('advances');
+}
+
+// Remember the already-clear migration decision atomically with the first financial
+// action. Otherwise a valid repayment itself changes the comparison with the legacy
+// report and makes the NEXT render fall back to legacy arithmetic.
+function saveFinancialAction(makeChanges) {
+    const plan = planCarryMigration(State.schedule);
+    const approved = carryMigrationApproved(State.schedule, plan);
+    if (!financialWritingEnabled(State.schedule)
+        || (!approved && (plan.needed || plan.rows.length !== 0))) {
+        askTell('צריך לבדוק את היתרות הקיימות לפני שממשיכים. פתח את בדיקת היתרות בהגדרות.');
+        return false;
+    }
+    const made = makeChanges();
+    const changes = (Array.isArray(made) ? made : [made]).filter(Boolean);
+    if (!changes.length) return false;
+    if (!approved) {
+        // At this point writing was permitted because plan.needed was false. Recording
+        // that zero-row decision changes no balance and travels with the action.
+        changes.push(recordCarryApproval(State.schedule, plan, new Date().toISOString(), syncDeviceId()));
+    }
+    return State.commitMany(changes);
+}
+
+function refreshWorkerFinance(workerId) {
+    if (typeof currentView !== 'undefined' && currentView === 'advances') showWorkerAdvances(workerId);
+    else openWorkerDays(workerId);
+}
+
+function renderAdvances() {
+    const root = document.getElementById('advancesView');
+    if (!root) return;
+    // A cloud update may redraw totals, but never discards an amount being typed.
+    // Save handlers validate against the current schedule, not these drawn balances.
+    if (root.querySelector('.advance-form')) return;
+    clear(root);
+    const worker = ADVANCE_WORKER && State.worker(ADVANCE_WORKER);
+    if (worker) {
+        root.appendChild(button('חזרה לכל העובדים', 'btn-secondary', () => showWorkerAdvances(null)));
+        root.appendChild(el('h2', null, `מקדמות · ${worker.name}`));
+        const summary = workerAdvanceSummary(worker.id);
+        const balance = el('div', 'advance-balance');
+        balance.appendChild(el('span', null, summary.overpaid > 0 ? 'החשבון דורש בדיקה' : 'נשאר להחזיר'));
+        balance.appendChild(el('strong', null, `${moneyText(summary.left)} ₪`));
+        balance.appendChild(el('p', null, `נמסר: ${moneyText(summary.given)} ₪ · הוחזר וקוזז: ${moneyText(summary.repaid + summary.deducted)} ₪`));
+        root.appendChild(balance);
+        root.appendChild(el('p', 'hint', 'היתרה כוללת החזרים וניכויים שאושרו. תצוגה מקדימה בדוח עדיין אינה ניכוי שנרשם.'));
+        const actions = el('div', 'finance-actions');
+        actions.appendChild(button('+ מקדמה חדשה', null, () => openAdvanceForm(worker, actions)));
+        actions.appendChild(button('קיזוז מהשכר', 'btn-secondary', () => {
+            const period = periodRangeFor(worker, todayStr());
+            REPORT_RANGE.from = period.from; REPORT_RANGE.to = period.to;
+            REPORT_WORKERS = new Set([String(worker.id)]); REPORT_SECTION = 'workers'; REPORT_PRESET = 'custom';
+            showView('reports'); openWorkerSettlement(worker.id);
+        }));
+        root.appendChild(actions);
+        if (!financialWritingEnabled(State.schedule)) {
+            root.appendChild(el('p', 'hint hint-warn', 'לפני רישום החזרים או קיזוז צריך לבדוק את יתרות המקדמות הקיימות.'));
+            root.appendChild(button('בדיקת היתרות', 'btn-secondary', openSettings));
+        }
+        const items = workerAdvanceItems(worker.id).slice().sort((a, b) => b.date.localeCompare(a.date));
+        const open = items.filter(item => {
+            const state = advanceOutstanding(State.schedule, item.id);
+            return state.left > 0 || state.overpaid > 0;
+        });
+        root.appendChild(el('h3', null, 'מקדמות פתוחות'));
+        if (!open.length) root.appendChild(emptyHint('אין מקדמות פתוחות לעובד הזה.'));
+        open.forEach(item => root.appendChild(renderSimpleAdvance(item)));
+        const paid = items.filter(item => !open.includes(item));
+        if (paid.length) {
+            const fold = el('details', 'wday-ledger');
+            fold.appendChild(el('summary', null, `מקדמות שסודרו (${paid.length})`));
+            paid.forEach(item => fold.appendChild(renderSimpleAdvance(item)));
+            root.appendChild(fold);
+        }
+        const history = renderWorkerLedger(worker.id);
+        if (history) root.appendChild(history);
+        return;
+    }
+    root.appendChild(el('h2', null, 'מקדמות'));
+    root.appendChild(el('p', 'hint', 'בחר עובד כדי להוסיף מקדמה, לרשום החזר או לבדוק כמה נשאר.'));
+    const search = document.createElement('input');
+    search.type = 'search'; search.placeholder = 'חיפוש עובד'; search.value = ADVANCE_SEARCH;
+    search.setAttribute('aria-label', 'חיפוש עובד במקדמות');
+    root.appendChild(search);
+    const list = el('div', 'advance-workers');
+    const paint = () => {
+        clear(list);
+        State.schedule.workers.filter(w => w.name.includes(ADVANCE_SEARCH)).forEach(w => {
+            const summary = workerAdvanceSummary(w.id);
+            const card = button('', 'advance-worker-card btn-secondary', () => showWorkerAdvances(w.id));
+            card.appendChild(el('strong', null, w.name + (w.active === false ? ' · כבוי' : '')));
+            card.appendChild(el('span', null, summary.overpaid > 0 ? 'דורש בדיקה'
+                : `${moneyText(summary.left)} ₪ נשארו`));
+            list.appendChild(card);
+        });
+        if (!list.children.length) list.appendChild(emptyHint('לא נמצא עובד.'));
+    };
+    search.addEventListener('input', () => { ADVANCE_SEARCH = search.value.trim(); paint(); });
+    paint(); root.appendChild(list);
+}
+
+function renderSimpleAdvance(item) {
+    const state = advanceOutstanding(State.schedule, item.id);
+    const card = el('section', 'advance-card');
+    card.appendChild(el('strong', null, `${formatFullDate(parseLocalDate(item.date))} · ${moneyText(state.given)} ₪`));
+    card.appendChild(el('p', 'advance-card-balance', `נשאר: ${moneyText(state.left)} ₪`));
+    card.appendChild(el('p', 'hint', `הוחזר: ${moneyText(state.repaid)} ₪ · קוזז מהשכר: ${moneyText(state.deducted)} ₪`));
+    if (item.note) card.appendChild(el('p', null, item.note));
+    if (state.overpaid > 0) card.appendChild(el('p', 'hint hint-warn', `נרשמו החזרים עודפים של ${moneyText(state.overpaid)} ₪. פתח את ההיסטוריה ובדוק את התנועות.`));
+    const actions = el('div', 'finance-actions');
+    if (financialWritingEnabled(State.schedule)) {
+        if (state.left > 0 && !state.overpaid) actions.appendChild(button('העובד החזיר כסף', 'btn-secondary',
+            () => openRepaymentForm(item, state, card)));
+        if (reversalRoom(State.schedule, item.id) > 0) actions.appendChild(button('תיקון טעות', 'btn-secondary',
+            () => openReversalForm(item, state, card, true)));
+    }
+    card.appendChild(actions);
+    return card;
+}
+function reportWorkerChosen(id) {
+    return REPORT_WORKERS === null || REPORT_WORKERS.has(String(id));
+}
+function reportDeductionKey(id, from = REPORT_RANGE.from, to = REPORT_RANGE.to) {
+    return JSON.stringify([String(id), from, to]);
+}
+function reportAccount(workerId) {
+    return advanceAccount(State.schedule, workerId, REPORT_RANGE.from, REPORT_RANGE.to,
+        REPORT_DEDUCTIONS.get(reportDeductionKey(workerId)));
+}
+
+function renderReportWorkerPicker() {
+    const box = el('details', 'report-worker-picker');
+    box.appendChild(el('summary', null, REPORT_WORKERS === null
+        ? 'עובדים בדוח: כולם · בחירת עובדים'
+        : `עובדים בדוח: ${State.schedule.workers.filter(w => reportWorkerChosen(w.id)).length} · שינוי הבחירה`));
+    const actions = el('div', 'finance-actions');
+    actions.appendChild(button('בחר הכל', 'btn-secondary', () => { REPORT_WORKERS = null; render(); }));
+    actions.appendChild(button('נקה בחירה', 'btn-secondary', () => { REPORT_WORKERS = new Set(); render(); }));
+    box.appendChild(actions);
+    State.schedule.workers.forEach(worker => {
+        const label = el('label', 'report-worker-choice');
+        const input = document.createElement('input');
+        input.type = 'checkbox'; input.checked = reportWorkerChosen(worker.id);
+        input.addEventListener('change', () => {
+            if (REPORT_WORKERS === null) REPORT_WORKERS = new Set(State.schedule.workers.map(w => String(w.id)));
+            if (input.checked) REPORT_WORKERS.add(String(worker.id));
+            else REPORT_WORKERS.delete(String(worker.id));
+            render();
+            const again = document.querySelector('.report-worker-picker');
+            if (again) again.open = true;
+        });
+        label.appendChild(input);
+        label.appendChild(el('span', null, worker.name + (worker.active === false ? ' · כבוי' : '')));
+        box.appendChild(label);
+    });
+    return box;
+}
 // What each cycle is CALLED, in the two places a person meets it: the sheet's group
 // heading and the worker's own file. One table so the two can never drift into saying
 // different things about the same man.
@@ -53,6 +237,7 @@ function renderReports() {
     clear(root);
     root.appendChild(renderRangePicker());
     root.appendChild(renderSectionToggle());
+    if (REPORT_SECTION === 'workers') root.appendChild(renderReportWorkerPicker());
     renderOverCapNotice(root);
 
     // Both sections are built and both are in the DOM, whichever is chosen; the one not
@@ -339,6 +524,7 @@ function payrollRows() {
     });
 
     return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
+        .filter(row => reportWorkerChosen(row.workerId))
         // The carry is worked out BEFORE the filter, because it is one of the things that
         // keeps a row alive - see the next comment.
         .map(row => {
@@ -355,8 +541,7 @@ function payrollRows() {
                 return withCycle;
             }
             return Object.assign(withCycle, {
-                carry: advanceAccount(State.schedule, row.workerId,
-                    REPORT_RANGE.from, REPORT_RANGE.to)
+                carry: reportAccount(row.workerId)
             });
         })
         .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
@@ -418,8 +603,13 @@ function renderPayrollTable() {
     const section = el('section', 'report report-payroll');
     section.appendChild(el('h2', null, 'שכר - לפי עובד'));
     section.appendChild(reportPeriod());
+    if (REPORT_WORKERS !== null) section.appendChild(el('p', 'report-selection-note',
+        `דוח לעובדים שנבחרו בלבד · ${State.schedule.workers.filter(w => reportWorkerChosen(w.id)).length} עובדים`));
 
     const allRows = payrollRows();
+    if (allRows.some(row => row.carry && !row.carry.closed)) section.appendChild(el('p', 'hint',
+        'חשבון פתוח הוא תצוגה מקדימה. לבחירת סכום הקיזוז לחץ על שם העובד ואז «בחירת קיזוז מהשכר». רק אישור החשבון רושם את הניכוי.'));
+
     if (allRows.length === 0) {
         section.appendChild(emptyHint('אין רישומים בטווח הזה.'));
         return section;
@@ -833,6 +1023,7 @@ function openWorkerDays(workerId) {
 
     const body = document.getElementById('workerDaysBody');
     clear(body);
+    body.appendChild(button('בחירת קיזוז מהשכר', 'btn-secondary', () => openWorkerSettlement(workerId)));
 
     if (days.length === 0 && advances.length === 0) {
         body.appendChild(emptyHint('אין רישומים בטווח הזה.'));
@@ -875,6 +1066,34 @@ function openWorkerDays(workerId) {
     // and the scroll position is set rather than assumed - whatever the last look left.
     // (The Node harness's elements have no children to find: guarded, not assumed.)
     const content = modal.querySelector('.modal-content');
+    if (content) content.scrollTop = 0;
+}
+
+function openWorkerSettlement(workerId) {
+    const worker = State.worker(workerId);
+    if (!worker) return;
+    let period = wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)
+        ? { from: REPORT_RANGE.from, to: REPORT_RANGE.to } : periodRangeFor(worker, todayStr());
+    REPORT_RANGE.from = period.from; REPORT_RANGE.to = period.to;
+    document.getElementById('workerDaysTitle').textContent = `חשבון · ${worker.name}`;
+    document.getElementById('workerDaysMeta').textContent = dateRange(
+        formatFullDate(parseLocalDate(period.from)), formatFullDate(parseLocalDate(period.to)));
+    const body = document.getElementById('workerDaysBody'); clear(body);
+    const choices = el('div', 'finance-actions');
+    [['התקופה הנוכחית', 0], ['התקופה הקודמת', -1]].forEach(([label, offset]) => {
+        choices.appendChild(button(label, 'btn-secondary', () => {
+            const current = periodRangeFor(worker, todayStr());
+            const chosen = offset ? periodRangeFor(worker, shiftDate(current.from, -1)) : current;
+            REPORT_RANGE.from = chosen.from; REPORT_RANGE.to = chosen.to;
+            render(); openWorkerSettlement(workerId);
+        }));
+    });
+    body.appendChild(choices);
+    const closure = renderPeriodClosure(worker);
+    if (closure) body.appendChild(closure);
+    else body.appendChild(el('p', 'hint hint-warn', 'אי אפשר לאשר את החשבון כרגע. בדוק שהשכר והיתרות הושלמו.'));
+    document.getElementById('workerDaysModal').style.display = 'flex';
+    const content = document.querySelector('#workerDaysModal .modal-content');
     if (content) content.scrollTop = 0;
 }
 
@@ -946,12 +1165,50 @@ function renderPeriodClosure(worker) {
     }
     if (!plan.canClose) return null;
 
-    box.appendChild(el('p', 'hint',
-        `סגירת החשבון תרשום ${moneyText(plan.deducted)} ₪ כ"${LEDGER_KIND_LABELS.deducted}" `
-        + `ותשאיר חוב פתוח ${moneyText(plan.carriedForward)} ₪. `
-        + 'אחרי הסגירה המספרים האלה לא ישתנו.'));
-    box.appendChild(button('סגור את החשבון', 'btn-secondary',
-        () => closeAccountFor(worker, plan), 'סגירת חשבון התקופה'));
+    const label = el('label', 'field-label', 'כמה לקזז מהשכר הפעם?');
+    const amount = document.createElement('input');
+    amount.type = 'text'; amount.inputMode = 'decimal'; amount.dir = 'ltr';
+    amount.setAttribute('aria-label', 'כמה לקזז מהשכר הפעם?');
+    amount.placeholder = 'הכנס סכום, גם 0 אפשרי';
+    const chosen = REPORT_DEDUCTIONS.get(reportDeductionKey(worker.id));
+    amount.value = chosen === undefined ? '' : String(chosen);
+    label.appendChild(amount); box.appendChild(label);
+    const preview = el('p', 'finance-preview');
+    const error = el('p', 'field-error');
+    const readChoice = () => {
+        const text = amount.value.trim().replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+            .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+        return /^\d+$/.test(text) ? Number(text) : NaN;
+    };
+    const chosenPlan = () => planPeriodClosure(State.schedule, worker.id,
+        plan.from, plan.to, new Date().toISOString(), readChoice());
+    const paint = () => {
+        const next = chosenPlan();
+        preview.textContent = Number.isFinite(readChoice()) && next.canClose
+            ? `לתשלום לעובד: ${moneyText(next.gross - next.deducted)} ₪ · יישארו בסلف: ${moneyText(next.carriedForward)} ₪`
+            : `שכר התקופה: ${moneyText(plan.gross)} ₪ · ניתן לקזז עד ${moneyText(plan.deducted)} ₪. בחר את הסכום בעצמך.`;
+    };
+    amount.addEventListener('input', paint); paint();
+    box.appendChild(preview); box.appendChild(error);
+    const selected = () => {
+        const next = chosenPlan();
+        if (!Number.isFinite(readChoice()) || !next.canClose) {
+            error.textContent = 'הכנס סכום תקין בין 0 לבין היתרה שניתן לקזז. אם הנתונים השתנו, פתח את החשבון מחדש.';
+            return null;
+        }
+        return next;
+    };
+    const actions = el('div', 'finance-actions');
+    actions.appendChild(button('הצג בדוח', 'btn-secondary', () => {
+        const next = selected(); if (!next) return;
+        REPORT_DEDUCTIONS.set(reportDeductionKey(worker.id, plan.from, plan.to), next.chosenDeduction);
+        render(); closeWorkerDays();
+    }));
+    actions.appendChild(button('סגור את החשבון', 'btn-secondary', () => {
+        const next = selected(); if (next) closeAccountFor(worker, next);
+    }, 'סגירת חשבון התקופה'));
+    box.appendChild(actions);
+    box.appendChild(el('p', 'hint', 'הצג בדוח = תצוגה מקדימה בלבד. הניכוי נשמר במקדמות רק אחרי אישור סגירת החשבון.'));
     return box;
 }
 
@@ -972,8 +1229,20 @@ async function closeAccountFor(worker, plan) {
     // ONE MOMENT for the plan and the write, because the clock reason is a question about
     // that moment: planning at one `at` and writing at another asks two questions.
     const at = new Date().toISOString();
-    const changes = closePeriodChanges(State.schedule, worker.id,
-        REPORT_RANGE.from, REPORT_RANGE.to, at, syncDeviceId());
+    const current = planPeriodClosure(State.schedule, worker.id, plan.from, plan.to, at, plan.chosenDeduction);
+    if (!current.canClose || current.gross !== plan.gross || current.deducted !== plan.deducted
+        || current.carriedForward !== plan.carriedForward
+        || JSON.stringify(current.rows) !== JSON.stringify(plan.rows)) {
+        await askTell('החשבון השתנה בזמן האישור. לא נשמר ניכוי. בדוק את הסכומים ואשר שוב.');
+        openWorkerDays(worker.id);
+        return;
+    }
+    let changes = [];
+    const saved = saveFinancialAction(() => {
+        changes = closePeriodChanges(State.schedule, worker.id,
+            plan.from, plan.to, at, syncDeviceId(), plan.chosenDeduction);
+        return changes;
+    });
     if (changes.length === 0) {
         // AND SAID FOR THE RIGHT REASON. Nothing written now has two causes - it was
         // already closed, or this phone's clock is behind something on the record - and
@@ -989,7 +1258,7 @@ async function closeAccountFor(worker, plan) {
         openWorkerDays(worker.id);
         return;
     }
-    if (!State.commitMany(changes)) return;
+    if (!saved) return;
     openWorkerDays(worker.id);
 }
 
@@ -1226,10 +1495,9 @@ function openRepaymentForm(item, settled, row) {
             return;
         }
 
-        const change = recordAdvanceRepaid(State.schedule, item.id, amount, date,
-            noteInput.value.trim(), new Date().toISOString(), syncDeviceId(), 'cash');
-        if (!State.commit(change)) return;
-        openWorkerDays(item.workerId);
+        if (!saveFinancialAction(() => recordAdvanceRepaid(State.schedule, item.id, amount, date,
+            noteInput.value.trim(), new Date().toISOString(), syncDeviceId(), 'cash'))) return;
+        refreshWorkerFinance(item.workerId);
     };
 
     const buttons = el('div', 'modal-actions');
@@ -1257,7 +1525,7 @@ function openRepaymentForm(item, settled, row) {
 //   the words       "הוחזר במזומן" is not said here. He handed nothing back; the money
 //                   never left the tin, and a statement that called this a repayment
 //                   would be telling him he did something he did not do.
-function openReversalForm(item, settled, row) {
+function openReversalForm(item, settled, row, simple = false) {
     const host = row.parentNode;
     if (!host || host.querySelector('.advance-form')) return;
 
@@ -1266,7 +1534,8 @@ function openReversalForm(item, settled, row) {
 
     const form = el('div', 'advance-form');
     form.appendChild(el('div', 'advance-form-title',
-        `${LEDGER_KIND_LABELS.reversed} · אפשר לתקן עד ${moneyText(room)} ₪`));
+        simple ? `תיקון סכום המקדמה · ${moneyText(settled.given)} ₪ רשומים`
+            : `${LEDGER_KIND_LABELS.reversed} · אפשר לתקן עד ${moneyText(room)} ₪`));
 
     const field = (labelText, input) => {
         form.appendChild(el('label', 'field-label', labelText));
@@ -1286,8 +1555,9 @@ function openReversalForm(item, settled, row) {
     amountInput.type = 'text';
     amountInput.setAttribute('inputmode', 'decimal');
     amountInput.dir = 'ltr';
-    amountInput.value = String(room);
-    field('סכום לתיקון', amountInput);
+    amountInput.value = simple ? '' : String(room);
+    field(simple ? 'כמה להפחית מהסכום שנרשם?' : 'סכום לתיקון', amountInput);
+    if (simple) form.appendChild(el('p', 'hint', 'למשל: נרשמו 1,000 אבל מסרת 700 — הפחת 300. אם העובד החזיר כסף, בחר «העובד החזיר כסף».'));
 
     // Dated on the advance's own day, and not a question - the same rule as the form
     // that corrects a transaction, from the same reason. This entry says the advance was
@@ -1341,8 +1611,12 @@ function openReversalForm(item, settled, row) {
             amountInput.focus();
             return;
         }
-        const change = recordAdvanceReversed(State.schedule, item.id, amount, item.date,
-            reason, new Date().toISOString(), syncDeviceId());
+        let change;
+        const saved = saveFinancialAction(() => {
+            change = recordAdvanceReversed(State.schedule, item.id, amount, item.date,
+                reason, new Date().toISOString(), syncDeviceId());
+            return change;
+        });
         // A refusal from the model is not a screen that pretends to have saved. It reads
         // the record as it is NOW, so the honest answer is that something moved under
         // this form.
@@ -1352,8 +1626,8 @@ function openReversalForm(item, settled, row) {
             amountInput.focus();
             return;
         }
-        if (!State.commit(change)) return;
-        openWorkerDays(item.workerId);
+        if (!saved) return;
+        refreshWorkerFinance(item.workerId);
     };
 
     const buttons = el('div', 'modal-actions');
@@ -1388,7 +1662,7 @@ function workerAccountFor(workerId) {
         .filter(item => item && String(item.id) === String(workerId))[0] || null;
     if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)) return null;
     if (typeof advanceAccount !== 'function') return null;
-    return advanceAccount(State.schedule, workerId, REPORT_RANGE.from, REPORT_RANGE.to);
+    return reportAccount(workerId);
 }
 
 function renderNetRow(days, worker, advances) {
@@ -1553,7 +1827,7 @@ function openAdvanceForm(worker, actions) {
         const changes = recordNewAdvance(State.schedule, worker.id, date, amount,
             noteInput.value.trim(), new Date().toISOString(), syncDeviceId(), method);
         if (!State.commitMany(changes)) return;
-        openWorkerDays(worker.id);
+        refreshWorkerFinance(worker.id);
     };
 
     const buttons = el('div', 'modal-actions');
@@ -1854,11 +2128,9 @@ function openEventReversalForm(entry, row) {
         // The transaction's own day. recordEventReversed derives it from the validated
         // target and ignores anything else; this passes the same value so the two
         // never differ in a reading of the code either.
-        const change = recordEventReversed(State.schedule, entry.id, amount,
-            entry.date, reason, new Date().toISOString(), syncDeviceId());
-        if (!change) { form.remove(); return; }
-        if (!State.commit(change)) return;
-        openWorkerDays(entry.workerId || (State.schedule.advances[entry.advanceId] || {}).workerId);
+        if (!saveFinancialAction(() => recordEventReversed(State.schedule, entry.id, amount,
+            entry.date, reason, new Date().toISOString(), syncDeviceId()))) return;
+        refreshWorkerFinance(entry.workerId || (State.schedule.advances[entry.advanceId] || {}).workerId);
     };
 
     const buttons = el('div', 'modal-actions');
@@ -2627,6 +2899,10 @@ function invoiceSheetRows() {
 // said what the printed page was built never to say.
 function reportSheets() {
     if (scopedExportPlace()) return { invoice: invoiceSheetRows() };
+    // A selected-worker export must not attach an unfiltered client invoice behind it.
+    if (REPORT_SECTION === 'workers' && REPORT_WORKERS !== null) {
+        return { payroll: payrollSheetRows(), detail: detailRows() };
+    }
     return { payroll: payrollSheetRows(), invoice: invoiceSheetRows(), detail: detailRows() };
 }
 
