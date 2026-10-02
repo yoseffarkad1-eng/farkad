@@ -2302,9 +2302,24 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
 }
 
 // The account, start to finish, with what came before it already walked.
-function advanceAccount(schedule, workerId, fromDate, toDate) {
-    return advanceWalk(schedule, workerId, fromDate, toDate,
+function advanceAccount(schedule, workerId, fromDate, toDate, deduction) {
+    const account = advanceWalk(schedule, workerId, fromDate, toDate,
         advanceCarryInto(schedule, workerId, fromDate));
+    // Draft amounts never mutate the ledger. Closing revalidates the choice and
+    // journals the whole account. Historical closed accounts retain their figures.
+    if (deduction === undefined || account.closed) return account;
+    const balance = agoraRound(account.carriedForward + account.deducted);
+    const limit = account.gross === null ? 0 : Math.min(balance, Math.max(0, account.gross));
+    const invalid = typeof deduction !== 'number' || !Number.isFinite(deduction)
+        || deduction < 0 || deduction > limit || account.review;
+    const off = invalid ? 0 : agoraRound(deduction);
+    return Object.assign({}, account, {
+        deducted: off, carriedOut: agoraRound(balance - off),
+        carriedForward: agoraRound(balance - off),
+        net: account.gross === null ? null : agoraRound(account.gross - off),
+        deductionChosen: true, invalidDeduction: invalid,
+        review: account.review || invalid
+    });
 }
 
 // WHAT SWITCHING THE CARRY ON WOULD DO, without doing any of it.
@@ -2612,4 +2627,3 @@ function ensureDay(schedule, date, layer) {
     if (!schedule.days[date][layer]) schedule.days[date][layer] = {};
     return schedule.days[date][layer];
 }
-

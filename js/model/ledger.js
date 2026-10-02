@@ -809,9 +809,11 @@ function periodClosureFor(schedule, advanceId, periodFrom) {
 //
 // The basis travels too - the rate and the days it was priced at - because a payslip that
 // cannot say how it reached its own number is a number without a reason.
-function closureFacts(schedule, workerId, from, to, carriedIn) {
+function closureFacts(schedule, workerId, from, to, carriedIn, deduction) {
     if (typeof advanceWalk !== 'function') return null;
-    const walk = advanceWalk(schedule, workerId, from, to, carriedIn || 0);
+    const walk = deduction === undefined
+        ? advanceWalk(schedule, workerId, from, to, carriedIn || 0)
+        : advanceAccount(schedule, workerId, from, to, deduction);
     const row = typeof payrollReport === 'function'
         ? payrollReport(schedule, from, to).find(item => item.workerId === workerId)
         : null;
@@ -861,6 +863,7 @@ function closureFacts(schedule, workerId, from, to, carriedIn) {
         repaid: walk.repaid,
         reversed: walk.reversed,
         net: walk.net,
+        carriedForward: walk.carriedForward,
         days,
         // What it was priced at, so the number can be explained without the schedule.
         // EVERY COUNT THE SHEET PRINTS, not only the two the wage is checked against.
@@ -970,6 +973,7 @@ function recordPeriodArtifact(schedule, workerId, from, to, at, by, facts) {
         repaid: held.repaid,
         reversed: held.reversed,
         net: held.net,
+        balanceAfter: held.carriedForward,
         basis: held.basis,
         days: held.days
     }, {
@@ -1038,9 +1042,10 @@ function overlappingClosures(schedule, workerId, from, to) {
     }).sort();
 }
 
-function planPeriodClosure(schedule, workerId, from, to, at) {
-    const walk = advanceAccount(schedule, workerId, from, to);
+function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
+    const walk = advanceAccount(schedule, workerId, from, to, deduction);
     const reasons = [];
+    if (walk.invalidDeduction) reasons.push('deduction');
     if (walk.closed) reasons.push('closed');
     // Asked before anything else is computed: a period that would settle days another
     // closure already settled is refused whole, not adjusted.
@@ -1125,6 +1130,7 @@ function planPeriodClosure(schedule, workerId, from, to, at) {
     // payslip stayed live for ever. The rows decide what money MOVES; whether the period
     // can be frozen is decided by the reasons alone.
     return { from, to, workerId, deducted: walk.deducted, gross: walk.gross,
+        chosenDeduction: deduction,
         carriedForward: walk.carriedForward, rows, reasons,
         alreadyClosed: Boolean(periodArtifactFor(schedule, workerId, from)),
         canClose: reasons.length === 0 };
@@ -1132,16 +1138,17 @@ function planPeriodClosure(schedule, workerId, from, to, at) {
 
 // The changes that close it. An empty list means nothing to do - which is what a second
 // press must produce, and what a second PHONE must produce once the first has landed.
-function closePeriodChanges(schedule, workerId, from, to, at, by) {
+function closePeriodChanges(schedule, workerId, from, to, at, by, deduction) {
     // PLANNED AT THE MOMENT IT WILL BE WRITTEN. The rows are computed as of `at`, and the
     // clock reason is asked of `at`, so what this writes is what closureProblems will
     // judge - see planPeriodClosure.
-    const plan = planPeriodClosure(schedule, workerId, from, to, at);
+    const plan = planPeriodClosure(schedule, workerId, from, to, at, deduction);
     if (!plan.canClose) return [];
     // Worked out ONCE, from the record as it stands before any of these land, and handed
     // to every entry: the artifact and the deductions describe one fortnight and must not
     // describe it differently.
-    const facts = closureFacts(schedule, workerId, from, to, undefined);
+    const facts = closureFacts(schedule, workerId, from, to,
+        advanceCarryInto(schedule, workerId, from), deduction);
     const artifact = recordPeriodArtifact(schedule, workerId, from, to, at, by, facts);
     return (artifact ? [artifact] : []).concat(plan.rows
         .filter(row => !row.alreadyClosed)
@@ -1223,6 +1230,15 @@ function closedPeriods(schedule, workerId) {
             if (at.days === undefined && Array.isArray(entry.days)) at.days = entry.days;
             out[key] = at;
         });
+    // A manual partial deduction can leave whole advances untouched. Summing only
+    // deduction rows would omit those balances. New artifacts freeze the TOTAL;
+    // older artifacts retain their original interpretation.
+    Object.values(held).filter(entry => entry && entry.kind === 'closed'
+        && String(entry.workerId) === String(workerId)
+        && entry.balanceAfter !== undefined).forEach(entry => {
+        const period = out[String(entry.periodFrom)];
+        if (period) period.balanceAfter = Number(entry.balanceAfter);
+    });
     return out;
 }
 

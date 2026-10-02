@@ -328,6 +328,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
 
 .tab {
     display: inline-flex;
+    min-width: 44px;
     align-items: center;
     gap: 7px;
     background: transparent;
@@ -384,7 +385,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
         inset-inline: 0;
         z-index: 45;
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 2px;
         background: var(--surface);
         border-top: 1px solid var(--line);
@@ -2053,6 +2054,24 @@ a[href]:focus-visible,
     background: var(--surface-2);
 }
 .advance-form-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+.finance-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
+.finance-actions button { min-height: 44px; flex: 1 1 130px; }
+.advance-workers { display: grid; gap: 10px; margin-block: 14px; }
+.advance-worker-card { display: flex; justify-content: space-between; gap: 12px; text-align: start; white-space: normal; padding: 16px; min-height: 64px; }
+.advance-worker-card strong { overflow-wrap: anywhere; }
+.advance-worker-card span { flex-shrink: 0; }
+.advance-balance { background: var(--accent-soft); color: var(--ink); border-radius: 16px; padding: 20px; margin-block: 16px; }
+.advance-balance > strong { display: block; font-size: 32px; margin-block: 8px; }
+.advance-balance p { margin: 0; line-height: 1.6; }
+.advance-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-block: 12px; }
+.advance-card-balance, .finance-preview { font-size: 19px; font-weight: 700; line-height: 1.6; }
+.report-worker-picker { padding: 12px; margin-block: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.report-worker-picker summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+.report-worker-choice { min-height: 44px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.report-worker-choice input { width: 44px; height: 44px; margin: 0; flex: 0 0 44px; accent-color: var(--accent); }
+.report-selection-note { font-weight: 700; }
+.period-closure input, #advancesView > input { font: inherit; font-size: 16px; width: 100%; min-height: 44px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+@media print { .report-worker-picker { display: none !important; } }
 /* The correction form's amount is a STATEMENT, not a field: a correction takes the whole
    transaction or none of it, so there is nothing to type. 16px like every input beside
    it - it sits in the same column and reads as part of the same form. */
