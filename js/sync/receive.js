@@ -1321,7 +1321,9 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 const [, date, layer, workerId] = parts;
                 if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
                 if (!schedule.days[date][layer]) schedule.days[date][layer] = {};
-                schedule.days[date][layer][workerId] = value;
+                if (value === null && (layer === 'plan' || layer === 'actual')) {
+                    delete schedule.days[date][layer][workerId];
+                } else schedule.days[date][layer][workerId] = value;
                 return;
             }
 
@@ -1483,6 +1485,7 @@ function scheduleHoldsEntry(schedule, path, value) {
         const [, date, layer, workerId] = parts;
         const day = (schedule.days || {})[date];
         const held = day && day[layer] ? day[layer][workerId] : undefined;
+        if (value === null && (layer === 'plan' || layer === 'actual')) return held === undefined;
         return same(held, value);
     }
 

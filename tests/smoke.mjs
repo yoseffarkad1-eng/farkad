@@ -671,9 +671,9 @@ async function seedRoster(page) {
   await page.waitForTimeout(250);
   check('his own screen offers the archive',
     await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).isVisible());
-  // He has a day recorded, so deleting him is not on offer at all.
-  check('and does not offer to delete a worker who has days recorded',
-    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0);
+  // Keep the action discoverable, disabled with its reason when history exists.
+  check('delete remains visible but disabled for recorded work',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isDisabled());
   check('saying why, rather than leaving a button that does nothing',
     (await page.textContent('#workerFormDanger')).includes('ימים רשומים'),
     await page.textContent('#workerFormDanger'));
@@ -1544,8 +1544,13 @@ async function seedRoster(page) {
     (await page.textContent('.roster-archive')).includes('טעות'),
     await page.textContent('.roster-archive'));
 
-  // Open his screen again, from inside the fold.
+  // The reported mobile case: a typo with empty placeholders, no work/absence.
   await page.evaluate(() => {
+    const typo = State.schedule.workers.find(worker => worker.name === 'טעות');
+    ['2026-08-14', '2026-08-15', '2026-08-16'].forEach(date => {
+      State.schedule.days[date] = { plan: {}, actual: { [typo.id]: { entries: [] } } };
+    });
+    State.save();
     document.querySelector('#workerList .roster-archive').open = true;
   });
   await page.waitForTimeout(150);
@@ -1557,10 +1562,15 @@ async function seedRoster(page) {
   check('an archived typo offers permanent deletion',
     (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק עובד לצמיתות/ }).count()) === 1,
     await page.textContent('#workerFormDanger'));
+  check('empty placeholders are shown separately from actual days',
+    (await page.textContent('#workerFormHistory')).includes('ימים רשומים0') &&
+    (await page.textContent('#workerFormHistory')).includes('רישומים ריקים3'));
+  check('deletion is enabled for this empty-record typo',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק עובד לצמיתות/ }).isEnabled());
   check('reactivation remains available beside deletion',
     await page.locator('#workerFormDanger').getByRole('button', { name: /החזר/ }).isVisible());
   check('the explanation identifies the absence of history',
-    (await page.textContent('#workerFormDanger')).includes('אין לו ימים, מקדמות או חשבונות שמורים'),
+    (await page.textContent('#workerFormDanger')).includes('אין לו ימי עבודה, חופשות, מקדמות או חשבונות שמורים'),
     await page.textContent('#workerFormDanger'));
 
   check('and he is still in the archive rather than gone',
@@ -1593,8 +1603,8 @@ async function seedRoster(page) {
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
 
-  check('an archived worker with a day recorded is offered no delete at all',
-    (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0);
+  check('an archived worker with history sees a disabled delete action',
+    await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).isDisabled());
   check('and the reason is on the screen',
     (await page.textContent('#workerFormDanger')).includes('ימים רשומים'),
     await page.textContent('#workerFormDanger'));

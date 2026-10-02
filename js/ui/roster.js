@@ -1203,7 +1203,7 @@ function renderWorkerFormHistory() {
 
     box.appendChild(el('h4', 'worker-history-title', 'היסטוריה'));
 
-    const days = workerFootprint(State.schedule, worker.id).days;
+    const { days, emptyDays } = workerFootprint(State.schedule, worker.id);
 
     // The count and the sum in one pass over the advances - not a lookup per id.
     let count = 0;
@@ -1221,7 +1221,8 @@ function renderWorkerFormHistory() {
         box.appendChild(item);
     };
 
-    line('ימים רשומים', String(days.length));
+    line('ימים רשומים', String(days.length - emptyDays.length));
+    if (emptyDays.length) line('רישומים ריקים', String(emptyDays.length));
     line('מקדמות רשומות', count === 0 ? '0' : `${count} בסך ${Math.round(total)} ₪`);
 
     // For an archived man: since WHEN is not in the record - v79 keeps active:false and
@@ -1253,32 +1254,19 @@ function renderWorkerFormActions() {
         box.appendChild(el('p', 'hint',
             'הימים והמקדמות שלו נשמרו כל הזמן הזה, והם יופיעו שוב במסך היומי.'));
 
-        // Inactive accidental names follow the same deletion checks as active ones.
-        const archivedBlockers = deletionBlockers(worker.id);
-        if (archivedBlockers.length === 0) {
-            box.appendChild(button('🗑️ מחק עובד לצמיתות', 'btn-danger', () => deleteWorker(worker.id)));
-            box.appendChild(el('p', 'hint',
-                'אין לו ימים, מקדמות או חשבונות שמורים. השם יוסר גם מהמכשירים המסונכרנים.'));
-        } else {
-            box.appendChild(el('p', 'hint', whyNotDeletable(archivedBlockers)));
-        }
-        return;
+    } else {
+        box.appendChild(button('כבה עובד זמנית', 'btn-secondary',
+            () => setWorkerArchived(worker.id, true)));
     }
 
     const blocked = deletionBlockers(worker.id);
-
-    box.appendChild(button('כבה עובד זמנית', 'btn-secondary',
-        () => setWorkerArchived(worker.id, true)));
-
-    // A name with history stays; accidental names may be removed after sync.
-    if (blocked.length === 0) {
-        box.appendChild(button('🗑️ מחק עובד לצמיתות', 'btn-danger', () => deleteWorker(worker.id)));
-        box.appendChild(el('p', 'hint',
-            'אין לו ימים, מקדמות או חשבונות שמורים. השם יוסר גם מהמכשירים המסונכרנים.'));
-        return;
+    if (permanentDeletionEnabled()) {
+        const remove = button('🗑️ מחק עובד לצמיתות', 'btn-danger', () => deleteWorker(worker.id));
+        remove.disabled = blocked.length > 0;
+        box.appendChild(remove);
     }
-
-    box.appendChild(el('p', 'hint', whyNotDeletable(blocked)));
+    box.appendChild(el('p', 'hint', blocked.length ? whyNotDeletable(blocked)
+        : 'אין לו ימי עבודה, חופשות, מקדמות או חשבונות שמורים. השם והרישומים הריקים שלו יוסרו גם מהמכשירים המסונכרנים.'));
 }
 
 // Every reason this man cannot be permanently deleted, asked of the model and of the
@@ -1298,7 +1286,8 @@ function deletionBlockers(workerId) {
     // while the feature itself is off.
     if (!permanentDeletionEnabled()) blocked.push('מחיקה סופית מושבתת בגרסה הזו');
 
-    if (footprint.days.length > 0) blocked.push(`${footprint.days.length} ימים רשומים`);
+    const recordedDays = footprint.days.length - footprint.emptyDays.length;
+    if (recordedDays > 0) blocked.push(`${recordedDays} ימים רשומים`);
     if (footprint.advances.length > 0) blocked.push(`${footprint.advances.length} מקדמות`);
     if (sync && sync.queueNamesWorker && sync.queueNamesWorker(workerId)) {
         blocked.push('רישומים שממתינים לשליחה');
@@ -1474,8 +1463,8 @@ async function setWorkerArchived(workerId, archived, quickToggle = false) {
     render();
 }
 
-// For the name typed by mistake on a phone that has never told anybody about him, and
-// only that. deletionBlockers decides; this function asks it again at the write.
+// An accidental name without work or money. Recheck after the typed confirmation;
+// another phone may have supplied real work while the question was open.
 async function deleteWorker(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
@@ -1485,15 +1474,15 @@ async function deleteWorker(workerId) {
     // By NAME, typed. The button was drawn once and this is permanent: a confirmation
     // that is one more tap in the same place as the last tap is not a decision, and the
     // difference between archiving and deleting is the whole of what this screen does.
-    // The message names the four things that were just checked - no day, no advance,
-    // nothing queued - because "it is final" alone does not say WHY this one man may be
-    // deleted when every other one may not. The footer makes the one promise the write
-    // path actually keeps.
+    // The question distinguishes empty placeholders from real work and names exactly
+    // what is removed. Another worker with the same name is never selected by name.
     const confirmedName = String(worker.name).trim();
+    const emptyCount = workerFootprint(State.schedule, workerId).emptyDays.length;
     const typed = await askText({
         title: 'מחיקת עובד',
-        message: `ל${isolate(worker.name)} אין אף יום רשום, אף מקדמה ואף רישום שממתין ` +
-            'לשליחה. השם יימחק גם מהמכשירים המסונכרנים. אם יגיע בהמשך רישום ממכשיר אחר, ' +
+        message: `ל${isolate(worker.name)} אין ימי עבודה, חופשות, מקדמות או רישומים שממתינים לשליחה. ` +
+            (emptyCount ? `${emptyCount} רישומים ריקים יוסרו יחד עם השם. ` : '') +
+            'השם יימחק גם מהמכשירים המסונכרנים. אם יגיע בהמשך רישום ממכשיר אחר, ' +
             'העובד יישמר כלא פעיל כדי לשמור את הרישום. לאישור, הקלד את שם העובד במדויק:',
         placeholder: worker.name,
         ok: 'מחיקה סופית',
@@ -1511,13 +1500,16 @@ async function deleteWorker(workerId) {
     if (deletionBlockers(workerId).length > 0) return refuseDeletion(workerId);
 
     const before = State.schedule.workers.slice();
+    const emptyDays = workerFootprint(State.schedule, workerId).emptyDays;
+    const changes = emptyDays.map(({ date, layer }) => {
+        delete State.schedule.days[date][layer][workerId];
+        return { path: `days.${date}.${layer}.${workerId}`, value: null };
+    });
     State.schedule.workers = State.schedule.workers.filter(item => item.id !== workerId);
 
-    // One write, through the ordinary safe path: the per-person tombstone, the order and
-    // the legacy array all go into a single journal entry, so the three of them cannot
-    // land apart. If it does not reach the disk, commitRoster puts the screen back and
-    // nothing here says otherwise.
-    if (!State.commitRoster({ workers: [workerId] })) {
+    // Tombstone, order, legacy roster and empty day removals share one durable batch.
+    // A failed journal restores the saved schedule, including the empty placeholders.
+    if (!State.commitRoster({ workers: [workerId] }, changes)) {
         State.schedule.workers = before;
         render();
         return;

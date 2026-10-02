@@ -120,7 +120,7 @@ downloading anything. The emulator suites need Java and run through
 Financial suites cover both enabled operation and explicit legacy-client fixtures
 with both financial gates closed. The v116 release candidate enables the financial
 pair by owner request; deployment remains held until cloud rules and device readiness
-are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, any history blocks deletion, and late work reinstates the identity as inactive. Test-only overrides are
+are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. Test-only overrides are
 provided before scripts load, never defined by the production shell.
 
 ## The culture

@@ -339,10 +339,10 @@ const State = {
     // from another phone, taking any days recorded against a new worker with it.
     // `removed` is passed straight through to editRoster: see the note there. It is how a
     // deletion reaches the other two phones on a device that has never had a snapshot.
-    commitRoster(removed) {
+    commitRoster(removed, changes) {
         const journalled = (typeof FarkadSync === 'undefined' || !FarkadSync.editRoster)
             ? !Store.available
-            : Boolean(FarkadSync.editRoster(this.schedule, removed)) || !Store.available;
+            : Boolean(FarkadSync.editRoster(this.schedule, removed, { changes })) || !Store.available;
 
         if (!journalled) return this.refuseEdit();
 

@@ -123,4 +123,89 @@ for (const [label,mutate] of [
     }
     stop(a);stop(b);
 }
+
+{
+    suite('D8 empty placeholders: same name, separate identity, atomic deletion and reopen');
+    const a=device(), cloud=makeCloud();
+    a.State.worker('w_typo').name='אבו עיד';a.State.worker('w_typo').active=false;
+    a.State.worker('w_keep').name='אבו עיד';
+    a.State.commitRoster();
+    const dates=['2026-08-14','2026-08-15','2026-08-16'];
+    a.State.schedule.days=Object.fromEntries(dates.map(date=>[date,{
+        plan:{},actual:{w_typo:{entries:[]},w_keep:{entries:[{placeId:'p_site'}],rates:{daily:500,hourly:0}}}
+    }]));
+    a.State.commitMany(dates.flatMap(date=>['w_typo','w_keep'].map(id=>({
+        path:`days.${date}.actual.${id}`,value:a.State.schedule.days[date].actual[id]
+    }))));
+    await connect(a,cloud);
+    const b=makeDevice({deviceId:'d_empty_reader'});await connect(b,cloud);
+    same('canonical empty rows permit deletion after sync',a.call('deletionBlockers','w_typo').length,0);
+    check('same-named worker with actual work stays protected',a.call('deletionBlockers','w_keep').some(x=>x.includes('ימים')));
+    let prompt='';a.ctx.askText=async q=>{prompt=q.message;return q.placeholder;};
+    const start=cloud.attempts.length;
+    await a.call('deleteWorker','w_typo');await settle(350);
+    check('confirmation names the three empty rows',prompt.includes('3 רישומים ריקים'));
+    const removal=cloud.attempts.slice(start).find(x=>x.payload['roster.workers.w_typo']===null);
+    check('all empty removals travel with roster tombstone',removal&&dates.every(date=>Object.hasOwn(removal.payload,`days.${date}.actual.w_typo`)&&removal.payload[`days.${date}.actual.w_typo`]===null));
+    same('cloud identity removed',cloud.doc.roster.workers.w_typo,null);
+    for(const d of [a,b,makeDevice({storage:a.dump()}),makeDevice({storage:b.dump()})]) {
+        if(d!==a&&d!==b)d.State.load();
+        same('accidental ID does not return',d.State.worker('w_typo'),null);
+        check('the other ID survives with its original rate',d.State.worker('w_keep')?.name==='אבו עיד'&&d.State.worker('w_keep').dailyRate===500);
+        check('empty keys absent and real work unchanged',dates.every(date=>!Object.hasOwn(d.State.schedule.days[date].actual,'w_typo')&&d.State.schedule.days[date].actual.w_keep.rates.daily===500));
+        same('no quarantine after reopen',d.call('farkadWritesBlocked'),false);
+    }
+    check('wire removes keys rather than writing null',dates.every(date=>!Object.hasOwn(cloud.doc.days[date].actual,'w_typo')));
+    const seed={days:{'2026-08-14':{actual:{w_typo:{entries:[]}}}}};
+    a.call('writeFieldPath',seed,'days.2026-08-14.actual.w_typo',null);
+    same('create seed also removes key',Object.hasOwn(seed.days['2026-08-14'].actual,'w_typo'),false);
+    stop(a);stop(b);
+}
+{
+    suite('D9 only exact empty placeholders are removable');
+    const d=device();
+    for(const record of [{absent:true,entries:[]},{entries:[],rates:{daily:450,hourly:0}},
+        {entries:[],hourlyRate:0},{entries:[],note:'keep'},{entries:[],unknown:true},{},null]) {
+        same('absence, stamp or unknown data is not empty: '+JSON.stringify(record),d.call('isEmptyWorkerRecord',record),false);
+    }
+    same('plain empty placeholder recognized',d.call('isEmptyWorkerRecord',{entries:[]}),true);
+}
+{
+    suite('D10 a failed durable batch keeps empty rows and worker together');
+    const d=device(),cloud=makeCloud();
+    d.State.schedule.days['2026-08-14']={plan:{w_typo:{entries:[]}},actual:{}};
+    d.State.commit({path:'days.2026-08-14.plan.w_typo',value:{entries:[]}});
+    await connect(d,cloud);d.setQuota(()=>true);
+    await d.call('deleteWorker','w_typo');
+    check('failed storage keeps worker and placeholder in memory',Boolean(d.State.worker('w_typo'))&&Object.hasOwn(d.State.schedule.days['2026-08-14'].plan,'w_typo'));
+    const reopened=makeDevice({storage:d.dump()});reopened.State.load();
+    check('failed storage keeps both after reopen',Boolean(reopened.State.worker('w_typo'))&&Object.hasOwn(reopened.State.schedule.days['2026-08-14'].plan,'w_typo'));
+    d.setQuota(null);stop(d);
+}
+
+
+{
+    suite('D11 work on a formerly empty day wins a race with deletion');
+    const a=device(),cloud=makeCloud();
+    a.State.schedule.days['2026-10-02']={plan:{},actual:{w_typo:{entries:[]}}};
+    a.State.commit({path:'days.2026-10-02.actual.w_typo',value:{entries:[]}});
+    await connect(a,cloud);
+    const b=makeDevice({deviceId:'d_race_worker'});await connect(b,cloud);
+    let release;const waiting=new Promise(resolve=>{release=resolve;});let held=false;
+    cloud.hold=(kind,payload)=>{
+        if(kind==='update'&&payload['roster.workers.w_typo']===null){held=true;return waiting;}
+        return null;
+    };
+    await a.call('deleteWorker','w_typo');await settle(80);
+    given('deletion held before server commit',held);
+    given('other phone records real work',work(b)===true);await settle(200);
+    release();cloud.hold=null;await settle(450);
+    same('new work wins in cloud',cloud.doc.days['2026-10-02'].actual.w_typo.entries[0]?.placeId,'p_site');
+    check('losing deletion remains visibly contested',a.Sync.honestStatusFor('synced')!=='synced');
+    check('winning phone keeps worker identity',Boolean(b.State.worker('w_typo')));
+    const reopened=makeDevice({storage:a.dump()});reopened.State.load();
+    same('losing operation survives reopen',reopened.Sync.pendingCount()>0,true);
+    stop(a);stop(b);
+}
+
 report();

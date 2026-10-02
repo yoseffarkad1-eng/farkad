@@ -1189,15 +1189,11 @@ function writeFieldPath(target, path, value) {
     }
 
     const last = parts[parts.length - 1];
-    // A null is WRITTEN, not deleted - exactly as it lands server-side.
-    //
-    // updateDoc(ref, path, null) stores a null at that path. It does not remove the
-    // field; only deleteField() does that, and this app has never sent one. The harness
-    // used to delete instead, which made the fake kinder than production: a tombstone
-    // vanished at the next reopen, so the stale legacy array was the only word left on
-    // that person and he came back. The tombstone has to SURVIVE, which means it has to
-    // be a value. mergeRoster reads it as "gone" and rosterProblems already allows it.
-    node[last] = value;
+    // Only worker-day nulls become deleteField() in the production adapter.
+    // Roster nulls are persistent tombstones, including when creating a document.
+    if (value === null && parts.length === 4 && parts[0] === 'days'
+        && (parts[2] === 'plan' || parts[2] === 'actual')) delete node[last];
+    else node[last] = value;
 }
 
 const FarkadSync = {

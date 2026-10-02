@@ -291,8 +291,8 @@ Object.assign(FarkadSync, {
             // who removed him watched him return with nothing on screen to explain it.
             //
             // A null is how the wire says "not here any more": mergeRoster skips a falsy
-            // entry, writeFieldPath deletes the field outright when seeding a new
-            // document, and a phone still on the old build never reads `roster` at all.
+            // entry. The tombstone stays null in both updates and a newly seeded
+            // document, so stale arrays cannot bring the removed identity back.
             const gone = new Set(Object.keys(known).filter(id => !here.has(String(id))));
             ((removed && removed[kind]) || []).forEach(id => {
                 if (!here.has(String(id))) gone.add(String(id));
@@ -304,6 +304,8 @@ Object.assign(FarkadSync, {
             put(kind, schedule[kind]);
         });
 
+        // Empty day placeholders and their removed worker are one durable batch.
+        ((options && options.changes) || []).forEach(change => put(change.path, change.value));
         const journalled = this.queueBatch(batch);
         if (journalled && this.adapter) this.scheduleFlush();
         return journalled;
