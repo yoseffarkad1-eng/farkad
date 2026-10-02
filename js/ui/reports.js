@@ -12,6 +12,90 @@ let REPORT_WORKERS = null;
 const REPORT_DEDUCTIONS = new Map();
 let ADVANCE_WORKER = null;
 let ADVANCE_SEARCH = '';
+const ADVANCE_ORDER_KEY = 'farkad:advanceWorkerOrder';
+let ADVANCE_ORDER_DRAFT = null;
+
+// A display preference for this device, separate from the shared crew and money.
+// Keep every current worker: an old order may name removed workers or predate new ones.
+function advanceWorkersInOrder(ids) {
+    if (ids === undefined) {
+        try { ids = JSON.parse(Store.durableGet(ADVANCE_ORDER_KEY) || '[]'); }
+        catch (error) { ids = []; }
+    }
+    const workers = State.schedule.workers;
+    const byId = new Map(workers.map(worker => [String(worker.id), worker]));
+    const order = Array.isArray(ids) ? ids.filter(id => typeof id === 'string') : [];
+    return [...new Set(order.concat(workers.map(worker => String(worker.id))))]
+        .filter(id => byId.has(id)).map(id => byId.get(id));
+}
+
+function openAdvanceOrder() {
+    ADVANCE_ORDER_DRAFT = advanceWorkersInOrder().map(worker => String(worker.id));
+    ADVANCE_SEARCH = '';
+    renderAdvances();
+}
+
+function moveAdvanceOrder(id, target, action) {
+    if (!ADVANCE_ORDER_DRAFT) return;
+    const order = advanceWorkersInOrder(ADVANCE_ORDER_DRAFT).map(worker => String(worker.id));
+    const from = order.indexOf(String(id));
+    if (from < 0) return;
+    order.splice(from, 1);
+    order.splice(Math.max(0, Math.min(order.length, target)), 0, String(id));
+    ADVANCE_ORDER_DRAFT = order;
+    renderAdvances();
+    const row = [...document.querySelectorAll('.advance-order-row')]
+        .find(node => node.dataset.worker === String(id));
+    const focus = row && row.querySelector(`[data-move="${action}"]`);
+    if (focus) focus.focus();
+}
+
+function saveAdvanceOrder() {
+    if (!ADVANCE_ORDER_DRAFT) return;
+    const ids = advanceWorkersInOrder(ADVANCE_ORDER_DRAFT).map(worker => String(worker.id));
+    const saved = JSON.stringify(ids);
+    // A page preference may not reclaim backups to make space for itself.
+    if (!Store.set(ADVANCE_ORDER_KEY, saved, { optional: true })
+        || Store.durableGet(ADVANCE_ORDER_KEY) !== saved) {
+        askTell('הסדר לא נשמר במכשיר. הסידור נשאר פתוח ואפשר לנסות לשמור שוב.');
+        return;
+    }
+    ADVANCE_ORDER_DRAFT = null;
+    renderAdvances();
+}
+
+function renderAdvanceOrder(root) {
+    const workers = advanceWorkersInOrder(ADVANCE_ORDER_DRAFT);
+    ADVANCE_ORDER_DRAFT = workers.map(worker => String(worker.id));
+    root.appendChild(el('h2', null, 'סידור מקדמות'));
+    root.appendChild(el('p', 'hint', 'סדר את העובדים בעזרת החצים. הסדר נשמר לעמוד המקדמות במכשיר הזה בלבד.'));
+    const controls = () => {
+        const actions = el('div', 'finance-actions');
+        actions.appendChild(button('שמור סדר', null, saveAdvanceOrder));
+        actions.appendChild(button('ביטול', 'btn-secondary', () => {
+            ADVANCE_ORDER_DRAFT = null; renderAdvances();
+        }));
+        return actions;
+    };
+    root.appendChild(controls());
+    workers.forEach((worker, index) => {
+        const row = el('div', 'advance-card advance-order-row');
+        row.dataset.worker = String(worker.id);
+        row.appendChild(el('strong', null, `${index + 1}. ${worker.name}`));
+        const actions = el('div', 'advance-order-actions');
+        [['top', '⇈', 'לראש', 0], ['up', '↑', 'למעלה', index - 1],
+            ['down', '↓', 'למטה', index + 1], ['bottom', '⇊', 'לסוף', workers.length - 1]]
+            .forEach(([action, icon, label, target]) => {
+                const control = button(icon, 'btn-secondary',
+                    () => moveAdvanceOrder(worker.id, target, action), `${worker.name} — ${label}`);
+                control.dataset.move = action;
+                control.disabled = target < 0 || target >= workers.length || target === index;
+                actions.appendChild(control);
+            });
+        row.appendChild(actions); root.appendChild(row);
+    });
+    if (workers.length > 4) root.appendChild(controls());
+}
 
 function workerAdvanceItems(workerId) {
     return advancesFor(State.schedule, workerId, '0000-01-01', '9999-12-31');
@@ -68,6 +152,7 @@ function renderAdvances() {
     // Save handlers validate against the current schedule, not these drawn balances.
     if (root.querySelector('.advance-form')) return;
     clear(root);
+    if (ADVANCE_ORDER_DRAFT) { renderAdvanceOrder(root); return; }
     const worker = ADVANCE_WORKER && State.worker(ADVANCE_WORKER);
     if (worker) {
         root.appendChild(button('חזרה לכל העובדים', 'btn-secondary', () => showWorkerAdvances(null)));
@@ -112,6 +197,9 @@ function renderAdvances() {
         return;
     }
     root.appendChild(el('h2', null, 'מקדמות'));
+    if (State.schedule.workers.length > 1) {
+        root.appendChild(button('סידור', 'btn-secondary', openAdvanceOrder, 'סידור עמוד המקדמות'));
+    }
     root.appendChild(el('p', 'hint', 'בחר עובד כדי להוסיף מקדמה, לרשום החזר או לבדוק כמה נשאר.'));
     const search = document.createElement('input');
     search.type = 'search'; search.placeholder = 'חיפוש עובד'; search.value = ADVANCE_SEARCH;
@@ -120,7 +208,7 @@ function renderAdvances() {
     const list = el('div', 'advance-workers');
     const paint = () => {
         clear(list);
-        State.schedule.workers.filter(w => w.name.includes(ADVANCE_SEARCH)).forEach(w => {
+        advanceWorkersInOrder().filter(w => w.name.includes(ADVANCE_SEARCH)).forEach(w => {
             const summary = workerAdvanceSummary(w.id);
             const card = button('', 'advance-worker-card btn-secondary', () => showWorkerAdvances(w.id));
             card.appendChild(el('strong', null, w.name + (w.active === false ? ' · כבוי' : '')));

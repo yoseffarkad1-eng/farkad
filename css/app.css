@@ -2057,6 +2057,9 @@ a[href]:focus-visible,
 .finance-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
 .finance-actions button { min-height: 44px; flex: 1 1 130px; }
 .advance-workers { display: grid; gap: 10px; margin-block: 14px; }
+.advance-order-row > strong { overflow-wrap: anywhere; }
+.advance-order-actions { display: flex; gap: 8px; margin-top: 12px; }
+.advance-order-actions button { min-width: 44px; min-height: 44px; font-size: 20px; }
 .advance-worker-card { display: flex; justify-content: space-between; gap: 12px; text-align: start; white-space: normal; padding: 16px; min-height: 64px; }
 .advance-worker-card strong { overflow-wrap: anywhere; }
 .advance-worker-card span { flex-shrink: 0; }

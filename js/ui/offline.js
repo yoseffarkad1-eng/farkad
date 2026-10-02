@@ -174,6 +174,7 @@ function showUpdateBanner(worker) {
 // advance, a site being renamed. A reload takes that with it, and an update the person
 // did not ask for at that exact second is not worth it.
 function midEdit() {
+    if (typeof ADVANCE_ORDER_DRAFT !== 'undefined' && ADVANCE_ORDER_DRAFT) return true;
     const active = document.activeElement;
     if (active && /^(INPUT|TEXTAREA)$/.test(active.tagName) && active.value) return true;
 
