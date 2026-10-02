@@ -40,9 +40,9 @@ different from what was done.
 
 ## The iron laws
 
-1. **The ledger is append-only and its writer gate stays closed.** `LEDGER_WRITES` in
-   `js/model/ledger.js` is `false` and only a person who knows all three phones are
-   past v79 may flip it. The boot-time mirror in `state.js` is the ONE sanctioned
+1. **The ledger is append-only.** Yosef authorized enabling repayment and correction
+   on 2026-10-02. v116 is an enabled LOCAL release candidate; production deployment
+   remains held until live rules/protocol and all three devices are verified. The boot-time mirror in `state.js` is the ONE sanctioned
    write; ledger entries are never edited, never deleted, and merged by union.
    `carryAdvances` in `js/model/schema.js` moves with it, in the same commit and the
    same direction - one gate open without the other ships a lie - and
@@ -117,11 +117,11 @@ The browser suites need Playwright's Chromium once (`npm run browsers`), or poin
 downloading anything. The emulator suites need Java and run through
 `firebase emulators:exec`; they never touch the real project.
 
-The suites the ledger branch brought measure the build a person would ship with the
-money gates OPEN. They open them through the test seam and nowhere else - `flags` on a
-harness device, `FARKAD_FLAG_OVERRIDES` set before the page loads in a browser suite -
-so the shipped defaults stay closed and pinned (`tests/data.test.mjs`, `tests/smoke.mjs`)
-while the machinery behind them is still measured on every run.
+Financial suites cover both enabled operation and explicit legacy-client fixtures
+with both financial gates closed. The v116 release candidate enables the financial
+pair by owner request; deployment remains held until cloud rules and device readiness
+are verified. Vehicles and permanent deletion stay off. Test-only overrides are
+provided before scripts load, never defined by the production shell.
 
 ## The culture
 
@@ -213,6 +213,8 @@ written down so it cannot happen twice.
     tests/rules.test.mjs       firestore.rules against the local emulator
     tests/cas.emulator.test.mjs the PRODUCTION adapter's write path against the real emulator
     tests/rollout.test.mjs     publishing the rules over a genuine legacy document, and the cutover
+    tests/rollout-matrix.test.mjs old and new client x old and new rules x legacy and protocol
+                               document: the eight cells the rollout order is DERIVED from, not argued
     tests/ledger.ingress.test.mjs malformed ledger data through every door: held aside, never coerced
     tests/money.concurrency.test.mjs two phones writing MONEY at once, through the production adapter
     tests/poison.test.mjs      a ledger id that would land on a prototype, through every writer

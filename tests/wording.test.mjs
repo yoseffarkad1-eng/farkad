@@ -107,7 +107,7 @@ const sheetOf = run => {
     const rows = run('payrollSheetRows()');
     return { head: rows[0], row: rows.find(line => line[0] === 'דוד') || [] };
 };
-const noteOf = ({ head, row }) => String(row[head.length - 1] || '');
+const noteOf = ({ head, row }) => String(row[head.indexOf('הערה')] || '');
 
 // ------------------------------------------------------------------ the column's own name
 {

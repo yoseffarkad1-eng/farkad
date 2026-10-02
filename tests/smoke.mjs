@@ -1,3 +1,4 @@
+import { launchLocalBrowser } from './network-guard.mjs';
 // Dev-only smoke tests. Nothing here ships to production and the app still has no
 // build step.
 //
@@ -43,7 +44,7 @@ const SERVED_SHA = expectedShaFor(SERVED_ROOT);
 const SERVED = await verifyServedAssets(BASE, SERVED_ROOT, SERVED_SHA);
 
 
-const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
+const browser = await launchLocalBrowser(chromium, EXEC ? { executablePath: EXEC } : {});
 const results = [];
 const check = (name, pass, detail = '') => {
   results.push({ name, pass, detail });
@@ -54,8 +55,12 @@ check('the origin served this commit, byte for byte',
   SERVED.ok, `${SERVED.checked} assets; ${SERVED.wrong.slice(0, 3).join(' | ')}`);
 
 async function newPage(opts = {}) {
-  const ctx = await browser.newContext(opts);
+  const { legacyMoney, ...contextOptions } = opts;
+  const ctx = await browser.newContext(contextOptions);
   const page = await ctx.newPage();
+  if (legacyMoney) await page.addInitScript(() => {
+    window.FARKAD_FLAG_OVERRIDES = { ledgerWrites: false, carryAdvances: false };
+  });
   page.on('dialog', d => d.accept());
   return page;
 }
@@ -659,13 +664,13 @@ async function seedRoster(page) {
   // worker's own screen now, not an icon beside every name in the list.
   check('the list no longer carries an archive icon next to every name',
     (await page.locator('#workerList .roster-row').first()
-      .getByRole('button', { name: /לארכיון/ }).count()) === 0);
+      .getByRole('button', { name: /כבה עובד/ }).count()) === 0);
 
   await page.locator('#workerList .roster-row').first()
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
   check('his own screen offers the archive',
-    await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).isVisible());
+    await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).isVisible());
   // He has a day recorded, so deleting him is not on offer at all.
   check('and does not offer to delete a worker who has days recorded',
     (await page.locator('#workerFormDanger').getByRole('button', { name: /מחק/ }).count()) === 0);
@@ -673,7 +678,7 @@ async function seedRoster(page) {
     (await page.textContent('#workerFormDanger')).includes('ימים רשומים'),
     await page.textContent('#workerFormDanger'));
 
-  await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).click();
+  await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).click();
   await page.waitForTimeout(250);
   await page.click('#askOk');
   await page.waitForTimeout(300);
@@ -716,7 +721,7 @@ async function seedRoster(page) {
     (await page.textContent('#workerFormDanger')).includes('מחיקה סופית מושבתת בגרסה הזו'),
     await page.textContent('#workerFormDanger'));
   check('the archive is what it does offer instead',
-    (await page.locator('#workerFormDanger').getByRole('button', { name: /ארכיון/ }).count()) > 0);
+    (await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).count()) > 0);
 
   // And the write path, called the way a screen drawn by an older build would call it.
   // NOT awaited inside the page: the refusal opens a dialog and waits for somebody to
@@ -1103,8 +1108,20 @@ async function seedRoster(page) {
   const page = await open();
   await seedRoster(page);
 
+  // NOTHING CONNECTED, asked of the thing that would be connected.
+  //
+  // This read FarkadSync.status === 'off' and was measuring the machine it ran on rather
+  // than the app. Since a cloud that could not be LOADED stopped being indistinguishable
+  // from a phone with no cloud configured (js/app.js, noteCloudUnavailable), 'off' is no
+  // longer the only honest answer here: on a machine that cannot reach gstatic the
+  // adapter's import fails, the app says so, and the status is the sync-error one - which
+  // is the new behaviour working, not a regression.
+  //
+  // The check's own name is the environment-independent question, so it is the one asked.
+  // `adapter` is what connect() sets and disconnect() clears; null is nothing connected,
+  // on a machine with a network and on one without.
   check('the app runs local-only with nothing connected',
-    (await page.evaluate(() => FarkadSync.status)) === 'off');
+    (await page.evaluate(() => FarkadSync.adapter)) === null);
   check('and says so under the board',
     (await page.textContent('#storageNotice')).includes('במכשיר הזה'));
 
@@ -1529,6 +1546,7 @@ async function seedRoster(page) {
   await page.getByRole('button', { name: '+ הוסף עובד' }).click();
   await page.waitForTimeout(200);
   await page.fill('#workerFormName', 'טעות');
+  await page.selectOption('#workerFormCycle', 'biweekly');
   await page.getByRole('button', { name: 'שמור' }).last().click();
   await page.waitForTimeout(300);
 
@@ -1536,7 +1554,7 @@ async function seedRoster(page) {
   await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
-  await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).click();
+  await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).click();
   await page.waitForTimeout(200);
   await page.click('#askOk');
   await page.waitForTimeout(300);
@@ -1583,7 +1601,7 @@ async function seedRoster(page) {
   await page.locator('#workerList .roster-row').filter({ hasText: 'דוד' })
     .getByRole('button', { name: /ערוך/ }).click();
   await page.waitForTimeout(250);
-  await page.locator('#workerFormDanger').getByRole('button', { name: /לארכיון/ }).click();
+  await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).click();
   await page.waitForTimeout(200);
   await page.click('#askOk');
   await page.waitForTimeout(300);
@@ -1619,6 +1637,7 @@ async function seedRoster(page) {
   await page.getByRole('button', { name: '+ הוסף עובד' }).click();
   await page.waitForTimeout(200);
   await page.fill('#workerFormName', 'עובד חדש');
+  await page.selectOption('#workerFormCycle', 'biweekly');
   await page.fill('#workerFormDaily', '425');
   await page.evaluate(() => { document.getElementById('workerFormMore').open = true; });
   await page.fill('#workerFormPhone', '052-111-2233');
@@ -2171,6 +2190,7 @@ async function seedRoster(page) {
     await page.getByRole('button', { name: '+ הוסף עובד' }).click();
     await page.waitForTimeout(200);
     await page.fill('#workerFormName', name);
+  await page.selectOption('#workerFormCycle', 'biweekly');
     await page.evaluate(() => { document.getElementById('workerFormMore').open = true; });
     await page.fill('#workerFormPhone', phone);
     await page.getByRole('button', { name: 'שמור' }).last().click();
@@ -3371,8 +3391,19 @@ async function seedRoster(page) {
   await seedRoster(page);
 
   const result = await page.evaluate(() => {
-    // an old restore point, big enough that dropping it is what makes room
-    Store.set('scheduleData:snap:2020-01-01', 'o'.repeat(400 * 1024));
+    // an old restore point, big enough that dropping it is what makes room.
+    //
+    // A REAL one - a schedule, padded to the size this scenario needs. It used to be
+    // 400 KB of the letter 'o', which was a stand-in for a photograph and is not one:
+    // the reclaim ladder now steps over a restore point it cannot parse, because an
+    // unreadable restore point is somebody's only copy of that state and not spare
+    // change (law 10, js/ui/backup.js). What this scenario is about - that an OLD
+    // restore point is what pays for the record - is unchanged; the bytes are now a
+    // restore point rather than filler that happens to sit under the key.
+    Store.set('scheduleData:snap:2020-01-01', JSON.stringify({
+      schemaVersion: 2, workers: [], places: [], days: {}, advances: {},
+      filler: 'o'.repeat(400 * 1024)
+    }));
 
     // then fill the rest of the quota, in small pieces so it ends up close to the brim
     let filled = 0;
@@ -4621,10 +4652,10 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     box.open = true;
     return measured;
   });
-  check(`${label}: the archive section is folded shut`,
-    folded.present === true && folded.closed === true, JSON.stringify(folded));
-  check(`${label}: and an archived worker is not drawn at all until it is opened`,
-    folded.visibleWhileClosed === 0 && folded.rows === 2, JSON.stringify(folded));
+  check(`${label}: inactive workers remain visible for easy reactivation`,
+    folded.present === true && folded.closed === false, JSON.stringify(folded));
+  check(`${label}: both inactive workers are drawn with their switches`,
+    folded.visibleWhileClosed === 2 && folded.rows === 2, JSON.stringify(folded));
 
   const opened = await page.evaluate(async () => {
     await new Promise(done => setTimeout(done, 200));
@@ -5065,9 +5096,15 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   const heads = await page.$$eval('#settingsPanel .settings-group h3',
     nodes => nodes.map(node => node.textContent.trim()));
-  check('the sheet has the six groups, in the board order',
+  // WAS SIX. «מידע טכני» joined at v104: the copyable block that reports the page
+  // build, the app build, the service worker's own build census, the visual viewport
+  // and both bars as measured rects. The panel is the one place a person can be asked
+  // to look, and "which build is this phone on" had been asked twice with no way for
+  // anybody to answer it. The count moves because the panel gained a group on purpose.
+  check('the sheet has the seven groups, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'עדכון וגרסה', 'מצב המכשיר']),
+      ['ענן וסנכרון', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'עדכון וגרסה', 'מצב המכשיר',
+                'מידע טכני']),
     JSON.stringify(heads));
 
   // One primary action: the export. Everything else is quieted with btn-secondary or
@@ -5708,6 +5745,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.evaluate(() => showAddWorkerModal());
   await page.waitForTimeout(200);
   await page.fill('#workerFormName', 'דוד');
+  await page.selectOption('#workerFormCycle', 'biweekly');
   await page.getByRole('button', { name: 'שמור', exact: true }).click();
   await page.waitForTimeout(300);
   check('a question asked from inside a form sits on top of it',
@@ -5845,6 +5883,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await page.getByRole('button', { name: '+ הוסף עובד' }).click();
     await page.waitForTimeout(200);
     await page.fill('#workerFormName', name);
+  await page.selectOption('#workerFormCycle', 'biweekly');
     await page.getByRole('button', { name: 'שמור', exact: true }).click();
     await page.waitForTimeout(250);
   };
@@ -5863,6 +5902,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     (await page.inputValue('#workerFormName')) === 'דוד');
 
   await page.fill('#workerFormName', 'דוד לוי');
+  await page.selectOption('#workerFormCycle', 'biweekly');
   await page.getByRole('button', { name: 'שמור', exact: true }).click();
   await page.waitForTimeout(300);
   check('a distinguishable name goes straight in',
@@ -6040,7 +6080,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 {
   // The one number that turns a correct pay sheet into the wrong one: the days are
   // right, the rate is right, and the man was handed 500 of it a week ago.
-  const page = await open();
+  const page = await open({ legacyMoney: true });
   await seedRoster(page);
   await page.evaluate(() => {
     ['2026-08-07', '2026-08-09', '2026-08-10', '2026-08-11'].forEach(date =>
@@ -6235,16 +6275,33 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     sent.includes('workers') && sent.includes('places'), JSON.stringify(sent));
 
   // and a roster edit in flight is not dropped by a snapshot landing on top of it
+  //
+  // THE GUARANTEE IS THE SAME; WHAT CARRIES IT IS NOT.
+  //
+  // This used to hand-queue the legacy whole array on its own - clearOutbox, then
+  // queue('workers', …) - and assert that reapplyPending laid it back over the snapshot.
+  // Since v104 the array is never re-applied over an adopted snapshot: it is a
+  // wire-compat projection for a v78 READER, and re-applying one over a newer truth is
+  // how a phone put another phone's rate change back (docs/data-safety-audit.md, O2).
+  // So the old shape now measures the absence of the defect and calls it a lost worker.
+  //
+  // It also could not happen. editRoster never queues the array alone - the order goes
+  // with it, and a worker who has just been added is not on the durable baseline, so
+  // `roster.workers.<id>` goes too. That per-entity path is what carries him, and it is
+  // what this check now drives, through commitRoster, the way the app does it.
   const kept = await page.evaluate(() => {
     FarkadSync.clearOutbox();
-    FarkadSync.queue('workers', State.schedule.workers);
+    State.commitRoster();
+    const queued = FarkadSync.pendingPaths();
     const incoming = { workers: [{ id: 'w_01', name: 'דוד', active: true }], places: [], days: {} };
     FarkadSync.reapplyPending(incoming);
     FarkadSync.clearOutbox();
-    return incoming.workers.map(w => w.id);
+    return { ids: incoming.workers.map(w => w.id), queued };
   });
   check('a just-added worker survives the snapshot that arrives mid-send',
-    kept.includes('w_09'), JSON.stringify(kept));
+    kept.ids.includes('w_09'), JSON.stringify(kept.ids));
+  check('and it is his own path that carries him, not the legacy array',
+    kept.queued.includes('roster.workers.w_09'), JSON.stringify(kept.queued));
 
   // A brand-new project: the first write is a day edit, so the server document has days
   // and a stamp but no roster. That is unfinished, not broken - it used to lock the
@@ -6848,7 +6905,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 {
   // The v80 record is readable the moment the boot migration mirrors an advance - and
   // ONLY readable: the writer is gated off, so the fold holds not a single control.
-  const page = await open();
+  const page = await open({ legacyMoney: true });
   await seedRoster(page);
   await page.evaluate(() => {
     assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
@@ -7008,8 +7065,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // The direction is only worth setting if the columns are in the order it assumes.
   check('the payroll still starts at the worker', book.firstPayrollHeading === 'עובד',
     book.firstPayrollHeading);
-  check('and ends at the note column, where it ends on the screen',
-    book.lastPayrollHeading === 'הערה', book.lastPayrollHeading);
+  check('and names payment frequency in the final column',
+    book.lastPayrollHeading === 'מחזור תשלום', book.lastPayrollHeading);
   await page.context().close();
 }
 
@@ -7211,6 +7268,17 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // screen, which is where a person who is not looking for this will meet it.
   check('and the line under the board carries it too',
     (await page.textContent('#storageNotice')).includes('אין מקום לשמור מצב קודם'));
+  // The claim is that the space message did not ERASE the sync half of this line - so the
+  // sync half is put into a state this check chooses, rather than whichever one the
+  // machine happened to produce. Reading it undetermined made the pinned sentence a fact
+  // about the sandbox's network: with no route to gstatic the adapter's import fails, the
+  // app now says so, and the line correctly carries the sync-error sentence instead.
+  //
+  // The string is NOT loosened to accept either one. That would turn the check into "some
+  // sync sentence is present", which is what it would have to say if the space message
+  // really had eaten it.
+  await page.evaluate(() => FarkadSync.setStatus('off'));
+  await page.waitForTimeout(50);
   check('without taking the sync state down with it',
     (await page.textContent('#storageNotice')).includes('הנתונים נשמרים במכשיר הזה בלבד'));
 
@@ -7771,6 +7839,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await app.waitForTimeout(200);
   await app.getByRole('button', { name: '+ הוסף עובד' }).click();
   await app.fill('#workerFormName', 'מוחמד');
+  await app.selectOption('#workerFormCycle', 'biweekly');
   await app.getByRole('button', { name: 'שמור', exact: true }).click();
   await app.waitForTimeout(300);
   check('a worker can be added with no browser storage at all',
@@ -7872,7 +7941,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('an archived row says what money is on the books',
     (await row.textContent()).includes('מקדמות רשומות: 350 ₪'), await row.textContent());
   check('and carries its own restore button',
-    await row.getByRole('button', { name: /החזר/ }).isVisible());
+    await row.getByRole('switch').isVisible());
 
   // Archived, his screen also says the last date anything was written for him - not
   // "archived since", which the record does not hold.
@@ -7885,7 +7954,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.waitForTimeout(200);
 
   // One tap, no dialog: his name and number clash with nobody, so nothing needs asking.
-  await row.getByRole('button', { name: /החזר/ }).click();
+  await row.getByRole('switch').click();
   await page.waitForTimeout(300);
   check('one tap puts him back in the crew',
     (await page.evaluate(() => State.worker('w_01').active)) === true);
@@ -7912,7 +7981,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   });
   await page.waitForTimeout(250);
   await page.locator('.roster-archive .roster-row').filter({ hasText: 'דוד' })
-    .getByRole('button', { name: /החזר/ }).click();
+    .getByRole('switch').click();
   await page.waitForTimeout(250);
   check('restoring into a namesake is asked about, from the row too',
     (await page.isVisible('#askModal'))
@@ -8587,8 +8656,577 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
+// ------------------------------------------------- the days drawer keeps the keyboard
+{
+  // The one dialog in this app with no keyboard contract. Twelve others were driven and
+  // measured for this: focus enters every one of them, Tab is held inside every one of
+  // them, Escape closes every one of them. The drawer had Escape and nothing else - and
+  // worse, it never left the page: closed, it was display:flex, visibility:visible,
+  // parked off the inline edge with no aria-hidden and no inert, so its buttons kept a
+  // live offsetParent and stayed in the tab order of every screen. Before it had ever
+  // been opened its ✕ was already a tab stop; after one open and close it was twenty-six
+  // day buttons a Tab walk could reach, none of them on the screen.
+  //
+  // settingsPanel and reorderPanel are not .modal either and both implement the whole
+  // contract by hand. The drawer now uses the same two pieces of js/ui/modal.js they do.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    todayStr = () => '2026-08-12';
+    assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_01');
+    State.save(); render();
+  });
+
+  // CLOSED, and never yet opened.
+  const fresh = await page.evaluate(() => {
+    const drawer = document.getElementById('dayDrawer');
+    const style = getComputedStyle(drawer);
+    const items = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    return {
+      display: style.display,
+      visibility: style.visibility,
+      reachable: items.filter(node => node.offsetParent !== null
+        && getComputedStyle(node).visibility !== 'hidden').length
+    };
+  });
+  check('a drawer nobody has opened is not in the tab order',
+    fresh.reachable === 0, JSON.stringify(fresh));
+
+  // OPEN: focus enters at the heading, the way the settings sheet and the reorder panel
+  // are entered - a reader is told where it has arrived before it is read a list of days.
+  await page.locator('.day-nav .drawer-btn').click();
+  await page.waitForTimeout(300);
+  const entered = await page.evaluate(() => ({
+    open: document.getElementById('dayDrawer').classList.contains('drawer-open'),
+    role: document.getElementById('dayDrawer').getAttribute('role'),
+    modal: document.getElementById('dayDrawer').getAttribute('aria-modal'),
+    focused: document.activeElement && document.activeElement.id,
+    inside: document.getElementById('dayDrawer').contains(document.activeElement)
+  }));
+  check('the drawer is a dialog and says so', entered.open === true
+    && entered.role === 'dialog' && entered.modal === 'true', JSON.stringify(entered));
+  check('opening it puts the keyboard inside it, at the heading',
+    entered.inside === true && entered.focused === 'dayDrawerTitle',
+    JSON.stringify(entered));
+
+  // Tab is held. Twenty presses, because the drawer holds twenty-four days and one way
+  // out - a trap that leaks on the twenty-first press is not a trap.
+  let leaked = 0;
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press('Tab');
+    if (!(await page.evaluate(() =>
+      document.getElementById('dayDrawer').contains(document.activeElement)))) leaked += 1;
+  }
+  check('Tab does not walk out of the open drawer into the day behind it',
+    leaked === 0, `${leaked} of 20 presses landed outside`);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const shut = await page.evaluate(() => {
+    const drawer = document.getElementById('dayDrawer');
+    const items = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    return {
+      open: drawer.classList.contains('drawer-open'),
+      visibility: getComputedStyle(drawer).visibility,
+      buttons: items.length,
+      reachable: items.filter(node => node.offsetParent !== null
+        && getComputedStyle(node).visibility !== 'hidden').length,
+      focused: document.activeElement && document.activeElement.className
+    };
+  });
+  check('Escape closes it and the keyboard goes back to the ☰ that opened it',
+    shut.open === false && String(shut.focused).includes('drawer-btn'),
+    JSON.stringify(shut));
+  // The half that costs a reader on every screen, not only on this one: a drawer full of
+  // days, drawn and then closed, must be gone from the tab order and from the
+  // accessibility tree - not merely slid off the edge.
+  check('and a closed drawer full of days is out of the tab order again',
+    shut.buttons > 20 && shut.reachable === 0, JSON.stringify(shut));
+
+  // Walked rather than inferred, because that is how the fault was found: Tab from the
+  // top of the day screen and see whether focus ever lands behind the parked panel.
+  await page.evaluate(() => { document.body.focus(); if (document.activeElement) document.activeElement.blur(); });
+  let behind = 0;
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    if (await page.evaluate(() =>
+      document.getElementById('dayDrawer').contains(document.activeElement))) behind += 1;
+  }
+  check('and forty tab presses across the day screen reach none of it',
+    behind === 0, `${behind} of 40 landed inside the closed drawer`);
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- focus comes back from the field dialogs
+{
+  // Ten of thirteen dialogs return the keyboard to where the person was. Three did not,
+  // and they are exactly the three that focus a text field for themselves: askText - which
+  // is this app's prompt(), so renaming a site, correcting an amount and answering the
+  // reorder guard all go through it - the quick-start paste, and the sign-in sheet.
+  //
+  // The mechanism, and why the fix is not in the three dialogs. watchModals captures the
+  // return target from a MutationObserver, which fires at the microtask checkpoint - AFTER
+  // the whole synchronous block that both revealed the dialog and moved focus into it:
+  //
+  //     parts.modal.style.display = 'flex';   // ask.js  - the mutation is queued
+  //     parts.input.focus();                  // ask.js  - activeElement is now the input
+  //     ...                                   // the observer runs here
+  //
+  // So it recorded a node INSIDE the dialog, and calling .focus() on that node after the
+  // dialog was hidden did nothing at all, which is how focus ended up on <body>. The three
+  // dialogs are not wrong; the capture was late.
+  //
+  // Driven the way the fault happens: something outside is focused, then the dialog is
+  // opened in the same synchronous block, exactly as a real click does it.
+  const page = await open();
+  await seedRoster(page);
+
+  const OPENER = 'settingsBtn';
+  const returns = async (name, which, howToClose) => {
+    const before = await page.evaluate(([id, key]) => {
+      document.getElementById(id).focus();
+      // Opened in the SAME synchronous block as the focus above it, which is what a real
+      // click does and what the observer arrives too late for.
+      if (key === 'ask') askText({ title: 'שם חדש' });
+      if (key === 'quick') openQuickStart();
+      if (key === 'signin') openSignInModal();
+      if (key === 'workerform') showAddWorkerModal();
+      return { opener: document.activeElement && document.activeElement.id };
+    }, [OPENER, which]);
+    await page.waitForTimeout(300);
+    const during = await page.evaluate(() =>
+      document.activeElement && (document.activeElement.id || document.activeElement.tagName));
+    await howToClose();
+    await page.waitForTimeout(350);
+    const after = await page.evaluate(() =>
+      document.activeElement && (document.activeElement.id || document.activeElement.tagName));
+    check(`focus comes back from ${name}`, after === OPENER,
+      JSON.stringify({ before, during, after, wanted: OPENER }));
+  };
+
+  // askText, closed with Escape.
+  await returns('askText', 'ask', async () => { await page.keyboard.press('Escape'); });
+  // The quick start, closed with its own ביטול - this was never about Escape.
+  await returns('the quick start', 'quick',
+    async () => { await page.evaluate(() => closeQuickStart()); });
+  // The sign-in sheet, closed with Escape.
+  await returns('the sign-in sheet', 'signin',
+    async () => { await page.keyboard.press('Escape'); });
+
+  // And one of the ten that already worked, driven the same way, so a repair that moved
+  // the capture cannot quietly have moved THEM: the worker form does not focus a field for
+  // itself, so it is the control case for the three above.
+  await page.evaluate(() => { showView('roster'); render(); });
+  await page.waitForTimeout(200);
+  await returns('the worker form, which was never broken', 'workerform',
+    async () => { await page.keyboard.press('Escape'); });
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- what a week cell says it is
+{
+  // The week grid is read as a picture, and on a phone the cells shrink to the site's
+  // colour alone. For anybody NOT looking at the picture the cell's aria-label is the
+  // whole cell: a label on a role="button" overrides its contents, so the browser
+  // reports the cell as a leaf and whatever the label does not say is not on the screen
+  // at all.
+  //
+  // It said who and when. Never where - so a fortnight of work read as thirty identical
+  // "דוד · יום שישי 07/08/2026" - and never that a day was an ABSENCE, so a man marked
+  // נעדר announced exactly like a blank Tuesday.
+  //
+  // Swept rather than sampled, and built out of the same three facts the block is
+  // painted from, because the fault was a template that knew two of the three.
+  const page = await open();
+  await page.evaluate(() => {
+    State.schedule.workers = [
+      { id: 'w_01', name: 'דוד', active: true, dailyRate: 400, hourlyRate: 50 },
+      // Latin with a digit: two left-to-right runs inside a right-to-left sentence,
+      // which is the arrangement isolate() exists for.
+      { id: 'w_02', name: 'Ali 2', active: true, dailyRate: 400, hourlyRate: 50 }
+    ];
+    State.schedule.places = [
+      { id: 'p_01', name: 'הרצליה', active: true },
+      { id: 'p_02', name: 'B7', active: true }
+    ];
+    State.date = '2026-08-12';
+    setWeekFromDate(State.date);
+    const dates = weekDates();
+    // A doubled day at two sites, somebody else's single day, and an absence: the three
+    // shapes a cell can take, all in one grid.
+    assignPlace(State.schedule, dates[0], 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, dates[0], 'w_01', 'actual', 'p_02');
+    assignPlace(State.schedule, dates[2], 'w_02', 'actual', 'p_02');
+    markAbsent(State.schedule, dates[3], 'w_01', 'actual');
+    State.save({ silent: true });
+    showView('week');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  const cells = await page.evaluate(() => [...document.querySelectorAll('.week-cell')].map(cell => ({
+    label: cell.getAttribute('aria-label') || '',
+    // The site names are in the DOM whatever the width does to their display.
+    sites: [...cell.querySelectorAll('.site-name')].map(node => node.textContent),
+    absent: cell.classList.contains('cell-absent')
+  })));
+
+  const filled = cells.filter(cell => cell.sites.length > 0);
+  const absent = cells.filter(cell => cell.absent);
+  check('the week drew cells of all three shapes to read',
+    cells.length === 14 && filled.length === 2 && absent.length === 1
+      && filled.some(cell => cell.sites.length === 2),
+    JSON.stringify({ cells: cells.length, filled: filled.length, absent: absent.length }));
+
+  const silent = filled.filter(cell => cell.sites.some(site => !cell.label.includes(site)));
+  check('every week cell names the site its block stands for',
+    silent.length === 0, JSON.stringify(silent));
+
+  const blank = absent.filter(cell => !cell.label.includes('נעדר'));
+  check('and an absence is not announced as an empty day',
+    blank.length === 0, JSON.stringify(absent.map(cell => cell.label)));
+
+  // The other side of the same statement: a day with nothing on it must not claim one.
+  const empty = cells.filter(cell => !cell.absent && cell.sites.length === 0);
+  const overclaimed = empty.filter(cell => cell.label.includes('נעדר') || cell.label.includes('B7')
+    || cell.label.includes('הרצליה'));
+  check('and a day with nothing on it says nothing extra',
+    empty.length > 0 && overclaimed.length === 0, JSON.stringify(overclaimed.slice(0, 2)));
+
+  // ---- and the bidi rule, everywhere a name is spoken
+  //
+  // js/ui/dom.js states it: a name that is not plain Hebrew is a left-to-right run
+  // inside a right-to-left sentence, and it slides to wherever the algorithm puts it -
+  // "all the way through offerUndo, askConfirm and every aria-label". It held in every
+  // label on the day screen and in none of the twenty-eight week cells.
+  //
+  // So this asks the question of every aria-label the app draws on every view, not of
+  // the one that was found wrong. A label that IS the bare name needs no isolate: there
+  // is no sentence around it to be reordered by.
+  const bare = await page.evaluate(names => {
+    const out = [];
+    ['day', 'week', 'roster', 'reports'].forEach(view => {
+      showView(view);
+      render();
+      document.querySelectorAll('[aria-label]').forEach(node => {
+        const label = node.getAttribute('aria-label') || '';
+        names.forEach(name => {
+          if (label === name) return;
+          for (let at = label.indexOf(name); at !== -1; at = label.indexOf(name, at + 1)) {
+            if (label[at - 1] === '⁨' || label[at - 1] === '⁦') continue;
+            out.push({ view, cls: String(node.className || node.tagName).slice(0, 20), label });
+            return;
+          }
+        });
+      });
+    });
+    showView('week');
+    render();
+    return out;
+  }, ['Ali 2', 'B7']);
+  check('every aria-label that carries a name isolates it, on every view',
+    bare.length === 0, `${bare.length} bare — ${JSON.stringify(bare.slice(0, 3))}`);
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the live regions, both directions
+{
+  // Two faults, opposite ways round, and they are one fault: the region the day screen
+  // leans on announced nothing, and the region under it announced on every tap.
+  //
+  // index.html states the rule, about the panel beside the reorder list: "It lives out
+  // here rather than inside the list, because the list is redrawn on every move and a
+  // live region that is destroyed and rebuilt is a live region that announces nothing."
+  // .progress-line was built from scratch by renderProgress, filled, and given
+  // role="status" and aria-live on the way in - a different node every render. What rode
+  // on it: the day switch, the climbing count, and the only text anywhere that says
+  // writing is held.
+  //
+  // The other way: #storageNotice is written with `textContent =`, which replaces the
+  // text node whether or not the string differs, and render() calls updateSyncNotice on
+  // every change. Forty lines above it in the same file showStorageBanner has carried
+  // `if (banner.dataset.text === text) return;` since it was written.
+  //
+  // Both are asked of EVERY live region the app has, not of the two that were wrong.
+  const page = await open();
+  await seedRoster(page);
+
+  const measured = await page.evaluate(async () => {
+    const wait = ms => new Promise(done => setTimeout(done, ms));
+    const regions = [...document.querySelectorAll('[aria-live]')];
+    const before = new Set(regions);
+    const churn = new Map();
+    const observers = regions.map(node => {
+      const key = node.id || String(node.className);
+      churn.set(key, 0);
+      const observer = new MutationObserver(records => {
+        churn.set(key, churn.get(key) + records.length);
+      });
+      observer.observe(node, { childList: true, characterData: true, subtree: true });
+      return observer;
+    });
+
+    // NOTHING CHANGES. Three renders of the same screen with the same record: a live
+    // region that speaks here is a live region that speaks over whatever the person
+    // asked for next.
+    for (let i = 0; i < 3; i++) { render(); await wait(60); }
+    observers.forEach(observer => observer.disconnect());
+
+    const after = [...document.querySelectorAll('[aria-live]')];
+    return {
+      regions: regions.length,
+      noisy: [...churn].filter(([, count]) => count > 0).map(([key, count]) => `${key}:${count}`),
+      // A region that is not the node it was is a region whose subscribers are gone.
+      rebuilt: after.filter(node => !before.has(node)).map(node => node.id || String(node.className)),
+      lost: regions.filter(node => !node.isConnected).map(node => node.id || String(node.className))
+    };
+  });
+
+  check('the app has live regions to measure', measured.regions >= 6, JSON.stringify(measured));
+  check('three renders that change nothing announce nothing',
+    measured.noisy.length === 0, JSON.stringify(measured.noisy));
+  check('and no live region is a different node afterwards',
+    measured.rebuilt.length === 0 && measured.lost.length === 0,
+    JSON.stringify({ rebuilt: measured.rebuilt, lost: measured.lost }));
+
+  // AND IT STILL SPEAKS. A region that never changes is silent by another route, so the
+  // day's own region is asked for the two things js/ui/day.js calls "the two things a
+  // person not looking at the screen most needs to hear".
+  const said = await page.evaluate(async () => {
+    const wait = ms => new Promise(done => setTimeout(done, ms));
+    const live = document.getElementById('dayLive');
+    const read = () => (live ? live.textContent : null);
+    const start = read();
+    assignPlace(State.schedule, State.date, 'w_01', 'actual', 'p_01');
+    State.save({ silent: true });
+    render();
+    await wait(80);
+    const counted = read();
+    stepDay(-1);
+    await wait(80);
+    const stepped = read();
+    return { present: Boolean(live), start, counted, stepped };
+  });
+  check('the day screen has a live region that outlives its own render',
+    said.present, JSON.stringify(said));
+  check('it names the day and the date, so a count has a day attached',
+    Boolean(said.start) && said.start.includes('12/08') && said.start.includes('יום'),
+    JSON.stringify(said.start));
+  check('the climbing count reaches it', said.counted !== said.start
+    && String(said.counted).includes('1 מתוך 3'), JSON.stringify(said));
+  check('and so does the day switch', said.stepped !== said.counted
+    && String(said.stepped).includes('11/08'), JSON.stringify(said));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- nothing on the day screen is unnamed
+{
+  // Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼, ⤓, ₪, 🗄️ and ↩️ in this app carries a Hebrew
+  // name, and most of them fold in the worker's or the site's. One control did not: the
+  // rate <select> on each assign row, which a reader announced as "רגיל, תיבה משולבת" and
+  // nothing more - on a screen where four of them are visible at once, one per recorded
+  // man, and where what it sets is what that man's day is PRICED at.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    State.date = '2026-08-12';
+    assignPlace(State.schedule, '2026-08-12', 'w_01', 'actual', 'p_01');
+    assignPlace(State.schedule, '2026-08-12', 'w_02', 'actual', 'p_01');
+    State.save();
+    setDayMode('sites');
+    render();
+  });
+  await page.waitForTimeout(300);
+
+  // The sweep first, so this is a claim about the screen and not about one element.
+  //
+  // AND IT COMPUTES THE NAME THE WAY THE BROWSER DOES, which the first draft of this
+  // check did not: it added node.textContent for everything, and a <select>'s textContent
+  // is the text of its OPTIONS - "רגילשעות נוספותיום כפול" - so the one unnamed control
+  // in the app came out named and the sweep was green on the broken build. Content is a
+  // name source for a button and a link. It is not one for a select, an input or a
+  // textarea: those are named by a label, aria-label, aria-labelledby or title, and
+  // nothing else.
+  const sweep = () => page.evaluate(() => {
+    const out = [];
+    const fromContent = node => node.tagName === 'BUTTON' || node.tagName === 'A'
+      || node.getAttribute('role') === 'button';
+    document.querySelectorAll('#dayView button, #dayView select, #dayView input, #dayView textarea, #dayView a[href], #dayView [role="button"]')
+      .forEach(node => {
+        if (node.getAttribute('aria-hidden') === 'true') return;
+        if (node.offsetParent === null) return;
+        const labelled = node.getAttribute('aria-labelledby');
+        const parts = [
+          node.getAttribute('aria-label'),
+          labelled ? (document.getElementById(labelled) || {}).textContent : '',
+          node.labels && node.labels.length ? node.labels[0].textContent : '',
+          node.getAttribute('title'),
+          node.getAttribute('placeholder'),
+          fromContent(node) ? node.textContent : ''
+        ];
+        if (parts.some(part => String(part || '').trim())) return;
+        out.push({ tag: node.tagName, cls: String(node.className).slice(0, 24) });
+      });
+    return out;
+  });
+
+  const unnamed = await sweep();
+  check('every control on the day screen, by site, has a name',
+    unnamed.length === 0, JSON.stringify(unnamed));
+
+  // And the name is the one the buttons around it use: the man, and the site, both
+  // bidi-isolated the way js/ui/dom.js requires of every name in every label.
+  const rate = await page.evaluate(() => {
+    const node = document.querySelector('.site-card .rate-select');
+    if (!node) return null;
+    const label = node.getAttribute('aria-label') || '';
+    // FSI…PDI, U+2068 and U+2069 - what js/ui/dom.js's isolate() emits around a NAME.
+    // U+2066 is the other one, LRI, and it belongs to dateRange(): a first draft of this
+    // check counted that instead and reported a correctly isolated label as bare.
+    return {
+      label,
+      plain: label.replace(/[\u2066-\u2069]/g, ''),
+      isolated: (label.match(/\u2068/g) || []).length === 2
+        && (label.match(/\u2069/g) || []).length === 2
+    };
+  });
+  check('the rate control names the man whose day it prices',
+    rate !== null && rate.plain.includes('דוד'), JSON.stringify(rate));
+  check('and the site it is priced at, because four of them are on the screen at once',
+    rate !== null && rate.plain.includes('הרצליה'), JSON.stringify(rate));
+  check('with both names bidi-isolated, like every other name in every other label',
+    rate !== null && rate.isolated === true, JSON.stringify(rate));
+
+  await page.evaluate(() => { setDayMode('workers'); render(); });
+  await page.waitForTimeout(250);
+  const unnamedByWorker = await sweep();
+  check('and the same screen by worker', unnamedByWorker.length === 0,
+    JSON.stringify(unnamedByWorker));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- Escape leaves no password behind
+{
+  // signInModal is a .modal, so topModal() finds it and Escape closes it - through the
+  // FALLBACK at js/ui/modal.js (`modal.style.display = 'none'`), because it was the one
+  // .modal with no entry in MODAL_CLOSERS. Closing is not always just hiding, which is
+  // the whole reason that table exists: closeSignInModal clears the password field, and
+  // Escape never reached it. This is a phone three men share on a site.
+  const page = await open();
+  await page.evaluate(() => {
+    openSignInModal();
+    document.getElementById('signInPassword').value = 'hunter2';
+    document.getElementById('signInError').textContent = 'סיסמה שגויה';
+  });
+  await page.waitForTimeout(250);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const left = await page.evaluate(() => ({
+    open: document.getElementById('signInModal').style.display,
+    password: document.getElementById('signInPassword').value,
+    error: document.getElementById('signInError').textContent
+  }));
+  check('Escape closes the sign-in sheet', left.open === 'none', JSON.stringify(left));
+  check('and takes the password out of the field with it',
+    left.password === '', JSON.stringify(left));
+
+  // The same door the button uses, for comparison: this was already right, and it is what
+  // Escape now goes through rather than around.
+  await page.evaluate(() => {
+    openSignInModal();
+    document.getElementById('signInPassword').value = 'hunter2';
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => closeSignInModal());
+  await page.waitForTimeout(200);
+  const byButton = await page.evaluate(() =>
+    document.getElementById('signInPassword').value);
+  check('as the ביטול button always did', byButton === '', JSON.stringify(byButton));
+
+  await page.context().close();
+}
+
+// ------------------------------------------------- the hold is said by the button itself
+{
+  // While writes are held, the day screen dims and the dock's copy button "goes quiet".
+  // Quiet was CSS only: `body.writes-blocked .day-actions #copyDayBtn { pointer-events:
+  // none; }` plus opacity .5. Neither reaches the accessibility tree, and pointer-events
+  // stops a finger without stopping a keyboard - so the button reported itself ENABLED,
+  // and Enter on it fired the copy.
+  //
+  // The record was never at risk: State.commit refuses under the hold, which is law 3
+  // working. What was wrong was the SAYING. Somebody who presses a button that announces
+  // itself live and then does nothing has been told the app is broken, not that recording
+  // is held - and this is the button a foreman reaches for first in the morning.
+  //
+  // Fixed where it is DECIDED (renderCopyButton), not where it is painted. The word is the
+  // app's own: «הרישום מושבת» is already what the day screen's progress line says in this
+  // exact state (js/ui/day.js), so no new string enters the product.
+  const page = await open();
+  await seedRoster(page);
+  await page.evaluate(() => {
+    assignPlace(State.schedule, '2026-08-11', 'w_01', 'actual', 'p_01');
+    State.date = '2026-08-12';
+    State.save({ silent: true });
+    render();
+  });
+
+  // The button must be live for the RIGHT reason first, or a disabled reading afterwards
+  // proves nothing: renderCopyButton also disables it when there is no day to copy.
+  const before = await page.evaluate(() => {
+    const btn = document.getElementById('copyDayBtn');
+    return { disabled: btn.disabled, blocked: farkadWritesBlocked() };
+  });
+  // Asserted rather than assumed: smoke has no given(), and this IS a claim - the button
+  // must be live for the right reason before a disabled reading afterwards means anything.
+  check('the copy button is live, and writes are not held',
+    before.disabled === false && before.blocked === false, JSON.stringify(before));
+
+  // The hold, induced the way the app really enters it - a half-written outbox record.
+  const held = await page.evaluate(() => {
+    // Recovery.halt is the app's OWN door into this state - it is what a boot-time
+    // discovery calls, it sets mustHold, and it paints. Reached for after a guess at
+    // `Recovery.load()` threw `is not a function`: the surface here is damaged, evidence,
+    // collect, deliver, halt, blocked, rawRecords, rawSnapshot, acknowledge, paint.
+    Recovery.halt('scheduleData:v2', 'הרישום השמור נפגם');
+    render();
+    const btn = document.getElementById('copyDayBtn');
+    return {
+      blocked: farkadWritesBlocked(),
+      disabled: btn.disabled,
+      title: btn.title,
+      pointerEvents: getComputedStyle(btn).pointerEvents
+    };
+  });
+  check('the hold is on', held.blocked === true, JSON.stringify(held));
+
+  check('the copy button reports itself disabled, not merely unclickable',
+    held.disabled === true, JSON.stringify(held));
+  check('and it says which state it is in, in the app\'s own word for it',
+    typeof held.title === 'string' && held.title.includes('הרישום מושבת'), held.title);
+
+  await page.context().close();
+}
+
 await browser.close();
 await server.close();
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+// THE FAILURES, NAMED, the way tests/runner.mjs does it.
+//
+// This printed the count and nothing else. A FAIL is written inline as it happens, which
+// is fine when somebody is watching the run and useless afterwards: this suite is the
+// longest in the repository, its output is thousands of lines, and every way anyone
+// actually reads it - a pipe into tail, a CI log with a cap, a scroll-back - keeps the
+// end. So "1130/1131" was the whole of what survived, and finding out WHICH check needed
+// the entire suite run again.
+if (failed.length) {
+  console.log('\nfailed:');
+  failed.forEach(r => console.log(`  ${r.name}${r.detail ? '  — ' + r.detail : ''}`));
+}
 process.exit(failed.length ? 1 : 0);

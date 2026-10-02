@@ -363,6 +363,52 @@ Object.assign(FarkadSync, {
 // person just made is NOT written down. That cannot be a grey line under the fold, below
 // two fixed bottom bars: it goes in a banner at the top, with the one button that turns
 // the situation around. `text` of null clears it.
+// SAYING THE SAME THING AGAIN IS A CHANGE, to a live region.
+//
+// `node.textContent = text` replaces the text node whether or not the string differs,
+// and a live region announces the replacement, not the difference. render() runs on
+// every tap (js/app.js), so a man marking thirty names with a reader on heard the sync
+// sentence thirty times, in between the thirty things he asked for - measured: three
+// ordinary edits took three childList mutations inside #storageNotice, and writing the
+// IDENTICAL sentence back took one more.
+//
+// showStorageBanner below has carried this memo since it was written. The notice had
+// four writers and not one of them had it, so the memo now lives on the WRITE and there
+// is one write. Returns whether anything was actually said, for a caller that wants to
+// know.
+//
+// Here rather than in js/ui/dom.js because this file is loaded before every UI file and
+// before js/state.js, and updateSyncNotice is reachable from all of them.
+function sayOnce(node, text) {
+    if (!node) return false;
+    // The node's OWN words, not a memo kept beside them. showStorageBanner needs the
+    // memo because what it draws is a sentence plus a button and its text is not the
+    // whole story; these regions hold text and nothing else, so what one is already
+    // saying is readable straight off it - and a node in tests/harness.mjs, which has
+    // textContent and no dataset, is still a node this can answer for.
+    if (node.textContent === text) return false;
+    node.textContent = text;
+    return true;
+}
+
+// The notice with everything that follows it told.
+//
+// #storageNotice is written in four places in updateSyncNotice, and two other things
+// mirror it: the chip beside the app's name and the ⋯ panel's sync line with its reason
+// underneath. Both were driven by a MutationObserver on this node (watchSyncNotice,
+// js/app.js) - a live region doing duty as an event bus, which is why the memo above
+// could not simply be dropped onto the write. A status can change under an open sheet
+// WITHOUT the sentence changing: permission-denied and unauthenticated both read
+// «שגיאת סנכרון - הנתונים שמורים במכשיר הזה.» and carry different reasons under it, and
+// the observer got that right only because `textContent =` fired whether or not anything
+// differed. So the followers are told here, in words, either way. The observer still
+// runs and calling them twice costs nothing - both are idempotent redraws.
+function sayNotice(notice, text) {
+    sayOnce(notice, text);
+    if (typeof renderSyncChip === 'function') renderSyncChip();
+    if (typeof renderSettingsSyncLine === 'function') renderSettingsSyncLine();
+}
+
 function showStorageBanner(text) {
     const banner = document.getElementById('storageBanner');
     if (!banner) return;
@@ -391,7 +437,7 @@ function updateSyncNotice() {
     // Data held only in memory must never look like data that survives a refresh.
     if (typeof Store !== 'undefined' && !Store.available) {
         const text = '⚠️ הדפדפן חוסם שמירה. הנתונים יימחקו ברענון - ייצא קובץ גיבוי.';
-        notice.textContent = text;
+        sayNotice(notice, text);
         showStorageBanner(text);
         return;
     }
@@ -399,7 +445,7 @@ function updateSyncNotice() {
     // Full is not blocked: what is already saved is safe, but the last change is not.
     if (typeof Store !== 'undefined' && Store.full) {
         const text = '⚠️ אין מקום פנוי במכשיר והשינוי האחרון לא נשמר - ייצא קובץ גיבוי ופנה מקום.';
-        notice.textContent = text;
+        sayNotice(notice, text);
         showStorageBanner(text);
         return;
     }
@@ -409,7 +455,7 @@ function updateSyncNotice() {
     // read back as something else, which is exactly what State.save now checks.
     if (typeof State !== 'undefined' && State.saveFailed) {
         const text = '⚠️ השינוי האחרון לא נשמר במכשיר. ייצא קובץ גיבוי עכשיו.';
-        notice.textContent = text;
+        sayNotice(notice, text);
         showStorageBanner(text);
         return;
     }
@@ -490,5 +536,5 @@ function updateSyncNotice() {
         text += ' ⚠️ אין מקום לשמור מצב קודם - ייצא קובץ גיבוי.';
     }
 
-    notice.textContent = text;
+    sayNotice(notice, text);
 }

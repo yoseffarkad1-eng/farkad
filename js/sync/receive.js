@@ -90,10 +90,114 @@ Object.assign(FarkadSync, {
 
     // What the disk holds at `path`, as a mark: VALUE_ABSENT for nothing, and null when
     // the record will not read - which is not nothing, and contributes nothing.
+    //
+    // `roster.*` IS NOT A KEY ON THE DISK. A schedule this app saves carries
+    //
+    //     advances, days, ledger, places, schemaVersion, updatedAt, updatedBy, vehicles, workers
+    //
+    // and nothing named `roster`: the roster lives in the two arrays. `roster.<kind>.<id>`
+    // is the WIRE shape. So readPath walks a key that is not there, the operation is
+    // written down as having seen NOTHING, and the provenance is false at the moment it
+    // is journalled - see rosterMarkFromArrays for what that costs.
     storedMarkAt(path, stored) {
         if (stored.raw === null) return VALUE_ABSENT;
         if (!stored.schedule) return null;
-        return valueMark(readPath(stored.schedule, path));
+        const direct = readPath(stored.schedule, path);
+        if (direct !== undefined) return valueMark(direct);
+        const carried = this.rosterMarkFromArrays(path, stored);
+        if (carried !== undefined) return carried;
+        return valueMark(direct);
+    },
+
+    // THE SAME FACT, WHERE AN UPGRADED DISK ACTUALLY KEEPS IT.
+    //
+    // Measured on c7afe7f: a disk whose roster is only in the arrays - every disk this
+    // build opens that was written before the keyed map existed, and every disk that has
+    // not yet adopted a snapshot - records a per-field roster write with seen: ["absent"]
+    // while `places[0].name` on that same disk says "site". The first snapshot then
+    // arrives holding "site", movedUnder finds the server's mark outside the operation's
+    // seen list, reads it as another phone's correction this device has never seen, and
+    // holds the write. The person's rename is stranded for ever, the phone says
+    // «contested», and nothing anywhere is actually wrong except the record of what the
+    // device had seen.
+    //
+    // This is the mirror of O2 and it must not be fixed by loosening the rule that closed
+    // O2. Treating every absent keyed path as seen would let a genuinely stale value, or
+    // an invented field, walk over another phone's edit - which is the failure O2 was.
+    // So the fallback answers only when this device can prove it holds the fact:
+    //
+    //   the path is a roster entity or one of ITS OWN declared fields (ENTITY_FIELDS,
+    //   the same list the wire validator uses, so the two cannot drift apart);
+    //   the id is a safe segment;
+    //   the keyed map does not already say something - a tombstone there is read by
+    //   readPath above and is never inherited from the array underneath it;
+    //   the entity is REALLY in the durable roster. A missing one is not synthesized
+    //   from a fragment, so a new person still travels as a whole entity and a phone
+    //   that has never heard of somebody still records that it has not;
+    //   and the record reads. One that does not answers null - contributes nothing,
+    //   which leaves the write held. Fail-closed, deliberately: a wrong "seen" loses
+    //   somebody's edit to another phone, and that is worse than a hold somebody can see.
+    //
+    // Returns undefined for "no opinion, use the direct read".
+    rosterMarkFromArrays(path, stored) {
+        const parts = String(path).split('.');
+        if (parts[0] !== 'roster') return undefined;
+        if (parts.length !== 3 && parts.length !== 4) return undefined;
+        const kind = parts[1];
+        if (kind !== 'workers' && kind !== 'places') return undefined;
+        const id = parts[2];
+        if (typeof isSafeSegment !== 'function' || !isSafeSegment(id)) return undefined;
+        if (parts.length === 4) {
+            const known = (typeof ENTITY_FIELDS === 'object' && ENTITY_FIELDS
+                && ENTITY_FIELDS[kind]) || [];
+            if (known.indexOf(parts[3]) === -1) return undefined;
+        }
+        const index = this.durableRosterIndex(stored);
+        if (index === null) return null;
+        const entity = index[kind] && index[kind][id];
+        if (!entity) return undefined;
+        return parts.length === 3 ? valueMark(entity) : valueMark(entity[parts[3]]);
+    },
+
+    // The durable roster, normalised and keyed, cached against the exact bytes it was
+    // built from. Normalised because that is the footing the wire uses: editRoster sends
+    // entities out of State.schedule, which is always normaliseSchedule's output, so a
+    // mark built any other way would not match the one the server holds and the fallback
+    // would silently do nothing. Null when the record will not normalise.
+    durableRosterIndex(stored) {
+        if (this._durableRoster && this._durableRoster.raw === stored.raw) {
+            return this._durableRoster.index;
+        }
+        let index = null;
+        try {
+            const normal = normaliseSchedule(stored.schedule);
+            // Object.create(null), not {}.
+            //
+            // A plain object answers `index.workers['toString']` with a Function, and the
+            // guard this index exists for - `if (!entity) return undefined`, the line that
+            // makes "the entity is REALLY in the durable roster" true - is satisfied by a
+            // method inherited from Object.prototype. Six ids do it: toString, valueOf,
+            // hasOwnProperty, isPrototypeOf, toLocaleString, propertyIsEnumerable. The
+            // mark then built is a fact about a worker nobody ever recorded, written into
+            // an operation as something this device has held - where the same path under
+            // an id that is merely unknown correctly records `absent` and is held.
+            //
+            // isSafeSegment stops __proto__, prototype and constructor, and it should not
+            // have to carry the rest. A null-prototype object has nothing to inherit, so
+            // the question cannot be asked wrongly rather than being asked and defended.
+            const byId = list => {
+                const out = Object.create(null);
+                (list || []).forEach(item => {
+                    if (item && item.id) out[String(item.id)] = item;
+                });
+                return out;
+            };
+            index = { workers: byId(normal.workers), places: byId(normal.places) };
+        } catch (error) {
+            index = null;
+        }
+        this._durableRoster = { raw: stored.raw, index };
+        return index;
     },
 
     // Every value this device has held or produced at `path`, as marks. Recorded with
@@ -423,6 +527,23 @@ Object.assign(FarkadSync, {
     // branch, which used to answer synced before anything looked at the money, and once
     // on the ordinary path.
     refuseBadMoney(raw) {
+        const ledger = typeof ledgerProblems === 'function' ? ledgerProblems(raw) : [];
+        Object.keys(raw.days || {}).forEach(date => {
+            const runs = (raw.days[date] || {}).vehicleRuns;
+            if (runs === undefined) return;
+            if (!isPlainObject(runs) || Object.keys(runs).some(id => !isSafeId(id)
+                || (runs[id] !== null && vehicleRunProblems(runs[id]).length > 0)))
+                ledger.push('רישום נסיעת רכב אינו תקין.');
+        });
+        if (ledger.length > 0) {
+            // Keep the whole snapshot: valid payments beside the malformed one are
+            // evidence too, and none of this snapshot may replace the good local record.
+            Recovery.evidence('farkad:refusedSnapshot', JSON.stringify(raw),
+                'נתונים מהענן לא נקלטו בגלל רישום כספי שאינו תקין. ייתכן שחסרות כאן תנועות. '
+                + 'עותק מלא נשמר לייצוא חילוץ ולבדיקה; הנתונים במכשיר לא הוחלפו.');
+            this.fail(new Error('unreadable cloud ledger; complete snapshot retained for review'));
+            return true;
+        }
         const money = advanceProblems({ advances: raw.advances }, null, true);
         if (money.length === 0) return false;
         Recovery.damaged('farkad:remoteAdvances', JSON.stringify(raw.advances),
@@ -505,7 +626,7 @@ Object.assign(FarkadSync, {
             // Authoritative: the document exists and has no roster in it, so there is
             // nothing tombstoned for a queued array to contradict.
             this.noteCloudHeard();
-            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
+            if (State.schedule.workers.length > 0) this.editRoster(State.schedule, null, { whole: true });
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             if (this.pendingCount() > 0) this.scheduleFlush();
@@ -556,8 +677,8 @@ Object.assign(FarkadSync, {
         // snapshot, call the device synced, and then flush him back into the document,
         // where every v78 reader picks him up again. So the snapshot is not adopted, the
         // stale queue is barred from flushing, and the retry ladder comes back to it.
-        if (!this.sanitiseQueuedRosters(gone)) {
-            this.holdStaleRoster(gone);
+        if (!this.sanitiseQueuedRosters(gone, remote)) {
+            this.holdStaleRoster(gone, remote);
             return;
         }
         this.releaseStaleRoster();
@@ -573,7 +694,7 @@ Object.assign(FarkadSync, {
             // A document nobody has written to holds no tombstones either, and this is
             // the server saying so rather than a guess.
             this.noteCloudHeard();
-            if (State.schedule.workers.length > 0) this.editRoster(State.schedule);
+            if (State.schedule.workers.length > 0) this.editRoster(State.schedule, null, { whole: true });
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
             if (this.pendingCount() > 0) this.scheduleFlush();
@@ -737,7 +858,7 @@ Object.assign(FarkadSync, {
         // way the answer is the same write - the roster as this device now holds it, in
         // both forms at once.
         if (this.repairsMissingIdentities(raw) || this.conflictsWithLegacyArray(raw, gone)) {
-            this.editRoster(State.schedule);
+            this.editRoster(State.schedule, null, { whole: true });
         }
 
         // The copy is taken from what the server holds at the first sight of it today -
@@ -796,8 +917,12 @@ Object.assign(FarkadSync, {
     // v78 reader finds him - and the fix cannot be at replay time only, because replay is
     // in memory and the FLUSH reads what is stored. So the stored entry is rewritten, in
     // one atomic journal write, the same way every other queue change is made.
-    sanitiseQueuedRosters(gone) {
-        if (!gone || (gone.workers.size === 0 && gone.places.size === 0)) return true;
+    sanitiseQueuedRosters(gone, remote) {
+        const buried = gone && (gone.workers.size > 0 || gone.places.size > 0);
+        // `remote` arrived at v104 and the two passes below are one job: making the queue
+        // agree with what has just been heard. A tombstone is one way the queue can be
+        // out of date about a man; his WAGE is the other, and the second one costs money.
+        if (!buried && !remote) return true;
         this.loadOutbox();
 
         // Which queued path is a list of whom, in both of the forms a roster is queued
@@ -821,19 +946,131 @@ Object.assign(FarkadSync, {
         // Not an invention on somebody's behalf either. Once this device has heard that
         // the man is gone, the sanitised array IS its opinion of the roster, and sending
         // the old one would put him back into the document for every v78 reader.
+        // AND THE SECOND WAY THE QUEUE CAN BE OUT OF DATE: A STALE WAGE.
+        //
+        // The whole array is this device's opinion of the ENTIRE roster, so it carries
+        // every man this device has not reconciled - not only the one the person touched.
+        // Measured on c7afe7f: A opens on an upgraded disk holding the man at 500, renames
+        // a SITE, and the array goes out with him at 500 in it. Every v79+ reader takes
+        // the keyed map and converges on 600, so nothing looks wrong; the document's own
+        // array is left saying 500, which is the one place the reader it exists for looks.
+        //
+        // Which ids this device is actually speaking about, so its own edit is never
+        // overwritten by the thing meant to correct somebody else's copy. A per-entity or
+        // per-field write for a man IS this device's opinion of him and stands.
+        const speakingFor = { workers: new Set(), places: new Set() };
+        this.projectedQueue().forEach((item, path) => {
+            const parts = String(path).split('.');
+            if (parts[0] !== 'roster' || (parts.length !== 3 && parts.length !== 4)) return;
+            if (parts[1] !== 'workers' && parts[1] !== 'places') return;
+            speakingFor[parts[1]].add(String(parts[2]));
+        });
+
+        const heardEntity = (kind, id) => {
+            if (!remote) return null;
+            const found = (remote[kind] || []).find(item =>
+                item && String(item.id) === String(id));
+            return found || null;
+        };
+
+        // ONE CORRECTION PER PATH. An operation may only supersede one on the SAME path -
+        // decodeQueue enforces that on the bytes - so the two passes are folded into a
+        // single value per path rather than each minting its own.
         const corrections = [];
         this.projectedQueue().forEach((item, path) => {
             const kind = listedKind(path);
-            const removed = kind ? gone[kind] : null;
-            if (!removed || removed.size === 0 || !Array.isArray(item.value)) return;
-            // An array of records, or an array of bare ids - the same question either
-            // way: is this the man the document says is gone?
-            const kept = item.value.filter(entry => {
-                const id = entry && typeof entry === 'object' ? entry.id : entry;
-                return !removed.has(String(id));
-            });
-            if (kept.length !== item.value.length) corrections.push({ path, value: kept });
+            if (!kind || !Array.isArray(item.value)) return;
+            const removed = (gone && gone[kind]) || null;
+
+            let next = item.value;
+            if (removed && removed.size > 0) {
+                // An array of records, or an array of bare ids - the same question either
+                // way: is this the man the document says is gone?
+                next = next.filter(entry => {
+                    const id = entry && typeof entry === 'object' ? entry.id : entry;
+                    return !removed.has(String(id));
+                });
+            }
+            // The order list is bare ids and carries no wage, so there is nothing here to
+            // refresh - it is only ever shortened by the pass above.
+            if (remote) {
+                next = next.map(entry => {
+                    if (!entry || typeof entry !== 'object' || !entry.id) return entry;
+                    const id = String(entry.id);
+                    if (speakingFor[kind] && speakingFor[kind].has(id)) return entry;
+                    const heard = heardEntity(kind, id);
+                    if (!heard) return entry;
+                    return canonicalJson(heard) === canonicalJson(entry) ? entry : heard;
+                });
+            }
+            const changed = next.length !== item.value.length
+                || next.some((entry, at) => entry !== item.value[at]);
+            if (changed) corrections.push({ path, value: next });
         });
+
+        // AND THE WRITE THAT NAMES HIM ON HIS OWN.
+        //
+        // The lists are not the only queued opinion of a removed man. A whole-entity write
+        // for him - `roster.workers.w_01` with a record in it - lands straight on top of
+        // the null the tombstone is, and since v104 so does one FIELD of him: Firestore
+        // stores `roster.workers.w_01.phone` by replacing that null with `{ phone: … }`.
+        // Either way the tombstone is gone from the document, and the tombstone is the
+        // only thing telling the third phone - which still has him in its own stale whole
+        // array - that he was removed. Merged against that array, the record or the
+        // fragment stands him back up, with every day and every shekel recorded against
+        // him back in the report.
+        //
+        // So this device's queued opinion of him becomes the one it has just heard: gone.
+        // No more an invention than the sanitised array is - the same sentence, about one
+        // man rather than about a list.
+        //
+        // TWO SHAPES, TWO MECHANISMS, because an operation may only supersede one on the
+        // SAME path - decodeQueue enforces that on the bytes, and it is right to: naming
+        // an operation on another path suppresses work that was never replaced.
+        //
+        //   the whole-entity write is corrected AT ITS OWN PATH, to the tombstone. One
+        //   ordinary operation, superseding the one it replaces, exactly as the arrays are.
+        //
+        //   a field write has no such correction to make - every value that could go in it
+        //   stands the man back up, a null included, because Firestore stores
+        //   `roster.workers.w_01.phone = null` by replacing the tombstone with a record.
+        //   So it is RETIRED instead: the mark that says an operation lost, written to its
+        //   own key, which is how every other defeated operation in this queue is put out
+        //   of the way. The field the person typed is discarded with him, which is the
+        //   same thing the sanitised whole array does and for the same reason.
+        //
+        // If the work says otherwise, the work still wins: a man with a day behind him is
+        // reinstated by reinstateReferenced and written back whole by the repair at the
+        // foot of receive(), which is minted after this and supersedes it in turn.
+        const standingUp = new Set();
+        const retiring = [];
+        this.projectedQueue().forEach((item, path) => {
+            const parts = String(path).split('.');
+            if (parts[0] !== 'roster') return;
+            if (parts.length !== 3 && parts.length !== 4) return;
+            const kind = parts[1];
+            if (kind !== 'workers' && kind !== 'places') return;
+            if (!gone[kind] || !gone[kind].has(String(parts[2]))) return;
+            if (parts.length === 4) { retiring.push(item); return; }
+            // A tombstone already queued for him says exactly what this would say.
+            if (item.value === null) return;
+            standingUp.add(`roster.${kind}.${parts[2]}`);
+        });
+        standingUp.forEach(path => corrections.push({ path, value: null }));
+
+        // The marks go first. A correction that landed while a resurrecting field write
+        // stayed live would be a queue that says two things about one man, and the field
+        // write is the one that reaches the document last.
+        let retired = true;
+        retiring.forEach(item => {
+            const key = outboxBeatKey(item.slot, item.opId);
+            if (Store.durableGet(key) === ACK_VALUE) return;
+            if (Store.setVerified(key, ACK_VALUE)) return;
+            Store.forget(key);
+            retired = false;
+        });
+        if (!retired) return false;
+
         if (corrections.length === 0) return true;
         return this.queueOperations(corrections);
     },
@@ -890,9 +1127,30 @@ Object.assign(FarkadSync, {
     // document, so a device that is restarted learns them again the moment it reconnects.
     // What must not happen in between is a flush, and flush() asks this before sending.
     _staleRoster: null,
+    // THE OTHER HALF OF THE JOB, held with it.
+    //
+    // This used to store `gone` alone. `sanitiseQueuedRosters` does two things - it drops
+    // people the document buried, and it REFRESHES the value of people it did not - and
+    // only the first half was remembered. So a retry called it with `remote === undefined`
+    // and hit its own first line, `if (!buried && !remote) return true;`, which in the
+    // ordinary shape of this failure (a raised wage, nobody removed) is every time: no
+    // tombstones, no remote, "nothing to do". The hold was released, noteCloudHeard() was
+    // recorded, and the queue flushed the array it had never been cleaned of.
+    //
+    // What that costs: B raises a man 500 -> 600, A holds an upgraded disk whose queued
+    // legacy `workers` array still says 500, one refused journal write takes the hold, and
+    // a moment later A writes 500 back into the document and calls itself synced. The
+    // keyed map keeps 600 and the whole array - the one place a v78 reader looks - says
+    // 500. That is the exact failure the `remote` pass was added to close, reached one
+    // refused write later.
+    //
+    // `_staleRoster` being a truthy object of two empty sets was the smell: a hold that
+    // carried no information about what it was holding.
+    _staleRemote: null,
 
-    holdStaleRoster(gone) {
+    holdStaleRoster(gone, remote) {
         this._staleRoster = gone;
+        this._staleRemote = remote || null;
         this.fail(new Error(
             'a queued roster could not be cleaned of a removed worker; it is held back'));
         this.scheduleRetry();
@@ -900,13 +1158,14 @@ Object.assign(FarkadSync, {
 
     releaseStaleRoster() {
         this._staleRoster = null;
+        this._staleRemote = null;
     },
 
     // Tried again from the retry ladder, with no second snapshot needed: the tombstones
     // were learned once and are remembered until the rewrite lands.
     staleRosterHeld() {
         if (!this._staleRoster) return false;
-        if (this.sanitiseQueuedRosters(this._staleRoster)) {
+        if (this.sanitiseQueuedRosters(this._staleRoster, this._staleRemote)) {
             this.releaseStaleRoster();
             // These tombstones came from a real snapshot, and the queue now agrees with
             // it. That is the whole of the first-snapshot barrier's question answered,
@@ -986,10 +1245,46 @@ Object.assign(FarkadSync, {
         const perEntity = new Set();
         pending.forEach(([path]) => {
             const parts = path.split('.');
-            if (parts.length === 3 && parts[0] === 'roster') perEntity.add(parts[1]);
+            // Both per-person shapes count: the whole entity, and one field of it. A
+            // queue holding only `roster.workers.w_01.phone` is still a queue that has
+            // spoken for the workers list, and the legacy array beside it must not undo
+            // it at boot replay, where this same set is what stops it.
+            if (parts[0] === 'roster' && (parts.length === 3 || parts.length === 4)) {
+                perEntity.add(parts[1]);
+            }
         });
 
         pending.forEach(([path, item]) => {
+            // THE LEGACY WHOLE ARRAY IS NEVER LAID BACK OVER AN ADOPTED SNAPSHOT.
+            //
+            // `perEntity` above was meant to stop exactly this and only half does: it
+            // fires when a per-person edit for the SAME list is waiting, so renaming a
+            // SITE leaves the queued `workers` array unguarded. Measured: B raises a
+            // man's rate to 600 and it lands; A - which has already adopted a snapshot,
+            // so the memory baseline everyone blamed is present and correct - renames a
+            // site; A adopts 600 and this loop puts its own pre-snapshot `workers` array
+            // straight back on top. A holds 500, B and the cloud hold 600, and it
+            // survives A's reopen. A's next ordinary roster edit then finds its w_01
+            // differing from the baseline and sends 500 to everybody, where the map
+            // outranks the array in mergeRoster. All three converge on the stale value
+            // and nothing on any screen says so. A day recorded on A in between is
+            // stamped at 500 while the man is paid 600 - law 2 reached from the wrong end.
+            //
+            // The array carries nothing this queue does not already carry per person:
+            // every real roster change also queues `roster.<kind>.<id>`, the order, or a
+            // tombstone, and the entities it holds that none of those name are the
+            // unchanged ones the cloud already has. It exists to be READ by a phone still
+            // on v78 and for no other reason - see editRoster. A projection is not a
+            // record, and re-applying one over a newer truth can only lose.
+            //
+            // Filtered HERE and not inside applyJournalEntry, because the boot replay
+            // (js/sync/sync.js) and the rescue-file rebuild (js/ui/backup.js) call it
+            // too, and there the array IS this device's own latest opinion with no
+            // snapshot to contradict it.
+            const parts = String(path).split('.');
+            if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
+                return;
+            }
             applyJournalEntry(schedule, path, item.value, perEntity, tombstoned);
         });
         // What was put back, so the acknowledgement that retires one of these can tell
@@ -1098,6 +1393,35 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 return;
             }
 
+            // ONE FIELD of one person - the unit an ordinary roster edit travels in, so
+            // that a phone number typed here does not carry this device's stale copy of
+            // his daily rate with it.
+            //
+            // And only onto somebody who is THERE. A field of a man this schedule does
+            // not have is not a man: pushing a row built out of it would invent a person
+            // with no name, and when the snapshot that has just been adopted is the one
+            // that removed him, it would stand him back up - the resurrection the
+            // tombstones exist to stop, done by the re-apply. The person's own field is
+            // not lost by that: whoever still holds a record for him writes it, and the
+            // write that gives him one is the whole-entity write editRoster keeps for an
+            // entity nobody has yet.
+            if (parts.length === 4 && parts[0] === 'roster'
+                && (parts[1] === 'workers' || parts[1] === 'places')) {
+                const list = schedule[parts[1]] || [];
+                const at = list.findIndex(item => item && String(item.id) === parts[2]);
+                // The gate that admits an operation refuses a poison segment anywhere in
+                // its path, so this cannot be reached with one. Asked again here anyway:
+                // this is the one arm that writes a segment straight into a record as a
+                // KEY, and `row.__proto__ = value` does not add a field, it moves the
+                // prototype. One comparison against a decision that already exists.
+                if (at !== -1 && isPlainObject(list[at])
+                    && POISON_SEGMENTS.indexOf(parts[3]) === -1) {
+                    list[at][parts[3]] = value;
+                }
+                schedule[parts[1]] = list;
+                return;
+            }
+
             if (parts.length === 2 && parts[0] === 'roster'
                 && (parts[1] === 'workerOrder' || parts[1] === 'placeOrder')) {
                 const kind = parts[1] === 'workerOrder' ? 'workers' : 'places';
@@ -1195,6 +1519,23 @@ function scheduleHoldsEntry(schedule, path, value) {
         return found !== undefined && same(found, value);
     }
 
+    // ONE FIELD of one person. Held when the man is on the disk AND his record there
+    // already says this.
+    //
+    // A man who is NOT on the disk answers no, and that is the rule at the top of this
+    // function rather than an oversight: the write may still be owed - he can be absent
+    // because this device has not adopted the snapshot that carries him yet - and a wrong
+    // "yes" would take the person's edit off the queue with nowhere it had landed. A
+    // wrong "no" costs one path's bytes and one more attempt, which is the direction to
+    // be wrong in.
+    if (parts.length === 4 && parts[0] === 'roster'
+        && (parts[1] === 'workers' || parts[1] === 'places')) {
+        const list = schedule[parts[1]] || [];
+        const found = list.find(item => item && String(item.id) === parts[2]);
+        if (!found || typeof found !== 'object') return false;
+        return same(found[parts[3]], value);
+    }
+
     // An order is held when the people it names appear in the stored list in the order it
     // named them. Anybody it had not heard of is not its business - applyJournalEntry
     // leaves them where they are rather than dropping them.
@@ -1208,8 +1549,27 @@ function scheduleHoldsEntry(schedule, path, value) {
         return wanted.every((id, at) => stored[at] === id);
     }
 
+    // THE LEGACY WHOLE ARRAY, once it has been sent, owes the disk nothing.
+    //
+    // This used to ask whether the stored list equalled the queued array, and that
+    // question stopped having an answer the moment reapplyPending stopped laying the
+    // array back over an adopted snapshot: the disk holds the snapshot's roster, the
+    // queued array holds this device's older opinion, and they differ for ever. Measured
+    // with only the reapply guarded: one operation on the disk became seven, five paths
+    // still listed by pendingPaths() while pendingCount() read 0 - sent work that could
+    // never be collected, growing on every roster edit.
+    //
+    // The honest answer is yes, and it is yes for the same reason the array is not
+    // re-applied: it is a wire-compat projection for a v78 reader, not a record. Every
+    // entity it names that this device actually changed is also queued at
+    // `roster.<kind>.<id>`, and those are asked the real question above; the rest were
+    // never this device's to say. So there is nothing in it that a "yes" could lose,
+    // which is the test this function is written against - a wrong yes loses somebody's
+    // day, and this one cannot, because the day is not in here.
+    //
+    // The caller only reaches this for an operation already `sent` (js/sync/sync.js).
     if (parts.length === 1 && (parts[0] === 'workers' || parts[0] === 'places')) {
-        return same(schedule[parts[0]], value);
+        return true;
     }
 
     return false;

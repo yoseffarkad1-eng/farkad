@@ -583,4 +583,32 @@ function crew(tag) {
         && inCloud(DAY6) === 'p_00,p_02', `${kept} ${inCloud(DAY6)}`);
 }
 
+{
+    suite('vehicle holds name the owner, price and sites without inventing a worker day');
+    const d = withPanel(makeDevice({ flags: { vehicles: true } }));
+    d.State.schedule.workers = [{ id: 'w_01', name: 'בעל הרכב', active: true }];
+    d.State.schedule.places = [{ id: 'p_01', name: 'אתר ראשון', active: true }];
+    d.State.schedule.vehicles = [{ id: 'v_01', name: 'טנדר', ownerId: 'w_01', active: true,
+        rates: [{ from: '2026-01-01', amount: 300 }] }];
+    d.State.save({ silent: true });
+    const run = { out: true, ownerId: 'w_01', name: 'טנדר', amount: 300, siteIds: ['p_01'] };
+    const row = { path: 'days.2026-08-12.vehicleRuns.v_01', heard: true, mine: run, cloud: null };
+    d.Sync.heldRecords = () => [row];
+    d.ctx.askConfirm = () => Promise.resolve(true);
+    const said = d.call('describeHeldRecord', row, d.State.schedule);
+    check('the conflict is a vehicle, not an unnamed worker', said.kind === 'vehicle' && said.title.includes('טנדר'));
+    check('its money, owner and site are visible together', said.mine.includes('300')
+        && said.mine.includes('בעל הרכב') && said.mine.includes('אתר ראשון'));
+    check('the cloud absence is described honestly', said.cloud === 'אין רישום');
+    check('taking no cloud departure succeeds', await d.call('resolveHeldRecord', row, true));
+    check('it writes null, not an empty worker-day record', d.State.schedule.days['2026-08-12'].vehicleRuns.v_01 === null);
+    check('taking cloud absence does not quarantine the vehicle queue', !d.call('farkadWritesBlocked'));
+    check('keeping the reviewed departure succeeds', await d.call('resolveHeldRecord', row, false));
+    check('the full departure is preserved', JSON.stringify(d.State.schedule.days['2026-08-12'].vehicleRuns.v_01) === JSON.stringify(run));
+    d.State.schedule.ledger.advances.cl = { kind: 'closed', workerId: 'w_01',
+        periodFrom: '2026-08-07', periodTo: '2026-08-20' };
+    check('a closed period offers no conflict rewrite', !d.call('describeHeldRecord', row, d.State.schedule).decidable);
+    check('even a direct resolution call refuses the closed period', !await d.call('resolveHeldRecord', row, false));
+}
+
 report();

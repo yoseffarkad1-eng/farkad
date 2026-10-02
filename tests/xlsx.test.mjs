@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
-import { rootFromEnv, refuseUnlessVerified } from './treecheck.mjs';
+import { rootFromEnv, refuseUnlessVerified, shippedLibrary } from './treecheck.mjs';
 
 // See tests/treecheck.mjs: an override must name the commit it is allowed to point at.
 const ROOT_ENV = rootFromEnv(join(dirname(fileURLToPath(import.meta.url)), '..'));
@@ -40,14 +40,17 @@ const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
 // no shipped copy to prefer. There is now: vendor/, in the service worker's shell, named
 // by js/ui/reports.js. Reading anything else would prove the arithmetic of a file no
 // phone has.
-const SHEETJS = process.env.FARKAD_SHEETJS ||
-    join(ROOT, 'vendor/xlsx-0.18.5.min.js');
+// FARKAD_SHEETJS may relocate the file; it may not change which build it is - which is
+// what the paragraph above asks for and what the bare `||` did not deliver. See
+// shippedLibrary in tests/treecheck.mjs.
+const SHIPPED = shippedLibrary(ROOT, 'FARKAD_SHEETJS', 'vendor/xlsx-0.18.5.min.js');
+const SHEETJS = SHIPPED.path;
 
 // dist/xlsx.full.min.js, not `import('xlsx')` - that resolves to a DIFFERENT build of
 // the package, and a test that proves the wrong build proves nothing about the file a
 // phone writes. The vendored file IS that dist build, copied in.
-given(`SheetJS is in the tree (${SHEETJS} - or set FARKAD_SHEETJS)`,
-    existsSync(SHEETJS));
+given(`SheetJS is the shipped build (${SHEETJS})`, SHIPPED.ok,
+    SHIPPED.reason || 'vendor/, the copy sw.js precaches');
 const SHEETJS_CODE = readFileSync(SHEETJS, 'utf8');
 
 // ---------------------------------------------------------------- a zip reader, by hand
@@ -134,7 +137,14 @@ function sheetOf(xml, strings) {
                 const found = /<is>[\s\S]*?<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/.exec(cellXml);
                 text = found ? unescapeXml(found[1]) : '';
             } else {
-                const found = /<v>([\s\S]*?)<\/v>/.exec(cellXml);
+                // ATTRIBUTES ARE ALLOWED ON <v>, and one of them is written by the
+                // library under test: SheetJS writes <v xml:space="preserve"> for a
+                // value with leading whitespace in it - a tab, which is exactly what an
+                // injection check hands it - and a reader that insists on a bare <v>
+                // reads such a cell back as EMPTY. One false red, on the check that
+                // exists to prove the cell is inert. tests/exports-proof.lib.mjs has
+                // always accepted the attributes; this is the same reader.
+                const found = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(cellXml);
                 const raw = found ? unescapeXml(found[1]) : '';
                 text = type === 's' ? (strings[Number(raw)] || '') : raw;
             }
@@ -280,7 +290,7 @@ const FORTNIGHT = `
 const column = (workbook, heading) => workbook.sheets['שכר'].values[0].indexOf(heading);
 
 const PAYROLL_HEAD = ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
-    'נעדר', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה'];
+    'נעדר', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה', 'מחזור תשלום'];
 
 const main = phone(FORTNIGHT);
 const book = await main.exportOnce();
@@ -323,11 +333,11 @@ suite('שכר, read back out of the file');
 // Every value pinned against a literal, not against another call of the same function:
 // comparing reportSheets() to reportSheets() would agree with itself no matter what the
 // arithmetic did.
-same('the header is the eleven columns, in order', book.sheets['שכר'].values[0], PAYROLL_HEAD);
+same('the header includes payment frequency, in order', book.sheets['שכר'].values[0], PAYROLL_HEAD);
 same('דוד: a double day at two sites, two extra hours, an absence, 500 already taken',
-    book.sheets['שכר'].values[1], ['דוד', 2, 3, 1, 2, 1, 400, 1300, -500, 800, '']);
+    book.sheets['שכר'].values[1], ['דוד', 2, 3, 1, 2, 1, 400, 1300, -500, 800, '', 'דו־שבועי']);
 same('שרה: two ordinary days at 350', book.sheets['שכר'].values[2],
-    ['שרה', 2, 2, 0, 0, 0, 350, 700, 0, 700, '']);
+    ['שרה', 2, 2, 0, 0, 0, 350, 700, 0, 700, '', 'דו־שבועי']);
 same('and nobody else is on the sheet', book.sheets['שכר'].values.length, 3);
 
 // A number stored as text is a column that will not SUM and will not sort, and it looks
@@ -335,7 +345,7 @@ same('and nobody else is on the sheet', book.sheets['שכר'].values.length, 3);
 same('the name is text and every figure beside it is a number',
     book.sheets['שכר'].types[1],
     ['str', 'number', 'number', 'number', 'number', 'number', 'number', 'number',
-        'number', 'number', 'str']);
+        'number', 'number', 'str', 'str']);
 
 suite('חיוב, read back out of the file');
 
@@ -398,8 +408,8 @@ check('and every worker-day on it is billed on the billing sheet',
 
 suite('no vehicle columns while the feature is retired');
 
-same('the pay sheet is eleven columns wide, not thirteen',
-    book.sheets['שכר'].values[0].length, 11);
+same('the pay sheet includes frequency without vehicle columns',
+    book.sheets['שכר'].values[0].length, 12);
 check('and no part of the file carries a vehicle heading',
     !book.text.includes('ימי רכב') && !book.text.includes('שכר רכב'));
 
@@ -633,7 +643,7 @@ check('and its rows end CRLF',
     offline.downloads.every(file => file.text.includes('\r\n') && !/[^\r]\n/.test(file.text)));
 same('the pay sheet carries the same numbers the workbook did',
     offline.downloads[0].text.split('\r\n')[1],
-    '"דוד","2","3","1","2","1","400","1300","-500","800",""');
+    '"דוד","2","3","1","2","1","400","1300","-500","800","","דו־שבועי"');
 // The words moved with the cause. While the library came from a CDN, reaching here meant
 // no signal, and the message said so gently because waiting was the remedy. The file is
 // in the shell now, so reaching here means the build on this phone is incomplete - and no
@@ -667,7 +677,7 @@ risky.failOnFetch();
 await risky.run('exportReports()');
 same('a name that opens like a formula is defused in the file itself',
     risky.downloads[0].text.split('\r\n')[1],
-    '"\'-חדש","1","1","0","0","0","400","400","-500","-100",""');
+    '"\'-חדש","1","1","0","0","0","400","400","-500","-100","","דו־שבועי"');
 same('and a site name too, on the billing sheet the client is the one who opens',
     risky.downloads[1].text.replace('\ufeff', '').split('\r\n')[0],
     '"תאריך","\'=תל אביב","סה״כ"');

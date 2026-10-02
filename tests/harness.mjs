@@ -788,10 +788,25 @@ export function makeCloud(options = {}) {
 // early from one of those moves the sample and changes what is measured. The rule is:
 // if the next line asks "has it happened yet", this is the barrier; if the next line asks
 // "how many happened while I waited", the sleep is the point.
+// AWAITED, because a predicate that reads the cloud is the ordinary case and the old
+// shape could not express it.
+//
+// This used to ask `if (ready())`. A synchronous predicate answers a boolean and that is
+// fine; an ASYNC one answers a Promise, and a Promise is truthy - so the barrier returned
+// true on its first turn, having waited for nothing, and the limit beside it was
+// decoration. Measured: five barriers in tests/bootstrap.emulator.test.mjs, each written
+// `await settleUntil(async () => { const raw = await readDoc(); ... }, 8000, 100)`, each
+// returning on turn one. Whatever those five suites then proved, they did not prove it
+// after the condition they name.
+//
+// `await` on a plain boolean is a microtask and changes nothing for the ninety-eight
+// synchronous call sites; for the five it is the difference between a barrier and a
+// comment. Supporting the async predicate properly is the fix - refusing it would have
+// left the same five tests to be rewritten by somebody who did not know why.
 export async function settleUntil(ready, limitMs = 5000, stepMs = 5) {
     const deadline = Date.now() + limitMs;
     for (;;) {
-        if (ready()) return true;
+        if (await ready()) return true;
         if (Date.now() >= deadline) return false;
         await new Promise(resolve => setTimeout(resolve, stepMs));
     }

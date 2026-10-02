@@ -101,7 +101,7 @@ function surfaces(device, run) {
         earned: row[at('נצבר')],
         deductionColumn: row[at('מקדמות') !== -1 ? at('מקדמות') : at('נוכה מהשכר')],
         payable: row[at('לתשלום')],
-        note: String(row[heads.length - 1] || ''),
+        note: String(row[heads.indexOf('הערה')] || ''),
         // The payroll row the screen draws from.
         carry: (rows.find(line => line.workerId === 'w_01') || {}).carry || null,
         payableCell: row[at('לתשלום')],

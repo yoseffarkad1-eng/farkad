@@ -1,15 +1,34 @@
-# Publishes firestore.rules to the farkad-schedule project whenever the file changes on
-# main - the "rules first" half of every rollout (tests/rollout.test.mjs says why), done
-# by the merge instead of by a person at a console.
+# Publishes firestore.rules to the farkad-schedule project when the file changes on main -
+# the "rules first" half of every rollout (tests/rollout.test.mjs says why), done by the
+# merge instead of by a person at a console.
 #
 # It needs one secret, FIREBASE_SERVICE_ACCOUNT: the JSON of a service account key with
 # the "Firebase Rules Admin" role (Firebase console -> Project settings -> Service
-# accounts -> Generate new private key), pasted into the repository's Settings ->
-# Secrets and variables -> Actions. Until the secret exists the job runs, says so, and
-# publishes nothing - so a fork or a clone without the key is never a broken build.
+# accounts -> Generate new private key), pasted into the repository's Settings -> Secrets
+# and variables -> Actions.
 #
-# The rules are still tested against the emulator before any merge (tests/rules.test.mjs,
-# tests/bootstrap.rules.test.mjs); this only carries a file the gate already passed.
+# WHAT THIS FILE GOT WRONG, AND WHY IT IS WORTH THIS MUCH COMMENT.
+#
+# The old version set HAVE_SA on the line AFTER `exit 0`. With no secret the guard exited
+# zero before reaching it, the publish step's `if: env.HAVE_SA == '1'` read an unset
+# variable as empty, the step was skipped - and a skipped step is neutral, not failing.
+# So the job was green, the run was green, and nothing anywhere distinguished "published
+# the rules" from "published nothing".
+#
+# Both recorded runs are that: 34504261742 (push) and 34504270637 (workflow_dispatch), on
+# commit da1e062, both `"conclusion":"success"`, both with step 5 `"conclusion":"skipped"`,
+# both logging `SA:` empty. The second is the sharp one - a person pressed "Run workflow"
+# to publish the rules and was told success. The first fired only because this file is
+# itself in the paths list; firestore.rules had not changed at all.
+#
+# The cost of believing that green is the state features/rollout-order/findings.md calls
+# impossible: phones updated, rules still old, and an updated phone refused on EVERY write
+# including its own bootstrap. There is no middle setting.
+#
+# So: a missing key on this repository is now a RED run. A fork without one stays green,
+# because a fork is a real reason not to have the key and breaking every fork teaches
+# nobody anything - and a fork is the only green skip left.
+
 name: rules
 
 on:
@@ -18,27 +37,161 @@ on:
     paths: [firestore.rules, firebase.json, .github/workflows/rules.yml]
   workflow_dispatch:
 
+# AN OLDER RUN MUST NOT PUBLISH OLDER RULES OVER NEWER ONES.
+#
+# Two pushes in quick succession start two runs with nothing ordering them, and the one
+# that finishes last wins - which can be the older. One group, newest-wins: the older run
+# is cancelled. Cancelled is not green.
+#
+# Cancellation is not instant, so a run already inside `firebase deploy` can finish the
+# request it has in flight. That is what the tip check below is for; it is the guarantee,
+# and this is the cheap half.
+concurrency:
+  group: publish-firestore-rules
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Two commits, because the last step compares this one against its parent to see
+          # whether one commit carried the rules AND the client. Nothing below may shorten
+          # this: `git fetch --depth=1` DEEPENS OR SHORTENS, and against a tip that is
+          # already this commit it rewrites .git/shallow and the parent stops resolving -
+          # which silently turns that last step into a no-op on the only path that
+          # matters. The tip check uses `git ls-remote`, which touches no local history.
+          fetch-depth: 2
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: The key, if the repository holds one
+          cache: npm
+
+      - name: Is there a key, and is it a key
+        id: key
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FORK: ${{ github.event.repository.fork }}
         run: |
-          if [ -z "$SA" ]; then
-            echo "FIREBASE_SERVICE_ACCOUNT is not set: nothing published. See the comment at the top of this file."
+          set -euo pipefail
+          if [ -n "$SA" ]; then
+            # Parsed here rather than inside firebase-tools: a truncated or
+            # whitespace-mangled paste should fail with a sentence about the paste.
+            printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+            node -e 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/sa.json","utf8"))' \
+              || { echo "::error title=The key is not valid JSON::FIREBASE_SERVICE_ACCOUNT did not parse. Re-paste the whole file."; exit 1; }
+            echo "publish=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
-          echo "HAVE_SA=1" >> "$GITHUB_ENV"
+          if [ "$FORK" = "true" ]; then
+            echo "::notice title=No key on this fork::firestore.rules was NOT published. That is expected on a fork."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The whole point of this rewrite.
+          echo "::error title=firestore.rules was NOT published::FIREBASE_SERVICE_ACCOUNT is not set on this repository, so nothing was published. The live rules are whatever they already were."
+          {
+            echo "### firestore.rules was NOT published"
+            echo
+            echo "\`FIREBASE_SERVICE_ACCOUNT\` is not set on this repository."
+            echo "The live rules are unchanged. **Do not update any phone** on the"
+            echo "assumption that the rules moved - see \`docs/rollout-checklist.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Install
+        if: steps.key.outputs.publish == 'true'
+        run: npm ci --ignore-scripts
+
       - name: Publish firestore.rules
-        if: env.HAVE_SA == '1'
+        if: steps.key.outputs.publish == 'true'
+        env:
+          # Scoped to THIS step, not written into $GITHUB_ENV. The old file exported it
+          # for the whole job; every step after it then ran with a live Firebase Rules
+          # Admin credential in scope, including anything that runs repository code. The
+          # one step that deploys is the one step that gets the key.
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
         run: |
-          npm ci
+          set -euo pipefail
+          # THE LAST THING CHECKED BEFORE THE REQUEST GOES.
+          #
+          # Asked here, immediately before the deploy, rather than once at the top: the
+          # install above takes minutes and a newer run can have published inside them.
+          # ls-remote reads the remote and leaves local history alone.
+          TIP="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ -z "$TIP" ]; then
+            echo "::error title=Could not read main::Refusing to publish without knowing what the tip is."
+            exit 1
+          fi
+          if [ "$TIP" != "$GITHUB_SHA" ]; then
+            # One exemption, and it is not a courtesy: if this commit's rules are byte for
+            # byte main's rules, publishing them cannot move the live rules backwards. A
+            # re-run after a flaky install stays useful; a stale "Re-run jobs" or a
+            # dispatch on an old ref does not get to overwrite newer rules.
+            if git diff --quiet "$GITHUB_SHA" "$TIP" -- firestore.rules firebase.json 2>/dev/null; then
+              echo "::notice title=Not the tip, but identical rules::Publishing anyway; this cannot move the live rules backwards."
+            else
+              echo "::error title=Refusing to publish older rules::This run is on $GITHUB_SHA and main is now $TIP, whose rules differ. A newer run owns the publish."
+              exit 1
+            fi
+          fi
           npx firebase deploy --only firestore:rules --project farkad-schedule --non-interactive
+
+      - name: What this run sent
+        if: steps.key.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          # Nothing in this repository can read the live rules back, so the best evidence
+          # it can leave is an exact record of what it SENT. A person comparing this hash
+          # with the console knows whether the live rules are this commit's rules. Without
+          # it the only trace is a green tick, which is what started all this.
+          SUM="$(sha256sum firestore.rules | cut -d' ' -f1)"
+          {
+            echo "### rules sent to farkad-schedule"
+            echo
+            echo "- commit: \`$GITHUB_SHA\`"
+            echo "- \`firestore.rules\` sha256: \`$SUM\`"
+            echo
+            echo "This is what was SENT. What is LIVE is only provable by reading the"
+            echo "Rules page in the Firebase console."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Did this commit carry the client too
+        if: always() && steps.key.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          # RULES FIRST, THEN THE PHONES. This job cannot enforce that and does not pretend
+          # to: the client is served by GitHub Pages, which is not a job in this graph, so
+          # there is nothing for `needs:` to name and nothing to gate. A commit that
+          # changes the rules AND the client starts both at the same moment.
+          #
+          # What it can do is refuse to let a green tick imply an ordering nobody enforced.
+          # It is a warning and not a failure because by the time it runs the rules are
+          # already published and the client is already on its way - failing here would
+          # turn a correct publish red and teach people to ignore red.
+          if ! git rev-parse --verify -q "$GITHUB_SHA^" >/dev/null; then
+            echo "::warning title=No parent to compare::Could not check whether this commit also carried the client."
+            exit 0
+          fi
+          CLIENT="$(git diff --name-only "$GITHUB_SHA^" "$GITHUB_SHA" -- index.html sw.js manifest.webmanifest js css icons vendor)"
+          RULES="$(git diff --name-only "$GITHUB_SHA^" "$GITHUB_SHA" -- firestore.rules)"
+          if [ -n "$CLIENT" ] && [ -n "$RULES" ]; then
+            echo "::warning title=Rules and client shipped in one commit::Nothing ordered the two. See docs/rollout-checklist.md."
+            {
+              echo
+              echo "**The rules and the client shipped in one commit.**"
+              echo "Pages began serving this client when this job started; nothing orders them."
+              echo "Merge the rules alone and first - a phone on a new client under old rules"
+              echo "cannot write at all, not even its own bootstrap."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Take the key back off the disk
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

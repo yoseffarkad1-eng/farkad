@@ -12,13 +12,172 @@ Every count below names the commit it was measured on. A count carried over from
 commit is worse than no count at all, so a build whose run was not written down at the
 time says so rather than borrowing a neighbour's.
 
-**`main` is at v105 (`be4e610`).** Every build at the top of this file has reached `main`;
-a candidate, when there is one, sits above them headed CANDIDATE, and there is none now.
-v91, v93 and v94 below were
+**Published baseline: main at v105 (`0d5160f`).** CANDIDATE entries below are
+unserved branch history. v91, v93 and v94 below were
 never served on their own: each was the base the next was repaired from, and v95 is the
 first of the line to reach `main`.
 
 ---
+
+## CANDIDATE — v105 — what two phones do to each other, and the crew nobody could see
+
+**Not served. Not merged. On no phone.** On `claude/farkad-closeout-blockers`, built on
+`main` as served (`21c8e08`, v103). Both money gates are still `false`: `LEDGER_WRITES` in
+`js/model/ledger.js` and `carryAdvances` in `js/model/schema.js`. Code being ready is not
+permission to open them, and this build adds a reason to wait — see below.
+
+Measured on `b02ab36`, which is the last commit that changes any shipped or test byte;
+this entry is the only thing after it.
+
+**Seven defects, each with the failure that found it**
+
+- **A refused retirement let a beaten wage come back.** `collectQueueGarbage` owed its
+  winners only against RETIRED losers, so a loser whose retirement the disk had just
+  refused left its winner collectable — in the same pass that failed to write the one
+  record keeping that loser defeated. The loser then became current and went to the cloud
+  over the value it had lost to. `tests/races.tabs.test.mjs` R14.
+- **A phantom conflict that never cleared.** «הנתונים השתנו במכשיר אחר» stayed up all
+  evening on a phone where cloud, disk and screen agreed and nothing was pending. R2b.
+- **A restore erased money recorded while it was on the wire** — the ledger half (O6, O7,
+  O9, O10) and, on the build a person actually has with both gates shut, the legacy
+  `advances` half: 800 shekels gone from all three phones, every one saying synced. O8b.
+- **A stale wage written backwards after one refused write.** The stale-roster hold
+  remembered the tombstones and forgot the refresh, so the retry hit its own "nothing to
+  do" return. `tests/refute.roster.mjs` R2.2.
+- **An index that answered out of `Object.prototype`** — six ids resolved to methods, and
+  an operation recorded a mark for a worker nobody hired. R1.1.
+- **The export said files had left when they had not**, and stamped «גיבוי אחרון» over a
+  backup that was never written.
+- **At 200% text there was no crew on the screen** — 469px of chrome above and 263px of
+  bars below on a 667px screen: zero whole worker rows at every width.
+
+**And two instruments that were lying**
+
+`tests/build.test.mjs` compared the three stamps with each other and was structurally
+blind to whether they still described the BYTES — the half iron law 5 exists for. It asks
+git now. Its first answer was that eleven commits had changed thirteen cached files with
+the stamps still reading v104, which is a fix that ships green and never reaches the
+phone. That is what v105 is.
+
+`tests/gate.integrity.test.mjs` then gave a FALSE GREEN over the same question, because it
+took "the last commit touching index.html, js/app.js or sw.js" as its baseline and a
+commit to `js/app.js` moved it. Two instruments answering one question is the only reason
+anybody looked.
+
+**What was run, and on what**
+
+| gate | commit | result |
+|---|---|---|
+| `npm test` | `d77589b` | 54 suites, **5160/5160**, exit 0, 5m55s |
+| `npm run test:release` run 1 | `b02ab36` | 74 reporting blocks, **8318/8318**, exit 0, zero FAIL lines, 23m54s |
+| `npm run test:release` run 2 | `b02ab36` | 74 reporting blocks, **8318/8318**, exit 0, zero FAIL lines, 23m46s |
+| seeds 1 / 42 / 2026 | `d77589b` | `data` 1951/1951, `concurrency` 46/46, `probes` 35/35, `races.tabs` 109/109 — identical on all three |
+
+Both release runs from their own clean detached worktree at the exact commit, Node
+v22.22.2, tree clean, `git diff --check` silent, every tracked `.js`/`.mjs` parsing.
+
+**What this build is known NOT to cover**
+
+- **Nothing was checked on an iPhone.** Twenty-two rows in `docs/iphone-acceptance.md` are
+  marked NOT RUN. Eleven of them exist because Chromium anchors `position: fixed` to the
+  LAYOUT viewport and iOS to the VISUAL one — a measured limit, not an untried idea. The
+  200% pass is a uniform multiplier and is **not** Dynamic Type.
+- **`page-break-inside: avoid` on a payroll row is unfalsifiable here.** Headless Chromium
+  keeps a table row atomic by itself — five fixtures, identical PDFs — so no PDF in this
+  repository can tell the rule from its absence. WebKit is the only place it is a real
+  question.
+- **The download-refusal path has never met a real refusing browser.** It is proved in the
+  harness and against doubles.
+- **The service worker's ordering was not proved against a real iOS resume.**
+  `bringToFront()` produces zero `visibilitychange` events in headless Chromium, so that
+  event is dispatched rather than caused.
+- **`tests/smoke.mjs` does not neutralise `js/sync/firebase-config.js`.** On a machine with
+  a network it initialises the Firebase SDK against the live `farkad-schedule` project. It
+  reaches no business data — `connect` runs only for a signed-in user — but it is worth
+  knowing before running the browser gate on a networked machine.
+
+**And what it means for the two money gates — a NEW blocker**
+
+`firestore.rules` names `ledger` nowhere. Measured on the emulator against the real rules:
+on a LEGACY document (no `revision` yet) a whole-document write with no ledger is
+**accepted and the cloud ledger is gone**, and a null at a ledger field path lands. After
+cutover both are refused. So "no older client can overwrite ledger fields" is proven
+**after** cutover and **false before it**, and the flip must not happen while the shared
+document is still legacy — read the `revision`, do not assume somebody has written since
+the update. Recorded with two more findings in `features/gate-flip/contract.md`.
+
+Firestore protocol: **CODE COMPLETE — LIVE CUTOVER NOT PERFORMED.**
+Ledger: **LEDGER CANDIDATE READY — ACTIVATION BLOCKED BY ROLLOUT.**
+
+---
+
+## CANDIDATE — v104 — the two open blockers, closed
+
+**Not served. Not merged. On no phone.** On `claude/farkad-closeout-blockers`, built on
+`main` as served (`21c8e08`, v103). Both money gates are still `false`: `LEDGER_WRITES` in
+`js/model/ledger.js` and `carryAdvances` in `js/model/schema.js`. Code being ready is not
+permission to open them.
+
+**The two findings `docs/data-safety-audit.md` left OPEN are closed, with the contract each
+was waiting for**
+
+- **O1 — a restore took a repayment off two devices out of three.** A takes a backup, B
+  records 500 handed back, A restores. A and the cloud held 5000, B held 4500, both said
+  «מסונכרן», and reopening B kept it. `features/restore-ledger/contract.md` decides it: a
+  restore replaces the WORK record and never erases a financial event anywhere. The union
+  goes in at `prepareReplace`, so the document that is stored, sent and compared against is
+  one already-correct document and a retry re-sends the same bytes.
+- **O2 — a roster edit put another phone's rate change back.** Three mechanisms, not the
+  one the audit established. The memory baseline is empty at every app start; the legacy
+  whole array IS the carrier the audit said it was not, and its guard only fires for the
+  same list, so renaming a SITE reverted a WORKER; and the write unit was the whole person,
+  so editing a phone number carried a stale wage with it. A roster edit now writes
+  `roster.<kind>.<id>.<field>` — what the person touched, and nothing else.
+
+**Two defects on the phone, found by asking for a tap instead of a width**
+
+- A third fixed bar (`#undoBar`) that nothing had ever measured. At 320×667 with a long
+  name it covered 107px the page did not know about, and the last worker was not
+  hit-testable. At 200% text it missed at every width.
+- `.wrow-main { flex: 1 }` with the default `min-width: auto` let an unbreakable name grow a
+  button to 1008px inside a 320px row, putting the delete ✕ at x = −732 — off screen, and
+  invisible to every check because the list clips.
+
+**Five defects in what leaves the phone**, each proved by reading the produced file: a
+mid-period raise made a row uncheckable and only the screen said why; a closed payslip
+printed TODAY's daily rate beside a frozen wage that did not multiply out; «מקדמות חדשות»
+was missing from the workbook and the CSV; a correction carried four of its seven fields;
+and a range that is not a whole account changed the arithmetic without saying so.
+
+**A diagnostic that answers the question that has been asked twice** — ⋯ → מידע טכני prints
+the page build, the app build and the service worker's own build census, the visual viewport
+with its scale, both bars as measured rects, the pending count and the sync reason. It
+carries no name, no amount and no device id, and a Latin worker name is seeded to prove it.
+
+**The rollout order is now derived from measurement.** Eight cells on the emulator — old and
+new client × old and new rules × legacy and protocol document — plus two rollback rows.
+`docs/rollout-checklist.md`, `docs/firebase-setup.md` and `features/gate-flip/contract.md`
+disagreed; one of them asked the operator for a state its own rules forbid.
+
+**What this build is known NOT to cover**
+
+- **No physical iPhone has run any of it.** `docs/iphone-acceptance.md` holds 73 rows and
+  every one is NOT RUN. The floating-bars geometry from the September screenshot cannot be
+  reproduced by any suite here: Chromium anchors `position: fixed` to the layout viewport,
+  iOS to the visual one. Row P11 — send back the diagnostic block from that phone — is the
+  only thing that ends the guessing, and only the owner can run it.
+- **One screen stays broken and it is written down**: 320×667 at 200% text with the undo bar
+  up has 469px of chrome on a 667px screen, so the last worker cannot be reached. Acceptance
+  row P12. It is a geometric impossibility, not a defect that was skipped.
+- **One roster race survives**: a whole-entity write and a per-field write for one man,
+  serialised so they never race a revision, can still lose the field. Every actual race is
+  caught. The window exists only while some phone still sends whole records — a new entity,
+  and the seed path.
+- **`firestore.rules` is unchanged and unpublished.** Nothing in this repository proves which
+  rules are live on the project; reading the console is step zero of the runbook.
+- **The advances feature is not on.** Everything measured about it in this build was measured
+  with the gates opened through the test seam and closed again.
+
 
 ## v105 — 11 September 2026 — `be4e610` (PR #20, the tree at `1477c79`)
 

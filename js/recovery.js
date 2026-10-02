@@ -34,6 +34,18 @@ const Recovery = {
     // of on this device - see collect(). Null between collections, which is always.
     collecting: null,
 
+    // A rejected cloud record is not in scheduleData; only its evidence survives.
+    // Re-report it on every boot, including after a previous acknowledgement.
+    restoreSnapshotWarnings() {
+        Store.keys().filter(key => /^farkad:refusedSnapshot:damaged(?::\d+)?$/.test(key))
+            .forEach(key => {
+                const raw = Store.get(key);
+                if (raw !== null) this.evidence('farkad:refusedSnapshot', raw,
+                    'נתונים מהענן לא נקלטו בגלל רישום כספי שאינו תקין. ייתכן שחסרות כאן תנועות. '
+                    + 'עותק מלא נשמר לייצוא חילוץ ולבדיקה; הנתונים במכשיר לא הוחלפו.');
+            });
+    },
+
     // A raw record that would not parse. Returns the quarantine key, or null.
     //
     // `raw` is passed in rather than re-read: whoever found the damage has the bytes in
@@ -472,6 +484,7 @@ const FARKAD_RECORD_KEYS = [
     'scheduleData:v2',
     'scheduleData:migrationIssues',
     'farkad:deviceId',
+    'farkad:refusedSnapshot',
     'farkad:pendingReplace',
     'farkad:pendingReplace:v71',
     'farkad:provenance:v1',
@@ -589,8 +602,17 @@ function quarantineRecord(key, raw) {
 
     // NOT optional. An optional write is one the app can live without, and this is the
     // only copy of somebody's work that exists. If there is no room, the reclaim ladder
-    // inside Store is allowed to throw away restore points to make some - a restore point
-    // is a copy of a state that parsed, and this is a state that did not.
+    // inside Store is allowed to throw away restore points to make some - but only the
+    // ones it can READ.
+    //
+    // The sentence here used to end "a restore point is a copy of a state that parsed,
+    // and this is a state that did not", and that premise was the defect. A restore point
+    // is written with { optional: true } onto the same disk as everything else, so a write
+    // cut off half way leaves a truncated one - G16.4 in tests/data.test.mjs stages
+    // exactly that, and the read path leaves it alone. The ladder did not: it removed the
+    // oldest key without reading it. dropOldestSnapshot in js/ui/backup.js now steps over
+    // any restore point it cannot parse, which is what makes the sentence true - it is
+    // true because the ladder was changed to make it so, not because it always was.
     return Store.setVerified(target, raw) ? target : null;
 }
 

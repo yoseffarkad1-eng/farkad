@@ -37,13 +37,13 @@ const FARKAD_SHIPPED_FLAGS = {
     // two are still recording days against. The archive does everything this was for.
     permanentDeletion: false,
 
-    // Vehicles. Off because the owner cancelled the feature, and because the shape it had
-    // assumed that every active vehicle went out on every worked day - so one day with no
-    // vehicle state recorded quietly added the daily vehicle charge to somebody's pay.
-    // The stored vehicle records are NOT removed by this; see the retirement below.
+    // Explicit departures are implemented for review. Keep activation separate from
+    // preparing the code: old phones do not understand vehicleRuns and must update first.
     vehicles: false,
 
-    // Carrying an unsettled advance from one account to the next. OFF, and not because
+    // Carrying an unsettled advance from one account to the next. v116 enables the
+    // build after owner authorization; per-record migration approval remains required.
+    // Deployment is held until rules and device readiness are verified. Previously OFF because
     // the arithmetic is in doubt - it is in advanceAccount below, and tested - but
     // because switching it on RESTATES fortnights that have already been paid. A man who
     // took 5,000 against 3,200 earned is currently shown a net of -1,800 and a next
@@ -60,7 +60,7 @@ const FARKAD_SHIPPED_FLAGS = {
     // same direction. The repayment control needs both gates: with the carry shut nothing
     // reads a repayment, and a man who hands back 200 is still deducted 500. A build that
     // opened one without the other would ship that, so tests/data.test.mjs pins the pair.
-    carryAdvances: false
+    carryAdvances: true
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set
@@ -582,7 +582,15 @@ function rosterIds(raw, kind) {
     const roster = isPlainObject(raw.roster) ? raw.roster : {};
     if (isPlainObject(roster[kind])) {
         Object.keys(roster[kind]).forEach(id => {
-            if (roster[kind][id]) ids.add(String(id));
+            if (!roster[kind][id]) return;
+            // A FRAGMENT GRANTS NOBODY. `roster.workers.w_01.phone` on a document whose
+            // map had no w_01 leaves `{ phone: … }` there, and mergeRoster refuses to
+            // build a person out of it. This function answers "who does the document
+            // grant", and it has to answer it the same way the reader does - otherwise a
+            // phone that still knows the man is told he is already granted, does not
+            // repair the document, and he stays missing everywhere.
+            if (isEntityFragment(roster[kind][id]) && !ids.has(String(id))) return;
+            ids.add(String(id));
         });
     }
     return ids;
@@ -639,11 +647,19 @@ function rosterProblems(raw) {
                     }
                     // The key IS the id. A map whose key and whose record disagree says
                     // two things about one person, and every reader picks a different one.
-                    if (String(item.id) !== String(id)) {
+                    //
+                    // A record that names NO id is the other thing this map holds now: a
+                    // fragment left by a per-field write - `roster.workers.w_01.phone` -
+                    // on a document whose map had not heard of him yet. It disagrees with
+                    // nobody, the key still says who it is, and refusing it would make
+                    // every document that has taken one unreadable on every phone. What a
+                    // fragment may NOT do is stand a man up on its own; that is
+                    // mergeRoster's rule, not this one's.
+                    if (!isEntityFragment(item) && String(item.id) !== String(id)) {
                         problems.push(label + ' ' + id + ' בגוש הרוסטר רשום תחת מזהה אחר.');
                         return;
                     }
-                    entityProblems(item, kind, label).forEach(p => problems.push(p));
+                    entityProblems(item, kind, label, id).forEach(p => problems.push(p));
                 });
             }
         }
@@ -670,18 +686,111 @@ function rosterProblems(raw) {
     return problems;
 }
 
-function entityProblems(item, kind, label) {
+// `id` names who this is when the record itself does not - a per-field write leaves a
+// FRAGMENT in the keyed map, and the key is then the only place the id lives. Without it
+// every sentence about a fragment read "עובד undefined", which is a sentence about
+// nobody.
+function entityProblems(item, kind, label, id) {
     const problems = [];
+    const who = label + ' ' + (item.id === undefined || item.id === null
+        ? String(id === undefined ? '' : id) : item.id);
     if (item.active !== undefined && typeof item.active !== 'boolean') {
-        problems.push(label + ' ' + item.id + ': הסימון "פעיל" אינו תקין.');
+        problems.push(who + ': הסימון "פעיל" אינו תקין.');
     }
     if (kind !== 'workers') return problems;
 
     ['dailyRate', 'hourlyRate'].forEach(field => {
-        rateProblems(item[field], 'השכר של', label + ' ' + item.id)
+        rateProblems(item[field], 'השכר של', who)
             .forEach(problem => problems.push(problem));
     });
+
+    // Reported, never coerced. A history this build cannot read is still the record of
+    // how somebody is paid, so it is named to a person rather than quietly replaced with
+    // the default - which would settle a weekly man fortnightly and say nothing.
+    if (item.payCycles !== undefined && item.payCycles !== null && item.payCycles !== ''
+        && parsePayCycles(item.payCycles) === null) {
+        problems.push(who + ': היסטוריית מחזור התשלום אינה תקינה.');
+    }
     return problems;
+}
+
+// ---------------------------------------------------------------- one field of one man
+//
+// The unit a roster edit travels in used to be the WHOLE entity record, and that is a lie
+// whenever two phones touch one person: A types a phone number, A's stale copy of his
+// daily rate rides along inside the same record, and the keyed map outranks everything, so
+// A's 500 lands on top of the 600 B raised him to - on every device, with both phones
+// saying synced. Measured in tests/roster-race.test.mjs, suite O2(d).
+//
+// So a change to somebody who is ALREADY on the record travels one field at a time:
+// `roster.<kind>.<id>.<field>`. Two phones editing two different fields of one man write
+// two different Firestore field paths and both survive; two phones editing the SAME field
+// write one path and contest it, which is what a contest is.
+//
+// These are the fields such a path may name. `id` is deliberately not among them: the KEY
+// is the id, a write that could move it would file a man under somebody else's name, and
+// nothing in the app has ever needed to. A name this table does not carry is refused by
+// journalEntryProblems rather than written - an unknown field is a field no reader here
+// knows what to do with, and normaliseSchedule would drop it at the next reopen anyway.
+const ENTITY_FIELDS = {
+    // payCycles is ONE field on purpose. It was two - the cycle and its start date - and
+    // two fields are two wire paths: phone A choosing (weekly, 25 Sep) and phone B
+    // choosing (biweekly, 11 Sep) merged field by field into (biweekly, 25 Sep), a
+    // setting neither phone chose, on both phones, both saying synced. A decision about
+    // how somebody is paid is one decision and it contests as one.
+    workers: ['name', 'idNumber', 'phone', 'dailyRate', 'hourlyRate',
+        'payCycles', 'active'],
+    places: ['name', 'active']
+};
+
+// A record in the keyed map that does not say who it is: what a per-field write leaves
+// behind on a document whose map had no entry for that id yet. It is a fragment of a
+// person, not a person, and every reader has to know the difference - mergeRoster will
+// not stand one up as a roster row on its own.
+function isEntityFragment(item) {
+    return isPlainObject(item)
+        && (item.id === undefined || item.id === null || item.id === '');
+}
+
+// One field of one entity, on the wire. Empty means it is one.
+//
+// The value rules are exactly the ones the whole-entity form is already held to - the
+// rates through rateProblems, `active` a boolean - so a field that would pass inside a
+// record cannot be refused for travelling on its own. A null is a field CLEARED: it is
+// what writeFieldPath and Firestore both store, and normaliseSchedule reads it back as
+// the empty string or as zero, which is what clearing a field means here.
+function entityFieldProblems(kind, field, value) {
+    const known = ENTITY_FIELDS[kind] || [];
+    if (known.indexOf(field) === -1) return ['a roster field nobody wrote'];
+    // No entity field is a container. A record or a list arriving at one is not a value
+    // this app produced, and writing it would put a shape every reader has to survive
+    // into somebody's row.
+    if (value !== null && (Array.isArray(value) || isPlainObject(value))) {
+        return ['a roster field carrying a record'];
+    }
+    if (field === 'active') {
+        return (value === null || typeof value === 'boolean')
+            ? [] : ['a roster field that is not a mark'];
+    }
+    if (field === 'dailyRate' || field === 'hourlyRate') {
+        return rateProblems(value, 'השכר של', kind === 'workers' ? 'עובד' : 'אתר').length > 0
+            ? ['a roster field that is not a wage'] : [];
+    }
+    // A HISTORY THE ARITHMETIC CANNOT READ IS NOT A HISTORY.
+    //
+    // This field decides which days are settled together, so a value arriving over the
+    // wire that this reader cannot parse would cut somebody's pay on a boundary nothing
+    // here can compute. '' is how it is CLEARED - back to every second Thursday - and is
+    // not a value. Every boundary must be a Friday, because both cycles open on one, and
+    // they must be strictly increasing, because two answers on one day is no answer.
+    if (field === 'payCycles') {
+        if (value === null || value === '') return [];
+        if (typeof value !== 'string') return ['a roster field that is not text'];
+        return parsePayCycles(value) === null
+            ? ['a roster field that is not a pay cycle history'] : [];
+    }
+    return (value === null || typeof value === 'string')
+        ? [] : ['a roster field that is not text'];
 }
 
 // `known` names the ids that have to resolve, or null to skip the reference checks.
@@ -708,7 +817,7 @@ function dayProblems(raw, known) {
         // read, hold every write, and tell somebody their data is unreadable, over a
         // field naming a van that stayed in the yard one evening in June.
         const extra = Object.keys(day).filter(key =>
-            key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff');
+            key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff' && key !== 'vehicleRuns');
         if (extra.length > 0) {
             problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
             return;
@@ -717,6 +826,12 @@ function dayProblems(raw, known) {
             && !(Array.isArray(day.vehiclesOff)
                 && day.vehiclesOff.every(id => typeof id === 'string'))) {
             problems.push('ליום ' + date + ' יש רישום רכבים שאינו תקין.');
+            return;
+        }
+        if (day.vehicleRuns !== undefined && (!isPlainObject(day.vehicleRuns)
+            || Object.keys(day.vehicleRuns).some(id => !isSafeId(id)
+                || (day.vehicleRuns[id] !== null && vehicleRunProblems(day.vehicleRuns[id]).length > 0)))) {
+            problems.push('ליום ' + date + ' יש רישום נסיעת רכב שאינו תקין.');
             return;
         }
         if (day.plan === undefined && day.actual === undefined) {
@@ -1053,6 +1168,10 @@ function journalEntryProblems(path, value) {
         }
         if (parts.length !== 4) return ['a day path with the wrong number of segments'];
         if (!isRealDate(parts[1])) return ['a day path with a date that does not exist'];
+        if (parts[2] === 'vehicleRuns') {
+            if (!isSafeId(parts[3])) return ['a vehicle path with an unusable id'];
+            return value === null ? [] : vehicleRunProblems(value);
+        }
         if (parts[2] !== 'plan' && parts[2] !== 'actual') return ['a layer nobody wrote'];
         if (!isSafeSegment(parts[3])) return ['a day path with an unusable worker id'];
         // `known` is null: the queue is a list of edits, not a document, and the roster
@@ -1104,14 +1223,23 @@ function journalEntryProblems(path, value) {
 
         // roster.workers.<id> / roster.places.<id> - one person or one site, or a
         // removal, which travels as null.
-        if (parts.length !== 3) return ['a roster path with the wrong number of segments'];
+        //
+        // roster.workers.<id>.<field> - ONE FIELD of one person. The unit an ordinary
+        // roster edit travels in, so that a phone number typed on one phone does not
+        // carry that phone's stale copy of the man's daily rate along with it. See
+        // ENTITY_FIELDS: the field name is checked against the fields that kind actually
+        // has, so an unknown one is refused rather than written into somebody's row.
+        if (parts.length !== 3 && parts.length !== 4) {
+            return ['a roster path with the wrong number of segments'];
+        }
         const kind = parts[1];
         if (kind !== 'workers' && kind !== 'places') return ['a roster path nobody wrote'];
         if (!isSafeSegment(parts[2])) return ['a roster path with an unusable id'];
+        if (parts.length === 4) return entityFieldProblems(kind, parts[3], value);
         if (value === null) return [];
         if (!isPlainObject(value)) return ['a roster entry that is not a record'];
         if (String(value.id) !== parts[2]) return ['a roster entry filed under another id'];
-        return entityProblems(value, kind, kind === 'workers' ? 'עובד' : 'אתר');
+        return entityProblems(value, kind, kind === 'workers' ? 'עובד' : 'אתר', parts[2]);
     }
 
     // The legacy whole-array form. Still written on purpose, for a phone that has not
@@ -1349,16 +1477,58 @@ function rosterDocument(schedule) {
 // Order: the order field first, then anyone it had not heard of, in the order the array
 // had them. An order written by a device that has not yet seen a new man must not remove
 // him.
+//
+// AND THE MAP ENTRY IS MERGED INTO WHAT IS THERE, not laid over it whole.
+//
+// An ordinary roster edit writes one FIELD now - `roster.workers.w_01.phone` - so the
+// entry the map ends up holding for a man whose record it had never carried is
+// `{ phone: … }` and nothing else. Replacing with that took his name, both his rates and
+// his active mark off him; normaliseSchedule then dropped the row for having no id, and
+// the man left every phone. Merging is also what makes the per-field write worth having:
+// the fields another device wrote stay exactly where they are, which is the whole point.
+//
+// For the whole-entity form this is the same answer it always gave. A record written by
+// this app carries every field it has, so nothing in the floor survives a merge that
+// would not have survived a replacement.
+//
+// A FRAGMENT WITH NOTHING TO MERGE INTO IS NOT A PERSON. Nobody holds a record for that
+// id - not the array, not the map - so all there is here is one field of somebody this
+// document cannot name. Standing him up would put a nameless row in the roster and, when
+// the fragment landed on a tombstone, resurrect a man somebody removed. Dropped: the
+// person who typed it still has it on their own phone, and the entity write that would
+// give it somebody to belong to is the one editRoster keeps whole.
 function mergeRoster(list, map, order) {
     const byId = new Map();
     (Array.isArray(list) ? list : []).forEach(item => {
         if (item && item.id) byId.set(String(item.id), item);
     });
 
+    // Field by field, and never through Object.assign: a document can arrive carrying an
+    // own `__proto__` key - JSON.parse makes one - and assigning it moves the prototype
+    // instead of copying a field. The poison names are skipped, which is what every other
+    // copy in this app does with them.
+    const overlay = (floor, entry, id) => {
+        const out = {};
+        [floor, entry].forEach(source => {
+            if (!source || typeof source !== 'object') return;
+            Object.keys(source).forEach(key => {
+                if (POISON_SEGMENTS.indexOf(key) !== -1) return;
+                out[key] = source[key];
+            });
+        });
+        out.id = String(id);
+        return out;
+    };
+
     const entries = (map && typeof map === 'object') ? map : {};
     Object.keys(entries).forEach(id => {
-        if (entries[id]) byId.set(String(id), entries[id]);
-        else byId.delete(String(id));
+        const key = String(id);
+        const entry = entries[id];
+        if (!entry) { byId.delete(key); return; }
+        if (!isPlainObject(entry)) return;
+        const floor = byId.get(key);
+        if (isEntityFragment(entry) && !floor) return;
+        byId.set(key, overlay(floor, entry, key));
     });
 
     const out = [];
@@ -1462,7 +1632,7 @@ function unlistedPlaceIds(schedule, fromDate, toDate) {
         const layers = days[date] || {};
         Object.keys(layers).forEach(layer => {
             const byWorker = layers[layer] || {};
-            if (layer === 'vehiclesOff') return;
+            if (layer === 'vehiclesOff' || layer === 'vehicleRuns') return;
             Object.keys(byWorker).forEach(workerId => {
                 const record = byWorker[workerId];
                 const entries = (record && record.entries) || [];
@@ -1907,15 +2077,38 @@ function accountsBefore(schedule, workerId, fromDate) {
     const advances = advancesFor(schedule, workerId, '0000-01-01', '9999-12-31');
     if (advances.length === 0) return [];
 
-    const first = toLocalDateStr(accountStart(parseLocalDate(advances[0].date)));
+    // STEPPED IN THIS MAN'S OWN CYCLE, not in fourteens.
+    //
+    // This walked the calendar in fixed fortnights from accountStart. For a man settled
+    // every Thursday that produces a period which CONTAINS the one being asked about: his
+    // week 09-11..09-17 sits inside the fortnight 09-04..09-17, the walk pushed that
+    // fortnight as "before", and every advance dated inside his own week was counted once
+    // as carried IN and once as given.
+    //
+    // Measured: 3,000 taken on 09-11 against a 1,950 week reported carriedIn 1,050 and
+    // given 3,000 - an obligation of 4,050 from a 3,000 advance, and a man carrying 2,100
+    // where he owed 1,050. Nothing said so; both halves were internally consistent.
+    //
+    // So the walk asks the same function the reports ask, and steps one period at a time.
+    // The guard is on DAYS: a period is "before" only when its last day falls short of
+    // the target's first. A period that overlaps the target is not a predecessor, and
+    // under the old arithmetic it was the predecessor of itself.
+    const worker = (schedule && Array.isArray(schedule.workers))
+        ? schedule.workers.filter(item => item && String(item.id) === String(workerId))[0]
+        : null;
+
     const out = [];
-    let at = first;
+    let period = periodRangeFor(worker || null, advances[0].date);
     // Bounded by the target, and by a ceiling that cannot be reached in a working life:
     // a walk driven by dates on a record is a walk a damaged date could send forever.
-    for (let n = 0; at < fromDate && n < 4000; n += 1) {
-        const end = advanceDayStep(at, 13);
-        out.push({ from: at, to: end });
-        at = advanceDayStep(at, 14);
+    for (let n = 0; period.from < fromDate && n < 4000; n += 1) {
+        if (period.to < fromDate) out.push({ from: period.from, to: period.to });
+        const next = nextPeriodFor(worker || null, period.from);
+        // A cycle that failed to advance would spin until the ceiling and return a
+        // thousand copies of one period. It cannot happen through periodRangeFor, and
+        // the walk still refuses to trust that.
+        if (!next || next.from <= period.from) break;
+        period = next;
     }
     return out;
 }
@@ -2209,6 +2402,9 @@ function mergeVehicleDaysInto(target, source) {
     Object.keys(held).forEach(date => {
         const was = held[date];
         const now = (target.days || {})[date];
+        if (was && now && isPlainObject(was.vehicleRuns)) {
+            now.vehicleRuns = Object.assign({}, was.vehicleRuns, now.vehicleRuns || {});
+        }
         if (!was || !Array.isArray(was.vehiclesOff)) return;
         if (!now || Array.isArray(now.vehiclesOff)) return;
         now.vehiclesOff = was.vehiclesOff.slice();
@@ -2257,42 +2453,29 @@ function anyWorkOn(schedule, date) {
     });
 }
 
-// The vehicles that count on a date, with what each was worth.
-//
-// The default is that they all went out, and only the EXCEPTION is written down. Five
-// vehicles leaving the yard every morning is the ordinary day, and asking somebody to
-// confirm it five times every evening is asking him to stop using the app. So an evening
-// with nothing said about vehicles is an evening they all went; days[date].vehiclesOff
-// names the ones that did not, and it is empty almost always.
-//
-// The cost of that choice is that a vehicle added today would otherwise earn for every
-// day in the record, including months already paid. The rate history is what stops it:
-// no rate before the day it was added means no money before the day it was added.
+// An explicit departure is the only source of vehicle pay. No record means zero.
+// Price and owner are stamped on the departure, so archiving or editing the roster
+// never reprices a completed day. Site count and double worker days never multiply it.
+function vehicleRunProblems(value) {
+    if (!isPlainObject(value) || typeof value.out !== 'boolean'
+        || !isSafeId(value.ownerId) || typeof value.name !== 'string' || !value.name.trim()
+        || typeof value.amount !== 'number' || !Number.isFinite(value.amount)
+        || value.amount < 0 || !Number.isSafeInteger(Math.round(value.amount * 100))
+        || Math.abs(value.amount * 100 - Math.round(value.amount * 100)) > 0.000001
+        || !Array.isArray(value.siteIds) || value.siteIds.some(id => !isSafeId(id))
+        || new Set(value.siteIds).size !== value.siteIds.length
+        || (!value.out && value.amount !== 0)) return ['רישום נסיעת רכב אינו תקין.'];
+    return [];
+}
+
 function vehiclesOutOn(schedule, date) {
-    // THE RETIREMENT, at the one place every vehicle number in this app comes from.
-    //
-    // The owner cancelled the feature. Gating the screens alone would have left this
-    // function answering, and the answer is the whole hazard: the default here is that
-    // every active vehicle went out on every worked day, so one evening recorded with
-    // nothing said about vehicles added the daily charge to somebody's pay by itself.
-    // A retired feature that still moves money is not retired.
-    //
-    // The stored records are NOT touched by this. Whoever turns it back on gets the same
-    // vehicles, the same owners and the same rate history - see normaliseSchedule, which
-    // goes on carrying every one of those fields through load, sync, backup and restore.
     if (!vehiclesEnabled()) return [];
-
-    if (!Array.isArray(schedule.vehicles) || schedule.vehicles.length === 0) return [];
-    if (!anyWorkOn(schedule, date)) return [];
-
-    const off = (schedule.days[date] || {}).vehiclesOff;
-    const stayed = Array.isArray(off) ? off : [];
-
-    return schedule.vehicles
-        .filter(vehicle => vehicle && vehicle.active !== false)
-        .filter(vehicle => !stayed.includes(vehicle.id))
-        .map(vehicle => ({ vehicle, amount: vehicleRateOn(vehicle, date) }))
-        .filter(item => item.amount > 0);
+    const runs = (schedule.days[date] || {}).vehicleRuns;
+    if (!isPlainObject(runs)) return [];
+    return Object.keys(runs).filter(id => isSafeId(id))
+        .filter(id => vehicleRunProblems(runs[id]).length === 0 && runs[id].out)
+        .map(id => ({ vehicle: { id, name: runs[id].name, ownerId: runs[id].ownerId },
+            amount: runs[id].amount, siteIds: runs[id].siteIds.slice() }));
 }
 
 // What one person is owed for his vehicles across a period.
@@ -2311,37 +2494,39 @@ function vehiclePayFor(schedule, workerId, fromDate, toDate) {
     return { days, amount };
 }
 
-// Mark a vehicle as having stayed in the yard, or take that mark back. Returns the change
-// for State.commit, the same shape every other edit here returns.
-function setVehicleOut(schedule, date, vehicleId, out) {
-    // No mutation path while the feature is off. Nothing draws the control that calls
-    // this, but a stale screen, an undo held from before a reload, or a queued edit from
-    // another build could still reach it - and every one of those writes a day record.
-    if (!vehiclesEnabled()) return { path: null, value: null };
-
-    if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
-    const day = schedule.days[date];
-
-    const stayed = Array.isArray(day.vehiclesOff) ? day.vehiclesOff.slice() : [];
-    const at = stayed.indexOf(vehicleId);
-
-    // Nothing to do - already in the state being asked for. A change with no path is
-    // journalled as nothing and sent as nothing, which is what State.commit does with it.
-    if (out && at >= 0) stayed.splice(at, 1);
-    else if (!out && at < 0) stayed.push(vehicleId);
-    else return { path: null };
-
-    // An empty list is deleted rather than stored: the ordinary evening writes nothing,
-    // and a field that is always there saying "nothing" is a field on every device's
-    // document forever.
-    if (stayed.length === 0) {
-        delete day.vehiclesOff;
-        return { path: `days.${date}.vehiclesOff`, value: null };
-    }
-
-    day.vehiclesOff = stayed;
-    return { path: `days.${date}.vehiclesOff`, value: stayed };
+function vehicleDateClosed(schedule, ownerId, date) {
+    if (typeof closedPeriods !== 'function') return false;
+    const periods = closedPeriods(schedule, ownerId);
+    return Object.keys(periods).some(from => {
+        if (!isRealDate(from)) return true;
+        const end = parseLocalDate(from); end.setDate(end.getDate() + 13);
+        const to = periods[from].periodTo || toLocalDateStr(end);
+        return date >= from && date <= to;
+    });
 }
+
+// Per vehicle per day, not a whole-day array: two phones recording different
+// vehicles cannot overwrite each other's departures. A false record is explicit.
+function setVehicleOut(schedule, date, vehicleId, out, siteIds) {
+    if (!vehiclesEnabled()) return { path: null, value: null };
+    if (!isRealDate(date) || !isSafeId(vehicleId) || typeof out !== 'boolean') return { path: null };
+    const vehicle = (schedule.vehicles || []).find(item => item.id === vehicleId);
+    if (!vehicle || vehicle.active === false || !isSafeId(vehicle.ownerId)) return { path: null };
+    const previous = ((schedule.days[date] || {}).vehicleRuns || {})[vehicleId];
+    const stamped = previous && vehicleRunProblems(previous).length === 0 && previous.out;
+    if (vehicleDateClosed(schedule, stamped ? previous.ownerId : vehicle.ownerId, date)) return { path: null };
+    const sites = siteIds === undefined ? (stamped ? previous.siteIds : []) : siteIds;
+    const value = { out, name: stamped ? previous.name : vehicle.name,
+        ownerId: stamped ? previous.ownerId : vehicle.ownerId,
+        amount: out ? (stamped ? previous.amount : vehicleRateOn(vehicle, date)) : 0,
+        siteIds: out && Array.isArray(sites) ? sites.slice() : [] };
+    if (vehicleRunProblems(value).length > 0) return { path: null };
+    if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
+    if (!schedule.days[date].vehicleRuns) schedule.days[date].vehicleRuns = {};
+    schedule.days[date].vehicleRuns[vehicleId] = value;
+    return { path: `days.${date}.vehicleRuns.${vehicleId}`, value };
+}
+
 
 function nextVehicleId(schedule) {
     const used = new Set((schedule.vehicles || []).map(vehicle => String(vehicle.id)));

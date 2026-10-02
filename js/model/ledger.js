@@ -42,28 +42,16 @@
 //
 // CLOSED AGAIN AT THE MERGE. claude/farkad-ledger-enable-ready opened it - and
 // carryAdvances in js/model/schema.js with it - so the build somebody eventually ships
-// could be run end to end before anybody committed to it. Taking that branch onto the
-// core is not that decision: the flip is a person's, and only somebody who knows all
-// three phones are past v79 AND has read every row of planAdvanceCarry may make it. The
-// suites that measure the open build open it through the seam below, never here.
-const LEDGER_WRITES = false;
+// v116: Yosef authorized repayments and corrections on 2026-10-02. This is an
+// enabled release candidate, NOT evidence of a production rollout. Deploy only after
+// the live rules/protocol and all three devices are verified. Per-record migration
+// approval below still prevents silently restating existing paid accounts.
+const LEDGER_WRITES = true;
 
-// THE ONE SEAM, and it is the same seam every other gate in this app has.
-//
-// The const above is the shipped answer and stays where iron law 1 says it lives. What
-// this adds is the ability for a SUITE to open the gate and measure the build somebody
-// eventually ships - which was not possible before, so everything behind the gate was
-// unmeasured, which is a poor way to keep a feature safe until the day it matters.
-//
-// FARKAD_FLAG_OVERRIDES is read once, into a frozen object, and tests/build.test.mjs
-// fails if any file this app ships mentions it - the page included. So a browser cannot
-// reach this, and neither can a phone: opening it needs a file that is not in the shell.
-// That is a stronger gate than a bare const, which nothing enforces at all.
-//
-// The shipped default is unchanged and is still what every device runs. tests/smoke.mjs
-// asks a real browser whether the gate is shut, and tests/data.test.mjs asks the model.
+// Tests may explicitly model older, disabled clients. No shipped file sets overrides.
 function ledgerWritesEnabled() {
-    return LEDGER_WRITES === true || FARKAD_FLAGS.ledgerWrites === true;
+    return typeof FARKAD_FLAGS.ledgerWrites === 'boolean'
+        ? FARKAD_FLAGS.ledgerWrites : LEDGER_WRITES === true;
 }
 
 function ledgerEntryId() {
@@ -418,11 +406,35 @@ function closureProblems(schedule, entry) {
     // reports the record rather than doing the sum - so a wrong window is wrong forever.
     const from = String(entry.periodFrom);
     const to = String(entry.periodTo);
-    const start = parseLocalDate(from);
-    if (!start || toLocalDateStr(accountStart(start)) !== from) {
-        out.push('a closure over a period that does not start an account');
-    } else if (advanceDayStep(from, 13) !== to) {
-        out.push('a closure whose last day is not its own account\'s');
+
+    // ASKED OF THE MAN, not of the fortnight grid.
+    //
+    // This asked accountStart and then thirteen days, which is every period there was
+    // while the whole crew was settled together. A man paid every Thursday has none: his
+    // week opens on a Friday the fortnight grid does not open on, and it ends six days
+    // later. So a weekly closure - written by this app, through closePeriodChanges, and
+    // committed - failed its own validator at the next boot, landed in ledger.unreadable
+    // and blocked the device from writing. A correct money record, quarantined as damage.
+    // Measured: le_period_w_wk_20260911 after a save and a reopen.
+    //
+    // It is asked of the HISTORY, which is why the history exists. A week closed in
+    // September is still a period the record can account for after the man moves back to
+    // fortnightly in October, because the boundary that governed it is still written down.
+    // Validating against his cycle TODAY would condemn every closure he was paid under
+    // before his last change.
+    const worker = ((schedule && schedule.workers) || [])
+        .filter(item => item && String(item.id) === String(entry.workerId
+            || ((schedule.advances || {})[entry.advanceId] || {}).workerId))[0] || null;
+
+    if (typeof isPeriodFor === 'function' && isPeriodFor(worker, from, to)) {
+        // A period this man is settled over. Nothing to say.
+    } else {
+        const start = parseLocalDate(from);
+        if (!start || toLocalDateStr(accountStart(start)) !== from) {
+            out.push('a closure over a period that does not start an account');
+        } else if (advanceDayStep(from, 13) !== to) {
+            out.push('a closure whose last day is not its own account\'s');
+        }
     }
 
     // The artifact moves no money, so the three money questions below are not asked of
@@ -997,10 +1009,44 @@ function recordedAfter(schedule, advanceId, to, at) {
 // `at` is the moment the closure would carry. It is optional only so that a caller that
 // has not decided yet can still draw the screen; the one caller that WRITES passes it,
 // and closePeriodChanges hands it straight through.
+// EVERY CLOSED PERIOD OF THIS MAN THAT SHARES A DAY WITH [from, to].
+//
+// `closedPeriods` is keyed by the opening Friday, so it answers "is a period starting on
+// this date closed?" and nothing else. That was enough while every man was paid on one
+// fortnightly grid: two periods either began on the same Friday or shared no day at all.
+//
+// With a weekly man it stops being enough. His week 09-11..09-17 sits INSIDE the
+// fortnight 09-04..09-17, and the two open on different Fridays - so a fortnight closed
+// over a week that was already closed passes the same-key check, freezes the same days a
+// second time and deducts the same advance twice. Nothing would have said so: both
+// closures are internally consistent, and each is the only one its own key can see.
+//
+// So the question is asked about DAYS, which is what a period actually is.
+function overlappingClosures(schedule, workerId, from, to) {
+    const closed = closedPeriods(schedule, workerId) || {};
+    const wantFrom = String(from);
+    const wantTo = String(to);
+    return Object.keys(closed).filter(key => {
+        const period = closed[key] || {};
+        const hadFrom = String(key);
+        // A closure written before periodTo was carried names only its opening day. It
+        // cannot be proved disjoint, and treating an unprovable overlap as "no overlap"
+        // is how a day gets paid twice - so it counts as one, and the person decides.
+        const hadTo = period.periodTo === undefined ? null : String(period.periodTo);
+        if (hadTo === null) return hadFrom === wantFrom;
+        return hadFrom <= wantTo && hadTo >= wantFrom;
+    }).sort();
+}
+
 function planPeriodClosure(schedule, workerId, from, to, at) {
     const walk = advanceAccount(schedule, workerId, from, to);
     const reasons = [];
     if (walk.closed) reasons.push('closed');
+    // Asked before anything else is computed: a period that would settle days another
+    // closure already settled is refused whole, not adjusted.
+    const overlaps = overlappingClosures(schedule, workerId, from, to)
+        .filter(key => key !== String(from));
+    if (overlaps.length > 0) reasons.push('overlap');
     if (walk.review) reasons.push('overpaid');
     if (walk.gross === null) reasons.push('unpriced');
 

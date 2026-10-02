@@ -567,4 +567,57 @@ function documentWithLedger(device, ledger) {
         JSON.stringify(other.State.schedule.ledger));
 }
 
+// A refused remote record is absent from scheduleData. Its durable evidence must
+// therefore restore the warning independently of the local schedule at next boot.
+{
+    suite('F3: refused cloud money cannot become silent after two reopens');
+    const device = crew({ flags: { ledgerWrites: true, carryAdvances: true } });
+    const raw = JSON.parse(JSON.stringify(device.State.schedule));
+    raw.updatedAt = '2026-09-16T12:00:00.000Z';
+    raw.ledger.advances.le_bad = { id: 'le_bad', kind: 'repaid',
+        advanceId: Object.keys(raw.advances)[0], date: '2026-08-18', amount: 'broken' };
+    raw.ledger.advances.le_good = { id: 'le_good', kind: 'repaid',
+        advanceId: Object.keys(raw.advances)[0], date: '2026-08-18', amount: 100 };
+    const before = device.raw('scheduleData:v2');
+    device.Sync.receive(raw);
+    check('the local schedule is not replaced by the rejected snapshot',
+        device.raw('scheduleData:v2') === before);
+    check('the complete refused snapshot retains the valid repayment too',
+        Object.values(device.dump()).some(bytes => bytes === JSON.stringify(raw)));
+    let disk = device.dump();
+    for (let n = 1; n <= 2; n += 1) {
+        const reopened = makeDevice({ storage: disk });
+        reopened.State.load();
+        check('reopen ' + n + ' tells the person that cloud money was refused',
+            reopened.call('farkadWritesBlocked') === true);
+        check('reopen ' + n + ' keeps the original good schedule',
+            reopened.raw('scheduleData:v2') === before);
+        const evidence = Object.keys(reopened.dump()).filter(k => k.startsWith('farkad:refusedSnapshot:damaged'));
+        check('reopen ' + n + ' reuses evidence without exhausting quarantine slots', evidence.length === 1);
+        check('reopen ' + n + ' rescue export includes the complete refused snapshot',
+            Object.values(reopened.global('Recovery').rawRecords()).some(bytes => bytes === JSON.stringify(raw)));
+        reopened.global('Recovery').acknowledge();
+        disk = reopened.dump();
+    }
+}
+
+{
+    suite('F3: failed quarantine still keeps the refused snapshot available in memory');
+    for (const fault of ['quota', 'corrupt', 'refused']) {
+        const device = crew();
+        const raw = JSON.parse(JSON.stringify(device.State.schedule));
+        raw.ledger.advances.le_bad = { id: 'le_bad', kind: 'repaid', amount: 'broken',
+            advanceId: Object.keys(raw.advances)[0], date: '2026-08-18' };
+        if (fault === 'quota') device.setQuota(key => key.startsWith('farkad:refusedSnapshot'));
+        if (fault === 'corrupt') device.corruptWhen(key => key.startsWith('farkad:refusedSnapshot'));
+        if (fault === 'refused') device.failWrite(key => key.startsWith('farkad:refusedSnapshot'));
+        device.Sync.receive(raw);
+        device.global('Recovery').acknowledge();
+        check(fault + ': acknowledging cannot release a record without a verified copy',
+            device.call('farkadWritesBlocked'));
+        check(fault + ': the raw rescue still carries the complete in-memory evidence',
+            device.global('Recovery').rawRecords()['farkad:refusedSnapshot'] === JSON.stringify(raw));
+    }
+}
+
 report();

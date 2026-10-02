@@ -1,14 +1,15 @@
 # The suites
 
-Fifty-nine suites, forty-three of which need no browser at all. (Counted off
+Sixty-three suites, forty-five of which need no browser at all. (Counted off
 package.json, which is the only place a suite count is true: `npm test` names the node
-suites, `test:all` adds the nine browser suites, `test:release` adds sendclaim and the
-six emulator suites.) From a clean clone:
+suites, `test:all` adds the eleven browser suites, `test:release` adds sendclaim and the
+six emulator suites. The count in this paragraph is re-counted whenever a suite is added
+and is true of nothing but the commit it was written on.) From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
-    npm run test:all        # adds smoke, print, mobile, update, forms, recovery-browser,
-                            #   handover, swrestart, swidentity
+    npm run test:all        # adds smoke, print, mobile, update, forms, reorder, boot,
+                            #   recovery-browser, handover, swrestart, swidentity
     npm run test:release    # the RELEASE gate: test:all plus sendclaim and the emulator suites
     npm run test:emulator   # rules, the adapter's CAS, the rollout, the cutover, and two
                             #   phones writing money at once (needs Java)
@@ -40,6 +41,17 @@ the harness and the client agree with each other — so the PRODUCTION adapter i
 against the real Firestore emulator in `tests/cas.emulator.test.mjs`, and the rollout
 that has to publish it in `tests/rollout.test.mjs`. Both are in `test:release`. A manual
 emulator run on the side is not the gate.
+
+`tests/rollout-matrix.test.mjs` is in `test:release` too, and it is the one suite here whose
+output a DOCUMENT depends on. It measures eight cells — old and new client, against old and
+new rules, on a legacy document and one that has entered the protocol — plus the two
+rollback rows. `docs/rollout-checklist.md`, `docs/firebase-setup.md` and
+`features/gate-flip/contract.md` state the order those cells produce; before this suite
+existed the three of them disagreed, and one of them asked the operator for a state its own
+rules forbid. Nothing fails today if somebody weakens `legacyWrite()` or
+`bootstrapTouchesOnlyProtocol()` in `firestore.rules` — except this. It loads both rulesets
+itself through `@firebase/rules-unit-testing`, so it does not care which one `firebase.json`
+points at, and it runs on the repo's own config with no extra file.
 
 Any single suite runs on its own: `npm run test:build`, `node tests/data.test.mjs`,
 and so on — each file's header says exactly how to invoke it and why it exists.
@@ -150,9 +162,40 @@ does not is a count from some other tree:
     gate, 50/50. Two earlier attempts came back 43/50 and 46/50 and were
     self-inflicted - two loops running the suite at once share the emulator that
     `firebase emulators:exec` binds from firebase.json, and reseed() wipes the shared
-    document, so each run was deleting the other's record. Passing --config with a private
-    port does NOT fix it: the websocket port is not read from that config and still
-    collides. Run them serially.
+    document, so each run was deleting the other's record.
+
+    The sentence that used to stand here said passing --config with a private port "does
+    NOT fix it: the websocket port is not read from that config and still collides". THAT
+    REASON WAS WRONG, and a wrong reason is worse than none - it sends the next person to
+    read firebase-tools instead of the six lines that were the whole problem. The websocket
+    port IS read from a private config, as long as the config names it:
+
+        firebase emulators:exec --only firestore --config firebase.alt.json "..."
+          with { "firestore": { "port": 8099, "websocketPort": 9199 } }
+        firestore: Firestore Emulator UI websocket is running on 9199.
+        FIRESTORE_EMULATOR_HOST=127.0.0.1:8099
+
+    measured while another emulator held 8080 and 9150. What actually collided was the
+    hard-coded `host: '127.0.0.1', port: 8080` in all six emulator suites: each reached
+    past the emulator started for it and found the other one, or nothing at all
+    (`connect ECONNREFUSED 127.0.0.1:8080`).
+
+    They now read it from tests/emulator-host.mjs, which answers out of
+    FIRESTORE_EMULATOR_HOST - set by `firebase emulators:exec` for the script it runs - and
+    falls back to 127.0.0.1:8080 when nothing says otherwise, so the plain
+    `npm run test:emulator` is byte-for-byte the run it always was.
+
+    SO THEY CAN NOW RUN IN PARALLEL, on private ports. Copy firebase.json, give it another
+    `port` AND another `websocketPort`, and pass it with --config; the file name is
+    gitignored as `firebase.*.json`. Proved on this commit, all six against a 8099/9199
+    emulator while port 8080 was busy: rules 59, cas.emulator 24, rollout 17,
+    bootstrap.emulator 23, bootstrap.rules 28, money.concurrency 50 - every count identical
+    to the serial numbers recorded above, every one EXIT=0. And on the default path with no
+    --config, rules 59/59 on 8080 with the websocket on 9150, unchanged.
+
+    Two runs still must not share ONE emulator: reseed() wipes the document and the
+    argument above stands unaltered. Different emulators on different ports do not share
+    anything.
     Per suite and verbatim: features/false-holds/handoff.md.
 
     At 55bfa00 (v99: the bottom bars come back - a keyboard needs a focused editable - and
@@ -307,6 +350,7 @@ several waves of tests and is stale.)
 | probes | `probes.test.mjs` | Two tabs of one app on one disk, interleaved at the write. Whoever loses a race loses it durably, and neither tab ever reports work it did not do. |
 | capacity | `capacity.test.mjs` | A season of days on a disk that fills up, and a restore over the queue an older build left behind. |
 | concurrency | `concurrency.test.mjs` | The cross-tab hazards named C1-C5: retirement by operation and not by path, an acknowledgement one tab wrote and the other reads, the right to send against a restore, the ABA fence, and a removal the disk refused. |
+| queuecost | `queuecost.test.mjs` | What ASKING the queue a question costs, and what it must still answer. Counted, never timed: `decodeQueue` is wrapped on the device's own global scope and its calls are counted, so one commit decoding the queue once - at thirty operations and at three hundred and one - is a fact about the code rather than a stopwatch on a shared container. The other half is the hazard that comes with any cache over a shared disk: the second tab writes an operation, acknowledges one and removes one, and this tab's very NEXT answer has to move each time. And the three that hold the line the performance contract draws - six hundred edits leave six hundred pending paths, the collector takes none of them, and a journal write the disk refuses still comes back false with nothing left behind. |
 | exports | `exports.test.mjs` | The three files that leave the phone, read back off the browser: the pay sheet, the invoice sheet, the detail sheet, and the message a worker himself receives. |
 | fence | `fence.test.mjs` | The write counter that lets a rescue file claim its readings were one moment - what moves it, what must not, and what it costs per edit. |
 | method | `method.test.mjs` | How an advance was handed over, through all four doors and the ledger mirror, the fold and the overlay. |
@@ -330,6 +374,8 @@ several waves of tests and is stale.)
 | wording | `wording.test.mjs` | Every figure called what it is: the third money column is headed by what it holds - מקדמות until the migration is approved, נוכה מהשכר after - on the screen, in the CSV and in the workbook alike; the statement's opening balance is יתרת פתיחה, not an advance; and an overpaid account stops the automatic deduction and says so instead of printing a quiet zero. |
 | samefact | `samefact.test.mjs` | One fact written by two phones - the same approval, the same closure, the same correction, under one deterministic id with two names on it - is one fact: dropped from the second write as already done, kept by the merge as one body, never a conflict held for ever. |
 | forms | `forms.browser.mjs` | The advance and correction forms, driven by real clicks in real Chromium: open the history, press תיקון, type a reason, press שמור, read the record. A ReferenceError in a save handler is invisible to every node suite, and this is where one shipped from. |
+| reorder | `reorder.browser.mjs` | The reorder mode, driven by real pointer events in real Chromium. The node harness loads `js/ui/roster.js` against a document of nulls, so the drag, its three document listeners and its 16ms autoscroll interval had never been executed by a suite at all. Two claims: the mode's exits leave nothing armed - the interval's ticks are counted, and a drag left standing is what disabled the save button on the NEXT open of the panel - and the list scrolls the way the finger went, not the way it first went, which is the direction the interval used to capture in its closure and never revise. |
+| boot | `boot.browser.mjs` | What the boot SAYS, in order, on a disk it had to make two decisions about. Asserts the SEQUENCE and not the final state, for the reason `status.test.mjs` was written: the app's dialogs displace one another, so a false sentence raised over a true one leaves no trace. It wraps `askTell` from a DOMContentLoaded listener registered before `js/app.js`'s own, and stages the disk in an init script. Two boots: the one that migrates BECAUSE the v2 record will not parse - where the migration is deliberately not written down, so the app may not say it was - and the ordinary migration, which must still say so and still ask its questions. |
 | status | `status.test.mjs` | What the line is ALLOWED to say. Asserts transitions rather than final states, because a claim made and withdrawn is invisible to a final-state check and that claim is the defect: it wraps setStatus and records what was asked for, what was said, and what was owed at that moment. A queue larger than one write, a restore the cloud will not take, a record Recovery could not read, and a close-and-reopen. |
 | rollout | `rollout.test.mjs` | Publishing the rules, from a GENUINE legacy document — roster, days and an advance, no `protocol`, no `revision`, no receipt. The first protocol write preserves every legacy byte; a bootstrap without its receipt is refused; two phones racing produce exactly one bootstrap and the loser rebases; the exception is one write wide; an un-updated phone works before cutover and is refused after; and a missing document is a different road from a legacy one. |
 | ledger-ingress | `ledger.ingress.test.mjs` | Thirteen shapes of malformed ledger data through every door — boot, load, cloud snapshot, restore, JSON import, raw recovery, migration, full replacement. Each is named by the check that catches it, held aside rather than folded, never normalised or coerced to zero; the record still opens, the bytes are kept, the person is told, writes are blocked, and the rescue export still carries the bytes. |

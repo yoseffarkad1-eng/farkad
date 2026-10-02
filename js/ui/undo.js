@@ -135,16 +135,35 @@ function hideUndo() {
 // when there is nothing behind them - a control that appears and disappears is one that
 // has to be hunted for at the moment it is needed. Each carries the name of the change
 // it would apply, so pressing it is not a guess.
+//
+// THE NAME AND THE TOOLTIP ARE TWO DIFFERENT THINGS, and only one of them was moving.
+//
+// `title` is what a mouse pointer hovers over, and there is no pointer on a building
+// site. The accessible NAME - what VoiceOver reads out - comes from aria-label, which was
+// written once in index.html and never again: so after an edit the tooltip said
+// «בטל: מחיקת יום» and the screen reader still said «אין מה לבטל», which is the opposite
+// of what the button would do.
+//
+// It became load-bearing rather than merely wrong when the day screen learned to collapse
+// at large text sizes: the words beside these two buttons are hidden there, so the
+// accessible name is the ONLY thing left that says what they are. Both are set together
+// now, from one string, so they cannot drift apart again.
 function renderUndoButton() {
+    const name = (action, label, empty) => (action ? `${label}: ${undoLabel}` : empty);
+
     const undoBtn = document.getElementById('undoBtn');
     if (undoBtn) {
         undoBtn.disabled = !undoAction;
-        undoBtn.title = undoAction ? `בטל: ${undoLabel}` : 'אין מה לבטל';
+        const said = name(undoAction, 'בטל', 'אין מה לבטל');
+        undoBtn.title = said;
+        undoBtn.setAttribute('aria-label', said);
     }
 
     const redoBtn = document.getElementById('redoBtn');
     if (redoBtn) {
         redoBtn.disabled = !redoAction;
-        redoBtn.title = redoAction ? `בצע שוב: ${undoLabel}` : 'אין מה לבצע שוב';
+        const said = name(redoAction, 'בצע שוב', 'אין מה לבצע שוב');
+        redoBtn.title = said;
+        redoBtn.setAttribute('aria-label', said);
     }
 }
