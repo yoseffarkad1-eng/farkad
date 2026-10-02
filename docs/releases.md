@@ -1,3 +1,17 @@
+## v121 — include both payroll cycles in shared report images
+
+A mixed payroll report contains one table for weekly workers and another for fortnightly
+workers. The image export read only the first table, silently omitting the second group.
+It now reads every table in the visible report section and draws each group with its own
+payment-frequency heading, columns, rows and totals. The common report title/date appears
+once. Selected-worker filters still apply; client exports still exclude payroll. All
+numbers come from displayed cells, with no change to payroll, advances, sync or data.
+
+A browser regression reproduces the omission before the fix and checks both names,
+different column sets, both totals, real PNG ink and bounds, DOM-only values, and a
+fortnightly-only selection. The existing print/image suite and full release gate validate
+the exact candidate commit; final results are recorded in the release PR.
+
 ## v120 — delete accidental names with empty day placeholders
 
 The reported inactive duplicate had three `{entries: []}` rows and no work or absence.
