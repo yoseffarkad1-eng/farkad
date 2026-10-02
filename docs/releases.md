@@ -1,3 +1,23 @@
+## v120 — delete accidental names with empty day placeholders
+
+The reported inactive duplicate had three `{entries: []}` rows and no work or absence.
+v119 counted these as history and hid deletion. The worker card now shows an explicit
+permanent-delete button, disabled with the reason when protected history exists, and
+counts empty placeholders separately. Only exact empty placeholders can be removed;
+work, absence, rate stamps, advances, ledger history and vehicle ownership still block.
+
+Typed confirmation deletes by worker ID, preserving a different worker with the same
+name. Empty row removals and the roster tombstone share one durable journal batch and
+one protocol transaction. The production adapter uses Firestore `deleteField()` only for
+worker-day removals; roster tombstones remain literal nulls. Cloud documents therefore
+contain no new nullable day shape for older readers. Replays and creation seeds use the
+same semantics. A concurrent real work entry contests the deletion instead of being erased.
+
+Validation covers duplicate names, two phones, reopen, storage refusal, racing work,
+mobile-dialog button visibility and the real Firestore adapter against the local emulator.
+The full release result belongs to the exact tested commit in the release PR. Updating
+the app alone removes no worker or business record. No live rules or data are changed.
+
 ## v119 — remove accidental unused workers
 
 Owner requested permanent removal of old names entered by mistake. The worker card now

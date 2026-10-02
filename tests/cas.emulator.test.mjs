@@ -368,5 +368,37 @@ const conflictOf = async promise => {
         String(twice.revision));
 }
 
+
+{
+    suite('empty-worker cleanup uses real field deletion and compare-and-set');
+    await reset();
+    const ops=opsFor(as(ALLOWED));
+    const stamp=(revision,id)=>({protocol:1,revision,lastOpId:id,opFingerprint:'f_'+id});
+    await ops.update({
+        ...stamp(2,'op_empty_rows'),
+        'days.2026-08-14.actual.w_typo':{entries:[]},
+        'days.2026-08-14.actual.w_01':{entries:[{placeId:'p_01'}],rates:{daily:400,hourly:0}},
+        'roster.workers.w_typo':{id:'w_typo',name:'TYPO',active:false}
+    });
+    await ops.update({
+        ...stamp(3,'op_remove_empty'),
+        'days.2026-08-14.actual.w_typo':null,
+        'roster.workers.w_typo':null
+    });
+    const after=await readDoc();
+    check('production adapter removes the field rather than storing null',
+        !Object.hasOwn(after.days['2026-08-14'].actual,'w_typo'));
+    check('the adjacent real work and rate stay unchanged',
+        JSON.stringify(after.days['2026-08-14'].actual.w_01)===JSON.stringify({entries:[{placeId:'p_01'}],rates:{daily:400,hourly:0}}));
+    check('roster tombstone stays null',Object.hasOwn(after.roster.workers,'w_typo')&&after.roster.workers.w_typo===null);
+    await ops.update({...stamp(4,'op_new_work'),
+        'days.2026-08-14.actual.w_typo':{entries:[{placeId:'p_01'}],rates:{daily:500,hourly:0}}});
+    const refused=await conflictOf(ops.update({...stamp(4,'op_stale_delete'),
+        'days.2026-08-14.actual.w_typo':null}));
+    check('stale deletion refuses to erase newer work',refused?.code==='conflict');
+    const preserved=await readDoc();
+    check('newer work remains at its original rate',preserved.days['2026-08-14'].actual.w_typo.rates.daily===500);
+}
+
 await env.cleanup();
 report();

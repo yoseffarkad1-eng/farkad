@@ -1176,7 +1176,8 @@ function journalEntryProblems(path, value) {
         if (!isSafeSegment(parts[3])) return ['a day path with an unusable worker id'];
         // `known` is null: the queue is a list of edits, not a document, and the roster
         // they belong to may still be arriving.
-        return recordProblems(null, parts[1], parts[3], value);
+        // Null is an explicit field removal; the adapter sends deleteField(), not null.
+        return value === null ? [] : recordProblems(null, parts[1], parts[3], value);
     }
 
     // ledger.advances.<entry id>. Append-only on the wire as well as on the disk: an
@@ -1328,15 +1329,19 @@ function workersSharingPhone(schedule, phone, exceptId) {
         worker && String(worker.id) !== String(exceptId) && samePhone(worker.phone, phone));
 }
 
-// Everything in the record that names this worker. Empty means he can go.
-//
-// A day record counts even when it is empty. `{entries: []}` is not "no day" - it is a
-// day somebody opened and cleared, written down, and sitting in the document. Deleting
-// the man under it would leave the whole schedule failing its own validation, and every
-// restore on the device refused from then on.
+// Only a canonical empty placeholder may leave with an accidental name. Absence,
+// stamped rates, notes and unknown fields remain history even without a work entry.
+function isEmptyWorkerRecord(record) {
+    return isPlainObject(record) && Object.keys(record).length === 1
+        && Array.isArray(record.entries) && record.entries.length === 0;
+}
+
+// Every reference, including empty placeholders. Deletion removes those placeholders
+// together with the identity; leaving an orphan would invalidate the schedule.
 function workerFootprint(schedule, workerId) {
     const id = String(workerId);
     const days = [];
+    const emptyDays = [];
     const advances = [];
 
     const allDays = (schedule && schedule.days) || {};
@@ -1344,7 +1349,10 @@ function workerFootprint(schedule, workerId) {
         ['plan', 'actual'].forEach(layer => {
             const side = (allDays[date] || {})[layer];
             if (!side || typeof side !== 'object') return;
-            if (Object.prototype.hasOwnProperty.call(side, id)) days.push({ date, layer });
+            if (Object.prototype.hasOwnProperty.call(side, id)) {
+                days.push({ date, layer });
+                if (isEmptyWorkerRecord(side[id])) emptyDays.push({ date, layer });
+            }
         });
     });
 
@@ -1382,7 +1390,7 @@ function workerFootprint(schedule, workerId) {
             if (String(runs[key]?.ownerId) === id) vehicles.push(`${date}:${key}`);
         });
     });
-    return { days, advances, ledger, vehicles };
+    return { days, emptyDays, advances, ledger, vehicles };
 }
 
 // What still has to be settled with a man before he is put away, said in a sentence, or

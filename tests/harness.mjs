@@ -530,14 +530,11 @@ export function makeCloud(options = {}) {
             node = node[key];
         }
         const last = parts[parts.length - 1];
-        // STORED, not deleted. updateDoc(ref, path, null) writes a null at that path;
-        // removing the field takes deleteField(), which this app has never sent.
-        //
-        // Deleting here made the fake kinder than the thing it stands in for, and that
-        // is the one thing a fake must never be: a tombstone disappeared from the
-        // document, so the stale legacy array was the last word on that person and the
-        // suite reported a resurrection bug as fixed while it was live in production.
-        node[last] = value;
+        // Match patchToUpdateArgs: worker-day nulls remove the field; all other
+        // nulls, including roster tombstones, remain literal values.
+        if (value === null && parts.length === 4 && parts[0] === 'days'
+            && (parts[2] === 'plan' || parts[2] === 'actual')) delete node[last];
+        else node[last] = value;
     }
 
     // What the real adapter hands the sync layer when the document does not exist yet.

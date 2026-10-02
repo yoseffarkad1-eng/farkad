@@ -26,6 +26,7 @@ import {
     getDocs,
     setDoc,
     updateDoc,
+    deleteField,
     onSnapshot,
     runTransaction,
     FieldPath
@@ -59,7 +60,12 @@ import { firebaseConfig, SCHEDULE_DOC_PATH } from './firebase-config.js';
 export function patchToUpdateArgs(patch) {
     const args = [];
     Object.keys(patch).forEach(path => {
-        args.push(new FieldPath(...path.split('.')), patch[path]);
+        const parts = path.split('.');
+        // Remove empty worker-day placeholders without leaving nulls that older
+        // readers reject. Roster nulls still travel as permanent tombstones.
+        const removeDay = patch[path] === null && parts.length === 4 && parts[0] === 'days'
+            && (parts[2] === 'plan' || parts[2] === 'actual');
+        args.push(new FieldPath(...parts), removeDay ? deleteField() : patch[path]);
     });
     return args;
 }
