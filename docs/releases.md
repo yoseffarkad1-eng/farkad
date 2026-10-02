@@ -1251,3 +1251,17 @@ Sixteen commits, fast-forwarded from `claude/farkad-mobile-workers-v79`, so what
   crew of thirty - but the ceiling itself is not gone.
 - **CSV cannot carry a direction.** The xlsx export opens right to left; the CSV fallback,
   used when the export library cannot be reached, is at the mercy of whatever opens it.
+
+
+## v122 — settings with a visible name and clear sections
+
+The header now says הגדרות beside a gear icon. The settings sheet groups connection
+and updates, backup and restore, and device/help into three labelled sections with
+always-visible jump buttons. Status and held records remain first; any carry review
+is beside them. Backup remains the sole primary action, and restore keeps its separate
+warning and existing confirmation flow. The technical report lives under help.
+
+This release changes layout and in-sheet navigation only. Every existing action and
+data path remains in place. The settings browser suite checks section focus/scroll,
+reopening, redraws, phone and desktop widths, dark mode, double text size and unchanged
+worker data after navigation. The release proof belongs to the tested commit/PR.

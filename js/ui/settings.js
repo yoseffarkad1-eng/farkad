@@ -4,14 +4,8 @@
 // cloud account, which build is running, and the way to get a damaged device's raw
 // records off it.
 //
-// It was at the foot of the roster screen, under the crew and the sites, which made the
-// screen about people also the screen about files - and on a phone it meant scrolling
-// past thirty men to reach the backup button. It is not a fifth tab either: four tabs is
-// what fits across a phone with a legible label under each icon, and the fifth would have
-// been the one nobody presses on a screen everybody uses.
-//
-// So: one ⋯ in the header, and a sheet that covers the screen. The tab bar stays where it
-// is - the way back is the same X that closes every other sheet in this app.
+// A named header button opens one sheet. Jump buttons make backup and help reachable
+// without scrolling past every card; held records remain visible in the first section.
 
 let settingsOpen = false;
 
@@ -24,11 +18,22 @@ function openSettings() {
     // What is on it depends on the device: the restore points, the backup age, the
     // version, and whether there is a cloud account at all.
     renderSettings();
+    panel.querySelector('.settings-body').scrollTop = 0;
     document.addEventListener('keydown', settingsKeydown);
     // The heading, not the first button: a screen reader should say where it has arrived
     // before it starts naming controls, and the first control here is a file dialog.
     const title = document.getElementById('settingsTitle');
     if (title && title.focus) title.focus();
+}
+
+// Navigation only: never changes the URL, the data, or the selected main screen.
+// Focus follows the scroll so the next Tab enters the requested section's controls.
+function settingsJump(id) {
+    if (!['settingsDaily', 'settingsBackups', 'settingsHelp'].includes(id)) return;
+    const heading = document.getElementById(id);
+    if (!heading) return;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ block: 'start', behavior: 'instant' });
 }
 
 function closeSettings() {
@@ -943,7 +948,7 @@ let diagnosticBuilds;
 // index.html, because it is drawn only when somebody asks for it and because index.html
 // belongs to the shell rather than to this screen.
 function renderDiagnostic() {
-    const body = document.querySelector('#settingsPanel .settings-body');
+    const body = document.getElementById('settingsHelpCards');
     if (!body) return;
 
     let group = document.getElementById('diagnosticGroup');
@@ -990,10 +995,7 @@ function renderDiagnostic() {
         box.appendChild(copy);
         group.appendChild(box);
 
-        // Above the carry review, which is a screen about money and belongs last.
-        const carry = document.getElementById('carryMigrationBox');
-        if (carry && carry.parentNode === body) body.insertBefore(group, carry);
-        else body.appendChild(group);
+        body.appendChild(group);
     }
 
     const toggle = document.getElementById('diagnosticToggle');

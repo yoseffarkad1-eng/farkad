@@ -5003,14 +5003,14 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.context().close();
 }
 
-// ------------------------------------------------- הגדרות וכלים, behind one ⋯
+// ------------------------------------------------- הגדרות, behind a named button
 {
   const page = await open({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
   await seedRoster(page);
 
   check('five tabs include the owner-requested separate advances screen',
     (await page.locator('.tabs .tab').count()) === 5);
-  check('and the ⋯ is in the header instead',
+  check('the named settings button is in the header',
     await page.locator('#settingsBtn').isVisible());
 
   // The roster screen is about people and sites again. The backup was at the foot of it,
@@ -5033,7 +5033,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
       text: panel.textContent
     };
   });
-  check('⋯ opens the settings sheet', opened.shown === true, JSON.stringify(opened.shown));
+  check('the settings button opens the sheet', opened.shown === true, JSON.stringify(opened.shown));
   check('as a dialog, not a page behind a page',
     opened.modal === 'true' && opened.hidden === 'false', JSON.stringify(opened));
   check('focus lands on the heading, so a reader says where it is',
@@ -5085,14 +5085,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   const heads = await page.$$eval('#settingsPanel .settings-group h3',
     nodes => nodes.map(node => node.textContent.trim()));
-  // WAS SIX. «מידע טכני» joined at v104: the copyable block that reports the page
-  // build, the app build, the service worker's own build census, the visual viewport
-  // and both bars as measured rects. The panel is the one place a person can be asked
-  // to look, and "which build is this phone on" had been asked twice with no way for
-  // anybody to answer it. The count moves because the panel gained a group on purpose.
+  // v122: connection and update first, backup and replacement together but in
+  // separate cards, device and recovery help last. Labels and action guards remain.
   check('the sheet has the seven groups, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'עדכון וגרסה', 'מצב המכשיר',
+      ['ענן וסנכרון', 'עדכון וגרסה', 'גיבוי', 'ייבוא ושחזור', 'מצב המכשיר', 'שחזור חירום',
                 'מידע טכני']),
     JSON.stringify(heads));
 

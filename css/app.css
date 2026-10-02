@@ -12,7 +12,7 @@
      buttons               every btn-* class, and the 44px floor they are held to
      a thumb's worth       the touch targets that are not buttons
      reorder mode          dragging the roster into order
-     settings sheet        the ... panel
+     settings sheet        the named settings button and organised tools
      banners               the account warning, the storage banner, the update notice
      day view              the day header, the progress, the site cards, the trays
      pickers               the worker and place pickers
@@ -471,26 +471,8 @@ a[href]:focus-visible,
 }
 .btn-icon:hover { background: var(--surface-2); color: var(--ink); }
 
-/* The one icon button that is a way IN rather than a way out, so it is written in the
-   text colour rather than the quiet one. That, and only that, is what this line is for
-   now: EMPHASIS. It used to be the contrast repair as well, and it was the wrong shape
-   for one.
-
-   The sentence that used to sit here - "--ink-3 on paper is 3.2:1, which is under the
-   4.5:1 a small glyph needs and exactly the sort of thing that reads fine to whoever
-   chose it and not at all on a site at four in the afternoon" - was a diagnosis of the
-   TOKEN, and the cure was applied to one id. .btn-icon eight lines above kept the colour
-   that sentence had just condemned, and so did thirty-one other rules: the date on the
-   day header at 3.66, the line that says whether the other two phones have seen tonight's
-   work at 3.23, the dates across the week grid at 3.00. A correct diagnosis cured at one
-   call site is worse than none, because it reads to the next person as already handled.
-
-   So the token moved instead (see :root, both schemes), which fixes .btn-icon and the
-   other thirty-two at once. The measurement is in tests/mobile.test.mjs, "the quiet ink":
-   --ink-3 against all seven grounds this stylesheet can put text on, and separately every
-   element the browser is actually painting in it, across the four screens and the ⋯ panel.
-   Neither of those can be made green by moving one rule. That is the point of them. */
-#settingsBtn { color: var(--ink-2); font-size: 20px; letter-spacing: 2px; }
+/* A named settings button now replaces the old oversized ellipsis. */
+#settingsBtn { color: var(--ink-2); letter-spacing: normal; }
 
 /* ---------------------------------------------------------------- a thumb's worth
 
@@ -749,17 +731,54 @@ a[href]:focus-visible,
     flex-direction: column;
 }
 .settings-panel.open { display: flex; }
+.settings-panel button { min-height: 44px; min-width: 44px; }
+
+.settings-open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 7px 12px;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+    border-radius: 12px;
+}
+.settings-open svg { width: 20px; height: 20px; flex: none; }
 
 .settings-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 14px 16px;
+    padding: calc(18px + env(safe-area-inset-top, 0px)) 20px 18px;
     border-bottom: 1px solid var(--line);
     background: var(--surface);
 }
-.settings-head h2 { font-size: 18px; }
+.settings-head h2 { font-size: 28px; margin: 2px 0 0; line-height: 1.25; }
+.settings-eyebrow { margin: 0; font-size: 14px; color: var(--ink-3); }
+.settings-close { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; font-size: 16px; }
+.settings-nav {
+    display: grid;
+    grid-template-columns: .7fr 1fr 1fr;
+    flex: none;
+    gap: 6px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+}
+.settings-nav button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 8px 4px;
+    font-size: 14px;
+    font-weight: 600;
+    border-color: transparent;
+    background: var(--paper);
+    border-radius: 10px;
+}
+.settings-nav button:hover { background: var(--accent-soft); color: var(--accent); }
 /* The heading takes focus when the sheet opens, so a screen reader says where it has
    arrived before it starts naming controls. It is not a control itself. */
 .settings-head h2:focus-visible {
@@ -778,14 +797,37 @@ a[href]:focus-visible,
 
 .settings-body {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: 16px;
     padding-bottom: calc(24px + var(--safe-bottom));
     display: flex;
     flex-direction: column;
-    gap: 22px;
+    gap: 28px;
 }
+
+.settings-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.settings-section-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 4px; }
+.settings-section-title h3 { margin: 0; font-size: 18px; color: var(--ink); scroll-margin-top: 16px; }
+.settings-section-title span { font-size: 14px; color: var(--ink-3); }
+.settings-section-title h3:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.settings-card-head { display: flex; align-items: center; gap: 12px; }
+.settings-card-head > div { min-width: 0; }
+.settings-card-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 13px;
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+.settings-card-icon svg { width: 24px; height: 24px; }
+.settings-help-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.settings-help-grid #diagnosticGroup { grid-column: 1 / -1; }
 
 /* Each group is a card of its own, on the panel's paper. The card border is what keeps
    FACTS' rule - a destructive door never sits beside a safe one - true here: ייבוא
@@ -794,20 +836,42 @@ a[href]:focus-visible,
 .settings-group {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 14px;
     background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 14px 16px;
+    border-radius: 16px;
+    padding: 18px;
+    min-width: 0;
 }
-/* Quiet group labels, like the board: the contents carry the weight, not the heading. */
-.settings-group h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.settings-group h3 { margin: 0; font-size: 18px; font-weight: 600; color: var(--ink); }
 /* The card's own gap does the spacing; .hint's top margin would double it. */
 .settings-group .hint { margin: 0; }
+.settings-card-head .hint { margin-top: 3px; font-size: 14px; }
+.settings-group .settings-status {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+.settings-group .settings-restore-warning {
+    padding: 12px 14px;
+    border-inline-start: 3px solid var(--warn);
+    border-radius: 8px;
+    background: var(--warn-bg);
+    color: var(--ink);
+    line-height: 1.65;
+}
+.settings-panel .app-version { flex-wrap: wrap; font-size: 16px; }
+.settings-panel .app-version span { padding: 6px 10px; border-radius: 8px; background: var(--paper); }
+.settings-panel .app-version button { font-size: 16px; min-height: 44px; }
 
 /* The backup card carries the accent, because its button is the one thing on this sheet
    that gets a copy OFF the phone. */
 .settings-group-backup { border-color: var(--accent); }
+.settings-group-backup .backup-primary { border-radius: 10px; min-height: 52px; }
 
 /* The held records, one card per record, inside the cloud group. The warning colour on
    the border, not on the text: the card is a decision waiting, not an error. The two
@@ -877,13 +941,19 @@ a[href]:focus-visible,
            off the side of the screen, visible to a test and to nobody else. */
         inset: 24px 0 auto 0;
         margin-inline: auto;
-        width: min(560px, calc(100vw - 48px));
+        width: min(760px, calc(100vw - 48px));
         max-height: calc(100vh - 48px);
         border: 1px solid var(--line);
         border-radius: var(--radius);
         box-shadow: 0 24px 60px -30px rgba(0, 0, 0, .55);
         overflow: hidden;
     }
+    .settings-head { padding: 22px 28px; }
+    .settings-nav { padding-inline: 24px; }
+    .settings-body { padding: 24px; }
+    .settings-help-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .settings-update { flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+    .settings-update .app-version { flex: 1; justify-content: flex-end; }
 }
 
 /* ---------------------------------------------------------------- banners */
