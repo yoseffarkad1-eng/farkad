@@ -27,14 +27,20 @@ try {
     });
     const before = await page.evaluate(() => JSON.stringify(State.schedule));
     const original = await page.evaluate(() => JSON.stringify(reportSheets()));
-    suite('report choices precede the output actions');
+    suite('one report toolbar with compact filters');
     const order = await page.evaluate(() => {
         const top = selector => document.querySelector(selector).getBoundingClientRect().top;
         return top('.report-section-toggle') < top('.range-wrap')
             && top('.range-wrap') < top('.report-worker-picker')
-            && top('.report-worker-picker') < top('.report-output-actions');
+            && top('.report-output-actions') < top('.report-section-toggle');
     });
-    check('type, dates and workers come before sharing', order);
+    check('toolbar precedes type, dates and workers', order);
+    check('output choices start collapsed', !(await page.locator('.report-output-actions button').first().isVisible()));
+    await page.locator('.report-output-actions > summary').click();
+    same('all three existing outputs are available', await page.locator('.report-output-actions button:visible').count(), 3);
+    await page.locator('.report-output-actions > summary').press('Escape');
+    check('Escape closes output choices', !(await page.locator('.report-output-actions').evaluate(n=>n.open)));
+    same('Escape restores trigger focus', await page.evaluate(()=>document.activeElement.parentElement.className), 'report-output-actions');
     check('date presets start folded away', !(await page.locator('.range-chips').isVisible()));
     check('compact controls fit above the report', await page.locator('.reports-controls').evaluate(n=>n.getBoundingClientRect().height<230));
     same('both payroll cycles remain in the image', await page.evaluate(() => readReportPrintout().groups.length), 2);
@@ -82,6 +88,7 @@ try {
     await page.getByRole('button',{name:'לפי אתר',exact:true}).click();
     await page.locator('.invoice-picker').getByRole('button',{name:'הרצליה',exact:true}).click();
     same('one client still receives only an invoice sheet', await page.evaluate(() => Object.keys(reportSheets())), ['invoice']);
+    await page.locator('.report-output-actions > summary').click();
     check('client output action names the selected client', (await page.locator('.report-output-actions').innerText()).includes('הרצליה'));
     await page.emulateMedia({media:'print'});
     check('controls do not enter the paper report', !(await page.locator('.reports-controls').isVisible()));

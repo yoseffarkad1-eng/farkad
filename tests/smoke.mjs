@@ -491,9 +491,10 @@ async function seedRoster(page) {
       .includes('01/08/2026 - 31/08/2026'));
   check('and says how long it is, so a short period is obvious',
     (await page.textContent('.report-payroll .report-period')).includes('31 ימים'));
-  check('on the screen, not only on paper',
-    (await page.evaluate(() =>
-      getComputedStyle(document.querySelector('.report-period')).display)) !== 'none');
+  // The phone has one date range in the filter header; paper retains its own heading.
+  check('the covered period remains visible in the report controls',
+    await page.locator('.range-current').isVisible() &&
+    (await page.locator('.range-current').textContent()).includes('01/08/2026 - 31/08/2026'));
 
   const bodyText = await page.textContent('#reportsView');
   check('neither report shows an ID number or a phone',
@@ -1871,6 +1872,7 @@ async function seedRoster(page) {
   const beforeExport = offOrigin.length;
   const saved = [];
   page.on('download', download => saved.push(download));
+  if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
   await page.locator('#reportsView button').filter({ hasText: 'יצוא' }).click();
   await page.waitForTimeout(3000);
 
@@ -8297,6 +8299,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     window.__printCalls = 0;
     window.print = () => { window.__printCalls += 1; };
   });
+  if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
   await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
   await page.waitForTimeout(2000);
   offer = await readOffer();

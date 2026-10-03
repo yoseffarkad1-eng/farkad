@@ -1,3 +1,10 @@
+## v130 — a quieter reports workspace
+
+One report heading and an expandable output menu replace the repeated headings and
+large action row. Filters use a flat compact layout. Open-account guidance expands
+on demand; payment-period warnings remain visible. Print layouts and amounts remain
+unchanged.
+
 ## v129 — compact report controls
 
 The date range is a single expandable row; presets appear only when changing it,

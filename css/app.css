@@ -1963,8 +1963,30 @@ a[href]:focus-visible,
     .report-worker-choice { border-bottom: 1px solid var(--line-soft); }
     .reports-controls .report-worker-choice input { font-size: 16px; }
     .report-worker-choice[hidden] { display: none; }
-    .report-output-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 18px; }
-    .report-output-actions button { min-width: 0; min-height: 44px; padding: 8px 6px; font-size: 14px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+    .reports-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .reports-toolbar .reports-heading { margin: 0; font-size: 26px; }
+    .report-output-actions { position: relative; margin: 0; flex-shrink: 0; }
+    .report-output-actions > summary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 14px; box-sizing: border-box; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 700; cursor: pointer; list-style: none; }
+    .report-output-actions > summary::-webkit-details-marker { display: none; }
+    .report-output-actions > summary::after { content: '⌄'; }
+    .report-output-actions[open] > summary::after { content: '⌃'; }
+    .report-output-actions .range-actions { position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 20; display: grid; gap: 6px; padding: 8px; width: min(260px, calc(100vw - 48px)); border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 24px #0003; }
+    .report-output-actions button { min-width: 0; min-height: 44px; padding: 10px 12px; font-size: 15px; line-height: 1.4; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+    .reports-controls { padding: 0 0 12px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; margin-bottom: 16px; }
+    .reports-controls .report-section-toggle { background: var(--surface-2); border-radius: 12px; padding: 4px; box-sizing: border-box; margin-bottom: 8px; }
+    .reports-controls .report-section-toggle .layer-on { background: var(--surface); color: var(--accent); box-shadow: 0 1px 4px #0002; border-radius: 9px; }
+    .report-range-heading > span { flex-basis: auto; font-size: 14px; }
+    .report-range-heading .range-current { margin-inline-start: auto; }
+    .reports-controls .report-worker-picker { margin-top: 0; border-top: 0; }
+    .reports-controls .report-worker-picker summary { color: var(--ink-2); font-weight: 500; }
+    #reportsView > .report > h2, #reportsView > .report > .report-period { display: none; }
+    .report-explanation { margin: 0 0 12px; color: var(--ink-2); font-size: 14px; }
+    .report-explanation > summary { min-height: 44px; display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+    .report-explanation > summary::-webkit-details-marker { display: none; }
+    .report-explanation > summary::after { content: 'ⓘ'; margin-inline-start: auto; }
+    .report-explanation .hint { margin: 0; padding-bottom: 12px; }
+    #reportsView .report-payroll > .hint { font-size: 14px; line-height: 1.55; font-weight: 400; }
+    #reportsView .report-payroll > .hint-warn { border-inline-start: 3px solid var(--warn); padding: 8px 12px; margin: 0 0 12px; background: var(--surface); border-radius: 6px; }
     #reportsView .report h2 { font-size: 19px; margin-bottom: 4px; }
     #reportsView .link-cell { min-width: 44px; min-height: 44px; }
     #reportsView .report-group { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; font-size: 17px; color: var(--accent); }
@@ -1988,7 +2010,7 @@ a[href]:focus-visible,
     .reports-controls .range-bar { grid-template-columns: minmax(0, 1fr); }
 }
 @media print {
-    .reports-heading, .reports-controls, .report-output-actions { display: none !important; }
+    .reports-toolbar, .reports-heading, .reports-controls, .report-output-actions, .report-explanation { display: none !important; }
 }
 
 /* Restore points: dated, and folded shut under a counted summary - the board's collapsed
