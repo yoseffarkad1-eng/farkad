@@ -1909,6 +1909,7 @@ for (const width of [320, 390]) {
 
     const page = await open({ width, height: HEIGHTS[width] });
     await page.evaluate(() => {
+        REPORT_CARD_GRID = false; // This block pins the opt-in full-detail card layout.
         // A double day and an advance, so every one of the four labelled counts is a
         // column the table actually grew.
         assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
@@ -2484,6 +2485,7 @@ for (const width of WIDTHS) {
 // tests/print.test.mjs depends on for an A4 page.
 {
     const seedReports = () => {
+        REPORT_CARD_GRID = false; // Full-detail RTL column/card alignment; grid covered separately.
         State.schedule.workers = [{ id: 'w_01', name: 'עובד 1', active: true,
             dailyRate: 400, hourlyRate: 50 }];
         State.schedule.places = [{ id: 'p_1', name: 'אתר 1', active: true }];

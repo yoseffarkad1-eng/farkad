@@ -2033,6 +2033,26 @@ a[href]:focus-visible,
 }
 @media print { .report-cycle-nav { display: none !important; } }
 
+/* Compact phone cards are a second view of the same prepared table cells.
+   The canonical table remains the only source for paper, image and spreadsheet. */
+.report-worker-cards, .report-layout-toggle { display: none; }
+@media screen and (max-width: 700px) {
+    .report-layout-toggle { display: block; min-height: 44px; margin: 0 0 12px; margin-inline-start: auto; font-size: 14px; padding: 8px 12px; }
+    .report-card-grid .report-worker-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 10px; margin-bottom: 14px; }
+    .report-card-grid .report-payroll .report-table tbody { display: none; }
+    #reportsView .report-worker-tile { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; min-height: 200px; padding: 12px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; box-shadow: none; text-align: center; white-space: normal; }
+    .report-tile-name { font-size: 16px; line-height: 1.35; overflow-wrap: anywhere; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+    .report-tile-amount { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px; border-radius: 8px; background: var(--accent-soft); }
+    .report-tile-label { display: block; font-size: 13px; line-height: 1.35; color: var(--ink-2); font-weight: 400; }
+    .report-tile-value { display: block; max-width: 100%; font-size: 24px; line-height: 1.2; color: var(--accent); font-variant-numeric: tabular-nums; }
+    .report-tile-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .report-tile-metrics strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+    .report-tile-deduction { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; padding-top: 6px; border-top: 1px solid var(--line-soft); font-size: 13px; color: var(--ink-2); }
+    .report-tile-open { margin-top: auto; font-size: 13px; color: var(--accent); }
+    .report-card-grid .report-payroll .report-table tfoot { margin-top: 8px; }
+}
+@media print { .report-worker-cards, .report-layout-toggle { display: none !important; } }
+
 /* Restore points: dated, and folded shut under a counted summary - the board's collapsed
    row. Every date behind the fold replaces the record, so the list is opened on purpose
    rather than sitting unfolded beside the file picker. */

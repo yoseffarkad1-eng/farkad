@@ -136,6 +136,33 @@ try {
         }
         await page.evaluate(() => document.querySelectorAll('#reportsView *').forEach(n=>n.style.removeProperty('font-size')));
     }
+    suite('compact phone cards preserve amounts and make details reachable');
+    await page.setViewportSize({width:390,height:844});
+    await page.evaluate(()=> { REPORT_CARD_GRID = true; render(); });
+    same('one compact card per report row', await page.locator('.report-worker-tile').count(), await page.locator('.report-payroll tbody tr').count());
+    const amounts = await page.evaluate(()=>[...document.querySelectorAll('.report-payroll-group')].every(group=> {
+        const cards=[...group.querySelectorAll('.report-tile-value')].map(n=>n.textContent);
+        const rows=[...group.querySelectorAll('tbody tr')].map(n=>n.querySelector('.cell-net')?.textContent || '—');
+        return JSON.stringify(cards)===JSON.stringify(rows);
+    }));
+    check('compact amounts exactly match the prepared full report', amounts);
+    const pair = page.locator('.report-worker-cards').last().locator('.report-worker-tile');
+    const positions=await pair.evaluateAll(nodes=>nodes.map(n=>({x:n.offsetLeft,y:n.offsetTop})));
+    check('two workers share a row on an ordinary phone', positions.length===2 && positions[0].y===positions[1].y && positions[0].x!==positions[1].x,JSON.stringify(positions));
+    await page.locator('.report-worker-tile').first().click();
+    check('tapping the card opens worker details', await page.locator('#workerDaysModal').isVisible());
+    await page.evaluate(()=>closeWorkerDays());
+    await page.locator('.report-layout-toggle').click();
+    check('full detail view still exposes the original worker rows', await page.locator('.report-payroll tbody tr').first().isVisible());
+    check('full detail hides duplicate compact cards', !(await page.locator('.report-worker-tile').first().isVisible()));
+    await page.locator('.report-layout-toggle').click();
+    await page.setViewportSize({width:320,height:844});
+    const narrow=await pair.evaluateAll(nodes=>nodes.map(n=>n.offsetTop));
+    check('narrow phones use one column', narrow.length===2 && narrow[0]!==narrow[1]);
+    await page.emulateMedia({media:'print'});
+    check('paper hides compact duplicates', !(await page.locator('.report-worker-tile').first().isVisible()));
+    check('paper retains the complete payroll table', await page.locator('.report-payroll tbody tr').first().isVisible());
+    await page.emulateMedia({media:'screen'});
     suite('selecting a worker in a long list preserves the position');
     await page.setViewportSize({width:390,height:844});
     await page.evaluate(() => {

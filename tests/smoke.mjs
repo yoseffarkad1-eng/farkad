@@ -6738,7 +6738,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.click('#tab-reports');
   await page.waitForTimeout(400);
 
-  await page.locator('.report-payroll .link-cell').first().click();
+  if (await page.locator('.report-worker-tile').first().isVisible()) await page.locator('.report-worker-tile').first().click();
+  else await page.locator('.report-payroll .link-cell').first().click();
   await page.waitForTimeout(300);
   check('a name in the pay sheet opens that worker\'s days',
     await page.locator('#workerDaysModal').isVisible() &&
@@ -8597,7 +8598,9 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.waitForTimeout(300);
 
   // A finger on the name in the pay sheet, not a call.
-  const name = page.locator('#reportsView .report-payroll tbody button.link-cell', { hasText: 'דוד' }).first();
+  const name = await page.locator('.report-worker-tile').first().isVisible()
+    ? page.locator('.report-worker-tile', { hasText: 'דוד' }).first()
+    : page.locator('#reportsView .report-payroll tbody button.link-cell', { hasText: 'דוד' }).first();
   await name.tap();
   await page.waitForTimeout(400);
 
@@ -8640,14 +8643,15 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // Escape is unchanged: the dialog closes and the keyboard goes back to the name.
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  const closed = await page.evaluate(() => ({
+  const closed = await name.evaluate(opener => ({
     open: document.getElementById('workerDaysModal').style.display,
     cls: document.activeElement.className,
-    text: document.activeElement.textContent.trim()
+    text: document.activeElement.textContent.trim(),
+    returnedToOpener: document.activeElement === opener
   }));
   check('Escape still closes it', closed.open === 'none', JSON.stringify(closed));
   check('and focus goes back to the name that opened it',
-    closed.cls === 'link-cell' && closed.text === 'דוד', JSON.stringify(closed));
+    closed.returnedToOpener, JSON.stringify(closed));
   await page.context().close();
 }
 

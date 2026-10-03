@@ -1,3 +1,11 @@
+## v132 — compact worker card grid
+
+Phone reports default to compact cards that share a row when space permits. Cards
+show the worker name, the prepared net amount, attendance/pay units and deductions,
+and open the existing worker detail sheet. Full detail remains available with a
+view toggle. Larger text and narrow screens naturally use one column. Cards read
+the same prepared table cells; print, image and spreadsheet keep their original data.
+
 ## v131 — clearer payroll groups and cards
 
 Mixed-cycle reports offer quick navigation to either payroll group with worker
