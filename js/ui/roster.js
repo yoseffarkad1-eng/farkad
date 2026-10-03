@@ -44,6 +44,23 @@ function renderAppVersion() {
     if (node) node.textContent = `גרסה ${APP_VERSION}`;
 }
 
+// View-only navigation and filtering. Neither touches roster order nor shared data.
+function rosterJump(id) {
+    if (!['workersHeading', 'placesHeading'].includes(id)) return;
+    const heading = document.getElementById(id);
+    if (!heading) return;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ block: 'start', behavior: 'instant' });
+}
+
+function clearRosterSearch() {
+    const field = document.getElementById('rosterWorkerSearch');
+    if (!field) return;
+    field.value = '';
+    renderWorkerList();
+    field.focus();
+}
+
 function renderWorkerList() {
     const container = document.getElementById('workerList');
     if (!container) return;
@@ -53,35 +70,42 @@ function renderWorkerList() {
     const archiveWasOpen = !previousFold || previousFold.open;
     clear(container);
 
+    const query = (document.getElementById('rosterWorkerSearch')?.value || '').trim().toLocaleLowerCase();
+    const matches = worker => !query || [worker.name, worker.phone, worker.idNumber]
+        .some(value => String(value || '').toLocaleLowerCase().includes(query));
+    const activeAll = State.schedule.workers.filter(worker => worker.active !== false);
+    const active = activeAll.filter(matches);
+    const archived = State.schedule.workers.filter(worker => worker.active === false && matches(worker));
+    const workersHeading = document.getElementById('workersHeading');
+    if (workersHeading) workersHeading.textContent = `עובדים פעילים (${activeAll.length})`;
+    const result = document.getElementById('rosterSearchResult');
+    if (result) {
+        result.hidden = !query;
+        result.textContent = query ? `נמצאו ${active.length + archived.length} עובדים` : '';
+    }
+    const clearSearch = document.getElementById('rosterSearchClear');
+    if (clearSearch) clearSearch.hidden = !query;
+
     if (State.schedule.workers.length === 0) {
         container.appendChild(emptyHint('אין עובדים. הוסף עובד כדי להתחיל.'));
         return;
     }
 
-    const active = State.schedule.workers.filter(worker => worker.active !== false);
-    const archived = State.schedule.workers.filter(worker => worker.active === false);
-
-    if (active.length === 0) {
+    if (query && active.length + archived.length === 0) {
+        container.appendChild(emptyHint('לא נמצאו עובדים. נסה שם או מספר אחר.'));
+        return;
+    }
+    if (active.length === 0 && !query) {
         container.appendChild(emptyHint('כל העובדים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.'));
     }
     active.forEach(worker => container.appendChild(workerRow(worker)));
-
-    // The headings carry the counts: a crew is a NUMBER before it is a list, and the
-    // number is the first thing checked against payday's.
-    const workersHeading = document.getElementById('workersHeading');
-    if (workersHeading) workersHeading.textContent = `עובדים פעילים (${active.length})`;
-    const placesHeading = document.getElementById('placesHeading');
-    if (placesHeading) {
-        placesHeading.textContent =
-            `אתרי עבודה (${State.schedule.places.filter(place => place.active !== false).length})`;
-    }
 
     if (archived.length === 0) return;
 
     // Folded, and at the bottom. They are not part of the working list any more, and a
     // crew of six that reads as a crew of eleven is a crew somebody counts wrong.
     const box = el('details', 'roster-archive');
-    if (archiveWasOpen) box.open = true;
+    if (archiveWasOpen || query) box.open = true;
     // The count of archived men who still have advances on the books rides on the fold,
     // and each of their rows carries its own sum: money does not go to the archive with
     // the man, and a fold that hid it would be where an open balance goes to be
@@ -109,9 +133,12 @@ function renderWorkerList() {
 // summed advances, built in renderWorkerList's single pass over the record.
 function workerRow(worker, archiveAdvances) {
     const row = el('div', worker.active === false ? 'roster-row roster-off' : 'roster-row');
+    row.dataset.workerId = worker.id;
 
     const details = el('div', 'roster-details');
     details.appendChild(el('strong', null, worker.name));
+    const cycle = payCycleAt(worker, todayStr());
+    details.appendChild(el('span', 'crew-cycle', cycle === 'weekly' ? 'תשלום שבועי' : 'תשלום כל שבועיים'));
     if (worker.idNumber) {
         const line = el('div', 'roster-meta');
         line.appendChild(el('span', null, 'זהות: '));
@@ -181,7 +208,7 @@ function workerRow(worker, archiveAdvances) {
     toggle.setAttribute('role', 'switch');
     toggle.setAttribute('aria-checked', String(enabled));
     actions.appendChild(toggle);
-    actions.appendChild(button('✏️', 'btn-icon', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
+    actions.appendChild(button('עריכה', 'btn-icon crew-edit', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
     row.appendChild(actions);
 
     return row;
@@ -673,6 +700,8 @@ function renderPlaceList() {
     const container = document.getElementById('placeList');
     if (!container) return;
     clear(container);
+    const heading = document.getElementById('placesHeading');
+    if (heading) heading.textContent = `אתרי עבודה (${State.schedule.places.filter(place => place.active !== false).length})`;
 
     if (State.schedule.places.length === 0) {
         container.appendChild(emptyHint('אין אתרי עבודה. הוסף אתר כדי להתחיל.'));
@@ -693,10 +722,10 @@ function renderPlaceList() {
         row.appendChild(details);
 
         const actions = el('div', 'roster-actions');
-        actions.appendChild(button('✏️', 'btn-icon', () => renamePlaceById(place.id), `שנה שם ${isolate(place.name)}`));
+        actions.appendChild(button('עריכה', 'btn-icon crew-edit', () => renamePlaceById(place.id), `שנה שם ${isolate(place.name)}`));
         actions.appendChild(button(
-            place.active === false ? '↩️' : '🗄️',
-            'btn-icon',
+            place.active === false ? 'הפעלה' : 'כיבוי',
+            'btn-icon crew-edit',
             () => togglePlaceActive(place.id),
             place.active === false ? `החזר את ${isolate(place.name)}` : `העבר את ${isolate(place.name)} לארכיון`
         ));
