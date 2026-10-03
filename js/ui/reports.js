@@ -9,6 +9,8 @@ const REPORT_RANGE = { from: null, to: null };
 // null means all workers; an empty set deliberately means nobody. This is a report
 // filter only and never changes a worker's active status or anything in shared data.
 let REPORT_WORKERS = null;
+let REPORT_WORKER_SEARCH = '';
+let REPORT_PICKER_OPEN = false;
 const REPORT_DEDUCTIONS = new Map();
 let ADVANCE_WORKER = null;
 let ADVANCE_SEARCH = '';
@@ -253,29 +255,52 @@ function reportAccount(workerId) {
 
 function renderReportWorkerPicker() {
     const box = el('details', 'report-worker-picker');
+    box.open = REPORT_PICKER_OPEN;
+    box.addEventListener('toggle', () => { REPORT_PICKER_OPEN = box.open; });
     box.appendChild(el('summary', null, REPORT_WORKERS === null
         ? 'עובדים בדוח: כולם · בחירת עובדים'
         : `עובדים בדוח: ${State.schedule.workers.filter(w => reportWorkerChosen(w.id)).length} · שינוי הבחירה`));
     const actions = el('div', 'finance-actions');
-    actions.appendChild(button('בחר הכל', 'btn-secondary', () => { REPORT_WORKERS = null; render(); }));
-    actions.appendChild(button('נקה בחירה', 'btn-secondary', () => { REPORT_WORKERS = new Set(); render(); }));
+    actions.appendChild(button('בחר הכל', 'btn-secondary', () => { REPORT_WORKERS = null; REPORT_PICKER_OPEN = true; render(); }));
+    actions.appendChild(button('נקה בחירה', 'btn-secondary', () => { REPORT_WORKERS = new Set(); REPORT_PICKER_OPEN = true; render(); }));
+    const search = document.createElement('input');
+    search.id = 'reportWorkerSearch';
+    search.type = 'search'; search.placeholder = 'חיפוש עובד בדוח';
+    search.setAttribute('aria-label', 'חיפוש עובד בדוח');
+    search.value = REPORT_WORKER_SEARCH;
+    box.appendChild(search);
     box.appendChild(actions);
+    const list = el('div', 'report-worker-list');
     State.schedule.workers.forEach(worker => {
         const label = el('label', 'report-worker-choice');
+        label.dataset.workerName = worker.name;
         const input = document.createElement('input');
         input.type = 'checkbox'; input.checked = reportWorkerChosen(worker.id);
+        input.dataset.workerId = String(worker.id);
         input.addEventListener('change', () => {
             if (REPORT_WORKERS === null) REPORT_WORKERS = new Set(State.schedule.workers.map(w => String(w.id)));
             if (input.checked) REPORT_WORKERS.add(String(worker.id));
             else REPORT_WORKERS.delete(String(worker.id));
+            REPORT_PICKER_OPEN = true;
             render();
             const again = document.querySelector('.report-worker-picker');
-            if (again) again.open = true;
+            const focused = again && [...again.querySelectorAll('input[type="checkbox"]')]
+                .find(node => node.dataset.workerId === String(worker.id));
+            if (focused) focused.focus({ preventScroll: true });
         });
         label.appendChild(input);
         label.appendChild(el('span', null, worker.name + (worker.active === false ? ' · כבוי' : '')));
-        box.appendChild(label);
+        list.appendChild(label);
     });
+    const empty = el('p', 'hint', 'לא נמצאו עובדים בחיפוש.');
+    const filter = () => {
+        const query = REPORT_WORKER_SEARCH.trim().toLocaleLowerCase();
+        const choices = [...list.children];
+        choices.forEach(choice => { choice.hidden = !choice.dataset.workerName.toLocaleLowerCase().includes(query); });
+        empty.hidden = choices.some(choice => !choice.hidden);
+    };
+    search.addEventListener('input', () => { REPORT_WORKER_SEARCH = search.value; filter(); });
+    filter(); box.appendChild(list); box.appendChild(empty);
     return box;
 }
 // What each cycle is CALLED, in the two places a person meets it: the sheet's group
@@ -322,10 +347,17 @@ function renderReports() {
         REPORT_RANGE.to = range.to;
     }
 
+    const searching = document.activeElement && document.activeElement.id === 'reportWorkerSearch';
+    const oldWorkerList = root.querySelector('.report-worker-list');
+    const workerScroll = oldWorkerList ? oldWorkerList.scrollTop : 0;
     clear(root);
-    root.appendChild(renderRangePicker());
-    root.appendChild(renderSectionToggle());
-    if (REPORT_SECTION === 'workers') root.appendChild(renderReportWorkerPicker());
+    root.appendChild(el('h2', 'reports-heading', 'דוחות'));
+    const controls = el('div', 'reports-controls');
+    controls.appendChild(renderSectionToggle());
+    controls.appendChild(renderRangePicker());
+    if (REPORT_SECTION === 'workers') controls.appendChild(renderReportWorkerPicker());
+    root.appendChild(controls);
+    root.appendChild(renderReportActions());
     renderOverCapNotice(root);
 
     // Both sections are built and both are in the DOM, whichever is chosen; the one not
@@ -348,6 +380,12 @@ function renderReports() {
     else invoice.classList.add('report-offscreen');
     root.appendChild(payroll);
     root.appendChild(invoice);
+    const workerList = root.querySelector('.report-worker-list');
+    if (workerList) workerList.scrollTop = workerScroll;
+    if (searching) {
+        const search = document.getElementById('reportWorkerSearch');
+        if (search) search.focus({ preventScroll: true });
+    }
 }
 
 // The same two-button switch the day screen uses for its two ways of looking at one
@@ -396,6 +434,12 @@ function renderOverCapNotice(root) {
 // cockpit, and the person flying it is sixty-two.
 function renderRangePicker() {
     const wrap = el('div', 'range-wrap');
+    const heading = el('div', 'report-range-heading');
+    heading.appendChild(el('span', null, 'תקופת הדוח'));
+    // One left-to-right run keeps the start and end in chronological order in RTL.
+    heading.appendChild(el('strong', 'range-current',
+        dateRange(formatFullDate(parseLocalDate(REPORT_RANGE.from)), formatFullDate(parseLocalDate(REPORT_RANGE.to)))));
+    wrap.appendChild(heading);
 
     const chips = el('div', 'range-chips');
     chips.appendChild(presetChip('fortnight', 'תקופת החשבון', () => {
@@ -416,10 +460,11 @@ function renderRangePicker() {
 
     if (REPORT_PRESET === 'custom') {
         const bar = el('div', 'range-bar');
-        bar.appendChild(el('label', null, 'מתאריך'));
-        bar.appendChild(dateInput('from'));
-        bar.appendChild(el('label', null, 'עד'));
-        bar.appendChild(dateInput('to'));
+        ['from', 'to'].forEach(key => {
+            const label = el('label', 'report-date-field', key === 'from' ? 'מתאריך' : 'עד תאריך');
+            label.appendChild(dateInput(key));
+            bar.appendChild(label);
+        });
         wrap.appendChild(bar);
 
         // Said out loud, because the numbers underneath look exactly like the ones under
@@ -432,11 +477,13 @@ function renderRangePicker() {
             'החשבון הקבועות, וטווחים שנבחרים ידנית עלולים לחפוף.'));
     }
 
-    const actions = el('div', 'range-actions');
-    // One left-to-right run (dateRange, js/ui/dom.js): as two runs in this RTL line the
-    // later date landed on the left and the range read backwards.
-    actions.appendChild(el('strong', 'range-current',
-        dateRange(formatFullDate(parseLocalDate(REPORT_RANGE.from)), formatFullDate(parseLocalDate(REPORT_RANGE.to)))));
+    return wrap;
+}
+
+// Export actions follow the filters, so the report's scope is chosen before it leaves
+// the phone. The existing handlers retain their client/worker privacy boundaries.
+function renderReportActions() {
+    const actions = el('div', 'range-actions report-output-actions');
     // Not window.print() bare - see renderWeekHeader in js/ui/week.js and
     // js/ui/printout.js: where the print sheet does not open, the sheet on screen is
     // offered as a picture instead, and the picture has its own button beside it.
@@ -449,9 +496,7 @@ function renderRangePicker() {
     actions.appendChild(button(
         client ? `📊 יצוא חיוב - ${isolate(client.name)}` : '📊 יצוא',
         'btn-secondary', exportReports));
-    wrap.appendChild(actions);
-
-    return wrap;
+    return actions;
 }
 
 function presetChip(key, label, apply) {

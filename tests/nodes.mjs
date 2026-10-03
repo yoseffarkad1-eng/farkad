@@ -16,6 +16,16 @@ export function makeNode(tag) {
         className: '', type: '', value: '', href: '', download: '', onerror: null,
         parentNode: null, listeners: {}, _text: '',
         get firstChild() { return kids[0] || null; },
+        // Report selection reads element children and data attributes. Model the
+        // browser APIs here so Node's vehicle/export assertions can render that UI.
+        get children() { return kids; },
+        get dataset() {
+            const attr = key => 'data-' + String(key).replace(/[A-Z]/g, letter => '-' + letter.toLowerCase());
+            return new Proxy({}, {
+                get: (_, key) => node.attrs[attr(key)],
+                set: (_, key, value) => { node.attrs[attr(key)] = String(value); return true; }
+            });
+        },
         appendChild(child) { child.parentNode = node; kids.push(child); return child; },
         // A form that opens BESIDE the row it belongs to, rather than at the end of the
         // list. A stub without it does not fail a check - it throws, from inside the

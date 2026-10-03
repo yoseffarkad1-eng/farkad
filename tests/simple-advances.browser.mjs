@@ -54,7 +54,9 @@ try {
     suite('selected workers in report and files');
     await page.locator('.report-worker-picker summary').click();
     await page.getByRole('button',{name:'בחר הכל',exact:true}).click();
-    await page.locator('.report-worker-picker summary').click();
+    // v128 retains the open picker after changing the selection. A second summary
+    // click now closes it; assert the intended state before selecting a worker.
+    check('select all leaves the worker choices open', await page.getByLabel('עובד שני',{exact:true}).isVisible());
     await page.getByLabel('עובד שני',{exact:true}).uncheck();
     const sheets=await page.evaluate(()=>reportSheets());
     check('selected report excludes second worker',!JSON.stringify(sheets).includes('עובד שני'));

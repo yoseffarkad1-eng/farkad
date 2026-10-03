@@ -1,3 +1,15 @@
+## v128 — organised reports page
+
+Report type now comes first, followed by one panel for dates and worker selection,
+then a separate row for printing, sharing an image and exporting. Worker selection
+has a name search, retains its open state and keyboard focus after selection, and
+keeps selected workers when the search changes. Mobile payroll cards and site totals
+have clearer surfaces and headings. Printed reports retain their existing layout.
+
+The controls do not write to the shared schedule or change payroll calculations,
+payment cycles, client export boundaries or either payroll group. Verification and
+publication evidence is recorded against the exact candidate commit in the PR.
+
 ## v127 — weekly table first, without Saturday
 
 Opening the week always shows the table immediately. Saturday is omitted from the
