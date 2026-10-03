@@ -352,13 +352,15 @@ function renderReports() {
     const oldWorkerList = root.querySelector('.report-worker-list');
     const workerScroll = oldWorkerList ? oldWorkerList.scrollTop : 0;
     clear(root);
-    root.appendChild(el('h2', 'reports-heading', 'דוחות'));
+    const head = el('div', 'reports-toolbar');
+    head.appendChild(el('h2', 'reports-heading', 'דוחות'));
+    head.appendChild(renderReportActions());
+    root.appendChild(head);
     const controls = el('div', 'reports-controls');
     controls.appendChild(renderSectionToggle());
     controls.appendChild(renderRangePicker());
     if (REPORT_SECTION === 'workers') controls.appendChild(renderReportWorkerPicker());
     root.appendChild(controls);
-    root.appendChild(renderReportActions());
     renderOverCapNotice(root);
 
     // Both sections are built and both are in the DOM, whichever is chosen; the one not
@@ -486,7 +488,16 @@ function renderRangePicker() {
 // Export actions follow the filters, so the report's scope is chosen before it leaves
 // the phone. The existing handlers retain their client/worker privacy boundaries.
 function renderReportActions() {
-    const actions = el('div', 'range-actions report-output-actions');
+    const menu = el('details', 'report-output-actions');
+    const trigger = el('summary', null, 'הפקת דוח');
+    menu.appendChild(trigger);
+    menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { menu.open = false; trigger.focus(); }
+    });
+    menu.addEventListener('focusout', event => {
+        if (event.relatedTarget && !menu.contains(event.relatedTarget)) menu.open = false;
+    });
+    const actions = el('div', 'range-actions');
     // Not window.print() bare - see renderWeekHeader in js/ui/week.js and
     // js/ui/printout.js: where the print sheet does not open, the sheet on screen is
     // offered as a picture instead, and the picture has its own button beside it.
@@ -499,7 +510,8 @@ function renderReportActions() {
     actions.appendChild(button(
         client ? `📊 יצוא חיוב - ${isolate(client.name)}` : '📊 יצוא',
         'btn-secondary', exportReports));
-    return actions;
+    menu.appendChild(actions);
+    return menu;
 }
 
 function presetChip(key, label, apply) {
@@ -744,8 +756,13 @@ function renderPayrollTable() {
         `דוח לעובדים שנבחרו בלבד · ${State.schedule.workers.filter(w => reportWorkerChosen(w.id)).length} עובדים`));
 
     const allRows = payrollRows();
-    if (allRows.some(row => row.carry && !row.carry.closed)) section.appendChild(el('p', 'hint',
+    if (allRows.some(row => row.carry && !row.carry.closed)) {
+        const help = el('details', 'report-explanation');
+        help.appendChild(el('summary', null, 'חשבון פתוח · תצוגה מקדימה'));
+        help.appendChild(el('p', 'hint',
         'חשבון פתוח הוא תצוגה מקדימה. לבחירת סכום הקיזוז לחץ על שם העובד ואז «בחירת קיזוז מהשכר». רק אישור החשבון רושם את הניכוי.'));
+        section.appendChild(help);
+    }
 
     if (allRows.length === 0) {
         section.appendChild(emptyHint('אין רישומים בטווח הזה.'));

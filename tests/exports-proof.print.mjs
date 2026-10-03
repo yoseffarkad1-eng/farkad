@@ -166,6 +166,7 @@ async function seedReport(page) {
     check('with bytes in it', drawn.size > 2000, String(drawn.size));
 
     // The file that goes out through the share sheet is that same picture.
+    if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
     await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
     await page.waitForTimeout(2000);
     const offer = await readOffer(page);
@@ -209,6 +210,7 @@ async function seedReport(page) {
     await instrument(page);
     await page.evaluate(() => { window.__shareMode = 'abort'; });
 
+    if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
     await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
     await page.waitForTimeout(2000);
     given('the offer is on screen', (await readOffer(page)).shown, '');
@@ -225,6 +227,7 @@ async function seedReport(page) {
 
     // The person tries again, and the sheet takes it this time. ONE more file, not two.
     await page.evaluate(() => { window.__shareMode = 'ok'; });
+    if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
     await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
     await page.waitForTimeout(2000);
     await choose(page, IMAGE);
@@ -238,6 +241,7 @@ async function seedReport(page) {
     // A share that FAILS is a different thing from one that was cancelled: there the
     // download IS the next door, and it must open.
     await page.evaluate(() => { window.__shareMode = 'fail'; });
+    if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
     await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
     await page.waitForTimeout(2000);
     await choose(page, IMAGE);
@@ -258,6 +262,7 @@ async function seedReport(page) {
     await seedReport(page);
     await instrument(page);
 
+    if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
     const button = page.locator('#reportsView').getByRole('button', { name: /הדפסה/ });
     await button.click();
     await page.waitForTimeout(300);

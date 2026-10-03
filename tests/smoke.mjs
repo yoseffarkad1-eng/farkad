@@ -1871,6 +1871,7 @@ async function seedRoster(page) {
   const beforeExport = offOrigin.length;
   const saved = [];
   page.on('download', download => saved.push(download));
+  if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
   await page.locator('#reportsView button').filter({ hasText: 'יצוא' }).click();
   await page.waitForTimeout(3000);
 
@@ -8297,6 +8298,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     window.__printCalls = 0;
     window.print = () => { window.__printCalls += 1; };
   });
+  if (!(await page.locator('.report-output-actions').evaluate(n => n.open))) await page.locator('.report-output-actions > summary').click();
   await page.locator('#reportsView').getByRole('button', { name: /הדפסה/ }).click();
   await page.waitForTimeout(2000);
   offer = await readOffer();
