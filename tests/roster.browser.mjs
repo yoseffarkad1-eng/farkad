@@ -52,6 +52,22 @@ try {
     await page.locator('.crew-shortcuts').getByRole('button', {name:'עובדים ↓',exact:true}).click();
     same('worker shortcut moves keyboard focus', await page.evaluate(() => document.activeElement.id), 'workersHeading');
 
+    suite('crew list puts names within reach on a phone');
+    const compact = await page.evaluate(() => {
+        const view = document.getElementById('rosterView').getBoundingClientRect();
+        const row = document.querySelector('[data-worker-id="w_week"]').getBoundingClientRect();
+        const search = document.getElementById('rosterWorkerSearch').getBoundingClientRect();
+        const tools = document.querySelector('.crew-tools').getBoundingClientRect();
+        return {lead:row.top-view.top, height:row.height, searchFirst:search.bottom<=tools.top};
+    });
+    check('first worker starts within 240px of the crew section', compact.lead <= 240, JSON.stringify(compact));
+    check('ordinary worker card stays within 125px without shrinking controls', compact.height <= 125, JSON.stringify(compact));
+    check('search precedes the less frequent list tools', compact.searchFirst);
+    const archive = page.locator('#workerList .roster-archive');
+    await archive.locator('summary').click();
+    check('collapsed disabled section really hides its workers', !(await page.locator('[data-worker-id="w_off"]').isVisible()));
+    await archive.locator('summary').click();
+
     suite('roster controls fit small screens and remain legible');
     for (const [width, scheme, scale=1] of [[320,'light'],[390,'light'],[430,'dark'],[1100,'light'],[320,'light',2]]) {
         await page.setViewportSize({width,height:844});
