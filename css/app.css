@@ -2013,6 +2013,26 @@ a[href]:focus-visible,
     .reports-toolbar, .reports-heading, .reports-controls, .report-output-actions, .report-explanation { display: none !important; }
 }
 
+/* Cycle navigation stays on screen only; output readers keep the original tables. */
+@media screen {
+    .report-cycle-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+    .report-cycle-nav button { flex: 1; min-width: 0; min-height: 44px; font-size: 14px; padding: 8px 12px; border-radius: 10px; }
+    #reportsView .report-group { scroll-margin-top: calc(var(--topbar-h, 0px) + 16px); padding: 10px 12px; margin-top: 20px; background: var(--accent-soft); border-radius: 10px; }
+    #reportsView .report-group::after { content: attr(data-workers); flex: none; margin-inline-start: auto; width: auto; height: auto; background: transparent; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+    .report-calculation { margin-top: 4px; border-bottom: 1px solid var(--line-soft); }
+    .report-calculation > summary { font-size: 13px; }
+}
+@media screen and (max-width: 700px) {
+    #reportsView .report-payroll tbody tr { border-color: var(--line); margin-bottom: 14px; }
+    #reportsView .report-payroll tbody td.cell-net { background: var(--accent-soft); border-radius: 10px; padding-block: 10px; margin-bottom: 6px; }
+    #reportsView .report-payroll tbody td:first-child { padding-block: 4px 8px; }
+    #reportsView .report-payroll tbody td[data-label="נצבר"] { border-top: 1px solid var(--line-soft); margin-top: 8px; }
+    #reportsView .report-payroll tfoot tr { padding: 12px; border: 1px solid var(--accent); }
+    #reportsView .report-payroll tfoot td:first-child { padding-bottom: 10px; margin-bottom: 6px; }
+    #reportsView .report-payroll tfoot td:last-child { font-size: 24px; padding-top: 8px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+}
+@media print { .report-cycle-nav { display: none !important; } }
+
 /* Restore points: dated, and folded shut under a counted summary - the board's collapsed
    row. Every date behind the fold replaces the record, so the list is opened on purpose
    rather than sitting unfolded beside the file picker. */

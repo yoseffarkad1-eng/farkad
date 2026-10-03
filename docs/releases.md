@@ -1,3 +1,10 @@
+## v131 — clearer payroll groups and cards
+
+Mixed-cycle reports offer quick navigation to either payroll group with worker
+counts. Group headings, worker amounts and group totals are easier to distinguish.
+The repeated explanation of attendance versus pay units expands on demand. Printed
+tables, monetary warnings and all calculations remain unchanged.
+
 ## v130 — a quieter reports workspace
 
 One report heading and an expandable output menu replace the repeated headings and
