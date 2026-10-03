@@ -1265,3 +1265,15 @@ This release changes layout and in-sheet navigation only. Every existing action 
 data path remains in place. The settings browser suite checks section focus/scroll,
 reopening, redraws, phone and desktop widths, dark mode, double text size and unchanged
 worker data after navigation. The release proof belongs to the tested commit/PR.
+
+
+## v123 — a clearer crew page
+
+The crew page now has a named header, worker/site shortcuts, distinct add and reorder
+controls, and worker search by name, phone or ID. Search includes disabled workers and
+never changes roster order or shared data. Worker cards show the currently effective
+pay cycle beside readable details, the existing activity switch, and a named edit
+button. Disabled workers retain full text contrast. Site cards share the same layout.
+Empty-list headings reset their counts. Existing edit, activity and deletion guards
+remain unchanged. A dedicated browser suite checks filtering, redraws, current/future
+pay-cycle labels, navigation, editing and phone/desktop layouts.

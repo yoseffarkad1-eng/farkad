@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v122">
+<meta name="farkad-build" content="v123">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -80,11 +80,20 @@
         <section id="weekView" role="tabpanel" aria-labelledby="tab-week" style="display:none"></section>
 
         <section id="rosterView" role="tabpanel" aria-labelledby="tab-roster" style="display:none">
+            <div class="crew-header">
+                <div><h1>הצוות שלי</h1><p>עובדים ואתרי עבודה</p></div>
+                <div class="crew-shortcuts" aria-label="קיצורי דרך בצוות">
+                    <button type="button" class="btn-secondary" onclick="rosterJump('workersHeading')">עובדים ↓</button>
+                    <button type="button" class="btn-secondary" onclick="rosterJump('placesHeading')">אתרים ↓</button>
+                </div>
+            </div>
             <div class="roster-columns">
-                <div class="roster-panel">
+                <div class="roster-panel crew-workers">
                     <div class="panel-head">
-                        <h2 id="workersHeading">עובדים</h2>
+                        <h2 id="workersHeading" tabindex="-1">עובדים</h2>
                         <button type="button" class="btn-add" onclick="showAddWorkerModal()">+ הוסף עובד</button>
+                    </div>
+                    <div class="crew-tools">
                         <button type="button" class="btn-secondary" onclick="openQuickStart()">📋 הדבק רשימה</button>
                         <!-- The order every other screen reads in. A mode of its own, and
                              not two arrows beside the pencil: each press used to be a
@@ -94,12 +103,20 @@
                              screen, and focus comes back to this button when it closes. -->
                         <button type="button" class="btn-secondary" id="reorderOpenBtn" onclick="openReorder()">↕ סדר מחדש</button>
                     </div>
+                    <div class="crew-search">
+                        <label for="rosterWorkerSearch">חיפוש עובד</label>
+                        <div class="crew-search-field">
+                            <input id="rosterWorkerSearch" type="search" placeholder="שם, טלפון או תעודת זהות" oninput="renderWorkerList()" autocomplete="off"/>
+                            <button type="button" class="btn-secondary" id="rosterSearchClear" onclick="clearRosterSearch()" hidden>נקה</button>
+                        </div>
+                        <p id="rosterSearchResult" class="hint" role="status" aria-live="polite" hidden></p>
+                    </div>
                     <div id="workerList"></div>
                 </div>
 
-                <div class="roster-panel">
+                <div class="roster-panel crew-places">
                     <div class="panel-head">
-                        <h2 id="placesHeading">אתרי עבודה</h2>
+                        <h2 id="placesHeading" tabindex="-1">אתרי עבודה</h2>
                         <button type="button" class="btn-add" onclick="showAddPlaceModal()">+ הוסף אתר</button>
                     </div>
                     <div id="placeList"></div>
