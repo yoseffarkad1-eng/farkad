@@ -1,3 +1,11 @@
+## v127 — weekly table first, without Saturday
+
+Opening the week always shows the table immediately. Saturday is omitted from the
+weekly table, day picker, paper and image, without removing or changing saved records.
+Calendar navigation still advances a full seven days. On a phone, tapping a date heading
+opens its full-text detail with a back button. Reopening the week resets to the table.
+Landscape printing is retained.
+
 ## v126 — landscape weekly printout
 
 Weekly paper uses a named A4 landscape page with 10mm margins, a visible date-range

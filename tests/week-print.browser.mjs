@@ -27,7 +27,9 @@ try{
  const pdf=readPdf(buffer),text=pdf.pages.map(pageText).join('\n');
  check('every weekly page is landscape A4',pdf.pages.length>0&&pdf.pages.every(p=>p.width>p.height&&Math.abs(p.width-842)<3&&Math.abs(p.height-595)<3),JSON.stringify(pdf.pages.map(p=>[p.width,p.height])));
  check('all thirty worker names survive pagination',Array.from({length:30},(_,i)=>`Worker ${String(i+1).padStart(2,'0')}`).every(n=>text.includes(n)));
- check('all seven site names print as words',Array.from({length:7},(_,i)=>`Site ${i+1}`).every(n=>text.includes(n)));
+ check('all six visible day sites print as words',[1,3,4,5,6,7].every(i=>text.includes(`Site ${i}`)));
+ same('Saturday is omitted from the paper and image data',await page.evaluate(()=>readWeekPrintout().days.length),6);
+ check('Saturday date is absent from the paper',!text.includes('03/10'));
  check('first and last week dates are printed',text.includes('02/10')&&text.includes('08/10'));
  check('precise extra hours survive printing',text.includes('2.5'));
  check('no empty trailing pages',pdf.pages.every(p=>p.texts.length>10));
