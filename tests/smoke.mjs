@@ -4308,6 +4308,9 @@ async function seedRoster(page) {
       width.page <= width.viewport + 1, JSON.stringify(width));
   }
 
+  // This block retains the optional grid's geometry; week.browser.mjs tests the new phone default.
+  await page.evaluate(() => setWeekPhoneMode('grid'));
+
   // On a phone the week is a colour map of seven days, and it scrolls inside its own box.
   //
   // This check used to read `week.inner <= week.box + 1` - the whole week on the screen

@@ -7,6 +7,23 @@
 // second site.
 
 let weekStart = null;
+// View preferences only: browsing a week must never write work or move the day being edited.
+let weekPhoneMode = 'days';
+let weekPhoneDate = null;
+
+function setWeekPhoneMode(mode) {
+    weekPhoneMode = mode === 'grid' ? 'grid' : 'days';
+    renderWeek();
+    document.querySelector(`[data-week-mode="${weekPhoneMode}"]`)?.focus({preventScroll:true});
+}
+
+function selectWeekPhoneDate(date) {
+    if (!weekDates().includes(date)) return;
+    weekPhoneDate = date;
+    renderWeek();
+    document.querySelector(`[data-week-date="${date}"]`)?.focus({preventScroll:true});
+}
+
 
 function currentWeekStart() {
     if (!weekStart) weekStart = toLocalDateStr(snapToWeekStart(parseLocalDate(State.date)));
@@ -33,6 +50,7 @@ function renderWeek() {
     if (!root) return;
 
     clear(root);
+    root.classList.toggle('week-phone-grid', weekPhoneMode === 'grid');
     root.appendChild(renderWeekHeader());
 
     const dates = weekDates();
@@ -45,6 +63,8 @@ function renderWeek() {
         root.appendChild(emptyHint('אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.'));
         return;
     }
+
+    root.appendChild(renderWeekPhone(dates, workers));
 
     const table = el('table', 'week-table');
 
@@ -123,6 +143,98 @@ function renderWeek() {
     root.appendChild(el('p', 'week-legend-note',
         '\u25CF = יום כפול \u00B7 + = שעות נוספות \u00B7 \u2014 = נעדר'));
     root.appendChild(el('p', 'hint', 'לחיצה על יום פותחת אותו במסך היום לעריכה.'));
+}
+
+// The phone opens on a readable day within the week. The original grid stays available
+// for overview and is still the single source for print/image export and desktop.
+function renderWeekPhone(dates, workers) {
+    const phone = el('div', 'week-phone');
+    const modes = el('div', 'week-phone-modes');
+    modes.setAttribute('aria-label', 'תצוגת השבוע');
+    [['days', 'לפי יום'], ['grid', 'טבלת שבוע']].forEach(([mode, text]) => {
+        const control = button(text, 'btn-secondary', () => setWeekPhoneMode(mode));
+        control.dataset.weekMode = mode;
+        control.setAttribute('aria-pressed', String(weekPhoneMode === mode));
+        modes.appendChild(control);
+    });
+    phone.appendChild(modes);
+    if (weekPhoneMode === 'grid') {
+        phone.appendChild(el('p', 'hint', 'החליקו לצדדים לכל ימי השבוע. לחצו על תא לפתיחת היום.'));
+        return phone;
+    }
+    if (!dates.includes(weekPhoneDate)) weekPhoneDate = dates.includes(State.date) ? State.date : dates[0];
+    const chosen = weekPhoneDate;
+    const picker = el('div', 'week-phone-dates');
+    picker.setAttribute('aria-label', 'בחירת יום בשבוע');
+    dates.forEach(date => {
+        const parsed = parseLocalDate(date);
+        const control = button('', 'week-phone-date', () => selectWeekPhoneDate(date),
+            `${hebrewDayName(parsed)} ${formatFullDate(parsed)}`);
+        control.dataset.weekDate = date;
+        control.setAttribute('aria-pressed', String(date === chosen));
+        if (date === todayStr()) control.setAttribute('aria-current', 'date');
+        control.appendChild(el('span', null, HEBREW_DAY_LETTERS[parsed.getDay()]));
+        control.appendChild(el('bdi', null, `${String(parsed.getDate()).padStart(2, '0')}/${String(parsed.getMonth()+1).padStart(2, '0')}`));
+        picker.appendChild(control);
+    });
+    phone.appendChild(picker);
+
+    const panel = el('section', 'week-phone-panel');
+    const heading = el('h2', null, `${hebrewDayName(parseLocalDate(chosen))} · ${isolateLtr(formatFullDate(parseLocalDate(chosen)))}`);
+    panel.appendChild(heading);
+    const worked = [], absent = [], blank = [];
+    workers.forEach(worker => {
+        if (isAbsent(State.schedule, chosen, worker.id, State.layer)) absent.push(worker);
+        else if (entriesFor(State.schedule, chosen, worker.id, State.layer).length) worked.push(worker);
+        // A departed worker only belongs in days they actually have a record on.
+        else if (worker.active !== false) blank.push(worker);
+    });
+    const counts = el('div', 'week-phone-counts');
+    [[worked.length,'עבדו'],[absent.length,'נעדרו'],[blank.length,'ללא רישום']].forEach(([n, label]) => {
+        counts.appendChild(el('span', null, `${n} ${label}`));
+    });
+    panel.appendChild(counts);
+    panel.appendChild(button('פתיחת היום לעריכה', 'btn-primary week-phone-open', () => {
+        State.date = chosen; showView('day');
+    }));
+    const labels = placeLabelsIn(State.schedule);
+    const row = (worker, status) => {
+        const item = el('div', 'week-phone-worker');
+        item.dataset.workerId = worker.id;
+        const name = el('div', 'week-phone-name');
+        name.appendChild(el('strong', null, worker.name));
+        if (worker.active === false) name.appendChild(el('span', 'badge', 'לא פעיל'));
+        item.appendChild(name);
+        if (status) item.appendChild(el('span', 'week-phone-status', status));
+        else entriesFor(State.schedule, chosen, worker.id, State.layer).forEach(entry => {
+            const line = el('div', 'week-phone-entry');
+            const site = el('span', 'tag tag-place');
+            appendSiteName(site, entry.placeId, placeLabelFrom(labels, entry.placeId));
+            paintSite(site, entry.placeId);
+            line.appendChild(site);
+            const rate = entryRate(entry);
+            if (rate === RATE_DOUBLE) line.appendChild(el('span', 'week-phone-rate', 'יום כפול'));
+            if (rate === RATE_EXTRA) {
+                const hours = entryExtraHours(entry);
+                line.appendChild(el('span', 'week-phone-rate', hours ? `${isolateLtr(String(hours))} שעות נוספות` : 'שעות נוספות'));
+            }
+            item.appendChild(line);
+        });
+        return item;
+    };
+    const list = el('div', 'week-phone-worked');
+    worked.forEach(worker => list.appendChild(row(worker)));
+    if (!worked.length) list.appendChild(el('p', 'hint', 'אין עבודה רשומה ביום הזה.'));
+    panel.appendChild(list);
+    [[absent, 'נעדרים', 'נעדר'], [blank, 'ללא רישום', 'טרם נרשם']].forEach(([group, title, status]) => {
+        if (!group.length) return;
+        const fold = el('details', 'week-phone-fold');
+        fold.appendChild(el('summary', null, `${title} (${group.length})`));
+        group.forEach(worker => fold.appendChild(row(worker, status)));
+        panel.appendChild(fold);
+    });
+    phone.appendChild(panel);
+    return phone;
 }
 
 // On a phone the whole week fits on one screen because the cells shrink to the site's
@@ -273,16 +385,16 @@ function renderWeekHeader() {
     const fwd = button('שבוע הבא', 'btn-secondary btn-nav nav-fwd', () => stepWeek(7));
     fwd.appendChild(chevronIcon('fwd'));
     header.appendChild(fwd);
-    header.appendChild(button('השבוע', 'btn-secondary', () => { setWeekFromDate(todayStr()); render(); }));
+    header.appendChild(button('השבוע', 'btn-secondary week-today-action', () => { weekPhoneDate = todayStr(); setWeekFromDate(todayStr()); render(); }));
 
     // Not window.print() bare. On the home-screen app on an iPhone that call opens
     // nothing and says nothing; printWithFallback (js/ui/printout.js) still makes it,
     // listens for the sheet, and offers the grid as a picture when no sheet came.
-    header.appendChild(button('🖨️ הדפסה', 'btn-success', () => printWithFallback('week')));
+    header.appendChild(button('🖨️ הדפסה', 'btn-success week-print-action', () => printWithFallback('week')));
     // And the picture on its own button, always. The person on a site sends pictures on
     // WhatsApp, not PDFs, and the print button's offer arrives a second and a half after
     // a tap that did nothing - this is the door for somebody who already knows that.
-    header.appendChild(button('🖼️ שיתוף כתמונה', 'btn-secondary', () => sharePrintout('week')));
+    header.appendChild(button('🖼️ שיתוף כתמונה', 'btn-secondary week-share-action', () => sharePrintout('week')));
 
     return header;
 }
