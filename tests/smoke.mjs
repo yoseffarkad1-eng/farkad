@@ -5852,6 +5852,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('and the chosen period is written out in full',
     /\d{2}\/\d{2}\/\d{4} - \d{2}\/\d{2}\/\d{4}/.test(await page.textContent('.range-current')));
 
+  await page.locator('.report-range-heading').click();
   await page.getByRole('button', { name: 'תאריכים אחרים' }).click();
   await page.waitForTimeout(250);
   check('asking for other dates reveals the two calendars',
