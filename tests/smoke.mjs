@@ -8643,14 +8643,15 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // Escape is unchanged: the dialog closes and the keyboard goes back to the name.
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  const closed = await page.evaluate(() => ({
+  const closed = await name.evaluate(opener => ({
     open: document.getElementById('workerDaysModal').style.display,
     cls: document.activeElement.className,
-    text: document.activeElement.textContent.trim()
+    text: document.activeElement.textContent.trim(),
+    returnedToOpener: document.activeElement === opener
   }));
   check('Escape still closes it', closed.open === 'none', JSON.stringify(closed));
   check('and focus goes back to the name that opened it',
-    closed.cls === 'link-cell' && closed.text === 'דוד', JSON.stringify(closed));
+    closed.returnedToOpener, JSON.stringify(closed));
   await page.context().close();
 }
 
