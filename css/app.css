@@ -1635,36 +1635,36 @@ a[href]:focus-visible,
 
 /* ---------------------------------------------------------------- roster */
 
-.crew-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 20px; }
-.crew-header > div:first-child { flex: 1; min-width: 130px; }
+.crew-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 8px; }
+.crew-header > div:first-child { flex: 1; min-width: 70px; }
 .crew-header h1 { margin: 0; font-size: 26px; line-height: 1.3; }
 .crew-header p { margin: 5px 0 0; color: var(--ink-2); font-size: 14px; }
 .crew-shortcuts { display: flex; gap: 8px; }
 .crew-shortcuts button { min-height: 44px; font-size: 15px; }
 #rosterView .roster-columns { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 20px; }
-#rosterView .roster-panel { min-width: 0; padding: 16px; border-radius: 18px; margin-bottom: 0; }
-#rosterView .panel-head { margin-bottom: 14px; padding-bottom: 14px; }
+#rosterView .roster-panel { min-width: 0; padding: 12px; border-radius: 16px; margin-bottom: 0; }
+#rosterView .panel-head { margin-bottom: 8px; padding-bottom: 8px; }
 #rosterView .panel-head h2 { margin: 0; font-size: 20px; scroll-margin-top: calc(var(--topbar-h, 0px) + 12px); }
 #rosterView .panel-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 #rosterView .panel-head .btn-add { min-height: 46px; font-size: 16px; }
-.crew-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.crew-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .crew-tools button { flex: 1 1 120px; min-height: 44px; font-size: 14px; padding: 9px 8px; }
-.crew-search { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-.crew-search label { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.crew-search { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.crew-search label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .crew-search-field { display: flex; gap: 8px; }
 .crew-search-field input { flex: 1; min-width: 0; width: 100%; min-height: 46px; font-size: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--ink); }
 .crew-search-field button { min-width: 44px; min-height: 44px; padding-inline: 10px; }
 #rosterSearchClear[hidden], #rosterSearchResult[hidden] { display: none; }
 #rosterView .crew-search .hint { margin: 0; }
-#rosterView .roster-row { padding: 14px 12px; margin-bottom: 10px; gap: 12px; border: 1px solid var(--line); border-radius: 12px; align-items: flex-start; flex-wrap: wrap; }
+#rosterView .roster-row { padding: 10px; margin-bottom: 8px; gap: 10px; border: 1px solid var(--line); border-radius: 12px; align-items: flex-start; flex-wrap: wrap; }
 #rosterView .roster-row:last-child { margin-bottom: 0; }
-#rosterView .roster-details { flex: 1 1 150px; }
+#rosterView .roster-details { flex: 1 1 140px; }
 #rosterView .roster-details > strong { display: block; font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
 #rosterView .roster-details > .tag { display: inline-flex; max-width: 100%; font-size: 16px; }
 #rosterView .tag-place { height: auto; min-height: 30px; white-space: normal; padding-block: 5px; }
 #rosterView .tag-place .site-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 #rosterView .roster-meta { line-height: 1.65; overflow-wrap: anywhere; }
-.crew-cycle { display: table; margin: 5px 0 7px; border-radius: 6px; padding: 2px 7px; background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 600; }
+.crew-cycle { display: table; margin: 4px 0; border-radius: 6px; padding: 2px 7px; background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 600; }
 #rosterView .roster-actions { flex: 0 0 auto; flex-direction: column; gap: 6px; align-items: stretch; }
 #rosterView .roster-actions button { min-width: 64px; min-height: 44px; }
 #rosterView .crew-edit { background: var(--paper); border: 1px solid var(--line); border-radius: 9px; font-size: 14px; color: var(--ink-2); }

@@ -1,3 +1,14 @@
+## v124 — compact crew page
+
+The crew heading occupies one row on ordinary phone text sizes. Search comes before
+paste/reorder tools and keeps its accessible label. Reduced panel/card spacing brings
+names closer to the top without reducing 44px controls or 16px inputs. Worker activity,
+pay cycles, financial records, and synchronization behavior are unchanged.
+
+Validation is recorded against the exact candidate commit in the release PR; browser
+coverage measures the lead-in, ordinary card height, and collapsed inactive rows in
+addition to the existing small-screen, large-text, search and edit checks.
+
 ## v121 — include both payroll cycles in shared report images
 
 A mixed payroll report contains one table for weekly workers and another for fortnightly
