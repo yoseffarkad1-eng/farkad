@@ -769,8 +769,28 @@ function renderPayrollTable() {
         return section;
     }
 
-    payrollGroups(allRows).forEach(group => {
-        if (group.title) section.appendChild(el('h3', 'report-group', group.title));
+    const groups = payrollGroups(allRows);
+    if (groups.length > 1) {
+        const jump = el('nav', 'report-cycle-nav');
+        jump.setAttribute('aria-label', 'מעבר בין קבוצות התשלום');
+        groups.forEach(group => jump.appendChild(button(
+            `${group.title} · ${group.rows.length}`, 'btn-secondary', () => {
+                const target = document.getElementById(`report-cycle-${group.cycle}`);
+                if (target) {
+                    target.scrollIntoView({ block: 'start' });
+                    target.focus({ preventScroll: true });
+                }
+            }, `${group.title} · ${countedIn(group.rows.length, 'עובד אחד', 'עובדים')} בדוח`)));
+        section.appendChild(jump);
+    }
+    groups.forEach(group => {
+        if (group.title) {
+            const heading = el('h3', 'report-group', group.title);
+            heading.id = `report-cycle-${group.cycle}`;
+            heading.setAttribute('tabindex', '-1');
+            heading.setAttribute('data-workers', countedIn(group.rows.length, 'עובד אחד', 'עובדים'));
+            section.appendChild(heading);
+        }
         const note = groupPeriodNote(group);
         if (note) section.appendChild(note);
         section.appendChild(payrollGroupTable(group.rows));
@@ -926,10 +946,13 @@ function payrollGroupTable(rows) {
         section.appendChild(el('p', 'hint',
             'הוסף שכר יומי לעובדים במסך "עובדים ואתרים" כדי שהדוח יחשב גם את הסכום.'));
     } else {
-        section.appendChild(el('p', 'hint',
+        const explanation = el('details', 'report-explanation report-calculation');
+        explanation.appendChild(el('summary', null, 'איך מחושבים ימי השכר?'));
+        explanation.appendChild(el('p', 'hint',
             'ימי נוכחות = כמה תאריכים העובד היה באתר. ימי שכר = כמה ימים משולמים, ' +
             'כשיום כפול נספר כשניים. שני אתרים באותו יום הם יום נוכחות אחד, ' +
             'ויום שכר אחד - או שניים אם היום כפול. שעות נוספות מחושבות בנפרד.'));
+        section.appendChild(explanation);
     }
 
     if (rows.some(row => row.hoursUnpriced)) {

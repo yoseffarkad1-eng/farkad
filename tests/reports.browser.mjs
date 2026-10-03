@@ -25,6 +25,15 @@ try {
         assignPlace(State.schedule,'2026-10-03','w_week','actual','p_two');
         showView('reports');
     });
+    suite('pay-cycle navigation keeps both groups in the report');
+    same('two groups offer two jump buttons', await page.locator('.report-cycle-nav button').count(), 2);
+    await page.locator('.report-cycle-nav button').last().click();
+    same('jump moves keyboard focus to the chosen group', await page.evaluate(()=>document.activeElement.id), 'report-cycle-biweekly');
+    same('counts include the workers actually in that group', await page.locator('#report-cycle-biweekly').getAttribute('data-workers'), '2 עובדים');
+    await page.locator('.report-calculation > summary').first().click();
+    check('pay-unit explanation remains available', await page.locator('.report-calculation .hint').first().isVisible());
+    await page.locator('.report-calculation > summary').first().click();
+    await page.evaluate(()=>scrollTo(0,0));
     const before = await page.evaluate(() => JSON.stringify(State.schedule));
     const original = await page.evaluate(() => JSON.stringify(reportSheets()));
     suite('one report toolbar with compact filters');
@@ -61,6 +70,7 @@ try {
     same('clear selection deliberately removes report rows', await page.locator('.report-payroll tbody tr').count(), 0);
     const off = page.locator('[data-worker-id="w_off"]');
     await off.check();
+    same('one remaining group does not need navigation', await page.locator('.report-cycle-nav').count(), 0);
     same('only the chosen worker is included', await page.locator('.report-payroll tbody tr').count(), 1);
     same('selection restores checkbox focus', await page.evaluate(() => document.activeElement.dataset.workerId), 'w_off');
     await search.fill('');
@@ -91,6 +101,7 @@ try {
     await page.locator('.report-output-actions > summary').click();
     check('client output action names the selected client', (await page.locator('.report-output-actions').innerText()).includes('הרצליה'));
     await page.emulateMedia({media:'print'});
+    check('cycle navigation stays off paper', !(await page.locator('.report-cycle-nav').isVisible()));
     check('controls do not enter the paper report', !(await page.locator('.reports-controls').isVisible()));
     check('payroll is excluded from client printing', !(await page.locator('.report-payroll').isVisible()));
     check('invoice remains printable', await page.locator('.report-invoice').isVisible());
