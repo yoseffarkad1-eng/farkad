@@ -2242,7 +2242,7 @@ a[href]:focus-visible,
    site's colour block, seven days fit the width of the screen, and a tap still opens
    the day with everything written out. Asking someone to scroll a grid sideways to see
    Thursday is not "seeing the week". */
-@media (max-width: 423px) {
+@media (max-width: 355px) {
     /* Sits over the clipped edge, above the cells and under nothing a finger needs -
        pointer-events: none so a tap at the edge still reaches the day beneath it. The
        colour is the page's own background fading to nothing, so it reads as the strip
@@ -2467,9 +2467,9 @@ a[href]:focus-visible,
     .week-table tfoot .name-cell { font-size: 12px; }
 }
 
-/* Phone week: full names and site labels, with the existing grid one tap away.
+/* Phone week: the table first, with full names and site labels behind each date.
    Screen-only media keeps desktop and paper layout exactly as before. */
-.week-phone { display: none; }
+.week-phone, .week-day-preview, .week-phone-grid-hint { display: none; }
 @media screen and (max-width: 700px) {
     #weekView .week-header { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
     #weekView .week-range { grid-column: 1 / -1; grid-row: 1; text-align: center; margin: 2px 0 4px; font-size: 18px; }
@@ -2484,9 +2484,12 @@ a[href]:focus-visible,
     #weekView:not(.week-phone-grid) > .week-legend,
     #weekView:not(.week-phone-grid) > .week-legend-note,
     #weekView:not(.week-phone-grid) > .hint { display: none; }
-    .week-phone-modes { display: flex; padding: 4px; gap: 4px; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; margin-bottom: 12px; }
-    .week-phone-modes button { flex: 1; min-width: 0; min-height: 44px; font-size: 16px; border: 0; background: transparent; color: var(--ink-2); }
-    .week-phone-modes button[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+    .week-phone-back { min-height: 44px; font-size: 16px; margin-bottom: 12px; }
+    .week-table thead th:not(.corner) { position: relative; min-height: 54px; }
+    .week-day-preview { display: block; position: absolute; inset: 0; width: 100%; height: 100%; min-width: 44px; min-height: 44px; padding: 0; background: transparent; border: 0; border-radius: 0; cursor: pointer; }
+    .week-day-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+    #weekView > .week-grid-hint { display: none; }
+    #weekView.week-phone-grid > .week-phone-grid-hint { display: block; }
     .week-phone-dates { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 12px; }
     .week-phone-date { flex: 1 1 2.8em; min-width: max(44px, 2.8em); min-height: 58px; padding: 6px 1px; display: flex; flex-direction: column; align-items: center; gap: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); font-size: 14px; }
     .week-phone-date[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }

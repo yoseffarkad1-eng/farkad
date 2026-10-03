@@ -1800,20 +1800,20 @@ for (const width of WIDTHS) {
             screen: document.documentElement.clientWidth
         };
     });
-    if (width >= 430) {
+    if (width >= 356) {
         // One assertion for one fact: seven days, every one of them at the pitch, every
         // one of them inside the box, and nothing left to push. Split four ways, the
         // 45px columns passed the `shown` count while a separate check failed the
         // pitch, and the failure read as two unrelated facts.
-        check('a 430px phone shows all seven days at the pitch, with nothing to push',
-            fit.days === 7 && fit.shown === 7 && fit.narrowest >= 48
+        check(`a ${width}px phone shows all six days at the pitch, with nothing to push`,
+            fit.days === 6 && fit.shown === 6 && fit.narrowest >= 48
                 && fit.boxScroll <= fit.boxClient + 1,
             JSON.stringify(fit));
     } else {
         // Strictly wider than its box, not "at least": on these phones the week MUST
         // scroll, because the alternative is columns narrower than the pitch.
         check(`a ${width}px phone keeps the names and scrolls the days under them`,
-            fit.days === 7 && fit.shown < 7 && fit.shown >= 4 && fit.boxScroll > fit.boxClient,
+            fit.days === 6 && fit.shown < 6 && fit.shown >= 4 && fit.boxScroll > fit.boxClient,
             JSON.stringify(fit));
     }
 
@@ -1842,7 +1842,7 @@ for (const width of WIDTHS) {
         return { rows: boxes.length, bad };
     });
     check('and no two days in a row overlap each other',
-        overlap.rows === 7 && overlap.bad.length === 0, JSON.stringify(overlap));
+        overlap.rows === 6 && overlap.bad.length === 0, JSON.stringify(overlap));
 
     // The RTL order, on the screen and in the DOM: the first day of the week is the
     // RIGHTMOST cell, because that is what "first" means in Hebrew. A grid that reads
@@ -2191,7 +2191,7 @@ for (const [script, longName] of LONG_NAMES) {
         check(`${width}px: at least one whole day is on the screen before any scrolling`,
             box.visible >= 1, JSON.stringify(box));
         check(`${width}px: and every day is still a 44px target`,
-            box.narrowest >= 44 && box.cells === 7, JSON.stringify(box));
+            box.narrowest >= 44 && box.cells === 6, JSON.stringify(box));
         check(`${width}px: the page itself still does not scroll sideways`,
             box.page <= box.client + 1, JSON.stringify(box));
         check(`${width}px: the whole name is still there for a reader`,
@@ -2220,7 +2220,7 @@ for (const [script, longName] of LONG_NAMES) {
             }
             return { seen: seen.size, of: cells.length };
         });
-        check(`${width}px: scrolling reaches every one of the seven days`,
+        check(`${width}px: scrolling reaches every one of the six days`,
             reached.seen === reached.of, JSON.stringify(reached));
 
         // The name still belongs to its row, which is the whole reason the column is
@@ -2358,8 +2358,8 @@ for (const width of WIDTHS) {
         // the screen and the grid is a name list.
         check(`${label}: a full day cell is on the screen before any scrolling`,
             grid.visible >= 1, JSON.stringify(grid));
-        check(`${label}: and all seven days can be reached by scrolling`,
-            grid.reachable === grid.days && grid.days === 7,
+        check(`${label}: and all six days can be reached by scrolling`,
+            grid.reachable === grid.days && grid.days === 6,
             JSON.stringify(grid));
         check(`${label}: the name column is bounded rather than taking the width`,
             grid.nameWidth !== null && grid.nameWidth <= Math.round(width * 0.45),
@@ -2634,7 +2634,7 @@ for (const width of WIDTHS) {
 
     check(`${width}px: the strip has a box the cue can hang on`, seen.found === true,
         JSON.stringify(seen));
-    const shouldCue = width < 424;
+    const shouldCue = width < 356;
     check(`${width}px: the strip ${shouldCue ? 'does' : 'does not'} overflow its box`,
         seen.overflows === shouldCue,
         JSON.stringify({ scrollWidth: seen.scrollWidth, clientWidth: seen.clientWidth }));

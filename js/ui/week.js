@@ -8,17 +8,17 @@
 
 let weekStart = null;
 // View preferences only: browsing a week must never write work or move the day being edited.
-let weekPhoneMode = 'days';
+let weekPhoneMode = 'grid';
 let weekPhoneDate = null;
 
 function setWeekPhoneMode(mode) {
     weekPhoneMode = mode === 'grid' ? 'grid' : 'days';
     renderWeek();
-    document.querySelector(`[data-week-mode="${weekPhoneMode}"]`)?.focus({preventScroll:true});
+    document.querySelector(weekPhoneMode === 'grid' ? `[data-week-preview="${weekPhoneDate}"]` : '[data-week-mode=grid]')?.focus({preventScroll:true});
 }
 
 function selectWeekPhoneDate(date) {
-    if (!weekDates().includes(date)) return;
+    if (!weekDates().includes(date) || parseLocalDate(date).getDay() === 6) return;
     weekPhoneDate = date;
     renderWeek();
     document.querySelector(`[data-week-date="${date}"]`)?.focus({preventScroll:true});
@@ -53,9 +53,10 @@ function renderWeek() {
     root.classList.toggle('week-phone-grid', weekPhoneMode === 'grid');
     root.appendChild(renderWeekHeader());
 
-    const dates = weekDates();
+    // Saturday is hidden here only; calendar navigation and saved records keep all dates.
+    const dates = weekDates().filter(date => parseLocalDate(date).getDay() !== 6);
     root.appendChild(el('h1', 'week-print-title', 'שבוע ' + dateRange(
-        formatFullDate(parseLocalDate(dates[0])), formatFullDate(parseLocalDate(dates[6])))));
+        formatFullDate(parseLocalDate(dates[0])), formatFullDate(parseLocalDate(dates[dates.length - 1])))));
     const workers = weekWorkers(dates);
 
     if (workers.length === 0) {
@@ -78,13 +79,16 @@ function renderWeek() {
     dates.forEach(date => {
         const parsed = parseLocalDate(date);
         const th = el('th');
-        // Saturday is the rest day; its column stays, greyed, so the week keeps its
-        // shape - a six-column week would make every other day jump position.
-        if (parsed.getDay() === 6) th.classList.add('col-rest');
         // Both forms are in the cell; the stylesheet decides which fits the screen.
         th.appendChild(el('div', 'day-full', HEBREW_DAY_NAMES[parsed.getDay()]));
         th.appendChild(el('div', 'day-initial', HEBREW_DAY_LETTERS[parsed.getDay()]));
         th.appendChild(el('small', null, `${String(parsed.getDate()).padStart(2, '0')}/${String(parsed.getMonth() + 1).padStart(2, '0')}`));
+        const preview = button('', 'week-day-preview', () => {
+            weekPhoneDate = date;
+            setWeekPhoneMode('days');
+        }, `פירוט ${hebrewDayName(parsed)} ${formatFullDate(parsed)}`);
+        preview.dataset.weekPreview = date;
+        th.appendChild(preview);
         headRow.appendChild(th);
     });
     head.appendChild(headRow);
@@ -144,26 +148,17 @@ function renderWeek() {
     root.appendChild(renderWeekLegend());
     root.appendChild(el('p', 'week-legend-note',
         '\u25CF = יום כפול \u00B7 + = שעות נוספות \u00B7 \u2014 = נעדר'));
-    root.appendChild(el('p', 'hint', 'לחיצה על יום פותחת אותו במסך היום לעריכה.'));
+    root.appendChild(el('p', 'hint week-grid-hint', 'לחיצה על תא פותחת את היום לעריכה.'));
+    root.appendChild(el('p', 'hint week-phone-grid-hint', 'לחצו על כותרת יום לפירוט, או על תא לעריכת היום.'));
 }
 
-// The phone opens on a readable day within the week. The original grid stays available
-// for overview and is still the single source for print/image export and desktop.
+// The table opens first. A date heading opens its full-text detail on phones.
 function renderWeekPhone(dates, workers) {
     const phone = el('div', 'week-phone');
-    const modes = el('div', 'week-phone-modes');
-    modes.setAttribute('aria-label', 'תצוגת השבוע');
-    [['days', 'לפי יום'], ['grid', 'טבלת שבוע']].forEach(([mode, text]) => {
-        const control = button(text, 'btn-secondary', () => setWeekPhoneMode(mode));
-        control.dataset.weekMode = mode;
-        control.setAttribute('aria-pressed', String(weekPhoneMode === mode));
-        modes.appendChild(control);
-    });
-    phone.appendChild(modes);
-    if (weekPhoneMode === 'grid') {
-        phone.appendChild(el('p', 'hint', 'החליקו לצדדים לכל ימי השבוע. לחצו על תא לפתיחת היום.'));
-        return phone;
-    }
+    if (weekPhoneMode === 'grid') return phone;
+    const back = button('חזרה לטבלת השבוע', 'btn-secondary week-phone-back', () => setWeekPhoneMode('grid'));
+    back.dataset.weekMode = 'grid';
+    phone.appendChild(back);
     if (!dates.includes(weekPhoneDate)) weekPhoneDate = dates.includes(State.date) ? State.date : dates[0];
     const chosen = weekPhoneDate;
     const picker = el('div', 'week-phone-dates');

@@ -377,12 +377,12 @@ async function seedRoster(page) {
   await page.click('#tab-week');
   await page.waitForTimeout(400);
 
-  check('the week has eight columns',
-    (await page.locator('.week-table thead th').count()) === 8);
+  check('the week has six days plus the names column',
+    (await page.locator('.week-table thead th').count()) === 7);
   check('the week starts on Friday, the way the accounts run',
     (await page.locator('.week-table thead th').nth(1).textContent()).includes('שישי'));
-  check('and Saturday rests, greyed but keeping its place',
-    (await page.locator('.week-table thead th.col-rest').count()) === 1);
+  check('Saturday is omitted from the week',
+    (await page.locator('.week-table thead th.col-rest').count()) === 0 && !(await page.locator('.week-table thead').innerText()).includes('שבת'));
   check('a cell shows both sites rather than hiding one',
     (await page.locator('.week-cell.cell-filled').first().locator('.cell-line').count()) === 2);
   check('a doubled site is marked inside its own badge',
@@ -2800,9 +2800,9 @@ async function seedRoster(page) {
   const totals = await page.locator('.week-table tfoot td')
     .evaluateAll(nodes => nodes.map(n => n.textContent.trim()));
   check('the week counts how many people were out each day',
-    totals[4] === '2' && totals[5] === '1', JSON.stringify(totals));
+    totals[3] === '2' && totals[4] === '1', JSON.stringify(totals));
   check('and an absence is not counted as a day worked',
-    totals[5] === '1', JSON.stringify(totals));
+    totals[4] === '1', JSON.stringify(totals));
   await page.context().close();
 }
 
@@ -4338,8 +4338,8 @@ async function seedRoster(page) {
       legendShown: legend ? getComputedStyle(legend).display !== 'none' : false
     };
   });
-  check('all seven days are in the week, and the box is what scrolls',
-    week.cols === 8 && week.inner >= week.box, JSON.stringify(week));
+  check('all six working days are in the week, and the box is what scrolls',
+    week.cols === 7 && week.inner >= week.box, JSON.stringify(week));
   check('and every one of them is a 44px target',
     week.narrowest >= 44 && week.shortest >= 44, JSON.stringify(week));
   check('cells shrink to the site colour alone', week.nameHidden, JSON.stringify(week));
@@ -4349,7 +4349,7 @@ async function seedRoster(page) {
   const initials = await page.evaluate(() =>
     [...document.querySelectorAll('.week-table thead .day-initial')].map(n => n.textContent));
   check('every shrunk day letter is distinct',
-    new Set(initials).size === 7, JSON.stringify(initials));
+    new Set(initials).size === 6, JSON.stringify(initials));
   check('and Friday reads ו׳ the way a calendar writes it',
     initials.includes('ו׳'), JSON.stringify(initials));
   check('and the legend maps each colour back to its name', week.legendShown);
@@ -8865,7 +8865,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const filled = cells.filter(cell => cell.sites.length > 0);
   const absent = cells.filter(cell => cell.absent);
   check('the week drew cells of all three shapes to read',
-    cells.length === 14 && filled.length === 2 && absent.length === 1
+    cells.length === 12 && filled.length === 2 && absent.length === 1
       && filled.some(cell => cell.sites.length === 2),
     JSON.stringify({ cells: cells.length, filled: filled.length, absent: absent.length }));
 
