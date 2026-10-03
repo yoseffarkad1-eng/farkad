@@ -4193,3 +4193,32 @@ body.day-tight .topbar { margin-bottom: 2px; }
 .day-holiday-action { margin: 0; min-height: 44px; padding: 6px; flex-shrink: 0; }
 
 @media (max-width: 360px) { .day-tools .mode-prefix { display: none; } }
+
+/* Weekly paper uses its own page, leaving payroll/invoice A4 portrait intact. */
+.week-print-title { display: none; }
+@media print {
+    @page farkad-week { size: A4 landscape; margin: 10mm; }
+    body.week-print-layout { page: farkad-week; }
+    body.week-print-layout .app { max-width: none; padding: 0; margin: 0; }
+    #weekView .week-print-title { display: block; font-size: 15pt; margin: 0 0 4mm; color: #000; }
+    #weekView .week-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; }
+    #weekView .week-table .corner { width: 18%; min-width: 0; max-width: none; }
+    #weekView .week-table .name-cell { width: 18%; max-width: none; white-space: normal; font-size: 10pt; }
+    #weekView .week-table .name-clip { display: block; max-width: none; overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; font-size: 10pt; }
+    #weekView .week-table th, #weekView .week-table td { height: auto; min-height: 0; padding: 3pt; vertical-align: middle; border: .5pt solid #999; }
+    #weekView .week-table thead { display: table-header-group; }
+    #weekView .week-table tfoot { display: table-row-group; break-inside: avoid; }
+    #weekView .week-table tr { break-inside: avoid; }
+    #weekView .week-table .day-full { display: block; font-size: 10pt; }
+    #weekView .week-table .day-initial { display: none; }
+    #weekView .week-table thead small { font-size: 9pt; color: #333; }
+    #weekView .week-table .cell-line { display: flex; flex-wrap: wrap; justify-content: center; gap: 3pt; width: auto; height: auto; min-height: 0; padding: 2pt 3pt; margin: 2pt 0; font-size: 9pt; white-space: normal; }
+    #weekView .week-table .site-name, #weekView .week-table .tag-rate { display: inline; overflow: visible; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+    #weekView .week-table .site-mark { position: static; font-size: 8pt; }
+    #weekView .week-table .cell-double::after, #weekView .week-table .cell-extra::after,
+    #weekView .week-table .cell-absent::before, #weekView .week-strip::after { display: none; }
+    #weekView .week-table .cell-absent { font-size: 9pt; color: #333; }
+    #weekView .week-table .col-rest { opacity: 1; }
+    #weekView .week-table .name-cell .badge { display: inline; font-size: 8pt; }
+    #weekView .week-legend, #weekView .week-legend-note { display: none; }
+}

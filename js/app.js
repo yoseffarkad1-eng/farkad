@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v125';
+const APP_VERSION = 'v126';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -79,6 +79,7 @@ function render() {
     // recording surfaces and quiets the dock under it, and the progress row adds its
     // badge - the block is SAID where the tap would land, not only explained at the top.
     if (document.body && document.body.classList) {
+        document.body.classList.toggle('week-print-layout', currentView === 'week');
         document.body.classList.toggle('writes-blocked',
             typeof farkadWritesBlocked === 'function' && farkadWritesBlocked());
     }

@@ -315,6 +315,8 @@ function readWeekPrintout() {
             chips: [...td.querySelectorAll('.cell-line')].map(line => ({
                 // The colour the screen computed for THIS chip - paintSite wrote a
                 // var(--site-N) inline and the scheme resolved it. Read, not recomputed.
+                name: printoutText(line.querySelector('.site-name')),
+                rate: printoutText(line.querySelector('.tag-rate')),
                 color: getComputedStyle(line).backgroundColor,
                 double: line.classList.contains('cell-double'),
                 extra: line.classList.contains('cell-extra')
@@ -473,7 +475,7 @@ function planWeekPrintout(spec, probe, family) {
     const TITLE_H = 34;
     const HEAD_H = 46;
     const FOOT_H = 34;
-    const DAY_W = 64;
+    let DAY_W = 140;
     const CHIP = 18;
     const CHIP_GAP = 4;
     const LEGEND_H = 26;
@@ -482,12 +484,22 @@ function planWeekPrintout(spec, probe, family) {
     probe.font = printoutFont(600, 14, family);
     const widest = spec.rows.reduce((max, row) =>
         Math.max(max, probe.measureText(row.name).width), probe.measureText(spec.totals ? spec.totals.label : '').width);
-    const NAME_W = Math.max(96, Math.min(200, Math.ceil(widest) + 24));
-
-    const rowHeights = spec.rows.map(row => {
-        const deepest = row.cells.reduce((max, cell) => Math.max(max, cell.chips.length), 0);
-        return Math.max(40, 12 + deepest * (CHIP + CHIP_GAP));
-    });
+    const NAME_W = Math.max(160, Math.min(300, Math.ceil(widest) + 24));
+    const names = spec.rows.map(row => printoutWrap(probe, row.name, NAME_W - 16));
+    // Site and rate words come from the rendered cells, never from another calculation.
+    probe.font = printoutFont(500, 14, family);
+    const labels = spec.rows.map(row => row.cells.map(cell => cell.chips.map(chip =>
+        printoutWrap(probe, [chip.name, chip.rate].filter(Boolean).join(' · '), DAY_W - CHIP - 24))));
+    const rowHeights = spec.rows.map((row, r) => Math.max(36,
+        12 + names[r].length * 18 + (row.badge ? 16 : 0),
+        ...row.cells.map((cell, c) => 12 + cell.chips.reduce((sum, chip, k) =>
+            sum + Math.max(CHIP, labels[r][c][k].length * 18) + CHIP_GAP, 0))));
+    // A single shared image remains landscape even for a long crew. The existing bitmap
+    // cap bounds memory; paper paginates instead of shrinking rows to force one sheet.
+    const heightBound = rowHeights.reduce((sum, h) => sum + h, 0)
+        + 220 + spec.legend.length * LEGEND_H;
+    DAY_W = Math.max(DAY_W, Math.ceil((heightBound * 1.42 - PAD * 2 - NAME_W)
+        / Math.max(spec.days.length, 1)));
 
     probe.font = printoutFont(500, 14, family);
     const legendWidth = spec.legend.map(item => CHIP - 2 + 6 + Math.ceil(probe.measureText(item.name).width) + 18);
@@ -564,13 +576,16 @@ function planWeekPrintout(spec, probe, family) {
             ctx.fillStyle = paper.ink;
             ctx.textAlign = 'right';
             ctx.font = printoutFont(600, 14, family);
+            const nameHeight = names[rowIndex].length * 18 + (row.badge ? 16 : 0);
+            let nameY = y + (h - nameHeight) / 2 + 9;
+            names[rowIndex].forEach(line => {
+                ctx.fillText(printoutFit(ctx, line, NAME_W - 16), right - 8, nameY);
+                nameY += 18;
+            });
             if (row.badge) {
-                ctx.fillText(printoutFit(ctx, row.name, NAME_W - 16), right - 8, y + h / 2 - 7);
                 ctx.fillStyle = paper.ink3;
-                ctx.font = printoutFont(500, 11, family);
-                ctx.fillText(row.badge, right - 8, y + h / 2 + 8);
-            } else {
-                ctx.fillText(printoutFit(ctx, row.name, NAME_W - 16), right - 8, y + h / 2);
+                ctx.font = printoutFont(500, 12, family);
+                ctx.fillText(row.badge, right - 8, nameY);
             }
 
             row.cells.forEach((cell, index) => {
@@ -583,13 +598,21 @@ function planWeekPrintout(spec, probe, family) {
                     ctx.fillText('—', centre, y + h / 2);
                     return;
                 }
-                const stack = cell.chips.length * (CHIP + CHIP_GAP) - CHIP_GAP;
+                const heights = cell.chips.map((chip, k) => Math.max(CHIP, labels[rowIndex][index][k].length * 18));
+                const stack = heights.reduce((sum, value) => sum + value + CHIP_GAP, -CHIP_GAP);
                 let cy = y + (h - stack) / 2;
-                cell.chips.forEach(chip => {
-                    const cx = centre - CHIP / 2;
-                    printoutChip(ctx, chip, cx, cy, CHIP, family);
-                    layout.chips.push({ x: cx, y: cy, w: CHIP, h: CHIP, color: chip.color });
-                    cy += CHIP + CHIP_GAP;
+                cell.chips.forEach((chip, k) => {
+                    const cx = x0 + DAY_W - CHIP - 8;
+                    const chipY = cy + (heights[k] - CHIP) / 2;
+                    printoutChip(ctx, chip, cx, chipY, CHIP, family);
+                    layout.chips.push({ x: cx, y: chipY, w: CHIP, h: CHIP, color: chip.color });
+                    ctx.font = printoutFont(500, 14, family);
+                    ctx.fillStyle = paper.ink;
+                    ctx.textAlign = 'right';
+                    labels[rowIndex][index][k].forEach((line, l) => {
+                        ctx.fillText(printoutFit(ctx, line, DAY_W - CHIP - 24), cx - 6, cy + 9 + l * 18);
+                    });
+                    cy += heights[k] + CHIP_GAP;
                 });
             });
 
