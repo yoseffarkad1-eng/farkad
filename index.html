@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v121">
+<meta name="farkad-build" content="v122">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -47,8 +47,8 @@
         <div class="topbar-actions">
             <!-- Infrequent tools stay behind settings. The owner requested advances
                  as a separate daily-use screen, accessible from the dock. -->
-            <button type="button" class="btn-icon" id="settingsBtn" onclick="openSettings()"
-                    aria-label="הגדרות וכלים" aria-haspopup="dialog">⋯</button>
+            <button type="button" class="btn-secondary settings-open" id="settingsBtn" onclick="openSettings()"
+                    aria-label="הגדרות וכלים" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.2-2 .9-2-.6-2 3.4 1.5 1.7v2.3L2.4 15l2 3.4 2-.6 2 .9L9 21h4l.6-2.3 2-.9 2 .6 2-3.4-1.5-1.8V11l1.5-1.7-2-3.4-2 .6-2-.9L13 3Z"/><circle cx="11" cy="12" r="3"/></svg><span>הגדרות</span></button>
         </div>
     </header>
 
@@ -172,116 +172,83 @@
 
 </div>
 
-<!-- הגדרות וכלים. Opened by the ⋯ in the header; the tab bar underneath it does not
-     move, so the way out is the same ✕ that closes every other sheet in this app. -->
+<!-- Settings has a visible name in the header. Jump buttons move within this one
+     sheet; no account warnings or restore controls are hidden in another tab. -->
 <div class="settings-panel" id="settingsPanel" role="dialog" aria-modal="true"
      aria-labelledby="settingsTitle" aria-hidden="true">
     <div class="settings-head">
-        <h2 id="settingsTitle" tabindex="-1">הגדרות וכלים</h2>
-        <button type="button" class="btn-icon" onclick="closeSettings()" aria-label="סגור">✕</button>
+        <div><p class="settings-eyebrow">פרקד · ניהול עובדים</p>
+            <h2 id="settingsTitle" tabindex="-1">הגדרות</h2></div>
+        <button type="button" class="btn-secondary settings-close" onclick="closeSettings()" aria-label="סגור"><span>חזרה</span><span aria-hidden="true">✕</span></button>
     </div>
+    <nav class="settings-nav" aria-label="קיצורי דרך בהגדרות">
+        <button type="button" class="btn-secondary" onclick="settingsJump('settingsDaily')">כללי</button>
+        <button type="button" class="btn-secondary" onclick="settingsJump('settingsBackups')">גיבוי ושחזור</button>
+        <button type="button" class="btn-secondary" onclick="settingsJump('settingsHelp')">מכשיר ועזרה</button>
+    </nav>
     <div class="settings-body">
-        <!-- Six groups, in the order a person needs their answers: is anybody else
-             holding a copy, then the copy this device can make, then the doors that
-             REPLACE data - a group of their own, because a destructive door must never
-             sit beside a safe one - then the emergency exit, the running version, and
-             what this device itself is doing. -->
-        <section class="settings-group">
-            <h3>ענן וסנכרון</h3>
-            <!-- The same words the line at the foot of every screen is showing right
-                 now. updateSyncNotice (js/sync/sync.js) owns them and writes them into
-                 #storageNotice; renderSettingsSyncLine copies them here on every render
-                 rather than composing a second version that could drift. -->
-            <p class="hint" id="settingsSyncStatus"></p>
-            <!-- WHY, when the line above says the sync failed. Hidden until it does.
-                 The line above says the same thing for a dead tunnel and for a cloud
-                 that refuses this phone, and those are different evenings: one is wait,
-                 the other is a rules deploy or a sign-in that nobody will do while
-                 nothing on the screen names it. renderSettingsSyncLine reads
-                 FarkadSync.lastError into this; textContent only. -->
-            <p class="hint" id="settingsSyncReason" hidden></p>
-            <!-- THE HELD RECORDS. A write that lost a race while this phone was away is
-                 kept on the disk and sent by nothing; the screen shows THIS phone's
-                 value laid over the snapshot, so nothing on the phone said which records
-                 or what the cloud held - the owner's phone held six cells of one
-                 Thursday until a rescue export named them. renderHeldRecords
-                 (js/ui/settings.js) draws every held record here with both sides and
-                 the two answers; hidden, box and all, while nothing is held. -->
-            <div id="heldRecords" hidden></div>
-            <!-- Ships hidden and is shown by the adapter once a project actually answers:
-                 with no Firebase behind it, a "connect to the cloud" button is a door
-                 onto nothing. It lived in the header, where it was the widest thing on a
-                 phone and pressed about twice a year. -->
-            <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
+        <section class="settings-section" aria-labelledby="settingsDaily">
+            <div class="settings-section-title"><h3 id="settingsDaily" tabindex="-1">כללי</h3><span>חיבור ועדכונים</span></div>
+            <section class="settings-group settings-group-sync">
+                <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a5 5 0 1 1 .6-10A7 7 0 0 1 21 11a3.5 3.5 0 0 1-1 7H7Z"/><path d="m9 13 2 2 4-4"/></svg></span><div><h3>ענן וסנכרון</h3><p class="hint">מצב החיבור של המכשיר הזה</p></div></div>
+                <p class="hint settings-status" id="settingsSyncStatus"></p>
+                <p class="hint" id="settingsSyncReason" hidden></p>
+                <!-- Unresolved records stay visible on the first card. -->
+                <div id="heldRecords" hidden></div>
+                <button type="button" class="btn-secondary" id="syncAuthBtn" onclick="farkadSignIn()" style="display:none">☁️ התחבר לענן</button>
+            </section>
+            <!-- Financial decisions remain beside the sync issues, before routine tools. -->
+            <section id="carryMigrationBox" style="display:none">
+                <h3>העברת מקדמות לחשבון נמשך</h3>
+                <p class="hint" id="carryMigrationLead"></p>
+                <div id="carryMigrationRows"></div>
+                <div id="carryMigrationActions"></div>
+            </section>
+            <section class="settings-group settings-update">
+                <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M18 18a8 8 0 0 1-13-2"/></svg></span><div><h3>עדכון וגרסה</h3><p class="hint">בדיקה אם יש גרסה חדשה לאפליקציה</p></div></div>
+                <div class="app-version"><span id="appVersion"></span>
+                    <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button></div>
+            </section>
         </section>
 
-        <section class="settings-group settings-group-backup">
-            <h3>גיבוי</h3>
-            <!-- The one primary action on this sheet. Everything else here reads,
-                 restores or replaces; this is the only thing that gets a copy OFF the
-                 phone, which is why it does not share a row with anything. -->
-            <button type="button" class="backup-primary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
-            <p class="hint" id="backupAge"></p>
-            <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
+        <section class="settings-section" aria-labelledby="settingsBackups">
+            <div class="settings-section-title"><h3 id="settingsBackups" tabindex="-1">גיבוי ושחזור</h3><span>עותק נוסף של העבודה</span></div>
+            <section class="settings-group settings-group-backup">
+                <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 14v6h14v-6"/></svg></span><div><h3>גיבוי</h3><p class="hint">שמירת עותק של הנתונים בקובץ</p></div></div>
+                <p class="hint" id="backupAge"></p>
+                <button type="button" class="backup-primary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
+                <p class="hint">קובץ הגיבוי אינו סנכרון. שמור אותו מדי פעם גם אם הסנכרון פעיל.</p>
+            </section>
+            <!-- Replacement doors have their own card and guard sentence. -->
+            <section class="settings-group settings-group-restore">
+                <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4v6h6M4 9a8 8 0 1 1 1 9M12 8v5l3 2"/></svg></span><div><h3>ייבוא ושחזור</h3><p class="hint">פתיחת גיבוי או חזרה למצב קודם</p></div></div>
+                <p class="hint settings-restore-warning">שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר כגיבוי מקומי לפני כן.</p>
+                <div class="backup-actions">
+                    <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
+                    <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
+                </div>
+                <div class="restore-points" id="restorePoints"></div>
+                <div class="restore-points" id="cloudRestorePoints"></div>
+            </section>
         </section>
 
-        <section class="settings-group">
-            <h3>ייבוא ושחזור</h3>
-            <!-- Every door in this group replaces the record. Said once, above all of
-                 them, before any of them is pressed. -->
-            <p class="hint">שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר כגיבוי מקומי לפני כן.</p>
-            <div class="backup-actions">
-                <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
-                <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
-                <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
+        <section class="settings-section" aria-labelledby="settingsHelp">
+            <div class="settings-section-title"><h3 id="settingsHelp" tabindex="-1">מכשיר ועזרה</h3><span>כשצריך לבדוק משהו</span></div>
+            <div class="settings-help-grid" id="settingsHelpCards">
+                <section class="settings-group">
+                    <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4M11 19h2"/></svg></span><div><h3>מצב המכשיר</h3><p class="hint">אחסון והתקנה</p></div></div>
+                    <p class="hint" id="storageRoom"></p>
+                    <p class="hint" id="installState"></p>
+                    <p class="hint" id="ledgerParity" style="display:none"></p>
+                </section>
+                <section class="settings-group">
+                    <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1 .7-1.5 1-1.5 3M12 17h.01"/></svg></span><div><h3>שחזור חירום</h3><p class="hint">כלי עזר לטיפול בתקלה</p></div></div>
+                    <p class="hint">לשחזור חירום בלבד.</p>
+                    <button type="button" class="btn-secondary" onclick="exportRecoveryData()">💾 ייצא נתונים גולמיים</button>
+                </section>
+                <!-- The privacy-preserving technical report is inserted here by settings.js. -->
             </div>
-            <div class="restore-points" id="restorePoints"></div>
-            <!-- Copies kept in the cloud, one per day, which a deletion cannot follow:
-                 the rules there allow create and nothing else. Hidden entirely while
-                 sync is off. -->
-            <div class="restore-points" id="cloudRestorePoints"></div>
-        </section>
-
-        <section class="settings-group">
-            <h3>שחזור חירום</h3>
-            <!-- The raw-records export, findable BEFORE it is needed. It used to be
-                 reachable only from the recovery banner - that is, only after damage was
-                 detected - and the day somebody is told over the phone to "export the
-                 raw data" is precisely the day nothing should have to go wrong first. -->
-            <button type="button" class="btn-secondary" onclick="exportRecoveryData()">💾 ייצא נתונים גולמיים</button>
-            <p class="hint">לשחזור חירום בלבד.</p>
-        </section>
-
-        <section class="settings-group">
-            <h3>עדכון וגרסה</h3>
-            <!-- Which version is actually running, and the way to move off it. An
-                 installed app can sit on a cached build for a long time and there is
-                 nothing on any other screen that would say so. -->
-            <p class="hint app-version">
-                <span id="appVersion"></span>
-                <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button>
-            </p>
-        </section>
-
-        <section class="settings-group">
-            <h3>מצב המכשיר</h3>
-            <p class="hint" id="storageRoom"></p>
-            <p class="hint" id="installState"></p>
-            <!-- The v80 advances ledger, when this build carries the parity check.
-                 renderLedgerParity feature-detects it and leaves this line hidden when
-                 the check is not there to ask. -->
-            <p class="hint" id="ledgerParity" style="display:none"></p>
-        </section>
-
-        <!-- THE CARRY MIGRATION, and the one screen in this app whose whole purpose is to
-             be read before a button is pressed. Hidden unless there is something to
-             approve; renderCarryMigration feature-detects the plan and claims nothing when
-             it cannot be computed. See js/ui/settings.js. -->
-        <section id="carryMigrationBox" style="display:none">
-            <h3>העברת מקדמות לחשבון נמשך</h3>
-            <p class="hint" id="carryMigrationLead"></p>
-            <div id="carryMigrationRows"></div>
-            <div id="carryMigrationActions"></div>
         </section>
     </div>
 </div>
