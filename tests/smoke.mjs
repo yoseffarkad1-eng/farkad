@@ -6695,12 +6695,14 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   });
   await page.waitForTimeout(300);
 
+  await page.locator('.report-range-heading').click();
   await page.getByRole('button', { name: 'חודש שעבר' }).click();
   await page.waitForTimeout(300);
   const range = await page.evaluate(() => ({ ...REPORT_RANGE }));
   check('last month runs from the first to the last of the month before',
     range.from === '2026-02-01' && range.to === '2026-02-28', JSON.stringify(range));
 
+  await page.locator('.report-range-heading').click();
   await page.getByRole('button', { name: 'החודש' }).click();
   await page.waitForTimeout(300);
   const now = await page.evaluate(() => ({ ...REPORT_RANGE }));
