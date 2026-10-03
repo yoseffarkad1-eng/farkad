@@ -35,6 +35,8 @@ try {
             && top('.report-worker-picker') < top('.report-output-actions');
     });
     check('type, dates and workers come before sharing', order);
+    check('date presets start folded away', !(await page.locator('.range-chips').isVisible()));
+    check('compact controls fit above the report', await page.locator('.reports-controls').evaluate(n=>n.getBoundingClientRect().height<230));
     same('both payroll cycles remain in the image', await page.evaluate(() => readReportPrintout().groups.length), 2);
 
     suite('search narrows choices without silently narrowing the report');
@@ -68,10 +70,14 @@ try {
     await page.locator('.report-worker-picker summary').click();
 
     suite('date and client boundaries still drive every output');
+    if (!(await page.locator('.range-wrap').evaluate(n=>n.open))) await page.locator('.report-range-heading').click();
     await page.getByRole('button',{name:'השבוע · שישי–חמישי',exact:true}).click();
+    check('choosing a preset folds dates away', !(await page.locator('.range-chips').isVisible()));
     same('weekly dates remain Friday through Thursday', await page.evaluate(() => ({...REPORT_RANGE})), {from:'2026-10-02',to:'2026-10-08'});
+    if (!(await page.locator('.range-wrap').evaluate(n=>n.open))) await page.locator('.report-range-heading').click();
     await page.getByRole('button',{name:'שבוע קודם',exact:true}).click();
     same('previous week moves the whole range', await page.evaluate(() => ({...REPORT_RANGE})), {from:'2026-09-25',to:'2026-10-01'});
+    if (!(await page.locator('.range-wrap').evaluate(n=>n.open))) await page.locator('.report-range-heading').click();
     await page.getByRole('button',{name:'תקופת החשבון',exact:true}).click();
     await page.getByRole('button',{name:'לפי אתר',exact:true}).click();
     await page.locator('.invoice-picker').getByRole('button',{name:'הרצליה',exact:true}).click();
@@ -90,7 +96,8 @@ try {
     for (const [width,scheme,scale=1] of [[320,'light'],[390,'light'],[430,'dark'],[1100,'light'],[320,'light',2]]) {
         await page.setViewportSize({width,height:844});
         await page.emulateMedia({colorScheme:scheme});
-        await page.getByRole('button',{name:'תאריכים אחרים',exact:true}).click();
+        if (!(await page.locator('.range-wrap').evaluate(n=>n.open))) await page.locator('.report-range-heading').click();
+    await page.getByRole('button',{name:'תאריכים אחרים',exact:true}).click();
         if (!(await search.isVisible())) await page.locator('.report-worker-picker summary').click();
         if (scale === 2) await page.evaluate(() => {
             const sizes = [...document.querySelectorAll('#reportsView *')].map(n => [n,parseFloat(getComputedStyle(n).fontSize)]);

@@ -1,3 +1,9 @@
+## v129 — compact report controls
+
+The date range is a single expandable row; presets appear only when changing it,
+and collapse after selection. Custom dates remain open for editing. Worker selection
+has a shorter summary. All financial explanations and output boundaries are retained.
+
 ## v128 — organised reports page
 
 Report type now comes first, followed by one panel for dates and worker selection,

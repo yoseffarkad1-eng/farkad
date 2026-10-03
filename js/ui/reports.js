@@ -11,6 +11,7 @@ const REPORT_RANGE = { from: null, to: null };
 let REPORT_WORKERS = null;
 let REPORT_WORKER_SEARCH = '';
 let REPORT_PICKER_OPEN = false;
+let REPORT_RANGE_OPEN = false;
 const REPORT_DEDUCTIONS = new Map();
 let ADVANCE_WORKER = null;
 let ADVANCE_SEARCH = '';
@@ -258,8 +259,8 @@ function renderReportWorkerPicker() {
     box.open = REPORT_PICKER_OPEN;
     box.addEventListener('toggle', () => { REPORT_PICKER_OPEN = box.open; });
     box.appendChild(el('summary', null, REPORT_WORKERS === null
-        ? 'עובדים בדוח: כולם · בחירת עובדים'
-        : `עובדים בדוח: ${State.schedule.workers.filter(w => reportWorkerChosen(w.id)).length} · שינוי הבחירה`));
+        ? 'כל העובדים'
+        : `עובדים שנבחרו: ${State.schedule.workers.filter(w => reportWorkerChosen(w.id)).length}`));
     const actions = el('div', 'finance-actions');
     actions.appendChild(button('בחר הכל', 'btn-secondary', () => { REPORT_WORKERS = null; REPORT_PICKER_OPEN = true; render(); }));
     actions.appendChild(button('נקה בחירה', 'btn-secondary', () => { REPORT_WORKERS = new Set(); REPORT_PICKER_OPEN = true; render(); }));
@@ -433,8 +434,10 @@ function renderOverCapNotice(root) {
 // the odd question, folded away behind their own chip - eight controls in a row was a
 // cockpit, and the person flying it is sixty-two.
 function renderRangePicker() {
-    const wrap = el('div', 'range-wrap');
-    const heading = el('div', 'report-range-heading');
+    const wrap = el('details', 'range-wrap');
+    wrap.open = REPORT_RANGE_OPEN;
+    wrap.addEventListener('toggle', () => { if (wrap.isConnected) REPORT_RANGE_OPEN = wrap.open; });
+    const heading = el('summary', 'report-range-heading');
     heading.appendChild(el('span', null, 'תקופת הדוח'));
     // One left-to-right run keeps the start and end in chronological order in RTL.
     heading.appendChild(el('strong', 'range-current',
@@ -503,6 +506,7 @@ function presetChip(key, label, apply) {
     const on = REPORT_PRESET === key;
     const chip = button(label, on ? 'chip-on' : 'chip-off', () => {
         REPORT_PRESET = key;
+        REPORT_RANGE_OPEN = key === 'custom';
         apply();
         render();
     });
