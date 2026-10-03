@@ -1,3 +1,16 @@
+## v125 — readable phone week
+
+On screens up to 700px, the week opens on a selected day with full worker/site names,
+explicit double-day and overtime labels, and separate absence/no-record groups. The
+seven date buttons browse without changing the day being edited or writing work.
+The original weekly grid remains available from “טבלת שבוע”; desktop and print still
+use that grid. Phone navigation groups previous/current/next week together.
+
+The new week browser suite covers dates, two-site counting, inactive historical
+workers/sites, redraw, empty days, editing the selected day, narrow screens, dark mode,
+doubled text, desktop and print. Existing grid geometry regressions explicitly select
+the retained grid. Exact release-gate counts and deployed tree are recorded in the PR.
+
 ## v124 — compact crew page
 
 The crew heading occupies one row on ordinary phone text sizes. Search comes before

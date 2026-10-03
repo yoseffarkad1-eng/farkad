@@ -68,6 +68,8 @@ async function open({ width, height, scheme = 'light', touch = true, mode = 'wor
     await page.waitForTimeout(300);
 
     await page.evaluate(([count, mode]) => {
+        // Grid geometry regressions exercise the optional grid. week.browser.mjs covers the phone default.
+        weekPhoneMode = 'grid';
         // Pin the clock: Friday starts a new account with no missing-day warning.
         todayStr = () => '2026-08-12';
         State.schedule.workers = Array.from({ length: count }, (unused, i) => ({
