@@ -1,3 +1,15 @@
+## v126 — landscape weekly printout
+
+Weekly paper uses a named A4 landscape page with 10mm margins, a visible date-range
+heading, full site/rate text and wrapping worker names. Headers repeat across pages;
+rows are not squeezed into one sheet. Payroll/invoice paper stays portrait. The iPhone
+PNG fallback is landscape too and draws site/rate words beside each color marker.
+The weekly screen is unchanged.
+
+A real-PDF browser suite checks page dimensions, all 30 workers and seven sites,
+pagination, overtime, bounds, portrait report isolation and landscape image text.
+Exact release-gate and deployed-tree evidence is recorded in the PR.
+
 ## v125 — readable phone week
 
 On screens up to 700px, the week opens on a selected day with full worker/site names,

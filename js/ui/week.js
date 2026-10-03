@@ -54,6 +54,8 @@ function renderWeek() {
     root.appendChild(renderWeekHeader());
 
     const dates = weekDates();
+    root.appendChild(el('h1', 'week-print-title', 'שבוע ' + dateRange(
+        formatFullDate(parseLocalDate(dates[0])), formatFullDate(parseLocalDate(dates[6])))));
     const workers = weekWorkers(dates);
 
     if (workers.length === 0) {
