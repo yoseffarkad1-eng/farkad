@@ -12,6 +12,7 @@ let REPORT_WORKERS = null;
 let REPORT_WORKER_SEARCH = '';
 let REPORT_PICKER_OPEN = false;
 let REPORT_RANGE_OPEN = false;
+let REPORT_CARD_GRID = true;
 const REPORT_DEDUCTIONS = new Map();
 let ADVANCE_WORKER = null;
 let ADVANCE_SEARCH = '';
@@ -376,6 +377,7 @@ function renderReports() {
     // is what the print stylesheet keys on.
     if (document.body && document.body.classList) {
         document.body.classList.toggle('client-scoped', Boolean(scopedExportPlace()));
+        document.body.classList.toggle('report-card-grid', REPORT_CARD_GRID);
     }
     const payroll = renderPayrollTable();
     const invoice = renderInvoiceTable();
@@ -769,6 +771,13 @@ function renderPayrollTable() {
         return section;
     }
 
+    const layout = button(REPORT_CARD_GRID ? 'תצוגה מפורטת' : 'תצוגת כרטיסים', 'btn-secondary report-layout-toggle', () => {
+        REPORT_CARD_GRID = !REPORT_CARD_GRID; render();
+        const again = document.querySelector('.report-layout-toggle');
+        if (again) again.focus({ preventScroll: true });
+    });
+    layout.setAttribute('aria-pressed', REPORT_CARD_GRID ? 'false' : 'true');
+    section.appendChild(layout);
     const groups = payrollGroups(allRows);
     if (groups.length > 1) {
         const jump = el('nav', 'report-cycle-nav');
@@ -796,6 +805,45 @@ function renderPayrollTable() {
         section.appendChild(payrollGroupTable(group.rows));
     });
     return section;
+}
+
+// The compact phone cards read the cells already prepared for the full report,
+// so a formatted amount, missing rate or deduction cannot diverge between views.
+function renderReportCards(table, rows, headers) {
+    const grid = el('div', 'report-worker-cards');
+    const source = [...table.querySelectorAll('tbody tr')];
+    rows.forEach((row, index) => {
+        const cells = source[index] ? [...source[index].children] : [];
+        const value = label => {
+            const at = headers.indexOf(label);
+            return at < 0 || !cells[at] ? null : cells[at].textContent;
+        };
+        const card = button('', 'report-worker-tile', () => openWorkerDays(row.workerId));
+        card.setAttribute('data-report-worker-id', row.workerId);
+        card.appendChild(el('strong', 'report-tile-name', row.name));
+        const amount = el('span', 'report-tile-amount');
+        amount.appendChild(el('span', 'report-tile-label', 'נותר לתשלום'));
+        amount.appendChild(el('strong', 'report-tile-value', value('לתשלום') || '—'));
+        card.appendChild(amount);
+        const metrics = el('span', 'report-tile-metrics');
+        ['ימי נוכחות', 'ימי שכר'].forEach(label => {
+            const metric = el('span');
+            metric.appendChild(el('strong', null, value(label) || '0'));
+            metric.appendChild(el('span', 'report-tile-label', label));
+            metrics.appendChild(metric);
+        });
+        card.appendChild(metrics);
+        const deduction = deductionColumnName(rows);
+        if (headers.includes(deduction)) {
+            const line = el('span', 'report-tile-deduction');
+            line.appendChild(el('span', null, deduction));
+            line.appendChild(el('strong', null, value(deduction) || '0'));
+            card.appendChild(line);
+        }
+        card.appendChild(el('span', 'report-tile-open', 'פירוט ›'));
+        grid.appendChild(card);
+    });
+    return grid;
 }
 
 function payrollGroupTable(rows) {
@@ -940,6 +988,7 @@ function payrollGroupTable(rows) {
             `פירוט הימים של ${rows[index].name}`));
     });
 
+    section.appendChild(renderReportCards(table, rows, headers));
     section.appendChild(scrollWrap(table));
 
     if (!anyRate) {
