@@ -1925,6 +1925,65 @@ a[href]:focus-visible,
 .report-section-toggle button { flex: 1; min-height: 44px; }
 @media print { .report-section-toggle { display: none !important; } }
 
+/* Reports are chosen in reading order: type, dates, workers, then output. Keep all
+   presentation changes screen-only so the client paper and image keep their tables. */
+@media screen {
+    .reports-heading { font-size: 22px; margin: 0 0 10px; }
+    .reports-controls {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 12px;
+        margin-bottom: 10px;
+    }
+    .reports-controls .report-section-toggle { display: flex; margin: 0 0 12px; width: 100%; }
+    .reports-controls .report-section-toggle button { font-weight: 700; min-width: 0; }
+    .reports-controls .range-wrap { margin: 0; gap: 10px; }
+    .report-range-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+    .report-range-heading > span { color: var(--ink-2); font-size: 14px; }
+    .report-range-heading .range-current { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+    .reports-controls .range-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .reports-controls .range-chips button { min-width: 0; min-height: 44px; padding: 8px 6px; font-size: 14px; line-height: 1.35; white-space: normal; }
+    .reports-controls .range-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 0; border: 0; }
+    .report-date-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 14px; color: var(--ink-2); }
+    .reports-controls .range-bar input { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; }
+    .reports-controls .report-worker-picker { margin: 10px 0 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; padding: 0; }
+    .reports-controls .report-worker-picker summary { gap: 10px; font-size: 14px; padding-block: 6px; }
+    .reports-controls .report-worker-picker summary::after { content: '+'; margin-inline-start: auto; font-size: 22px; flex: none; }
+    .reports-controls .report-worker-picker[open] summary::after { content: '−'; }
+    #reportWorkerSearch { width: 100%; min-width: 0; min-height: 44px; font-size: 16px; margin-block: 4px 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--ink); }
+    .report-worker-list { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+    .report-worker-choice { border-bottom: 1px solid var(--line-soft); }
+    .reports-controls .report-worker-choice input { font-size: 16px; }
+    .report-worker-choice[hidden] { display: none; }
+    .report-output-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 18px; }
+    .report-output-actions button { min-width: 0; min-height: 48px; padding: 8px 6px; font-size: 14px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+    #reportsView .report h2 { font-size: 19px; margin-bottom: 4px; }
+    #reportsView .link-cell { min-width: 44px; min-height: 44px; }
+    #reportsView .report-group { display: flex; align-items: center; gap: 10px; margin: 18px 0 6px; font-size: 17px; color: var(--accent); }
+    #reportsView .report-group::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+    #reportsView .invoice-bars { background: var(--surface); padding: 14px; border: 1px solid var(--line); border-radius: 14px; }
+    #reportsView .invoice-picker { gap: 6px; }
+    #reportsView .invoice-picker-label { flex-basis: 100%; }
+    #reportsView .invoice-bar-name { overflow-wrap: anywhere; min-width: 0; }
+    #reportsView .invoice-bar-count { flex-shrink: 0; }
+}
+@media screen and (max-width: 700px) {
+    #reportsView .report-payroll tbody tr { background: var(--surface); padding: 12px; border-radius: 14px; }
+    #reportsView .report-payroll tbody td.cell-net { padding-block: 6px; }
+    #reportsView .report-payroll tbody td:first-child .link-cell { font-size: 18px; font-weight: 750; }
+    #reportsView .report-payroll tbody td[data-label="נצבר"] { font-size: 17px; font-weight: 700; color: var(--ink); padding-top: 8px; }
+    #reportsView .report-payroll tfoot tr { background: var(--accent-soft); border-color: var(--line); border-radius: 14px; }
+    #reportsView .report-payroll tfoot td:last-child { font-size: 20px; font-weight: 800; color: var(--accent); }
+}
+@media screen and (max-width: 379px) {
+    .reports-controls .range-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .reports-controls .range-bar { grid-template-columns: minmax(0, 1fr); }
+}
+@media print {
+    .reports-heading, .reports-controls, .report-output-actions { display: none !important; }
+}
+
 /* Restore points: dated, and folded shut under a counted summary - the board's collapsed
    row. Every date behind the fold replaces the record, so the list is opened on purpose
    rather than sitting unfolded beside the file picker. */
