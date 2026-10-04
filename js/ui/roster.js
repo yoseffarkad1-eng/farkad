@@ -208,10 +208,26 @@ function workerRow(worker, archiveAdvances) {
     toggle.setAttribute('role', 'switch');
     toggle.setAttribute('aria-checked', String(enabled));
     actions.appendChild(toggle);
-    actions.appendChild(button('עריכה', 'btn-icon crew-edit', () => editWorker(worker.id), `ערוך ${isolate(worker.name)}`));
+    const more = button('עוד ⋯', 'btn-icon crew-edit', () => openWorkerOptions(worker.id), `אפשרויות עבור ${isolate(worker.name)}`);
+    more.setAttribute('aria-haspopup', 'dialog');
+    actions.appendChild(more);
     row.appendChild(actions);
 
     return row;
+}
+
+// Secondary actions live behind one named target. The original guarded handlers
+// re-read the worker after this menu closes; the menu itself never changes the record.
+async function openWorkerOptions(workerId) {
+    const worker = State.worker(workerId);
+    if (!worker) return;
+    const choices = ['עריכת פרטים'];
+    if (permanentDeletionEnabled()) choices.push('מחיקת עובד');
+    choices.push('סגור');
+    const choice = await askChoice({title: worker.name, choices});
+    if (!State.worker(workerId)) return;
+    if (choice === 'עריכת פרטים') editWorker(workerId);
+    if (choice === 'מחיקת עובד') await deleteWorker(workerId);
 }
 
 // ---------------------------------------------------------------- reorder mode
@@ -722,17 +738,26 @@ function renderPlaceList() {
         row.appendChild(details);
 
         const actions = el('div', 'roster-actions');
-        actions.appendChild(button('עריכה', 'btn-icon crew-edit', () => renamePlaceById(place.id), `שנה שם ${isolate(place.name)}`));
-        actions.appendChild(button(
-            place.active === false ? 'הפעלה' : 'כיבוי',
-            'btn-icon crew-edit',
-            () => togglePlaceActive(place.id),
-            place.active === false ? `החזר את ${isolate(place.name)}` : `העבר את ${isolate(place.name)} לארכיון`
-        ));
+        const more = button('עוד ⋯', 'btn-icon crew-edit', () => openPlaceOptions(place.id), `אפשרויות עבור ${isolate(place.name)}`);
+        more.setAttribute('aria-haspopup', 'dialog');
+        actions.appendChild(more);
         row.appendChild(actions);
 
         container.appendChild(row);
     });
+}
+
+async function openPlaceOptions(placeId) {
+    const place = State.schedule.places.find(item => item.id === placeId);
+    if (!place) return;
+    const wasActive = place.active !== false;
+    const visibility = wasActive ? 'הסתרת האתר מהרשימה' : 'החזרת האתר לרשימה';
+    const choice = await askChoice({title: place.name, choices: ['שינוי שם האתר', visibility, 'סגור']});
+    const live = State.schedule.places.find(item => item.id === placeId);
+    if (!live) return;
+    if (choice === 'שינוי שם האתר') await renamePlaceById(placeId);
+    // A sync while this menu was open must not reverse somebody else's new status.
+    if (choice === visibility && (live.active !== false) === wasActive) await togglePlaceActive(placeId);
 }
 
 // ---------------------------------------------------------------- vehicles

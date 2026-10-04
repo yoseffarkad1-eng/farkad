@@ -211,6 +211,11 @@ try {
     check('double-day note remains in details',(await page.locator('#workerDaysBody').innerText()).includes('כפול'));
     check('holiday date remains in details',await page.locator('#workerDaysBody .wday-absent').isVisible());
     check('overtime note remains in details',(await page.locator('#workerDaysBody').innerText()).includes('+3'));
+    await page.waitForTimeout(250);
+    const detailRect = await page.locator('#workerDaysModal .modal-content').evaluate(n=>{const r=n.getBoundingClientRect();return {width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight};});
+    check('phone worker details use the full readable screen',Math.abs(detailRect.width-detailRect.viewportWidth)<=1&&Math.abs(detailRect.height-detailRect.viewportHeight)<=1,JSON.stringify(detailRect));
+    await page.locator('#workerDaysBody').evaluate(n=>n.parentElement.scrollTop=n.parentElement.scrollHeight);
+    check('worker details keep a reachable return action after scrolling',await page.locator('.worker-detail-back').evaluate(n=>{const r=n.getBoundingClientRect();return r.top>=0&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===n;}));
     await page.evaluate(()=>closeWorkerDays());
     await page.locator('.report-layout-toggle').click();
     check('full report retains the attendance breakdown',await page.locator('.report-payroll tbody [data-label="ימי נוכחות"]').isVisible());

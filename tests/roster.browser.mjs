@@ -45,8 +45,18 @@ try {
     await page.locator('#rosterSearchClear').click();
     same('search never modifies shared worker data', await page.evaluate(() => JSON.stringify(State.schedule)), before);
     await page.locator('[data-worker-id="w_week"] .crew-edit').click();
+    check('secondary worker actions open in a named menu', (await page.locator('#askTitle').innerText()).includes('עובד שבועי'));
+    same('opening More never changes worker data', await page.evaluate(() => JSON.stringify(State.schedule)), before);
+    await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
     same('labelled edit opens the right worker', await page.locator('#workerFormName').inputValue(), 'עובד שבועי');
+    check('optional wage help starts closed', !(await page.locator('#workerFormModal .worker-info').evaluate(n=>n.open)));
+    await page.locator('#workerFormModal .worker-info summary').click();
+    check('information action exposes the complete wage explanation', await page.locator('#workerFormModal .worker-info .hint').isVisible());
     await page.evaluate(() => closeWorkerForm());
+    await page.locator('#placeList .crew-edit').click();
+    await page.locator('#askChoices').getByRole('button', {name:'שינוי שם האתר',exact:true}).click();
+    same('site More retains the original rename form', await page.locator('#askInput').inputValue(), 'אתר העבודה הראשי');
+    await page.evaluate(()=>askCancel());
     await page.locator('.crew-shortcuts').getByRole('button', {name:'אתרים ↓',exact:true}).click();
     same('site shortcut moves keyboard focus', await page.evaluate(() => document.activeElement.id), 'placesHeading');
     await page.locator('.crew-shortcuts').getByRole('button', {name:'עובדים ↓',exact:true}).click();

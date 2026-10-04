@@ -7,7 +7,8 @@
      has no reason to magnify the page on focus. -->
 <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
 <title>פרקד - רישום עבודה</title>
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/app.css" onerror="this.dataset.loadFailed='true'">
+<link rel="stylesheet" href="css/readability.css" onerror="this.dataset.loadFailed='true'">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1f4b7a">
 <!-- Which build this PAGE belongs to. app.js carries the same string, and the two are
@@ -16,7 +17,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v139">
+<meta name="farkad-build" content="v140">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -429,7 +430,10 @@
             <label class="field-label" for="workerFormHourly">שכר לשעה נוספת</label>
             <input dir="ltr" id="workerFormHourly" inputmode="decimal" placeholder="שכר לשעה נוספת" type="number" min="0" step="1"/>
         </details>
-        <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום. שינוי שכר חל מהיום והלאה - ימים שכבר נרשמו שומרים את השכר שהיה בזמן הרישום.</p>
+        <details class="worker-info">
+            <summary><span aria-hidden="true">ⓘ</span> מידע על השכר</summary>
+            <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום. שינוי שכר חל מהיום והלאה - ימים שכבר נרשמו שומרים את השכר שהיה בזמן הרישום.</p>
+        </details>
         <!-- HOW OFTEN THIS MAN IS SETTLED. Two controls, never one: a cycle with no date
              is not in force, because a change that took effect "always" would re-cut
              fortnights he has already been paid for. The date is a Friday - both cycles
@@ -466,8 +470,11 @@
      my pay this number". -->
 <div class="modal" id="workerDaysModal">
     <div class="modal-content modal-wide">
+        <div class="worker-detail-head">
+            <button type="button" class="btn-secondary worker-detail-back" onclick="closeWorkerDays()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>חזרה לדוח</button>
+        </div>
         <!-- Focusable so the dialog is entered at its heading (js/ui/modal.js, focusFirst):
-             the first BUTTON in this dialog is the last thing in it. -->
+             entering the record should announce its worker, not a navigation action. -->
         <h3 id="workerDaysTitle" tabindex="-1"></h3>
         <p class="hint" id="workerDaysMeta"></p>
         <div id="workerDaysBody"></div>
@@ -562,6 +569,14 @@
         var reason = event && event.reason;
         show(reason && reason.message ? reason.message : reason);
     });
+
+    // A head stylesheet can fail before this listener exists, especially while the
+    // other sheet is still loading. The link records that early failure so it can
+    // be reported now that the banner exists, as well as listening for later errors.
+    var styles = document.querySelectorAll('link[rel="stylesheet"]');
+    for (var i = 0; i < styles.length; i++) {
+        if (styles[i].dataset.loadFailed === 'true') show(styles[i].href + ' - לא נטען');
+    }
 
     window.farkadBootSentinel = {
         // Called by the app the moment its own crash handler is installed. From there on

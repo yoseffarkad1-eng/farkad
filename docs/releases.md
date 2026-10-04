@@ -1,3 +1,18 @@
+## v140 — the owner's reading preferences across the app
+
+The screen theme follows the phone, with stronger text and site-name contrast,
+larger essential type, modest corners and visible card boundaries. Navigation has
+labelled icons; the existing compact fallback preserves room at extreme text sizes.
+Measured bar spacing reserves the room it actually occupies. Worker and site secondary actions move into named More menus,
+retaining the existing edit, archive and guarded deletion handlers. Worker report
+details use the full phone screen with a persistent return action. Optional wage
+help opens from an information control. Entrance motion respects reduced motion.
+Enlarged text can expand cards into one column. Paper, exports, stamped wages,
+ledger entries, sync rules and the disabled vehicle feature retain their behavior.
+Opening panels fades without resizing touch targets. Early stylesheet failures are
+remembered by their links and reported when the boot diagnostic is ready; one
+successfully loaded stylesheet cannot hide the failure of the other.
+
 ## v139 — owner's plain-language pay cards
 
 Compact worker cards show ימי עבודה (the existing payable day units) and חופש
