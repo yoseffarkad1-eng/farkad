@@ -1,0 +1,157 @@
+/* v140: the owner's reading preferences. Screen-only so saved paper layouts retain
+   their established columns. Small-phone grids yield to enlarged text, never clip it. */
+@media screen {
+    :root {
+        --paper: #f1f4f7;
+        --surface: #ffffff;
+        --surface-2: #e5ebf1;
+        --ink: #14202e;
+        --ink-2: #344658;
+        --ink-3: #35485b;
+        --line: #8a98aa;
+        --line-soft: #c1ccd8;
+        --accent: #173f68;
+        --accent-soft: #dce7f3;
+        --on-accent: #ffffff;
+        --radius: 12px;
+        --radius-sm: 8px;
+        --shadow: 0 1px 2px rgb(20 32 46 / 8%);
+    }
+    :root[data-theme="dark"] {
+        --paper: #101821;
+        --surface: #192431;
+        --surface-2: #223041;
+        --ink: #f4f6fa;
+        --ink-2: #d4dde7;
+        --ink-3: #bccad9;
+        --line: #768aa0;
+        --line-soft: #43566a;
+        --accent: #a9cdf7;
+        --accent-soft: #243c56;
+        --on-accent: #101821;
+    }
+    /* Keep each site's assigned hue and strengthen the white name in both themes. */
+    :root, :root[data-theme="dark"] {
+        --site-1: #1e40af;
+        --site-2: #9a3412;
+        --site-3: #166534;
+        --site-4: #6b21a8;
+        --site-5: #78450c;
+        --site-6: #155e75;
+        --site-7: #991b1b;
+        --site-8: #9d174d;
+        --site-9: #115e59;
+        --site-10: #3730a3;
+    }
+    body { font-size: 18px; line-height: 1.55; }
+    button, input, select, textarea { font-family: inherit; }
+    button { font-weight: 650; }
+    input, select, textarea { font-size: 18px; }
+    h1, h2, h3, strong, .field-label { font-weight: 750; }
+    .hint, .empty-hint, .field-label, .field-error, .ask-error,
+    .roster-meta, .crew-cycle, .sheet-meta, .sheet-status,
+    .report-period, .report-explanation, .report-calculation,
+    .report-tile-label, .report-tile-open, .report-tile-currency { font-size: 16px; }
+    .field-label { color: var(--ink); }
+    .btn-add, .btn-secondary, .modal-actions button, .ask-choices button {
+        font-size: 17px;
+        min-height: 48px;
+    }
+    .modal-content { border: 1px solid var(--line); border-radius: 12px; }
+    .modal-content h3 { font-size: 23px; }
+    .modal-content .field-label { margin-top: 16px; }
+    .worker-info { margin-block: 12px; border-block: 1px solid var(--line-soft); }
+    .worker-info > summary {
+        display: flex; align-items: center; gap: 8px; min-height: 48px;
+        cursor: pointer; color: var(--accent); font-size: 16px; font-weight: 650;
+    }
+    .worker-info > summary::-webkit-details-marker { display: none; }
+    .worker-info > summary span { font-size: 21px; }
+    .worker-info .hint { margin: 0 0 12px; }
+    .worker-detail-head {
+        position: sticky; top: -22px; z-index: 2; background: var(--surface);
+        padding-block: 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 16px;
+    }
+    .worker-detail-back { display: inline-flex; align-items: center; gap: 10px; }
+    .worker-detail-back svg { width: 20px; height: 20px; }
+    #workerDaysMeta { font-size: 16px; }
+    #workerDaysBody .day-row { border-bottom-color: var(--line-soft); }
+    .advance-balance > strong { color: var(--accent); font-size: 34px; }
+    .advance-worker-card strong { font-size: 19px; font-weight: 750; }
+    .advance-worker-card span { font-size: 20px; font-weight: 750; color: var(--accent); }
+    #rosterView .roster-panel, .advance-balance { border-radius: 12px; }
+    #rosterView .roster-details > strong { font-size: 19px; }
+    #rosterView .roster-details > .tag { font-size: 18px; }
+    #rosterView .crew-edit { font-size: 16px; min-height: 44px; }
+    .worker-active-toggle { font-size: 16px; border-radius: 8px; }
+    .worker-active-toggle.is-active { background: #166534; border-color: #166534; }
+    .crew-tools button, .crew-shortcuts button { font-size: 16px; }
+    .site-name { font-weight: 700; }
+    .site-head .site-name { font-size: 18px; white-space: normal; overflow-wrap: anywhere; }
+    .wrow-name { font-size: 19px; font-weight: 750; }
+    .tag, .rate-select, .rate-hours { font-size: 16px; }
+    .topbar .settings-open { min-width: 44px; min-height: 44px; }
+    /* The daily toolbar keeps its compact auxiliary controls. Names and amounts get
+       the larger type; inflating this whole toolbar hid the first worker at 200%. */
+    .day-header .btn-secondary { font-size: 14px; min-height: 44px; }
+}
+
+@media screen and (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --paper: #101821;
+        --surface: #192431;
+        --surface-2: #223041;
+        --ink: #f4f6fa;
+        --ink-2: #d4dde7;
+        --ink-3: #bccad9;
+        --line: #768aa0;
+        --line-soft: #43566a;
+        --accent: #a9cdf7;
+        --accent-soft: #243c56;
+        --on-accent: #101821;
+        --site-1: #1e40af;
+        --site-2: #9a3412;
+        --site-3: #166534;
+        --site-4: #6b21a8;
+        --site-5: #78450c;
+        --site-6: #155e75;
+        --site-7: #991b1b;
+        --site-8: #9d174d;
+        --site-9: #115e59;
+        --site-10: #3730a3;
+    }
+}
+
+@media screen and (max-width: 700px) {
+    .tabs { padding-inline: 4px; }
+    .tabs .tab { font-size: 15px; font-weight: 700; padding-inline: 0; }
+    /* The existing measured tight layout retains accessible icon tabs when extreme
+       text enlargement leaves no room. A named settings icon saves another line. */
+    body.day-tight .settings-open span { display: none; }
+    body.day-tight .settings-open { padding-inline: 10px; }
+    body.day-tight .topbar { flex-wrap: nowrap; }
+    #reportsView .report-worker-tile { border-radius: 12px; padding: 12px; }
+    .report-tile-name { font-size: 19px; min-height: 54px; font-weight: 750; }
+    .report-tile-value { font-size: 30px; }
+    .report-tile-metrics strong { font-size: 22px; }
+    .report-tile-label, .report-tile-open, .report-tile-currency { font-size: 16px; }
+    .report-tile-metrics { gap: 6px; }
+    .report-tile-metrics > span + span { padding-inline-start: 6px; }
+    #workerDaysModal { padding: 0; }
+    #workerDaysModal > .modal-content {
+        width: 100%; max-width: none; height: 100%; max-height: 100%;
+        border: 0; border-radius: 0;
+        padding: max(12px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+        overscroll-behavior: contain;
+    }
+    #workerDaysModal .worker-detail-head { top: calc(-1 * max(12px, env(safe-area-inset-top))); }
+}
+
+@media screen and (prefers-reduced-motion: no-preference) {
+    .modal-content { animation: readable-sheet-in 220ms ease-out; }
+    .tab { transition: color 160ms ease, background-color 160ms ease; }
+    @keyframes readable-sheet-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+}

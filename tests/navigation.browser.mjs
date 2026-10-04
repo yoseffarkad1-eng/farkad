@@ -57,7 +57,7 @@ try {
                 const r=n.getBoundingClientRect();
                 return {bottom:r.bottom,height:r.height,fixed:getComputedStyle(n).position==='fixed',
                     targets:[...n.querySelectorAll('.tab')].every(t=>{const b=t.getBoundingClientRect();return b.width>=44&&b.height>=44;}),
-                    labels:[...n.querySelectorAll('.tab')].every(t=>parseFloat(getComputedStyle(t).fontSize)>=14),
+                    labels:[...n.querySelectorAll('.tab')].every(t=>parseFloat(getComputedStyle(t).fontSize)>=15 && [...t.querySelectorAll('span:not(.tab-icon)')].some(s=>{const b=s.getBoundingClientRect();return b.width>10&&b.height>10&&getComputedStyle(s).clipPath==='none';})),
                     overflow:document.documentElement.scrollWidth>innerWidth+1};
             });
             check(`${width}/${colorScheme}/${view}: navigation is fixed to the viewport bottom`,geometry.fixed&&Math.abs(geometry.bottom-844)<=1,JSON.stringify(geometry));
@@ -70,6 +70,33 @@ try {
         return r.bottom<=bar.top&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('.report-worker-tile')===n;
     });
     check('last report card scrolls above the bar and remains tappable',clears);
+
+    suite('reading contrast follows the device theme without relying on site colours');
+    for (const colorScheme of ['light','dark']) {
+        await page.emulateMedia({colorScheme});
+        const contrast = await page.evaluate(()=>{
+            const styles=getComputedStyle(document.documentElement);
+            function luminance(hex) {
+                const channels=hex.trim().slice(1).match(/../g).map(x=>parseInt(x,16)/255)
+                    .map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4);
+                return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722;
+            }
+            const value=key=>luminance(styles.getPropertyValue(key));
+            const ratio=(a,b)=>(Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+            const grounds=['--surface','--paper','--surface-2'];
+            return {body:parseFloat(getComputedStyle(document.body).fontSize),
+                ordinary:['--ink','--ink-2','--ink-3'].flatMap(ink=>grounds.map(ground=>ratio(value(ink),value(ground)))),
+                primary:ratio(value('--accent'),value('--surface')),
+                sites:Array.from({length:10},(_,i)=>ratio(1,value(`--site-${i+1}`)))};
+        });
+        check(`${colorScheme}: main type is at least 18px`,contrast.body>=18);
+        check(`${colorScheme}: ordinary text exceeds 7:1 on its three surfaces`,contrast.ordinary.every(n=>n>=7),JSON.stringify(contrast));
+        check(`${colorScheme}: primary figures and all site names exceed 7:1`,contrast.primary>=7&&contrast.sites.every(n=>n>=7),JSON.stringify(contrast));
+    }
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.evaluate(()=>openWorkerDays('w_0'));
+    same('reduced-motion preference removes the detail entrance animation',await page.locator('#workerDaysModal .modal-content').evaluate(n=>getComputedStyle(n).animationName),'none');
+    await page.evaluate(()=>closeWorkerDays());
     same('no browser errors',errors,[]);
 } finally { await browser.close(); await server.close(); }
 report();

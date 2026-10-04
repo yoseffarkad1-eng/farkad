@@ -617,8 +617,11 @@ async function seedRoster(page) {
 
   // Every dialog is the app's own. The browser's prompt/confirm are ignored inside an
   // embedded frame, so driving them here would test something the app no longer uses.
+  // The owner moved secondary actions behind More. Follow that real menu before
+  // exercising the same rename, archive, history and deletion guarantees.
   const rename = async value => {
     await page.locator('#placeList .roster-row').first().getByRole('button').first().click();
+    await page.locator('#askChoices').getByRole('button', {name:'שינוי שם האתר',exact:true}).click();
     await page.waitForTimeout(200);
     await page.fill('#askInput', value);
     await page.click('#askOk');
@@ -668,7 +671,8 @@ async function seedRoster(page) {
       .getByRole('button', { name: /כבה עובד/ }).count()) === 0);
 
   await page.locator('#workerList .roster-row').first()
-    .getByRole('button', { name: /ערוך/ }).click();
+    .getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
   check('his own screen offers the archive',
     await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).isVisible());
@@ -706,7 +710,8 @@ async function seedRoster(page) {
   const before = await page.evaluate(() => State.schedule.workers.length);
 
   await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
-    .getByRole('button', { name: /ערוך/ }).click();
+    .getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
 
   check('unused names offer permanent deletion',
@@ -1534,7 +1539,8 @@ async function seedRoster(page) {
 
   // Archived from his own screen.
   await page.locator('#workerList .roster-row').filter({ hasText: 'טעות' })
-    .getByRole('button', { name: /ערוך/ }).click();
+    .getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
   await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).click();
   await page.waitForTimeout(200);
@@ -1556,7 +1562,8 @@ async function seedRoster(page) {
   });
   await page.waitForTimeout(150);
   await page.locator('.roster-archive .roster-row').filter({ hasText: 'טעות' })
-    .getByRole('button', { name: /ערוך/ }).click();
+    .getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
 
   // v119 offers the same permanent-delete option for unused inactive names.
@@ -1589,7 +1596,8 @@ async function seedRoster(page) {
     render();
   });
   await page.locator('#workerList .roster-row').filter({ hasText: 'דוד' })
-    .getByRole('button', { name: /ערוך/ }).click();
+    .getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
   await page.locator('#workerFormDanger').getByRole('button', { name: /כבה עובד/ }).click();
   await page.waitForTimeout(200);
@@ -1601,7 +1609,8 @@ async function seedRoster(page) {
   });
   await page.waitForTimeout(150);
   await page.locator('.roster-archive .roster-row').filter({ hasText: 'דוד' })
-    .getByRole('button', { name: /ערוך/ }).click();
+    .getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
 
   check('an archived worker with history sees a disabled delete action',
@@ -5831,7 +5840,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
 
-  await page.locator('#workerList .roster-row').first().getByRole('button', { name: /^ערוך/ }).click();
+  await page.locator('#workerList .roster-row').first().getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
   check('editing someone with a phone number opens the fold',
     (await page.evaluate(() => document.getElementById('workerFormMore').open)) === true);
@@ -7550,8 +7560,9 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const badge = page.locator('.wrow .tag-place').first();
   const colourOf = locator => locator.evaluate(node => getComputedStyle(node).backgroundColor);
   const badgeColour = await colourOf(badge);
+  // v140 keeps site three green and increases its white-label contrast.
   check('an assignment badge carries the site colour, not the accent',
-    badgeColour === 'rgb(21, 128, 61)', badgeColour);
+    badgeColour === 'rgb(22, 101, 52)', badgeColour);
   check('the badge text is white on it',
     (await badge.evaluate(node => getComputedStyle(node).color)) === 'rgb(255, 255, 255)');
 
@@ -7804,6 +7815,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
 {
   const page = await open();
+  // Inspect a completed installation. A fixed launch delay sometimes read only
+  // part of the shell while cache.add requests were still running.
+  await page.waitForFunction(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    return registration && registration.active && registration.active.state === 'activated';
+  }, null, {timeout: 15000});
   const cached = await page.evaluate(async () => {
     const names = (await caches.keys())
       .filter(key => key !== 'farkad-clients' && key !== 'farkad-shelves');
@@ -7901,7 +7918,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   });
 
   await page.locator('#workerList .roster-row').filter({ hasText: 'דוד' })
-    .getByRole('button', { name: /ערוך/ }).click();
+    .getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
 
   const history = await readHistory();
@@ -7940,7 +7958,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   // Archived, his screen also says the last date anything was written for him - not
   // "archived since", which the record does not hold.
-  await row.getByRole('button', { name: /ערוך/ }).click();
+  await row.getByRole('button', { name: /אפשרויות עבור/ }).click();
+  await page.locator('#askChoices').getByRole('button', {name:'עריכת פרטים',exact:true}).click();
   await page.waitForTimeout(250);
   const archivedHistory = await readHistory();
   check('an archived worker\'s history names his last recorded date',

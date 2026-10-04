@@ -363,23 +363,27 @@ async function diagnostic(page) {
     await ctx.close();
 }
 
-{
-    suite('a stylesheet that 404s does not take the diagnostic down with it');
+for (const missing of [['/css/app.css'], ['/css/readability.css'],
+    ['/css/app.css', '/css/readability.css']]) {
+    suite('missing stylesheets do not hide the diagnostic: ' + missing.join(', '));
 
     // The banner carries its own class, and the class is in a file that may be the thing
     // that failed. It ships with an inline `display:none` which the sentinel clears, so
     // what is left is a plain block-level div with text in it - unstyled, and readable.
     const { ctx, page } = await phone();
     await plant(page);
-    broken.set('/css/app.css', 'missing');
+    missing.forEach(path => broken.set(path, 'missing'));
     await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1200);
-    broken.delete('/css/app.css');
+    missing.forEach(path => broken.delete(path));
 
     const said = await diagnostic(page);
-    check('the diagnostic is drawn with no stylesheet at all', said.shown === true,
+    check('the diagnostic is drawn when required styling is missing', said.shown === true,
         JSON.stringify({ shown: said.shown, height: said.height }));
     check('and says the same sentence', said.sentence === BOOT_SENTENCE, said.sentence);
+    check('and identifies a stylesheet that failed',
+        missing.some(path => said.detail.includes(path)) && said.detail.includes(NOT_LOADED),
+        said.detail);
     check('and the record is untouched', (await stillThere(page)) === PLANTED);
 
     await ctx.close();
