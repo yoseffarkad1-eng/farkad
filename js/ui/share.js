@@ -116,6 +116,9 @@ let sharePlaceId = null;
 
 function showDayMessage(placeId) {
     sharePlaceId = placeId || null;
+    const place = sharePlaceId && State.place(sharePlaceId);
+    document.getElementById('shareContext').textContent =
+        `${place ? place.name : 'כל האתרים'} · ${formatFullDate(parseLocalDate(State.date))}`;
     renderMessageStyles();
     const box = document.getElementById('shareText');
     box.value = dayMessage(State.date, State.layer, undefined, sharePlaceId);
@@ -336,4 +339,3 @@ function downloadCsv(rows, filename) {
     return handOverBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }),
         filename);
 }
-

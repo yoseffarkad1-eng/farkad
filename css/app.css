@@ -405,6 +405,14 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
     /* "עובדים ואתרים" cannot live in a bottom tab; the short form takes over there. */
     .tab-long { display: none; }
     .tab-short { display: inline; }
+
+    /* Keep the measured bar and its full touch targets. The small pill identifies
+       the active icon without painting a solid block around the whole label. */
+    .tabs .tab-icon { position: relative; align-items: center; justify-content: center; min-width: 28px; }
+    .tabs .tab-icon svg { position: relative; z-index: 1; }
+    .tabs .tab-on { background: transparent; font-weight: 700; }
+    .tabs .tab-on .tab-icon::before { content: ''; position: absolute; inset: -2px -8px; border-radius: 999px; background: var(--accent-soft); }
+    .tabs .tab:active { background: var(--surface-2); }
 }
 
 /* ---------------------------------------------------------------- buttons */
@@ -1236,7 +1244,7 @@ a[href]:focus-visible,
        that is the side that gets the 12px, and the buttons take the tighter left. */
     padding: 4px 12px 4px 6px;
     border-bottom: none;
-    margin-bottom: 10px;
+    margin-bottom: 0;
 }
 /* The SAME dark scrim as the two buttons beside it, and for the reason written out at
    length above .site-head-btn: a white overlay only ever LIGHTENS, so what white ink is
@@ -1303,6 +1311,17 @@ a[href]:focus-visible,
     border-radius: 10px;
 }
 .site-head-btn:hover { background: rgba(0, 0, 0, .34); color: #fff; }
+.site-head-btn svg { width: 22px; height: 22px; display: block; margin: auto; }
+/* Empty sites keep their name, count and add action in one compact heading. */
+.site-card-empty .site-head h3 { flex-direction: column; align-items: flex-start; gap: 1px; }
+.site-card-empty .site-empty { color: inherit; font-size: 14px; font-weight: 400; margin: 0; }
+@media screen and (max-width: 700px) {
+    .site-grid { gap: 10px; }
+    .site-card { padding: 8px; gap: 4px; }
+    .site-head-color { padding-block: 0; border-radius: 10px; }
+    .site-list { gap: 0; }
+    .site-list .assign-row { padding-inline: 4px; }
+}
 
 .site-count {
     background: var(--surface-2);
@@ -1345,7 +1364,26 @@ a[href]:focus-visible,
     flex-wrap: wrap;
 }
 .assign-row:hover { background: var(--surface-2); }
-.assign-name { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 4em; }
+.assign-name {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 4em;
+    overflow-wrap: anywhere;
+    font-weight: 700;
+}
+/* Dividers keep each worker's rate on a readable row without adding another box. */
+.site-list .assign-row + .assign-row { border-top: 1px solid var(--line-soft); }
+.site-list .assign-row { border-radius: 0; }
+.site-list .rate-select { background: var(--surface-2); }
+.site-list .rate-hours { font-variant-numeric: tabular-nums; }
+@media (max-width: 375px) {
+    /* Give names a full line before the controls on the narrowest phones. */
+    .site-list .assign-name { flex-basis: 100%; min-width: 0; }
+    .site-list .rate-control { margin-inline-end: auto; }
+}
 
 .rate-control { display: flex; gap: 4px; align-items: center; }
 /* 16px is not a taste here, it is the threshold below which iOS magnifies the whole page
@@ -1384,6 +1422,18 @@ a[href]:focus-visible,
     margin-bottom: 12px;
 }
 .tray-empty { color: var(--ink-3); font-size: 14px; margin: 0; }
+/* Missing work and confirmed absence remain separate, labelled sections. */
+.tray-pending { border-inline-start: 4px solid var(--warn); }
+.tray-pending h4 { color: var(--warn); }
+.tray-complete { border-inline-start: 4px solid var(--ok); }
+.tray-complete .tray-empty { color: var(--ok); font-weight: 600; }
+.tray-absent { border-inline-start: 4px solid var(--line); }
+.tray-pending .chip-main { font-weight: 700; }
+.tray-pending .chip { max-width: 100%; }
+.tray-pending .chip-main { min-width: 0; overflow-wrap: anywhere; }
+.tray-pending .chip-side { flex-shrink: 0; border-inline-start: 1px solid var(--line); }
+.tray-is-empty { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding-block: 10px; }
+.tray-is-empty h4 { margin: 0; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
@@ -1552,6 +1602,25 @@ a[href]:focus-visible,
 
 .picker-actions { display: flex; gap: 8px; }
 .picker-actions button { flex: 1; }
+.picker-context { margin: -4px 0 10px; color: var(--ink-2); font-size: 14px; }
+.picker-search { width: 100%; min-width: 0; min-height: 44px; margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--ink); font: inherit; font-size: 16px; }
+.picker-search-summary { margin: 0 0 8px; color: var(--ink-2); font-size: 14px; }
+.picker-search-summary:empty { display: none; }
+.picker-search-tools { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+.picker-search-tools .picker-search { flex: 1; margin: 0; }
+.picker-search-tools button { flex: 0 0 auto; min-width: 52px; padding-inline: 10px; }
+.picker-no-results p { margin: 0 0 12px; }
+.picker-no-results { padding: 18px 8px; text-align: center; color: var(--ink-2); }
+#workerPickerModal .modal-content { display: flex; flex-direction: column; overflow: auto; }
+#workerPickerTitle { margin-bottom: 8px; overflow-wrap: anywhere; }
+#workerPickerModal .picker-list { min-height: 0; flex: 1 1 auto; }
+#workerPickerModal .picker-actions { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+#workerPickerModal .picker-row { padding: 8px; border-radius: 8px; }
+#workerPickerModal .picker-name { min-width: 0; overflow-wrap: anywhere; font-weight: 700; }
+#workerPickerModal .picker-note { font-size: 14px; font-weight: 400; }
+#workerPickerModal .picker-note-pending { color: var(--warn); }
+#workerPickerModal .picker-row button { flex: 0 0 auto; max-width: 50%; white-space: normal; }
+#workerPickerModal .picker-row-on { box-shadow: inset -3px 0 var(--ok); }
 
 .place-choice { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .place-btn {
@@ -1560,6 +1629,12 @@ a[href]:focus-visible,
     border: 1px solid var(--line);
 }
 .place-on { background: var(--ok-bg); color: var(--ok); border-color: transparent; font-weight: 600; }
+#placePickerList { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); }
+#placePickerList .place-btn { min-height: 52px; padding: 10px; white-space: normal; overflow-wrap: anywhere; font-weight: 600; text-align: center; }
+#placePickerList .place-btn { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: start; }
+.place-choice-dot { width: 12px; height: 12px; border-radius: 50%; }
+.place-choice-name { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.place-choice-check { color: var(--ok); font-weight: 800; }
 
 /* ---------------------------------------------------------------- week */
 
@@ -2038,7 +2113,7 @@ a[href]:focus-visible,
 .report-worker-cards, .report-layout-toggle { display: none; }
 @media screen and (max-width: 700px) {
     .report-layout-toggle { display: block; min-height: 44px; margin: 0 0 12px; margin-inline-start: auto; font-size: 14px; padding: 8px 12px; }
-    .report-card-grid .report-worker-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 10px; margin-bottom: 14px; }
+    .report-card-grid .report-worker-cards { display: grid; font-size: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11em), 1fr)); gap: 10px; margin-bottom: 14px; }
     .report-card-grid .report-payroll .report-table tbody { display: none; }
     #reportsView .report-worker-tile { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; min-height: 200px; padding: 12px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; box-shadow: none; text-align: center; white-space: normal; }
     .report-tile-name { font-size: 16px; line-height: 1.35; overflow-wrap: anywhere; min-height: 44px; display: flex; align-items: center; justify-content: center; }
@@ -2052,6 +2127,63 @@ a[href]:focus-visible,
     .report-card-grid .report-payroll .report-table tfoot { margin-top: 8px; }
 }
 @media print { .report-worker-cards, .report-layout-toggle { display: none !important; } }
+
+/* A quiet report hierarchy: filters are one panel, browsing is one row, and
+   the prepared payable amount leads each card. Print keeps the canonical tables. */
+@media screen {
+    .reports-toolbar { margin-bottom: 14px; }
+    .reports-controls { padding: 8px 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); margin-bottom: 12px; }
+    .reports-controls .report-section-toggle { margin-bottom: 4px; }
+    .reports-controls .range-wrap { border-bottom: 1px solid var(--line-soft); }
+    .reports-controls .range-wrap:only-child { border-bottom: 0; }
+    .reports-controls .report-worker-picker { background: transparent; }
+    .reports-controls .report-worker-picker summary { font-weight: 600; color: var(--ink); }
+    .report-range-heading { gap: 4px 6px; }
+    .report-range-heading::after, .reports-controls .report-worker-picker summary::after {
+        content: ''; width: 7px; height: 7px; flex: 0 0 7px; border: solid var(--ink-2); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); margin-inline: auto 3px;
+    }
+    .range-wrap[open] .report-range-heading::after, .reports-controls .report-worker-picker[open] summary::after { content: ''; transform: rotate(225deg); }
+    .report-search-tools { display: flex; gap: 8px; align-items: center; margin-block: 4px 8px; }
+    .report-search-tools #reportWorkerSearch { flex: 1; width: 0; margin: 0; }
+    #reportWorkerSearchClear { min-width: 52px; min-height: 44px; padding-inline: 10px; }
+    .report-search-count { margin: 8px 0; font-size: 13px; color: var(--ink-2); }
+    .report-worker-choice { border-radius: 8px; padding-inline: 4px; }
+    .report-worker-choice:has(input:checked) { background: var(--accent-soft); }
+    .report-browse-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; }
+    .report-browse-tools .report-cycle-nav { flex: 1; margin: 0; gap: 6px; }
+    .report-browse-tools .report-cycle-nav button { background: transparent; border-color: var(--line); }
+    .report-browse-tools .report-layout-toggle { margin: 0; margin-inline-start: auto; order: 1; }
+    #reportsView .report-group { padding: 8px 0; margin: 12px 0 6px; background: transparent; color: var(--ink); border-radius: 0; }
+    #reportsView .report-group::after { padding: 4px 8px; background: var(--surface-2); border-radius: 6px; }
+    #reportsView .report-payroll > .hint { margin-block: 0 10px; }
+    #reportsView .report-payroll > .hint-warn { background: var(--warn-bg); border-radius: 8px; }
+    .report-explanation { margin-bottom: 4px; }
+    .report-explanation > summary { font-size: 13px; }
+    .report-explanation > summary::after { content: 'i'; width: 16px; height: 16px; flex: 0 0 16px; border: 1px solid currentColor; border-radius: 50%; font: 600 14px/16px Georgia, serif; text-align: center; }
+}
+@media screen and (max-width: 700px) {
+    #reportsView .report-worker-tile { gap: 10px; min-height: 0; padding: 14px 12px 10px; border-radius: 16px; text-align: start; }
+    .report-tile-name { justify-content: flex-start; align-items: flex-start; min-height: 44px; line-height: 1.4; font-weight: 750; }
+    .report-tile-amount { align-items: flex-start; padding: 0 0 10px; border-radius: 0; border-bottom: 1px solid var(--line-soft); background: transparent; }
+    .report-tile-figure { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; max-width: 100%; direction: ltr; }
+    .report-tile-value { font-size: 26px; font-weight: 800; letter-spacing: -.03em; overflow-wrap: anywhere; }
+    .report-tile-currency { font-size: 14px; color: var(--ink-2); }
+    .report-tile-metrics { gap: 8px; }
+    .report-tile-metrics > span + span { border-inline-start: 1px solid var(--line-soft); padding-inline-start: 8px; }
+    .report-tile-metrics strong { display: block; font-size: 18px; line-height: 1.35; }
+    .report-tile-label { font-size: 12px; line-height: 1.5; }
+    .report-tile-open { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line-soft); font-size: 12px; }
+    .report-tile-open::after { content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: rotate(45deg); }
+    .report-card-grid .report-payroll .report-table tfoot td.num:empty { display: none; }
+    .report-card-grid .report-payroll .report-table tfoot td:not(:first-child):not([data-label="לתשלום"]) { display: none; }
+    .report-card-grid #reportsView .report-payroll tfoot tr { border-color: var(--line); background: var(--surface); }
+    .report-card-grid #reportsView .report-payroll tfoot td { background: transparent; }
+    .report-card-grid #reportsView .report-payroll tfoot td:last-child { background: var(--accent-soft); padding: 10px; margin-top: 8px; border-radius: 8px; border-top: 0; }
+}
+@media (hover: hover) and (pointer: fine) {
+    #reportsView .report-worker-tile:hover { border-color: var(--accent); background: var(--surface-2); }
+}
+@media print { .report-browse-tools { display: none !important; } }
 
 /* Restore points: dated, and folded shut under a counted summary - the board's collapsed
    row. Every date behind the fold replaces the record, so the list is opened on purpose
@@ -2745,10 +2877,24 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 /* Under the field it belongs to, not in a second dialog on top of the first. */
 .ask-error { color: var(--danger); font-size: 14px; margin: 0 0 4px; min-height: 1px; }
 .field-error { color: var(--danger); font-size: 14px; margin: -4px 0 8px; }
+.field-error:not(:empty), .ask-error:not(:empty) { padding: 8px 10px; margin-block: 4px 10px; border-inline-start: 3px solid var(--danger); background: var(--surface-2); border-radius: 6px; }
+#workerFormMore[open] { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+#workerFormMore .field-label { margin-top: 8px; font-weight: 600; }
+#workerFormModal .field-label { line-height: 1.35; }
+/* Consistent, wrapping headings for the small task dialogs. */
+:is(#workerPickerModal, #placePickerModal, #workerFormModal, #shareModal, #askModal) .modal-content > h3 { line-height: 1.3; margin: 0 0 12px; overflow-wrap: anywhere; }
+@media screen and (max-width: 700px) {
+    :is(#workerPickerModal, #placePickerModal, #workerFormModal, #shareModal) .modal-content { padding: 18px; }
+}
 /* Not var(--ok): this line also carries "the copy was blocked", and a refusal printed in
    the success colour is read as a success. */
 .share-status { color: var(--ink-2); font-size: 14px; }
 .share-styles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+#shareModal .share-styles button { flex: 1 1 0; min-width: 0; white-space: normal; font-size: 14px; }
+#shareText { min-height: 120px; height: clamp(120px, 30dvh, 320px); line-height: 1.65; padding: 12px; background: var(--surface-2); font-family: inherit; white-space: pre-wrap; }
+#shareModal .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; border-top: 1px solid var(--line); padding-top: 12px; }
+#shareModal .modal-actions .btn-success, #shareStatus { grid-column: 1 / -1; }
+#shareStatus:empty { display: none; }
 
 /* Who will be missing from the message, said where the sending happens. */
 .share-warning {
@@ -3270,6 +3416,9 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
 .wrow-empty { background: var(--warn-bg); }
 .wrow-empty .wrow-main:hover { background: transparent; filter: brightness(.97); }
 .wrow-name { font-weight: 600; }
+.worker-list .wrow-name { font-weight: 700; }
+.wrow-empty { box-shadow: inset -3px 0 var(--warn); }
+.wrow-absent { box-shadow: inset -3px 0 var(--line); }
 .wrow-value { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
 
 .tag {
@@ -3413,6 +3562,10 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
 }
 .sheet-head h3 { margin: 0; font-size: 27px; line-height: 1.15; }
 .sheet-meta { font-size: 14px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sheet-status { display: inline-block; margin: 0 0 10px; padding: 4px 10px; border-radius: 6px; font-size: 14px; font-weight: 600; }
+.sheet-status-pending { background: var(--warn-bg); color: var(--warn); }
+.sheet-status-absent { background: var(--surface-2); color: var(--ink-2); }
+.sheet-status-recorded { background: var(--ok-bg); color: var(--ok); }
 
 /* Advancing to the next worker slides the whole card in and flashes the name line -
    slowly enough to be SEEN. The layout is identical from worker to worker, so without
@@ -3476,6 +3629,14 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
     border-top: 1px solid var(--line-soft);
 }
 .sheet-rate-name { font-size: 13px; margin-inline-end: auto; }
+@media screen and (max-width: 700px) {
+    .sheet-head { margin-bottom: 8px; padding-block: 12px 8px; }
+    .sheet-places { margin-bottom: 8px; }
+    .sheet-rate-row { gap: 6px; padding: 10px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+    .sheet-rate-row .sheet-rate-name { flex-basis: 100%; margin: 0; height: auto; min-height: 30px; white-space: normal; overflow-wrap: anywhere; }
+    .sheet-rate-row button { flex: 1 1 0; min-width: 0; white-space: normal; padding-inline: 6px; }
+    .sheet-rate-row .rate-hours { margin-inline-start: auto; }
+}
 
 .chip-on, .chip-off {
     font-size: 13px;

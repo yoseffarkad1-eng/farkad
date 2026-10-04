@@ -622,7 +622,7 @@ function renderDayWorkerList() {
         const entries = entriesFor(State.schedule, State.date, worker.id, State.layer);
         const empty = !absent && entries.length === 0;
 
-        const row = el('div', empty ? 'wrow wrow-empty' : 'wrow');
+        const row = el('div', empty ? 'wrow wrow-empty' : absent ? 'wrow wrow-absent' : 'wrow');
 
         // The whole row is the target. On a phone a name-sized tap area is a miss
         // waiting to happen, and this row gets tapped thirty times an evening.
@@ -878,15 +878,33 @@ function anyRecordOnRestDay(date) {
         entriesFor(State.schedule, date, worker.id, layer).length > 0));
 }
 
+// Draw the two site actions so their shape does not depend on emoji fonts.
+function siteActionIcon(add) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.8');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', add ? 'M12 5v14M5 12h14' : 'M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z M7 9h10M7 13h6');
+    svg.appendChild(path);
+    return svg;
+}
+
 function renderSiteCard(place) {
     const card = el('div', 'site-card');
     const workerIds = workersAtPlace(State.schedule, State.date, place.id, State.layer);
+    if (workerIds.length === 0) card.classList.add('site-card-empty');
 
     // By-site view: here the card IS one site, so there is no ambiguity in colouring its
     // heading - and it keeps the same identity the badges use in the list.
     const head = el('div', 'site-head site-head-color');
     const title = el('h3');
     appendSiteName(title, place.id, place.name);
+    if (workerIds.length === 0) title.appendChild(el('span', 'site-empty', 'אין עובדים באתר הזה.'));
     head.appendChild(title);
 
     // The count and the two things done to a card, on the head itself. They used to be a
@@ -896,11 +914,15 @@ function renderSiteCard(place) {
     // says what it does, and there are four of these cards on the screen at once - it has
     // to say which site as well.
     const tools = el('div', 'site-head-tools');
-    tools.appendChild(el('span', 'site-count', String(workerIds.length)));
+    const count = el('span', 'site-count', String(workerIds.length));
+    count.setAttribute('aria-label', `${workerIds.length} עובדים באתר`);
+    tools.appendChild(count);
 
-    tools.appendChild(button('＋', 'btn-icon site-head-btn',
+    const add = button('', 'btn-icon site-head-btn',
         () => openWorkerPicker(place.id),
-        `הוסף עובד ל${isolate(place.name)}`));
+        `הוסף עובד ל${isolate(place.name)}`);
+    add.appendChild(siteActionIcon(true));
+    tools.appendChild(add);
 
     // The seder for THIS gate. It goes to the man driving there, who needs to know who is
     // with him tomorrow and cannot act on the other four sites - and sending him all of
@@ -909,9 +931,11 @@ function renderSiteCard(place) {
     // Only once there is somebody to name: a message saying an empty site is empty is a
     // message nobody sends.
     if (workerIds.length > 0) {
-        tools.appendChild(button('💬', 'btn-icon site-head-btn',
+        const share = button('', 'btn-icon site-head-btn',
             () => showDayMessage(place.id),
-            `שלח את סידור ${isolate(place.name)} בלבד`));
+            `שלח את סידור ${isolate(place.name)} בלבד`);
+        share.appendChild(siteActionIcon(false));
+        tools.appendChild(share);
     }
 
     head.appendChild(tools);
@@ -919,12 +943,10 @@ function renderSiteCard(place) {
     card.appendChild(head);
 
     const list = el('div', 'site-list');
-    if (workerIds.length === 0) {
-        list.appendChild(el('p', 'site-empty', 'אין עובדים באתר הזה.'));
-    } else {
+    if (workerIds.length > 0) {
         workerIds.forEach(workerId => list.appendChild(renderAssignmentRow(place, workerId)));
+        card.appendChild(list);
     }
-    card.appendChild(list);
 
     return card;
 }
@@ -1020,7 +1042,7 @@ function renderRateControl(place, workerId, entry) {
 // Everyone with nothing recorded today, as tappable chips. This tray is the safety net
 // against the failure that costs real money: forgetting someone entirely.
 function renderUnassignedTray(unrecorded) {
-    const tray = el('div', 'tray');
+    const tray = el('div', unrecorded.length ? 'tray tray-pending' : 'tray tray-complete tray-is-empty');
     // The count rides on the header: this tray is the day's debt, and how deep it is
     // should not take a chip-by-chip count to know. An empty tray keeps the bare word -
     // the line under it already says "nobody" in words, and (0) next to that is noise.
@@ -1145,7 +1167,7 @@ async function editVehicleDeparture(vehicleId) {
 
 function renderAbsentTray() {
     const absent = State.absentToday();
-    const tray = el('div', 'tray');
+    const tray = el('div', absent.length ? 'tray tray-absent' : 'tray tray-absent tray-is-empty');
     // Same rule as the tray above: a count when there is anyone to count.
     tray.appendChild(el('h4', null,
         absent.length > 0 ? `נעדרים (${absent.length})` : 'נעדרים'));

@@ -262,7 +262,9 @@ const wonCount = accepted();
         device.State.schedule, date, 'w_01', 'actual', placeId);
 
     one.State.commit(put(one, DAY_ONE, 'p_00'));
-    await settleUntil(() => Boolean((cloud2.doc.days || {})[DAY_ONE])
+    // Bootstrap may still be pending when polling begins under a busy test runner.
+    // Wait for the actual day and matching revisions; null is not a ready document.
+    await settleUntil(() => Boolean((cloud2.doc?.days || {})[DAY_ONE])
         && two.Sync._revision === cloud2.doc.revision, 5000);
     given('both phones start from the same document',
         Boolean((cloud2.doc.days || {})[DAY_ONE]));

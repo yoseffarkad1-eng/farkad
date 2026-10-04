@@ -16,7 +16,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v132">
+<meta name="farkad-build" content="v139">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -36,11 +36,11 @@
              the line is the live region; two announcements of one fact is noise. -->
         <span class="sync-chip" id="syncChip" hidden aria-hidden="true"></span>
 
-        <nav class="tabs" role="tablist">
+        <nav class="tabs" role="tablist" aria-label="ניווט ראשי" aria-orientation="horizontal" onkeydown="handleNavigationKey(event)">
             <button type="button" class="tab" id="tab-day" role="tab" aria-controls="dayView" onclick="showView('day')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></svg></span><span>היום</span></button>
             <button type="button" class="tab" id="tab-week" role="tab" aria-controls="weekView" onclick="showView('week')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18M9 10v11M15 10v11"/></svg></span><span>שבוע</span></button>
             <button type="button" class="tab" id="tab-roster" role="tab" aria-controls="rosterView" onclick="showView('roster')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.7-3.2 2.9-4.8 5.5-4.8s4.8 1.6 5.5 4.8"/><circle cx="17" cy="9.5" r="2.5"/><path d="M16.2 14.6c2.3.2 3.9 1.6 4.4 4.2"/></svg></span><span class="tab-long">עובדים ואתרים</span><span class="tab-short">צוות</span></button>
-            <button type="button" class="tab" id="tab-advances" role="tab" aria-controls="advancesView" onclick="showView('advances')"><span class="tab-icon" aria-hidden="true">₪</span><span>מקדמות</span></button>
+            <button type="button" class="tab" id="tab-advances" role="tab" aria-controls="advancesView" onclick="showView('advances')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 9h18M7 15h3"/><path d="M16 13h5v4h-5a2 2 0 0 1 0-4Z"/></svg></span><span>מקדמות</span></button>
             <button type="button" class="tab" id="tab-reports" role="tab" aria-controls="reportsView" onclick="showView('reports')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><rect x="5.5" y="11" width="3.4" height="9" rx="1"/><rect x="10.3" y="6" width="3.4" height="14" rx="1"/><rect x="15.1" y="14" width="3.4" height="6" rx="1"/></svg></span><span>דוחות</span></button>
         </nav>
 
@@ -348,7 +348,13 @@
 
 <div class="modal" id="workerPickerModal">
     <div class="modal-content">
-        <h3 id="workerPickerTitle"></h3>
+        <h3 id="workerPickerTitle" tabindex="-1"></h3>
+        <p class="picker-context" id="workerPickerContext"></p>
+        <div class="picker-search-tools">
+            <input type="search" id="workerPickerSearch" class="picker-search" placeholder="חיפוש עובד לפי שם" aria-label="חיפוש עובד לפי שם" autocomplete="off" oninput="renderWorkerPicker()">
+            <button type="button" id="workerPickerClear" class="btn-secondary" onclick="clearWorkerPickerSearch()" aria-label="נקה חיפוש עובדים" disabled>נקה</button>
+        </div>
+        <p class="picker-search-summary" id="workerPickerSummary" role="status"></p>
         <div class="picker-list" id="workerPickerList"></div>
         <div class="picker-actions">
             <button type="button" class="btn-secondary" onclick="clearWorkerPicker()">🧹 רוקן אתר</button>
@@ -360,6 +366,7 @@
 <div class="modal" id="placePickerModal">
     <div class="modal-content">
         <h3 id="placePickerTitle"></h3>
+        <p class="picker-context" id="placePickerContext"></p>
         <div class="place-choice" id="placePickerList"></div>
         <button type="button" class="btn-secondary" onclick="closePlacePicker()">סגור</button>
     </div>
@@ -411,12 +418,15 @@
              form fits above the phone keyboard with room to spare. -->
         <details class="form-more" id="workerFormMore">
             <summary>עוד פרטים (טלפון, תעודת זהות, שעות נוספות)</summary>
+            <label class="field-label" for="workerFormPhone">מספר טלפון</label>
             <input dir="ltr" id="workerFormPhone" inputmode="tel" placeholder="מספר טלפון" type="text" oninput="workerPhoneTyped()"/>
             <!-- Said while the number is still being typed, when fixing it costs one
                  keystroke. Advisory only - the blocking question at save stays, and it is
                  the one asked against the state that is actually written to. -->
             <p class="phone-shared-hint" id="workerFormPhoneHint" style="display:none"></p>
+            <label class="field-label" for="workerFormId">מספר זהות</label>
             <input dir="ltr" id="workerFormId" inputmode="numeric" placeholder="מספר זהות" type="text"/>
+            <label class="field-label" for="workerFormHourly">שכר לשעה נוספת</label>
             <input dir="ltr" id="workerFormHourly" inputmode="decimal" placeholder="שכר לשעה נוספת" type="number" min="0" step="1"/>
         </details>
         <p class="hint">בלי שכר יומי הדוח יראה רק ימים, בלי סכום. שינוי שכר חל מהיום והלאה - ימים שכבר נרשמו שומרים את השכר שהיה בזמן הרישום.</p>
@@ -469,14 +479,16 @@
 
 <div class="modal" id="shareModal">
     <div class="modal-content">
-        <h3>הודעה לוואטסאפ</h3>
+        <h3 id="shareTitle" tabindex="-1">הודעה לוואטסאפ</h3>
+        <p id="shareContext" class="picker-context"></p>
         <!-- Three looks for one message; the choice is remembered, so this is set once
              and then never thought about again. -->
         <div class="share-styles" id="shareStyles"></div>
         <!-- Anyone not recorded yet is missing from the message entirely, which is not
              visible in the text itself. Said here, above the button that sends it. -->
         <div class="share-warning" id="shareWarning" style="display:none"></div>
-        <textarea id="shareText" rows="14" readonly></textarea>
+        <label class="field-label" for="shareText">תצוגה מקדימה של ההודעה</label>
+        <textarea id="shareText" rows="10" readonly></textarea>
         <div class="modal-actions">
             <button type="button" class="btn-success" onclick="sendDayMessage()">💬 שלח בוואטסאפ</button>
             <button type="button" class="btn-secondary" onclick="copyDayMessage()">העתק</button>

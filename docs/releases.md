@@ -1,3 +1,69 @@
+## v139 — owner's plain-language pay cards
+
+Compact worker cards show ימי עבודה (the existing payable day units) and חופש
+(recorded absence, never inferred from missing dates). Double days still count as
+two payable units. Attendance dates and advance deductions remain in worker details
+and the full report rather than on the outer tile. The compact footer shows only
+its worker count and payable total; detailed tables, paper and exports are unchanged.
+The card still opens the full dated worker record through the existing action.
+
+## v138 — consistent primary navigation
+
+The phone bar uses one outline-icon family and a small active-icon pill while
+retaining its labelled targets and measured safe-area spacing. Advances gains an
+outline wallet icon instead of a differently sized text glyph. The tablist has a
+name and one keyboard entry point. RTL arrows, Home and End move focus; Enter or
+Space activates through the original guarded navigation path. No view-switch
+guard, day record, ledger, vehicle flag or financial calculation changes.
+
+## v137 — quieter report controls and readable payroll cards
+
+Reports group type, period and worker scope in one filter panel. Worker search gains
+a clear action and a live result count without changing the selected report scope.
+Pay-cycle navigation and display choice share one wrapping row. Compact cards lead
+with worker identity and the existing prepared payable amount, label its currency,
+and separate attendance from pay units. Unknown amounts remain unknown. The grid
+uses one column when enlarged text needs it. Empty footer rate cells no longer
+appear as a zero in the compact screen view. Canonical tables, output boundaries,
+stored records and all financial calculations are unchanged.
+
+## v136 — a consistent daily task-dialog package
+
+Task dialogs share wrapping headings and phone spacing. Worker search offers an
+explicit clear action, result counts and recovery from no matches. Worker actions
+name both person and site and expose their selected state. Place choices carry the
+existing site colour and selected check. The assignment sheet names the current
+recording state. Message preview identifies its date and site scope, keeps the
+original message text, and separates the primary send action from copy and close.
+Optional worker fields have persistent labels and validation messages are distinct.
+Cars remain disabled. No assignment, pay, ledger or synchronization rules change.
+
+## v135 — clearer daily recording and worker selection
+
+Worker selection gains a name search that keeps the open list order, preserves the
+filter while adding/removing people, and resets for the next site. Missing records,
+absence and other-site assignments are labelled explicitly. The selected day appears
+in both pickers, and opening worker selection focuses the heading without opening the
+keyboard. Place choices form a wrapping grid. Phone rate controls are grouped under
+each site name; the worker list distinguishes missing work from absence.
+The underlying assignment, pay and sync operations are unchanged.
+
+## v134 — compact daily site headings
+
+Phone site cards use slimmer headings and tighter spacing around worker rows.
+An empty site keeps its name, empty-state text, count and add button in one heading.
+Completed recording and empty absence sections fit on a compact wrapping line.
+Site actions use drawn icons with their existing accessible labels and 44px targets.
+No payroll, stored record, site order or vehicle setting changes.
+
+## v133 — clearer daily site records
+
+Daily site cards use tighter heading spacing, bold worker names and row dividers.
+Rate controls are visually distinct from names; long names can wrap without losing
+split-site badges. Missing records, completed recording and confirmed absences have
+separate labelled visual treatments. The site count has a spoken label. No record,
+calculation, site order, vehicle gate or default week view changes.
+
 ## v132 — compact worker card grid
 
 Phone reports default to compact cards that share a row when space permits. Cards

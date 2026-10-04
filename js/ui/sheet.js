@@ -104,6 +104,11 @@ function renderAssignSheet() {
     const entries = entriesFor(State.schedule, State.date, worker.id, State.layer);
     const chosen = new Set(entries.map(entry => entry.placeId));
     const absent = isAbsent(State.schedule, State.date, worker.id, State.layer);
+    const status = el('p', absent ? 'sheet-status sheet-status-absent'
+        : entries.length ? 'sheet-status sheet-status-recorded' : 'sheet-status sheet-status-pending',
+        absent ? 'נעדר ביום הזה' : entries.length === 1 ? 'רשום באתר אחד'
+            : entries.length ? `רשום ב־${entries.length} אתרים` : 'טרם נרשם ביום הזה');
+    body.appendChild(status);
 
     const grid = el('div', 'sheet-places');
     State.activePlaces().forEach(place => {
@@ -290,6 +295,7 @@ let pickerOrder = [];
 
 function openWorkerPicker(placeId) {
     pickerPlaceId = placeId;
+    document.getElementById('workerPickerSearch').value = '';
 
     const here = new Set(workersAtPlace(State.schedule, State.date, placeId, State.layer));
     const unrecorded = new Set(State.unrecorded().map(w => w.id));
@@ -302,6 +308,13 @@ function openWorkerPicker(placeId) {
     document.getElementById('workerPickerModal').style.display = 'flex';
 }
 
+function clearWorkerPickerSearch() {
+    const search = document.getElementById('workerPickerSearch');
+    search.value = '';
+    renderWorkerPicker();
+    search.focus({ preventScroll: true });
+}
+
 function renderWorkerPicker() {
     const place = State.place(pickerPlaceId);
     if (!place) return;
@@ -311,8 +324,14 @@ function renderWorkerPicker() {
 
     document.getElementById('workerPickerTitle').textContent =
         `הוסף עובדים ל${isolate(place.name)} · ${here.size} רשומים`;
+    const date = parseLocalDate(State.date);
+    document.getElementById('workerPickerContext').textContent = `${hebrewDayName(date)} · ${formatFullDate(date)}`;
+    const query = document.getElementById('workerPickerSearch').value.trim().toLocaleLowerCase();
+    document.getElementById('workerPickerClear').disabled = !document.getElementById('workerPickerSearch').value;
 
     const container = document.getElementById('workerPickerList');
+    const focusedRow = document.activeElement && document.activeElement.closest('#workerPickerList .picker-row');
+    const focusedWorker = focusedRow && focusedRow.dataset.workerId;
     container.innerHTML = '';
 
     // Anyone added to the roster while this was open goes on the end rather than being
@@ -323,12 +342,28 @@ function renderWorkerPicker() {
         .filter(worker => worker && worker.active)
         .concat(State.activeWorkers().filter(worker => !known.has(worker.id)));
 
-    ordered.forEach(worker => {
+    const visible = ordered.filter(worker => worker.name.toLocaleLowerCase().includes(query));
+    document.getElementById('workerPickerSummary').textContent = query
+        ? `מוצגים ${visible.length} מתוך ${ordered.length} עובדים` : `${ordered.length} עובדים ברשימה`;
+    if (!visible.length) {
+        const empty = el('div', 'picker-no-results');
+        empty.appendChild(el('p', null, 'לא נמצאו עובדים בחיפוש.'));
+        if (query) empty.appendChild(button('הצג את כל העובדים', 'btn-secondary', clearWorkerPickerSearch));
+        container.appendChild(empty);
+    }
+    visible.forEach(worker => {
         const row = el('div', 'picker-row');
+        row.dataset.workerId = worker.id;
         const inHere = here.has(worker.id);
         if (inHere) row.classList.add('picker-row-on');
 
         const label = el('span', 'picker-name', worker.name);
+        if (!inHere && unrecorded.has(worker.id)) {
+            row.classList.add('picker-row-pending');
+            label.appendChild(el('span', 'picker-note picker-note-pending', 'טרם נרשם'));
+        } else if (!inHere && isAbsent(State.schedule, State.date, worker.id, State.layer)) {
+            label.appendChild(el('span', 'picker-note', 'נעדר ביום הזה'));
+        }
         if (!inHere && !unrecorded.has(worker.id)) {
             const elsewhere = entriesFor(State.schedule, State.date, worker.id, State.layer)
                 .map(entry => (State.place(entry.placeId) || {}).name)
@@ -338,7 +373,7 @@ function renderWorkerPicker() {
         }
         row.appendChild(label);
 
-        row.appendChild(button(inHere ? '✓ נמצא' : '+ הוסף', inHere ? 'btn-on' : 'btn-add', () => {
+        const action = button(inHere ? '✓ נמצא' : '+ הוסף', inHere ? 'btn-on' : 'btn-add', () => {
             const label = inHere
                 ? `${isolate(worker.name)} הוסר מ${isolate(place.name)}`
                 : `${isolate(worker.name)} נוסף ל${isolate(place.name)}`;
@@ -346,9 +381,12 @@ function renderWorkerPicker() {
                 ? unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id)
                 : assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL)));
             renderWorkerPicker();
-        }));
+        }, `${inHere ? 'הסר את' : 'הוסף את'} ${isolate(worker.name)} ${inHere ? 'מ' : 'ל'}${isolate(place.name)}`);
+        action.setAttribute('aria-pressed', String(inHere));
+        row.appendChild(action);
 
         container.appendChild(row);
+        if (focusedWorker === worker.id) row.querySelector('button').focus({ preventScroll: true });
     });
 }
 
@@ -400,6 +438,8 @@ function openPlacePicker(workerId) {
     if (!worker) return;
 
     document.getElementById('placePickerTitle').textContent = `לאן הלך ${isolate(worker.name)}?`;
+    const date = parseLocalDate(State.date);
+    document.getElementById('placePickerContext').textContent = `${hebrewDayName(date)} · ${formatFullDate(date)}`;
 
     const container = document.getElementById('placePickerList');
     container.innerHTML = '';
@@ -409,8 +449,8 @@ function openPlacePicker(workerId) {
 
     State.activePlaces().forEach(place => {
         const inHere = current.has(place.id);
-        container.appendChild(button(
-            inHere ? `✓ ${isolate(place.name)}` : place.name,
+        const choice = button(
+            '',
             inHere ? 'place-btn place-on' : 'place-btn',
             () => {
                 const change = inHere
@@ -419,7 +459,17 @@ function openPlacePicker(workerId) {
                 State.commit(change);
                 openPlacePicker(workerId);
             }
-        ));
+        );
+        const dot = el('span', 'place-choice-dot');
+        dot.setAttribute('aria-hidden', 'true');
+        paintSite(dot, place.id);
+        choice.appendChild(dot);
+        const name = el('span', 'place-choice-name');
+        appendSiteName(name, place.id, place.name);
+        choice.appendChild(name);
+        if (inHere) choice.appendChild(el('span', 'place-choice-check', '✓'));
+        choice.setAttribute('aria-pressed', String(inHere));
+        container.appendChild(choice);
     });
 
     document.getElementById('placePickerModal').style.display = 'flex';
@@ -602,6 +652,3 @@ function renderCopyButton() {
     btn.textContent = `↧ ${'מ' + hebrewDayName(parsed)} ${formatShortDate(parsed)}`;
     btn.title = `העתק את מה שנרשם ב${formatFullDate(parsed)}. רק מי שעדיין לא נרשם יושלם.`;
 }
-
-
-
