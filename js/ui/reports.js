@@ -270,8 +270,18 @@ function renderReportWorkerPicker() {
     search.type = 'search'; search.placeholder = 'חיפוש עובד בדוח';
     search.setAttribute('aria-label', 'חיפוש עובד בדוח');
     search.value = REPORT_WORKER_SEARCH;
-    box.appendChild(search);
+    const searchTools = el('div', 'report-search-tools');
+    const reset = button('נקה', 'btn-secondary', () => {
+        REPORT_WORKER_SEARCH = ''; search.value = ''; filter();
+        search.focus({ preventScroll: true });
+    }, 'נקה חיפוש עובדים בדוח');
+    reset.id = 'reportWorkerSearchClear';
+    searchTools.appendChild(search); searchTools.appendChild(reset);
+    box.appendChild(searchTools);
     box.appendChild(actions);
+    const resultCount = el('p', 'report-search-count');
+    resultCount.setAttribute('role', 'status');
+    box.appendChild(resultCount);
     const list = el('div', 'report-worker-list');
     State.schedule.workers.forEach(worker => {
         const label = el('label', 'report-worker-choice');
@@ -300,6 +310,10 @@ function renderReportWorkerPicker() {
         const choices = [...list.children];
         choices.forEach(choice => { choice.hidden = !choice.dataset.workerName.toLocaleLowerCase().includes(query); });
         empty.hidden = choices.some(choice => !choice.hidden);
+        reset.disabled = !REPORT_WORKER_SEARCH;
+        resultCount.textContent = query
+            ? `מוצגים ${choices.filter(choice => !choice.hidden).length} מתוך ${choices.length} עובדים`
+            : `${choices.length} עובדים ברשימה`;
     };
     search.addEventListener('input', () => { REPORT_WORKER_SEARCH = search.value; filter(); });
     filter(); box.appendChild(list); box.appendChild(empty);
@@ -777,7 +791,9 @@ function renderPayrollTable() {
         if (again) again.focus({ preventScroll: true });
     });
     layout.setAttribute('aria-pressed', REPORT_CARD_GRID ? 'false' : 'true');
-    section.appendChild(layout);
+    const browse = el('div', 'report-browse-tools');
+    browse.appendChild(layout);
+    section.appendChild(browse);
     const groups = payrollGroups(allRows);
     if (groups.length > 1) {
         const jump = el('nav', 'report-cycle-nav');
@@ -790,7 +806,7 @@ function renderPayrollTable() {
                     target.focus({ preventScroll: true });
                 }
             }, `${group.title} · ${countedIn(group.rows.length, 'עובד אחד', 'עובדים')} בדוח`)));
-        section.appendChild(jump);
+        browse.appendChild(jump);
     }
     groups.forEach(group => {
         if (group.title) {
@@ -823,24 +839,24 @@ function renderReportCards(table, rows, headers) {
         card.appendChild(el('strong', 'report-tile-name', row.name));
         const amount = el('span', 'report-tile-amount');
         amount.appendChild(el('span', 'report-tile-label', 'נותר לתשלום'));
-        amount.appendChild(el('strong', 'report-tile-value', value('לתשלום') || '—'));
+        const payable = value('לתשלום') || '—';
+        const figure = el('span', 'report-tile-figure');
+        figure.appendChild(el('strong', 'report-tile-value', payable));
+        // The symbol labels the prepared amount; an unknown wage remains unknown.
+        if (payable !== '—') figure.appendChild(el('span', 'report-tile-currency', '₪'));
+        amount.appendChild(figure);
         card.appendChild(amount);
         const metrics = el('span', 'report-tile-metrics');
-        ['ימי נוכחות', 'ימי שכר'].forEach(label => {
+        // The owner's compact vocabulary: work means payable day units, not dates
+        // on site. A double day is still two units; holiday means recorded absence.
+        [['ימי עבודה', value('ימי שכר') || '0'], ['חופש', value('נעדר') || '0']].forEach(([label, count]) => {
             const metric = el('span');
-            metric.appendChild(el('strong', null, value(label) || '0'));
+            metric.appendChild(el('strong', null, count));
             metric.appendChild(el('span', 'report-tile-label', label));
             metrics.appendChild(metric);
         });
         card.appendChild(metrics);
-        const deduction = deductionColumnName(rows);
-        if (headers.includes(deduction)) {
-            const line = el('span', 'report-tile-deduction');
-            line.appendChild(el('span', null, deduction));
-            line.appendChild(el('strong', null, value(deduction) || '0'));
-            card.appendChild(line);
-        }
-        card.appendChild(el('span', 'report-tile-open', 'פירוט ›'));
+        card.appendChild(el('span', 'report-tile-open', 'פירוט'));
         grid.appendChild(card);
     });
     return grid;
@@ -996,7 +1012,7 @@ function payrollGroupTable(rows) {
             'הוסף שכר יומי לעובדים במסך "עובדים ואתרים" כדי שהדוח יחשב גם את הסכום.'));
     } else {
         const explanation = el('details', 'report-explanation report-calculation');
-        explanation.appendChild(el('summary', null, 'איך מחושבים ימי השכר?'));
+        explanation.appendChild(el('summary', null, 'איך מחושב התשלום?'));
         explanation.appendChild(el('p', 'hint',
             'ימי נוכחות = כמה תאריכים העובד היה באתר. ימי שכר = כמה ימים משולמים, ' +
             'כשיום כפול נספר כשניים. שני אתרים באותו יום הם יום נוכחות אחד, ' +

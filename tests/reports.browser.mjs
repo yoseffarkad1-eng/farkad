@@ -63,7 +63,13 @@ try {
     await search.fill('לא קיים');
     same('no-match search hides every worker choice', await page.locator('.report-worker-choice:visible').count(), 0);
     check('no-match search explains the empty list', await page.getByText('לא נמצאו עובדים בחיפוש.',{exact:true}).isVisible());
+    same('no-match search announces its result count', await page.locator('.report-search-count').textContent(), 'מוצגים 0 מתוך 3 עובדים');
     same('search does not remove workers from the exported report', await page.evaluate(() => JSON.stringify(reportSheets())), original);
+    await page.locator('#reportWorkerSearchClear').click();
+    same('clear search restores every choice', await page.locator('.report-worker-choice:visible').count(), 3);
+    same('clear search returns typing focus', await page.evaluate(()=>document.activeElement.id), 'reportWorkerSearch');
+    check('clear search is disabled while empty', await page.locator('#reportWorkerSearchClear').isDisabled());
+    same('clear search preserves exported amounts', await page.evaluate(() => JSON.stringify(reportSheets())), original);
     await search.fill('ארוך');
     same('inactive workers can still be selected', await page.locator('.report-worker-choice:visible').count(), 1);
     await page.getByRole('button',{name:'נקה בחירה',exact:true}).click();
@@ -178,6 +184,74 @@ try {
     same('selection retains focus on the worker just changed', await page.evaluate(() => document.activeElement.dataset.workerId), 'w_extra_24');
     await page.evaluate(() => render());
     same('live redraw retains the list position', await list.evaluate(node => node.scrollTop), scroll);
+    suite('plain work and holiday cards count payable units, not attendance dates');
+    await page.evaluate(()=>{
+        State.schedule = emptySchedule();
+        State.schedule.workers = [{id:'w_simple',name:'עובד לדוגמה',active:true,dailyRate:450,hourlyRate:55}];
+        State.schedule.places = [{id:'p_one',name:'הרצליה',active:true},{id:'p_two',name:'רמת גן',active:true}];
+        assignPlace(State.schedule,'2026-10-02','w_simple','actual','p_one');
+        assignPlace(State.schedule,'2026-10-02','w_simple','actual','p_two');
+        assignPlace(State.schedule,'2026-10-03','w_simple','actual','p_one',RATE_DOUBLE);
+        markAbsent(State.schedule,'2026-10-04','w_simple','actual');
+        assignPlace(State.schedule,'2026-10-05','w_simple','actual','p_one',RATE_EXTRA,3);
+        REPORT_RANGE.from='2026-10-02'; REPORT_RANGE.to='2026-10-15';
+        REPORT_WORKERS=null; REPORT_PICKER_OPEN=false; REPORT_RANGE_OPEN=false; REPORT_CARD_GRID=true; render();
+    });
+    const simple = page.locator('[data-report-worker-id="w_simple"]');
+    same('only plain work and holiday labels appear on the card',await simple.locator('.report-tile-metrics .report-tile-label').allTextContents(),['ימי עבודה','חופש']);
+    same('normal day, double day and overtime day are four payable units',await simple.locator('.report-tile-metrics strong').allTextContents(),['4','1']);
+    same('the original attendance count stays three',await page.locator('.report-payroll tbody [data-label="ימי נוכחות"]').textContent(),'3');
+    same('the original pay count stays four',await page.locator('.report-payroll tbody [data-label="ימי שכר"]').textContent(),'4');
+    same('no deduction line crowds the outer card',await simple.locator('.report-tile-deduction').count(),0);
+    check('compact total hides detailed attendance labels',!(await page.locator('.report-payroll tfoot [data-label="ימי נוכחות"]').isVisible()));
+    const simpleOutput = await page.evaluate(()=>JSON.stringify(reportSheets()));
+    const simpleRecord = await page.evaluate(()=>JSON.stringify(State.schedule));
+    await simple.click();
+    check('card opens the complete dated details',await page.locator('#workerDaysModal').isVisible());
+    check('double-day note remains in details',(await page.locator('#workerDaysBody').innerText()).includes('כפול'));
+    check('holiday date remains in details',await page.locator('#workerDaysBody .wday-absent').isVisible());
+    check('overtime note remains in details',(await page.locator('#workerDaysBody').innerText()).includes('+3'));
+    await page.evaluate(()=>closeWorkerDays());
+    await page.locator('.report-layout-toggle').click();
+    check('full report retains the attendance breakdown',await page.locator('.report-payroll tbody [data-label="ימי נוכחות"]').isVisible());
+    check('full total retains the attendance breakdown',await page.locator('.report-payroll tfoot [data-label="ימי נוכחות"]').isVisible());
+    same('simplified cards and details leave every export unchanged',await page.evaluate(()=>JSON.stringify(reportSheets())),simpleOutput);
+    same('simplified cards and details leave the record unchanged',await page.evaluate(()=>JSON.stringify(State.schedule)),simpleRecord);
+    suite('large amounts and unknown wages stay readable in compact cards');
+    await page.evaluate(() => {
+        State.schedule = emptySchedule();
+        State.schedule.workers = [
+            {id:'w_large',name:'מוחמד עבד אלרחמן אבו מחאמיד',active:true,dailyRate:987654.32},
+            {id:'w_unknown',name:'עובד ללא שכר יומי',active:true}
+        ];
+        State.schedule.places = [{id:'p_one',name:'הרצליה',active:true}];
+        State.schedule.workers.forEach(worker=>assignPlace(State.schedule,'2026-10-02',worker.id,'actual','p_one'));
+        REPORT_WORKERS = null; REPORT_PICKER_OPEN = false; REPORT_RANGE_OPEN = false; REPORT_CARD_GRID = true; render();
+    });
+    const unknown = page.locator('[data-report-worker-id="w_unknown"]');
+    same('unknown wage remains a dash, not a zero', await unknown.locator('.report-tile-value').textContent(), '—');
+    same('unknown wage has no misleading currency amount', await unknown.locator('.report-tile-currency').count(), 0);
+    same('known wage explicitly names its currency', await page.locator('[data-report-worker-id="w_large"] .report-tile-currency').textContent(), '₪');
+    for (const [width, scale] of [[390,1],[320,1],[390,2]]) {
+        await page.setViewportSize({width,height:844});
+        await page.evaluate(()=>render());
+        if (scale === 2) await page.evaluate(() => {
+            const sizes = [...document.querySelectorAll('.report-worker-cards, .report-worker-cards *')].map(n=>[n,parseFloat(getComputedStyle(n).fontSize)]);
+            sizes.forEach(([n,size])=>n.style.fontSize=`${size*2}px`);
+        });
+        const cards = await page.locator('.report-worker-tile').evaluateAll(nodes=>nodes.map(n=>({fits:n.scrollWidth<=n.clientWidth+1,top:n.offsetTop})));
+        check(`${width}px/${scale}: long name and large wage fit inside each card`, cards.every(n=>n.fits),JSON.stringify(cards));
+        if (scale === 2) check('enlarged text switches the cards to one column', cards[0].top!==cards[1].top,JSON.stringify(cards));
+    }
+    await page.evaluate(()=>{
+        State.schedule=emptySchedule();
+        State.schedule.workers=[{id:'w_unpriced',name:'עובד ללא מחיר',active:true}];
+        State.schedule.places=[{id:'p_one',name:'הרצליה',active:true}];
+        assignPlace(State.schedule,'2026-10-02','w_unpriced','actual','p_one');
+        render();
+    });
+    check('unpriced compact footer does not expose the old pay-units label',!(await page.locator('.report-payroll tfoot [data-label="ימי שכר"]').isVisible()));
+    same('unpriced card still has plain work and holiday counts',await page.locator('.report-tile-metrics strong').allTextContents(),['1','0']);
     check('no uncaught browser errors', errors.length === 0, JSON.stringify(errors));
 } finally { await browser.close(); await server.close(); }
 report();

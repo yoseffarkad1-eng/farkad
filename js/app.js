@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v132';
+const APP_VERSION = 'v139';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -43,6 +43,24 @@ function checkBuildConsistency() {
 let currentView = 'day';
 
 const VIEWS = ['day', 'week', 'roster', 'advances', 'reports'];
+
+// Manual tab activation: arrows move focus in the visual RTL direction; Enter or
+// Space uses the existing click path, including the guard for an unsaved roster.
+function handleNavigationKey(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const origin = event.target.closest('.tab');
+    if (!origin) return;
+    const index = VIEWS.indexOf(origin.id.slice(4));
+    if (index < 0) return;
+    const rtl = getComputedStyle(origin.parentElement).direction === 'rtl';
+    const step = event.key === 'ArrowLeft' ? (rtl ? 1 : -1) : (rtl ? -1 : 1);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? VIEWS.length - 1
+        : (index + step + VIEWS.length) % VIEWS.length;
+    event.preventDefault();
+    VIEWS.forEach((view, at) => document.getElementById('tab-' + view)
+        .setAttribute('tabindex', at === next ? '0' : '-1'));
+    document.getElementById('tab-' + VIEWS[next]).focus({ preventScroll: true });
+}
 
 function showView(view) {
     if (!VIEWS.includes(view)) return;
@@ -95,6 +113,7 @@ function render() {
         if (tab) {
             tab.classList.toggle('tab-on', view === currentView);
             tab.setAttribute('aria-selected', view === currentView ? 'true' : 'false');
+            tab.setAttribute('tabindex', view === currentView ? '0' : '-1');
         }
     });
 
