@@ -66,6 +66,28 @@ function linesOf(page) {
         }));
 }
 
+// A PDF renderer may emit a name as one run or one run per glyph. Read the whole
+// right-hand column in visual order for this Latin fixture; the final glyph of
+// Worker 01 is only a digit. Hebrew headings keep their separate RTL assertions.
+function rightColumnText(items, width) {
+    return items.filter(item => item.x > width * 0.6)
+        .sort((a, b) => a.x - b.x).map(item => item.text).join('');
+}
+
+{
+    suite('a printed name is independent of PDF text-run boundaries');
+    const name = 'Worker 01';
+    const glyphs = [...name].map((text, i) => ({ text, x: 480 + i * 6 }));
+    same('one complete text run is the worker name',
+        rightColumnText([{ text: name, x: 480 }], 600), name);
+    same('separate glyphs are assembled in their printed order',
+        rightColumnText([...glyphs].reverse(), 600), name);
+    check('the final numeric glyph alone is not a worker name',
+        rightColumnText([glyphs[glyphs.length - 1]], 600) !== name);
+    check('a complete name in the left-hand column does not pass',
+        rightColumnText(glyphs.map(item => ({ ...item, x: item.x - 400 })), 600) !== name);
+}
+
 async function open(options = {}) {
     // `flags` opens a shut feature gate for THIS page, before the app loads, through the
     // one seam js/model/schema.js reads at definition time - the same thing a build with
@@ -372,11 +394,10 @@ for (const scenario of [
             const cells = payrollPages[0].texts
                 .filter(item => Math.abs(item.y - firstRow.y) < 3)
                 .sort((a, b) => a.x - b.x);
-            const name = cells[cells.length - 1];
+            const name = rightColumnText(cells, width);
             const money = cells[0];
             check('a worker\'s name is on the right, under the column that names it',
-                name.x > width * 0.6 && !/^[\d,.\s]+$/.test(name.text),
-                JSON.stringify({ text: name.text, x: Math.round(name.x) }));
+                name === 'Worker 01', JSON.stringify(name));
             check('and his money is on the left, under the column that totals it',
                 money.x < width * 0.4 && /\d/.test(money.text),
                 JSON.stringify({ text: money.text, x: Math.round(money.x) }));

@@ -121,19 +121,27 @@ try {
         await page.setViewportSize({width,height:844});
         await page.emulateMedia({colorScheme:scheme});
         if (!(await page.locator('.range-wrap').evaluate(n=>n.open))) await page.locator('.report-range-heading').click();
-    await page.getByRole('button',{name:'תאריכים אחרים',exact:true}).click();
+        await page.getByRole('button',{name:'תאריכים אחרים',exact:true}).click();
         if (!(await search.isVisible())) await page.locator('.report-worker-picker summary').click();
         if (scale === 2) await page.evaluate(() => {
             const sizes = [...document.querySelectorAll('#reportsView *')].map(n => [n,parseFloat(getComputedStyle(n).fontSize)]);
             sizes.forEach(([n,size]) => n.style.setProperty('font-size',`${size*2}px`,'important'));
         });
+        same(`${width}/${scheme}/${scale}: all six date presets remain visible`,
+            await page.locator('.range-chips button:visible').count(), 6);
         const geometry = await page.evaluate(() => ({
             overflow:document.documentElement.scrollWidth>innerWidth+1,
+            // Page clipping must not hide a preset that still spills out of its button.
+            spillingPresets:[...document.querySelectorAll('.range-chips button')]
+                .filter(n => n.scrollWidth>n.clientWidth+1 || n.scrollHeight>n.clientHeight+1)
+                .map(n => ({text:n.textContent,width:n.clientWidth,scrollWidth:n.scrollWidth,
+                    height:n.clientHeight,scrollHeight:n.scrollHeight})),
             small:[...document.querySelectorAll('#reportsView button, #reportsView input, #reportsView summary')]
                 .filter(n => n.offsetParent !== null).filter(n => {const r=n.getBoundingClientRect();return r.width<44||r.height<44;}).map(n=>n.textContent),
             smallInput:[...document.querySelectorAll('.reports-controls input')].some(n=>parseFloat(getComputedStyle(n).fontSize)<16)
         }));
         check(`${width}/${scheme}/${scale}: no page overflow`, !geometry.overflow, JSON.stringify(geometry));
+        check(`${width}/${scheme}/${scale}: date preset text fits inside each button`, !geometry.spillingPresets.length, JSON.stringify(geometry.spillingPresets));
         check(`${width}/${scheme}/${scale}: touch targets remain at least 44px`, !geometry.small.length, JSON.stringify(geometry));
         check(`${width}/${scheme}/${scale}: inputs remain readable without iPhone zoom`, !geometry.smallInput);
         if (process.env.REPORTS_SCREENSHOT_DIR) {
