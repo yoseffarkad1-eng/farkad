@@ -5100,10 +5100,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   const heads = await page.$$eval('#settingsPanel .settings-group h3',
     nodes => nodes.map(node => node.textContent.trim()));
   // v122: connection and update first, backup and replacement together but in
-  // separate cards, device and recovery help last. Labels and action guards remain.
-  check('the sheet has the seven groups, in the board order',
+  // separate cards, device and recovery help last. v141 adds the chosen Calendar
+  // reminder after updates, before backup. Labels and action guards remain.
+  check('the sheet has the eight groups, including the Calendar reminder, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'עדכון וגרסה', 'גיבוי', 'ייבוא ושחזור', 'מצב המכשיר', 'שחזור חירום',
+      ['ענן וסנכרון', 'עדכון וגרסה', 'תזכורת לרישום היום', 'גיבוי', 'ייבוא ושחזור', 'מצב המכשיר', 'שחזור חירום',
                 'מידע טכני']),
     JSON.stringify(heads));
 

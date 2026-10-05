@@ -170,7 +170,9 @@ given('the two trees agree with themselves about which build they are',
     oldStamps.page === oldStamps.app && newStamps.page === newStamps.app);
 given('the deploy changes files and not only stamps',
     newNames.some(name => !/^(index\.html|js\/app\.js|sw\.js)$/.test(name) &&
-        sha(readFileSync(join(OLD, name))) !== sha(readFileSync(join(NEW, name)))));
+        // A newly added cached asset is a real deploy change, with no old bytes to read.
+        (!oldNames.includes(name) ||
+            sha(readFileSync(join(OLD, name))) !== sha(readFileSync(join(NEW, name))))));
 
 // What the cache should hold, derived from the tree on disk rather than from sw.js's own
 // SHELL list. Reading the list out of the file under test would make the completeness

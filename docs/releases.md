@@ -1,3 +1,13 @@
+## v141 — a clear daily reminder through iPhone Calendar
+
+Settings adds a readable 18:00 Israel-time reminder card with workday choices,
+native Calendar handoff, a selectable subscription address and an ICS fallback.
+The owner chose Calendar rather than a new push backend. Enabling and cancelling
+happen in Calendar; opening a link is never labelled as an active reminder.
+The public recurrence contains no employee data and remains at 18:00 across
+daylight-saving transitions. Existing work records, sync and pay calculations
+are unchanged. See `docs/calendar-reminders.md` for activation and validation limits.
+
 ## v140 — the owner's reading preferences across the app
 
 The screen theme follows the phone, with stronger text and site-name contrast,
