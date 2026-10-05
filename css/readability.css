@@ -94,6 +94,33 @@
     /* The daily toolbar keeps its compact auxiliary controls. Names and amounts get
        the larger type; inflating this whole toolbar hid the first worker at 200%. */
     .day-header .btn-secondary { font-size: 14px; min-height: 44px; }
+    .calendar-reminder { border-radius: 12px; }
+    .calendar-reminder-time {
+        display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px;
+        padding: 12px 14px; border-radius: 8px; background: var(--accent-soft);
+    }
+    .calendar-reminder-time strong { font-size: 34px; color: var(--accent); line-height: 1.25; }
+    .calendar-reminder-time span { font-size: 16px; color: var(--ink-2); }
+    .calendar-reminder-field { display: grid; gap: 6px; min-width: 0; }
+    .calendar-reminder-field .field-label { margin: 0; }
+    .calendar-reminder select { width: 100%; min-width: 0; min-height: 48px; border-radius: 8px; }
+    .calendar-reminder-open, .calendar-reminder-download {
+        display: flex; align-items: center; justify-content: center; text-align: center;
+        min-height: 48px; padding: 10px 12px; border-radius: 8px; text-decoration: none;
+        white-space: normal; overflow-wrap: anywhere; font-weight: 700;
+    }
+    .calendar-reminder-open { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+    .calendar-reminder-help { border-top: 1px solid var(--line-soft); padding-top: 4px; }
+    .calendar-reminder-help summary {
+        display: flex; align-items: center; gap: 8px; min-height: 48px;
+        font-size: 16px; font-weight: 700; cursor: pointer; color: var(--accent);
+    }
+    .calendar-reminder-help summary::-webkit-details-marker { display: none; }
+    .calendar-reminder-help ol { margin: 8px 0; padding-inline-start: 24px; }
+    .calendar-reminder-help li { margin-block: 8px; }
+    .calendar-reminder-help > .hint { margin-block: 12px; }
+    .calendar-reminder-help input { width: 100%; min-width: 0; min-height: 48px; border-radius: 8px; padding: 10px; margin-block: 6px 10px; }
+    .calendar-reminder-help button, .calendar-reminder-download { width: 100%; margin-block: 4px; }
 }
 
 @media screen and (prefers-color-scheme: dark) {

@@ -17,7 +17,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v140">
+<meta name="farkad-build" content="v141">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -226,6 +226,21 @@
                 <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M18 18a8 8 0 0 1-13-2"/></svg></span><div><h3>עדכון וגרסה</h3><p class="hint">בדיקה אם יש גרסה חדשה לאפליקציה</p></div></div>
                 <div class="app-version"><span id="appVersion"></span>
                     <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button></div>
+            </section>
+            <section class="settings-group calendar-reminder" aria-labelledby="calendarReminderTitle">
+                <div class="settings-card-head"><span class="settings-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span><div><h3 id="calendarReminderTitle">תזכורת לרישום היום</h3><p class="hint">דרך היומן של ה־iPhone</p></div></div>
+                <div class="calendar-reminder-time"><strong dir="ltr">18:00</strong><span>בערב · שעון ישראל</span></div>
+                <div class="calendar-reminder-field"><label class="field-label" for="calendarReminderDays">באילו ימים להזכיר?</label><select id="calendarReminderDays" onchange="updateCalendarReminderLinks()"><option value="workdays">ראשון עד חמישי</option><option value="friday">ראשון עד שישי</option><option value="everyday">כל יום</option></select></div>
+                <a class="btn-secondary calendar-reminder-open" id="calendarReminderOpen" href="webcal://yoseffarkad1-eng.github.io/farkad/calendars/daily-workdays-1800.ics" onclick="calendarReminderOpened()">פתיחה ביומן iPhone</a>
+                <p class="hint" id="calendarReminderStatus" role="status" aria-live="polite">יש לאשר ביומן ולהפעיל התראות. פתיחת הקישור לבדה אינה מפעילה תזכורת.</p>
+                <details class="calendar-reminder-help"><summary><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v2"/></svg> הפעלה, שינוי וביטול</summary>
+                    <ol><li>פתח את היומן ואשר את הוספת יומן פרקד.</li><li>הפעל התראות לאירועים ביומן פרקד, וודא שהתראות היישום ״יומן״ מותרות בהגדרות ה־iPhone.</li><li>ודא שמופיע אירוע רישום בשעה 18:00. התזכורת קבועה, גם אם כבר רשמת את היום.</li></ol>
+                    <p class="hint">לשינוי ימים או לביטול, הסר קודם את יומן פרקד מתוך היישום ״יומן״. אחר כך אפשר להוסיף את האפשרות החדשה בלי תזכורות כפולות.</p>
+                    <p class="hint">אם היומן לא נפתח: ביומן בחר ״הוספת לוח שנה״ ואז הרשמה באמצעות הכתובת הבאה.</p>
+                    <label class="field-label" for="calendarReminderAddress">כתובת היומן</label><input id="calendarReminderAddress" dir="ltr" readonly value="https://yoseffarkad1-eng.github.io/farkad/calendars/daily-workdays-1800.ics" onclick="this.select()"/>
+                    <button type="button" class="btn-secondary" onclick="copyCalendarReminderAddress()">העתקת כתובת היומן</button>
+                    <a class="btn-secondary calendar-reminder-download" id="calendarReminderDownload" href="calendars/daily-workdays-1800.ics" download="Farkad-Reminder-1800.ics">הורדת קובץ ליומן</a>
+                </details>
             </section>
         </section>
 

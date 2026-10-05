@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# iCalendar wire format uses CRLF; preserve exact bytes on every checkout.
+calendars/*.ics -text

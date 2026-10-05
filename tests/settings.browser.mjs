@@ -44,6 +44,38 @@ try {
     await page.locator('#settingsBtn').click();
     same('reopening begins with current sync information', await page.locator('.settings-body').evaluate(node => node.scrollTop), 0);
 
+    suite('calendar handoff is explicit and does not claim notification permission');
+    same('default reminder excludes Friday and Saturday',await page.locator('#calendarReminderDays').inputValue(),'workdays');
+    same('the chosen time is readable',await page.locator('.calendar-reminder-time strong').innerText(),'18:00');
+    for(const kind of ['workdays','friday','everyday']) {
+        await page.locator('#calendarReminderDays').selectOption(kind);
+        const path=`calendars/daily-${kind}-1800.ics`;
+        same(`${kind}: native Calendar link`,await page.locator('#calendarReminderOpen').getAttribute('href'),`webcal://yoseffarkad1-eng.github.io/farkad/${path}`);
+        same(`${kind}: manual subscription address`,await page.locator('#calendarReminderAddress').inputValue(),`https://yoseffarkad1-eng.github.io/farkad/${path}`);
+        same(`${kind}: downloadable alternative`,await page.locator('#calendarReminderDownload').getAttribute('href'),path);
+        const response=await page.request.get(server.url+'/'+path);
+        check(`${kind}: served calendar includes an alarm`,response.ok()&&(await response.text()).includes('BEGIN:VALARM'));
+    }
+    await page.locator('#calendarReminderDays').selectOption('workdays');
+    await page.locator('#calendarReminderOpen').evaluate(link=>link.addEventListener('click',event=>event.preventDefault(),{once:true}));
+    await page.locator('#calendarReminderOpen').click();
+    check('opening requires confirmation in Calendar',/אשר.*ביומן.*התראות/.test(await page.locator('#calendarReminderStatus').innerText()));
+    await page.locator('.calendar-reminder-help summary').click();
+    check('repeat and cancellation are explained',/כפולות/.test(await page.locator('.calendar-reminder-help').innerText()));
+    await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.calendarCopied=text;}}}));
+    await page.getByRole('button',{name:'העתקת כתובת היומן',exact:true}).click();
+    same('copy shares only the public subscription address',await page.evaluate(()=>window.calendarCopied),await page.locator('#calendarReminderAddress').inputValue());
+    await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('denied');}}}));
+    await page.getByRole('button',{name:'העתקת כתובת היומן',exact:true}).click();
+    check('a denied clipboard selects the address for manual copying',await page.locator('#calendarReminderAddress').evaluate(n=>document.activeElement===n&&n.selectionStart===0&&n.selectionEnd===n.value.length));
+    check('copy failure is not called success',(await page.locator('#calendarReminderStatus').innerText()).includes('לא הושלמה'));
+    if(process.env.CALENDAR_SCREENSHOT_DIR) {
+        await page.locator("#calendarReminderDays").selectOption("workdays");
+        await page.locator('.calendar-reminder-help summary').click();
+        await page.locator('.calendar-reminder').scrollIntoViewIfNeeded();
+        await page.screenshot({path:`${process.env.CALENDAR_SCREENSHOT_DIR}/Farkad-v141-Calendar-Reminder.png`});
+    }
+
     suite('settings layout on small phones, large text, desktop and dark mode');
     for (const [width, scheme, scale] of [[320, 'light', 1], [390, 'light', 1], [430, 'dark', 1], [1000, 'light', 1], [320, 'light', 2]]) {
         await page.setViewportSize({width, height: 844});
@@ -63,7 +95,7 @@ try {
             return {
                 inside: box.left >= -1 && box.right <= innerWidth + 1,
                 overflow: body.scrollWidth > body.clientWidth + 1,
-                small: [...panel.querySelectorAll('button')].filter(node => node.offsetParent !== null)
+                small: [...panel.querySelectorAll('button, a[href], select, .calendar-reminder input')].filter(node => node.offsetParent !== null)
                     .filter(node => {const r = node.getBoundingClientRect(); return r.width < 44 || r.height < 44;}).map(node => node.textContent),
                 nav: panel.querySelector('.settings-nav').getBoundingClientRect().bottom,
                 bodyHeight: body.clientHeight

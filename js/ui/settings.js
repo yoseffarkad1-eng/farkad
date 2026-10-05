@@ -94,6 +94,39 @@ function renderSettings() {
     renderCarryMigration();
 }
 
+// These are public, data-free calendar subscriptions. Opening Calendar is not proof
+// of subscribing or granting alerts; never store or display a claimed enabled state.
+function updateCalendarReminderLinks() {
+    const choice = document.getElementById('calendarReminderDays');
+    if (!choice) return;
+    const days = ['workdays', 'friday', 'everyday'].includes(choice.value) ? choice.value : 'workdays';
+    const path = `calendars/daily-${days}-1800.ics`;
+    const address = `https://yoseffarkad1-eng.github.io/farkad/${path}`;
+    document.getElementById('calendarReminderOpen').href = address.replace('https:', 'webcal:');
+    document.getElementById('calendarReminderDownload').href = path;
+    document.getElementById('calendarReminderAddress').value = address;
+    document.getElementById('calendarReminderStatus').textContent =
+        'יש לאשר ביומן ולהפעיל התראות. לפני הוספת ימים אחרים, הסר את יומן פרקד הקודם כדי למנוע כפילות.';
+}
+
+function calendarReminderOpened() {
+    document.getElementById('calendarReminderStatus').textContent =
+        'אשר את ההוספה ביומן והפעל התראות לאירועים. אם לא נפתח יומן, פתח את הוראות ההפעלה שמתחת.';
+}
+
+async function copyCalendarReminderAddress() {
+    const field = document.getElementById('calendarReminderAddress');
+    const status = document.getElementById('calendarReminderStatus');
+    try {
+        await navigator.clipboard.writeText(field.value);
+        status.textContent = 'הכתובת הועתקה. אפשר להדביק אותה בהרשמה ליומן ב־iPhone.';
+    } catch (error) {
+        field.focus();
+        field.select();
+        status.textContent = 'ההעתקה לא הושלמה. לחץ לחיצה ממושכת על הכתובת המסומנת ובחר העתקה.';
+    }
+}
+
 // THE MIGRATION REVIEW, and the only screen in this app built to be READ before a button
 // is pressed.
 //
