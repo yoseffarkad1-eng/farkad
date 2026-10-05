@@ -327,6 +327,32 @@ if (!isConfigured()) {
     const db = getFirestore(app);
     const scheduleRef = doc(db, ...SCHEDULE_DOC_PATH.split('/'));
 
+    // A callable uses the existing signed-in identity, never an API key as proof of
+    // membership. Loading the app or signing in does not ask notification permission.
+    async function reminderRequest(data) {
+        const user = auth.currentUser;
+        if (!user) throw Object.assign(new Error('Sign in first.'), {code: 'unauthenticated'});
+        const controller = new AbortController();
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => { controller.abort(); reject(new Error('Reminder request timed out.')); }, 15000);
+        });
+        try {
+            const token = await Promise.race([user.getIdToken(), timeout]);
+            const response = await fetch(`https://europe-west1-${firebaseConfig.projectId}.cloudfunctions.net/reminderDevice`, {
+                method: 'POST', credentials: 'omit', signal: controller.signal,
+                headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
+                body: JSON.stringify({data})
+            });
+            const body = await response.json();
+            if (auth.currentUser?.uid !== user.uid) throw Object.assign(new Error('Account changed.'), {code: 'unauthenticated'});
+            if (!response.ok || body.error) throw Object.assign(new Error('Reminder request refused.'), {
+                code: String(body.error?.status || 'UNAVAILABLE').toLowerCase().replace(/_/g, '-')
+            });
+            return body.result;
+        } finally { clearTimeout(timer); }
+    }
+
 
     // Sign-in has to happen INSIDE the app, and on an iPhone that rules out both of the
     // usual routes. A home-screen web app has its own storage, separate from Safari's,
@@ -392,6 +418,7 @@ if (!isConfigured()) {
 
     onAuthStateChanged(auth, user => {
         const button = document.getElementById('syncAuthBtn');
+        if (window.FarkadReminders) window.FarkadReminders.setTransport(user ? reminderRequest : null);
 
         // The button ships hidden, because with no Firebase project a "connect to the
         // cloud" button is a door onto nothing. Reaching this callback means the SDK
