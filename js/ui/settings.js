@@ -18,6 +18,7 @@ function openSettings() {
     // What is on it depends on the device: the restore points, the backup age, the
     // version, and whether there is a cloud account at all.
     renderSettings();
+    initializeCalendarReminderDevice();
     panel.querySelector('.settings-body').scrollTop = 0;
     document.addEventListener('keydown', settingsKeydown);
     // The heading, not the first button: a screen reader should say where it has arrived
@@ -96,10 +97,34 @@ function renderSettings() {
 
 // These are public, data-free calendar subscriptions. Opening Calendar is not proof
 // of subscribing or granting alerts; never store or display a claimed enabled state.
+// The Android Calendar apps do not share iPhone's webcal handoff. Use their
+// documented recurring-event setup, and never mistake a displayed guide for activation.
+function initializeCalendarReminderDevice() {
+    const choice = document.getElementById('calendarReminderDevice');
+    if (!choice || choice.dataset.initialized) return;
+    choice.value = /Android/i.test(navigator.userAgent) ? 'android' : 'iphone';
+    choice.dataset.initialized = 'true';
+    updateCalendarReminderDevice();
+}
+
+function updateCalendarReminderDevice() {
+    const android = document.getElementById('calendarReminderDevice').value === 'android';
+    document.getElementById('calendarReminderIPhone').hidden = android;
+    document.getElementById('calendarReminderAndroid').hidden = !android;
+    document.getElementById('calendarReminderSubtitle').textContent = android ?
+        'דרך יומן Samsung או Google' : 'דרך היומן של ה־iPhone';
+    updateCalendarReminderLinks();
+}
+
 function updateCalendarReminderLinks() {
     const choice = document.getElementById('calendarReminderDays');
     if (!choice) return;
     const days = ['workdays', 'friday', 'everyday'].includes(choice.value) ? choice.value : 'workdays';
+    document.getElementById('calendarReminderAndroidRepeat').textContent = {
+        workdays: 'בכל שבוע, בימים ראשון עד חמישי.',
+        friday: 'בכל שבוע, בימים ראשון עד שישי.',
+        everyday: 'בכל יום.'
+    }[days];
     const path = `calendars/daily-${days}-1800.ics`;
     const address = `https://yoseffarkad1-eng.github.io/farkad/${path}`;
     document.getElementById('calendarReminderOpen').href = address.replace('https:', 'webcal:');

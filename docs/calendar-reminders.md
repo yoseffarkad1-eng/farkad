@@ -28,3 +28,24 @@ contents change, retain each UID, increment SEQUENCE and update DTSTAMP. Do not
 put private information in these publicly fetched files. Physical iPhone Calendar
 handoff and the final notification depend on the user's confirmation and settings;
 browser checks do not prove delivery on a physical phone.
+
+## Galaxy / Android (v142)
+
+The owner's father uses a Galaxy phone. Settings selects the Android guide on Android,
+with a visible device selector to switch manually. That choice persists only while the
+page stays open and never touches shared records or claims alerts were activated.
+Samsung and Google Calendar document creating an event, choosing recurrence and saving.
+The guide shows 18:00 Israel time, maps each day choice to the manual recurrence and
+asks for an event-time alert. Existing series should be edited or removed to avoid
+duplicates. iPhone subscriptions remain unchanged.
+
+Google's Android help directs ICS import to a computer, so the Galaxy route uses the
+phone's own documented event form rather than claiming a webcal link or downloaded ICS
+will activate reminders. No native Galaxy or iPhone device was available for delivery
+verification. Browser tests cover Android selection, manual override, day instructions,
+large text, touch sizes and preservation of the app's records.
+
+Sources checked 2026-10-05:
+- https://www.samsung.com/uk/support/mobile-devices/how-to-add-and-manage-events-using-the-calendar-app-on-your-samsung-galaxy-phone/
+- https://support.google.com/calendar/answer/37115?co=GENIE.Platform%3DAndroid
+- https://support.google.com/calendar/answer/37118?co=GENIE.Platform%3DAndroid
