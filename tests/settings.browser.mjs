@@ -60,8 +60,8 @@ try {
     await page.locator('#calendarReminderOpen').evaluate(link=>link.addEventListener('click',event=>event.preventDefault(),{once:true}));
     await page.locator('#calendarReminderOpen').click();
     check('opening requires confirmation in Calendar',/אשר.*ביומן.*התראות/.test(await page.locator('#calendarReminderStatus').innerText()));
-    await page.locator('.calendar-reminder-help summary').click();
-    check('repeat and cancellation are explained',/כפולות/.test(await page.locator('.calendar-reminder-help').innerText()));
+    await page.locator('#calendarReminderIPhoneHelp summary').click();
+    check('repeat and cancellation are explained',/כפולות/.test(await page.locator('#calendarReminderIPhoneHelp').innerText()));
     await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.calendarCopied=text;}}}));
     await page.getByRole('button',{name:'העתקת כתובת היומן',exact:true}).click();
     same('copy shares only the public subscription address',await page.evaluate(()=>window.calendarCopied),await page.locator('#calendarReminderAddress').inputValue());
@@ -71,12 +71,38 @@ try {
     check('copy failure is not called success',(await page.locator('#calendarReminderStatus').innerText()).includes('לא הושלמה'));
     if(process.env.CALENDAR_SCREENSHOT_DIR) {
         await page.locator("#calendarReminderDays").selectOption("workdays");
-        await page.locator('.calendar-reminder-help summary').click();
+        await page.locator('#calendarReminderIPhoneHelp summary').click();
         await page.locator('.calendar-reminder').scrollIntoViewIfNeeded();
         await page.screenshot({path:`${process.env.CALENDAR_SCREENSHOT_DIR}/Farkad-v141-Calendar-Reminder.png`});
     }
 
+    suite('Galaxy setup uses the phone calendar and never claims activation');
+    const android = await browser.newPage({viewport:{width:360,height:800},isMobile:true,hasTouch:true,
+        userAgent:'Mozilla/5.0 (Linux; Android 15; SM-S938B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'});
+    android.on('pageerror',error=>errors.push(error.message));
+    try {
+        await android.goto(server.url);
+        await android.locator('#settingsBtn').click();
+        same('Galaxy selects its own setup automatically',await android.locator('#calendarReminderDevice').inputValue(),'android');
+        check('Galaxy hides the iPhone-only handoff',!(await android.locator('#calendarReminderIPhone').isVisible())&&await android.locator('#calendarReminderAndroid').isVisible());
+        await android.locator('.calendar-reminder-android-help summary').click();
+        for(const [kind,words] of [['workdays','ראשון עד חמישי'],['friday','ראשון עד שישי'],['everyday','בכל יום']]) {
+            await android.locator('#calendarReminderDays').selectOption(kind);
+            check(`${kind}: the Android guide follows the chosen days`,(await android.locator('#calendarReminderAndroidRepeat').innerText()).includes(words));
+        }
+        check('Galaxy explicitly requires saving and notification permission',(await android.locator('#calendarReminderAndroid [role="status"]').innerText()).includes('אחרי שתשמור אותה ביומן ותאפשר התראות'));
+        check('Galaxy offers editing the series instead of duplicating reminders',(await android.locator('#calendarReminderAndroid').innerText()).includes('כל סדרת האירועים'));
+        await android.locator('#calendarReminderDevice').selectOption('iphone');
+        check('manual iPhone choice exposes the subscription',await android.locator('#calendarReminderOpen').isVisible()&&!(await android.locator('#calendarReminderAndroid').isVisible()));
+        await android.keyboard.press('Escape');
+        await android.locator('#settingsBtn').click();
+        same('reopening preserves the manual device choice',await android.locator('#calendarReminderDevice').inputValue(),'iphone');
+    } finally { await android.close(); }
+
     suite('settings layout on small phones, large text, desktop and dark mode');
+    for (const device of ['iphone','android']) {
+    await page.locator('#calendarReminderDevice').selectOption(device);
+    await page.locator(device==='android' ? '.calendar-reminder-android-help' : '#calendarReminderIPhoneHelp').evaluate(node=>node.open=true);
     for (const [width, scheme, scale] of [[320, 'light', 1], [390, 'light', 1], [430, 'dark', 1], [1000, 'light', 1], [320, 'light', 2]]) {
         await page.setViewportSize({width, height: 844});
         await page.emulateMedia({colorScheme: scheme});
@@ -101,13 +127,14 @@ try {
                 bodyHeight: body.clientHeight
             };
         });
-        check(`${width}/${scheme}/${scale}: inside viewport`, geometry.inside && !geometry.overflow, JSON.stringify(geometry));
-        check(`${width}/${scheme}/${scale}: usable controls and scrolling region`, !geometry.small.length && geometry.bodyHeight > 200, JSON.stringify(geometry));
+        check(`${device}/${width}/${scheme}/${scale}: inside viewport`, geometry.inside && !geometry.overflow, JSON.stringify(geometry));
+        check(`${device}/${width}/${scheme}/${scale}: usable controls and scrolling region`, !geometry.small.length && geometry.bodyHeight > 200, JSON.stringify(geometry));
         if (process.env.SETTINGS_SCREENSHOT_DIR && scale === 1) {
             await page.locator('.settings-body').evaluate(node => node.scrollTop = 0);
             await page.screenshot({path: `${process.env.SETTINGS_SCREENSHOT_DIR}/settings-${width}-${scheme}.png`});
         }
         if (scale === 2) await page.evaluate(() => document.querySelectorAll('#settingsPanel *').forEach(node => node.style.removeProperty('font-size')));
+    }
     }
     same('opening, navigating and inspecting settings preserves worker data', await page.evaluate(() => JSON.stringify(State.schedule)), before);
     check('no uncaught errors during navigation', errors.length === 0, JSON.stringify(errors));

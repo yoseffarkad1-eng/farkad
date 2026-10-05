@@ -1,3 +1,12 @@
+## v142 — Galaxy reminder setup (2026-10-05)
+
+Reminder settings now support the owner's father's Galaxy phone as well as iPhone.
+Android opens a short Samsung/Google Calendar setup guide with the chosen weekdays,
+18:00 Israel time, event-time alerts and series editing/cancellation. Device selection
+is automatic on Android and can be changed manually. iPhone subscriptions are preserved.
+The screen does not claim the user's Calendar or notifications have been enabled.
+No worker, financial or synchronization records change.
+
 ## v141 — a clear daily reminder through iPhone Calendar
 
 Settings adds a readable 18:00 Israel-time reminder card with workday choices,

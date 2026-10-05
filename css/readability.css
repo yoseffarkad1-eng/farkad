@@ -95,6 +95,12 @@
        the larger type; inflating this whole toolbar hid the first worker at 200%. */
     .day-header .btn-secondary { font-size: 14px; min-height: 44px; }
     .calendar-reminder { border-radius: 12px; }
+    .calendar-reminder [hidden] { display: none !important; }
+    .calendar-reminder-platform { display: grid; gap: 12px; min-width: 0; }
+    .calendar-reminder-android-help summary {
+        justify-content: space-between; padding: 12px; border-radius: 8px;
+        background: var(--accent-soft); color: var(--accent);
+    }
     .calendar-reminder-time {
         display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px;
         padding: 12px 14px; border-radius: 8px; background: var(--accent-soft);
