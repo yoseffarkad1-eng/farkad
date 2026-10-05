@@ -1,4 +1,9 @@
 {
+  "functions": [{
+    "source": "functions",
+    "codebase": "reminders",
+    "ignore": ["node_modules", ".git", "*-debug.log", ".secret.local", ".env*"]
+  }],
   "firestore": {
     "rules": "firestore.rules"
   },

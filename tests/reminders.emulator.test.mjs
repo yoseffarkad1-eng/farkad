@@ -1,0 +1,81 @@
+import {createRequire} from 'node:module';
+import {createECDH, randomBytes} from 'node:crypto';
+import {readFileSync} from 'node:fs';
+import {initializeTestEnvironment, assertFails} from '@firebase/rules-unit-testing';
+import {doc, getDoc, setDoc} from 'firebase/firestore';
+import {emulatorHost} from './emulator-host.mjs';
+import {suite, check, same, report} from './runner.mjs';
+import {createReminderService} from '../functions/service.js';
+import {ALLOWED_EMAILS} from '../functions/policy.js';
+const emulator = emulatorHost();
+const require = createRequire(new URL('../functions/package.json', import.meta.url));
+const {initializeApp, deleteApp} = require('firebase-admin/app');
+const {getFirestore} = require('firebase-admin/firestore');
+const projectId = 'demo-farkad-reminders';
+const env = await initializeTestEnvironment({projectId, firestore: {host: emulator.host, port: emulator.port,
+    rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8')}});
+const app = initializeApp({projectId}, 'reminder-tests'), db = getFirestore(app);
+let clock = Date.parse('2026-10-05T15:00:00Z'), failSend = false, gone = false, active = true, sends = [];
+const owner = {uid: 'first', token: {email: ALLOWED_EMAILS[0]}};
+const other = {uid: 'second', token: {email: ALLOWED_EMAILS[1]}};
+const key = createECDH('prime256v1'); key.generateKeys();
+const subscription = n => ({endpoint: `https://fcm.googleapis.com/fcm/send/device-${n}`,
+    keys: {p256dh: key.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url')}});
+const service = createReminderService({db, now: () => clock, publicKey: key.getPublicKey().toString('base64url'),
+    getUser: async uid => ({email: uid === 'first' ? ALLOWED_EMAILS[0] : ALLOWED_EMAILS[1], disabled: !active}),
+    send: async (sub, data) => { if (failSend) throw {statusCode: gone ? 410 : 503}; sends.push({sub, data}); }});
+const call = (data, auth = owner) => service.handle({auth, data});
+async function refuses(name, fn, code) { try { await fn(); check(name, false); } catch (error) { check(name, !code || error.code === code, error.code); } }
+try {
+    await env.clearFirestore();
+    await db.doc('schedules/current').set({untouched: 'payroll-fixture'});
+    suite('registration requires an allowed identity and stores only the device');
+    await refuses('anonymous config is refused', () => call({action: 'config'}, null), 'unauthenticated');
+    const config = await call({action: 'config'});
+    same('exact two confirmed times', config.times.join(','), '18:00,10:00');
+    const sub = subscription(1);
+    const enabled = await call({action: 'enable', subscription: sub, days: 'workdays', uid: 'attacker'});
+    same('registration acknowledged', enabled.enabled, true);
+    same('body cannot choose an owner', (await db.doc(`reminderDevices/${enabled.id}`).get()).data().uid, owner.uid);
+    same('status reads the durable registration', (await call({action: 'status', id: enabled.id})).enabled, true);
+    await refuses('other family member cannot inspect subscription', () => call({action: 'status', id: enabled.id}, other), 'permission-denied');
+    await refuses('other family member cannot disable subscription', () => call({action: 'disable', id: enabled.id}, other), 'permission-denied');
+    await refuses('other family member cannot replace subscription', () => call({action: 'enable', subscription: sub, days: 'everyday'}, other), 'permission-denied');
+    const client = env.authenticatedContext(owner.uid, owner.token).firestore();
+    const deniedRead = await assertFails(getDoc(doc(client, 'reminderDevices', enabled.id)));
+    same('existing rules deny direct client read of endpoint', deniedRead.code, 'permission-denied');
+    const deniedWrite = await assertFails(setDoc(doc(client, 'reminderDevices', 'fake'), {enabled: true}));
+    same('existing rules deny direct client subscription writes', deniedWrite.code, 'permission-denied');
+    suite('morning confirmation, duplicate jobs, retries and expired subscriptions');
+    await Promise.all([service.dispatch(new Date(clock).toISOString()), service.dispatch(new Date(clock).toISOString())]);
+    same('overlapping scheduler jobs send once', sends.length, 1);
+    await service.dispatch(new Date(clock).toISOString()); same('replayed schedule does not send twice', sends.length, 1);
+    clock = Date.parse('2026-10-06T07:00:00Z');
+    failSend = true;
+    await refuses('temporary delivery failure requests a scheduler retry', () => service.dispatch(new Date(clock).toISOString()));
+    failSend = false;
+    await service.dispatch(new Date(clock).toISOString());
+    same('failed send can retry successfully', sends.length, 2);
+    same('next morning is a different reminder', sends[1].data.kind, 'morning');
+    clock += 7200000;
+    same('a stale scheduled event is not delivered hours late', (await service.dispatch('2026-10-06T07:00:00Z')).skipped, true);
+    same('test reports provider acceptance only', (await call({action: 'test', id: enabled.id})).accepted, true);
+    await refuses('test button cannot spam push', () => call({action: 'test', id: enabled.id}), 'resource-exhausted');
+    clock += 60001; failSend = true; gone = true;
+    await refuses('expired endpoint is not called test success', () => call({action: 'test', id: enabled.id}), 'failed-precondition');
+    same('expired endpoint removed', (await call({action: 'status', id: enabled.id})).enabled, false);
+    failSend = false; gone = false;
+    const fresh = await call({action: 'enable', subscription: subscription(2), days: 'everyday'});
+    clock = Date.parse('2026-10-06T15:00:00Z'); active = false;
+    await service.dispatch(new Date(clock).toISOString());
+    same('a disabled account stops future pushes', (await call({action: 'status', id: fresh.id})).enabled, false);
+    active = true;
+    suite('bounded subscriptions and independent devices');
+    const records = await Promise.all(Array.from({length: 8}, (_, i) => call({action: 'enable', subscription: subscription(i + 10), days: 'everyday'})));
+    await refuses('a ninth device is refused', () => call({action: 'enable', subscription: subscription(99), days: 'everyday'}), 'resource-exhausted');
+    await call({action: 'disable', id: records[0].id});
+    same('disable does not affect another phone', (await call({action: 'status', id: records[1].id})).enabled, true);
+    same('removed device frees a registration slot', (await call({action: 'enable', subscription: subscription(99), days: 'friday'})).enabled, true);
+    same('work and money never changed', JSON.stringify((await db.doc('schedules/current').get()).data()), JSON.stringify({untouched: 'payroll-fixture'}));
+} finally { await env.cleanup(); await deleteApp(app); }
+report();

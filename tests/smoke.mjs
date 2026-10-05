@@ -5102,9 +5102,9 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // v122: connection and update first, backup and replacement together but in
   // separate cards, device and recovery help last. v141 adds the chosen Calendar
   // reminder after updates, before backup. Labels and action guards remain.
-  check('the sheet has the eight groups, including the Calendar reminder, in the board order',
+  check('the sheet has the eight groups, including the phone reminders, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'עדכון וגרסה', 'תזכורת לרישום היום', 'גיבוי', 'ייבוא ושחזור', 'מצב המכשיר', 'שחזור חירום',
+      ['ענן וסנכרון', 'עדכון וגרסה', 'תזכורות בטלפון', 'גיבוי', 'ייבוא ושחזור', 'מצב המכשיר', 'שחזור חירום',
                 'מידע טכני']),
     JSON.stringify(heads));
 

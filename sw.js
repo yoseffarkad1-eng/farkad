@@ -21,7 +21,44 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v142';
+const VERSION = 'farkad-v143';
+
+// A scheduled server push wakes this worker even with every app window closed.
+// Always display a visible notification; neither iOS nor Android needs a page timer.
+self.addEventListener('push', event => {
+    let data = {};
+    try { data = event.data?.json() || {}; } catch { /* A visible fallback is required. */ }
+    const kind = ['morning', 'evening', 'test'].includes(data.kind) ? data.kind : 'evening';
+    const title = typeof data.title === 'string' ? data.title.slice(0, 100) : 'פרקד · תזכורת';
+    const body = typeof data.body === 'string' ? data.body.slice(0, 300) : 'פתח את פרקד כדי לבדוק ולעדכן את רישום העובדים.';
+    event.waitUntil(self.registration.showNotification(title, {
+        body, dir: 'rtl', lang: 'he',
+        icon: new URL('./icons/icon-192.png', self.registration.scope).href,
+        badge: new URL('./icons/icon-192.png', self.registration.scope).href,
+        tag: /^farkad-[a-z0-9-]{1,60}$/.test(data.tag || '') ? data.tag : `farkad-${kind}`,
+        data: {kind}, renotify: false
+    }));
+});
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    event.waitUntil((async () => {
+        const scope = new URL(self.registration.scope);
+        const windows = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+        const existing = windows.find(client => {
+            const url = new URL(client.url);
+            return url.origin === scope.origin && url.pathname.startsWith(scope.pathname);
+        });
+        if (existing) {
+            await existing.focus();
+            existing.postMessage({type: 'FARKAD_REMINDER_OPEN'});
+            return;
+        }
+        // No payload may navigate away from this app or supply executable URLs.
+        const url = new URL('./index.html', scope);
+        url.searchParams.set('farkad-reminder', 'today');
+        await self.clients.openWindow(url.href);
+    })());
+});
 
 const SHELL = [
     './',
@@ -64,6 +101,7 @@ const SHELL = [
     './js/ui/offline.js',
     './js/ui/install.js',
     './js/ui/settings.js',
+    './js/ui/reminders.js',
     './js/app.js',
     // The cloud adapter and its configuration. Same-origin, imported at runtime, and
     // therefore exactly as much a part of the offline shell as any other script here -

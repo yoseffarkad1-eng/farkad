@@ -1,4 +1,6 @@
 node_modules/
+functions/.secret.local
+functions/.env*
 
 # Firebase emulator output. Written into the working tree by `firebase
 # emulators:exec`, and one of these was committed once already.
