@@ -13,6 +13,8 @@ let REPORT_WORKER_SEARCH = '';
 let REPORT_PICKER_OPEN = false;
 let REPORT_RANGE_OPEN = false;
 let REPORT_CARD_GRID = true;
+let REPORT_PERIOD_NOTE_CONTEXT = '';
+const REPORT_PERIOD_NOTES_CLOSED = new Set();
 const REPORT_DEDUCTIONS = new Map();
 let ADVANCE_WORKER = null;
 let ADVANCE_SEARCH = '';
@@ -361,6 +363,18 @@ function renderReports() {
         const range = defaultPayrollRange();
         REPORT_RANGE.from = range.from;
         REPORT_RANGE.to = range.to;
+    }
+
+    // Only this page session remembers a dismissal. A different range, selection or
+    // crew/cycle must explain the mismatch again, even if the old range is revisited.
+    const noteContext = JSON.stringify([
+        REPORT_RANGE.from, REPORT_RANGE.to,
+        REPORT_WORKERS === null ? null : [...REPORT_WORKERS].sort(),
+        State.schedule.workers.map(w => [w.id, w.name, w.active, w.payCycles])
+    ]);
+    if (noteContext !== REPORT_PERIOD_NOTE_CONTEXT) {
+        REPORT_PERIOD_NOTES_CLOSED.clear();
+        REPORT_PERIOD_NOTE_CONTEXT = noteContext;
     }
 
     const searching = document.activeElement && document.activeElement.id === 'reportWorkerSearch';
@@ -759,9 +773,36 @@ function groupPeriodNote(group) {
             ? 'תקופת מעבר: הימים שנשארו מהמחזור הקודם, לפני המעבר לתשלום שבועי.'
             : 'זאת תקופת התשלום המלאה של העובדים האלה.');
     }
-    return el('p', 'hint hint-warn',
+    const note = el('div', 'report-period-note');
+    const head = el('div', 'report-period-note-head');
+    head.appendChild(el('span', 'report-period-note-label', 'תצוגת ימים בלבד · לא לסגירת חשבון'));
+    // Image export reads hint-warn text directly, including collapsed notes. Keep the
+    // complete warning in its own paragraph; controls must never become exported text.
+    const explanation = el('p', 'hint hint-warn report-period-note-text',
         'הטווח שנבחר אינו תקופת התשלום של העובדים האלה, ולכן זאת תצוגה של ימים ולא '
         + 'חשבון לתשלום: אין כאן יתרה מועברת ואי אפשר לסגור מכאן.');
+    explanation.id = `report-period-note-${group.cycle}`;
+    const details = button('פרטים', 'btn-secondary', () => setOpen(note.classList.contains('is-closed')));
+    details.setAttribute('aria-controls', explanation.id);
+    const close = button('×', 'btn-secondary report-period-note-close', () => {
+        setOpen(false);
+        details.focus({ preventScroll: true });
+    }, 'סגירת ההסבר על תקופת התשלום');
+    function setOpen(open) {
+        if (open) REPORT_PERIOD_NOTES_CLOSED.delete(group.cycle);
+        else REPORT_PERIOD_NOTES_CLOSED.add(group.cycle);
+        note.classList.toggle('is-closed', !open);
+        details.setAttribute('aria-expanded', String(open));
+        close.hidden = !open;
+    }
+    const controls = el('div', 'report-period-note-actions');
+    controls.appendChild(details);
+    controls.appendChild(close);
+    head.appendChild(controls);
+    note.appendChild(head);
+    note.appendChild(explanation);
+    setOpen(!REPORT_PERIOD_NOTES_CLOSED.has(group.cycle));
+    return note;
 }
 
 function renderPayrollTable() {

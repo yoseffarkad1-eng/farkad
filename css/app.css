@@ -2933,6 +2933,15 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 /* A note about money that is missing from a total has to survive the print stylesheet,
    where every other hint is dropped. */
 .hint-warn { color: var(--warn); font-weight: 600; }
+.report-period-note { margin-block: 10px; }
+.report-period-note-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.report-period-note-label { flex: 1; min-width: 120px; font-size: 14px; color: var(--warn); }
+.report-period-note-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.report-period-note-head button { flex-shrink: 0; min-width: 44px; min-height: 44px; }
+.report-period-note-close { font-size: 22px; }
+@media screen { .report-period-note.is-closed > .report-period-note-text { display: none; } }
+/* The full warning still belongs on paper when dismissed on the screen. */
+@media print { .report-period-note-head { display: none !important; } }
 /* Lifted back onto the paper by SPECIFICITY, not by position.
 
    A warning is not decoration: "* שעות נוספות בלי שכר שעה - לא נכללו בסכום" says a man

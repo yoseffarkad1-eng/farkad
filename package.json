@@ -94,7 +94,7 @@
     "test:paycycle-completion": "node tests/paycycle.completion.test.mjs",
     "test:crew-controls": "node tests/crew-controls.test.mjs",
     "test:simple-advances": "node tests/simple-advances.test.mjs",
-    "test:reports-browser": "node tests/reports.browser.mjs",
+    "test:reports-browser": "node tests/reports.browser.mjs && node tests/report-period-note.browser.mjs",
     "test:navigation-browser": "node tests/navigation.browser.mjs",
     "test:week-print-browser": "node tests/week-print.browser.mjs",
     "test:week-browser": "node tests/week.browser.mjs",
