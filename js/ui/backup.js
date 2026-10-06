@@ -908,9 +908,8 @@ function exportBackup() {
 // that the data is now safe. It says what happened - the browser has it - and asks the
 // one person who can check to go and check.
 //
-// Until now this export said NOTHING, and the age line then read "גיבוי אחרון: היום."
-// over a file that may never have reached anywhere. The line stays - a backup was taken
-// today, that much is true - but the handover itself is no longer silent.
+// The age line records this handoff too; neither it nor this dialog can verify that
+// the person kept the file after the browser received it.
 function tellBackupHandedOver(name) {
     if (typeof askConfirm !== 'function') return;
 
@@ -948,32 +947,31 @@ function tellBackupHandedOver(name) {
     });
 }
 
-// How old the last backup is, in the one place a person can act on it.
-//
-// While sync is off this file is the only copy that survives losing the phone - and on an
-// iPhone that has not been added to the home screen, the browser clears its storage after
-// a week without a visit. So a fortnight of records can be one uninstalled browser away
-// from gone, and nothing on screen would have said so.
+// Age of this device's recorded export handoff, not proof that a file was saved.
+// A missing record says nothing about copies elsewhere. Sync status cannot verify a
+// download, and malformed or future dates must not make an unknown age look fresh.
 function renderBackupAge() {
     const line = document.getElementById('backupAge');
     if (!line) return;
 
     const last = Store.get(LAST_BACKUP_KEY);
-    const days = last ? daysBetween(last, todayStr()) : null;
-    const synced = typeof FarkadSync !== 'undefined' && FarkadSync.status === 'synced';
+    const today = todayStr();
+    const days = isRealDate(last) && isRealDate(today) && last <= today
+        ? daysBetween(last, today) : null;
 
-    if (days === null) {
-        line.textContent = 'עוד לא נשמר קובץ גיבוי.';
+    if (last === null) {
+        line.textContent = 'אין במכשיר הזה רישום של ייצוא קובץ גיבוי.';
+    } else if (days === null) {
+        line.textContent = 'מועד מסירת קובץ הגיבוי לדפדפן אינו ידוע.';
     } else if (days === 0) {
-        line.textContent = 'גיבוי אחרון: היום.';
+        line.textContent = 'קובץ גיבוי נמסר לדפדפן: היום.';
     } else if (days === 1) {
-        line.textContent = 'גיבוי אחרון: אתמול.';
+        line.textContent = 'קובץ גיבוי נמסר לדפדפן: אתמול.';
     } else {
-        line.textContent = `גיבוי אחרון: לפני ${days} ימים.`;
+        line.textContent = `קובץ גיבוי נמסר לדפדפן: לפני ${days} ימים.`;
     }
 
-    // Not called a problem while the cloud holds a second copy.
-    line.className = !synced && (days === null || days >= 7) ? 'hint hint-warn' : 'hint';
+    line.className = days === null || days >= 7 ? 'hint hint-warn' : 'hint';
 }
 
 function daysBetween(from, to) {
