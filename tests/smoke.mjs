@@ -1072,7 +1072,7 @@ async function seedRoster(page) {
     !(await page.locator('#askModal').isVisible()) && escaped === false);
 
   check('and the age line reads today - what was done, not what was verified',
-    (await page.textContent('#backupAge')).includes('גיבוי אחרון: היום.'));
+    (await page.textContent('#backupAge')).includes('קובץ גיבוי נמסר לדפדפן: היום.'));
 
   // a file that is not a backup must not touch the data
   const before = await page.evaluate(() => State.schedule.workers.length);
@@ -6978,15 +6978,14 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
 // ---------------------------------------------------------------- backup age
 {
-  // While sync is off, this file is the only copy that survives losing the phone - and
-  // an iPhone that was never added to the home screen clears its storage after a week.
+  // This device records the browser handoff, not whether the person kept the file.
   const page = await open();
   await seedRoster(page);
   await page.click('#settingsBtn');
   await page.waitForTimeout(300);
-  check('with no backup ever saved, the app says so',
-    (await page.textContent('#backupAge')).includes('עוד לא נשמר'));
-  check('and says it as a warning while nothing else holds a copy',
+  check('with no local export record, the app says only that',
+    (await page.textContent('#backupAge')).includes('אין במכשיר הזה רישום של ייצוא'));
+  check('and warns that this device has no export record',
     (await page.locator('#backupAge').getAttribute('class')).includes('hint-warn'));
 
   await page.evaluate(() => { Store.set('scheduleData:lastBackup', todayStr()); render(); });
@@ -7008,8 +7007,8 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   await page.evaluate(() => { FarkadSync.status = 'synced'; render(); });
   await page.waitForTimeout(200);
-  check('but not while the cloud holds a second copy',
-    !(await page.locator('#backupAge').getAttribute('class')).includes('hint-warn'));
+  check('active sync does not dismiss a stale export warning',
+    (await page.locator('#backupAge').getAttribute('class')).includes('hint-warn'));
   await page.context().close();
 }
 

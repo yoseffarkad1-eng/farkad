@@ -2025,7 +2025,8 @@ a[href]:focus-visible,
     .report-range-heading > span { color: var(--ink-2); font-size: 13px; flex-basis: 100%; }
     .report-range-heading .range-current { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
     .reports-controls .range-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-    .reports-controls .range-chips button { min-width: 0; min-height: 44px; padding: 8px 6px; font-size: 14px; line-height: 1.35; white-space: normal; }
+    /* Enlarged text must wrap even the unspaced weekday range inside its grid cell. */
+    .reports-controls .range-chips button { min-width: 0; min-height: 44px; padding: 8px 6px; font-size: 14px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
     .reports-controls .range-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 0; border: 0; }
     .report-date-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 14px; color: var(--ink-2); }
     .reports-controls .range-bar input { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; }

@@ -255,19 +255,36 @@ async function diagnostic(page) {
 }
 
 // ---------------------------------------------------------------- the network that never answers
-{
-    suite('the record opens and takes a new day while the network answers nothing');
+for (const delayAdapter of [false, true]) {
+    suite('the record opens and takes a new day while the network answers nothing'
+        + (delayAdapter ? ' — SDK import released after local render' : ''));
 
     // HANGING, not failing. A route handler that is never resolved is a request that is
     // never answered and never refused - which is what one bar of signal in a stairwell
     // actually does, and the reason `load` was the wrong event to boot on.
     const { ctx, page } = await phone();
     const held = { gstatic: 0, cdnjs: 0, other: 0 };
-    await ctx.route(url => /(^|\.)gstatic\.com$/.test(url.hostname), () => { held.gstatic++; });
+    let markSdkHeld;
+    const sdkHeld = new Promise(resolve => { markSdkHeld = resolve; });
+    await ctx.route(url => /(^|\.)gstatic\.com$/.test(url.hostname), () => {
+        held.gstatic++;
+        markSdkHeld(true);
+    });
     await ctx.route(url => /cdnjs\.cloudflare\.com$/.test(url.hostname), () => { held.cdnjs++; });
     await ctx.route(url => url.origin !== BASE
         && !/gstatic\.com$|cdnjs\.cloudflare\.com$/.test(url.hostname),
         () => { held.other++; });
+
+    // Force the race without a sleep: no SDK request can start until the local UI
+    // has been checked. Only the same-origin adapter is released; SDK routes stay held.
+    let releaseAdapter;
+    if (delayAdapter) {
+        const adapterReady = new Promise(resolve => { releaseAdapter = resolve; });
+        await ctx.route(`${BASE}/js/sync/firebase-adapter.js`, async route => {
+            await adapterReady;
+            await route.continue();
+        });
+    }
 
     await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded' });
 
@@ -280,9 +297,23 @@ async function diagnostic(page) {
     check('the day screen is drawn with every off-origin request still unanswered', drew,
         `gstatic ${held.gstatic} held, cdnjs ${held.cdnjs} held, other ${held.other} held`);
 
+    if (delayAdapter) {
+        check('the controlled delay leaves the SDK unrequested at local render', held.gstatic === 0);
+        releaseAdapter();
+    }
+
+    // Rendering does not imply the later dynamic import has reached its route yet.
+    // Wait for interception, never a response. A missing request must still fail.
+    let sdkDeadline;
+    const sdkWasHeld = await Promise.race([
+        sdkHeld,
+        new Promise(resolve => { sdkDeadline = setTimeout(() => resolve(false), 15000); })
+    ]);
+    clearTimeout(sdkDeadline);
+
     // And it is drawn because nothing was WAITING on them, not because they happened to
     // be quick: the requests are still open at this instant and will never be answered.
-    check('the cloud SDK was asked for and has still not answered', held.gstatic > 0,
+    check('the cloud SDK was asked for and has still not answered', sdkWasHeld && held.gstatic > 0,
         `${held.gstatic} request(s) held open`);
     check('and nothing was fetched from a CDN at all - the library ships on this origin',
         held.cdnjs === 0, `${held.cdnjs} cdnjs request(s)`);
