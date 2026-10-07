@@ -378,6 +378,10 @@ function renderReports() {
     }
 
     const searching = document.activeElement && document.activeElement.id === 'reportWorkerSearch';
+    // A sync redraw replaces these buttons too. Keep the cycle and action, not the
+    // detached node, so a keyboard user can continue where they were reading.
+    const periodControlFocus = String(document.activeElement && document.activeElement.id || '')
+        .match(/^report-period-note-(weekly|biweekly)-(details|close)$/);
     const oldWorkerList = root.querySelector('.report-worker-list');
     const workerScroll = oldWorkerList ? oldWorkerList.scrollTop : 0;
     clear(root);
@@ -418,6 +422,16 @@ function renderReports() {
     if (searching) {
         const search = document.getElementById('reportWorkerSearch');
         if (search) search.focus({ preventScroll: true });
+    }
+    if (periodControlFocus) {
+        // A settled period or removed group has no notice; switching to invoices
+        // hides payroll entirely. Never focus a detached or hidden control.
+        const target = [
+            document.getElementById(periodControlFocus[0]),
+            document.getElementById(`report-period-note-${periodControlFocus[1]}-details`),
+            root.querySelector('.report-section-toggle [aria-pressed="true"]')
+        ].find(control => control && control.getClientRects().length);
+        if (target) target.focus({ preventScroll: true });
     }
 }
 
@@ -783,11 +797,13 @@ function groupPeriodNote(group) {
         + 'חשבון לתשלום: אין כאן יתרה מועברת ואי אפשר לסגור מכאן.');
     explanation.id = `report-period-note-${group.cycle}`;
     const details = button('פרטים', 'btn-secondary', () => setOpen(note.classList.contains('is-closed')));
+    details.id = `${explanation.id}-details`;
     details.setAttribute('aria-controls', explanation.id);
     const close = button('×', 'btn-secondary report-period-note-close', () => {
         setOpen(false);
         details.focus({ preventScroll: true });
     }, 'סגירת ההסבר על תקופת התשלום');
+    close.id = `${explanation.id}-close`;
     function setOpen(open) {
         if (open) REPORT_PERIOD_NOTES_CLOSED.delete(group.cycle);
         else REPORT_PERIOD_NOTES_CLOSED.add(group.cycle);
