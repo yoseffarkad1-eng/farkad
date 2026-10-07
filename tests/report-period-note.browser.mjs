@@ -71,6 +71,52 @@ try {
     await page.evaluate(() => { REPORT_CARD_GRID = false; render(); });
     check('changing report layout preserves dismissal', !(await text.isVisible()));
 
+    suite('report redraw preserves keyboard focus without reviving removed controls');
+    const focusBefore = await snapshot();
+    for (const cycle of ['weekly', 'biweekly']) {
+        const note = notes.filter({ has: page.locator(`#report-period-note-${cycle}`) });
+        const detailButton = note.getByRole('button', { name: 'פרטים', exact: true });
+        const closeButton = note.getByRole('button', { name: 'סגירת ההסבר על תקופת התשלום' });
+        if (await closeButton.isVisible()) await closeButton.click();
+        await detailButton.focus();
+        await page.evaluate(() => render());
+        check(`${cycle}: collapsed Details retains focus after ordinary render`,
+            await detailButton.evaluate(n => n === document.activeElement));
+        await detailButton.press('Enter');
+        await page.evaluate(() => renderReports());
+        check(`${cycle}: expanded Details retains focus after report redraw`,
+            await detailButton.evaluate(n => n === document.activeElement));
+        await closeButton.focus();
+        await page.evaluate(() => render());
+        check(`${cycle}: Close retains focus after ordinary render`,
+            await closeButton.evaluate(n => n === document.activeElement));
+        await closeButton.press('Enter');
+    }
+    same('focus restoration leaves record, workbook, image and storage unchanged', await snapshot(), focusBefore);
+    const activeSectionFocused = () => page.locator('.report-section-toggle [aria-pressed="true"]')
+        .evaluate(n => n === document.activeElement);
+    await details.focus();
+    await page.evaluate(() => { REPORT_WORKERS = new Set(['w_two']); render(); });
+    check('removing the focused cycle falls back to the active report section', await activeSectionFocused());
+    await page.evaluate(() => { REPORT_WORKERS = new Set(['w_week']); render(); });
+    await close.focus();
+    await page.evaluate(() => { REPORT_RANGE.from = '2026-10-02'; REPORT_RANGE.to = '2026-10-08'; render(); });
+    same('a complete period removes the mismatch control', await notes.count(), 0);
+    check('a removed Close falls back to the active report section', await activeSectionFocused());
+    await page.evaluate(() => { REPORT_RANGE.from = '2026-10-01'; REPORT_RANGE.to = '2026-10-31'; render(); });
+    await close.focus();
+    await page.evaluate(() => { REPORT_PERIOD_NOTES_CLOSED.add('weekly'); render(); });
+    check('a newly hidden Close falls back to its visible Details', await details.evaluate(n => n === document.activeElement));
+    await details.focus();
+    await page.evaluate(() => { REPORT_SECTION = 'sites'; render(); });
+    check('an offscreen payroll control falls back to the visible invoice section', await activeSectionFocused());
+    await page.locator('#tab-reports').focus();
+    await page.evaluate(() => renderReports());
+    check('a report redraw does not steal focus from outside the report',
+        await page.locator('#tab-reports').evaluate(n => n === document.activeElement));
+    await page.evaluate(() => { REPORT_SECTION = 'workers'; REPORT_WORKERS = null; render(); });
+    await close.click();
+
     suite('changed context always explains the mismatch again');
     for (const [label, change] of [
         ['period', () => { REPORT_RANGE.to = '2026-10-30'; }],
