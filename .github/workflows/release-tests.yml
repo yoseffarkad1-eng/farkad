@@ -1,0 +1,143 @@
+# Test-only workflow. No deployment, production credentials, or rule publication.
+name: release tests
+
+on:
+  # Proposal only: neither a push nor a pull request starts a download or test.
+  # The owner must separately authorize setup on the selected GitHub-hosted runner.
+  workflow_dispatch:
+    inputs:
+      approve_test_setup:
+        description: Approve browser and Firestore emulator setup on this GitHub-hosted runner
+        required: true
+        type: boolean
+        default: false
+
+# All unspecified token permissions are none. Do not add id-token or write scopes.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Exact-head release gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: 'true'
+      GCLOUD_PROJECT: demo-farkad
+      EXPECTED_SHA: ${{ github.sha }}
+    steps:
+      - name: Require separate approval for runner setup
+        shell: bash
+        env:
+          SETUP_APPROVED: ${{ inputs.approve_test_setup }}
+        run: |
+          set -euo pipefail
+          if [ "$SETUP_APPROVED" != true ]; then
+            echo "::error::Browser and emulator setup was not approved. No setup or gate was run."
+            exit 1
+          fi
+
+      - name: Check out the exact candidate, including historical test fixtures
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the supported Node major
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Java for the local Firestore emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify candidate identity and emulator-only entry points
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          test -z "$(git status --porcelain)"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          assert.equal(process.versions.node.split('.')[0], '22');
+          assert.equal(pkg.scripts['test:release'],
+            'npm run test:all && npm run test:sendclaim && npm run test:emulator');
+          assert.ok(pkg.scripts.test.startsWith('npm run test:isolation && npm run test:blobs && '));
+          const emulatorScripts = Object.entries(pkg.scripts)
+            .filter(([, command]) => command.includes('firebase emulators:exec'));
+          assert.ok(emulatorScripts.length > 0);
+          for (const [name, command] of emulatorScripts) {
+            assert.match(command,
+              /^firebase emulators:exec --project demo-farkad --only firestore "node tests\/[a-z.-]+\.mjs"$/,
+              `${name} must use only the demo Firestore emulator`);
+          }
+          assert.ok(readFileSync('tests/network-guard.mjs', 'utf8')
+            .includes('--host-resolver-rules=MAP * ~NOTFOUND'));
+          NODE
+          {
+            echo "Candidate: $EXPECTED_SHA"
+            echo "Tree: $(git rev-parse 'HEAD^{tree}')"
+            node --version
+            npm --version
+            java -version 2>&1
+          } | tee "$RUNNER_TEMP/release-environment.txt"
+
+      - name: Install the locked test dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install the Chromium paired with the locked Playwright package
+        # This is an ephemeral GitHub-hosted runner, not the restricted local agent.
+        # Calling the installed CLI cannot select a newer package from the registry.
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Run the entire release gate, serially
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Every suite serves its own candidate. Preserve the source network guard;
+          # do not allow a caller-supplied browser, origin, checkout, or emulator.
+          unset CHROME_PATH PLAYWRIGHT_MODULE SMOKE_URL FARKAD_REPO FARKAD_EXPECT_SHA
+          unset FIRESTORE_EMULATOR_HOST FIREBASE_AUTH_EMULATOR_HOST
+          unset GOOGLE_APPLICATION_CREDENTIALS FIREBASE_TOKEN
+          node --input-type=module -e 'import { chromium } from "playwright"; console.log("Chromium:", chromium.executablePath())' \
+            | tee -a "$RUNNER_TEMP/release-environment.txt"
+          npm run test:release 2>&1 | tee "$RUNNER_TEMP/release-gate.log"
+          git diff --exit-code
+
+      - name: Preserve the result and environment, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-environment.txt
+            ${{ runner.temp }}/release-gate.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: State what was actually checked
+        if: always()
+        shell: bash
+        env:
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          {
+            echo "### Test-only release gate"
+            echo "- Candidate: \`$EXPECTED_SHA\`"
+            echo "- Gate step: \`$GATE_OUTCOME\`"
+            echo "- Command: \`npm run test:release\`"
+            echo "- No production data, rules, secrets, deployment, or device acceptance."
+            echo "A successful job is technical test evidence for this SHA, not approval to publish."
+          } >> "$GITHUB_STEP_SUMMARY"
