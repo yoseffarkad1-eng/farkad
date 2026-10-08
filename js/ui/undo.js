@@ -41,22 +41,28 @@ function workerDayMatchesSnapshot(date, layer, workerId, expected) {
 // of a crew operation would leave a different result from the one the button named.
 // Unrelated workers, dates and layers are deliberately outside this comparison.
 function offerWorkerDaysUndo(label, date, layer, previous, withRedo = true) {
+    offerWorkerRecordsUndo(label, previous.map(item => ({...item, date, layer})), withRedo);
+}
+
+function offerWorkerRecordsUndo(label, previous, withRedo = true) {
     const rows = previous.map(item => ({ ...item,
-        after: snapshotWorkerDay(date, layer, item.id) }));
+        after: snapshotWorkerDay(item.date, item.layer, item.id) }));
     let expected = rows.map(item => item.after);
     const restoreTo = side => () => {
-        if (!rows.every((item, index) => workerDayMatchesSnapshot(date, layer, item.id, expected[index]))) {
+        if (!rows.every((item, index) => State.worker(item.id)
+            && !(item.layer === 'actual' && vehicleDateClosed(State.schedule, item.id, item.date))
+            && workerDayMatchesSnapshot(item.date, item.layer, item.id, expected[index]))) {
             askTell('הרישום השתנה מאז הפעולה. הביטול או הביצוע החוזר לא בוצע, כדי לשמור על העדכון. בדוק את רישום היום לפני שינוי נוסף.');
             return false;
         }
-        const changes = rows.map(item => setWorkerDay(State.schedule, date, item.id, layer,
+        const changes = rows.map(item => setWorkerDay(State.schedule, item.date, item.id, item.layer,
             JSON.parse(JSON.stringify(item[side]))));
         const saved = changes.length === 1 ? State.commit(changes[0]) : State.commitMany(changes);
         if (!saved) return false;
         // setWorkerDay preserves a first-write rate stamp even when undo returns an
         // empty row. Redo must compare against those ACTUAL restored bytes, not the
         // originally unstamped empty row, or ordinary first-assignment redo fails.
-        expected = rows.map(item => snapshotWorkerDay(date, layer, item.id));
+        expected = rows.map(item => snapshotWorkerDay(item.date, item.layer, item.id));
         return true;
     };
     offerUndo(label, restoreTo('before'), withRedo ? restoreTo('after') : null);

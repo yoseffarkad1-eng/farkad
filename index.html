@@ -17,7 +17,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-    <meta name="farkad-build" content="v148">
+    <meta name="farkad-build" content="v149">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -370,6 +370,30 @@
     </div>
 </div>
 
+<div class="modal" id="crewModal" role="dialog" aria-modal="true" aria-labelledby="crewTitle">
+    <div class="modal-content crew-content">
+        <h3 id="crewTitle" tabindex="-1">בחירת עובדים</h3>
+        <button type="button" class="btn-icon crew-close" onclick="closeCrewActions()" aria-label="סגור בחירת עובדים">✕</button>
+        <p class="hint" id="crewScope"></p>
+        <div id="crewForm" class="crew-form"></div>
+        <div class="crew-actions">
+            <button type="button" class="btn-secondary" onclick="selectVisibleCrew()">בחר מוצגים</button>
+            <button type="button" class="btn-secondary" onclick="clearCrewSelection()">נקה בחירה</button>
+        </div>
+        <p id="crewCount" role="status" aria-live="polite"></p>
+        <div id="crewList"></div>
+        <h4>פעולה לקבוצה</h4>
+        <div id="crewOperation" class="crew-form"></div>
+        <p class="hint">רישומים קיימים וחשבונות סגורים יישמרו. חופש לתקופה כולל גם שבת.</p>
+        <div class="crew-actions">
+            <button type="button" class="btn-primary" id="crewPreview" onclick="previewCrewAction()">בדיקה לפני אישור</button>
+            <button type="button" class="btn-secondary" id="crewAdjacent" onclick="arrangeSelectedCrew()">סדר נבחרים זה לצד זה</button>
+            <button type="button" class="btn-secondary" onclick="closeCrewActions()">סגור בלי לשנות</button>
+        </div>
+        <p class="hint">סידור השמות ייפתח לבדיקה ושמירה בנפרד. הבחירה של כל עובד נשארת עצמאית.</p>
+    </div>
+</div>
+
 <div class="modal" id="workerPickerModal">
     <div class="modal-content">
         <h3 id="workerPickerTitle" tabindex="-1"></h3>
@@ -639,6 +663,7 @@
 <script src="js/ui/quickstart.js"></script>
 <script src="js/ui/week.js"></script>
 <script src="js/ui/roster.js"></script>
+<script src="js/ui/groups.js"></script>
 <script src="js/ui/reports.js"></script>
 <script src="js/ui/share.js"></script>
 <script src="js/ui/backup.js"></script>

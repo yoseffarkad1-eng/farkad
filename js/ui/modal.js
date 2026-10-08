@@ -17,6 +17,7 @@ const MODAL_CLOSERS = {
     quickModal: () => closeQuickStart(),
     assignSheet: () => closeAssignSheet(),
     workerPickerModal: () => closeWorkerPicker(),
+    crewModal: () => closeCrewActions(),
     placePickerModal: () => closePlacePicker(),
     workerFormModal: () => closeWorkerForm(),
     workerDaysModal: () => closeWorkerDays(),

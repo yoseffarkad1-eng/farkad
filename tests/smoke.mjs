@@ -5347,6 +5347,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     return { hidden: box.hidden, shown: box.offsetParent !== null, text: box.textContent,
       rows: box.querySelectorAll('.held-row').length, buttons, primaries };
   });
+  // v149 deliberately opens a comparison before offering its two decisions. Every
+  // previous content, touch-size and resolution assertion still runs on that review.
+  check('a held record begins with an explicit review step',
+    await page.locator('#heldRecords details.held-row:not([open]) > summary').count() === 1);
+  await page.locator('#heldRecords .held-title').click();
   const shown = await readPanel();
   check('the panel lists the held record, once',
     shown.missing !== true && shown.hidden === false && shown.shown === true && shown.rows === 1,
@@ -5385,6 +5390,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   }, HELD_PATH);
   await page.waitForTimeout(300);
   check('the record is held again, and listed again', (await readPanel()).rows === 1);
+  await page.locator('#heldRecords .held-title').click();
   await page.locator('#heldRecords button').filter({ hasText: 'לקחת מהענן' }).click();
   await page.waitForTimeout(300);
   const dialog = await page.evaluate(() => ({
