@@ -613,6 +613,14 @@ function renderHeldRecords() {
             row.cloud === undefined ? null : row.cloud]));
     if (box.getAttribute('data-held') === signature) return;
     box.setAttribute('data-held', signature);
+    const openPaths = new Set(Array.from(box.querySelectorAll('details.held-row[open]'))
+        .map(node => node.dataset.heldPath));
+    const oldHelp = box.querySelector('.held-help');
+    const helpOpen = oldHelp && oldHelp.open;
+    const focused = document.activeElement;
+    const focusedCard = focused && box.contains(focused) ? focused.closest('.held-row') : null;
+    const focusPath = focusedCard && focusedCard.dataset.heldPath;
+    const focusIndex = focusedCard ? Array.from(focusedCard.querySelectorAll('summary, button')).indexOf(focused) : -1;
     clear(box);
     box.hidden = rows.length === 0 && !unreadable;
     if (unreadable) {
@@ -621,7 +629,11 @@ function renderHeldRecords() {
     }
     if (rows.length === 0) return;
 
-    box.appendChild(el('p', 'hint hint-warn', HELD_LEAD));
+    const count = el('p', 'hint hint-warn', `${rows.length} רישומים ממתינים לבדיקה. פתח שורה להשוואה לפני בחירה. אין צורך ללחוץ שוב על סנכרון.`);
+    count.id = 'heldReviewCount'; count.setAttribute('role', 'status'); box.appendChild(count);
+    const help = el('details', 'held-help'); help.open = Boolean(helpOpen);
+    help.appendChild(el('summary', null, 'למה הרישום ממתין?'));
+    help.appendChild(el('p', 'hint', HELD_LEAD)); box.appendChild(help);
     const list = el('div', 'held-list');
     const sideLine = (label, text) => {
         const line = el('p', 'held-side');
@@ -631,8 +643,12 @@ function renderHeldRecords() {
     };
     rows.forEach(row => {
         const said = describeHeldRecord(row, State.schedule);
-        const card = el('div', 'held-row');
-        card.appendChild(el('div', 'held-title', said.title));
+        const card = el('details', 'held-row');
+        card.dataset.heldPath = row.path;
+        // Unreadable/unheard records keep their reason exposed. Closing a comparison
+        // never dismisses its warning or resolves either version.
+        card.open = openPaths.has(row.path) || !said.decidable || !said.takeable;
+        card.appendChild(el('summary', 'held-title', said.title + ' · ממתין לבדיקה'));
         if (said.kind !== 'day' && said.kind !== 'vehicle') {
             card.appendChild(el('p', 'hint', said.note));
             list.appendChild(card);
@@ -654,6 +670,11 @@ function renderHeldRecords() {
         list.appendChild(card);
     });
     box.appendChild(list);
+    if (focusPath && focusIndex >= 0) {
+        const card = Array.from(list.children).find(node => node.dataset.heldPath === focusPath);
+        const target = card && card.querySelectorAll('summary, button')[focusIndex];
+        if (target) target.focus({preventScroll: true});
+    }
 }
 
 // Installed to the home screen, or visiting in a tab. On an iPhone that difference is

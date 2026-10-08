@@ -896,6 +896,31 @@ a[href]:focus-visible,
     padding: 10px 12px;
 }
 .held-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+details.held-row { display: block; }
+summary.held-title { min-height: 44px; padding-block: 10px; cursor: pointer; overflow-wrap: anywhere; }
+details.held-row[open] > :not(summary) { margin-top: 6px; }
+.held-help summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
+
+/* Group work stays below the compact day header, in a dialog when needed. Search
+   never rebuilds its own input, so Arabic/Hebrew keyboard composition keeps focus. */
+.crew-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 10px; }
+.crew-actions button { min-width: 44px; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.crew-content { overflow-y: auto; position: relative; }
+.crew-content h3 { overflow-wrap: anywhere; padding-inline-end: 44px; }
+.crew-close { position: absolute; inset-inline-end: 12px; top: 12px; }
+.crew-filters { grid-column: 1 / -1; }
+.crew-filters summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
+#crewForm > .crew-field { grid-column: 1 / -1; }
+.crew-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.crew-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.crew-field[hidden] { display: none; }
+.crew-field input, .crew-field select { width: 100%; min-width: 0; min-height: 44px; font-size: 16px; padding: 8px; box-sizing: border-box; }
+.crew-choice { display: flex; align-items: center; gap: 8px; min-height: 48px; overflow-wrap: anywhere; }
+.crew-choice input { width: 44px; height: 44px; flex: 0 0 44px; }
+.crew-choice bdi { min-width: 0; }
+.crew-group-title { margin-block: 12px 4px; overflow-wrap: anywhere; }
+@media (max-width: 440px) { .crew-form { grid-template-columns: minmax(0, 1fr); } }
+@media print { .crew-actions, #crewModal { display: none !important; } }
 .held-side { margin: 0; font-size: 14px; color: var(--ink-2); }
 .held-side b { color: var(--ink); font-weight: 600; }
 .held-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
@@ -2933,6 +2958,15 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 /* A note about money that is missing from a total has to survive the print stylesheet,
    where every other hint is dropped. */
 .hint-warn { color: var(--warn); font-weight: 600; }
+.report-period-note { margin-block: 10px; }
+.report-period-note-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.report-period-note-label { flex: 1; min-width: 120px; font-size: 14px; color: var(--warn); }
+.report-period-note-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.report-period-note-head button { flex-shrink: 0; min-width: 44px; min-height: 44px; }
+.report-period-note-close { font-size: 22px; }
+@media screen { .report-period-note.is-closed > .report-period-note-text { display: none; } }
+/* The full warning still belongs on paper when dismissed on the screen. */
+@media print { .report-period-note-head { display: none !important; } }
 /* Lifted back onto the paper by SPECIFICITY, not by position.
 
    A warning is not decoration: "* שעות נוספות בלי שכר שעה - לא נכללו בסכום" says a man
@@ -3229,7 +3263,7 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
 @media print { .undo-bar { display: none !important; } }
 
 /* One tap for the day everyone worked in one place. */
-.bulk-row {
+.bulk-row, .crew-fold {
     margin-bottom: 10px;
     background: var(--surface);
     border: 1px dashed var(--line);
@@ -3242,6 +3276,7 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     gap: 7px;
     padding: 9px 14px;
 }
+.bulk-row > .crew-actions, .crew-fold > .crew-actions { padding-inline: 14px; }
 /* The phone-only disclosure button, on the switcher row (see bulkToggle in day.js): a
    checklist glyph and the count, 44px square. On a desktop the chips are always out, so
    this button never shows there and the row reads exactly as it always has. */
@@ -4177,7 +4212,7 @@ body.day-compact .day-header .progress .progress-line {
     .bulk-toggle { display: inline-flex; }
     .bulk-row { margin: 6px 0 0; }
     /* Folded, the row is not on the page at all - its button is on the switcher row. */
-    .bulk-row.bulk-closed { display: none; }
+    .bulk-row.bulk-closed, .crew-fold.bulk-closed { display: none; }
 
     /* One list surface, full-bleed, dividers only: the card-in-a-card was two borders
        and 32px of margin that the names paid for. */

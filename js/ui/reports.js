@@ -13,6 +13,8 @@ let REPORT_WORKER_SEARCH = '';
 let REPORT_PICKER_OPEN = false;
 let REPORT_RANGE_OPEN = false;
 let REPORT_CARD_GRID = true;
+let REPORT_PERIOD_NOTE_CONTEXT = '';
+const REPORT_PERIOD_NOTES_CLOSED = new Set();
 const REPORT_DEDUCTIONS = new Map();
 let ADVANCE_WORKER = null;
 let ADVANCE_SEARCH = '';
@@ -363,7 +365,23 @@ function renderReports() {
         REPORT_RANGE.to = range.to;
     }
 
+    // Only this page session remembers a dismissal. A different range, selection or
+    // crew/cycle must explain the mismatch again, even if the old range is revisited.
+    const noteContext = JSON.stringify([
+        REPORT_RANGE.from, REPORT_RANGE.to,
+        REPORT_WORKERS === null ? null : [...REPORT_WORKERS].sort(),
+        State.schedule.workers.map(w => [w.id, w.name, w.active, w.payCycles])
+    ]);
+    if (noteContext !== REPORT_PERIOD_NOTE_CONTEXT) {
+        REPORT_PERIOD_NOTES_CLOSED.clear();
+        REPORT_PERIOD_NOTE_CONTEXT = noteContext;
+    }
+
     const searching = document.activeElement && document.activeElement.id === 'reportWorkerSearch';
+    // A sync redraw replaces these buttons too. Keep the cycle and action, not the
+    // detached node, so a keyboard user can continue where they were reading.
+    const periodControlFocus = String(document.activeElement && document.activeElement.id || '')
+        .match(/^report-period-note-(weekly|biweekly)-(details|close)$/);
     const oldWorkerList = root.querySelector('.report-worker-list');
     const workerScroll = oldWorkerList ? oldWorkerList.scrollTop : 0;
     clear(root);
@@ -404,6 +422,16 @@ function renderReports() {
     if (searching) {
         const search = document.getElementById('reportWorkerSearch');
         if (search) search.focus({ preventScroll: true });
+    }
+    if (periodControlFocus) {
+        // A settled period or removed group has no notice; switching to invoices
+        // hides payroll entirely. Never focus a detached or hidden control.
+        const target = [
+            document.getElementById(periodControlFocus[0]),
+            document.getElementById(`report-period-note-${periodControlFocus[1]}-details`),
+            root.querySelector('.report-section-toggle [aria-pressed="true"]')
+        ].find(control => control && control.getClientRects().length);
+        if (target) target.focus({ preventScroll: true });
     }
 }
 
@@ -759,9 +787,38 @@ function groupPeriodNote(group) {
             ? 'תקופת מעבר: הימים שנשארו מהמחזור הקודם, לפני המעבר לתשלום שבועי.'
             : 'זאת תקופת התשלום המלאה של העובדים האלה.');
     }
-    return el('p', 'hint hint-warn',
+    const note = el('div', 'report-period-note');
+    const head = el('div', 'report-period-note-head');
+    head.appendChild(el('span', 'report-period-note-label', 'תצוגת ימים בלבד · לא לסגירת חשבון'));
+    // Image export reads hint-warn text directly, including collapsed notes. Keep the
+    // complete warning in its own paragraph; controls must never become exported text.
+    const explanation = el('p', 'hint hint-warn report-period-note-text',
         'הטווח שנבחר אינו תקופת התשלום של העובדים האלה, ולכן זאת תצוגה של ימים ולא '
         + 'חשבון לתשלום: אין כאן יתרה מועברת ואי אפשר לסגור מכאן.');
+    explanation.id = `report-period-note-${group.cycle}`;
+    const details = button('פרטים', 'btn-secondary', () => setOpen(note.classList.contains('is-closed')));
+    details.id = `${explanation.id}-details`;
+    details.setAttribute('aria-controls', explanation.id);
+    const close = button('×', 'btn-secondary report-period-note-close', () => {
+        setOpen(false);
+        details.focus({ preventScroll: true });
+    }, 'סגירת ההסבר על תקופת התשלום');
+    close.id = `${explanation.id}-close`;
+    function setOpen(open) {
+        if (open) REPORT_PERIOD_NOTES_CLOSED.delete(group.cycle);
+        else REPORT_PERIOD_NOTES_CLOSED.add(group.cycle);
+        note.classList.toggle('is-closed', !open);
+        details.setAttribute('aria-expanded', String(open));
+        close.hidden = !open;
+    }
+    const controls = el('div', 'report-period-note-actions');
+    controls.appendChild(details);
+    controls.appendChild(close);
+    head.appendChild(controls);
+    note.appendChild(head);
+    note.appendChild(explanation);
+    setOpen(!REPORT_PERIOD_NOTES_CLOSED.has(group.cycle));
+    return note;
 }
 
 function renderPayrollTable() {

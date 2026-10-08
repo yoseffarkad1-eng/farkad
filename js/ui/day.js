@@ -100,6 +100,7 @@ function renderDay() {
         return;
     }
     if (State.activePlaces().length === 0) {
+        root.appendChild(renderCrewActions());
         root.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
             markAllHoliday, 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
         root.appendChild(renderSetupCard(
@@ -413,10 +414,14 @@ let bulkOpen = false;
 
 function renderBulkRow() {
     const remaining = State.unrecorded();
-    if (remaining.length < 2) return el('span');
-
-    const row = el('div', bulkOpen ? 'bulk-row' : 'bulk-row bulk-closed');
+    // Group selection remains useful after today's records are complete (range
+    // holidays and adjacent names). Keep that door in the existing fold, without
+    // an extra row above the crew. Quick "all remaining" chips still need two names.
+    const kind = remaining.length < 2 ? 'crew-fold' : 'bulk-row';
+    const row = el('div', kind + (bulkOpen ? '' : ' bulk-closed'));
     row.id = 'bulkRow';
+    row.appendChild(renderCrewActions());
+    if (remaining.length < 2) return row;
     // The disclosure control is on the header's tools row (bulkToggle, below): this row
     // is the chips alone, and folded it costs the list nothing at all.
 
@@ -447,7 +452,7 @@ function bulkToggle(row) {
         bulkOpen = !bulkOpen;
         row.classList.toggle('bulk-closed', !bulkOpen);
         toggle.setAttribute('aria-expanded', String(bulkOpen));
-    }, `פעולות מרוכזות (${remaining})`);
+    }, `פעולות מרוכזות (${remaining}) · בחירת עובדים וחופש לתקופה`);
     toggle.setAttribute('aria-expanded', String(bulkOpen));
     toggle.setAttribute('aria-controls', 'bulkRow');
     toggle.appendChild(bulkIcon());
@@ -477,14 +482,14 @@ function bulkAssign(place) {
     if (workers.length === 0) return;
 
     const date = State.date;
+    const previous = workers.map(worker => ({ id: worker.id,
+        before: snapshotWorkerDay(date, 'actual', worker.id) }));
     const changes = workers.map(worker =>
         assignPlace(State.schedule, date, worker.id, 'actual', place.id, RATE_NORMAL));
     if (!State.commitMany(changes)) return;
 
-    offerUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`, () => {
-        State.commitMany(workers.map(worker =>
-            clearWorkerDay(State.schedule, date, worker.id, 'actual')));
-    });
+    offerWorkerDaysUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`,
+        date, 'actual', previous, false);
 }
 
 // ---------------------------------------------------------------- days drawer
@@ -821,7 +826,8 @@ function appendModeSwitch(tools, bulkRow) {
     line.appendChild(modes);
     line.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
         markAllHoliday, 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
-    if (bulkRow && bulkRow.classList && bulkRow.classList.contains('bulk-row')) {
+    if (bulkRow && bulkRow.classList && (bulkRow.classList.contains('bulk-row')
+        || bulkRow.classList.contains('crew-fold'))) {
         line.appendChild(bulkToggle(bulkRow));
     }
     tools.appendChild(line);

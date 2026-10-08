@@ -2238,8 +2238,9 @@ async function seedRoster(page) {
     (await page.isVisible('#askModal')) === true
     && (await page.textContent('#askTitle')).includes('סאמר חוסיין'),
     await page.textContent('#askTitle'));
-  check('and is named as being in the archive',
-    (await page.textContent('#askTitle')).includes('בארכיון'),
+  check('and is named as inactive without an archive label',
+    (await page.textContent('#askTitle')).includes('(לא פעיל)')
+    && !(await page.textContent('#askTitle')).includes('ארכיון'),
     await page.textContent('#askTitle'));
   await page.click('#askCancel');
   await page.waitForTimeout(200);
@@ -5346,6 +5347,11 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     return { hidden: box.hidden, shown: box.offsetParent !== null, text: box.textContent,
       rows: box.querySelectorAll('.held-row').length, buttons, primaries };
   });
+  // v149 deliberately opens a comparison before offering its two decisions. Every
+  // previous content, touch-size and resolution assertion still runs on that review.
+  check('a held record begins with an explicit review step',
+    await page.locator('#heldRecords details.held-row:not([open]) > summary').count() === 1);
+  await page.locator('#heldRecords .held-title').click();
   const shown = await readPanel();
   check('the panel lists the held record, once',
     shown.missing !== true && shown.hidden === false && shown.shown === true && shown.rows === 1,
@@ -5384,6 +5390,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   }, HELD_PATH);
   await page.waitForTimeout(300);
   check('the record is held again, and listed again', (await readPanel()).rows === 1);
+  await page.locator('#heldRecords .held-title').click();
   await page.locator('#heldRecords button').filter({ hasText: 'לקחת מהענן' }).click();
   await page.waitForTimeout(300);
   const dialog = await page.evaluate(() => ({
@@ -8029,8 +8036,10 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   });
   check('typing an archived man\'s number raises the hint',
     hint.shown && hint.text.includes('המספר הזה כבר רשום אצל'), JSON.stringify(hint));
-  check('naming him, and saying where he is',
-    hint.text.includes('דוד') && hint.text.includes('(בארכיון)'), hint.text);
+  // Inactive is the owner-approved status label; the duplicate warning stays visible.
+  check('naming him as inactive, without an archive label',
+    hint.text.includes('דוד') && hint.text.includes('(לא פעיל)')
+      && !hint.text.includes('ארכיון'), hint.text);
   check('and saying it is allowed, with a caution rather than a block',
     hint.text.includes('אפשר לשמור, אבל בדוק שאין כפילות'), hint.text);
 

@@ -30,6 +30,44 @@ function snapshotWorkerDay(date, layer, workerId) {
     return record ? JSON.parse(JSON.stringify(record)) : { entries: [] };
 }
 
+// A second phone may have changed this same row since the offered edit. Undo is
+// allowed to restore only the fact it last wrote, never a newer fact it has adopted.
+// Key order is not a change; hours, stamps, absence and every other field are.
+function workerDayMatchesSnapshot(date, layer, workerId, expected) {
+    return canonicalJson(snapshotWorkerDay(date, layer, workerId)) === canonicalJson(expected);
+}
+
+// The whole action is refused if any of its rows changed: silently undoing only part
+// of a crew operation would leave a different result from the one the button named.
+// Unrelated workers, dates and layers are deliberately outside this comparison.
+function offerWorkerDaysUndo(label, date, layer, previous, withRedo = true) {
+    offerWorkerRecordsUndo(label, previous.map(item => ({...item, date, layer})), withRedo);
+}
+
+function offerWorkerRecordsUndo(label, previous, withRedo = true) {
+    const rows = previous.map(item => ({ ...item,
+        after: snapshotWorkerDay(item.date, item.layer, item.id) }));
+    let expected = rows.map(item => item.after);
+    const restoreTo = side => () => {
+        if (!rows.every((item, index) => State.worker(item.id)
+            && !(item.layer === 'actual' && vehicleDateClosed(State.schedule, item.id, item.date))
+            && workerDayMatchesSnapshot(item.date, item.layer, item.id, expected[index]))) {
+            askTell('הרישום השתנה מאז הפעולה. הביטול או הביצוע החוזר לא בוצע, כדי לשמור על העדכון. בדוק את רישום היום לפני שינוי נוסף.');
+            return false;
+        }
+        const changes = rows.map(item => setWorkerDay(State.schedule, item.date, item.id, item.layer,
+            JSON.parse(JSON.stringify(item[side]))));
+        const saved = changes.length === 1 ? State.commit(changes[0]) : State.commitMany(changes);
+        if (!saved) return false;
+        // setWorkerDay preserves a first-write rate stamp even when undo returns an
+        // empty row. Redo must compare against those ACTUAL restored bytes, not the
+        // originally unstamped empty row, or ordinary first-assignment redo fails.
+        expected = rows.map(item => snapshotWorkerDay(item.date, item.layer, item.id));
+        return true;
+    };
+    offerUndo(label, restoreTo('before'), withRedo ? restoreTo('after') : null);
+}
+
 // Applies a change to one worker-day and keeps both sides of it on hand. The date and
 // layer are captured now, not read at undo time - by then the person may have moved to
 // another day, and restoring into that one would be a second mistake.
@@ -47,13 +85,7 @@ function editWithUndo(workerId, label, mutate) {
     // back and said why; offering "undo" over that would name a change nobody made.
     if (!State.commit(mutate())) return false;
 
-    // Taken AFTER the commit, so redo restores exactly what the edit produced rather
-    // than being a guess at how to repeat it.
-    const after = snapshotWorkerDay(date, layer, workerId);
-
-    offerUndo(label,
-        () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, previous)),
-        () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, after)));
+    offerWorkerDaysUndo(label, date, layer, [{ id: workerId, before: previous }]);
     return true;
 }
 
@@ -91,12 +123,15 @@ function runUndo() {
     const replay = restore._replay;
 
     dismissUndoBar();
-    restore();
+    // A refused durable write or a changed record did not move back. Keep the step
+    // available for retry; offering redo here would claim an undo that never happened.
+    if (restore() === false) { renderUndoButton(); return false; }
 
     undoAction = null;
     redoAction = replay || null;
     if (redoAction) redoAction._replay = restore;
     renderUndoButton();
+    return true;
 }
 
 function runRedo() {
@@ -104,12 +139,13 @@ function runRedo() {
     if (!replay) return;
     const restore = replay._replay;
 
-    replay();
+    if (replay() === false) { renderUndoButton(); return false; }
 
     redoAction = null;
     undoAction = restore || null;
     if (undoAction) undoAction._replay = replay;
     renderUndoButton();
+    return true;
 }
 
 // Takes the toast off the screen and leaves the step itself standing.
