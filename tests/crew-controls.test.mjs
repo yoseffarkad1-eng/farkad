@@ -24,10 +24,10 @@ function form(d) {
     const nodes={};
     for (const id of ['workerFormTitle','workerFormName','workerFormId','workerFormPhone',
         'workerFormDaily','workerFormHourly','workerFormError','workerFormCycle','workerFormCycleFrom',
-        'workerFormCycleHint','workerFormCycleHistory','workerFormModal'])
+        'workerFormCycleHint','workerFormCycleHistory','workerFormModal','workerFormPhoneHint'])
         nodes[id]={value:'',textContent:'',style:{},options:[{textContent:''}],focus(){}};
     d.ctx.document.getElementById=id=>nodes[id]||null;
-    d.ctx.workerPhoneTyped=()=>{}; d.ctx.renderWorkerFormActions=()=>{};
+    d.ctx.renderWorkerFormActions=()=>{};
     return nodes;
 }
 {
@@ -139,5 +139,94 @@ function form(d) {
     closed.ctx.askConfirm=async()=>true;await closed.call('markAllHoliday');
     same('holiday leaves closed worker untouched',closed.call('isAbsent',closed.State.schedule,'2026-10-02','w_a','actual'),false);
     same('holiday still fills unclosed worker',closed.call('isAbsent',closed.State.schedule,'2026-10-02','w_b','actual'),true);
+}
+{
+    suite('U6: shared phone warning names an inactive worker without changing his history');
+    const d=device();
+    given('recorded work saved',work(d)===true);
+    given('advance saved',d.State.commit(d.call('addAdvance',d.State.schedule,'w_a','2026-10-02',200,'TEST'))===true);
+    const advanceId=Object.keys(d.State.schedule.advances)[0];
+    given('repayment saved',d.State.commit(d.call('recordAdvanceRepaid',d.State.schedule,advanceId,50,
+        '2026-10-02','TEST repayment','2026-10-02T12:00:00Z',d.id,'cash'))===true);
+    d.State.worker('w_a').name='יוסף يوسف';
+    d.State.worker('w_a').phone='052-884-1930';
+    d.State.worker('w_a').active=false;
+    given('inactive identity saved',d.State.commitRoster()===true);
+    // Boot completes the sanctioned legacy-advance mirror before the history snapshot.
+    d.State.load();
+    const history=schedule=>JSON.stringify({days:schedule.days,advances:schedule.advances,ledger:schedule.ledger});
+    const beforeHistory=history(d.State.schedule);
+    const originalWorker=JSON.stringify(d.State.worker('w_a'));
+    const n=form(d);
+    d.call('showAddWorkerModal');
+    n.workerFormName.value='עובד חדש';n.workerFormDaily.value='550';n.workerFormCycle.value='weekly';
+    n.workerFormPhone.value='+972-52-884-1930';
+    d.call('workerPhoneTyped');
+    const inactiveName=`${d.call('isolate','יוסף يوسف')} (לא פעיל)`;
+    same('duplicate hint stays visible',n.workerFormPhoneHint.style.display,'');
+    check('hint names the inactive worker',n.workerFormPhoneHint.textContent.includes(inactiveName),n.workerFormPhoneHint.textContent);
+    check('hint does not call him archived',!n.workerFormPhoneHint.textContent.includes('ארכיון'),n.workerFormPhoneHint.textContent);
+    check('hint retains the duplicate warning',n.workerFormPhoneHint.textContent.includes('בדוק שאין כפילות'));
+    const beforeCancel=JSON.stringify(d.State.schedule);
+    const diskBeforeCancel=JSON.stringify(d.dump());
+    const questions=[];
+    let writeAttempts=0;d.failWrite(()=>{writeAttempts++;return false;});
+    d.ctx.askConfirm=async options=>{questions.push(options);return false;};
+    await d.call('saveWorkerForm');
+    same('save still requires duplicate confirmation',questions.length,1);
+    check('confirmation uses the same inactive label',questions[0]?.title.includes(inactiveName),questions[0]?.title);
+    check('confirmation does not call him archived',!questions[0]?.title.includes('ארכיון'),questions[0]?.title);
+    same('cancel keeps the entire schedule',JSON.stringify(d.State.schedule),beforeCancel);
+    same('cancel writes nothing to disk',JSON.stringify(d.dump()),diskBeforeCancel);
+    same('cancel attempts no storage writes',writeAttempts,0);
+    d.failWrite(null);
+    same('cancel leaves the draft open',n.workerFormModal.style.display,'flex');
+    same('cancel preserves the typed phone',n.workerFormPhone.value,'+972-52-884-1930');
+    d.ctx.askConfirm=async()=>true;
+    await d.call('saveWorkerForm');
+    same('explicit confirmation adds one separate worker',d.State.schedule.workers.length,4);
+    same('original inactive identity remains intact',JSON.stringify(d.State.worker('w_a')),originalWorker);
+    same('save preserves recorded days, advances and ledger',history(d.State.schedule),beforeHistory);
+    const reopened=makeDevice({storage:d.dump()});reopened.State.load();
+    same('historical days and money survive reopening',history(reopened.State.schedule),beforeHistory);
+    same('inactive worker historical wage is unchanged',reopened.call('payrollReport',reopened.State.schedule,
+        '2026-10-02','2026-10-08').find(row=>row.workerId==='w_a').amount,500);
+    same('repayment is not lost or repeated',reopened.call('advanceOutstanding',reopened.State.schedule,advanceId).left,150);
+}
+{
+    suite('U7: site inactivity confirmation names the site and preserves recorded work');
+    const d=device();
+    given('site work saved',work(d)===true);
+    given('worker advance saved',d.State.commit(d.call('addAdvance',d.State.schedule,'w_a','2026-10-02',100,'TEST'))===true);
+    d.State.load();
+    const history=schedule=>JSON.stringify({days:schedule.days,advances:schedule.advances,ledger:schedule.ledger});
+    const beforeHistory=history(d.State.schedule);
+    const beforeCancel=JSON.stringify(d.State.schedule);
+    const diskBeforeCancel=JSON.stringify(d.dump());
+    let question;
+    let writeAttempts=0;d.failWrite(()=>{writeAttempts++;return false;});
+    d.ctx.askConfirm=async options=>{question=options;return false;};
+    await d.call('togglePlaceActive','p_a');
+    check('title explicitly identifies an inactive site',question?.title.includes('SITE')
+        && question.title.includes('לא פעיל') && question.title.includes('אתר'),question?.title);
+    check('site confirmation does not use archive wording',!question?.title.includes('ארכיון'),question?.title);
+    same('confirmation button refers to a site',question?.ok,'הפוך אתר ללא פעיל');
+    check('confirmation explains that recorded days remain',question?.message.includes('הימים שכבר נרשמו יישמרו'));
+    same('cancel keeps the schedule intact',JSON.stringify(d.State.schedule),beforeCancel);
+    same('cancel does not write to disk',JSON.stringify(d.dump()),diskBeforeCancel);
+    same('site cancellation attempts no storage writes',writeAttempts,0);
+    d.failWrite(null);
+    d.ctx.askConfirm=async()=>true;
+    await d.call('togglePlaceActive','p_a');
+    same('confirmed site becomes inactive',d.State.place('p_a').active,false);
+    same('site visibility preserves days and money',history(d.State.schedule),beforeHistory);
+    const reopened=makeDevice({storage:d.dump()});reopened.State.load();
+    same('site stays inactive after reopening',reopened.State.place('p_a').active,false);
+    same('site history survives reopening',history(reopened.State.schedule),beforeHistory);
+    same('historical wage at inactive site remains',reopened.call('payrollReport',reopened.State.schedule,
+        '2026-10-02','2026-10-08').find(row=>row.workerId==='w_a').amount,500);
+    await d.call('togglePlaceActive','p_a');
+    same('existing reactivation still works',d.State.place('p_a').active,true);
+    same('reactivation preserves days and money',history(d.State.schedule),beforeHistory);
 }
 report();

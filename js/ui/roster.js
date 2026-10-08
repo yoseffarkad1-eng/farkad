@@ -1040,7 +1040,7 @@ function workerPhoneTyped() {
     }
     // Named the way the save-time question names them, so the two read as one voice.
     const names = sharing
-        .map(worker => worker.active === false ? `${isolate(worker.name)} (בארכיון)` : worker.name)
+        .map(worker => worker.active === false ? `${isolate(worker.name)} (לא פעיל)` : worker.name)
         .join(', ');
     hint.textContent =
         `המספר הזה כבר רשום אצל ${names} - אפשר לשמור, אבל בדוק שאין כפילות.`;
@@ -1159,7 +1159,7 @@ async function saveWorkerForm() {
         const sharing = workersSharingPhone(State.schedule, typed.phone, editingWorkerId);
         if (sharing.length > 0 && askedAbout.phone !== normalisePhone(typed.phone)) {
             const names = sharing
-                .map(worker => worker.active === false ? `${isolate(worker.name)} (בארכיון)` : worker.name)
+                .map(worker => worker.active === false ? `${isolate(worker.name)} (לא פעיל)` : worker.name)
                 .join(', ');
             const go = await askConfirm({
                 title: `הטלפון הזה כבר רשום אצל ${names}`,
@@ -1647,9 +1647,9 @@ async function togglePlaceActive(placeId) {
 
     if (place.active !== false) {
         const yes = await askConfirm({
-            title: `להעביר את ${isolate(place.name)} לארכיון?`,
+            title: `להפוך את ${isolate(place.name)} לאתר לא פעיל?`,
             message: 'הימים שכבר נרשמו יישמרו, והאתר לא יופיע ברשימת האתרים.',
-            ok: 'כבה עובד'
+            ok: 'הפוך אתר ללא פעיל'
         });
         if (!yes) return;
     }

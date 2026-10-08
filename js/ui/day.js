@@ -477,14 +477,14 @@ function bulkAssign(place) {
     if (workers.length === 0) return;
 
     const date = State.date;
+    const previous = workers.map(worker => ({ id: worker.id,
+        before: snapshotWorkerDay(date, 'actual', worker.id) }));
     const changes = workers.map(worker =>
         assignPlace(State.schedule, date, worker.id, 'actual', place.id, RATE_NORMAL));
     if (!State.commitMany(changes)) return;
 
-    offerUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`, () => {
-        State.commitMany(workers.map(worker =>
-            clearWorkerDay(State.schedule, date, worker.id, 'actual')));
-    });
+    offerWorkerDaysUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`,
+        date, 'actual', previous, false);
 }
 
 // ---------------------------------------------------------------- days drawer

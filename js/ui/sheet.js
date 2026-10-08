@@ -396,12 +396,17 @@ async function clearWorkerPicker() {
     const place = State.place(pickerPlaceId);
     if (!place) return;
 
-    const here = workersAtPlace(State.schedule, State.date, place.id, State.layer);
+    const date = State.date;
+    const layer = State.layer;
+    const here = workersAtPlace(State.schedule, date, place.id, layer);
     if (here.length === 0) {
         askTell(`אף אחד לא רשום ב${isolate(place.name)} ביום הזה.`);
         return;
     }
 
+    // The confirmation names this date and these rows. A sync update or navigation
+    // while the dialog is open must not turn the same confirmation into a new edit.
+    const previous = here.map(id => ({ id, before: snapshotWorkerDay(date, layer, id) }));
     const ok = await askConfirm({
         title: `לרוקן את ${isolate(place.name)}?`,
         message: `${here.length} עובדים יוסרו מ${isolate(place.name)} ביום הזה. שאר הימים לא ייגעו.`,
@@ -409,20 +414,16 @@ async function clearWorkerPicker() {
     });
     if (!ok) return;
 
-    const previous = here.map(workerId => ({
-        workerId,
-        record: snapshotWorkerDay(State.date, State.layer, workerId)
-    }));
-    const date = State.date;
-    const layer = State.layer;
+    if (!previous.every(item => workerDayMatchesSnapshot(date, layer, item.id, item.before))) {
+        askTell('הרישום השתנה בזמן שהחלון היה פתוח. לא הוסר אף עובד. פתח את רשימת האתר שוב ובדוק את העדכון.');
+        return;
+    }
 
     if (!State.commitMany(here.map(workerId =>
         unassignPlace(State.schedule, date, workerId, layer, place.id)))) return;
 
-    offerUndo(`${here.length} עובדים הוסרו מ${isolate(place.name)}`, () => {
-        State.commitMany(previous.map(item =>
-            setWorkerDay(State.schedule, date, item.workerId, layer, item.record)));
-    });
+    offerWorkerDaysUndo(`${here.length} עובדים הוסרו מ${isolate(place.name)}`,
+        date, layer, previous, false);
 
     renderWorkerPicker();
 }
@@ -543,16 +544,8 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
         .filter(item => JSON.stringify(item.before) !== JSON.stringify(item.after));
     if (touched.length > 0) {
         const count = touched.length;
-        // The undo (and the redo) restore only rows that still hold what this copy
-        // left there - a row another phone edited in between is that phone's answer,
-        // and dragging it back would re-make the mistake somewhere new.
-        const restoreTo = side => () => State.commitMany(touched
-            .filter(item => JSON.stringify(snapshotWorkerDay(dateAtCopy, layerAtCopy, item.id))
-                === JSON.stringify(side === 'before' ? item.after : item.before))
-            .map(item => setWorkerDay(State.schedule, dateAtCopy, item.id, layerAtCopy,
-                side === 'before' ? item.before : item.after)));
-        offerUndo(count === 1 ? `הועתק עובד אחד ${source}` : `הועתקו ${count} עובדים ${source}`,
-            restoreTo('before'), restoreTo('after'));
+        offerWorkerDaysUndo(count === 1 ? `הועתק עובד אחד ${source}` : `הועתקו ${count} עובדים ${source}`,
+            dateAtCopy, layerAtCopy, touched);
     }
 
     const copied = countCopied(changes);
