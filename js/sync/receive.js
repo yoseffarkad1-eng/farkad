@@ -59,6 +59,10 @@ Object.assign(FarkadSync, {
     // against a base that has moved is refused rather than landing on somebody's evening.
     PROTOCOL: 1,
     _revision: null,
+    // How many deliveries were older than a document this device had already been shown.
+    // Counted rather than merely dropped: a listener that keeps handing back the past is
+    // worth seeing in the diagnostic, and a count is the only honest way to notice it.
+    _staleSnapshots: 0,
     _sendOpId: null,
     _rebases: 0,
     // The base values, per field path, that the write currently in flight was built on.
@@ -567,6 +571,40 @@ Object.assign(FarkadSync, {
         // still a snapshot that tells it what revision the document is at, and writing
         // against a stale base is refused by the rules, which is a worse way to find out.
         this.noteRevision(raw);
+
+        // A DOCUMENT OLDER THAN ONE THIS DEVICE HAS ALREADY BEEN SHOWN IS NOT ADOPTED.
+        //
+        // noteRevision above has refused to LOWER the write base since the cached-first
+        // suite proved a stale base gets every later write refused. Nothing did the same
+        // for the RECORD. receive() replaced State.schedule with whatever turned up, and
+        // reapplyPending puts back only what the cloud has NOT acknowledged - so an edit
+        // that had LANDED was reverted on the screen by any later delivery of an older
+        // document, with the line still saying «מסונכרן».
+        //
+        // That is not a race between two people. Firestore delivers a cached snapshot
+        // before the server's and the cached one can be behind - the comment above
+        // noteRevision says so in this repository's own words - and the same shape
+        // arrives when a listener reconnects after a resume and when a write's own echo
+        // is delivered late. One phone, one cloud, one late delivery: the move goes back
+        // to the site it came from, the person does it again, it lands, and the next
+        // delivery takes it off again. Measured in tests/snapshot.stale.test.mjs.
+        //
+        // STRICTLY older, and only when the arriving document says what it is: equal is
+        // the same document delivered twice and is adopted as before, and a document
+        // with no revision at all is a phone that has not reached the protocol, which
+        // this must not cut off. Nothing else is skipped and nothing is thrown away: the
+        // document is not adopted, the queue is untouched, the status is left exactly as
+        // the last real snapshot set it, and `_latestRaw` keeps the NEWER document so
+        // the held-snapshot replay and readoptAfter still have the right one to re-run.
+        if (Number.isInteger(raw.revision) && this._revision !== null
+            && raw.revision < this._revision) {
+            this._staleSnapshots += 1;
+            // A delivery is still a sighting of the cloud, and the barrier it opens is
+            // what sends anything this device still owes.
+            this.noteCloudHeard();
+            return;
+        }
+
         this._latestRaw = raw;
         this._heldSnapshot = false;
 
