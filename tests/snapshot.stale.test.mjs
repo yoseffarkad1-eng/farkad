@@ -222,4 +222,76 @@ const deliver = (cloud, snapshot) =>
     check('and still owed', a.Sync.pendingCount() > 0, String(a.Sync.pendingCount()));
 }
 
+// ---------------------------------- two phones, a man at two sites, switched fast
+{
+    suite('two phones, a man at two sites, switched fast, and a reopen');
+
+    const cloud = makeCloud();
+    const a = phone('d_two_a', cloud);
+    const b = phone('d_two_b', cloud);
+    await settle(TICK * 10);
+
+    // Two sites in one day is the cap this app allows and the normal case here, so it is
+    // also the shape "the sites come out mixed" is most likely to be about: half of a
+    // stale copy and half of the real document reads exactly like that.
+    a.State.commit(a.call('assignPlace', a.State.schedule, DAY, 'w_01', 'actual', 'p_01', 'normal'));
+    a.State.commit(a.call('assignPlace', a.State.schedule, DAY, 'w_01', 'actual', 'p_02', 'normal'));
+    a.State.commit(a.call('assignPlace', a.State.schedule, DAY, 'w_02', 'actual', 'p_01', 'normal'));
+    await settleUntil(() => sitesInCloud(cloud, 'w_01') === 'p_01,p_02'
+        && sitesOn(b, 'w_01') === 'p_01,p_02' && sitesOn(b, 'w_02') === 'p_01', 8000);
+    given('one phone records two sites and the other phone sees them',
+        sitesOn(a, 'w_01') === 'p_01,p_02' && sitesOn(b, 'w_01') === 'p_01,p_02',
+        `${sitesOn(a, 'w_01')} / ${sitesOn(b, 'w_01')}`);
+
+    const stale = JSON.parse(JSON.stringify(cloud.doc));
+
+    // The SECOND phone corrects one of the two sites: off p_01, on to p_03.
+    move(b, 'w_01', 'p_01', 'p_03');
+    await settleUntil(() => sitesInCloud(cloud, 'w_01') === 'p_02,p_03'
+        && sitesOn(a, 'w_01') === 'p_02,p_03', 8000);
+    given('the correction reached the first phone', sitesOn(a, 'w_01') === 'p_02,p_03',
+        sitesOn(a, 'w_01'));
+
+    // A late delivery of the document as it stood before the correction, to BOTH phones.
+    deliver(cloud, stale);
+    await settle(TICK * 20);
+    check('the phone that made the correction keeps it',
+        sitesOn(b, 'w_01') === 'p_02,p_03', sitesOn(b, 'w_01'));
+    check('and the phone that only heard about it keeps it too',
+        sitesOn(a, 'w_01') === 'p_02,p_03', sitesOn(a, 'w_01'));
+    check('the other man is not mixed into it either',
+        sitesOn(a, 'w_02') === 'p_01' && sitesOn(b, 'w_02') === 'p_01',
+        `${sitesOn(a, 'w_02')} / ${sitesOn(b, 'w_02')}`);
+
+    // Fast switching: four taps with no pause between them, the way a thumb does it when
+    // the first one "did not take".
+    b.State.commit(b.call('unassignPlace', b.State.schedule, DAY, 'w_02', 'actual', 'p_01'));
+    b.State.commit(b.call('assignPlace', b.State.schedule, DAY, 'w_02', 'actual', 'p_02', 'normal'));
+    b.State.commit(b.call('unassignPlace', b.State.schedule, DAY, 'w_02', 'actual', 'p_02'));
+    b.State.commit(b.call('assignPlace', b.State.schedule, DAY, 'w_02', 'actual', 'p_03', 'normal'));
+    await settleUntil(() => sitesInCloud(cloud, 'w_02') === 'p_03'
+        && b.Sync.pendingCount() === 0 && sitesOn(a, 'w_02') === 'p_03', 8000);
+    check('fast switching ends where the last tap left it, on both phones',
+        sitesOn(b, 'w_02') === 'p_03' && sitesOn(a, 'w_02') === 'p_03'
+        && sitesInCloud(cloud, 'w_02') === 'p_03',
+        `${sitesOn(b, 'w_02')} / ${sitesOn(a, 'w_02')} / ${sitesInCloud(cloud, 'w_02')}`);
+
+    deliver(cloud, stale);
+    await settle(TICK * 20);
+    check('and a stale delivery does not take it back',
+        sitesOn(b, 'w_02') === 'p_03' && sitesOn(a, 'w_02') === 'p_03',
+        `${sitesOn(b, 'w_02')} / ${sitesOn(a, 'w_02')}`);
+
+    // The app closed and opened again, off its own disk: what is on that disk is what the
+    // person sees in the morning, and a stale delivery must not have written itself there.
+    const again = makeDevice({ deviceId: 'd_two_b', storage: b.dump() });
+    again.Sync.pushDelayMs = TICK;
+    again.setToday('2026-10-20');
+    again.ctx.askTell = () => Promise.resolve();
+    again.State.load();
+    check('a reopen shows what the last tap left',
+        sitesOn(again, 'w_02') === 'p_03' && sitesOn(again, 'w_01') === 'p_02,p_03',
+        `${sitesOn(again, 'w_02')} / ${sitesOn(again, 'w_01')}`);
+}
+
 report();
