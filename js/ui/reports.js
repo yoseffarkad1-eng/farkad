@@ -776,6 +776,87 @@ function groupPeriodNote(group) {
         + 'חשבון לתשלום: אין כאן יתרה מועברת ואי אפשר לסגור מכאן.');
 }
 
+// A WEEKLY MAN INSIDE A LONGER RANGE, WEEK BY WEEK.
+//
+// A fortnight is one period for the men paid fortnightly and two for the men paid
+// weekly. The sheet has said which since the cycles arrived, in a line under the group -
+// but it still showed a weekly man one row of totals for fourteen days, which is not how
+// he is paid and not what anybody hands him. Asked for on 17 October 2026: each week
+// worked out on its own, then the total for the range.
+//
+// The boundaries are NOT invented here. Each slice is periodRangeFor's own answer for
+// that man on that day - the same function the closure, the carry and the group note
+// use - stepped with nextPeriodFor, so a cycle change mid-range splits exactly where the
+// record says it does. A slice is then CLAMPED to the chosen range, which is what makes
+// the weeks add up to the row above them: a week half outside the range would count days
+// the range does not, and the person would be reading two different periods in one table.
+//
+// The money column is נצבר and only נצבר. A deduction belongs to the period a man is
+// settled over, never to a week inside it, so splitting לתשלום across weeks would invent
+// an account nobody keeps. Said under the table in one line rather than left to be
+// guessed.
+function weeklyBreakdownFor(workerId, from, to) {
+    const worker = State.worker(workerId);
+    if (!worker) return [];
+    const slices = [];
+    let at = from;
+    // Sixteen is a ceiling, not a rule: a range long enough to hold more weekly periods
+    // than that is a range nobody settles, and a loop that cannot end is worse than a
+    // table that stops.
+    for (let guard = 0; guard < 16 && at <= to; guard += 1) {
+        const period = periodRangeFor(worker, at);
+        if (period.cycle !== 'weekly') return [];
+        const sliceFrom = period.from < from ? from : period.from;
+        const sliceTo = period.to > to ? to : period.to;
+        slices.push({ from: sliceFrom, to: sliceTo, whole: period.from === sliceFrom && period.to === sliceTo });
+        const after = parseLocalDate(period.to);
+        after.setDate(after.getDate() + 1);
+        at = toLocalDateStr(after);
+    }
+    if (slices.length < 2) return [];
+    return slices.map(slice => {
+        const row = payrollReport(State.schedule, slice.from, slice.to)
+            .find(item => String(item.workerId) === String(workerId)) || null;
+        return Object.assign({}, slice, {
+            attendanceDays: row ? row.attendanceDays : 0,
+            payUnits: row ? row.payUnits : 0,
+            doubleDays: row ? row.doubleDays : 0,
+            amount: row ? row.amount : null
+        });
+    });
+}
+
+// The fold under a weekly group: one small table per man, his weeks and their total.
+function renderWeeklyBreakdown(rows) {
+    const withWeeks = rows
+        .map(row => ({ row, weeks: weeklyBreakdownFor(row.workerId, REPORT_RANGE.from, REPORT_RANGE.to) }))
+        .filter(item => item.weeks.length > 1);
+    if (withWeeks.length === 0) return null;
+
+    const fold = el('details', 'report-weekly-breakdown');
+    fold.appendChild(el('summary', null, 'פירוט שבועי'));
+    fold.appendChild(el('p', 'hint',
+        'כל שבוע מחושב בנפרד לפי גבולות המחזור, והשורה האחרונה היא הסכום לטווח שנבחר. '
+        + 'מקדמות וניכויים שייכים לתקופת התשלום ולא לשבוע בתוכה, ולכן אינם כאן.'));
+    withWeeks.forEach(item => {
+        fold.appendChild(el('h4', 'report-weekly-name', isolate(item.row.name)));
+        const body = item.weeks.map(week => [
+            dateRange(formatShortDate(parseLocalDate(week.from)), formatShortDate(parseLocalDate(week.to))),
+            String(week.attendanceDays), String(week.payUnits), String(week.doubleDays),
+            week.amount === null ? '' : `${moneyText(week.amount)} ₪`
+        ]);
+        const sum = (pick) => item.weeks.reduce((total, week) => total + Number(pick(week) || 0), 0);
+        const anyPriced = item.weeks.some(week => week.amount !== null);
+        body.push([
+            'סה״כ לטווח', String(sum(w => w.attendanceDays)), String(sum(w => w.payUnits)),
+            String(sum(w => w.doubleDays)),
+            anyPriced ? `${moneyText(sum(w => w.amount))} ₪` : ''
+        ]);
+        fold.appendChild(buildTable(['שבוע', 'נוכחות', 'ימי שכר', 'כפולים', 'נצבר'], body));
+    });
+    return fold;
+}
+
 function renderPayrollTable() {
     const section = el('section', 'report report-payroll');
     section.appendChild(el('h2', null, 'שכר - לפי עובד'));
@@ -831,6 +912,10 @@ function renderPayrollTable() {
         const note = groupPeriodNote(group);
         if (note) section.appendChild(note);
         section.appendChild(payrollGroupTable(group.rows));
+        if (group.cycle === 'weekly') {
+            const weeks = renderWeeklyBreakdown(group.rows);
+            if (weeks) section.appendChild(weeks);
+        }
     });
     return section;
 }

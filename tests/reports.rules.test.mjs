@@ -128,4 +128,45 @@ const namesInWork = device => run(device,
     check('the sites report is the same report', before === after, `${before} -> ${after}`);
 }
 
+// --------------------------------------------------- a weekly man inside a fortnight
+{
+    suite('a weekly man inside a longer range is worked out week by week');
+
+    const device = phone();
+    // Put one man on the weekly cycle from a real week start, and give him a day in each
+    // of the two weeks the range covers.
+    const weekStart = run(device, `(() => { let d = '${FROM}'; for (let i = 0; i < 7; i += 1) { if (isWeekStart(d)) return d; const n = parseLocalDate(d); n.setDate(n.getDate() + 1); d = toLocalDateStr(n); } return null; })()`);
+    given('the range contains a real week start', typeof weekStart === 'string' && weekStart !== null, String(weekStart));
+    run(device, `State.worker('w_rate').payCycles = '${weekStart}=weekly';`);
+    const secondWeek = run(device, `(() => { const n = parseLocalDate('${weekStart}'); n.setDate(n.getDate() + 8); return toLocalDateStr(n); })()`);
+    device.State.commit(device.call('assignPlace',
+        device.State.schedule, secondWeek, 'w_rate', 'actual', 'p_01', 'normal'));
+    run(device, `REPORT_RANGE.from='${FROM}'; REPORT_RANGE.to='${TO}';`);
+
+    const weeks = JSON.parse(run(device, `JSON.stringify(weeklyBreakdownFor('w_rate', REPORT_RANGE.from, REPORT_RANGE.to))`));
+    check('his range is split into more than one week', weeks.length > 1, JSON.stringify(weeks));
+    check('every slice sits inside the chosen range',
+        weeks.every(week => week.from >= FROM && week.to <= TO), JSON.stringify(weeks));
+    check('the slices do not overlap and leave no gap',
+        weeks.every((week, at) => at === 0 || week.from > weeks[at - 1].to),
+        JSON.stringify(weeks.map(w => `${w.from}..${w.to}`)));
+
+    // The one property that makes the table readable: the weeks add up to the row above.
+    const whole = JSON.parse(run(device, `JSON.stringify(payrollRows().find(r => r.workerId === 'w_rate'))`));
+    const sum = key => weeks.reduce((total, week) => total + Number(week[key] || 0), 0);
+    check('the weeks add up to the attendance on the period row',
+        sum('attendanceDays') === whole.attendanceDays,
+        `${sum('attendanceDays')} vs ${whole.attendanceDays}`);
+    check('and to the pay days', sum('payUnits') === whole.payUnits,
+        `${sum('payUnits')} vs ${whole.payUnits}`);
+    check('and to the doubles', sum('doubleDays') === whole.doubleDays,
+        `${sum('doubleDays')} vs ${whole.doubleDays}`);
+    check('and to the amount earned', Math.abs(sum('amount') - Number(whole.amount)) < 0.005,
+        `${sum('amount')} vs ${whole.amount}`);
+
+    // A fortnightly man is not split: his period IS the range.
+    const none = JSON.parse(run(device, `JSON.stringify(weeklyBreakdownFor('w_norate', REPORT_RANGE.from, REPORT_RANGE.to))`));
+    check('a fortnightly man gets no weekly split', none.length === 0, JSON.stringify(none));
+}
+
 report();
