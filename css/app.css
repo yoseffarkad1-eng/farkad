@@ -1938,10 +1938,17 @@ a[href]:focus-visible,
     /* The four counts the money is checked against, as one labelled row: the number,
        and under it the word saying which count it is. A column nobody used this
        fortnight is dropped from the table itself (renderPayrollTable), so this row
-       only ever shows what is true. */
-    .report-payroll .report-table tbody td[data-label="ימי נוכחות"],
+       only ever shows what is true.
+
+       THESE FOUR STRINGS ARE THE HEADINGS, spelled again. The card layout is selected
+       by the heading text, so renaming a heading in js/ui/reports.js and not here does
+       not fail anywhere - it quietly drops the column out of the row and leaves it
+       stacked on its own line on a phone. That is what happened when נוכחות and כפולים
+       were shortened on 17 October 2026; tests/mobile.test.mjs caught it at 320px and
+       390px. The heading and the selector move in the same commit, always. */
+    .report-payroll .report-table tbody td[data-label="נוכחות"],
     .report-payroll .report-table tbody td[data-label="ימי שכר"],
-    .report-payroll .report-table tbody td[data-label="מתוכם כפולים"],
+    .report-payroll .report-table tbody td[data-label="כפולים"],
     .report-payroll .report-table tbody td[data-label="מקדמות"] {
         order: 2;
         /* Just under a quarter each: four to the row - a rounding-proof 100% - and
@@ -1958,9 +1965,9 @@ a[href]:focus-visible,
         font-variant-numeric: tabular-nums;
         text-align: center;
     }
-    .report-payroll .report-table tbody td[data-label="ימי נוכחות"]::before,
+    .report-payroll .report-table tbody td[data-label="נוכחות"]::before,
     .report-payroll .report-table tbody td[data-label="ימי שכר"]::before,
-    .report-payroll .report-table tbody td[data-label="מתוכם כפולים"]::before,
+    .report-payroll .report-table tbody td[data-label="כפולים"]::before,
     .report-payroll .report-table tbody td[data-label="מקדמות"]::before {
         font-size: 14px;
         line-height: 1.25;
