@@ -1966,15 +1966,17 @@ for (const width of [320, 390]) {
 // -------------------------------------------- the weekly fold under the pay card
 //
 // A weekly man inside a longer range is worked out week by week in a fold under his
-// group (renderWeeklyBreakdown). Its table deliberately does NOT carry .report-table:
-// the card rules above are scoped to `.report-payroll .report-table`, and this fold sits
-// inside that section, so sharing the class would fling its five narrow columns across a
-// card that has no net cell to lead it, and .report-table's 520px min-width would push
-// the narrowest screen this app is used on sideways. Nothing else would catch it: every
-// payroll fixture in this suite and in the print suite is fortnightly, so the fold is
-// never drawn in them at all.
+// group (renderWeeklyBreakdown). Two things about it are measured here and nowhere else,
+// because every payroll fixture in this suite and in the print suite is fortnightly, so
+// the fold is never drawn in them at all:
+//
+//   - IT IS NOT A TABLE. A <tbody><tr> inside .report-payroll is a worker row to the
+//     card rules above, to the compact grid's count and to the suites that prove the
+//     exported numbers against the screen; three weeks of one man read as three more men
+//     in all of them.
+//   - ITS SUMMARY IS A 44px TARGET, like every other fold in this app (iron law 9).
 {
-    suite('320px: the weekly fold stays a small table');
+    suite('320px: the weekly fold is lines, and a finger can open it');
 
     const page = await open({ width: 320, height: HEIGHTS[320] });
     const fold = await page.evaluate(() => {
@@ -2003,24 +2005,32 @@ for (const width of [320, 390]) {
 
         const box = document.querySelector('.report-weekly-breakdown');
         if (!box) return { present: false };
+        const summary = box.querySelector('summary').getBoundingClientRect();
         box.open = true;                       // the person taps it; the layout is the test
-        const table = box.querySelector('table');
-        const row = table ? table.querySelector('tbody tr') : null;
+        const lines = [...box.querySelectorAll('.report-weekly-line')];
         return {
             present: true,
-            card: table ? table.classList.contains('report-table') : null,
-            rowDisplay: row ? getComputedStyle(row).display : null,
-            rows: table ? table.querySelectorAll('tbody tr').length : 0,
+            tables: box.querySelectorAll('table').length,
+            payrollRows: document.querySelectorAll('.report-payroll tbody tr').length,
+            lines: lines.length,
+            total: lines.filter(line => line.classList.contains('report-weekly-total')).length,
+            says: lines.map(line => line.textContent.replace(/\s+/g, ' ').trim()),
+            summary: { w: Math.round(summary.width), h: Math.round(summary.height) },
             across: document.documentElement.scrollWidth <= window.innerWidth + 1
         };
     });
 
     check('320px: a weekly man inside a longer range gets his weeks',
-        fold.present === true && fold.rows >= 3, JSON.stringify(fold));
-    check('320px: the fold is not the pay table, so the card rules do not reach it',
-        fold.card === false, JSON.stringify(fold));
-    check('320px: its rows stay rows rather than becoming cards',
-        fold.rowDisplay === 'table-row', JSON.stringify(fold));
+        fold.present === true && fold.lines >= 3 && fold.total === 1, JSON.stringify(fold));
+    check('320px: the fold holds no table, so nothing else reads its weeks as men',
+        fold.tables === 0, JSON.stringify(fold));
+    check('320px: and the pay sheet still has one row per man',
+        fold.payrollRows === 1, JSON.stringify(fold));
+    check('320px: the fold can be opened by a finger',
+        fold.summary.h >= 44 && fold.summary.w >= 44, JSON.stringify(fold.summary));
+    check('320px: every line says which week and what it came to',
+        fold.says.every(text => text.includes('נוכחות') && text.includes('נצבר')),
+        JSON.stringify(fold.says));
     check('320px: and it does not widen the page',
         fold.across === true, JSON.stringify(fold));
 

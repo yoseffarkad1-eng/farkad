@@ -844,7 +844,31 @@ function weeklyBreakdownFor(workerId, from, to) {
     });
 }
 
-// The fold under a weekly group: one small table per man, his weeks and their total.
+// The fold under a weekly group: one line per week for each man, and the range's total
+// under them.
+//
+// NOT A TABLE, and that is the whole design of it. A <tbody><tr> inside .report-payroll
+// IS a worker row as far as the rest of this app is concerned: the phone's pay-card rules
+// are scoped to that section, the compact card grid counts those rows to decide how many
+// cards it owes, and the suites that prove the exported numbers against the screen read
+// them as the crew. Three weeks of one man arrived in all of them as three more men -
+// tests/reports.browser.mjs counted six rows against three cards. Lines carry the same
+// five facts, read better at 320px than five columns do, and belong to nobody else's
+// query.
+function weeklyLine(when, facts, extra) {
+    const line = el('div', extra ? `report-weekly-line ${extra}` : 'report-weekly-line');
+    line.appendChild(el('span', 'report-weekly-when', when));
+    const list = el('span', 'report-weekly-facts');
+    facts.forEach(([name, value]) => {
+        const fact = el('span', 'report-weekly-fact');
+        fact.appendChild(el('span', 'report-weekly-label', name));
+        fact.appendChild(el('span', 'report-weekly-value', value));
+        list.appendChild(fact);
+    });
+    line.appendChild(list);
+    return line;
+}
+
 function renderWeeklyBreakdown(rows) {
     const withWeeks = rows
         .map(row => ({ row, weeks: weeklyBreakdownFor(row.workerId, REPORT_RANGE.from, REPORT_RANGE.to) }))
@@ -858,27 +882,24 @@ function renderWeeklyBreakdown(rows) {
         + 'מקדמות וניכויים שייכים לתקופת התשלום ולא לשבוע בתוכה, ולכן אינם כאן.'));
     withWeeks.forEach(item => {
         fold.appendChild(el('h4', 'report-weekly-name', isolate(item.row.name)));
-        const body = item.weeks.map(week => [
-            dateRange(formatShortDate(parseLocalDate(week.from)), formatShortDate(parseLocalDate(week.to))),
-            String(week.attendanceDays), String(week.payUnits), String(week.doubleDays),
-            week.amount === null ? '' : `${moneyText(week.amount)} ₪`
-        ]);
-        const sum = (pick) => item.weeks.reduce((total, week) => total + Number(pick(week) || 0), 0);
+        const facts = week => [
+            ['נוכחות', String(week.attendanceDays)],
+            ['ימי שכר', String(week.payUnits)],
+            ['כפולים', String(week.doubleDays)],
+            ['נצבר', week.amount === null ? '—' : `${moneyText(week.amount)} ₪`]
+        ];
+        item.weeks.forEach(week => fold.appendChild(weeklyLine(
+            dateRange(formatShortDate(parseLocalDate(week.from)),
+                formatShortDate(parseLocalDate(week.to))),
+            facts(week))));
+        const sum = pick => item.weeks.reduce((total, week) => total + Number(pick(week) || 0), 0);
         const anyPriced = item.weeks.some(week => week.amount !== null);
-        body.push([
-            'סה״כ לטווח', String(sum(w => w.attendanceDays)), String(sum(w => w.payUnits)),
-            String(sum(w => w.doubleDays)),
-            anyPriced ? `${moneyText(sum(w => w.amount))} ₪` : ''
-        ]);
-        // NOT .report-table, deliberately. The phone's pay-card rules are scoped to
-        // `.report-payroll .report-table` and this fold lives inside that section, so
-        // sharing the class lays five narrow columns out as a card - the three counts
-        // flung across a row that has no net cell to lead it - and .report-table's
-        // 520px min-width pushes the page sideways on a 320px screen. Same borders,
-        // no card: css/app.css, .report-weekly-table.
-        const table = buildTable(['שבוע', 'נוכחות', 'ימי שכר', 'כפולים', 'נצבר'], body);
-        table.className = 'report-weekly-table';
-        fold.appendChild(table);
+        fold.appendChild(weeklyLine('סה״כ לטווח', [
+            ['נוכחות', String(sum(w => w.attendanceDays))],
+            ['ימי שכר', String(sum(w => w.payUnits))],
+            ['כפולים', String(sum(w => w.doubleDays))],
+            ['נצבר', anyPriced ? `${moneyText(sum(w => w.amount))} ₪` : '—']
+        ], 'report-weekly-total'));
     });
     return fold;
 }

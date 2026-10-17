@@ -1843,40 +1843,57 @@ a[href]:focus-visible,
     background: var(--surface-2);
 }
 
-/* The weekly fold's own small table (renderWeeklyBreakdown). It carries the borders and
-   nothing else: it is NOT .report-table because the phone's pay-card rules below are
-   scoped to `.report-payroll .report-table`, and this table sits inside that section.
-   Sharing the class would lay five narrow columns out as a card and the 520px min-width
-   would push a 320px screen sideways - neither of which any suite would have caught,
-   because every payroll fixture in the mobile and print suites is fortnightly and the
-   fold is only drawn for a weekly man. */
-.report-weekly-table { border-collapse: collapse; width: 100%; }
-.report-weekly-table th, .report-weekly-table td {
-    padding: 7px 8px;
-    text-align: right;
+/* The weekly fold (renderWeeklyBreakdown): a weekly man's weeks, one line each, with the
+   total for the chosen range under them.
+
+   IT IS NOT A TABLE, deliberately. A <tbody><tr> inside .report-payroll is a worker row
+   as far as everything else is concerned - the pay-card rules below are scoped to that
+   section, the compact card grid counts those rows to know how many cards it owes, and
+   the suites that prove the exported numbers against the screen read them as the crew.
+   Three weeks of one man arrived in all of them as three more men.
+
+   The summary is a 44px target like every other fold's (iron law 9); it was 24px for one
+   commit and tests/reports.browser.mjs caught it at all four widths. */
+.report-weekly-breakdown { margin: 4px 0 14px; }
+.report-weekly-breakdown > summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 15px;
+    font-weight: 600;
+}
+.report-weekly-breakdown > summary::-webkit-details-marker { display: none; }
+.report-weekly-breakdown > summary::after { content: '⌄'; margin-inline-start: auto; color: var(--ink-2); }
+.report-weekly-breakdown[open] > summary::after { content: '⌃'; }
+.report-weekly-breakdown .hint { margin: 0 0 8px; }
+.report-weekly-name { margin: 10px 0 2px; font-size: 15px; }
+.report-weekly-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 10px;
+    padding: 6px 0;
     font-size: 14px;
     border-bottom: 1px solid var(--line-soft);
 }
-.report-weekly-table thead th {
-    background: var(--surface-2);
-    font-size: 13px;
-    color: var(--ink-2);
-    white-space: nowrap;
-}
-.report-weekly-table td.num, .report-weekly-table th.num {
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-}
-/* The last row is «סה״כ לטווח» - the one line that must not read as another week. */
-.report-weekly-table tbody tr:last-child td {
-    font-weight: 700;
+.report-weekly-when { font-weight: 600; }
+.report-weekly-facts { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-inline-start: auto; }
+.report-weekly-fact { display: flex; gap: 4px; color: var(--ink-2); }
+.report-weekly-value { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* The one line that must not read as another week. */
+.report-weekly-total {
+    border-bottom: none;
     border-top: 1px solid var(--line);
+    font-weight: 700;
 }
 /* Working, not the answer. The other working folds - .report-explanation and the
    calculation - are off the paper too, and a closed <details> that printed anyway would
-   put the words «פירוט שבועי» on a pay sheet with nothing under them. The printed sheet
-   keeps exactly the shape it has today; showing the weeks on paper is a decision for the
-   owner, not a side effect of this fold. */
+   put the words «פירוט שבועי» on a pay sheet with nothing under them. The picture agrees
+   by itself: js/ui/printout.js draws table.report-table and this fold is not one. Showing
+   the weeks on paper is a decision for the owner, not a side effect of a fold. */
 @media print { .report-weekly-breakdown { display: none !important; } }
 
 /* On a phone the report stops being a table and becomes one card per row.
