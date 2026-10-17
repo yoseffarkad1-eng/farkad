@@ -9,9 +9,11 @@
 //   - Do NOT hide a worker who worked because his wage is not set - the hours are the
 //     record, the missing rate is a separate problem and the sheet already says so.
 //   - Do NOT hide a worker who is inactive today if he has work inside the period.
-//   - A balance or an advance ALONE does not put a worker in the WORK report. The money
-//     is not lost by that: the מקדמות screen lists every worker with a balance, work or
-//     no work, which is where an outstanding amount is read.
+//   - A balance or an advance ALONE should not put a worker in the WORK report. ASKED
+//     FOR, TRIED, AND REPORTED BACK INSTEAD OF SHIPPED - see the refusal below. On this
+//     build the deduction is read on that row and on no other surface that pays anybody,
+//     so hiding the man hides the money with him. The owner settles which he wants; until
+//     he does, the record keeps the number.
 //   - The headings are shortened to נוכחות | ימי שכר | כפולים. The numbers under them
 //     and the arithmetic that produces them do not change.
 //   - Filtering the payroll by pay cycle does not move a shekel on the sites report.
@@ -83,16 +85,34 @@ const namesInWork = device => run(device,
     check('a man who worked with no rate set is on the sheet too',
         ids.indexOf('w_norate') !== -1, ids);
     check('and a man who worked but is inactive today', ids.indexOf('w_off') !== -1, ids);
-    check('a man with only an advance and no work is NOT on the work report',
-        ids.indexOf('w_money') === -1, ids);
-    // WHERE THAT RULE STOPS. Cash handed over is not a reason to be on the sheet; an
-    // account this period actually moved is, because the sheet is the document the
-    // deduction and the opening balance are read on. A man can be settled in a fortnight
-    // he did not work in. tests/repayment.test.mjs owns that case end to end - עומר סעד,
-    // 1,950 carried in and 200 handed back with no day worked - and it is named here so
-    // the next person tightening this filter finds the reason before the gate does.
+    // THE REFUSAL, written down where the next person will look for it.
+    //
+    // The owner asked for this man to be off the work report. He is on it. Taking him off
+    // was implemented first and then taken back out, because on this build his row is the
+    // only place his 500 is ever deducted:
+    //
+    //   - with no row of his, the sheet has no in-range advance left, so the three money
+    //     columns (נצבר · מקדמות · לתשלום) leave the page and the footer stops
+    //     reconciling - tests/smoke.mjs, twice, plus the RTL check on that very cell;
+    //   - next period the same 500 is out of range and is not deducted there either, so
+    //     it is deducted NOWHERE;
+    //   - and the same shape with a carried balance took a repayment off the sheet
+    //     outright - tests/repayment.test.mjs, עומר סעד, 1,950 in and 200 handed back.
+    //
+    // That is an advance deduction dropped through the transition, which is the one thing
+    // this record must not do. So the clause stays and the decision goes back to the
+    // owner: the tidier sheet he asked for costs a deduction, and that is his call, not
+    // this file's.
+    check('a man with only an advance keeps his row, because the deduction is read on it',
+        ids.indexOf('w_money') !== -1, ids);
+    const moneyRow = JSON.parse(run(device,
+        'JSON.stringify(payrollRows().find(row => row.workerId === "w_money"))'));
+    check('and the row carries the advance it is there for',
+        Number(moneyRow.advances) === 500 && Number(moneyRow.attendanceDays) === 0,
+        JSON.stringify(moneyRow));
 
-    // And the money is not lost by leaving him off it.
+    // The balance is readable on the advances screen as well, which is where it is read
+    // when the man has no row at all - no day, no absence, no money moved this period.
     const balance = run(device, 'workerAdvanceSummary("w_money").left');
     check('his balance is still there to be read on the advances screen',
         Number(balance) === 500, String(balance));

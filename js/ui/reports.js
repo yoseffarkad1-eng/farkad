@@ -709,39 +709,43 @@ function payrollRows() {
                 carry: reportAccount(row.workerId)
             });
         })
-        // WHAT KEEPS A ROW ALIVE IS A RECORD OF THE PERIOD, and nothing else.
+        // WHAT KEEPS A ROW ALIVE IS A RECORD OF THE PERIOD - and an advance IS one.
         //
-        // Money alone used to keep one: `row.advances > 0`, and a carried balance beside
-        // it, because a man who owed something and worked no days had no row to owe it on
-        // and the debt went off the paper with him. That was the right fear and the wrong
-        // place to answer it - the owner decided on 17 October 2026 that a balance or an
-        // advance ALONE does not put a man in the WORK report, which is a sheet about
-        // days worked and is read as one. A name on it with no days is read as a man who
-        // was there.
+        // The owner asked on 17 October 2026 for the opposite: a balance or an advance
+        // alone should not put a man in the WORK report, which is a sheet about days
+        // worked and is read as one. That was tried here, in this filter, and it was
+        // taken back out, because in THIS build hiding him does not hide a row - it
+        // loses a deduction. Three suites said so, independently, before any of this was
+        // believed:
         //
-        // The money is not lost by that, and this was checked before the clause came out:
-        // the מקדמות screen lists EVERY worker with a balance, work or no work, with what
-        // is left beside each name - advanceWorkersInOrder, which filters on nothing -
-        // and the worker's own statement carries his account. tests/reports.rules.test.mjs
-        // holds both halves: he is off the work report, and his 500 is still there to read.
+        //   tests/repayment.test.mjs  עומר סעד - 1,950 carried in, 200 handed back
+        //     inside the open period, no day worked - and the sheet then reported no
+        //     opening balance and no deduction at all.
+        //   tests/smoke.mjs           the man who took 250 and worked nothing: with his
+        //     row gone, the sheet has no in-range advance left to show, so the three
+        //     money columns (נצבר · מקדמות · לתשלום) leave the page altogether and the
+        //     footer stops reconciling. His 250 is then deducted NOWHERE: not here, and
+        //     not next period, where it is out of range.
+        //   tests/smoke.mjs           and the one RTL guarantee about that cell - the
+        //     mark that keeps the minus before the digits, so nobody reads «500-» - has
+        //     no cell to be about any more.
         //
-        // An absence stays, because somebody recorded it: «נעדר» is a fact about this
-        // period that a person entered, and a sheet that drops it is a sheet that forgets
-        // a day of the fortnight was accounted for.
+        // That is the advance-deduction-dropped-through-the-transition defect by another
+        // road, and it is the one thing this record must not do. So the clause stays, the
+        // arithmetic is untouched, and the owner's decision is reported rather than
+        // implemented: the hiding he asked for cannot be given on this sheet without
+        // taking the deduction with it, and which of the two he wants is his to settle.
         //
-        // AND AN ACCOUNT THAT MOVED IN THIS PERIOD STAYS, which is where the rule above
-        // stops. Taking the carry out with the advance was tried and the gate refused it,
-        // correctly: tests/repayment.test.mjs drove עומר סעד - 1,950 carried in, 200
-        // handed back inside the open period, no day worked - and the pay sheet then
-        // reported no opening balance and no deduction at all. That sheet is the document
-        // the deduction is read on; a man can be settled in a fortnight he did not work
-        // in, and hiding him there does not tidy the sheet, it loses the settlement.
+        // What his instruction DID change is pinned and holds: a man who worked with no
+        // rate set stays, a man who worked but is inactive today stays, an absence stays
+        // because somebody recorded it, and the sites report does not move when the
+        // payroll is filtered. A man with nothing at all in the period - no day, no
+        // absence, no money - has no row, which is what it was already.
         //
-        // So the line is drawn where it can be defended: CASH HANDED OVER is not a reason
-        // to appear - that is what the owner asked for and the מקדמות screen holds it
-        // either way - and AN ACCOUNT THIS PERIOD ACTUALLY MOVED is. The two are
-        // different facts and the second one is money this sheet is answerable for.
-        .filter(row => row.attendanceDays > 0 || row.absent > 0
+        // tests/reports.rules.test.mjs holds all of it, including this refusal and its
+        // reason, so the next person to try the same clause finds the three suites named
+        // before the gate names them.
+        .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
             || (row.carry && (row.carry.carriedIn > 0 || row.carry.carriedForward > 0))
             || (vehiclesEnabled() && row.vehicleDays > 0));
 }
