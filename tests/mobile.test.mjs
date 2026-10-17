@@ -2011,7 +2011,10 @@ for (const width of [320, 390]) {
         return {
             present: true,
             tables: box.querySelectorAll('table').length,
+            // What the rest of the app counts as a worker row, against what the pay
+            // sheet's own tables hold: the fold must add nothing to the first number.
             payrollRows: document.querySelectorAll('.report-payroll tbody tr').length,
+            tableRows: document.querySelectorAll('.report-payroll .report-table tbody tr').length,
             lines: lines.length,
             total: lines.filter(line => line.classList.contains('report-weekly-total')).length,
             says: lines.map(line => line.textContent.replace(/\s+/g, ' ').trim()),
@@ -2024,8 +2027,9 @@ for (const width of [320, 390]) {
         fold.present === true && fold.lines >= 3 && fold.total === 1, JSON.stringify(fold));
     check('320px: the fold holds no table, so nothing else reads its weeks as men',
         fold.tables === 0, JSON.stringify(fold));
-    check('320px: and the pay sheet still has one row per man',
-        fold.payrollRows === 1, JSON.stringify(fold));
+    check('320px: and it adds not one row to what the app reads as the crew',
+        fold.payrollRows > 0 && fold.payrollRows === fold.tableRows,
+        JSON.stringify({ payrollRows: fold.payrollRows, tableRows: fold.tableRows }));
     check('320px: the fold can be opened by a finger',
         fold.summary.h >= 44 && fold.summary.w >= 44, JSON.stringify(fold.summary));
     check('320px: every line says which week and what it came to',
