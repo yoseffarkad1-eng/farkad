@@ -709,14 +709,26 @@ function payrollRows() {
                 carry: reportAccount(row.workerId)
             });
         })
-        .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
-            // A DEBT KEEPS A ROW ALIVE TOO, for the same reason an advance does, one line
-            // up: a man who owes a carried balance and worked no days this fortnight had
-            // no row to owe it on, so he dropped off the sheet and the debt went with
-            // him - out of the total, off the paper, and off the screen that is supposed
-            // to say what is still outstanding. Found by a check that asked the open
-            // period for his opening balance and got back undefined.
-            || (row.carry && (row.carry.carriedIn > 0 || row.carry.carriedForward > 0))
+        // WHAT KEEPS A ROW ALIVE IS A RECORD OF THE PERIOD, and nothing else.
+        //
+        // Money alone used to keep one: `row.advances > 0`, and a carried balance beside
+        // it, because a man who owed something and worked no days had no row to owe it on
+        // and the debt went off the paper with him. That was the right fear and the wrong
+        // place to answer it - the owner decided on 17 October 2026 that a balance or an
+        // advance ALONE does not put a man in the WORK report, which is a sheet about
+        // days worked and is read as one. A name on it with no days is read as a man who
+        // was there.
+        //
+        // The money is not lost by that, and this was checked before the clause came out:
+        // the מקדמות screen lists EVERY worker with a balance, work or no work, with what
+        // is left beside each name - advanceWorkersInOrder, which filters on nothing -
+        // and the worker's own statement carries his account. tests/reports.rules.test.mjs
+        // holds both halves: he is off the work report, and his 500 is still there to read.
+        //
+        // An absence stays, because somebody recorded it: «נעדר» is a fact about this
+        // period that a person entered, and a sheet that drops it is a sheet that forgets
+        // a day of the fortnight was accounted for.
+        .filter(row => row.attendanceDays > 0 || row.absent > 0
             || (vehiclesEnabled() && row.vehicleDays > 0));
 }
 
@@ -881,10 +893,16 @@ function payrollGroupTable(rows) {
     // "רגיל" is gone with it. It was the count of the days that were not double, which
     // is now the difference between the two columns either side of it - a third number
     // saying the same thing is a third number to reconcile.
+    // SHORTENED, 17 October 2026, by the owner: «נוכחות», «ימי שכר», «כפולים». On a
+    // phone the head of a column is read in the corner of the eye while the number is
+    // what is being looked at, and three words that each start with «ימי» are three
+    // words that have to be read to the end before they are told apart. Nothing under
+    // them moved: the same attendanceDays, the same payUnits, the same doubleDays, and
+    // the sentence below the table still spells out what each one counts.
     const columns = [
-        { header: 'ימי נוכחות', value: row => row.attendanceDays, always: true },
+        { header: 'נוכחות', value: row => row.attendanceDays, always: true },
         { header: 'ימי שכר', value: row => row.payUnits, always: true },
-        { header: 'מתוכם כפולים', value: row => row.doubleDays },
+        { header: 'כפולים', value: row => row.doubleDays },
         { header: 'שעות נוספות', value: row => row.extraHours },
         { header: 'נעדר', value: row => row.absent }
     ].filter(column => column.always || rows.some(row => column.value(row) > 0));
@@ -2828,7 +2846,7 @@ function payrollSheetRows() {
     // that reaches a bookkeeper are not neutral: they are a heading that says this app
     // still accounts for vehicles, beside a number saying it accounted for none.
     const withVehicles = vehiclesEnabled();
-    const headers = ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר']
+    const headers = ['עובד', 'נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נעדר']
         .concat(withVehicles ? ['ימי רכב', 'שכר רכב'] : [])
         .concat(['שכר יומי', 'נצבר', deductionColumnName(), 'לתשלום', 'הערה', 'מחזור תשלום']);
 

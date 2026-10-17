@@ -1927,7 +1927,7 @@ for (const width of [320, 390]) {
         const net = tr ? tr.querySelector('td.cell-net') : null;
         if (!net) return { present: false };
         const style = getComputedStyle(net);
-        const metricTops = ['ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'מקדמות']
+        const metricTops = ['נוכחות', 'ימי שכר', 'כפולים', 'מקדמות']
             .map(label => tr.querySelector(`td[data-label="${label}"]`))
             .filter(Boolean)
             .map(node => Math.round(node.getBoundingClientRect().top));

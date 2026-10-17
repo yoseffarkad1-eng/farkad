@@ -289,7 +289,7 @@ const FORTNIGHT = `
 // and goes on passing, about a different number.
 const column = (workbook, heading) => workbook.sheets['שכר'].values[0].indexOf(heading);
 
-const PAYROLL_HEAD = ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות',
+const PAYROLL_HEAD = ['עובד', 'נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות',
     'נעדר', 'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה', 'מחזור תשלום'];
 
 const main = phone(FORTNIGHT);

@@ -329,7 +329,7 @@ for (const scenario of [
         JSON.stringify(grey.slice(0, 3)));
 
     // The pay sheet's own pages, and the headings that have to be on all of them.
-    const payrollPages = pages.filter(item => says(pageText(item), 'ימי נוכחות'));
+    const payrollPages = pages.filter(item => says(pageText(item), 'נוכחות'));
     check('the pay sheet spans more than one page', payrollPages.length >= 2,
         String(payrollPages.length));
     check('and its column headings are repeated on every one of them',
@@ -358,7 +358,7 @@ for (const scenario of [
     // Measured as positions rather than read as text: the heading row's rightmost run
     // must be the worker column, and the leftmost must be the money.
     const headingLine = linesOf(payrollPages[0])
-        .filter(line => says(line.text, 'ימי נוכחות')).shift();
+        .filter(line => says(line.text, 'נוכחות')).shift();
     check('the pay sheet has a heading row on the paper', Boolean(headingLine),
         JSON.stringify(linesOf(payrollPages[0]).slice(0, 3).map(l => l.text.slice(0, 40))));
 
@@ -1006,7 +1006,7 @@ for (const scenario of [
     // The totals block, the other half of the same rule: the label, the numbers it adds
     // up and the row they sit on have to be one thing on one sheet.
     const totalsPages = shipped.pages
-        .filter(item => says(pageText(item), 'סה״כ') && says(pageText(item), 'ימי נוכחות'));
+        .filter(item => says(pageText(item), 'סה״כ') && says(pageText(item), 'נוכחות'));
     check('the pay sheet\'s totals row is on exactly one sheet',
         totalsPages.length === 1, JSON.stringify(totalsPages.map(item => item.index)));
     if (totalsPages.length === 1) {

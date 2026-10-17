@@ -544,15 +544,15 @@ async function seedRoster(page) {
   const at = name => sheet.heads.indexOf(name);
 
   check('the sheet has a column for the dates he was on site',
-    at('ימי נוכחות') !== -1, JSON.stringify(sheet.heads));
+    at('נוכחות') !== -1, JSON.stringify(sheet.heads));
   check('and a separate one for the days he is paid for',
     at('ימי שכר') !== -1, JSON.stringify(sheet.heads));
   check('it no longer prints one count as if it explained the total',
     !sheet.heads.includes('ימי עבודה'), JSON.stringify(sheet.heads));
-  check('four dates on site', sheet.cells[at('ימי נוכחות')] === '4',
+  check('four dates on site', sheet.cells[at('נוכחות')] === '4',
     JSON.stringify(sheet.cells));
   check('six days of pay', sheet.cells[at('ימי שכר')] === '6', JSON.stringify(sheet.cells));
-  check('two of them double', sheet.cells[at('מתוכם כפולים')] === '2',
+  check('two of them double', sheet.cells[at('כפולים')] === '2',
     JSON.stringify(sheet.cells));
   check('and the money is the real arithmetic, unchanged',
     sheet.cells[at('נצבר')] === '2700' && sheet.cells[at('לתשלום')] === '2600',
@@ -584,12 +584,12 @@ async function seedRoster(page) {
     return { head: rows[0], row: rows.find(line => line && line[0] === 'דוד') };
   });
   check('the export uses the same two headings',
-    exported.head.includes('ימי נוכחות') && exported.head.includes('ימי שכר')
+    exported.head.includes('נוכחות') && exported.head.includes('ימי שכר')
     && !exported.head.includes('ימי עבודה'), JSON.stringify(exported.head));
   check('with the same numbers under them',
-    exported.row[exported.head.indexOf('ימי נוכחות')] === 4
+    exported.row[exported.head.indexOf('נוכחות')] === 4
     && exported.row[exported.head.indexOf('ימי שכר')] === 6
-    && exported.row[exported.head.indexOf('מתוכם כפולים')] === 2,
+    && exported.row[exported.head.indexOf('כפולים')] === 2,
     JSON.stringify(exported.row));
   check('and the same money',
     exported.row[exported.head.indexOf('נצבר')] === 2700
