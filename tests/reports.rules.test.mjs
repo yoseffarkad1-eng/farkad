@@ -85,6 +85,12 @@ const namesInWork = device => run(device,
     check('and a man who worked but is inactive today', ids.indexOf('w_off') !== -1, ids);
     check('a man with only an advance and no work is NOT on the work report',
         ids.indexOf('w_money') === -1, ids);
+    // WHERE THAT RULE STOPS. Cash handed over is not a reason to be on the sheet; an
+    // account this period actually moved is, because the sheet is the document the
+    // deduction and the opening balance are read on. A man can be settled in a fortnight
+    // he did not work in. tests/repayment.test.mjs owns that case end to end - עומר סעד,
+    // 1,950 carried in and 200 handed back with no day worked - and it is named here so
+    // the next person tightening this filter finds the reason before the gate does.
 
     // And the money is not lost by leaving him off it.
     const balance = run(device, 'workerAdvanceSummary("w_money").left');

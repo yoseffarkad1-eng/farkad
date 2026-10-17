@@ -728,7 +728,21 @@ function payrollRows() {
         // An absence stays, because somebody recorded it: «נעדר» is a fact about this
         // period that a person entered, and a sheet that drops it is a sheet that forgets
         // a day of the fortnight was accounted for.
+        //
+        // AND AN ACCOUNT THAT MOVED IN THIS PERIOD STAYS, which is where the rule above
+        // stops. Taking the carry out with the advance was tried and the gate refused it,
+        // correctly: tests/repayment.test.mjs drove עומר סעד - 1,950 carried in, 200
+        // handed back inside the open period, no day worked - and the pay sheet then
+        // reported no opening balance and no deduction at all. That sheet is the document
+        // the deduction is read on; a man can be settled in a fortnight he did not work
+        // in, and hiding him there does not tidy the sheet, it loses the settlement.
+        //
+        // So the line is drawn where it can be defended: CASH HANDED OVER is not a reason
+        // to appear - that is what the owner asked for and the מקדמות screen holds it
+        // either way - and AN ACCOUNT THIS PERIOD ACTUALLY MOVED is. The two are
+        // different facts and the second one is money this sheet is answerable for.
         .filter(row => row.attendanceDays > 0 || row.absent > 0
+            || (row.carry && (row.carry.carriedIn > 0 || row.carry.carriedForward > 0))
             || (vehiclesEnabled() && row.vehicleDays > 0));
 }
 
