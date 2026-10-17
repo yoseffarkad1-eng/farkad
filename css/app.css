@@ -1843,6 +1843,42 @@ a[href]:focus-visible,
     background: var(--surface-2);
 }
 
+/* The weekly fold's own small table (renderWeeklyBreakdown). It carries the borders and
+   nothing else: it is NOT .report-table because the phone's pay-card rules below are
+   scoped to `.report-payroll .report-table`, and this table sits inside that section.
+   Sharing the class would lay five narrow columns out as a card and the 520px min-width
+   would push a 320px screen sideways - neither of which any suite would have caught,
+   because every payroll fixture in the mobile and print suites is fortnightly and the
+   fold is only drawn for a weekly man. */
+.report-weekly-table { border-collapse: collapse; width: 100%; }
+.report-weekly-table th, .report-weekly-table td {
+    padding: 7px 8px;
+    text-align: right;
+    font-size: 14px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.report-weekly-table thead th {
+    background: var(--surface-2);
+    font-size: 13px;
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+.report-weekly-table td.num, .report-weekly-table th.num {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+/* The last row is «סה״כ לטווח» - the one line that must not read as another week. */
+.report-weekly-table tbody tr:last-child td {
+    font-weight: 700;
+    border-top: 1px solid var(--line);
+}
+/* Working, not the answer. The other working folds - .report-explanation and the
+   calculation - are off the paper too, and a closed <details> that printed anyway would
+   put the words «פירוט שבועי» on a pay sheet with nothing under them. The printed sheet
+   keeps exactly the shape it has today; showing the weeks on paper is a decision for the
+   owner, not a side effect of this fold. */
+@media print { .report-weekly-breakdown { display: none !important; } }
+
 /* On a phone the report stops being a table and becomes one card per row.
    A seven-column table only fits by scrolling sideways, and in RTL what falls off the
    edge is the far left - which is exactly where "לתשלום" and the last site sit. A report

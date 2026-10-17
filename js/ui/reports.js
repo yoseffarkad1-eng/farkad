@@ -870,7 +870,15 @@ function renderWeeklyBreakdown(rows) {
             String(sum(w => w.doubleDays)),
             anyPriced ? `${moneyText(sum(w => w.amount))} ₪` : ''
         ]);
-        fold.appendChild(buildTable(['שבוע', 'נוכחות', 'ימי שכר', 'כפולים', 'נצבר'], body));
+        // NOT .report-table, deliberately. The phone's pay-card rules are scoped to
+        // `.report-payroll .report-table` and this fold lives inside that section, so
+        // sharing the class lays five narrow columns out as a card - the three counts
+        // flung across a row that has no net cell to lead it - and .report-table's
+        // 520px min-width pushes the page sideways on a 320px screen. Same borders,
+        // no card: css/app.css, .report-weekly-table.
+        const table = buildTable(['שבוע', 'נוכחות', 'ימי שכר', 'כפולים', 'נצבר'], body);
+        table.className = 'report-weekly-table';
+        fold.appendChild(table);
     });
     return fold;
 }

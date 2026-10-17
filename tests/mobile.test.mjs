@@ -1963,6 +1963,70 @@ for (const width of [320, 390]) {
     await page.context().close();
 }
 
+// -------------------------------------------- the weekly fold under the pay card
+//
+// A weekly man inside a longer range is worked out week by week in a fold under his
+// group (renderWeeklyBreakdown). Its table deliberately does NOT carry .report-table:
+// the card rules above are scoped to `.report-payroll .report-table`, and this fold sits
+// inside that section, so sharing the class would fling its five narrow columns across a
+// card that has no net cell to lead it, and .report-table's 520px min-width would push
+// the narrowest screen this app is used on sideways. Nothing else would catch it: every
+// payroll fixture in this suite and in the print suite is fortnightly, so the fold is
+// never drawn in them at all.
+{
+    suite('320px: the weekly fold stays a small table');
+
+    const page = await open({ width: 320, height: HEIGHTS[320] });
+    const fold = await page.evaluate(() => {
+        // Weekly from the first week start inside the range, so every slice the fold
+        // asks for is a real weekly period rather than a date somebody guessed.
+        let start = '2026-08-01';
+        for (let i = 0; i < 14 && !isWeekStart(start); i += 1) {
+            const next = parseLocalDate(start);
+            next.setDate(next.getDate() + 1);
+            start = toLocalDateStr(next);
+        }
+        const day = (from, add) => {
+            const at = parseLocalDate(from);
+            at.setDate(at.getDate() + add);
+            return toLocalDateStr(at);
+        };
+        State.worker('w_01').payCycles = `${start}=weekly`;
+        assignPlace(State.schedule, start, 'w_01', 'actual', 'p_1');
+        assignPlace(State.schedule, day(start, 8), 'w_01', 'actual', 'p_1');
+        State.save({ silent: true });
+        REPORT_CARD_GRID = false;
+        REPORT_RANGE.from = start;
+        REPORT_RANGE.to = day(start, 13);
+        showView('reports');
+        render();
+
+        const box = document.querySelector('.report-weekly-breakdown');
+        if (!box) return { present: false };
+        box.open = true;                       // the person taps it; the layout is the test
+        const table = box.querySelector('table');
+        const row = table ? table.querySelector('tbody tr') : null;
+        return {
+            present: true,
+            card: table ? table.classList.contains('report-table') : null,
+            rowDisplay: row ? getComputedStyle(row).display : null,
+            rows: table ? table.querySelectorAll('tbody tr').length : 0,
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+
+    check('320px: a weekly man inside a longer range gets his weeks',
+        fold.present === true && fold.rows >= 3, JSON.stringify(fold));
+    check('320px: the fold is not the pay table, so the card rules do not reach it',
+        fold.card === false, JSON.stringify(fold));
+    check('320px: its rows stay rows rather than becoming cards',
+        fold.rowDisplay === 'table-row', JSON.stringify(fold));
+    check('320px: and it does not widen the page',
+        fold.across === true, JSON.stringify(fold));
+
+    await page.context().close();
+}
+
 {
     suite('above the card breakpoint the pay sheet is still a table');
 
