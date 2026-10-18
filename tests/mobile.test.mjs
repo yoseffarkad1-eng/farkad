@@ -1927,12 +1927,19 @@ for (const width of [320, 390]) {
         const net = tr ? tr.querySelector('td.cell-net') : null;
         if (!net) return { present: false };
         const style = getComputedStyle(net);
-        const metricTops = ['נוכחות', 'ימי שכר', 'כפולים', 'מקדמות']
+        const metricCells = ['נוכחות', 'ימי שכר', 'כפולים', 'מקדמות']
             .map(label => tr.querySelector(`td[data-label="${label}"]`))
-            .filter(Boolean)
+            .filter(Boolean);
+        const metricTops = metricCells
             .map(node => Math.round(node.getBoundingClientRect().top));
+        // On the card there is no header row: the word under each number IS the heading,
+        // drawn from data-label through content: attr(data-label). So this is where the
+        // shortened headings of 17 October have to be read back from.
+        const metricLabels = metricCells
+            .map(node => getComputedStyle(node, '::before').content.replace(/^"|"$/g, ''));
         return {
             present: true,
+            metricLabels,
             netTop: Math.round(net.getBoundingClientRect().top),
             otherTops: [...tr.querySelectorAll('td')].filter(td => td !== net)
                 .map(td => Math.round(td.getBoundingClientRect().top)),
@@ -1957,6 +1964,13 @@ for (const width of [320, 390]) {
     check(`${width}px: the four counts share one labelled row beneath it`,
         card.metricTops.length === 4 && new Set(card.metricTops).size === 1,
         JSON.stringify(card.metricTops));
+    // The shortened headings, read off the card where they are the only naming of the
+    // number. css/app.css selects these cells BY THIS TEXT, so a rename that moved the
+    // table and not the stylesheet dropped two of them out of the row above without
+    // failing anywhere - which is how this check came to exist.
+    check(`${width}px: and each one is named by its shortened heading`,
+        card.metricLabels.join('|') === 'נוכחות|ימי שכר|כפולים|מקדמות',
+        JSON.stringify(card.metricLabels));
     check(`${width}px: and the card does not widen the page`,
         card.across === true);
 
@@ -1975,10 +1989,19 @@ for (const width of [320, 390]) {
 //     exported numbers against the screen; three weeks of one man read as three more men
 //     in all of them.
 //   - ITS SUMMARY IS A 44px TARGET, like every other fold in this app (iron law 9).
-{
-    suite('320px: the weekly fold is lines, and a finger can open it');
+for (const [width, scale] of [[320, '100%'], [390, '100%'], [430, '100%'], [320, '200%']]) {
+    const label = scale === '200%'
+        ? `${width}px at 200% text: the weekly fold`
+        : `${width}px: the weekly fold is lines, and a finger can open it`;
+    suite(label);
 
-    const page = await open({ width: 320, height: HEIGHTS[320] });
+    const page = await open({ width, height: HEIGHTS[width] });
+    if (scale === '200%') {
+        // The same cascade rewrite the 200% block above uses - the app rebuilds its own
+        // nodes, so nothing attached to an element survives a render().
+        await doubleEveryFontSize(page);
+        await page.waitForTimeout(200);
+    }
     const fold = await page.evaluate(() => {
         // Weekly from the first week start inside the range, so every slice the fold
         // asks for is a real weekly period rather than a date somebody guessed.
@@ -2008,8 +2031,22 @@ for (const width of [320, 390]) {
         const summary = box.querySelector('summary').getBoundingClientRect();
         box.open = true;                       // the person taps it; the layout is the test
         const lines = [...box.querySelectorAll('.report-weekly-line')];
+        // The property that makes the fold readable, measured on the DRAWN text rather
+        // than through the function that produced it: the weeks add up to the line under
+        // them. A fold whose own total disagrees with its own weeks is worse than none.
+        const valuesOf = line => [...line.querySelectorAll('.report-weekly-value')]
+            .map(node => Number(String(node.textContent).replace(/[^\d.-]/g, '')) || 0);
+        const weeks = lines.filter(line => !line.classList.contains('report-weekly-total'));
+        const totalLine = lines.find(line => line.classList.contains('report-weekly-total'));
+        const summed = weeks.reduce((into, line) => valuesOf(line)
+            .map((value, at) => (into[at] || 0) + value), []);
+        const shown = totalLine ? valuesOf(totalLine) : [];
         return {
             present: true,
+            adds: shown.length > 0 && summed.length === shown.length
+                && shown.every((value, at) => Math.abs(value - summed[at]) < 0.005),
+            summed,
+            shown,
             tables: box.querySelectorAll('table').length,
             // What the rest of the app counts as a worker row, against what the pay
             // sheet's own tables hold: the fold must add nothing to the first number.
@@ -2023,19 +2060,22 @@ for (const width of [320, 390]) {
         };
     });
 
-    check('320px: a weekly man inside a longer range gets his weeks',
+    check(`${label}: a weekly man inside a longer range gets his weeks`,
         fold.present === true && fold.lines >= 3 && fold.total === 1, JSON.stringify(fold));
-    check('320px: the fold holds no table, so nothing else reads its weeks as men',
+    check(`${label}: holds no table, so nothing else reads its weeks as men`,
         fold.tables === 0, JSON.stringify(fold));
-    check('320px: and it adds not one row to what the app reads as the crew',
+    check(`${label}: and adds not one row to what the app reads as the crew`,
         fold.payrollRows > 0 && fold.payrollRows === fold.tableRows,
         JSON.stringify({ payrollRows: fold.payrollRows, tableRows: fold.tableRows }));
-    check('320px: the fold can be opened by a finger',
+    check(`${label}: can be opened by a finger`,
         fold.summary.h >= 44 && fold.summary.w >= 44, JSON.stringify(fold.summary));
-    check('320px: every line says which week and what it came to',
-        fold.says.every(text => text.includes('נוכחות') && text.includes('נצבר')),
+    check(`${label}: every line says which week and what it came to`,
+        fold.says.length >= 3
+        && fold.says.every(text => text.includes('נוכחות') && text.includes('נצבר')),
         JSON.stringify(fold.says));
-    check('320px: and it does not widen the page',
+    check(`${label}: the weeks add up to the line under them, on the screen`,
+        fold.adds === true, JSON.stringify(fold.says));
+    check(`${label}: and it does not widen the page`,
         fold.across === true, JSON.stringify(fold));
 
     await page.context().close();
