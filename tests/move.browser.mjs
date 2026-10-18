@@ -769,7 +769,175 @@ const holds = (snapshot, who, placeId) => ({
     await page.context().close();
 }
 
-// ============================================================ 8. nothing threw, anywhere
+// ========== 9. TWO WINDOWS of the app, the owner's order, and the screen reopened
+{
+    suite('two windows of one app: the move, the other window\'s own edit, and a reopen');
+
+    // Two pages in ONE context share the origin's localStorage, which is what two
+    // windows of this app on one phone are. No cloud reaches either of them - the
+    // adapter cannot be fetched on this origin by design - so the second window is a
+    // window that hears nothing, which is the case the report describes: backgrounded,
+    // its listener dropped, or an older build still served from the cache (law 7).
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const faults = [];
+    const watch = page => page.on('pageerror', error => faults.push(String(error && error.message)));
+
+    const settle = page => page.waitForTimeout(250);
+    const openPage = async () => {
+        const page = await context.newPage();
+        watch(page);
+        await page.goto(`${server.url}/index.html`, { waitUntil: 'load' });
+        await page.waitForTimeout(500);
+        return page;
+    };
+    // The day screen, on the invented day, by site. No roster is written here: a window
+    // that opens on an existing record reads it through the app's own boot.
+    const toDay = page => page.evaluate(day => {
+        todayStr = () => day;
+        State.date = day;
+        if (typeof setDayMode === 'function') setDayMode('sites');
+        showView('day');
+        render();
+    }, DAY);
+
+    // ---- window one, and the roster
+    const one = await openPage();
+    await one.evaluate(([day, w1, w2, sites]) => {
+        todayStr = () => day;
+        State.date = day;
+        State.schedule.workers = [
+            { id: w1.id, name: w1.name, active: true, dailyRate: w1.dailyRate, hourlyRate: 0 },
+            { id: w2.id, name: w2.name, active: true, dailyRate: w2.dailyRate, hourlyRate: 0 }];
+        State.schedule.places = sites.map(site => ({ id: site.id, name: site.name, active: true }));
+        State.commitRoster();
+        if (typeof setDayMode === 'function') setDayMode('sites');
+        showView('day');
+        render();
+    }, [DAY, W1, W2, SITES]);
+    await settle(one);
+
+    // ---- the man at A, by the site's own ＋
+    await one.click(siteAdd(A));
+    await one.waitForTimeout(150);
+    await tap(one, 'w1 window one: + הוסף at A', pickerRow(W1.id));
+    await one.click('#workerPickerModal button:has-text("סגור")');
+    await settle(one);
+    const seeded = await look(one);
+    given('window one has him at the first site, on the disk',
+        diskOf(seeded, 'one') === SITES[A].id, diskOf(seeded, 'one'));
+
+    // ---- WINDOW TWO OPENS NOW, on the record as it stands: the man at A. From here on
+    // it is a window holding a copy of that day that is about to go out of date.
+    const two = await openPage();
+    await toDay(two);
+    await settle(two);
+    const twoSees = await look(two);
+    given('the second window opened on the same record and shows him at the first site',
+        placesOf(twoSees, 'one') === SITES[A].id
+        && twoSees.cards[A].rows.length === 1, placesOf(twoSees, 'one'));
+
+    // ---- window one finishes the owner's sequence: ✕ on A, then ＋ on B
+    const off = await tap(one, 'window one: ✕ on A',
+        `.site-grid > .site-card:nth-child(${A + 1}) .assign-row button.btn-icon`);
+    check('the removal lands on the disk',
+        diskOf(off.after, 'one') === '-', diskOf(off.after, 'one'));
+    await one.click(siteAdd(B));
+    await one.waitForTimeout(150);
+    const onto = await tap(one, 'window one: + הוסף at B', pickerRow(W1.id));
+    await one.click('#workerPickerModal button:has-text("סגור")');
+    await settle(one);
+    given('and the add leaves him at the second site, memory and disk',
+        placesOf(onto.after, 'one') === SITES[B].id
+        && diskOf(onto.after, 'one') === SITES[B].id,
+        JSON.stringify({ live: placesOf(onto.after, 'one'), disk: diskOf(onto.after, 'one') }));
+
+    // ---- THE SECOND WINDOW'S OWN NEXT PIECE OF WORK: the other man, at the first site,
+    // by real clicks. Its save writes the WHOLE schedule, and its whole schedule still
+    // holds the first man at the site he was taken off.
+    await two.click(siteAdd(A));
+    await two.waitForTimeout(150);
+    const other = await tap(two, 'window two: + הוסף the OTHER man at A', pickerRow(W2.id));
+    given('the second window recorded the other man',
+        holds(other.after, 'two', SITES[A].id).live === true,
+        placesOf(other.after, 'two'));
+    await two.click('#workerPickerModal button:has-text("סגור")');
+    await two.waitForTimeout(400);
+
+    // ---- several seconds of nothing, in both windows
+    await one.waitForTimeout(6000);
+
+    const disk = await look(two);
+    check('THE SECOND WINDOW\'S EDIT DOES NOT PUT THE FIRST MAN BACK ON THE OLD SITE',
+        diskOf(disk, 'one') === SITES[B].id,
+        `disk says ${diskOf(disk, 'one')}`);
+    check('and the other man it recorded is on the disk beside him, not instead of him',
+        diskOf(disk, 'two') === SITES[A].id, diskOf(disk, 'two'));
+
+    // ---- THE SCREEN REOPENED, which is what the report says happens next: off the day
+    // screen and back onto it, and the picker opened again.
+    const reopened = await one.evaluate(([day, worker]) => {
+        showView('week'); render();
+        showView('day'); render();
+        const strip = text => String(text || '').replace(/[⁨⁩‎]/g, '');
+        const cards = [...document.querySelectorAll('.site-grid > .site-card')].map(card => ({
+            head: strip(card.querySelector('h3').textContent),
+            count: (card.querySelector('.site-count') || {}).textContent,
+            names: [...card.querySelectorAll('.assign-name')].map(node => strip(node.textContent))
+        }));
+        const record = (((State.schedule.days || {})[day] || {}).actual || {})[worker];
+        return { cards, places: ((record || {}).entries || []).map(entry => entry.placeId) };
+    }, [DAY, W1.id]);
+    // THE GUARANTEE, and only it: the man who was MOVED is at the new site and not back
+    // at the old one, after the screen has been left and come back to.
+    check('leaving the day screen and coming back shows the moved man at the new site only',
+        reopened.places.length === 1 && reopened.places[0] === SITES[B].id
+        && reopened.cards[B].names.some(name => name.indexOf(W1.name) !== -1)
+        && reopened.cards[A].names.every(name => name.indexOf(W1.name) === -1),
+        JSON.stringify(reopened));
+
+    // WHAT IS STILL TRUE AND IS NOT THIS FIX'S TO CHANGE, pinned here so it is visible
+    // rather than discovered. There is no 'storage' listener anywhere in js/, so window
+    // one does not learn that window two recorded the OTHER man: its card for the old
+    // site is empty while the disk holds that man there. The record is right and a
+    // window opened fresh shows both - checked below - so nothing is lost; what is
+    // stale is one window's screen until it is reopened. Removing that staleness means
+    // giving the app a cross-window listener, which is a change this evidence does not
+    // reach and which is deliberately not made here.
+    check('and window one does NOT yet show the other window\'s man - the known residual',
+        reopened.cards[A].count === '0' && reopened.cards[A].names.length === 0,
+        JSON.stringify(reopened.cards[A]));
+
+    // And the picker for the OLD site, reopened: it must not offer him as «✓ נמצא».
+    await one.click(siteAdd(A));
+    await one.waitForTimeout(200);
+    const pickerAgain = await look(one);
+    check('the old site\'s picker, reopened, does not say he is there',
+        (pickerAgain.picker.buttons.find(item => item.worker === W1.id) || {}).pressed === 'false',
+        JSON.stringify(pickerAgain.picker.buttons));
+    await one.click('#workerPickerModal button:has-text("סגור")');
+
+    // ---- AND A FRESH WINDOW: the app opened again from nothing, which is the reopen
+    // that reads the disk and replays the journal.
+    const three = await openPage();
+    await toDay(three);
+    await settle(three);
+    const fresh = await look(three);
+    check('a window opened fresh after all of it shows him at the new site only',
+        placesOf(fresh, 'one') === SITES[B].id && diskOf(fresh, 'one') === SITES[B].id,
+        JSON.stringify({ live: placesOf(fresh, 'one'), disk: diskOf(fresh, 'one') }));
+    check('and the other man is still where the second window put him',
+        placesOf(fresh, 'two') === SITES[A].id, placesOf(fresh, 'two'));
+    check('neither man ends up at two sites by accident',
+        placesOf(fresh, 'one').indexOf('+') === -1
+        && placesOf(fresh, 'two').indexOf('+') === -1,
+        JSON.stringify([placesOf(fresh, 'one'), placesOf(fresh, 'two')]));
+    check('two windows of the app produced no uncaught error',
+        faults.length === 0, JSON.stringify(faults.slice(0, 3)));
+
+    await context.close();
+}
+
+// ============================================================ 10. nothing threw, anywhere
 {
     suite('the whole run threw nothing');
     check('no uncaught page error in any of the above',
