@@ -464,6 +464,70 @@ async function seedReport(page) {
     await page.context().close();
 }
 
+// ------------------------------------- the financial section reaches the picture
+//
+// The PNG is the WhatsApp surface for the pay round, and since 18 October 2026 a man whose
+// money moved in the period and who worked no day in it is not a row in the work table -
+// he is a line in the financial section under it. The lines are drawn as NOTES rather than
+// as a table on purpose: a <tbody><tr> inside .report-payroll is a worker row to the
+// phone's card rules and to four suites, so three accounts as a table would arrive in all
+// of them as three more men. What that costs is measured here: the line has to reach the
+// image, and the image's row count has to keep meaning the crew.
+{
+    suite('a man with no work days reaches the picture, without becoming a row');
+
+    const page = await open();
+    await page.evaluate(() => {
+        State.schedule.workers = [
+            { id: 'w_day', name: 'DAYMAN', active: true, dailyRate: 400, hourlyRate: 0 },
+            { id: 'w_cash', name: 'CASHMAN', active: true, dailyRate: 0, hourlyRate: 0 }
+        ];
+        State.schedule.places = [{ id: 'p_01', name: 'Site A', active: true }];
+        assignPlace(State.schedule, '2026-08-10', 'w_day', 'actual', 'p_01');
+        State.commit(addAdvance(State.schedule, 'w_cash', '2026-08-10', 250, ''));
+        State.save();
+        REPORT_RANGE.from = '2026-08-07';
+        REPORT_RANGE.to = '2026-08-20';
+        REPORT_SECTION = 'workers';
+        REPORT_WORKERS = null;
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(350);
+
+    const shot = await page.evaluate(async () => {
+        const words = [], proto = CanvasRenderingContext2D.prototype, real = proto.fillText;
+        proto.fillText = function(text, ...args) { words.push(String(text)); return real.call(this, text, ...args); };
+        let out;
+        try { out = printoutImage('report'); } finally { proto.fillText = real; }
+        return {
+            words,
+            rows: out.layout.rows.length,
+            tbody: document.querySelectorAll('.report-payroll tbody tr').length,
+            totals: document.querySelectorAll('.report-payroll tfoot tr').length
+        };
+    });
+    const said = shot.words.join('\n');
+
+    given('the picture was drawn from a page that hides one man from the table',
+        shot.tbody === 1, JSON.stringify({ tbody: shot.tbody, rows: shot.rows }));
+    check('the man who worked is a row in the image',
+        said.includes('DAYMAN') && shot.rows === shot.tbody,
+        JSON.stringify({ rows: shot.rows, tbody: shot.tbody }));
+    check('and the man whose only record is money is in it by name',
+        said.includes('CASHMAN'), said.slice(0, 300));
+    check('with the money that was handed to him',
+        said.replace(/,/g, '').includes('250'), said.slice(0, 400));
+    check('the picture says why he has no days',
+        said.includes('אין להם ימי עבודה בתקופה הזו'), said.slice(0, 400));
+    // Every band is still a tfoot row of its own, so the two sides of this count keep
+    // growing together: the reconciliation band is a header-and-footer table with no body.
+    same('each total row drawn is a total row on the screen',
+        shot.words.filter(word => word.startsWith('סה״כ')).length, shot.totals);
+
+    await page.context().close();
+}
+
 await browser.close();
 server.close();
 report();

@@ -2081,6 +2081,86 @@ for (const [width, scale] of [[320, '100%'], [390, '100%'], [430, '100%'], [320,
     await page.context().close();
 }
 
+// ---------------------------------- the financial section, on the narrowest screen
+//
+// Since 18 October 2026 a man whose money moved in the period and who worked no day in it
+// is not a row in the work table: he is a line in the financial section under it, with a
+// reconciliation band below that. Three facts about those two are phone facts and are
+// measured nowhere else:
+//
+//   - THE WORK BAND MUST NOT CLAIM TO BE THE PAYDAY while somebody's money is outside the
+//     table. In card mode - the default here - css/app.css draws exactly two footer cells,
+//     the label and the one carrying data-label="לתשלום", styled as the biggest number on
+//     the page. A number left in that cell would be read as the fortnight's payable.
+//   - THE LINES ARE NOT ROWS. They are divs, so the pay-card rules, the card grid's count
+//     and every row count in the suites keep meaning the crew.
+//   - IT ALL FITS 320px, with the text at twice the size as well.
+for (const [width, scale] of [[320, '100%'], [390, '100%'], [320, '200%']]) {
+    const label = scale === '200%'
+        ? `${width}px at 200% text: the financial section`
+        : `${width}px: the financial section under the work table`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    if (scale === '200%') {
+        await doubleEveryFontSize(page);
+        await page.waitForTimeout(200);
+    }
+    const seen = await page.evaluate(() => {
+        // One man works, one man only took cash in the same fortnight.
+        State.schedule.workers = State.schedule.workers.slice(0, 1);
+        State.schedule.workers.push({ id: 'w_cash', name: 'רגא',
+            active: true, dailyRate: 0, hourlyRate: 0 });
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
+        State.commit(addAdvance(State.schedule, 'w_cash', '2026-08-10', 250, ''));
+        State.save({ silent: true });
+        REPORT_CARD_GRID = true;          // the owner's default on a phone
+        REPORT_RANGE.from = '2026-08-07';
+        REPORT_RANGE.to = '2026-08-20';
+        REPORT_WORKERS = null;
+        showView('reports');
+        render();
+
+        const lines = [...document.querySelectorAll('.report-payroll .report-finance-text')];
+        const band = document.querySelector('.report-payroll .report-reconcile-group');
+        const bandCells = band
+            ? [...band.querySelectorAll('tfoot td')]
+                .filter(td => td.getBoundingClientRect().height > 0)
+                .map(td => td.textContent.trim())
+            : [];
+        const workFoot = [...document.querySelectorAll('.report-payroll-group tfoot td')]
+            .filter(td => td.getBoundingClientRect().height > 0)
+            .map(td => td.textContent.trim());
+        return {
+            lines: lines.map(node => node.textContent.replace(/\s+/g, ' ').trim()),
+            tbody: document.querySelectorAll('.report-payroll tbody tr').length,
+            cards: document.querySelectorAll('.report-worker-tile').length,
+            workFoot,
+            bandCells,
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+
+    check(`${label}: the man who only took cash is a line, not a row`,
+        seen.lines.length === 1 && seen.lines[0].indexOf('רגא') !== -1
+        && seen.tbody === 1, JSON.stringify(seen));
+    check(`${label}: so the card grid still owes one card per man in the table`,
+        seen.cards === seen.tbody, JSON.stringify({ cards: seen.cards, tbody: seen.tbody }));
+    check(`${label}: his deduction is on his line`,
+        seen.lines[0] && seen.lines[0].indexOf('250') !== -1, JSON.stringify(seen.lines));
+    // THE CELL A PERSON PAYS FROM. On the phone the work band shows its label and its
+    // לתשלום cell and nothing else, so that cell must not hold a number here.
+    check(`${label}: the work band does not show a payday number it does not own`,
+        seen.workFoot.some(text => text.indexOf('סה״כ בטבלת העבודה') === 0)
+        && seen.workFoot.indexOf('—') !== -1, JSON.stringify(seen.workFoot));
+    check(`${label}: and the band below it does`,
+        seen.bandCells.some(text => text.indexOf('סה״כ לתשלום') === 0)
+        && seen.bandCells.some(text => /\d/.test(text)), JSON.stringify(seen.bandCells));
+    check(`${label}: nothing widens the page`, seen.across === true, JSON.stringify(seen));
+
+    await page.context().close();
+}
+
 {
     suite('above the card breakpoint the pay sheet is still a table');
 

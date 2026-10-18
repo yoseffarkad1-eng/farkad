@@ -9,11 +9,13 @@
 //   - Do NOT hide a worker who worked because his wage is not set - the hours are the
 //     record, the missing rate is a separate problem and the sheet already says so.
 //   - Do NOT hide a worker who is inactive today if he has work inside the period.
-//   - A balance or an advance ALONE should not put a worker in the WORK report. ASKED
-//     FOR, TRIED, AND REPORTED BACK INSTEAD OF SHIPPED - see the refusal below. On this
-//     build the deduction is read on that row and on no other surface that pays anybody,
-//     so hiding the man hides the money with him. The owner settles which he wants; until
-//     he does, the record keeps the number.
+//   - A balance or an advance ALONE does not put a worker in the WORK table. ASKED FOR,
+//     TRIED THE WRONG WAY, REPORTED BACK, AND THEN DELIVERED the way the owner's second
+//     message allowed on 18 October: the hiding happens in the DISPLAY and never inside
+//     payrollRows(), so the calculation still holds every man, his money is read on a
+//     financial section of its own under the table, and the band below that is summed
+//     over everybody. tests/finance.test.mjs owns that end of it, in both readings of the
+//     record; what stays pinned HERE is that the calculation keeps him.
 //   - The headings are shortened to נוכחות | ימי שכר | כפולים. The numbers under them
 //     and the arithmetic that produces them do not change.
 //   - Filtering the payroll by pay cycle does not move a shekel on the sites report.
@@ -85,26 +87,36 @@ const namesInWork = device => run(device,
     check('a man who worked with no rate set is on the sheet too',
         ids.indexOf('w_norate') !== -1, ids);
     check('and a man who worked but is inactive today', ids.indexOf('w_off') !== -1, ids);
-    // THE REFUSAL, written down where the next person will look for it.
+    // WHY THE CALCULATION STILL KEEPS HIM, which is the half that cannot move.
     //
-    // The owner asked for this man to be off the work report. He is on it. Taking him off
-    // was implemented first and then taken back out, because on this build his row is the
-    // only place his 500 is ever deducted:
+    // Taking him out of payrollRows() was tried first and reverted: with no row of his the
+    // sheet had no in-range advance left, so the three money columns left the page and the
+    // footer stopped reconciling (tests/smoke.mjs, twice), and the same shape with a
+    // carried balance took a repayment off the sheet outright (tests/repayment.test.mjs,
+    // עומר סעד, 1,950 in and 200 handed back). Next period the money is out of range, so
+    // it would have been deducted NOWHERE - an advance deduction dropped through the
+    // transition, which is the one thing this record must not do.
     //
-    //   - with no row of his, the sheet has no in-range advance left, so the three money
-    //     columns (נצבר · מקדמות · לתשלום) leave the page and the footer stops
-    //     reconciling - tests/smoke.mjs, twice, plus the RTL check on that very cell;
-    //   - next period the same 500 is out of range and is not deducted there either, so
-    //     it is deducted NOWHERE;
-    //   - and the same shape with a carried balance took a repayment off the sheet
-    //     outright - tests/repayment.test.mjs, עומר סעד, 1,950 in and 200 handed back.
-    //
-    // That is an advance deduction dropped through the transition, which is the one thing
-    // this record must not do. So the clause stays and the decision goes back to the
-    // owner: the tidier sheet he asked for costs a deduction, and that is his call, not
-    // this file's.
-    check('a man with only an advance keeps his row, because the deduction is read on it',
+    // So payrollRows() keeps him, the export is written off it unchanged, and the HIDING
+    // happens above it in payrollDisplaySplit. tests/finance.test.mjs measures that side.
+    check('a man with only an advance keeps his CALCULATED row, because the band is summed off it',
         ids.indexOf('w_money') !== -1, ids);
+    // AND THE DISPLAY DOES WHAT WAS ASKED FOR: he is not in the work table, he is in the
+    // financial section, and the deduction the band carries includes him.
+    const work = run(device, 'payrollDisplaySplit().work.map(row => row.workerId).join(",")');
+    const finance = run(device, 'payrollDisplaySplit().finance.map(row => row.workerId).join(",")');
+    check('but he is not in the work table', work.indexOf('w_money') === -1, work);
+    check('he is in the financial section', finance.indexOf('w_money') !== -1, finance);
+    check('and the men who worked are still in the table, rate or no rate',
+        work.indexOf('w_rate') !== -1 && work.indexOf('w_norate') !== -1
+        && work.indexOf('w_off') !== -1, work);
+    const bandTaken = Number(run(device,
+        'payrollBandTotals(payrollRows()).taken'));
+    const workTaken = Number(run(device,
+        'payrollBandTotals(payrollDisplaySplit().work).taken'));
+    check('the band deducts his 500 and the work table alone does not',
+        Math.abs(bandTaken - 500) < 0.005 && workTaken === 0,
+        `${bandTaken} vs ${workTaken}`);
     const moneyRow = JSON.parse(run(device,
         'JSON.stringify(payrollRows().find(row => row.workerId === "w_money"))'));
     check('and the row carries the advance it is there for',

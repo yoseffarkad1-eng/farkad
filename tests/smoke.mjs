@@ -6209,13 +6209,30 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   // The minus sign in Hebrew text lays out on the wrong side of the digits without a
   // direction mark - the worker read "500-" on the one number that says money was taken.
+  //
+  // READ OFF THE FINANCIAL SECTION SINCE 18 OCTOBER 2026, and the move is the point: עלי
+  // took 250 and worked no day in this fortnight, so he is no longer a row in the work
+  // table - the owner asked for a sheet about days to be about days - and his money is a
+  // line in the financial section under it instead. The guarantee does not change by one
+  // character; it is now a guarantee about the cell the deduction is actually read on.
+  // Both the line and the band are inside .report-payroll, so the client-scoped print
+  // rule that hides the crew's pay still hides them.
   const advCell = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('.report-payroll tbody tr')];
-    const row = rows.find(tr => tr.textContent.includes('עלי'));
-    return [...row.querySelectorAll('td')].map(td => td.textContent).join('|');
+    const lines = [...document.querySelectorAll('.report-payroll .report-finance-text')];
+    const line = lines.find(node => node.textContent.includes('עלי'));
+    return line ? line.textContent : '';
   });
   check('a shown advance carries the mark that pins the minus before the digits',
     advCell.includes('‎-250'), JSON.stringify(advCell));
+  // And the man whose days ARE in the table is still in it, with his own money beside
+  // him: the split is about a missing record of work, not about money.
+  const workRow = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.report-payroll tbody tr')];
+    const row = rows.find(tr => tr.textContent.includes('דוד'));
+    return row ? [...row.querySelectorAll('td')].map(td => td.textContent).join('|') : '';
+  });
+  check('a man who worked keeps his row in the work table',
+    workRow.includes('דוד') && workRow.includes('1600'), JSON.stringify(workRow));
 
   // An advance typed while another phone's snapshot is landing must survive the swap -
   // day edits already did; advance paths were dropped on the floor.

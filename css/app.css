@@ -1896,6 +1896,28 @@ a[href]:focus-visible,
    the weeks on paper is a decision for the owner, not a side effect of a fold. */
 @media print { .report-weekly-breakdown { display: none !important; } }
 
+/* THE FINANCIAL SECTION (renderFinanceBlock): the men whose money moved in this period
+   and who worked no day in it. One line each, inside the pay sheet's own section so the
+   paper carries it, and NOT a table - a <tbody><tr> inside .report-payroll is a worker row
+   to the phone's pay-card rules, to the compact grid's card count and to four suites, so
+   three accounts would arrive in all of them as three more men.
+
+   These lines are NOT .hint: .hint is hidden in print and this is the money. They print
+   because nothing hides them. */
+.report-finance-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px 10px;
+    padding: 8px 0;
+    font-size: 15px;
+    line-height: 1.5;
+    border-top: 1px solid var(--line-soft);
+}
+.report-finance-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* The band is a header-and-footer table with no body. Its own wrapper, so js/ui/printout.js
+   finds its heading, and so a future .report-payroll-group rule does not reach it. */
+.report-reconcile-group { margin-top: 4px; }
+
 /* On a phone the report stops being a table and becomes one card per row.
    A seven-column table only fits by scrolling sideways, and in RTL what falls off the
    edge is the far left - which is exactly where "לתשלום" and the last site sit. A report
