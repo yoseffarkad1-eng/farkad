@@ -253,6 +253,64 @@ const State = {
     // to when an edit turns out to have nowhere durable to live.
     durableText: null,
 
+    // ANOTHER WINDOW OF THIS APP WROTE WHILE THIS ONE WAS LOOKING AWAY.
+    //
+    // save() writes the WHOLE schedule out of memory, and nothing in this app ever hears
+    // that a second window wrote: there is no 'storage' listener anywhere in js/. So a
+    // window that has been open since before somebody moved a man - backgrounded, its
+    // listener dropped, or an older build still being served from the cache (law 7) -
+    // still holds that man at his old site and lays it straight back over the disk on
+    // its own next ordinary edit. That edit is somebody recording ANOTHER man, so
+    // nothing on either screen looks like a conflict: the window that made the move
+    // still shows it, the disk no longer has it, and a reopen produces the old site,
+    // because the moving window's journal entry was acknowledged and collected long
+    // before. What that produces is «I move him and a few seconds later he is back».
+    //
+    // Measured in tests/move.late.test.mjs, with two windows on one disk.
+    //
+    // The disk is compared with what THIS window last confirmed on it. That is one
+    // getItem beside the one setVerified already pays on the same key, so it costs the
+    // same order as the write it guards.
+    diskMovedUnderUs() {
+        if (typeof this.durableText !== 'string') return false;
+        if (typeof Store === 'undefined' || !Store.available) return false;
+        const held = Store.get(V2_KEY);
+        return typeof held === 'string' && held !== this.durableText;
+    },
+
+    // What the disk holds right now, or null. Read once per rebase and handed to
+    // rollback() as the new baseline - rollback restores durableText, which is THIS
+    // window's own last confirmation, and restoring that is exactly the stale copy the
+    // rebase exists to stop writing. The disk is the baseline because the disk is what
+    // was confirmed there, whichever window confirmed it.
+    adoptDiskBaseline(held) {
+        if (typeof held !== 'string') return false;
+        const previous = this.durableText;
+        this.durableText = held;
+        // A blob this app wrote and read back. If it will not parse, rollback says so
+        // and nothing is changed: the baseline goes back and the write proceeds exactly
+        // as it does today, which is the direction to be wrong in.
+        if (this.rollback()) return true;
+        this.durableText = previous;
+        return false;
+    },
+
+    // The repair is one this file already had: re-read the disk and replay the journal
+    // over it. Journal-first is what makes it safe - the edit being committed is in that
+    // journal before this runs, so rebasing onto the other window's newer record cannot
+    // lose it, and whatever that window queued and has not sent comes back too, because
+    // on one phone the journal is one journal.
+    //
+    // Only for an edit the journal is holding: one with no path is not in it, and
+    // rebasing would be a way to drop it. And only from commit() - save() is also called
+    // by persist, by the restore doors and by the ledger mirror, where there is no
+    // journalled edit to come back on.
+    rebaseOnDisk(change) {
+        if (!change || !change.path) return false;
+        if (!this.diskMovedUnderUs()) return false;
+        return this.adoptDiskBaseline(Store.get(V2_KEY));
+    },
+
     save(options) {
         // Blocked: either the page and the scripts are from different builds, or a
         // damaged record is sitting under one of these keys. Either way what is already
@@ -392,6 +450,11 @@ const State = {
         // of the screen: a refused edit is never written anywhere.
         if (!this.journal(change)) return this.refuseEdit();
 
+        // See rebaseOnDisk. Between the journal and the schedule write: the journal is
+        // what the rebase replays, and the schedule write is what would otherwise carry
+        // this window's stale copy of somebody else's day back onto the disk.
+        this.rebaseOnDisk(change);
+
         this.save();
         render();
         return true;
@@ -516,6 +579,12 @@ const State = {
         // ran out of room, and the app said the copy had not happened while half of it sat
         // on the disk waiting to come back at the next open.
         if (!this.journalBatch(accepted)) return this.refuseEdit();
+
+        // The same rebase as commit(), for the same reason: a bulk assign from the
+        // by-site screen is as able to carry another window's stale day back onto the
+        // disk as a single tap is. Asked of the first accepted change, because the
+        // question is about the disk rather than about any one path.
+        this.rebaseOnDisk(accepted[0]);
 
         this.save();
         render();

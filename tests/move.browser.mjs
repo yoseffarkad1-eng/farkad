@@ -692,7 +692,84 @@ const holds = (snapshot, who, placeId) => ({
     await page.context().close();
 }
 
-// ============================================================ 7. nothing threw, anywhere
+// ================ 7. the owner's own order: add, remove, add - then wait
+{
+    suite('add him to A, take him off A, add him to B - then several seconds of nothing');
+
+    const page = await open();
+    const log = [];
+    const note = async (what, snapshot) => log.push(
+        `${what}: live ${placesOf(snapshot, 'one')}  disk ${diskOf(snapshot, 'one')}`);
+
+    // ---- add to A, through the site's own ＋
+    await page.click(siteAdd(A));
+    await page.waitForTimeout(150);
+    const one = await tap(page, 'picker A: + הוסף', pickerRow(W1.id));
+    given('he is at the first site', holds(one.after, 'one', SITES[A].id).live === true,
+        placesOf(one.after, 'one'));
+    await note('after the add to A', one.after);
+
+    // ---- take him OFF A, through the card's ✕. This is the order the report names, and
+    // it is not the one the three-step suite above drove: there the removal came last.
+    await page.click('#workerPickerModal button:has-text("סגור")');
+    await page.waitForTimeout(100);
+    const two = await tap(page, 'card A: ✕',
+        `.site-grid > .site-card:nth-child(${A + 1}) .assign-row button.btn-icon`);
+    check('one click takes him off the first site, in memory and on the disk',
+        holds(two.after, 'one', SITES[A].id).live === false
+        && holds(two.after, 'one', SITES[A].id).disk === false,
+        JSON.stringify({ live: placesOf(two.after, 'one'), disk: diskOf(two.after, 'one') }));
+    await note('after the removal from A', two.after);
+
+    // ---- add to B
+    await page.click(siteAdd(B));
+    await page.waitForTimeout(150);
+    const three = await tap(page, 'picker B: + הוסף', pickerRow(W1.id));
+    check('and the add then puts him at the second site ALONE',
+        placesOf(three.after, 'one') === SITES[B].id
+        && diskOf(three.after, 'one') === SITES[B].id,
+        JSON.stringify({ live: placesOf(three.after, 'one'), disk: diskOf(three.after, 'one') }));
+    await note('after the add to B', three.after);
+
+    await page.click('#workerPickerModal button:has-text("סגור")');
+    await page.waitForTimeout(100);
+
+    // ---- AND THEN NOTHING, FOR SIX SECONDS. Longer than the send's own delay, longer
+    // than the undo bar's timer, and long enough for anything the page does on a timer
+    // of its own to have run. Nothing is clicked and nothing is delivered: this measures
+    // the one window on its own.
+    await page.waitForTimeout(6000);
+    const later = await look(page);
+    await note('after six seconds of nothing', later);
+
+    check('six seconds later he is still at the second site, in memory',
+        placesOf(later, 'one') === SITES[B].id, placesOf(later, 'one'));
+    check('and on the disk',
+        diskOf(later, 'one') === SITES[B].id, diskOf(later, 'one'));
+    check('the old site did not come back on the screen either',
+        later.cards[A].rows.length === 0 && later.cards[A].count === '0',
+        JSON.stringify(later.cards[A]));
+    check('and the new site shows him once, with no two-sites badge',
+        later.cards[B].rows.length === 1 && later.cards[B].rows[0].split === false
+        && later.cards[B].count === '1', JSON.stringify(later.cards[B]));
+    check('a reload reads the same record back off the disk',
+        await (async () => {
+            await page.reload({ waitUntil: 'load' });
+            await page.waitForTimeout(600);
+            return page.evaluate(([day, worker, place]) => {
+                const record = (((State.schedule.days || {})[day] || {}).actual || {})[worker];
+                const places = ((record || {}).entries || []).map(entry => entry.placeId);
+                return places.length === 1 && places[0] === place;
+            }, [DAY, W1.id, SITES[B].id]);
+        })(), 'after a real page reload');
+
+    console.log('\n  the owner\'s order, step by step:');
+    log.forEach(line => console.log(`   ${line}`));
+
+    await page.context().close();
+}
+
+// ============================================================ 8. nothing threw, anywhere
 {
     suite('the whole run threw nothing');
     check('no uncaught page error in any of the above',
