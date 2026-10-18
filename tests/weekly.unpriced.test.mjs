@@ -2,16 +2,25 @@
 //
 //   node tests/weekly.unpriced.test.mjs
 //
-// R3 OF THE INDEPENDENT READ OF v158, 18 October 2026 - A MEASUREMENT, NOT A FIX.
+// R3 OF THE INDEPENDENT READ OF v158, 18 October 2026.
+//
+// MEASURED FIRST, THEN REPAIRED ON THE OWNER'S WORD. The measurement that proved the
+// defect was taken on c1ecd50 and is kept beside this branch as
+// R3-measurement-on-c1ecd50-BEFORE-ANY-FIX.log - it is the evidence of the fault and it
+// is not an acceptance of this repair. What this file pins now is the repaired DISPLAY:
+// the arithmetic, the records and the money engine are untouched, and no missing wage is
+// guessed or turned into a zero anywhere.
 //
 // The read observed, statically, that renderWeeklyBreakdown shows «—» for a week whose
 // amount is null but then sums with `Number(week.amount || 0)` and prints that sum
 // whenever ANY week is priced. Its question: when a known wage and an unknown wage are
 // mixed, is the sum of the known weeks shown as if it were the range's total?
 //
-// THIS SUITE ANSWERS THAT QUESTION AND PINS TODAY'S ANSWER. It changes nothing and asks
-// for nothing: the owner decides whether the display moves, and when it does, the
-// expectations marked ** TODAY ** below move with it in that same commit.
+// IT DID: the fold printed the sum of the weeks it could price under «סה״כ לטווח», two
+// rows below a line reading «נצבר —». The repair says so on the page instead - the money
+// cell of the total line is labelled as the known weeks only, and a sentence names the
+// weeks whose wage is missing and that the missing amount is NOT known. The coverage axis
+// (R1's sixteen-week ceiling) is separate and untouched by it.
 //
 // THE CONTRACT, read in js/model/money.js and js/model/schema.js and not touched here:
 //
@@ -142,6 +151,16 @@ const drawn = made => {
     check('and the total for the range is a real total',
         drawn(made).total.indexOf('סה״כ לטווח') === 0
         && has(drawn(made).total, 'נצבר 900 ₪'), JSON.stringify(drawn(made).total));
+    // NOTHING IS MARKED PARTIAL when nothing is missing: the repair must not shout on a
+    // page where every week has a wage.
+    const quiet = made.run('renderPayrollTable()')
+        .querySelectorAll('.report-weekly-breakdown')
+        .map(fold => fold.querySelectorAll('P').map(node => node.textContent).join(' | '))
+        .join(' || ');
+    check('and no partial-wage sentence is drawn',
+        quiet.indexOf('שכר חלקי') === -1, quiet);
+    check('nor the known-only label on the money cell',
+        drawn(made).total.indexOf('ידוע בלבד') === -1, JSON.stringify(drawn(made).total));
 }
 
 // ------------------------- part two: the reachable mixture, and what the total then says
@@ -174,24 +193,39 @@ const drawn = made => {
         has(shown.lines[1], 'נוכחות 1') && has(shown.lines[2], 'נוכחות 0'),
         JSON.stringify(shown.lines));
 
-    // ** TODAY'S BEHAVIOUR, AND THE FINDING. **
-    //
-    // The total line prints the sum of the weeks it could price - 450 - and calls itself
-    // «סה״כ לטווח», the total FOR THE CHOSEN RANGE, while one worked week of that range
-    // has no wage at all. Nothing marks the sum as partial, two rows under a line that
-    // says «נצבר —». The dash is reached on the total only when NO week can be priced,
-    // so the all-unknown case is honest and this mixed case is the one that reads wrong.
-    //
-    // Pinned, not fixed: R3 of the read was a verification, and the remedy is a display
-    // decision for the owner. The money is untouched either way - the range row a person
-    // is actually paid from already carries «—» for this man.
-    check('** TODAY ** the total is the sum of the priced weeks alone',
-        has(shown.total, 'נצבר 450 ₪'), JSON.stringify(shown.total));
-    check('** TODAY ** and it is still called the total for the range',
+    // THE REPAIR. The number is still the sum of the weeks that could be priced - nothing
+    // is guessed and no unknown becomes a nought - and the cell it sits in now SAYS that
+    // is what it is, so it cannot be read as the wage total of the range.
+    check('the money cell of the total is labelled as the known weeks only',
+        has(shown.total, 'נצבר - ידוע בלבד') && has(shown.total, '450 ₪'),
+        JSON.stringify(shown.total));
+    check('and it no longer offers an unqualified «נצבר» on that line',
+        shown.total.replace(/\s/g, '').indexOf('נצבר450') === -1, JSON.stringify(shown.total));
+    // THE COVERAGE AXIS IS A DIFFERENT QUESTION and R1 keeps it: this range is three
+    // weeks long, so it IS covered, and the row label still says so.
+    check('the row label still reports the coverage, which is whole here',
         shown.total.indexOf('סה״כ לטווח') === 0, JSON.stringify(shown.total));
-    check('the ceiling work is not involved - this range is three weeks long',
+    check('and the answer still says it covered the range',
         made.run(`weeklyBreakdownFor('w_mix', REPORT_RANGE.from, REPORT_RANGE.to).complete === true`) === true,
         made.run(`String(weeklyBreakdownFor('w_mix', REPORT_RANGE.from, REPORT_RANGE.to).complete)`));
+
+    // AND THE PAGE NAMES WHAT IS MISSING, by week, in words.
+    const said = made.run('renderPayrollTable()')
+        .querySelectorAll('.report-weekly-breakdown')
+        .map(fold => fold.querySelectorAll('P').map(node => node.textContent).join(' | '))
+        .join(' || ');
+    check('the page says the wage total is partial',
+        said.indexOf('שכר חלקי') !== -1, said);
+    check('it names the week that was worked without a wage',
+        said.indexOf('14/08') !== -1 && said.indexOf('20/08') !== -1, said);
+    check('it says the missing amount is not known, and refuses both a nought and a guess',
+        said.indexOf('אינו ידוע') !== -1 && said.indexOf('אין כאן אפס ואין השערה') !== -1,
+        said);
+    check('and it does not call the shown sum the accrual of the whole range',
+        said.indexOf('ולא הנצבר של כל הטווח') !== -1, said);
+    // THE OTHER KIND OF EMPTY WEEK, told apart in words as well as in the day counts.
+    check('a week with no days is named as missing DAYS, not a missing wage',
+        said.indexOf('חסר ימים ולא חסר שכר') !== -1, said);
 
     // THE TWO NUMBERS THE DECISION NEEDS, side by side: what is shown, and what the full
     // total of this range actually is - which is not a number at all, because one worked
@@ -222,6 +256,12 @@ const drawn = made => {
         weeks.every(week => week.amount === null), JSON.stringify(weeks.map(w => w.amount)));
     check('the total shows a dash rather than a number',
         has(drawn(made).total, 'נצבר —'), JSON.stringify(drawn(made).total));
+    const said = made.run('renderPayrollTable()')
+        .querySelectorAll('.report-weekly-breakdown')
+        .map(fold => fold.querySelectorAll('P').map(node => node.textContent).join(' | '))
+        .join(' || ');
+    check('and the page says there is no accrual to show at all',
+        said.indexOf('שכר חלקי') !== -1 && said.indexOf('אין נצבר להציג') !== -1, said);
 }
 
 report();

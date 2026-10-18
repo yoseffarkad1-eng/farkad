@@ -158,8 +158,11 @@ const foldOf = (device, to) => {
         JSON.stringify(fold.totals));
     check('it says how many weeks it is the total of',
         fold.totals[0].indexOf('16 השבועות שמוצגים') !== -1, JSON.stringify(fold.totals));
-    check('the page names the ceiling and the week it reached',
+    // BOTH BOUNDS OF WHAT IS SHOWN, not only the far end: a person checking a long range
+    // needs to know where the shown weeks start as well as where they stop.
+    check('the page names the ceiling and both bounds of the weeks it shows',
         fold.hints.indexOf('16 השבועות הראשונים') !== -1
+        && fold.hints.indexOf('07/08') !== -1
         && fold.hints.indexOf('26/11') !== -1, fold.hints);
     check('and says the sum belongs to those weeks alone',
         fold.hints.indexOf('ולא של כל הטווח') !== -1, fold.hints);

@@ -982,9 +982,36 @@ function renderWeeklyBreakdown(rows) {
                 formatShortDate(parseLocalDate(week.to))),
             facts(week))));
         const sum = pick => item.weeks.reduce((total, week) => total + Number(pick(week) || 0), 0);
-        const anyPriced = item.weeks.some(week => week.amount !== null);
-        // THE TOTAL IS CALLED WHAT IT IS. A sum over sixteen of a longer range's weeks is
-        // not the range's total, and the only honest label for it names what it covers.
+
+        // A WEEK'S WAGE CAN BE UNKNOWN, AND UNKNOWN IS NOT NOTHING.
+        //
+        // Two kinds of week come back with no amount and they are different statements:
+        //
+        //   - work recorded and no wage to price it with - a MISSING WAGE. A day is priced
+        //     by its own stamp, or by the roster's rate when it has none, and when neither
+        //     exists the day is worth an unknown amount. money.js refuses to call that
+        //     nought on purpose: "showing 0 for a worker whose rate has not been entered
+        //     would read as owed nothing, which is a different thing entirely".
+        //   - no work recorded at all - nothing earned; and if the roster has no rate
+        //     either, nothing to price. A week missing DAYS, not a wage.
+        //
+        // Only the first makes the sum below partial. Nothing here invents a figure for
+        // it: the unknown weeks are left out of the addition, the cell says that is what
+        // it did, and the sentence under it names the weeks and refuses both a nought and
+        // a guess. Reported by the independent read of v158 (R3) and measured before it
+        // was repaired - tests/weekly.unpriced.test.mjs, 18 October 2026.
+        const unpricedWorked = item.weeks
+            .filter(week => week.amount === null && week.attendanceDays > 0);
+        const unknownEmpty = item.weeks
+            .filter(week => week.amount === null && week.attendanceDays === 0);
+        const known = item.weeks.filter(week => week.amount !== null);
+        const knownAmount = known.reduce((total, week) => total + week.amount, 0);
+        const anyPriced = known.length > 0;
+        const partial = unpricedWorked.length > 0;
+
+        // THE TOTAL IS CALLED WHAT IT IS, on two axes that are not the same question:
+        // the ROW label says how much of the range was read (the ceiling, R1), and the
+        // MONEY cell says which weeks its figure adds up (the wages, R3).
         const whole = item.weeks.complete !== false;
         fold.appendChild(weeklyLine(whole
             ? 'סה״כ לטווח'
@@ -992,7 +1019,8 @@ function renderWeeklyBreakdown(rows) {
             ['נוכחות', String(sum(w => w.attendanceDays))],
             ['ימי שכר', String(sum(w => w.payUnits))],
             ['כפולים', String(sum(w => w.doubleDays))],
-            ['נצבר', anyPriced ? `${moneyText(sum(w => w.amount))} ₪` : '—']
+            [partial && anyPriced ? 'נצבר - ידוע בלבד' : 'נצבר',
+                anyPriced ? `${moneyText(knownAmount)} ₪` : '—']
         ], 'report-weekly-total'));
         // AND WHAT IS MISSING IS NAMED, beside the number it is missing from: the ceiling,
         // the last week this fold reached, and that the sum belongs to those weeks alone.
@@ -1004,12 +1032,34 @@ function renderWeeklyBreakdown(rows) {
         // screen sentence about a screen table, and it is styled by .hint like the line
         // above it.
         if (!whole) {
+            // BOTH BOUNDS of what is shown, not only the far end: somebody checking a
+            // long range needs to know where the shown weeks begin as well as where they
+            // stop, or the sentence cannot be acted on.
             fold.appendChild(el('p', 'hint report-weekly-short',
                 `הטווח שנבחר מכיל יותר מ-${WEEKLY_SLICE_CEILING} שבועות. מוצגים `
-                + `${WEEKLY_SLICE_CEILING} השבועות הראשונים, עד `
+                + `${WEEKLY_SLICE_CEILING} השבועות הראשונים, מ-`
+                + `${formatShortDate(parseLocalDate(item.weeks[0].from))} עד `
                 + `${formatShortDate(parseLocalDate(item.weeks.coveredTo))}, והסכום `
                 + 'שלמעלה הוא שלהם בלבד ולא של כל הטווח. לשאר השבועות בחר טווח שמתחיל '
                 + 'אחרי התאריך הזה.'));
+        }
+        // AND WHAT THE WAGE TOTAL IS MISSING, by week, in words. Screen only, like the
+        // ceiling line above it and for the same reason: this whole fold is off the paper
+        // and out of the picture, so a sentence carrying .hint-warn or .hint-money would
+        // arrive on a surface that does not show the table it is about.
+        if (partial) {
+            const spans = unpricedWorked.map(week => dateRange(
+                formatShortDate(parseLocalDate(week.from)),
+                formatShortDate(parseLocalDate(week.to)))).join(', ');
+            fold.appendChild(el('p', 'hint report-weekly-partial',
+                `שכר חלקי: בשבועות ${spans} נרשמה עבודה בלי שכר יומי, ולכן `
+                + (anyPriced
+                    ? 'הנצבר שלמעלה מסכם את השבועות הידועים בלבד ולא הנצבר של כל הטווח.'
+                    : 'אין נצבר להציג כאן.')
+                + ' הסכום החסר אינו ידוע - אין כאן אפס ואין השערה.'
+                + (unknownEmpty.length > 0
+                    ? ' שבוע בלי ימי עבודה מסומן «—» גם הוא, והוא חסר ימים ולא חסר שכר.'
+                    : '')));
         }
     });
     return fold;
