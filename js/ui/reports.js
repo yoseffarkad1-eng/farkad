@@ -876,15 +876,19 @@ function groupPeriodNote(group) {
 // settled over, never to a week inside it, so splitting לתשלום across weeks would invent
 // an account nobody keeps. Said under the table in one line rather than left to be
 // guessed.
+// THE CEILING, named once so the loop and the sentence under the table cannot drift apart.
+// It is a ceiling and not a rule: a range long enough to hold more weekly periods than this
+// is a range nobody settles, and a loop that cannot end is worse than a table that stops.
+// Nothing limits the RANGE to this - dateInput only refuses an inverted one - so the stop
+// is reachable with two taps on the calendar, and the page has to say when it happened.
+const WEEKLY_SLICE_CEILING = 16;
+
 function weeklyBreakdownFor(workerId, from, to) {
     const worker = State.worker(workerId);
     if (!worker) return [];
     const slices = [];
     let at = from;
-    // Sixteen is a ceiling, not a rule: a range long enough to hold more weekly periods
-    // than that is a range nobody settles, and a loop that cannot end is worse than a
-    // table that stops.
-    for (let guard = 0; guard < 16 && at <= to; guard += 1) {
+    for (let guard = 0; guard < WEEKLY_SLICE_CEILING && at <= to; guard += 1) {
         const period = periodRangeFor(worker, at);
         if (period.cycle !== 'weekly') return [];
         const sliceFrom = period.from < from ? from : period.from;
@@ -895,7 +899,7 @@ function weeklyBreakdownFor(workerId, from, to) {
         at = toLocalDateStr(after);
     }
     if (slices.length < 2) return [];
-    return slices.map(slice => {
+    const weeks = slices.map(slice => {
         const row = payrollReport(State.schedule, slice.from, slice.to)
             .find(item => String(item.workerId) === String(workerId)) || null;
         return Object.assign({}, slice, {
@@ -905,6 +909,22 @@ function weeklyBreakdownFor(workerId, from, to) {
             amount: row ? row.amount : null
         });
     });
+
+    // WHAT THIS ANSWER DOES NOT COVER, carried on the answer itself.
+    //
+    // The loop above has two exits and they mean opposite things: it ran out of RANGE, or
+    // it ran out of CEILING. Returning the slices with no mark on them left the caller
+    // unable to tell, and renderWeeklyBreakdown summed whatever it was handed and called
+    // the sum «סה״כ לטווח» - the total for the chosen range - over a range the fold had
+    // not finished reading. A person settling a long range read a partial sum as a
+    // complete one. Reported by the independent read of v158 (R1), 18 October 2026.
+    //
+    // Two properties on the array rather than a new return shape: every caller and every
+    // suite already reads this as a list of weeks, JSON.stringify ignores them, and the
+    // fold needs exactly these two facts - whether it finished, and where it got to.
+    weeks.complete = at > to;
+    weeks.coveredTo = slices[slices.length - 1].to;
+    return weeks;
 }
 
 // The fold under a weekly group: one line per week for each man, and the range's total
@@ -938,10 +958,16 @@ function renderWeeklyBreakdown(rows) {
         .filter(item => item.weeks.length > 1);
     if (withWeeks.length === 0) return null;
 
+    // Did ANY man's weeks stop at the ceiling? The opening line has to agree with the
+    // totals under it, and two sentences contradicting each other on one page is the fault
+    // this change exists to remove rather than to move.
+    const anyShort = withWeeks.some(item => item.weeks.complete === false);
+
     const fold = el('details', 'report-weekly-breakdown');
     fold.appendChild(el('summary', null, 'פירוט שבועי'));
     fold.appendChild(el('p', 'hint',
-        'כל שבוע מחושב בנפרד לפי גבולות המחזור, והשורה האחרונה היא הסכום לטווח שנבחר. '
+        'כל שבוע מחושב בנפרד לפי גבולות המחזור, והשורה האחרונה היא '
+        + (anyShort ? 'הסכום של השבועות שמוצגים. ' : 'הסכום לטווח שנבחר. ')
         + 'מקדמות וניכויים שייכים לתקופת התשלום ולא לשבוע בתוכה, ולכן אינם כאן.'));
     withWeeks.forEach(item => {
         fold.appendChild(el('h4', 'report-weekly-name', isolate(item.row.name)));
@@ -957,12 +983,34 @@ function renderWeeklyBreakdown(rows) {
             facts(week))));
         const sum = pick => item.weeks.reduce((total, week) => total + Number(pick(week) || 0), 0);
         const anyPriced = item.weeks.some(week => week.amount !== null);
-        fold.appendChild(weeklyLine('סה״כ לטווח', [
+        // THE TOTAL IS CALLED WHAT IT IS. A sum over sixteen of a longer range's weeks is
+        // not the range's total, and the only honest label for it names what it covers.
+        const whole = item.weeks.complete !== false;
+        fold.appendChild(weeklyLine(whole
+            ? 'סה״כ לטווח'
+            : `סה״כ ${WEEKLY_SLICE_CEILING} השבועות שמוצגים`, [
             ['נוכחות', String(sum(w => w.attendanceDays))],
             ['ימי שכר', String(sum(w => w.payUnits))],
             ['כפולים', String(sum(w => w.doubleDays))],
             ['נצבר', anyPriced ? `${moneyText(sum(w => w.amount))} ₪` : '—']
         ], 'report-weekly-total'));
+        // AND WHAT IS MISSING IS NAMED, beside the number it is missing from: the ceiling,
+        // the last week this fold reached, and that the sum belongs to those weeks alone.
+        //
+        // Deliberately NOT .hint-warn and NOT .hint-money. Those two are the classes the
+        // print stylesheet lifts onto the paper and js/ui/printout.js reads into the
+        // picture - and this whole fold is off both of them, so a warning carrying either
+        // class would arrive on a page that does not show the table it is about. It is a
+        // screen sentence about a screen table, and it is styled by .hint like the line
+        // above it.
+        if (!whole) {
+            fold.appendChild(el('p', 'hint report-weekly-short',
+                `הטווח שנבחר מכיל יותר מ-${WEEKLY_SLICE_CEILING} שבועות. מוצגים `
+                + `${WEEKLY_SLICE_CEILING} השבועות הראשונים, עד `
+                + `${formatShortDate(parseLocalDate(item.weeks.coveredTo))}, והסכום `
+                + 'שלמעלה הוא שלהם בלבד ולא של כל הטווח. לשאר השבועות בחר טווח שמתחיל '
+                + 'אחרי התאריך הזה.'));
+        }
     });
     return fold;
 }
@@ -1088,6 +1136,30 @@ function financeSectionTitle() {
         : 'כספים - מקדמות וניכויים';
 }
 
+// WHAT THE SECTION MAY PROMISE ABOUT MONEY IT DID NOT DEDUCT.
+//
+// The sentence under the heading promised, with no condition on it, that what was not
+// deducted this period moves to the next one and is not erased. That promise belongs to
+// ONE of the three states this app ships in. Read in js/model, and not changed by this:
+//
+//   carryReportingEnabled(schedule) = advanceCarryEnabled() && carryMigrationSettled(schedule)
+//   advanceCarryEnabled()           = FARKAD_FLAGS.carryAdvances === true      (the BUILD)
+//   carryMigrationSettled(schedule) = the migration is not needed, or it is APPROVED
+//                                     on this record                            (the RECORD)
+//
+// With either half missing there is no balance crossing periods at all: the advance is
+// netted in the period it falls in, and what is left of it lives on the man's advances
+// record and is read on the מקדמות screen. So the sentence asks the same gate the heading
+// asks - one function, because this text reaches the screen, the paper and the picture
+// through .hint-money, and three surfaces must not be able to say different things.
+// Reported by the independent read of v158 (R2), 18 October 2026.
+function financeCarryPromise() {
+    return carryReportingEnabled(State.schedule)
+        ? 'מה שלא נוכה בתקופה הזו עובר לתקופה הבאה ולא נמחק.'
+        : 'בתצוגה הזו אין יתרה שעוברת בין תקופות: מה שלא נוכה כאן נשאר רשום בחשבון '
+            + 'המקדמות של העובד ונקרא במסך מקדמות.';
+}
+
 function financeLineText(row, label) {
     const money = moneyOf(row);
     // The same three expressions payrollGroupTable prints, cell for cell: '—' where the
@@ -1112,8 +1184,7 @@ function renderFinanceBlock(group) {
     // WHY THESE MEN ARE HERE, said on the paper. .hint-money, because this is money and
     // money belongs on the printed page - see the print rules beside .hint-warn.
     nodes.push(el('p', 'hint hint-money',
-        'אין להם ימי עבודה בתקופה הזו, והכסף שלהם נקרא מכאן. מה שלא נוכה בתקופה הזו '
-        + 'עובר לתקופה הבאה ולא נמחק.'));
+        `אין להם ימי עבודה בתקופה הזו, והכסף שלהם נקרא מכאן. ${financeCarryPromise()}`));
     group.finance.forEach(row => {
         const line = el('div', 'report-finance-line');
         line.appendChild(el('span', 'report-finance-text', financeLineText(row, label)));
