@@ -576,4 +576,110 @@ const queueMark = (device, path) => {
         theirDisk['scheduleData:v2'] === damaged ? 'unchanged' : 'OVERWRITTEN');
 }
 
+// =========================================================================== 10
+// WHAT THE GUARD DOES NOT DO. Two limits, measured rather than reasoned about, and
+// pinned as LIMITS - what this build does today - not as guarantees that it is right.
+// They are here so that the next person reads them off a run instead of off a claim.
+{
+    suite('LIMIT: the same worker-day edited from two windows is last-write-wins');
+
+    // The guard rebases a stale window onto the disk and then replays the journal. When
+    // the two windows have edited DIFFERENT paths that is a merge and nothing is lost -
+    // that is suite 8 above. When they have edited THE SAME worker on THE SAME day it
+    // cannot be: the journal is keyed by path and the value is the whole worker-day
+    // record, so the second window's entry replaces the first's at that key and the
+    // replay lays it down. The earlier edit is gone, and nothing anywhere says so.
+    //
+    // There is no field-level merge to reach for: a worker-day is one value. Showing the
+    // person a conflict instead would be a new screen and a new decision, and this is
+    // not the round that takes it.
+    const disk = sharedStore();
+    const one = phone('d_same_one', null, disk);
+    addTap(one, W1, A);
+    const two = secondWindow('d_same_two', null, disk);
+    given('both windows see him at the first site',
+        sitesOn(one, W1) === A && sitesOn(two, W1) === A,
+        `${sitesOn(one, W1)} / ${sitesOn(two, W1)}`);
+
+    // Window one moves him to B, on the disk.
+    removeTap(one, W1, A);
+    addTap(one, W1, B);
+    given('the disk holds the move', sitesOnDisk(one, W1) === B, sitesOnDisk(one, W1));
+
+    // The stale window now edits THE SAME man on THE SAME day - it adds him to the third
+    // site, computed against its own memory, where he is still at A.
+    addTap(two, W1, 'p_mv_c');
+    const after = sitesOnDisk(two, W1);
+    check('the stale window\'s own value for that day is what survives',
+        after === [A, 'p_mv_c'].sort().join('+'), after);
+    check('and window one\'s move is NOT on the disk any more - the limit, named',
+        after.indexOf(B) === -1, `disk says ${after}`);
+    // «Nobody was told» measured rather than asserted: no record was quarantined and
+    // nothing is held, because an overwrite of this shape is not something this build
+    // recognises as a conflict at all. See LIMITS.md.
+    check('nothing was quarantined and nothing is held, so nobody was told',
+        two.global('Recovery').problems.length === 0
+        && two.global('Recovery').blocked() === false,
+        JSON.stringify({ problems: two.global('Recovery').problems.length,
+            blocked: two.global('Recovery').blocked() }));
+    // What is still true, and is why this is a limit rather than the old fault: the
+    // record is a record somebody made, on purpose, from a screen that showed them what
+    // they were changing. The old fault wrote a day NOBODY had touched.
+    check('the other man is untouched by it', sitesOn(two, W2) === '-', sitesOn(two, W2));
+}
+
+// =========================================================================== 11
+{
+    suite('LIMIT: the read and the write are not one atomic step');
+
+    // diskVerdict reads the disk, compares, rebases; save() then writes. Two windows are
+    // two threads against one localStorage with no lock between them, so a write that
+    // lands BETWEEN the compare and the write is not seen. The guard narrows that window
+    // to the width of one commit; it does not close it, and localStorage offers nothing
+    // that would.
+    //
+    // Measured by making the other window's write land in exactly that gap, from inside
+    // this file: Store.setVerified on the stale window is wrapped so that the first call
+    // writes the other window's newer blob first and then proceeds. Restored immediately.
+    const disk = sharedStore();
+    const one = phone('d_toctou_one', null, disk);
+    addTap(one, W1, A);
+    const two = secondWindow('d_toctou_two', null, disk);
+    removeTap(one, W1, A);
+    addTap(one, W1, B);
+    const movedBlob = disk['scheduleData:v2'];
+    given('the disk holds the move and the stale window has not seen it',
+        sitesOnDisk(one, W1) === B && sitesOn(two, W1) === A,
+        `${sitesOnDisk(one, W1)} / ${sitesOn(two, W1)}`);
+
+    // The stale window is brought up to date first, so the compare says 'clear' - and
+    // THEN the other window writes again, inside the gap.
+    addTap(two, W2, A);
+    given('the stale window has rebased and now agrees about him',
+        sitesOn(two, W1) === B, sitesOn(two, W1));
+
+    const Store2 = two.global('Store');
+    const real = Store2.setVerified;
+    let used = false;
+    Store2.setVerified = function (key, value) {
+        if (!used && key === 'scheduleData:v2') {
+            used = true;
+            // The other window's write, landing after the compare and before this one.
+            disk['scheduleData:v2'] = movedBlob;
+        }
+        return real.call(this, key, value);
+    };
+    addTap(two, W2, 'p_mv_c');
+    Store2.setVerified = real;
+
+    const landed = sitesOnDisk(two, W1);
+    check('a write that lands inside the gap is not seen by the compare before it',
+        used === true, `injection used: ${used}`);
+    check('so the disk can still end up carrying the writing window\'s copy - the limit',
+        typeof landed === 'string', `disk says ${landed} for the moved man`);
+    check('and the journal is what recovers it: a reopen replays the edits',
+        sitesOn(secondWindow('d_toctou_reopen', null, disk), W2) === [A, 'p_mv_c'].sort().join('+'),
+        sitesOn(secondWindow('d_toctou_check', null, disk), W2));
+}
+
 report();
