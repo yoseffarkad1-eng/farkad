@@ -423,4 +423,157 @@ const queueMark = (device, path) => {
     }
 }
 
+// ============================================================================ 7
+// THE TWO REVIEW FINDINGS ON THE v160 GUARD, each as its own case.
+//
+// Neither is a fault the guard introduced. The first is an old path the guard did not
+// close; the second is a gap the guard newly reaches into. Both were confirmed by reading
+// js/state.js before a line was changed, and both are measured here against the shipped
+// behaviour rather than against a description of it.
+{
+    suite('a batch that accepted nothing does not write the whole schedule');
+
+    // A worker already at the two-site cap, so assignPlace refuses - which is the
+    // ordinary way an all-refused batch arrives: copying a day across onto people who
+    // are already recorded twice. THE CAP ITSELF IS NOT UNDER TEST and is not changed:
+    // two sites a day stay legal, and the refusal is the model's own.
+    const disk = sharedStore();
+    const one = phone('d_rej_one', null, disk);
+    addTap(one, W1, A);
+    addTap(one, W1, B);
+    given('he is at two sites, which is allowed, and a third would be refused',
+        sitesOn(one, W1) === [A, B].sort().join('+'), sitesOn(one, W1));
+
+    // A second window, holding the day as it was BEFORE those two taps.
+    const two = secondWindow('d_rej_two', null, disk);
+    const twoSaw = sitesOn(two, W1);
+    given('the second window opened on the record of that moment', twoSaw !== undefined, twoSaw);
+
+    // Window one moves him off A, so the disk now says something the second window has
+    // never seen.
+    removeTap(one, W1, A);
+    given('the disk has moved under the second window',
+        sitesOnDisk(one, W1) === B, sitesOnDisk(one, W1));
+
+    // ---- THE ALL-REFUSED BATCH, from the stale window. Every change is a refusal, so
+    // there is nothing to journal and nothing a rebase could rebuild from.
+    const refusedBatch = [
+        two.call('assignPlace', two.State.schedule, DAY, W1, 'actual', 'p_mv_c', 'normal'),
+        two.call('assignPlace', two.State.schedule, DAY, W2, 'actual', 'p_mv_c', 'normal')
+    ].filter(change => change && change.refused);
+    given('the batch really is all refusals', refusedBatch.length >= 1,
+        JSON.stringify(refusedBatch.map(change => change.reason)));
+
+    const answered = two.State.commitMany(refusedBatch);
+    check('the call answers that nothing was recorded', answered === false, String(answered));
+    check('AND THE DISK IS UNTOUCHED: the stale window wrote nothing over the move',
+        sitesOnDisk(one, W1) === B, sitesOnDisk(one, W1));
+
+    // ---- THE EMPTY BATCH, same window, same stale memory.
+    const empty = two.State.commitMany([]);
+    check('an empty batch answers false and writes nothing',
+        empty === false && sitesOnDisk(one, W1) === B,
+        `${empty} / ${sitesOnDisk(one, W1)}`);
+    const nothing = two.State.commitMany(undefined);
+    check('and so does a call with no batch at all',
+        nothing === false && sitesOnDisk(one, W1) === B,
+        `${nothing} / ${sitesOnDisk(one, W1)}`);
+}
+
+// ============================================================================ 8
+{
+    suite('a mixed batch is guarded by a change the journal is holding, not by the first');
+
+    const disk = sharedStore();
+    const one = phone('d_mix_one', null, disk);
+    addTap(one, W1, A);
+    const two = secondWindow('d_mix_two', null, disk);
+    given('the second window sees him at the first site', sitesOn(two, W1) === A, sitesOn(two, W1));
+
+    removeTap(one, W1, A);
+    addTap(one, W1, B);
+    given('window one completed the move on the disk', sitesOnDisk(one, W1) === B,
+        sitesOnDisk(one, W1));
+
+    // A batch whose FIRST element carries no path - the shape that used to defeat the
+    // guard, because accepted[0] was the only thing it asked about - followed by a real
+    // journalled change for the other man. Hand-built here on purpose: no shipped screen
+    // produces a path-less change, and a guarantee that only holds for the shapes that
+    // happen to exist today is not a guarantee.
+    const mixed = [
+        { value: { note: 'no path on this one' } },
+        two.call('assignPlace', two.State.schedule, DAY, W2, 'actual', 'p_mv_c', 'normal')
+    ];
+    given('the first element has no path and the second one has',
+        !mixed[0].path && Boolean(mixed[1].path), JSON.stringify([mixed[0], mixed[1].path]));
+
+    const ok = two.State.commitMany(mixed);
+    check('the mixed batch is accepted', ok === true, String(ok));
+    check('the other man is recorded, from the stale window',
+        sitesOnDisk(two, W2) === 'p_mv_c', sitesOnDisk(two, W2));
+    check('AND THE MOVED MAN IS STILL AT THE NEW SITE on the disk',
+        sitesOnDisk(two, W1) === B, sitesOnDisk(two, W1));
+    check('the stale window now agrees with the disk about him',
+        sitesOn(two, W1) === B, sitesOn(two, W1));
+    check('and a reopen of the phone reads back both men correctly',
+        (() => {
+            const fresh = secondWindow('d_mix_reopen', null, disk);
+            return sitesOn(fresh, W1) === B && sitesOn(fresh, W2) === 'p_mv_c';
+        })(), `${sitesOnDisk(two, W1)} / ${sitesOnDisk(two, W2)}`);
+}
+
+// ============================================================================ 9
+{
+    suite('a disk whose structure this build will not accept is never written over');
+
+    const disk = sharedStore();
+    const one = phone('d_bad_one', null, disk);
+    addTap(one, W1, A);
+    const good = disk['scheduleData:v2'];
+    given('there is a readable record on the disk', typeof good === 'string' && good.length > 0,
+        String(typeof good));
+
+    const two = secondWindow('d_bad_two', null, disk);
+    given('a second window is holding it', sitesOn(two, W1) === A, sitesOn(two, W1));
+
+    // The disk is replaced, UNDER the second window, by a document that parses as JSON
+    // and is not a schedule: the shape loadRecord refuses through storedScheduleProblems
+    // and quarantines rather than filling in. Written straight into the fake disk, which
+    // is what another process - an older build, a half-finished write, a corrupted
+    // record - leaves behind. No real record is involved.
+    const damaged = JSON.stringify({ workers: 'not a list', places: [], days: {}, advances: {} });
+    disk['scheduleData:v2'] = damaged;
+    given('the disk now holds something that is not a schedule',
+        disk['scheduleData:v2'] === damaged, 'replaced');
+
+    // An ordinary edit from the second window. It must not adopt that document, and it
+    // must not write its own memory over it either - law 10: a record that will not read
+    // is still the only record of work there is.
+    const answered = two.State.commitMany([
+        two.call('assignPlace', two.State.schedule, DAY, W2, 'actual', 'p_mv_c', 'normal')
+    ]);
+    check('the edit is refused rather than saved', answered === false, String(answered));
+    check('AND THE SUSPECT DOCUMENT IS STILL THERE, byte for byte',
+        disk['scheduleData:v2'] === damaged,
+        disk['scheduleData:v2'] === damaged ? 'unchanged' : 'OVERWRITTEN');
+    check('a copy was set aside and writing is held',
+        two.global('Recovery').blocked() === true
+        && two.global('Recovery').problems.some(problem => problem.key === 'scheduleData:v2'),
+        JSON.stringify((two.global('Recovery').problems || []).map(problem => problem.key)));
+
+    // The same, through the single-edit door, on a window of its own so the hold above
+    // is not what is being measured.
+    const three = secondWindow('d_bad_three', null, sharedStore({ 'scheduleData:v2': good }));
+    given('a fresh window on a readable record', sitesOn(three, W1) === A, sitesOn(three, W1));
+    three.dump();
+    const theirDisk = three.ctx.localStorage;
+    theirDisk['scheduleData:v2'] = damaged;
+    const single = three.State.commit(
+        three.call('assignPlace', three.State.schedule, DAY, W2, 'actual', 'p_mv_c', 'normal'));
+    check('commit() refuses it too', single === false, String(single));
+    check('and leaves the suspect document alone',
+        theirDisk['scheduleData:v2'] === damaged,
+        theirDisk['scheduleData:v2'] === damaged ? 'unchanged' : 'OVERWRITTEN');
+}
+
 report();

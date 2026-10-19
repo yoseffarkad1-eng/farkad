@@ -268,15 +268,9 @@ const State = {
     //
     // Measured in tests/move.late.test.mjs, with two windows on one disk.
     //
-    // The disk is compared with what THIS window last confirmed on it. That is one
-    // getItem beside the one setVerified already pays on the same key, so it costs the
-    // same order as the write it guards.
-    diskMovedUnderUs() {
-        if (typeof this.durableText !== 'string') return false;
-        if (typeof Store === 'undefined' || !Store.available) return false;
-        const held = Store.get(V2_KEY);
-        return typeof held === 'string' && held !== this.durableText;
-    },
+    // The disk is compared with what THIS window last confirmed on it - see diskVerdict,
+    // which is the one place that asks. That is one getItem beside the one setVerified
+    // already pays on the same key, so it costs the same order as the write it guards.
 
     // What the disk holds right now, or null. Read once per rebase and handed to
     // rollback() as the new baseline - rollback restores durableText, which is THIS
@@ -302,13 +296,67 @@ const State = {
     // on one phone the journal is one journal.
     //
     // Only for an edit the journal is holding: one with no path is not in it, and
-    // rebasing would be a way to drop it. And only from commit() - save() is also called
-    // by persist, by the restore doors and by the ledger mirror, where there is no
-    // journalled edit to come back on.
-    rebaseOnDisk(change) {
-        if (!change || !change.path) return false;
-        if (!this.diskMovedUnderUs()) return false;
-        return this.adoptDiskBaseline(Store.get(V2_KEY));
+    // rebasing would be a way to drop it. And only from commit() and commitMany() -
+    // save() is also called by persist, by the restore doors and by the ledger mirror,
+    // where there is no journalled edit to come back on.
+    //
+    // WHAT THIS WINDOW MAY DO WITH THE DISK, asked once before a write of the whole
+    // schedule. Four answers, and both callers handle all four:
+    //
+    //   'clear'       the disk is what this window last confirmed; write as usual.
+    //   'rebased'     the disk had moved; memory was rebuilt from it plus the journal.
+    //   'unsafe'      the disk moved and there is NO journalled change to rebuild this
+    //                 edit from, so a rebase would drop it and a write would put this
+    //                 window's stale copy over the other one's record. Neither is
+    //                 allowed. Defensive: every change that reaches commit() and
+    //                 commitMany() today comes from a model function that returns a
+    //                 field path, so this answer is not reachable from the shipped
+    //                 screens - it is here because the alternative to an unreachable
+    //                 branch is an unguarded write.
+    //   'unreadable'  the disk holds something this build will not accept as a schedule.
+    //                 It is quarantined, NOT adopted, and NOT written over - law 10.
+    diskVerdict(journalled) {
+        if (typeof this.durableText !== 'string') return 'clear';
+        if (typeof Store === 'undefined' || !Store.available) return 'clear';
+        const held = Store.get(V2_KEY);
+        if (typeof held !== 'string' || held === this.durableText) return 'clear';
+
+        // THE SAME GATE loadRecord KEEPS, and for the same reason it keeps it.
+        //
+        // rollback() only parses and normalises, and normaliseSchedule answers with a
+        // schedule-shaped object for very nearly anything - that is its job. So adopting
+        // the disk through rollback() alone would take a damaged record into memory, and
+        // the save after it would write that back over the only copy of the damage there
+        // is. loadRecord refuses such a record and quarantines it; this must too, and
+        // through the same two functions rather than a second opinion about what a
+        // schedule is.
+        let problems;
+        try {
+            const upgraded = upgradeStoredSchedule(JSON.parse(held));
+            problems = upgraded
+                ? storedScheduleProblems(upgraded)
+                : ['הרישום השמור אינו מסמך של לוח עבודה.'];
+        } catch (error) {
+            problems = ['הרישום השמור במכשיר לא נקרא: '
+                + String((error && error.message) || error)];
+        }
+        if (problems.length > 0) {
+            // The original stays where it is and a copy is set aside. The caller refuses
+            // on this answer rather than leaning on the write being blocked: whether the
+            // hold stands depends on whether the copy could be made, and "the disk may
+            // not be overwritten" must not depend on that.
+            if (typeof Recovery !== 'undefined' && Recovery.damaged) {
+                Recovery.damaged(V2_KEY, held,
+                    'הרישום השמור במכשיר לא נקרא: ' + problems[0]);
+            }
+            return 'unreadable';
+        }
+
+        if (!journalled || !journalled.path) return 'unsafe';
+        // Readable, and the journal can rebuild the edit. If the rebase still fails -
+        // normaliseSchedule throwing on a record the two validators passed - nothing was
+        // adopted and nothing may be written either.
+        return this.adoptDiskBaseline(held) ? 'rebased' : 'unsafe';
     },
 
     save(options) {
@@ -450,10 +498,18 @@ const State = {
         // of the screen: a refused edit is never written anywhere.
         if (!this.journal(change)) return this.refuseEdit();
 
-        // See rebaseOnDisk. Between the journal and the schedule write: the journal is
+        // See diskVerdict. Between the journal and the schedule write: the journal is
         // what the rebase replays, and the schedule write is what would otherwise carry
         // this window's stale copy of somebody else's day back onto the disk.
-        this.rebaseOnDisk(change);
+        //
+        // Both refusing answers go to refuseEdit, which puts the screen back and says
+        // so. Its sentence names a full device or a hold; on 'unreadable' the hold is
+        // real, because the quarantine above raises it. On 'unsafe' - the branch no
+        // shipped screen reaches - the sentence would be the full-device one, which is
+        // the wrong reason with the right verdict. A third sentence is a product
+        // decision and is deliberately not invented here.
+        const verdict = this.diskVerdict(change);
+        if (verdict === 'unreadable' || verdict === 'unsafe') return this.refuseEdit();
 
         this.save();
         render();
@@ -574,17 +630,46 @@ const State = {
         const refused = (changes || []).filter(change => change && change.refused);
         const accepted = (changes || []).filter(change => change && !change.refused);
 
+        // NOTHING ACCEPTED IS NOT A REASON TO WRITE.
+        //
+        // save() writes the WHOLE schedule out of memory, and journalBatch answers true
+        // for an empty set - rightly, nothing is owed - so a call that accepted nothing
+        // fell straight through to that write. With another window's newer record on the
+        // disk, this window's entire copy of it went down on top, and there was no
+        // journalled edit behind it for a rebase to rebuild from or for a refusal to be
+        // about: a whole-record write with nothing to justify it. The ordinary way in is
+        // an all-refused batch - copying a day across where every worker is already at
+        // the two-site cap - so this is not a corner.
+        //
+        // The refusals are named in the same words as a partial batch, and the answer is
+        // false, because nothing was recorded. Every caller already treats false as
+        // "nothing happened": the two that pass the answer on refuse an empty list of
+        // their own before they get here.
+        if (accepted.length === 0) {
+            if (refused.length > 0 && typeof askTell === 'function') {
+                askTell(`${refused.length} רישומים לא נוספו: ${refused[0].reason}`);
+            }
+            return false;
+        }
+
         // All or nothing, and ONE write. Journalling them one at a time was all-or-nothing
         // in what it reported and not in what it did: the first entry landed, the second
         // ran out of room, and the app said the copy had not happened while half of it sat
         // on the disk waiting to come back at the next open.
         if (!this.journalBatch(accepted)) return this.refuseEdit();
 
-        // The same rebase as commit(), for the same reason: a bulk assign from the
-        // by-site screen is as able to carry another window's stale day back onto the
-        // disk as a single tap is. Asked of the first accepted change, because the
-        // question is about the disk rather than about any one path.
-        this.rebaseOnDisk(accepted[0]);
+        // THE REBASE IS ASKED OF A CHANGE THE JOURNAL IS ACTUALLY HOLDING.
+        //
+        // journalBatch keeps only the changes that carry a path, so a batch can be
+        // accepted with some paths and some not - and the first element is then not
+        // necessarily one of the journalled ones. Asking the question of accepted[0] left
+        // the whole batch unguarded whenever that first element had no path, which is the
+        // one case the guarantee had to cover. It is explicit now: the first accepted
+        // change WITH a path, which is the first thing a replay could rebuild, and
+        // diskVerdict is told plainly when there is none.
+        const journalled = accepted.find(change => change && change.path) || null;
+        const verdict = this.diskVerdict(journalled);
+        if (verdict === 'unreadable' || verdict === 'unsafe') return this.refuseEdit();
 
         this.save();
         render();
