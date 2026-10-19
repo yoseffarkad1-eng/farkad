@@ -581,18 +581,23 @@ const queueMark = (device, path) => {
 // pinned as LIMITS - what this build does today - not as guarantees that it is right.
 // They are here so that the next person reads them off a run instead of off a claim.
 {
-    suite('LIMIT: the same worker-day edited from two windows is last-write-wins');
+    suite('the same worker-day edited from two windows is held, not overwritten');
 
-    // The guard rebases a stale window onto the disk and then replays the journal. When
-    // the two windows have edited DIFFERENT paths that is a merge and nothing is lost -
-    // that is suite 8 above. When they have edited THE SAME worker on THE SAME day it
-    // cannot be: the journal is keyed by path and the value is the whole worker-day
-    // record, so the second window's entry replaces the first's at that key and the
-    // replay lays it down. The earlier edit is gone, and nothing anywhere says so.
+    // THIS SUITE USED TO PIN THE OPPOSITE, AND THAT WAS THE FAULT.
     //
-    // There is no field-level merge to reach for: a worker-day is one value. Showing the
-    // person a conflict instead would be a new screen and a new decision, and this is
-    // not the round that takes it.
+    // It was written as «LIMIT: the same worker-day edited from two windows is
+    // last-write-wins», and it recorded, accurately, what the build then did: the stale
+    // window's whole-record journal entry was replayed over the disk, the other window's
+    // edit was gone, and nothing anywhere said so. Calling that a limit did not make it
+    // one. The independent review's F3 named it, and the repair is in js/state.js:
+    // contestedPaths compares three sides - what this window last agreed the disk held,
+    // what the disk holds now, and what this window has in memory - and a field both
+    // have moved is not resolved here at all.
+    //
+    // Both sides are kept: theirs is on the disk and is left alone, ours stays in the
+    // journal and is marked held, and ⋯ shows the pair for a person to release one at a
+    // time. A worker-day is one value and there is no field left to merge, so the only
+    // honest answer is to stop and ask - which is what this suite now measures.
     const disk = sharedStore();
     const one = phone('d_same_one', null, disk);
     addTap(one, W1, A);
@@ -608,20 +613,19 @@ const queueMark = (device, path) => {
 
     // The stale window now edits THE SAME man on THE SAME day - it adds him to the third
     // site, computed against its own memory, where he is still at A.
-    addTap(two, W1, 'p_mv_c');
+    const answered = addTap(two, W1, 'p_mv_c');
     const after = sitesOnDisk(two, W1);
-    check('the stale window\'s own value for that day is what survives',
-        after === [A, 'p_mv_c'].sort().join('+'), after);
-    check('and window one\'s move is NOT on the disk any more - the limit, named',
-        after.indexOf(B) === -1, `disk says ${after}`);
-    // «Nobody was told» measured rather than asserted: no record was quarantined and
-    // nothing is held, because an overwrite of this shape is not something this build
-    // recognises as a conflict at all. See LIMITS.md.
-    check('nothing was quarantined and nothing is held, so nobody was told',
-        two.global('Recovery').problems.length === 0
-        && two.global('Recovery').blocked() === false,
-        JSON.stringify({ problems: two.global('Recovery').problems.length,
-            blocked: two.global('Recovery').blocked() }));
+    check('the stale window is told its edit did not go to the record',
+        answered === false, String(answered));
+    check('AND WINDOW ONE\'S MOVE IS STILL ON THE DISK',
+        after === B, `disk says ${after}`);
+    check('the stale window\'s own value did not replace it',
+        after.indexOf('p_mv_c') === -1, `disk says ${after}`);
+    // Both sides, kept. Theirs is the record; ours is in the queue, held so that nothing
+    // sends it behind the person's back, and listed in ⋯ with the pair.
+    check('and its own side is kept in the queue rather than dropped',
+        two.Sync.heldRecords().some(row => String(row.path).indexOf(W1) !== -1),
+        JSON.stringify(two.Sync.heldRecords().map(row => row.path)));
     // What is still true, and is why this is a limit rather than the old fault: the
     // record is a record somebody made, on purpose, from a screen that showed them what
     // they were changing. The old fault wrote a day NOBODY had touched.
@@ -630,13 +634,20 @@ const queueMark = (device, path) => {
 
 // =========================================================================== 11
 {
-    suite('LIMIT: the read and the write are not one atomic step');
+    suite('a writer that does not take the lock is still a writer - what is left');
 
-    // diskVerdict reads the disk, compares, rebases; save() then writes. Two windows are
-    // two threads against one localStorage with no lock between them, so a write that
-    // lands BETWEEN the compare and the write is not seen. The guard narrows that window
-    // to the width of one commit; it does not close it, and localStorage offers nothing
-    // that would.
+    // THIS SUITE ALSO USED TO PIN A LIMIT THAT IS NO LONGER TRUE OF COMMITS.
+    //
+    // It read «the read and the write are not one atomic step», and that was right of the
+    // build it was written against: diskVerdict read, save() wrote, and a write landing
+    // between them was invisible. The review's F4 asked for serialisation rather than
+    // re-reading, and js/state.js takes a lock across both steps now - so two COMMITS can
+    // no longer interleave that way, which is measured in tests/codex.probes.test.mjs.
+    //
+    // What is left, and is measured here, is narrower and worth keeping visible: a writer
+    // that does not take the lock is not serialised by it. The injection below writes the
+    // disk directly, which is what an older build in another window does - it has no such
+    // lock to take. The journal is what recovers the rest, and that is checked too.
     //
     // Measured by making the other window's write land in exactly that gap, from inside
     // this file: Store.setVerified on the stale window is wrapped so that the first call
@@ -675,7 +686,7 @@ const queueMark = (device, path) => {
     const landed = sitesOnDisk(two, W1);
     check('a write that lands inside the gap is not seen by the compare before it',
         used === true, `injection used: ${used}`);
-    check('so the disk can still end up carrying the writing window\'s copy - the limit',
+    check('so a writer outside the lock can still land its own copy - what is left',
         typeof landed === 'string', `disk says ${landed} for the moved man`);
     check('and the journal is what recovers it: a reopen replays the edits',
         sitesOn(secondWindow('d_toctou_reopen', null, disk), W2) === [A, 'p_mv_c'].sort().join('+'),
