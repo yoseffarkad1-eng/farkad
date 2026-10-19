@@ -179,8 +179,24 @@ const deliver = (cloud, snapshot) =>
     check('a newer document from another phone is adopted',
         sitesOn(a, 'w_01') === 'p_03', sitesOn(a, 'w_01'));
 
-    // A legacy document carries no revision at all. Refusing those would cut off every
-    // phone that has not reached the protocol, which is the opposite of the point.
+    // A LEGACY DOCUMENT NO LONGER OUTRANKS A DEVICE THAT IS PAST THE PROTOCOL.
+    //
+    // This expectation moved, deliberately, and it is the point of the change rather
+    // than a casualty of it. It used to read «and a document with no revision is adopted
+    // as before», over a device that had already adopted revision 5 - and the
+    // independent review's F5 named exactly that: the stale-snapshot guard asked
+    // Number.isInteger(raw.revision) first, so a delivery with the field missing walked
+    // past it and undid, in one go, everything this device had accepted since. The
+    // symptom is the stale one exactly: the move goes back to the site it came from.
+    //
+    // The reason the old line gave is still a real reason, and it is still honoured -
+    // just not here. «Refusing those would cut off every phone that has not reached the
+    // protocol» is true of a device that has NEVER seen a revision, whose `_revision` is
+    // null and for which a document without one is the only kind there is. That case is
+    // untouched by the change and is pinned in the suite below this one, and again in
+    // tests/codex.probes.test.mjs under F5. What is refused here is only a document with
+    // no revision arriving at a device that is already past the cutover, where the
+    // cloud's own documents all carry one.
     const legacy = JSON.parse(JSON.stringify(cloud.doc));
     delete legacy.revision;
     delete legacy.protocol;
@@ -190,8 +206,38 @@ const deliver = (cloud, snapshot) =>
         rates: { daily: 450, hourly: 0 } };
     deliver(cloud, legacy);
     await settle(TICK * 20);
-    check('and a document with no revision is adopted as before',
-        sitesOn(a, 'w_01') === 'p_01', sitesOn(a, 'w_01'));
+    check('a document with no revision does not take the newer one off a device past the protocol',
+        sitesOn(a, 'w_01') === 'p_03', sitesOn(a, 'w_01'));
+}
+
+// ------------------------------------------- and the legacy path, where it is the truth
+{
+    suite('a device that has never seen a revision still adopts a document without one');
+
+    // Nothing this device is ever shown carries a revision, so there is no cutover behind
+    // it and no newer state to protect: the document in front of it is all there is.
+    // Refusing it here WOULD cut off a project that has not reached the protocol.
+    //
+    // The project is already holding that document when the device connects - which is
+    // what a pre-protocol project looks like. Letting the device create the document
+    // first would give it revision 1 and it would no longer be a device that has never
+    // seen one.
+    const pre = {
+        workers: [{ id: 'w_01', name: 'אחמד מחמוד', active: true, dailyRate: 450, hourlyRate: 0 },
+            { id: 'w_02', name: 'אחמד מכלוף', active: true, dailyRate: 550, hourlyRate: 0 }],
+        places: [{ id: 'p_01', name: 'פרסדיה', active: true },
+            { id: 'p_02', name: 'אילון', active: true },
+            { id: 'p_03', name: 'גדרה', active: true }],
+        days: { [DAY]: { plan: {}, actual: { w_01: { entries: [{ placeId: 'p_02' }],
+            rates: { daily: 450, hourly: 0 } } } } },
+        advances: {}, updatedAt: '2026-10-15T07:00:00.000Z', updatedBy: 'd_pre_protocol' };
+    const cloud = makeCloud({ doc: pre });
+    const a = phone('d_legacy_only', cloud);
+    await settle(TICK * 30);
+    given('this device has never been shown a revision',
+        a.Sync._revision === null || a.Sync._revision === undefined,
+        String(a.Sync._revision));
+    check('the legacy document is adopted', sitesOn(a, 'w_01') === 'p_02', sitesOn(a, 'w_01'));
 }
 
 // ------------------------------------------------- the same delivery, with work queued

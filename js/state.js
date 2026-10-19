@@ -8,6 +8,15 @@
 const V1_KEY = 'scheduleData';
 const V2_KEY = 'scheduleData:v2';
 const ISSUES_KEY = 'scheduleData:migrationIssues';
+// ONE WRITER AT A TIME, ACROSS WINDOWS. See takeWriteLock: reading the disk and then
+// writing it is two steps, and another window's write between them is not seen by any
+// amount of re-reading. Deliberately NOT a record: isFarkadSnapshotKey does not name it,
+// so it never moves the write fence and never reaches a rescue file.
+const WRITE_LOCK_KEY = 'farkad:writeLock';
+// A window that died holding the lock must not wedge recording for the rest of the
+// evening. The critical section is a parse, a compare and one write - microseconds - so
+// a claim older than this is a window that is gone, not one that is slow.
+const WRITE_LOCK_STALE_MS = 1500;
 // An unreadable v2 blob is handled by Recovery, which copies it to
 // `scheduleData:v2:damaged` and leaves the original alone. A build before v67 put its
 // copy under `scheduleData:v2damaged` - no colon - and then overwrote the original;
@@ -48,7 +57,23 @@ const State = {
 
     loadRecord() {
         let damaged = false;
-        const v2 = Store.get(V2_KEY);
+        // THE DISK, NOT THE SESSION CACHE - the same reading diskVerdict needs, and for
+        // the same reason.
+        //
+        // Store.get answers from Store.memory first, which holds what THIS window last
+        // wrote. At the first boot memory is empty and the two readings agree, so this
+        // looked harmless; a window that reads the record again later - after a snapshot
+        // was adopted and persisted, or any time a second window re-reads - was handed
+        // its own older text and set `durableText` from it. durableText is the claim
+        // "this is what the disk holds", every later comparison is made against it, and
+        // a false one makes every edit afterwards look like somebody else's conflict.
+        //
+        // Falling back to memory keeps the one case the cache is right about: a disk that
+        // cannot be read at all, where what this session wrote is all there is. What the
+        // disk refused and memory still holds is not lost by preferring the disk - the
+        // journal is replayed over it a few lines below, which is what the journal is for.
+        const durable = Store.durableGet(V2_KEY);
+        const v2 = durable === null || durable === undefined ? Store.get(V2_KEY) : durable;
         if (v2) {
             try {
                 // Parsing is not the question. A record that parses into
@@ -318,7 +343,14 @@ const State = {
     diskVerdict(journalled) {
         if (typeof this.durableText !== 'string') return 'clear';
         if (typeof Store === 'undefined' || !Store.available) return 'clear';
-        const held = Store.get(V2_KEY);
+        // durableGet, NOT get. Store.get answers from Store.memory first, and memory holds
+        // what THIS window last wrote - so for any window that has saved even once the
+        // comparison below was its own text against its own text, and the verdict was
+        // 'clear' every time. The guard protected only a window that had never written,
+        // which is the one case it was not needed for. durableGet exists for exactly this
+        // question - "what would the next session see" - and bypasses the cache without
+        // changing what Store.get means for everybody else.
+        const held = Store.durableGet(V2_KEY);
         if (typeof held !== 'string' || held === this.durableText) return 'clear';
 
         // THE SAME GATE loadRecord KEEPS, and for the same reason it keeps it.
@@ -352,11 +384,151 @@ const State = {
             return 'unreadable';
         }
 
-        if (!journalled || !journalled.path) return 'unsafe';
-        // Readable, and the journal can rebuild the edit. If the rebase still fails -
-        // normaliseSchedule throwing on a record the two validators passed - nothing was
-        // adopted and nothing may be written either.
+        if (!journalled) return 'unsafe';
+
+        // A FIELD BOTH WINDOWS HAVE CHANGED IS A CONFLICT, AND NOT THIS CODE'S TO SETTLE.
+        //
+        // The rebase adopts the disk and replays this window's journal over it. That is a
+        // merge only where the two windows touched different fields. Where they touched
+        // the SAME worker-day it is not a merge at all: the journal entry is the WHOLE
+        // record for that field, so replaying it puts back a site the other window
+        // deliberately removed and takes their edit off the disk with nobody told.
+        //
+        // The comparison is against what THIS window last agreed the disk held - the
+        // version the person was looking at when they made their edit - and never against
+        // the value just read off the disk. Reading a newer value is not the person
+        // consenting to replace it.
+        const contested = this.contestedPaths(held);
+        if (contested.length > 0) {
+            // Both sides are kept: theirs is what the disk already holds and is left
+            // alone, ours stays in the journal and is marked held so that nothing sends
+            // it behind the person's back. The ⋯ panel shows the pair and releases them
+            // one at a time - the machinery that already exists for exactly this.
+            if (typeof FarkadSync !== 'undefined' && FarkadSync.holdHere) {
+                contested.forEach(path => FarkadSync.holdHere(path));
+            }
+            return 'contested';
+        }
+
+        // Readable, no field contested, and the journal can rebuild the edit. If the
+        // rebase still fails - normaliseSchedule throwing on a record the two validators
+        // passed - nothing was adopted and nothing may be written either.
         return this.adoptDiskBaseline(held) ? 'rebased' : 'unsafe';
+    },
+
+    // ONE WRITER AT A TIME, ACROSS WINDOWS.
+    //
+    // diskVerdict reads the disk and save() writes it. Those are two steps, and a write
+    // from another window landing between them is invisible to any amount of re-reading:
+    // re-reading is not serialisation. Two windows are two threads against one
+    // localStorage, which offers no lock of its own - so the lock is built out of the one
+    // primitive the store does have, a write that is read back and believed only if it is
+    // still ours.
+    //
+    // The loser does not wait. A synchronous spin on the main thread cannot let another
+    // window run anyway, and a tap that hangs the screen is worse than a tap that says it
+    // did not take: it refuses, keeps its edit in the journal, and the person tries again.
+    // Collisions are a parse and one write wide, so this is rare by construction.
+    writeLockToken: null,
+    writeLockSeq: 0,
+
+    takeWriteLock() {
+        if (typeof Store === 'undefined' || !Store.available) return true;
+        this.writeLockSeq += 1;
+        const mine = `${typeof syncDeviceId === 'function' ? syncDeviceId() : 'local'}`
+            + `:${this.writeLockSeq}`;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            let holder = null;
+            try {
+                const raw = Store.durableGet(WRITE_LOCK_KEY);
+                holder = raw ? JSON.parse(raw) : null;
+            } catch (error) {
+                holder = null;
+            }
+            const at = holder && Number(holder.at);
+            const fresh = Number.isFinite(at) && (Date.now() - at) < WRITE_LOCK_STALE_MS;
+            // Somebody else is inside the critical section, and recently enough to be
+            // alive. Nothing of ours may be written on top of what they are doing.
+            if (fresh && holder.token !== mine) continue;
+            if (Store.setVerified(WRITE_LOCK_KEY,
+                JSON.stringify({ token: mine, at: Date.now() }))) {
+                this.writeLockToken = mine;
+                return true;
+            }
+        }
+        return false;
+    },
+
+    releaseWriteLock() {
+        if (!this.writeLockToken) return;
+        const mine = this.writeLockToken;
+        this.writeLockToken = null;
+        if (typeof Store === 'undefined' || !Store.available) return;
+        try {
+            const raw = Store.durableGet(WRITE_LOCK_KEY);
+            const holder = raw ? JSON.parse(raw) : null;
+            // Only ever our own claim: a lock taken over as stale belongs to whoever took
+            // it, and removing it from under them is the fault this exists to prevent.
+            if (holder && holder.token === mine) Store.remove(WRITE_LOCK_KEY);
+        } catch (error) {
+            // A lock that cannot be read is a lock that will go stale on its own.
+        }
+    },
+
+    // The field paths this window has queued that the disk ALSO moved since this window
+    // last agreed with it. One entry here is a genuine two-window conflict over one
+    // record; an empty answer means the two windows wrote about different things and the
+    // rebase is a merge that loses nothing.
+    contestedPaths(held) {
+        if (typeof FarkadSync === 'undefined' || !FarkadSync.pendingPaths) return [];
+        let base;
+        let theirs;
+        try {
+            base = JSON.parse(this.durableText);
+            theirs = JSON.parse(held);
+        } catch (error) {
+            // Unparseable is handled above this; answering "no conflict" here would be a
+            // second opinion about the same bytes.
+            return [];
+        }
+        const at = (document, path) => {
+            const parts = String(path).split('.');
+            let node = document;
+            for (let step = 0; step < parts.length; step += 1) {
+                if (!node || typeof node !== 'object') return undefined;
+                node = node[parts[step]];
+            }
+            return node;
+        };
+        const same = (one, other) => {
+            try { return JSON.stringify(one) === JSON.stringify(other); }
+            catch (error) { return false; }
+        };
+        let pending;
+        try { pending = FarkadSync.pendingPaths() || []; } catch (error) { return []; }
+
+        // THREE SIDES, and all three are needed.
+        //
+        //   base   - the record as this window last agreed the disk held it: the version
+        //            the person was looking at when they made their edit.
+        //   theirs - what the disk holds now.
+        //   mine   - what this window holds in memory, which is base plus what the person
+        //            has just done.
+        //
+        // A field is contested only when BOTH have moved away from base. Where only
+        // theirs moved, the other window is the only one with an opinion and the rebase
+        // takes it. Where only mine moved, nobody is arguing.
+        //
+        // The queue cannot answer "is this mine": on one phone the journal is ONE journal,
+        // shared by every window of the app, so the other window's own operations are in
+        // it too. Asking the queue made every path the other window had touched look
+        // contested. Memory is what distinguishes them, because memory is per window.
+        return pending.filter(path => {
+            const theirSide = at(theirs, path);
+            if (same(at(base, path), theirSide)) return false;
+            return !same(at(this.schedule, path), theirSide)
+                && !same(at(this.schedule, path), at(base, path));
+        });
     },
 
     save(options) {
@@ -446,13 +618,24 @@ const State = {
     // `removed` is passed straight through to editRoster: see the note there. It is how a
     // deletion reaches the other two phones on a device that has never had a snapshot.
     commitRoster(removed, changes) {
-        const journalled = (typeof FarkadSync === 'undefined' || !FarkadSync.editRoster)
-            ? !Store.available
-            : Boolean(FarkadSync.editRoster(this.schedule, removed, { changes })) || !Store.available;
+        const queued = typeof FarkadSync !== 'undefined' && FarkadSync.editRoster
+            ? Boolean(FarkadSync.editRoster(this.schedule, removed, { changes }))
+            : false;
+        const journalled = queued || !Store.available;
 
         if (!journalled) return this.refuseEdit();
 
-        this.save();
+        // THE SAME GUARD AS THE OTHER TWO DOORS, and it was missing here.
+        //
+        // save() writes the WHOLE schedule, days included. A roster edit made in a window
+        // that has gone out of date therefore carried that window's copy of every
+        // recorded day back onto the disk - so renaming one man silently rewrote another
+        // man's work. The roster edit itself is about names and rates and has nothing to
+        // do with days, which is exactly why nobody would look for the loss there.
+        //
+        // `queued` is what the journal is holding: editRoster's own entries, which a
+        // replay can rebuild this change from.
+        if (!this.guardedSave(queued)) return false;
         return true;
     },
 
@@ -498,20 +681,34 @@ const State = {
         // of the screen: a refused edit is never written anywhere.
         if (!this.journal(change)) return this.refuseEdit();
 
-        // See diskVerdict. Between the journal and the schedule write: the journal is
-        // what the rebase replays, and the schedule write is what would otherwise carry
-        // this window's stale copy of somebody else's day back onto the disk.
-        //
-        // Both refusing answers go to refuseEdit, which puts the screen back and says
-        // so. Its sentence names a full device or a hold; on 'unreadable' the hold is
-        // real, because the quarantine above raises it. On 'unsafe' - the branch no
-        // shipped screen reaches - the sentence would be the full-device one, which is
-        // the wrong reason with the right verdict. A third sentence is a product
-        // decision and is deliberately not invented here.
-        const verdict = this.diskVerdict(change);
-        if (verdict === 'unreadable' || verdict === 'unsafe') return this.refuseEdit();
+        // FROM HERE THE EDIT IS DURABLE. It is in the journal, it will be replayed at the
+        // next open, and it is owed to the cloud - so nothing below may describe it as
+        // cancelled. See refuseEdit's `kept`.
+        return this.guardedSave(Boolean(change && change.path));
+    },
 
-        this.save();
+    // The whole-schedule write, with the disk between two windows taken into account.
+    // Shared by the three doors that reach save() with a journalled edit behind them.
+    //
+    // `journalled` says whether the journal is holding something a replay could rebuild
+    // this edit from. The lock is taken FIRST, so the verdict's read and the write it
+    // guards are one critical section rather than two steps with a gap between them.
+    guardedSave(journalled) {
+        if (!this.takeWriteLock()) {
+            // Another window is inside its own write. Ours is in the journal and is not
+            // lost; what must not happen is this window writing its whole schedule on top
+            // of a record it has not read.
+            return this.refuseEdit({ kept: journalled, busy: true });
+        }
+        try {
+            const verdict = this.diskVerdict(journalled);
+            if (verdict !== 'clear' && verdict !== 'rebased') {
+                return this.refuseEdit({ kept: journalled, verdict });
+            }
+            this.save();
+        } finally {
+            this.releaseWriteLock();
+        }
         render();
         return true;
     },
@@ -540,9 +737,36 @@ const State = {
     },
 
     // The shared ending for a commit with nowhere to live.
-    refuseEdit() {
+    refuseEdit(options) {
         this.rollback();
         render();
+
+        // AN EDIT THE JOURNAL IS HOLDING WAS NOT CANCELLED, AND MUST NOT BE CALLED
+        // CANCELLED.
+        //
+        // The two sentences below were written for the one case this function originally
+        // had: the journal itself would not take the edit, so nothing of it existed
+        // anywhere and «השינוי בוטל כדי שלא ייראה כאילו נרשם» was exactly true. The disk
+        // guard reaches here from the other side - the journal HAS taken the edit, it is
+        // on this device, rollback() has just replayed it back onto the screen, and it is
+        // still owed to the cloud. Telling the person it was cancelled is false about the
+        // one thing they need to be able to trust, and it invites them to type the
+        // evening again over a record that already holds it.
+        //
+        // Nothing is dropped from the queue here. The operation stays exactly where it
+        // was; what changes is only what the person is told about it.
+        if (options && options.kept) {
+            if (typeof askTell === 'function') {
+                askTell({
+                    title: 'הרישום לא נכתב למכשיר',
+                    message: 'השינוי נשמר ברשימת ההמתנה ולא אבד, אבל לא הצלחנו לכתוב ' +
+                        'אותו לרישום שבמכשיר כרגע. מה שכבר שמור לא נפגע. נסה שוב בעוד ' +
+                        'רגע, ואם זה חוזר - פתח את ⋯ כדי לראות מה ממתין.'
+                });
+            }
+            return false;
+        }
+
         // Two different refusals, and the dialog must name the right one. A held
         // transaction - quarantine, a build mismatch - is not a space problem, and
         // claiming "אין מקום" over it sends somebody to delete photos that will not
@@ -667,12 +891,8 @@ const State = {
         // one case the guarantee had to cover. It is explicit now: the first accepted
         // change WITH a path, which is the first thing a replay could rebuild, and
         // diskVerdict is told plainly when there is none.
-        const journalled = accepted.find(change => change && change.path) || null;
-        const verdict = this.diskVerdict(journalled);
-        if (verdict === 'unreadable' || verdict === 'unsafe') return this.refuseEdit();
+        if (!this.guardedSave(accepted.some(change => change && change.path))) return false;
 
-        this.save();
-        render();
         if (refused.length > 0 && typeof askTell === 'function') {
             askTell(`${refused.length} רישומים לא נוספו: ${refused[0].reason}`);
         }

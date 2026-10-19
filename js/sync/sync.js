@@ -2103,6 +2103,25 @@ const FarkadSync = {
     // shown without a decision, since a decision offered against nothing is a coin toss.
     // Values are cloned on the way out, like everything the queue hands to the app: a
     // row the panel holds must not be a handle on the parsed queue.
+    // Hold one path for THIS SESSION, because another writer of the same disk changed it
+    // under us and both answers are now real.
+    //
+    // The cloud half of this file already holds a path when a write loses a race; this is
+    // the same hold reached from the local half, where the other writer is a second
+    // WINDOW of this app rather than another phone. A held operation is not sent and is
+    // listed in ⋯ with both sides for a person to release one at a time - which is the
+    // only honest answer when two people have changed the same worker-day, because the
+    // value is the whole record and there is no field left to merge.
+    //
+    // Nothing is deleted and nothing is zeroed: the operation stays in the queue exactly
+    // as it was. _heldNow dies with the tab, so a hold never outlives the session that
+    // had a reason for it.
+    holdHere(path) {
+        if (!path) return false;
+        this._heldNow.add(String(path));
+        return true;
+    },
+
     heldRecords() {
         this.loadOutbox();
         const heard = this._baseDoc !== null;

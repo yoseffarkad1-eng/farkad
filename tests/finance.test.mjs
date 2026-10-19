@@ -259,9 +259,28 @@ for (const [reading, flags] of [['gates shut', SHUT], ['gates open', OPEN]]) {
         check(`${reading}: the page says why they have no days`,
             why.some(text => text.indexOf('אין להם ימי עבודה בתקופה הזו') !== -1),
             JSON.stringify(why));
-        check(`${reading}: and that nothing undeducted is lost`,
-            why.some(text => text.indexOf('עובר לתקופה הבאה ולא נמחק') !== -1),
-            JSON.stringify(why));
+        // WHAT HAPPENS TO MONEY THE PERIOD DID NOT DEDUCT, asked of the record rather
+        // than hard-coded.
+        //
+        // This check used to require «עובר לתקופה הבאה ולא נמחק» in BOTH readings, and
+        // that is the promise R2 of the independent read found to be false: the carry
+        // needs carryReportingEnabled, which is advanceCarryEnabled() on the BUILD and
+        // carryMigrationSettled() on the RECORD. Opening the flags satisfies the first
+        // and not the second - this fixture approves nothing - so in the open reading
+        // there is no balance crossing periods, and the page says so instead. Demanding
+        // the carry sentence here was demanding the app lie in two of the three states
+        // it ships in.
+        //
+        // The wrong promise is not restored and neither sentence is accepted loosely:
+        // the gate is read the way renderFinanceBlock reads it, and the sentence that
+        // belongs to THAT reading is the one required. The three states are pinned on
+        // their own in tests/finance.wording.test.mjs.
+        const carries = device.run('carryReportingEnabled(State.schedule) === true');
+        check(`${reading}: and the section says what becomes of money it did not deduct`,
+            carries
+                ? why.some(text => text.indexOf('עובר לתקופה הבאה ולא נמחק') !== -1)
+                : why.some(text => text.indexOf('אין יתרה שעוברת בין תקופות') !== -1),
+            JSON.stringify({ carries, why }));
     }
 
     // ------------------------------------------------ what the bookkeeper's file carries

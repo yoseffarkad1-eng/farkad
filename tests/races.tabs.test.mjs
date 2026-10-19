@@ -61,6 +61,34 @@ function seed(device) {
 // One site on a day, REPLACING whatever was there: assignPlace adds and is idempotent,
 // so the site that is already there has to be taken off first. Several cases here turn
 // on "the same path, two different values", which needs the day to hold one site.
+// THE RACING TAB WRITES THE WAY A DISK IN THE FIELD CARRIES ONE.
+//
+// A retirement is needed when two genuinely concurrent operations exist for one path,
+// neither naming the other. This suite used to build that pair by having two tabs call
+// State.commit on the same path at once, and State.commit now refuses to make such a
+// pair: the second window is told its field is contested and its operation is held, so
+// only one operation is ever created and there is nothing to retire. That repair does
+// not make the pair disappear - disks already carry them, from builds that had no guard
+// and from operations made before it existed - and the collector must still be right
+// about those. So the racing tabs are built the way those disks were: the operation goes
+// into the queue, and the schedule is written through save(), the unguarded door the old
+// commit used. Nothing that is asserted below changes.
+function racingWrite(device, path, placeId) {
+    const [, date, layer, workerId] = path.split('.');
+    device.call('entriesFor', device.State.schedule, date, workerId, layer).slice()
+        .filter(entry => entry.placeId !== placeId)
+        .forEach(entry => {
+            const off = device.call('unassignPlace',
+                device.State.schedule, date, workerId, layer, entry.placeId);
+            if (off && off.path) device.Sync.queue(off.path, off.value);
+        });
+    const change = device.call('assignPlace',
+        device.State.schedule, date, workerId, layer, placeId);
+    if (change && change.path) device.Sync.queue(change.path, change.value);
+    device.State.save({ silent: true });
+    return true;
+}
+
 function put(device, path, placeId) {
     const [, date, layer, workerId] = path.split('.');
     device.call('entriesFor', device.State.schedule, date, workerId, layer)
@@ -1206,11 +1234,12 @@ function holdWrites(cloud, kind) {
         let fired = false;
         const arm = () => shared.interleave(key => {
             if (String(key) === warmKey) reads += 1;
-            if (reads === 2 && !fired) { fired = true; put(tabB, path, placeB); return; }
+            if (reads === 2 && !fired) { fired = true; racingWrite(tabB, path, placeB); return; }
             arm();
         });
         arm();
-        put(tabA, path, placeA);
+        // Both sides at queue level - see racingWrite.
+        racingWrite(tabA, path, placeA);
         shared.interleave(null);
         return fired;
     }

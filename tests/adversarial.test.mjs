@@ -149,6 +149,35 @@ const reopen = (device, options = {}) => {
 // projection, once for the physical set - and only then writes its batch. The second read
 // of a warm-up batch key is the last read before that write, so the other tab records its
 // day THERE: after A has decided what it can see, and before A's bytes exist for B.
+// THE RACING TAB WRITES THE WAY A DISK IN THE FIELD CARRIES ONE.
+//
+// This suite is about the QUEUE: two operations for one path, neither naming the other,
+// and what the collector and the projector may do with them. It used to build that pair
+// by having two tabs call State.commit on the same path at once - and State.commit now
+// refuses to make such a pair (see diskVerdict: the second window is told its field is
+// contested and its operation is held). That repair does not make the pair disappear:
+// disks already carry them, from builds that had no guard and from operations made
+// before it existed, and the collector must still be right about those.
+//
+// So the racing tab is built the way those disks were: the operation goes into the
+// queue, and the schedule is written through save(), which is the unguarded door the old
+// commit used. Nothing about what is then asserted changes.
+function racingWrite(device, path, placeId) {
+    const [, date, layer, workerId] = path.split('.');
+    device.call('entriesFor', device.State.schedule, date, workerId, layer).slice()
+        .filter(entry => entry.placeId !== placeId)
+        .forEach(entry => {
+            const off = device.call('unassignPlace',
+                device.State.schedule, date, workerId, layer, entry.placeId);
+            if (off && off.path) device.Sync.queue(off.path, off.value);
+        });
+    const change = device.call('assignPlace',
+        device.State.schedule, date, workerId, layer, placeId);
+    if (change && change.path) device.Sync.queue(change.path, change.value);
+    device.State.save({ silent: true });
+    return true;
+}
+
 function twoTabsRace(shared, tabA, tabB, path) {
     put(tabA, 'days.2026-08-10.actual.w_02', 'p_01');
     const warmKey = Object.keys(shared).filter(key =>
@@ -158,11 +187,16 @@ function twoTabsRace(shared, tabA, tabB, path) {
     let fired = false;
     const arm = () => shared.interleave(key => {
         if (String(key) === warmKey) reads += 1;
-        if (reads === 2 && !fired) { fired = true; put(tabB, path, 'p_02'); return; }
+        if (reads === 2 && !fired) { fired = true; racingWrite(tabB, path, 'p_02'); return; }
         arm();
     });
     arm();
-    put(tabA, path, 'p_01');
+    // Both sides of the race are built at queue level now - see racingWrite. With one
+    // side going through State.commit the other is told its field is contested, which is
+    // the repair working and leaves the projection naming a HELD operation that the disk
+    // deliberately disagrees with. That is a true state, and it is not the one this suite
+    // is about.
+    racingWrite(tabA, path, 'p_01');
     shared.interleave(() => {});
     return fired;
 }

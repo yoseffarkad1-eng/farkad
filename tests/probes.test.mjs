@@ -267,6 +267,14 @@ const connected = async (device, cloud) => {
     await connected(b, cloud);
     put(a, PATH, 'p_01');
     await settle(TICK * 40);
+    // The second tab reads the disk before it edits - a tab reopened, or one that has
+    // come back to the front. Without it its base is the record from BEFORE the first
+    // tab's write, so the field is contested: State refuses the edit and holds both
+    // sides for a person, which is the repair for the independent review's F3 and is
+    // measured in tests/codex.probes.test.mjs. Q3 is about what the CLOUD does with two
+    // writes that are both on their way, so it needs the second one to actually leave.
+    // Not one assertion below this line changed.
+    b.State.load();
     put(b, PATH, 'p_02');
     await settle(TICK * 40);
 

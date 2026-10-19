@@ -596,8 +596,21 @@ Object.assign(FarkadSync, {
         // document is not adopted, the queue is untouched, the status is left exactly as
         // the last real snapshot set it, and `_latestRaw` keeps the NEWER document so
         // the held-snapshot replay and readoptAfter still have the right one to re-run.
-        if (Number.isInteger(raw.revision) && this._revision !== null
-            && raw.revision < this._revision) {
+        // A DOCUMENT WITH NO REVISION AT ALL IS THE SAME HAZARD, and it walked past this
+        // guard because the guard asked for an integer before it asked anything else.
+        //
+        // Once this device has been shown a revision it is past the protocol, and every
+        // document the cloud holds from then on carries one. A delivery with the field
+        // missing is a cached copy from before the cutover, or a write by a phone that
+        // has not reached the protocol - and adopting it undoes, in one delivery,
+        // everything this device has accepted since. The symptom is the stale one
+        // exactly: the move goes back to the site it came from.
+        //
+        // THE LEGACY PATH STAYS OPEN where it is still the truth. A device that has never
+        // seen a revision has `_revision === null`, and for it a document without one is
+        // the only kind there is; nothing about that case changes here.
+        const said = Number.isInteger(raw.revision) ? raw.revision : null;
+        if (this._revision !== null && (said === null || said < this._revision)) {
             this._staleSnapshots += 1;
             // A delivery is still a sighting of the cloud, and the barrier it opens is
             // what sends anything this device still owes.
