@@ -8,15 +8,11 @@
 const V1_KEY = 'scheduleData';
 const V2_KEY = 'scheduleData:v2';
 const ISSUES_KEY = 'scheduleData:migrationIssues';
-// ONE WRITER AT A TIME, ACROSS WINDOWS. See takeWriteLock: reading the disk and then
-// writing it is two steps, and another window's write between them is not seen by any
-// amount of re-reading. Deliberately NOT a record: isFarkadSnapshotKey does not name it,
-// so it never moves the write fence and never reaches a rescue file.
-const WRITE_LOCK_KEY = 'farkad:writeLock';
-// A window that died holding the lock must not wedge recording for the rest of the
-// evening. The critical section is a parse, a compare and one write - microseconds - so
-// a claim older than this is a window that is gone, not one that is slow.
-const WRITE_LOCK_STALE_MS = 1500;
+// There was a lock key here. It is gone, and the reason is written out in full above
+// recordOnDisk: a read followed by a write is not a test-and-set, so what it held was a
+// belief rather than a lock. Nothing reads or writes this key any more; a value left
+// under it by v162 is inert and is deliberately not deleted - this round removes no
+// stored bytes of any kind.
 // An unreadable v2 blob is handled by Recovery, which copies it to
 // `scheduleData:v2:damaged` and leaves the original alone. A build before v67 put its
 // copy under `scheduleData:v2damaged` - no colon - and then overwrote the original;
@@ -404,8 +400,29 @@ const State = {
             // alone, ours stays in the journal and is marked held so that nothing sends
             // it behind the person's back. The ⋯ panel shows the pair and releases them
             // one at a time - the machinery that already exists for exactly this.
+            //
+            // The three sides go with it, apart: what the person was looking at, and
+            // what the other writer had put there. Handing over only "mine" would leave
+            // the panel asking somebody to decide against nothing, and a newer value on
+            // the disk is not the person agreeing to be replaced by it.
             if (typeof FarkadSync !== 'undefined' && FarkadSync.holdHere) {
-                contested.forEach(path => FarkadSync.holdHere(path));
+                let seenDoc = null;
+                let diskDoc = null;
+                try { seenDoc = JSON.parse(this.durableText); } catch (error) { seenDoc = null; }
+                try { diskDoc = JSON.parse(held); } catch (error) { diskDoc = null; }
+                const at = (document, path) => {
+                    const parts = String(path).split('.');
+                    let node = document;
+                    for (let step = 0; step < parts.length; step += 1) {
+                        if (!node || typeof node !== 'object') return undefined;
+                        node = node[parts[step]];
+                    }
+                    return node;
+                };
+                contested.forEach(path => FarkadSync.holdHere(path, {
+                    seen: at(seenDoc, path),
+                    disk: at(diskDoc, path)
+                }));
             }
             return 'contested';
         }
@@ -416,63 +433,65 @@ const State = {
         return this.adoptDiskBaseline(held) ? 'rebased' : 'unsafe';
     },
 
-    // ONE WRITER AT A TIME, ACROSS WINDOWS.
+    // WHAT THIS PLATFORM CAN AND CANNOT GUARANTEE, AND WHAT IS CLAIMED HERE INSTEAD.
     //
-    // diskVerdict reads the disk and save() writes it. Those are two steps, and a write
-    // from another window landing between them is invisible to any amount of re-reading:
-    // re-reading is not serialisation. Two windows are two threads against one
-    // localStorage, which offers no lock of its own - so the lock is built out of the one
-    // primitive the store does have, a write that is read back and believed only if it is
-    // still ours.
+    // There was a lock here, built from reading localStorage and then writing a token to
+    // it. It was not a lock. Two windows can both read "free" before either writes, and
+    // both then believe they hold it; a read followed by a write is not a test-and-set,
+    // and localStorage offers no test-and-set, no transaction, and no compare-and-swap.
+    // Widening the staleness bound or changing the token does not touch that - the flaw
+    // is in the shape of the protocol, not in its constants. It has been removed rather
+    // than tuned, because a guard that is believed and does not hold is worse than none.
     //
-    // The loser does not wait. A synchronous spin on the main thread cannot let another
-    // window run anyway, and a tap that hangs the screen is worse than a tap that says it
-    // did not take: it refuses, keeps its edit in the journal, and the person tries again.
-    // Collisions are a parse and one write wide, so this is rare by construction.
-    writeLockToken: null,
-    writeLockSeq: 0,
-
-    takeWriteLock() {
-        if (typeof Store === 'undefined' || !Store.available) return true;
-        this.writeLockSeq += 1;
-        const mine = `${typeof syncDeviceId === 'function' ? syncDeviceId() : 'local'}`
-            + `:${this.writeLockSeq}`;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-            let holder = null;
-            try {
-                const raw = Store.durableGet(WRITE_LOCK_KEY);
-                holder = raw ? JSON.parse(raw) : null;
-            } catch (error) {
-                holder = null;
-            }
-            const at = holder && Number(holder.at);
-            const fresh = Number.isFinite(at) && (Date.now() - at) < WRITE_LOCK_STALE_MS;
-            // Somebody else is inside the critical section, and recently enough to be
-            // alive. Nothing of ours may be written on top of what they are doing.
-            if (fresh && holder.token !== mine) continue;
-            if (Store.setVerified(WRITE_LOCK_KEY,
-                JSON.stringify({ token: mine, at: Date.now() }))) {
-                this.writeLockToken = mine;
-                return true;
-            }
-        }
-        return false;
+    // The platform DOES have one real primitive: navigator.locks, which is genuinely
+    // exclusive across windows of one origin. It is ASYNCHRONOUS. Every write path in
+    // this app is synchronous by construction - commit() returns a verdict that
+    // editWithUndo branches on in the same tick, and the undo bar, the sheet's advance to
+    // the next worker and the refusal dialog all read that answer. Making the write path
+    // async is a different app, not a repair.
+    //
+    // SO THE GUARANTEE IS NOT EXCLUSION. It is this, and it is what the suites measure:
+    //
+    //   A committed edit is never lost. It is in the stored record, or it is in the
+    //   journal and a reopen produces it.
+    //
+    // Three things hold that up:
+    //
+    //   1. OWNERSHIP BY KEY. Every operation is journalled under a key only its own
+    //      writer writes (farkad:outbox:op:<id>). A single setItem is atomic, and two
+    //      windows writing different keys never collide. The journal is the record; the
+    //      schedule blob is a projection of it.
+    //   2. VALIDATE, THEN RE-VALIDATE IMMEDIATELY BEFORE WRITING. diskVerdict reads the
+    //      real disk and refuses a contested field. writeIfStillCurrent re-reads once
+    //      more in the instruction before the write, so the gap between the reading a
+    //      decision was made on and the write it authorises is as narrow as a synchronous
+    //      language permits.
+    //   3. THE COLLECTOR'S GATE. An operation is dropped only when the cloud has it AND
+    //      the STORED schedule demonstrably holds its value. A write that was overwritten
+    //      therefore cannot take its operation with it: the gate reads the disk at
+    //      collection time, finds the value gone, and keeps the operation.
+    //
+    // WHAT IS LEFT, STATED AND NOT PAPERED OVER: between the last read and the setItem
+    // that follows it, another window's setItem can land, and this one will overwrite it.
+    // That window is irreducible without an atomic primitive. It is not a loss, because
+    // of (1) and (3) - the overwritten window's operations are still under its own keys
+    // and are not collectable while the record lacks them - and tests/codex2.probes
+    // measures exactly that, by reading the worker's value back after a reopen rather
+    // than by believing a save that returned true.
+    //
+    // The disk as it would be seen by the next session. One reading, one meaning.
+    recordOnDisk() {
+        if (typeof Store === 'undefined' || !Store.available) return null;
+        return Store.durableGet(V2_KEY);
     },
 
-    releaseWriteLock() {
-        if (!this.writeLockToken) return;
-        const mine = this.writeLockToken;
-        this.writeLockToken = null;
-        if (typeof Store === 'undefined' || !Store.available) return;
-        try {
-            const raw = Store.durableGet(WRITE_LOCK_KEY);
-            const holder = raw ? JSON.parse(raw) : null;
-            // Only ever our own claim: a lock taken over as stale belongs to whoever took
-            // it, and removing it from under them is the fault this exists to prevent.
-            if (holder && holder.token === mine) Store.remove(WRITE_LOCK_KEY);
-        } catch (error) {
-            // A lock that cannot be read is a lock that will go stale on its own.
-        }
+    // Whether the record is still the one the decision above was made against. Asked in
+    // the instruction before the write, which is the last moment anything can be asked.
+    stillCurrent() {
+        if (typeof this.durableText !== 'string') return true;
+        if (typeof Store === 'undefined' || !Store.available) return true;
+        const held = this.recordOnDisk();
+        return typeof held !== 'string' || held === this.durableText;
     },
 
     // The field paths this window has queued that the disk ALSO moved since this window
@@ -537,6 +556,25 @@ const State = {
         // saved stays saved and nothing new is written. See js/recovery.js.
         if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
 
+        // THE LAST DOOR, AND IT IS INSIDE THE FUNCTION THAT WRITES.
+        //
+        // guardedSave validates, writes and re-validates around this call, and that is
+        // where the verdict a person is told about is decided. This is not a second
+        // opinion on that verdict. It is here because `save` writes the WHOLE schedule
+        // and was reachable WITHOUT the guard - the boot-time ledger mirror calls it
+        // directly - so the only thing keeping a whole-record write off a record this
+        // window had not read was every caller remembering to ask first. A guarantee that
+        // rests on that is not a guarantee, and the independent review named `save`
+        // alongside the three commits for exactly this reason.
+        //
+        // It also narrows the window the comment above recordOnDisk is honest about:
+        // nothing at all happens between this reading and the setItem below.
+        //
+        // `whole` is the one declared exception, and it belongs to the transactions whose
+        // PURPOSE is to replace the whole record: the restore, in js/sync/restore.js.
+        // Refusing those here would break the one door the record is rebuilt through.
+        if (!(options && options.whole) && !this.stillCurrent()) return false;
+
         this.schedule.updatedAt = new Date().toISOString();
         this.schedule.updatedBy = syncDeviceId();
 
@@ -546,6 +584,16 @@ const State = {
         const text = JSON.stringify(this.schedule);
         const landed = Store.setVerified(V2_KEY, text);
         this.saveFailed = !landed;
+
+        // DID OUR WRITE SURVIVE THE INSTANT AFTER IT?
+        //
+        // setVerified reads back immediately, which catches a disk that accepted the
+        // write and stored something else. It cannot catch another window writing a
+        // moment later - nothing synchronous can. This second reading is not a guarantee
+        // and is not treated as one: it is the one place a clobber becomes VISIBLE
+        // rather than silent, so the collector, the status line and the suites have a
+        // fact to work from instead of an assumption. See recordOnDisk.
+        this.lastWriteWon = landed && this.recordOnDisk() === text;
 
         if (landed) {
             this.durableText = text;
@@ -694,23 +742,67 @@ const State = {
     // this edit from. The lock is taken FIRST, so the verdict's read and the write it
     // guards are one critical section rather than two steps with a gap between them.
     guardedSave(journalled) {
-        if (!this.takeWriteLock()) {
-            // Another window is inside its own write. Ours is in the journal and is not
-            // lost; what must not happen is this window writing its whole schedule on top
-            // of a record it has not read.
-            return this.refuseEdit({ kept: journalled, busy: true });
-        }
-        try {
+        // VALIDATE, RE-VALIDATE, WRITE - and go round again if the disk moved in between.
+        //
+        // The loop is what replaces the lock. Each pass reads the real disk, decides, and
+        // then checks once more that the record is still the one it decided against; if
+        // another window wrote in that gap the decision is stale and is made again rather
+        // than acted on. Bounded, because an unbounded retry on the main thread is a hung
+        // screen: after three passes the answer is that the record is too busy to write
+        // into right now, which is true, and the edit stays in the journal.
+        for (let pass = 0; pass < 3; pass += 1) {
             const verdict = this.diskVerdict(journalled);
             if (verdict !== 'clear' && verdict !== 'rebased') {
                 return this.refuseEdit({ kept: journalled, verdict });
             }
-            this.save();
-        } finally {
-            this.releaseWriteLock();
+            // The last thing asked before the write. A disk that moved since the verdict
+            // invalidates it - including the case where the verdict was 'rebased' and the
+            // baseline it adopted is already out of date.
+            if (!this.stillCurrent()) continue;
+
+            // A SCHEDULE WRITE THAT FAILS IS NOT A REFUSAL WHEN THE JOURNAL TOOK THE EDIT.
+            //
+            // save() answers false on a full or blocked device. The edit is still on this
+            // disk - journal-first put it there before any of this - so a reopen rebuilds
+            // it, and that is why it may stand on the screen: the screen and the device
+            // agree. save() has already raised saveFailed and the notice that says the
+            // record itself could not be written. Rolling back here would take a durable
+            // edit off the screen and tell the person it did not happen, which is the
+            // opposite of the truth and is pinned against in tests/data.test.mjs.
+            //
+            // With nothing journalled there is nothing to stand on, and the refusal is
+            // the honest answer - EXCEPT in a browser that has no durable storage at all,
+            // where an edit standing in memory is the deliberate behaviour and the app
+            // says so in a permanent banner. That is what `journal` and `journalBatch`
+            // mean by answering true when Store.available is false; commitRoster hands
+            // over `queued` - what the journal is actually holding - which is false in
+            // exactly that browser. Reading it as "nothing to stand on" took the added
+            // worker back off the screen and told the person the device was full, in the
+            // one browser where that is not what happened. Measured in tests/smoke.mjs,
+            // in the sandboxed frame.
+            const wrote = this.save();
+            if (wrote) {
+                render();
+                return true;
+            }
+            // REFUSED BY THE RECORD MOVING, NOT BY THE DISK - so decide again.
+            //
+            // save() asks stillCurrent() once more in the instruction before its own
+            // write, which is the narrowest the gap gets. When that is what refused it,
+            // this pass was simply built on a record that is no longer there, and going
+            // round produces a fresh verdict that can rebase onto what the other window
+            // wrote and then land. Leaving it here instead would let the edit stand on
+            // the screen with the record never written, which is exactly the quiet
+            // divergence the whole round is about. Bounded by the same three passes.
+            if (!this.stillCurrent()) continue;
+            const nowhereDurable = typeof Store === 'undefined' || !Store.available;
+            if (journalled || nowhereDurable) {
+                render();
+                return true;
+            }
+            return this.refuseEdit({ kept: false, verdict: 'unwritten' });
         }
-        render();
-        return true;
+        return this.refuseEdit({ kept: journalled, verdict: 'busy' });
     },
 
     // Puts one change in the journal. True when it is durably there - or when this

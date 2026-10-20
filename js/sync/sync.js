@@ -31,6 +31,12 @@ const SYNC_DEVICE_KEY = 'farkad:deviceId';
 // backwards, silently, at the one moment nobody was watching.
 const OUTBOX_KEY = 'farkad:outbox';
 
+// ONE KEY PER HELD OPERATION. See holdHere: a conflict nobody has answered has to still
+// be a conflict after the app is closed, so the hold is on the disk rather than in a Set
+// that dies with the tab. One key per operation means no two windows ever write the same
+// one, which is the only kind of write this store makes safely.
+const HOLD_PREFIX = 'farkad:hold:';
+
 // Where an active queue can live. The first is the ordinary one; the rest exist because a
 // damaged queue is never overwritten, so recording after one has to continue somewhere
 // else.
@@ -1281,6 +1287,12 @@ const FarkadSync = {
         if (this._loaded) return;
         this._loaded = true;
 
+        // The conflicts this disk is still holding an answer for, before anything else -
+        // a window that has just opened must know about them before it can send. See
+        // holdHere: without this the hold died with the tab that made it, and the
+        // operation nobody had decided about went out on the next flush.
+        this.loadHolds();
+
         // Walk the slots. The first whose MARK is absent or readable becomes the one this
         // session writes to; a damaged mark is copied aside and left exactly where it is.
         //
@@ -2011,8 +2023,34 @@ const FarkadSync = {
         // The fence goes to the PROJECTOR, not over its answer - see projectQueue.
         const entries = this.durableJournalEntries(envelope);
         if (!entries) return false;
-        entries.forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
+        entries.filter(([path]) => !this.isHeldHere(path))
+            .forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
         return true;
+    },
+
+    // Is this path one a person still owes an answer about?
+    //
+    // A HELD OPERATION IS NOT REPLAYED OVER THE RECORD, and leaving that out made the
+    // hold cosmetic: the operation was kept out of the SEND, correctly, and then laid
+    // straight back onto the schedule by the next replay - so the reopened screen showed
+    // the value nobody had agreed to, and the next ordinary save carried it to the disk
+    // and to the cloud from there. The hold has to mean both things or it means neither.
+    //
+    // The person's side is not lost by this: it is in the queue, it is in the durable
+    // hold with the three sides beside it, and ⋯ shows the pair. Releasing it is what
+    // puts it back.
+    // Only the DURABLE holds - the ones a person still owes an answer about because two
+    // windows of this app disagreed. _heldNow also carries the cloud half's holds, where
+    // a write lost a race to another phone, and those have their own long-settled
+    // behaviour: the loser keeps its value on its own screen and in its own queue while
+    // the panel offers the choice. Filtering the replay on _heldNow wholesale reached
+    // into that and changed what a reopened phone holds, which tests/contested.test.mjs
+    // is the record of. This set is written only by holdHere and read back by loadHolds,
+    // so the filter touches the case it was added for and nothing else.
+    _heldDurable: new Set(),
+
+    isHeldHere(path) {
+        return this._heldDurable.has(String(path));
     },
 
     // Throw away what is in memory and read the journal back off the disk.
@@ -2039,7 +2077,10 @@ const FarkadSync = {
     // possible to say "the replacement, plus the work done since it was asked for".
     replayJournal(schedule, envelope) {
         this.loadOutbox();
+        // See isHeldHere: a conflict nobody has answered is not laid back over the record
+        // by a replay any more than it is sent.
         queueJournalEntries(this.physicalOperations(), envelope)
+            .filter(([path]) => !this.isHeldHere(path))
             .forEach(([path, item]) => applyJournalEntry(schedule, path, item.value));
     },
 
@@ -2114,11 +2155,99 @@ const FarkadSync = {
     // value is the whole record and there is no field left to merge.
     //
     // Nothing is deleted and nothing is zeroed: the operation stays in the queue exactly
-    // as it was. _heldNow dies with the tab, so a hold never outlives the session that
-    // had a reason for it.
-    holdHere(path) {
+    // as it was.
+    //
+    // THE HOLD IS DURABLE, AND IT HAS TO BE.
+    //
+    // It used to live only in _heldNow, a Set that dies with the tab - so closing the app
+    // released every conflict it was protecting. The next open knew nothing, the queue
+    // looked ordinary, and the operation the person had never decided about went out on
+    // the first flush. The independent review's F3 asks for the opposite and is right:
+    // a conflict nobody has answered is still a conflict tomorrow.
+    //
+    // One key per held OPERATION, not per path: the hold is about the exact edit that
+    // lost, and a later edit at the same path is a different question. The key is written
+    // once and is never removed by the app - only a person releasing it from ⋯ removes
+    // one - so no code path here can drop a side.
+    //
+    // THE THREE SIDES ARE KEPT APART, because conflating them is how the fault began:
+    //   seen  - the record as this window last agreed the disk held it, which is what the
+    //           person was looking at when they made the edit.
+    //   mine  - what this window wrote, as the queue holds it.
+    //   disk  - what the other writer had put there by the time we looked.
+    // A newer value on the disk is not the person agreeing to be replaced by it, and with
+    // the three apart there is no way to mistake one for the other.
+    holdHere(path, sides) {
         if (!path) return false;
-        this._heldNow.add(String(path));
+        const key = String(path);
+        this._heldNow.add(key);
+
+        // The operation this hold is about. Without one there is nothing to name, and a
+        // hold on a path with no queued operation would be a hold on nothing.
+        let op = null;
+        try { op = this.projectedQueue().get(key) || null; } catch (error) { op = null; }
+        if (!op || !op.opId) return true;
+
+        // From here on there IS an operation being held, so the replay filter applies to
+        // this path - see isHeldHere. Added before the write, because the hold holds for
+        // this session whether or not the disk can be made to remember it.
+        this._heldDurable.add(key);
+
+        const already = Store.durableGet(HOLD_PREFIX + op.opId);
+        if (already) return true;           // decided once; a second look does not rewrite it
+
+        try {
+            Store.setVerified(HOLD_PREFIX + op.opId, JSON.stringify({
+                opId: op.opId,
+                path: key,
+                seen: (sides && sides.seen) === undefined ? null : sides.seen,
+                mine: cloneValue(op.value),
+                disk: (sides && sides.disk) === undefined ? null : sides.disk,
+                at: new Date().toISOString(),
+                by: typeof syncDeviceId === 'function' ? syncDeviceId() : null
+            }));
+        } catch (error) {
+            // A hold that cannot be written down is still a hold for this session, and
+            // the operation still is not sent. What is lost is only its survival of a
+            // reopen, and saying so is honestStatusFor's job, not this function's.
+        }
+        return true;
+    },
+
+    // Every conflict this disk is still holding an answer for, read back off the disk.
+    // Called by loadOutbox, so a window that has just opened knows about them before it
+    // can send anything.
+    loadHolds() {
+        let keys = [];
+        try { keys = Store.keys ? Store.keys() : []; } catch (error) { keys = []; }
+        keys.filter(key => String(key).indexOf(HOLD_PREFIX) === 0).forEach(key => {
+            let record = null;
+            try { record = JSON.parse(Store.durableGet(key)); } catch (error) { record = null; }
+            // Unreadable is not "absent". The operation stays held either way - the safe
+            // direction - and the bytes are left exactly where they are.
+            if (record && record.path) {
+                this._heldNow.add(String(record.path));
+                this._heldDurable.add(String(record.path));
+            } else this._heldUnreadable = true;
+        });
+    },
+
+    // What the disk is holding for one operation, or null. The ⋯ panel reads this so the
+    // person is shown the three sides rather than one of them.
+    durableHold(opId) {
+        if (!opId) return null;
+        try { return JSON.parse(Store.durableGet(HOLD_PREFIX + opId)); }
+        catch (error) { return null; }
+    },
+
+    // A person's decision, and the only thing that takes a hold off. The operation is
+    // untouched: releasing says "send mine after all", it never discards either side.
+    releaseHold(opId) {
+        const record = this.durableHold(opId);
+        if (!record) return false;
+        this._heldNow.delete(String(record.path));
+        this._heldDurable.delete(String(record.path));
+        Store.remove(HOLD_PREFIX + opId);
         return true;
     },
 
@@ -2129,11 +2258,21 @@ const FarkadSync = {
         this._outbox.forEach((item, path) => {
             if (item.sent) return;
             if (!item.held && !this._heldNow.has(String(path))) return;
+            // THE THREE SIDES, kept apart. `cloud` is the shared document's value and is
+            // undefined where there is no base to read. `seen` and `disk` come off the
+            // durable hold when the conflict was with another WINDOW rather than with
+            // the cloud - the version the person was looking at, and what the other
+            // writer had put there - so the panel can show a pair instead of asking
+            // somebody to decide against nothing.
+            const hold = this.durableHold(item.opId);
             rows.push({
                 path: String(path),
                 opId: item.opId,
                 mine: cloneValue(item.value),
                 cloud: heard ? cloneValue(this.baseValueAt(path)) : undefined,
+                seen: hold ? hold.seen : undefined,
+                disk: hold ? hold.disk : undefined,
+                durable: Boolean(hold),
                 heard
             });
         });

@@ -124,6 +124,14 @@ const connected = async (device, cloud) => {
     b.State.load();
 
     put(a, PATH, 'p_01');
+    // B reads the record before it writes. Seeing an operation in the shared queue is
+    // not the same as having seen the VALUE: without this read B's own base is the
+    // record from before A wrote, so its edit is made against a screen that never showed
+    // A's value - a stale window, which State now holds for a person rather than letting
+    // it overwrite (the independent review's F3; measured in codex2.probes). This suite
+    // is about what the queue does with two corrections, so B is given that sight. Not
+    // one assertion below changed.
+    b.State.load();
     put(b, PATH, 'p_02');
     await wait();
 
@@ -193,6 +201,14 @@ const connected = async (device, cloud) => {
     // makes the acknowledgement path do its most work.
     a.setQuota(key => key === 'scheduleData:v2');
 
+    // B reads the record before it writes. Seeing an operation in the shared queue is
+    // not the same as having seen the VALUE: without this read B's own base is the
+    // record from before A wrote, so its edit is made against a screen that never showed
+    // A's value - a stale window, which State now holds for a person rather than letting
+    // it overwrite (the independent review's F3; measured in codex2.probes). This suite
+    // is about what the queue does with two corrections, so B is given that sight. Not
+    // one assertion below changed.
+    b.State.load();
     put(b, PATH, 'p_02');
     await wait();
     const beforeAck = physicalOps(a).map(op => op.opId).sort().join();
@@ -381,6 +397,16 @@ const connected = async (device, cloud) => {
 
         put(a, PATH, 'p_01');
         // B reads the disk - it can SEE A's operation - and only then writes.
+        //
+        // It reads the RECORD too, which it did not before. Seeing an operation in the
+        // shared queue is not the same as having seen the value: B's own base was still
+        // the record from before A wrote, so the correction was being made against a
+        // screen that never showed p_01. That is a stale window, not a correction, and
+        // State now holds it for a person rather than letting it overwrite - which is
+        // the repair for the independent review's F3 and is measured in
+        // tests/codex2.probes.test.mjs. This suite is about the correction that DID see
+        // what it replaced, so B is given that sight. The assertion below is unchanged.
+        b.State.load();
         given('B saw A before writing', physicalOps(b).length > 0);
         put(b, PATH, 'p_02');
 
@@ -409,6 +435,14 @@ const connected = async (device, cloud) => {
     b.State.load();
 
     put(a, PATH, 'p_01');
+    // B reads the record before it writes. Seeing an operation in the shared queue is
+    // not the same as having seen the VALUE: without this read B's own base is the
+    // record from before A wrote, so its edit is made against a screen that never showed
+    // A's value - a stale window, which State now holds for a person rather than letting
+    // it overwrite (the independent review's F3; measured in codex2.probes). This suite
+    // is about what the queue does with two corrections, so B is given that sight. Not
+    // one assertion below changed.
+    b.State.load();
     put(b, PATH, 'p_02');
     await wait();
     given('the disk holds work for that path', opsForPath(a, PATH).length >= 1,

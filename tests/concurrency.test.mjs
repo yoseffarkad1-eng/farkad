@@ -231,6 +231,13 @@ function twoReopens(dump) {
     const race = whileReading(shared, () => {
         if (sneaked) return;
         sneaked = true;
+        // The correcting tab reads the record first. Without it its base is from before the
+        // other tab wrote, so the correction is made against a screen that never showed the
+        // value it replaces - a stale window, which State now holds for a person rather than
+        // letting it overwrite (the independent review's F3; measured in codex2.probes).
+        // This suite is about what the QUEUE does with the pair, so the tab is given that
+        // sight. Not one assertion below changed.
+        tabB.State.load();
         put(tabB, PATH, 'p_01');
     });
     tabA.Sync.collectQueueGarbage();

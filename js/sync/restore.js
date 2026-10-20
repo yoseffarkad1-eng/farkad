@@ -324,7 +324,9 @@ Object.assign(FarkadSync, {
         if (!this.forgetLocalOrigin()) return { stored: false, pruned: false };
 
         State.schedule = next;
-        if (!State.save()) {
+        // `whole` on purpose: this is the one transaction that exists to replace the whole
+        // record, so the disk having moved under it is not a reason to refuse - see save.
+        if (!State.save({ whole: true })) {
             State.schedule = previous;
             if (typeof render === 'function') render();
             return { stored: false, pruned: false };

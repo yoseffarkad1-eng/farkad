@@ -1034,8 +1034,18 @@ function holdWrites(cloud, kind) {
         given('the cloud has answered it',
             tabA.Sync.markAcknowledged([op.opId]) === true);
 
-        // The other tab has been holding a schedule from before that edit, and saves.
-        tabB.State.save({ silent: true });
+        // The other tab has been holding a schedule from before that edit, and its copy
+        // ends up on the record.
+        //
+        // AT THE DISK, not through save(), and the reason is the repair itself. save()
+        // now refuses to write a whole schedule over a record this window has not read -
+        // which is the fault this suite's (b) case was built out of - so the tab can no
+        // longer produce this state by asking. The state still EXISTS on disks in the
+        // field: an older build writes the record without validating anything, and a
+        // write that lands inside the window named above State.recordOnDisk leaves the
+        // same bytes. The collector has to be right about those, and that is what is
+        // asserted below. Nothing asserted here changes; only how the bytes get there.
+        tabB.putRaw('scheduleData:v2', JSON.stringify(tabB.State.schedule));
         given('the disk no longer holds the day',
             diskPlace(tabB, DAY_ONE) === null, String(diskPlace(tabB, DAY_ONE)));
 
@@ -1146,7 +1156,12 @@ function holdWrites(cloud, kind) {
     // Every removal under the queue is refused from here on - which is what localStorage
     // does, quietly, with nothing thrown.
     tabA.blockRemoval(key => String(key).indexOf('farkad:outbox') === 0);
-    put(tabB, DAY_ONE, 'p_02');
+    // The second decision is built at queue level - see racingWrite. State.commit now
+    // refuses to make a pair like this (the independent review's F3: the second window
+    // is told its field is contested and its operation is held), and this suite is about
+    // what the COLLECTOR does with a pair that already exists on a disk. Not one
+    // assertion below changed.
+    racingWrite(tabB, DAY_ONE, 'p_02');
 
     const both = opsFor(tabA, DAY_ONE);
     given('both decisions are on the disk', both.length === 2,
