@@ -12,8 +12,18 @@ Code head: `38a5fcafa04d43c025fa6aa7debd0b88dd383e22`, tree `89ff63e727bf6ff2dcd
 The release gate below ran on that commit. The only change after it is this file.
 
 Nothing in this round changes a rate, an advance, a pay cycle or a report's arithmetic.
-Nothing deletes or zeroes a stored byte, a queue or a record. Both money gates
-(`LEDGER_WRITES`, `carryAdvances`) are still shut and still pinned shut.
+Nothing deletes or zeroes a stored byte, a queue or a record.
+
+**CORRECTED after the third review, which was right to catch it.** An earlier version of
+this paragraph said both money gates were "still shut and still pinned shut". They are
+not. `LEDGER_WRITES` is `true` (`js/model/ledger.js:49`) and `carryAdvances` is `true`
+(`js/model/schema.js:63`), both opened in `e5b70f2` for the v116 candidate. The suites
+that assert a closed gate assert it **through the test seam** — `flags` on a harness
+device, `FARKAD_FLAG_OVERRIDES` in a browser suite (`tests/data.test.mjs:9423`,
+`tests/smoke.mjs:62`) — so a green gate never contradicted the false claim. `CLAUDE.md`'s
+first iron law still says `LEDGER_WRITES` is `false`, and reading the law instead of the
+file is how the error got in; it is reported in `contract.md` for the owner rather than
+rewritten here. This round still changes no accounting rule and does not move either gate.
 
 ## F4 — the lock was a belief, not a lock
 
@@ -239,7 +249,9 @@ after the fix (`rows 0` → `rows 1`).
    directly, so the new validation applies to it: if another window has moved the record,
    the mirror does not write and retries at the next boot or edit. Its entries are
    journalled either way, so nothing is lost, and its comment already promised silence.
-   Dormant in this build, both money gates being shut.
+   **This is a LIVE path, not a dormant one** — see the correction above: both gates are
+   open in this build, so the mirror runs, and its silence is a real risk rather than a
+   theoretical one. It is in scope as a writer in `contract.md`.
 4. **An older build cannot be stopped.** A window or phone on v162 or earlier writes the
    record without validating anything, and nothing in v163 can prevent that. What v163
    guarantees against it is recovery, not prevention; Law 7's catch-up only holds from v87
