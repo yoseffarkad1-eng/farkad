@@ -79,8 +79,13 @@ Object.assign(FarkadSync, {
     // legacy transition is untouched, which is the whole reason the field is nullable.
     _revisionLoaded: false,
 
-    loadRevision() {
-        if (this._revisionLoaded) return this._revision;
+    // Read once at the start of a session, and re-read whenever the question is asked
+    // again with `fresh` - which is what the adoption test does, because another window
+    // of this app may have heard more since. The session cache is kept for the hot path
+    // (every delivery asks), and the one decision that must not be made on a stale number
+    // asks for the disk. See rememberRevision.
+    loadRevision(fresh) {
+        if (this._revisionLoaded && !fresh) return this._revision;
         this._revisionLoaded = true;
         let stored = null;
         try { stored = Store.durableGet(REVISION_KEY); } catch (error) { stored = null; }
@@ -92,8 +97,32 @@ Object.assign(FarkadSync, {
         return this._revision;
     },
 
+    // MONOTONIC AT THE DISK, not only in this window's memory.
+    //
+    // v163 wrote String(said) unconditionally, and loadRevision cached for the session
+    // behind _revisionLoaded. Both together are a way back down: window A reaches 9 and
+    // writes it; window B read 7 when it opened and never looks again; B adopts a
+    // snapshot at 8 and writes 8 OVER 9. The next window to open then presents itself to
+    // the cloud as a device that is behind, and the key exists precisely so that it does
+    // not. The server cannot be talked into this - firestore.rules' nextRevision()
+    // requires exactly one more, and legacyWrite() is gated on noRevisionYet() - so this
+    // key was the only place the shared number could go backwards. Measured in
+    // tests/codex3.probes.test.mjs, D6.
+    //
+    // The read also HEALS the stale cache: a number on the disk higher than this window's
+    // is adopted into memory, which is the honest answer to "another window has heard
+    // more recently than I have".
     rememberRevision(said) {
         if (!Number.isInteger(said) || said < 0) return;
+        let held = null;
+        try { held = Store.durableGet(REVISION_KEY); } catch (error) { held = null; }
+        const onDisk = held === null || held === undefined ? NaN : Number(held);
+        if (Number.isInteger(onDisk) && onDisk >= said) {
+            // Somebody else has been further. Take their number rather than our own, and
+            // write nothing: the disk is already right and a write could only lower it.
+            if (onDisk > (this._revision === null ? -1 : this._revision)) this._revision = onDisk;
+            return;
+        }
         try { Store.setVerified(REVISION_KEY, String(said)); }
         catch (error) {
             // A revision that cannot be written down is still the one in memory for this
@@ -1355,8 +1384,16 @@ Object.assign(FarkadSync, {
         // Unsent only. An entry the cloud has already acknowledged is IN the snapshot
         // that just arrived, and putting it back on top would undo whatever another
         // phone has changed since.
+        // AND NOT A CONFLICT WITH THIS DEVICE'S OWN OTHER WINDOW. See holdIsLocal: the
+        // other side of that one is on this disk already, so putting our undecided value
+        // back on top and persisting it - which is what this function's caller does next
+        // - writes it over the answer the other window wrote. The third replay path, and
+        // the one that was missed: the journal replays were taught to withhold a held
+        // operation and this was not, so the value nobody had agreed to reached the record
+        // by way of a snapshot. Measured in tests/codex3.probes.test.mjs, D3.
         const pending = [...this._outbox.entries()]
             .filter(([, item]) => !item.sent)
+            .filter(([, item]) => !this.heldAgainstOwnDisk(item))
             .sort((a, b) => a[1].seq - b[1].seq);
 
         // Which lists already have a per-person edit waiting. The legacy whole-array

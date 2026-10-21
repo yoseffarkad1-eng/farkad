@@ -144,6 +144,134 @@ which makes the device key the only place this can go backwards.
 7. The shared revision is written monotonically — read, compare, write only if higher —
    and is re-read at use rather than cached for the session.
 
+## 5a. OPEN — G2 is NOT met as written. This needs the owner's decision.
+
+Recorded here because a reworded test going green is not a defect closed, and the third
+review was right to say so.
+
+**What §3 promised.** "G2 — a way back. Every field value this device has confirmed stays
+reconstructible until something newer for that field is confirmed, **including after the
+cloud has acknowledged it and the collector has taken it off the queue.**" And §5 item 6
+named the mechanism: "recoverable field by field from a shadow copy of the last confirmed
+record that older builds do not write."
+
+**What v164 actually does.** The shadow copy is NOT there. What is kept is the stamp of
+the last confirmed record - `updatedAt`, about sixty bytes - which detects the regression
+and names it. The recovery comes from two places that already existed:
+
+| the device | after acknowledgement AND collection | from the device alone, with no network |
+|---|---|---|
+| never had a cloud | **cannot happen** - `op.sent` is never true, so nothing is collected; `retired` and `superseded` only ever remove an operation a NEWER one for the same path has replaced | **yes** - the journal holds the current value of every field ever edited (D5b) |
+| has a cloud now | happens; the cloud holds every collected value by the gate's own condition | **no** - the next snapshot merge brings it back, which is a network |
+| had a cloud, then lost it for good | happens; the collected values are in a cloud this device can no longer reach | **NO. This is the gap.** |
+
+**So the exact change in the guarantee:** offline, device-alone reconstruction after
+acknowledgement and collection held while the whole-record shadow existed, and does not
+hold now for one case - a device that had a cloud, collected operations, and then lost
+cloud access permanently (project deleted, credentials revoked, `firebase-config.js`
+emptied). For that device, an older build writing the record away loses the collected
+days, and nothing local brings them back.
+
+**Why it was taken out, measured rather than argued.** A whole-record shadow is one
+permanent extra copy, and the capacity model has two agreed behaviours it cannot coexist
+with whichever way it is accounted for:
+
+- **In the reclaim ladder** → `tests/capacity.test.mjs`, "a device with nowhere left
+  refuses the edit rather than claiming it": that device has no restore points, so the
+  shadow becomes the thing the ladder sells, and a refused edit stops moving zero bytes.
+- **Out of the ladder** → it is pure pressure. `tests/data.test.mjs` C1, measured: 5,084
+  bytes used against a 2,793 budget, of which 848 were the shadow, leaving 271 free where
+  a copy costs 798. The device is then called critical for carrying the very copy that
+  was supposed to be expendable.
+
+**The three ways out, put to the owner.** Not for the hand that wrote the code. Named
+rather than numbered, because the list below and the list in the question put to the owner
+were in different orders and a number is the one thing that cannot survive that:
+
+- **THE BOUNDED RING** - the last N collected field writes, path and value. Meets G2 for
+  the last N confirmed writes offline and from the device alone; anything older falls back
+  to "the stamp alone". Costs N field records rather than a copy of the whole schedule.
+  **This is what the owner approved**, presented to them as the first of the three, and it
+  is what ships. Its measured numbers are below.
+- **The stamp alone** - zero bytes, both capacity behaviours intact, the gap accepted and
+  written down. The case it fails is a device that loses its cloud for good.
+- **The whole-record shadow** - meets G2 literally, and requires changing ONE of the two
+  capacity behaviours deliberately. **Not approved, not implemented.**
+
+**WHAT WAS OFFERED AND WHAT WAS MEASURED, reconciled, because they differ.** The option as
+put to the owner said N would be chosen so the ring stays under "the 271-byte margin C1
+measures". That figure does not govern this, and saying so is the correction:
+
+- **271 bytes is a FIXTURE margin, not a production budget.** It is what is left in
+  `tests/data.test.mjs` C1 after that suite sets `Store.budget = copy * 3.5` on a device
+  whose whole record is 798 bytes. Production `Store.budget` is `5 * 1024 * 1024`
+  (`js/store.js`).
+- **It does not bind the ring at all**, because C1's device has no cloud: nothing is ever
+  marked `sent`, so nothing is ever collected, so the ring is never written there. The
+  whole-record shadow was written on every save, which is why it did bind.
+- So the real limit had to be measured and set, not inherited from a fixture. It is below.
+
+**THE ENFORCED LIMITS, measured on a realistic crew** - 20 workers, 12 sites, one man on
+two sites, record 5,786 bytes:
+
+| | |
+|---|---|
+| count | **32 field paths** (`KEPT_LIMIT`) |
+| bytes | **a quarter of the record, 32 KB ceiling, floor of one entry** |
+| a worker-day entry | about **440 bytes** |
+| count-only ring, as first written | **17,520 bytes - three times the record**, because its largest entries were whole-roster paths that grow with the crew, not with N |
+| after the `replacesWhole` filter | **440 bytes** on the same device |
+| which bound bites | the BYTES below a ~56 KB record; the COUNT above it, at about 14 KB |
+| worst case | `max(one entry, a quarter of the record)`, capped at 32 KB - on a tiny record that is one entry, about 440 bytes |
+
+The floor exists because without it the guarantee was empty where it was needed most: on a
+1,500-byte record a quarter is 375 bytes and one day entry is 440, so nothing at all was
+insured. **It is a stated trade-off, not a silent one:** past the floor the ring can never
+shift a capacity verdict by more than a quarter of one threshold step; at the floor it can
+shift it by one entry.
+
+Only the families where a queued value REPLACES what is there are kept - `replacesWhole`,
+the same classification the pre-send hold uses. A whole-roster array merges per id and an
+added worker is additive rather than a correction, so keeping those cost 15 KB of the 17.5
+and bought nothing the snapshot merge does not already do.
+
+**DECIDED by the owner: the BOUNDED RING, and explicitly as a bounded local ring rather
+than an unlimited G2.** What ships:
+
+|  |  |
+|---|---|
+| N | **32 field paths** (`KEPT_LIMIT`, `js/sync/sync.js`) |
+| per entry | one field path and its value - **measured at about 440 bytes** for a worker-day |
+| byte budget | **a quarter of the record, 32 KB ceiling, floor of one entry** - enforced, not estimated. See the reconciliation above for why an earlier "10-13 KB" figure was wrong |
+| kept families | only `replacesWhole` paths: a day, a ledger entry, one field of one person |
+| when written | at COLLECTION only, so a device with no cloud pays nothing - it never marks anything `sent`, so it never collects |
+| key | one per PATH (`farkad:kept:<path>`), a single `setItem`, so a second confirmation of the same field replaces its own entry |
+| bound applied | after the write, oldest first, ordered by the operation's own `seq` - a timestamp is not an order, and thirty-three collections inside one millisecond proved it |
+| ladder | **not currency.** `Store.reclaim` sells restore points and nothing else |
+
+**What is recovered:** the newest confirmed value of each of the last 32 collected field
+paths, from the device alone, offline, after acknowledgement and collection. Measured in
+`tests/codex3.probes.test.mjs` D5c: the cloud acknowledges, the collector takes the
+operation, the adapter is dropped for good, an older build writes the day away, and the
+day comes back with no network and no journal entry.
+
+**What is NOT guaranteed:** anything past N - the 33rd collected path back and older. For
+those the recovery is still the cloud, and on a device that has permanently lost its cloud
+they are **not recoverable locally**. `tests/codex3.probes.test.mjs` D5d measures that
+edge rather than leaving it implied: 33 collected paths, the newest kept, the oldest gone.
+
+**And the behaviour that did NOT change:** a device with no restore points and not a byte
+to spare still refuses the write and moves not one byte. `tests/capacity.test.mjs` owns
+the full version; D5's own suite asks the one line of it the ring could have broken, **on
+a device that has synced and whose ring holds six real entries** - measured at 2,580 bytes
+of a 2,939-byte cap. An empty ring proves nothing there, and the first draft of that suite
+had one: the device had never synced, so there was no insurance on the disk for the ladder
+to have sold. Asserted on refusal: the edit is refused, not one byte of the device moves,
+every ring entry is still present, and the ring is the same size to the byte.
+
+G2 as written in §3 - "every field value this device has confirmed" - is therefore still
+**not** met in full, by decision rather than by oversight. It is met for the last 32.
+
 ## 6. Out of scope, deliberately
 
 - No accounting change of any kind: no rate, advance, pay cycle, report arithmetic, or

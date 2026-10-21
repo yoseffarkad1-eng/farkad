@@ -51,6 +51,25 @@ function seeded(id, disk, cloud) {
     return device;
 }
 
+// THE SAME, WITH A CREW. The kept ring's byte cap is a quarter of the record, so on the
+// two-man roster above it holds exactly one entry - which is the floor, and enough for
+// the recovery suites but not enough to prove that a refusal spends NOTHING of a ring
+// that has several things in it. A dozen men and eight sites is an ordinary crew and
+// raises the cap to several entries.
+function crewed(id, disk, cloud) {
+    const device = bare(id, disk);
+    device.State.schedule.workers = Array.from({ length: 12 }, (ignored, i) => ({
+        id: `w_crew_${i}`, name: `עובד ניסיון מספר ${i}`, active: true,
+        dailyRate: 400 + i, hourlyRate: 0 }));
+    device.State.schedule.places = Array.from({ length: 8 }, (ignored, i) => ({
+        id: `p_crew_${i}`, name: `אתר ניסיון מספר ${i}`, active: true }));
+    device.State.schedule.workers.push(...WORKERS.map(worker => Object.assign({}, worker)));
+    device.State.schedule.places.push(...PLACES.map(place => Object.assign({}, place)));
+    device.State.save({ silent: true });
+    if (cloud) device.Sync.connect(cloud.adapter);
+    return device;
+}
+
 // A window of the app opening on a disk that already holds a record - what js/app.js does.
 function opened(id, disk, cloud) {
     const device = bare(id, disk);
@@ -80,6 +99,16 @@ const sitesOnDisk = (disk, worker) => {
 const afterReopen = (disk, worker, id) => sitesOn(opened(id, disk), worker);
 
 const holdKeys = disk => Object.keys(disk).filter(key => key.indexOf('farkad:hold:') === 0);
+
+// THE RING, ASKED OF A BUILD THAT MAY NOT HAVE ONE. A red baseline has to be a count, not
+// a stack trace: a suite that throws on the old build stops measuring the checks after it,
+// and the number it reports is then about where it died rather than about the guarantee.
+const ring = device => (typeof device.Sync.keptEntries === 'function'
+    ? device.Sync.keptEntries() : []);
+const ringBytes = device => (typeof device.Sync.keptBytes === 'function'
+    ? device.Sync.keptBytes() : 0);
+const ringCap = device => (typeof device.Sync.keptBudget === 'function'
+    ? device.Sync.keptBudget() : 0);
 const cloudSites = (cloud, worker) => {
     const record = ((((cloud.doc || {}).days || {})[DAY] || {}).actual || {})[worker];
     return (((record || {}).entries) || []).map(entry => entry.placeId).sort().join('+') || '-';
@@ -177,7 +206,9 @@ const cloudSites = (cloud, worker) => {
     check('and the other window knows the path is held',
         one.Sync.isHeldHere(`days.${DAY}.actual.${W1}`) === true,
         String(one.Sync.isHeldHere(`days.${DAY}.actual.${W1}`)));
-    given('writes attempted', true, `${before} -> ${sky.writes.filter(w => !w.replayed).length}`);
+    check('and the other window attempted no write for the held path',
+        sky.writes.filter(write => !write.replayed).length === before,
+        `${before} -> ${sky.writes.filter(write => !write.replayed).length}`);
 }
 
 // ============================================== D3 · a hold that could not be written
@@ -194,8 +225,13 @@ const cloudSites = (cloud, worker) => {
     addTap(one, W1, A);
     await settleUntil(() => cloudSites(sky, W1) === A, 4000);
 
+    // A QUOTA ERROR, not a throw. The harness reads a throw from setItem as "this browser
+    // has no storage at all" and takes the whole Store down, which is a different fault
+    // and not the one under test: here the disk works and has no room for the one small
+    // record that says an edit is withheld. Both the mark and the descriptive pair are
+    // refused, which is every durable trace of the hold.
     const two = opened('d3_two', disk);
-    two.failWrite(key => String(key).indexOf('farkad:hold:') === 0);
+    two.setQuota(key => String(key).indexOf(':hold:') !== -1);
 
     removeTap(one, W1, A);
     addTap(one, W1, B);
@@ -203,26 +239,24 @@ const cloudSites = (cloud, worker) => {
 
     removeTap(two, W1, A);
     addTap(two, W1, C);
-    given('no readable hold reached the disk',
-        holdKeys(disk).every(key => {
-            try { return !JSON.parse(disk[key]); } catch (error) { return true; }
-        }), String(holdKeys(disk).length));
+    given('no durable trace of the hold reached the disk',
+        holdKeys(disk).length === 0, String(holdKeys(disk).length));
 
-    // The app is opened again, with no memory of the hold anywhere.
-    const again = opened('d3_again', disk, sky);
-    await settle(TICK * 10);
-    again.Sync.flush();
+    // The window that noticed is still connected and still flushing, and a snapshot is
+    // still arriving. BOTH HALVES have to stay withheld: a two-site move is an unassign
+    // and an assign, and holding the second while letting the first go is not holding the
+    // edit - it empties the man's day. The first draft of this check asked `!== C` and
+    // passed on '-', which is exactly that escape going unnoticed.
+    two.Sync.connect(sky.adapter);
+    await settle(TICK * 20);
+    two.Sync.flush();
     await settle(TICK * 40);
-    // BOTH HALVES. A two-site move is an unassign and an assign, and holding the second
-    // while letting the first go is not holding the edit: it empties the man's day. The
-    // first version of this check asked `!== C` and passed on '-', which is the removal
-    // having reached the cloud - the undecided edit escaping by its other half.
     check('THE UNDECIDED VALUE STILL DID NOT REACH THE CLOUD',
         cloudSites(sky, W1) === B, cloudSites(sky, W1));
     check('and the record still holds the other window\'s answer',
         sitesOnDisk(disk, W1) === B, sitesOnDisk(disk, W1));
     check('and nothing was discarded: the undecided edit is still owed',
-        again.Sync.pendingCount() > 0, String(again.Sync.pendingCount()));
+        two.Sync.pendingCount() > 0, String(two.Sync.pendingCount()));
 }
 
 // ================================================ D4 · the decision, bound to the hold
@@ -263,9 +297,16 @@ const cloudSites = (cloud, worker) => {
     check('and the hold it answers is no longer holding the path',
         two.Sync.isHeldHere(`days.${DAY}.actual.${W1}`) === false,
         String(two.Sync.isHeldHere(`days.${DAY}.actual.${W1}`)));
+    // THE VALUE THE PERSON CHOSE, read off the row they were shown rather than guessed
+    // at. The first draft of this check expected C alone; what the panel offered was
+    // A+C, because the refused removal had been rolled back before the second tap - so
+    // the check was asserting a value nobody was ever shown. The guarantee is that the
+    // reopen produces what the row said `mine` was.
+    const chose = ((row && row.mine && row.mine.entries) || [])
+        .map(entry => entry.placeId).sort().join('+') || '-';
     check('so a reopen produces the value the person chose',
-        afterReopen(disk, W1, 'd4_r1') === C,
-        `${afterReopen(disk, W1, 'd4_r2')} (disk ${sitesOnDisk(disk, W1)})`);
+        afterReopen(disk, W1, 'd4_r1') === chose,
+        `${afterReopen(disk, W1, 'd4_r2')} wanted ${chose} (disk ${sitesOnDisk(disk, W1)})`);
 }
 
 {
@@ -304,6 +345,31 @@ const cloudSites = (cloud, worker) => {
 
 // ==================================== D5 · a way back after acknowledgement and collection
 {
+    // ============================ D5 IS AN OPEN ITEM, NOT A CLOSED DEFECT ==============
+    //
+    // What these two suites measure is NOT the whole of what the contract's G2 promised.
+    // G2 said a confirmed value stays reconstructible "including after the cloud has
+    // acknowledged it and the collector has taken it off the queue", and §5 item 6 named
+    // a shadow copy of the record as the mechanism. There is no shadow copy in this
+    // build - it cost one permanent copy of the record and the capacity model has two
+    // agreed behaviours it cannot coexist with, measured in features/stale-window/
+    // contract.md §5a.
+    //
+    // So the guarantee these suites DO establish, said plainly so that a green run cannot
+    // be mistaken for the promise:
+    //
+    //   - the regression is detected and named, on any device;
+    //   - the stale bytes are never overwritten by a repair;
+    //   - a device that never had a cloud recovers from the device alone, offline, because
+    //     it never collects anything (D5b measures that, not assumes it);
+    //   - a device that has a cloud recovers from the cloud, which is a network.
+    //
+    // AND THE BOUND, which the owner chose knowingly: a bounded local ring of the last
+    // N = 32 collected field paths, NOT an unlimited G2. D5c measures the recovery it
+    // buys - offline, device alone, after acknowledgement and collection - and D5d
+    // measures where it stops. Past 32 the recovery is the cloud, and on a device that
+    // has permanently lost its cloud those older fields are not recoverable locally.
+    // That residual is the decision, written down in §5a, and nothing below hides it.
     suite('D5 · an edit survives an older build writing over it after it was collected');
 
     // The collector's gate is `op.sent && scheduleHoldsEntry(stored, op.path, op.value)`.
@@ -339,9 +405,58 @@ const cloudSites = (cloud, worker) => {
             && one.State.recordRegressed() === true,
         String(typeof one.State.recordRegressed === 'function'
             ? one.State.recordRegressed() : 'no such question'));
-    check('and the man\'s day comes back on the reopen, from the device alone',
-        afterReopen(disk, W1, 'd5_r1') === A,
-        `${afterReopen(disk, W1, 'd5_r2')} (disk ${sitesOnDisk(disk, W1)})`);
+    check('and the stale bytes are left where they are, not overwritten by a repair',
+        sitesOnDisk(disk, W1) === '-', sitesOnDisk(disk, W1));
+
+    // THE WAY BACK, and which one it is depends on whether the collector could have run.
+    //
+    // The first draft of this suite asked for the day back "from the device alone" after
+    // a collection, and that asked for a second local copy of the record. Measured, that
+    // copy costs one of two capacity guarantees whichever way it is accounted for - see
+    // STAMP_KEY in js/state.js for the numbers - so what is kept is the stamp, and the
+    // recovery is the one the collector's own gate already implies: an operation is only
+    // ever taken off the queue once `op.sent` is true, which is to say once the CLOUD
+    // holds it. Here it does, so hearing the cloud again brings the day back.
+    const back = opened('d5_back', disk, sky);
+    await settleUntil(() => sitesOn(back, W1) === A, 5000);
+    check('the man\'s day comes back when the cloud is heard again',
+        sitesOn(back, W1) === A, sitesOn(back, W1));
+    check('and the record on the disk holds it again afterwards',
+        sitesOnDisk(disk, W1) === A, sitesOnDisk(disk, W1));
+}
+
+{
+    suite('D5b · with no cloud at all, the journal is the way back and keeps it');
+
+    // THE DEVICE THAT HAS NO OTHER PATH, which is every phone until firebase-config.js is
+    // filled in. The claim the suite above leans on is checked here rather than assumed:
+    // the collector's gate is `op.sent && the disk holds it`, and a device that has never
+    // had a cloud marks nothing sent - so it never collects, and the journal still holds
+    // every edit when an older build writes the record away.
+    const disk = sharedStore();
+    const one = seeded('d5b_one', disk);
+    addTap(one, W1, A);
+    given('no cloud was ever configured', !one.Sync.adapter, String(Boolean(one.Sync.adapter)));
+    given('and the disk holds the day', sitesOnDisk(disk, W1) === A, sitesOnDisk(disk, W1));
+    one.Sync.collectQueueGarbage();
+    check('THE COLLECTOR TAKES NOTHING, because nothing is acknowledged',
+        one.Sync.pendingCount() > 0, String(one.Sync.pendingCount()));
+
+    const stale = JSON.parse(disk[V2]);
+    delete stale.days[DAY];
+    stale.updatedAt = '2026-09-01T00:00:00.000Z';
+    stale.updatedBy = 'd_old_build';
+    one.putRaw(V2, JSON.stringify(stale));
+    given('an older build has written the day away', sitesOnDisk(disk, W1) === '-',
+        sitesOnDisk(disk, W1));
+
+    const asks = typeof one.State.recordRegressed === 'function';
+    check('the regression is detected here too',
+        asks && one.State.recordRegressed() === true,
+        asks ? String(one.State.recordRegressed()) : 'no such question');
+    check('AND THE MAN\'S DAY COMES BACK FROM THE DEVICE ALONE',
+        afterReopen(disk, W1, 'd5b_r1') === A,
+        `${afterReopen(disk, W1, 'd5b_r2')} (disk ${sitesOnDisk(disk, W1)})`);
 }
 
 // ======================================================= D6 · the shared revision
@@ -378,6 +493,205 @@ const cloudSites = (cloud, worker) => {
     check('and a window opening now does not present itself as behind',
         opened('d6_r1', disk).Sync.loadRevision() >= 9,
         String(opened('d6_r2', disk).Sync.loadRevision()));
+}
+
+// ====================== D5c · offline, from the device alone, after collection
+{
+    suite('D5c · a collected edit comes back OFFLINE, from the device alone');
+
+    // THE CASE THE RING WAS APPROVED FOR, and the one the stamp alone could not answer.
+    // The operation is acknowledged by the cloud AND collected, so the journal no longer
+    // holds it; then the cloud is gone for good - the adapter is dropped, which is what a
+    // deleted project or a revoked credential looks like from here - and an older build
+    // writes the day away. No network, no cloud, no journal entry. The bounded ring is
+    // the only thing left, and it is what puts the day back.
+    //
+    // N = 32 field paths; what is older than that is NOT recoverable locally, which D5d
+    // measures rather than leaves implied.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = seeded('d5c_one', disk, sky);
+    await settle(TICK * 10);
+    addTap(one, W1, A);
+    await settleUntil(() => cloudSites(sky, W1) === A && one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    given('the cloud acknowledged it and the collector took it',
+        one.Sync.pendingCount() === 0
+        && one.Sync.physicalOperations().every(op => op.path !== `days.${DAY}.actual.${W1}`),
+        `${one.Sync.pendingCount()} / ${one.Sync.physicalOperations().length}`);
+    check('and the device kept the field it collected',
+        ring(one).some(entry => entry.path === `days.${DAY}.actual.${W1}`),
+        JSON.stringify(ring(one).map(entry => entry.path)));
+
+    const stale = JSON.parse(disk[V2]);
+    delete stale.days[DAY];
+    stale.updatedAt = '2026-09-01T00:00:00.000Z';
+    stale.updatedBy = 'd_old_build';
+    one.putRaw(V2, JSON.stringify(stale));
+    given('an older build wrote the day away', sitesOnDisk(disk, W1) === '-',
+        sitesOnDisk(disk, W1));
+
+    // NO CLOUD AT ALL from here: the reopened window is given no adapter.
+    const back = opened('d5c_back', disk);
+    check('THE DAY COMES BACK WITH NO NETWORK AND NO JOURNAL ENTRY',
+        sitesOn(back, W1) === A, sitesOn(back, W1));
+    const named = Array.isArray(back.State.recovered) ? back.State.recovered : [];
+    check('and the recovery names the field it put back, rather than claiming a rescue',
+        named.indexOf(`days.${DAY}.actual.${W1}`) !== -1, JSON.stringify(named));
+    check('and the stale bytes on the disk were not overwritten by the repair',
+        sitesOnDisk(disk, W1) === '-', sitesOnDisk(disk, W1));
+}
+
+// ============================================ D5d · and what the bound does NOT cover
+{
+    suite('D5d · past N the ring holds nothing, and does not pretend to');
+
+    // THE RESIDUAL, measured. 33 collected field paths; the oldest is gone, by its own
+    // timestamp, and the newest 32 are there. A guarantee whose edge is not tested is a
+    // guarantee nobody knows the shape of.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('d5d_one', disk, sky);
+    await settle(TICK * 10);
+    // REAL DATES, and the first draft of this did not have them: 33 days from the 1st of
+    // July walked off the end of the month into 2026-07-33, which the model refuses, so
+    // the newest day was never recorded and the bound looked as though it kept the wrong
+    // end. Thirty-one days of July and two of August.
+    const days = [];
+    for (let i = 0; i < 33; i += 1) {
+        const day = i < 31
+            ? `2026-07-${String(i + 1).padStart(2, '0')}`
+            : `2026-08-${String(i - 30).padStart(2, '0')}`;
+        days.push(day);
+        one.State.date = day;
+        one.State.commit(one.call('assignPlace', one.State.schedule, day, W1, 'actual', A, 'normal'));
+        await settleUntil(() => one.Sync.pendingCount() === 0, 4000);
+        one.Sync.collectQueueGarbage();
+    }
+    const kept = ring(one).map(entry => entry.path);
+    given('all thirty-three days were recorded and collected',
+        days.every(day => day.length === 10), String(days.length));
+    // WHICHEVER BOUND BINDS, BINDS - and on a record this size it is the bytes, not the
+    // count. A worker-day entry is about 440 bytes and the cap is a quarter of the
+    // record, so the count of 32 only becomes the binding limit once the record passes
+    // about 56 KB, which is a season. Both invariants are asserted, and which one bit is
+    // reported rather than assumed.
+    const bytes = ringBytes(one);
+    const cap = ringCap(one);
+    check('THE RING IS BOUNDED: inside its count AND inside its bytes',
+        kept.length <= 32 && bytes <= cap,
+        `${kept.length} entries, ${bytes} of ${cap} bytes - bound by ${bytes > cap - 440 ? 'bytes' : 'count'}`);
+    check('and it is not empty: the floor keeps at least the newest field',
+        kept.length >= 1, String(kept.length));
+    check('the newest collected field is one of them',
+        kept.indexOf(`days.${days[32]}.actual.${W1}`) !== -1,
+        `${days[32]} | ${JSON.stringify(kept.slice(-3))}`);
+    check('and the oldest is NOT - this is what past N means',
+        kept.indexOf(`days.${days[0]}.actual.${W1}`) === -1,
+        `${days[0]} still kept: ${kept.indexOf(`days.${days[0]}.actual.${W1}`) !== -1}`);
+}
+
+// ================= the refusal on a full device, WITH A RING THAT IS NOT EMPTY
+{
+    suite('a full device refuses the write and spends no ring entry to do it');
+
+    // AN EMPTY RING PROVES NOTHING, and the first draft of this suite had one - the
+    // device had never synced, so nothing was ever collected and there was no insurance
+    // on the disk for the ladder to have sold. Asked properly: a device that HAS synced,
+    // whose ring holds real entries, then runs out of room.
+    //
+    // The guarantee is the one tests/capacity.test.mjs owns in full and that the
+    // whole-record copy this replaced broke: a device with no restore points and not a
+    // byte to spare refuses the edit and moves nothing. The ladder's currency is restore
+    // points; the ring is not currency.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('dcap_one', disk, sky);
+    await settle(TICK * 10);
+    addTap(one, W1, A);
+    await settleUntil(() => one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    one.State.date = '2026-09-16';
+    one.State.commit(one.call('assignPlace', one.State.schedule, '2026-09-16', W2, 'actual', B, 'normal'));
+    await settleUntil(() => one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    const ringBefore = ring(one).map(entry => entry.path).sort();
+    given('THE RING IS NOT EMPTY: this device has synced and collected several fields',
+        ringBefore.length >= 2, JSON.stringify(ringBefore));
+    given('and it holds no restore point the ladder could sell',
+        Object.keys(one.dump()).every(key => key.indexOf('scheduleData:snap:') !== 0),
+        String(Object.keys(one.dump()).filter(key => key.indexOf('scheduleData:snap:') === 0).length));
+
+    const before = JSON.stringify(one.dump());
+    const ringBytesBefore = ringBytes(one);
+    one.setQuota(() => true);
+    one.State.date = DAY;
+    const wrote = addTap(one, W1, C);
+
+    check('the edit is refused rather than claimed', wrote === false, String(wrote));
+    check('AND NOT ONE BYTE OF THE DEVICE MOVED',
+        JSON.stringify(one.dump()) === before,
+        `${Object.keys(JSON.parse(before)).length} keys before, ${Object.keys(one.dump()).length} after`);
+    check('the ring was not sold to pay for it: every entry is still there',
+        JSON.stringify(ring(one).map(entry => entry.path).sort()) === JSON.stringify(ringBefore),
+        JSON.stringify(ring(one).map(entry => entry.path).sort()));
+    check('and the ring is the same size, to the byte',
+        ringBytes(one) === ringBytesBefore,
+        `${ringBytesBefore} -> ${ringBytes(one)}`);
+}
+
+// ============================================== the byte cap, and a value too large
+{
+    suite('the ring is capped in BYTES as well as in count');
+
+    // MEASURED, because a count alone is not a byte limit: a count-only ring of 32 came
+    // to 17,520 bytes against a 5,786-byte record on a realistic crew - three times the
+    // record it insured - because its biggest entries were whole-roster paths that grow
+    // with the crew. The cap is a quarter of the record with a 32 KB ceiling, and only
+    // the families where a queued value replaces what is there are kept at all.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('dcap2_one', disk, sky);
+    await settle(TICK * 10);
+    const cap = ringCap(one);
+    given('the cap is a quarter of the record, not a fixed number',
+        cap === Math.min(32 * 1024, Math.floor((one.State.durableText.length * 2) / 4)),
+        `${cap} of ${one.State.durableText.length * 2}`);
+
+    // A season of days, every one acknowledged and collected.
+    for (let i = 0; i < 20; i += 1) {
+        const day = `2026-07-${String(i + 1).padStart(2, '0')}`;
+        one.State.date = day;
+        one.State.commit(one.call('assignPlace', one.State.schedule, day, W1, 'actual', A, 'normal'));
+        await settleUntil(() => one.Sync.pendingCount() === 0, 4000);
+        one.Sync.collectQueueGarbage();
+    }
+    check('THE RING STAYS INSIDE ITS BYTE CAP',
+        ringBytes(one) <= ringCap(one),
+        `${ringBytes(one)} of ${ringCap(one)}`);
+    check('and inside its count',
+        ring(one).length <= 32, String(ring(one).length));
+    check('a whole-roster path is not kept at all - it merges per id and costs the most',
+        ring(one).every(entry => entry.path.indexOf('workers') !== 0
+            && entry.path.indexOf('places') !== 0
+            && entry.path.indexOf('roster.workerOrder') !== 0),
+        JSON.stringify(ring(one).map(entry => entry.path).slice(0, 4)));
+
+    // A SINGLE VALUE BIGGER THAN THE WHOLE CAP is not kept by evicting everything else.
+    const held = ring(one).length;
+    const huge = { entries: Array.from({ length: 400 }, () => ({ placeId: A })),
+        rates: { daily: 400, hourly: 0 } };
+    if (typeof one.Sync.keepConfirmed === 'function') {
+        one.Sync.keepConfirmed({ path: `days.2026-06-01.actual.${W1}`, value: huge,
+            sent: true, seq: 99999, slot: 'farkad:outbox', opId: 'op_huge' });
+    }
+    check('a value larger than the cap is refused, and evicts nothing',
+        ring(one).length === held
+        && ring(one).every(entry => entry.path !== `days.2026-06-01.actual.${W1}`),
+        `${held} -> ${ring(one).length}`);
+    check('and the ring is still inside its cap afterwards',
+        ringBytes(one) <= ringCap(one),
+        `${ringBytes(one)} of ${ringCap(one)}`);
 }
 
 report();

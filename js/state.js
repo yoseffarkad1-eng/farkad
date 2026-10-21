@@ -7,6 +7,31 @@
 
 const V1_KEY = 'scheduleData';
 const V2_KEY = 'scheduleData:v2';
+
+// THE STAMP OF THE LAST RECORD THIS DEVICE CONFIRMED, under a key no older build writes.
+//
+// G2 in features/stale-window/contract.md: a value this device has confirmed stays
+// reconstructible until something newer for that field is confirmed - INCLUDING after the
+// cloud has acknowledged the operation and the collector has taken it off the queue.
+//
+// A WHOLE SECOND COPY WAS THE FIRST ANSWER AND IT WAS THE WRONG ONE, measured rather than
+// argued. It cost one copy of the record, permanently, and the capacity model has two
+// guarantees that copy cannot coexist with: the reclaim ladder's only currency is restore
+// points (tests/capacity.test.mjs, "a device with nowhere left refuses the edit rather
+// than claiming it" - no snapshots there, so a shadow rung turns a refusal into a sale),
+// and a device whose room is in its album must not be called critical
+// (tests/data.test.mjs C1 - measured at 5,084 bytes used against a 2,793 budget, of which
+// 848 were the copy, leaving 271 where a copy costs 798). Insurance that is spent by the
+// ladder breaks the first; insurance the ladder cannot spend breaks the second.
+//
+// So what is kept is the STAMP, about sixty bytes: enough to KNOW the record went
+// backwards. The recovery itself needs no second copy, because the collector's gate is
+// `op.sent && the disk holds it` - and `op.sent` means the cloud has it. A device with no
+// cloud configured never marks anything sent, so it never collects, so its journal still
+// holds every edit; a device with a cloud has the collected ones in the cloud, and the
+// next snapshot merge brings them back. The two cases cover each other, and neither costs
+// a byte of the budget.
+const STAMP_KEY = 'scheduleData:v2.stamp';
 const ISSUES_KEY = 'scheduleData:migrationIssues';
 // There was a lock key here. It is gone, and the reason is written out in full above
 // recordOnDisk: a read followed by a write is not a test-and-set, so what it held was a
@@ -69,7 +94,51 @@ const State = {
         // disk refused and memory still holds is not lost by preferring the disk - the
         // journal is replayed over it a few lines below, which is what the journal is for.
         const durable = Store.durableGet(V2_KEY);
-        const v2 = durable === null || durable === undefined ? Store.get(V2_KEY) : durable;
+        let v2 = durable === null || durable === undefined ? Store.get(V2_KEY) : durable;
+
+        // A RECORD THAT WENT BACKWARDS IS NOTED, AND NOTHING IS OVERWRITTEN TO FIX IT.
+        //
+        // See recordRegressed and STAMP_KEY. The bytes under V2_KEY are older than the
+        // last record this device confirmed, so a writer this build cannot refuse has
+        // replaced it. They are left exactly where they are - law 10 is about losing a
+        // record, and a readable stale one is still a record, and overwriting it is how a
+        // repair destroys the thing it repairs. What was lost comes back the way it
+        // always does: the journal replay below for everything the collector has not
+        // taken, and the next snapshot merge for everything it has, because the
+        // collector's gate requires the cloud to hold it first. The ⋯ panel says it
+        // happened, because a recovery nobody is told about looks like nothing happened.
+        if (this.recordRegressed()) {
+            this.recordWasReplaced = true;
+            // AND THE BOUNDED RING IS LAID BACK OVER IT, field by field.
+            //
+            // See KEPT_PREFIX in js/sync/sync.js. These are fields the collector has
+            // already taken off the queue, so the journal replay below cannot bring them
+            // back and before this there was nothing on the device that could. Applied
+            // only where the record has gone backwards, and only to the record in memory -
+            // the stale bytes on the disk are left exactly where they are, because
+            // overwriting them is how a repair destroys the thing it repairs.
+            //
+            // BOUNDED, and the bound is the point: the last 32 collected field paths.
+            // Anything older than that is not recoverable from the device, and the ⋯
+            // panel's regression line says so rather than implying a complete rescue.
+            if (typeof FarkadSync !== 'undefined' && FarkadSync.keptEntries) {
+                this.recovered = [];
+                try {
+                    const parsed = JSON.parse(v2);
+                    // ONLY WHAT THE RECORD IS ACTUALLY MISSING. The stale record is not
+                    // empty - it is an older build's whole copy - and most of what it
+                    // holds is perfectly good. Asked with the collector's own question,
+                    // so "missing" means the same thing here as it does there.
+                    FarkadSync.keptEntries().forEach(entry => {
+                        if (scheduleHoldsEntry(parsed, entry.path, entry.value)) return;
+                        applyJournalEntry(parsed, entry.path, entry.value);
+                        this.recovered.push(entry.path);
+                    });
+                    if (this.recovered.length > 0) v2 = JSON.stringify(parsed);
+                } catch (error) { this.recovered = []; }
+            }
+        }
+
         if (v2) {
             try {
                 // Parsing is not the question. A record that parses into
@@ -268,6 +337,15 @@ const State = {
 
     // True only when the schedule is on the disk. Every caller that tells somebody
     // something happened needs to be able to find that out.
+    // Set when loadRecord found the record had gone backwards and put the confirmation
+    // back. Read by the ⋯ panel: a recovery nobody is told about is a recovery that looks
+    // like nothing happened, and the stale bytes are left exactly where they are.
+    recordWasReplaced: false,
+
+    // The field paths the bounded ring put back at the last load, for the ⋯ panel. Empty
+    // is not "nothing was lost": it is "nothing the ring still held was missing".
+    recovered: [],
+
     saveFailed: false,
 
     // The schedule exactly as it was last CONFIRMED on the disk. What memory is put back
@@ -337,7 +415,6 @@ const State = {
     //   'unreadable'  the disk holds something this build will not accept as a schedule.
     //                 It is quarantined, NOT adopted, and NOT written over - law 10.
     diskVerdict(journalled) {
-        if (typeof this.durableText !== 'string') return 'clear';
         if (typeof Store === 'undefined' || !Store.available) return 'clear';
         // durableGet, NOT get. Store.get answers from Store.memory first, and memory holds
         // what THIS window last wrote - so for any window that has saved even once the
@@ -347,7 +424,8 @@ const State = {
         // question - "what would the next session see" - and bypasses the cache without
         // changing what Store.get means for everybody else.
         const held = Store.durableGet(V2_KEY);
-        if (typeof held !== 'string' || held === this.durableText) return 'clear';
+        if (typeof held !== 'string') return 'clear';   // nothing there to lose
+        if (held === this.durableText) return 'clear';
 
         // THE SAME GATE loadRecord KEEPS, and for the same reason it keeps it.
         //
@@ -378,6 +456,28 @@ const State = {
                     'הרישום השמור במכשיר לא נקרא: ' + problems[0]);
             }
             return 'unreadable';
+        }
+
+        // NO BASE AT ALL IS NOT "NO CONFLICT IS POSSIBLE".
+        //
+        // This test used to be the first line of the function, and it answered 'clear' -
+        // so a window that had never successfully read or written the record treated
+        // every disk state as its own and wrote the whole schedule over it. That window
+        // is not exotic: it is the second window of a new project, open before the first
+        // record exists, and for as long as its own save never lands it has no base. Every
+        // man the first window recorded was erased by its first ordinary edit, with no
+        // hold, no refusal and nothing said. The journal did recover them - and the
+        // journal is collected the moment the cloud has the operation and the disk holds
+        // it, so that is not a guarantee. Measured in tests/codex3.probes.test.mjs, D1,
+        // which asks the RECORD and not the reopen.
+        //
+        // "I have no base" means "I have not read this record", and the honest answer to
+        // that is to read it: adopt the disk and replay this window's journal over it,
+        // which is the same repair the rebase below makes and loses nothing, because
+        // journal-first put the edit being committed there before any of this ran.
+        if (typeof this.durableText !== 'string') {
+            if (!this.adoptDiskBaseline(held)) return 'unsafe';
+            return journalled ? 'rebased' : 'unsafe';
         }
 
         if (!journalled) return 'unsafe';
@@ -485,13 +585,62 @@ const State = {
         return Store.durableGet(V2_KEY);
     },
 
+    // Best effort, and it says so. A shadow that cannot be written costs the recovery of
+    // G2 and nothing else: the record itself has already landed and been read back by the
+    // line above this one, so no edit is at risk from this failing.
+    // OPTIONAL, in Store's own sense of the word: a write the app can live without. It
+    // never reclaims - buying room for a stamp by deleting somebody's restore points
+    // would be the stamp costing more than it is worth - and it never raises `full`,
+    // which is reserved for a write that actually mattered. About sixty bytes, which is
+    // the whole point: see STAMP_KEY for what a full copy cost and why it is gone.
+    rememberConfirmed(text) {
+        if (typeof Store === 'undefined' || !Store.available) return false;
+        let at = null;
+        try { at = JSON.parse(text).updatedAt; } catch (error) { at = null; }
+        if (typeof at !== 'string') return false;
+        try { return Store.setVerified(STAMP_KEY, at, { optional: true }) === true; }
+        catch (error) { return false; }
+    },
+
+    confirmedStamp() {
+        if (typeof Store === 'undefined' || !Store.available) return null;
+        try { return Store.durableGet(STAMP_KEY); } catch (error) { return null; }
+    },
+
+    // HAS SOMETHING OLDER REPLACED THE RECORD?
+    //
+    // Asked of `updatedAt`, which every build this app has ever shipped writes on every
+    // save, because the question is about a writer that knows nothing of this build's
+    // keys or its fence. A record stamped EARLIER than the last one this device confirmed
+    // is a record that went backwards; a later stamp is another window doing its job,
+    // whatever it changed.
+    //
+    // An equal stamp is NOT a regression. Two writes inside the same millisecond are
+    // ordinary on a phone, and answering true there would make every busy second look
+    // like damage.
+    recordRegressed() {
+        const stamp = this.confirmedStamp();
+        const held = this.recordOnDisk();
+        if (typeof stamp !== 'string' || typeof held !== 'string') return false;
+        let theirs = null;
+        try { theirs = JSON.parse(held); } catch (error) { return false; }
+        const at = theirs && typeof theirs.updatedAt === 'string' ? theirs.updatedAt : null;
+        if (at === null) return false;
+        return at < stamp;
+    },
+
     // Whether the record is still the one the decision above was made against. Asked in
     // the instruction before the write, which is the last moment anything can be asked.
     stillCurrent() {
-        if (typeof this.durableText !== 'string') return true;
         if (typeof Store === 'undefined' || !Store.available) return true;
         const held = this.recordOnDisk();
-        return typeof held !== 'string' || held === this.durableText;
+        if (typeof held !== 'string') return true;      // nothing there to lose
+        // A window with no base has not read this record, so it is not current with it -
+        // the same answer diskVerdict now gives, and for the same reason. Answering true
+        // here was the other half of D1: the verdict was made to say 'clear' and then the
+        // write was let through by the check that exists to catch exactly this.
+        if (typeof this.durableText !== 'string') return false;
+        return held === this.durableText;
     },
 
     // The field paths this window has queued that the disk ALSO moved since this window
@@ -597,6 +746,7 @@ const State = {
 
         if (landed) {
             this.durableText = text;
+            this.rememberConfirmed(text);
             // Everything journalled up to now is inside the blob just written, so the
             // journal no longer has to hold the ones the cloud already has.
             if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
@@ -925,6 +1075,7 @@ const State = {
         this.saveFailed = !landed;
         if (landed) {
             this.durableText = text;
+            this.rememberConfirmed(text);
             if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
             // Adopted, not restored: another phone's snapshot swaps the object here,
             // and that is not a moment to mirror. An advance arriving from a v79 phone
