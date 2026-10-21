@@ -332,6 +332,9 @@ Object.assign(FarkadSync, {
             return { stored: false, pruned: false };
         }
 
+        // The ring's confirmations are about the record this replaced - see forgetKept.
+        this.forgetKept();
+
         const pruned = this.dropSupersededEntries(envelope);
         if (typeof render === 'function') render();
 

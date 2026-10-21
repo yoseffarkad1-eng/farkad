@@ -450,9 +450,24 @@ const cloudSites = (cloud, worker) => {
     given('an older build has written the day away', sitesOnDisk(disk, W1) === '-',
         sitesOnDisk(disk, W1));
 
+    // DETECTION IS NOT AVAILABLE HERE, and saying so is the honest answer rather than
+    // asserting it. recordRegressed asks "does the record hold nothing where this device
+    // has a CONFIRMED value", and the list of confirmed values is the ring - which on this
+    // device is empty, because nothing is ever acknowledged and so nothing is ever
+    // collected. With no list to compare against, a record that lost a day is
+    // indistinguishable from another window having written it.
+    //
+    // The earlier version of this check passed only because detection was asked of
+    // `updatedAt < stamp`, which is dead on the real path: every build stamps its write
+    // with the current time, so an older build that is RUNNING carries a fresh stamp. The
+    // check was green against a stamp the test had forced into the bytes by hand.
+    //
+    // WHAT IS GUARANTEED HERE IS THE DATA, not the notice, and it is the stronger half:
+    // the journal holds every edit on a device that never collects, so the day comes back
+    // whatever wrote over it. That is the check below, and it is unchanged.
     const asks = typeof one.State.recordRegressed === 'function';
-    check('the regression is detected here too',
-        asks && one.State.recordRegressed() === true,
+    check('the device does not claim a detection it cannot make',
+        asks && one.State.recordRegressed() === false,
         asks ? String(one.State.recordRegressed()) : 'no such question');
     check('AND THE MAN\'S DAY COMES BACK FROM THE DEVICE ALONE',
         afterReopen(disk, W1, 'd5b_r1') === A,
@@ -589,6 +604,220 @@ const cloudSites = (cloud, worker) => {
     check('and the oldest is NOT - this is what past N means',
         kept.indexOf(`days.${days[0]}.actual.${W1}`) === -1,
         `${days[0]} still kept: ${kept.indexOf(`days.${days[0]}.actual.${W1}`) !== -1}`);
+}
+
+// ====== R4 · a hold the disk would not record is withheld from the REPLAYS too
+{
+    suite('R4 · an undecided edit is not laid back on the record by a replay');
+
+    // THE OTHER TWO REPLAY PATHS. The snapshot path was taught to withhold a hold the
+    // disk refused; replayDurableJournal and replayJournal were not, because they asked
+    // `op.held` - which reads the very mark the disk would not take. So on that one device
+    // the send was refused correctly and then a rollback put the undecided value straight
+    // back onto the schedule, where the next write that DID land would carry it.
+    const disk = sharedStore();
+    const one = crewed('r4_one', disk);
+    addTap(one, W1, A);
+    const two = opened('r4_two', disk);
+    removeTap(one, W1, A);
+    addTap(one, W1, B);
+    given('the record holds the other window\'s answer', sitesOnDisk(disk, W1) === B,
+        sitesOnDisk(disk, W1));
+
+    // The disk takes everything EXCEPT a record that says an edit is withheld.
+    two.setQuota(key => String(key).indexOf(':hold:') !== -1);
+    removeTap(two, W1, A);
+    addTap(two, W1, C);
+    given('no durable trace of the hold reached the disk',
+        Object.keys(disk).every(key => key.indexOf(':hold:') === -1),
+        String(Object.keys(disk).filter(key => key.indexOf(':hold:') !== -1).length));
+
+    // A REPLAY, asked for directly: this is what a rollback and a boot both do.
+    const replayed = two.call('emptySchedule');
+    replayed.workers = two.State.schedule.workers;
+    replayed.places = two.State.schedule.places;
+    two.Sync.replayJournal(replayed);
+    const onReplay = two.call('entriesFor', replayed, DAY, W1, 'actual')
+        .map(entry => entry.placeId).sort().join('+') || '-';
+    check('THE UNDECIDED VALUE IS NOT IN WHAT A REPLAY PRODUCES',
+        onReplay.indexOf(C) === -1, onReplay);
+    check('and the other window\'s answer is what the replay produces',
+        onReplay === B, onReplay);
+    check('the record on the disk is untouched by any of it',
+        sitesOnDisk(disk, W1) === B, sitesOnDisk(disk, W1));
+}
+
+// ====== R5 · the rejected value can never be sent, crash or no crash
+{
+    suite('R5 · a value the person decided AGAINST is retired before anything is unbarred');
+
+    // THE GAP. answerHold used to write the answer and then immediately take the mark
+    // off, leaving the operation unheld and unsent until the caller committed. A crash in
+    // that gap flushed `mine` - and when the person had chosen the other side, `mine` is
+    // the value they had just rejected. Here nothing commits after the answer at all,
+    // which is the crash, and the rejected value must still never go.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('r5_one', disk, sky);
+    await settle(TICK * 10);
+    addTap(one, W1, A);
+    await settleUntil(() => cloudSites(sky, W1) === A, 5000);
+
+    const two = opened('r5_two', disk);
+    removeTap(one, W1, A);
+    addTap(one, W1, B);
+    await settle(TICK * 10);
+    removeTap(two, W1, A);
+    addTap(two, W1, C);
+    const row = two.Sync.heldRecords().find(item => item.path === `days.${DAY}.actual.${W1}`);
+    given('the conflict is held and has a row', Boolean(row),
+        JSON.stringify(two.Sync.heldRecords().map(item => item.path)));
+
+    // The person chooses the OTHER side - and then the app dies: nothing commits.
+    check('the decision is recorded', two.Sync.answerHold(row.opId, 'disk') === true,
+        String(two.Sync.answerHold ? 'yes' : 'no'));
+    const answer = two.Sync.holdAnswer(row.opId);
+    check('and it is on the disk, naming the operation and the side',
+        Boolean(answer) && answer.choice === 'disk' && answer.opId === row.opId,
+        JSON.stringify(answer));
+
+    // THE REOPEN, with no commit ever having happened, and a flush.
+    const again = opened('r5_again', disk, sky);
+    await settle(TICK * 10);
+    again.Sync.flush();
+    await settle(TICK * 40);
+    check('THE REJECTED VALUE NEVER REACHED THE CLOUD',
+        cloudSites(sky, W1).indexOf(C) === -1, cloudSites(sky, W1));
+    check('the cloud still holds the side the person chose',
+        cloudSites(sky, W1) === B, cloudSites(sky, W1));
+    check('and no replay puts the rejected value on the screen either',
+        sitesOn(again, W1).indexOf(C) === -1, sitesOn(again, W1));
+}
+
+// ====== R6 · a ring write the disk refused is written down, not shrugged off
+{
+    suite('R6 · a field the ring could not keep is reported, not silently unprotected');
+
+    // The collector discarded keepConfirmed's answer and removed the operation anyway.
+    // The operation leaving is right - the cloud has it - but the offline protection for
+    // that field is gone, and a panel that keeps claiming the protection is claiming
+    // something this device can no longer do.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('r6_one', disk, sky);
+    await settle(TICK * 10);
+    one.setQuota(key => String(key).indexOf('farkad:kept:') === 0);
+    addTap(one, W1, A);
+    await settleUntil(() => cloudSites(sky, W1) === A && one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    check('the ring could keep nothing', ring(one).length === 0,
+        JSON.stringify(ring(one).map(entry => entry.path)));
+    check('AND THE DEVICE SAYS THE RING HAS A HOLE IN IT',
+        one.Sync.keptIncomplete() === true, String(one.Sync.keptIncomplete()));
+    check('while the day itself is on the record, which is what the cloud answered about',
+        sitesOnDisk(disk, W1) === A, sitesOnDisk(disk, W1));
+}
+
+// ================== R1 · the real path: an older build with a FRESH timestamp
+{
+    suite('R1 · the regression is caught when the older build stamps it NOW');
+
+    // THE PATH THE FIELD ACTUALLY PRODUCES, and the one the first version of this
+    // machinery missed completely. An older build writing its own stale memory is a
+    // RUNNING program: `save` sets updatedAt to the current time, so its write is stamped
+    // newer than anything this device confirmed. Detection by `updatedAt < stamp`
+    // therefore answered false exactly when it mattered, and D5/D5c only passed because
+    // they forced an old stamp into the bytes by hand.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('r1_one', disk, sky);
+    await settle(TICK * 10);
+    addTap(one, W1, A);
+    await settleUntil(() => cloudSites(sky, W1) === A && one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    given('the field was acknowledged, collected, and kept',
+        ring(one).some(entry => entry.path === `days.${DAY}.actual.${W1}`),
+        JSON.stringify(ring(one).map(entry => entry.path)));
+
+    const stale = JSON.parse(disk[V2]);
+    delete stale.days[DAY];
+    stale.updatedAt = new Date().toISOString();      // FRESH, as a running build writes
+    stale.updatedBy = 'd_old_build';
+    one.putRaw(V2, JSON.stringify(stale));
+    given('the stale record is stamped NEWER than this device\'s confirmation',
+        stale.updatedAt >= String(one.State.confirmedStamp()),
+        `${stale.updatedAt} vs ${one.State.confirmedStamp()}`);
+
+    const back = opened('r1_back', disk);
+    check('THE LOSS IS STILL DETECTED, timestamp or no timestamp',
+        back.State.recordRegressed() === true, String(back.State.recordRegressed()));
+    check('and the day comes back, offline, from the device alone',
+        sitesOn(back, W1) === A, sitesOn(back, W1));
+}
+
+// ========== R2 · and it does not overrule somebody else's newer decision
+{
+    suite('R2 · a correction from another phone is not reverted by the ring');
+
+    // THE HAZARD THE ABSENCE RULE EXISTS FOR. If the trigger were "the record differs
+    // from what I confirmed", every value another phone corrected would look like a loss,
+    // and this device would put its own older copy back over a decision somebody else
+    // made - the exact fault this whole round is about, committed by the repair instead
+    // of by the bug. Absence cannot be confused that way: a corrected field HAS something
+    // in it.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('r2_one', disk, sky);
+    await settle(TICK * 10);
+    addTap(one, W1, A);
+    await settleUntil(() => cloudSites(sky, W1) === A && one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    given('the ring holds this device\'s confirmed value',
+        ring(one).some(entry => entry.path === `days.${DAY}.actual.${W1}`),
+        JSON.stringify(ring(one).map(entry => entry.path)));
+
+    const moved = JSON.parse(disk[V2]);
+    moved.days[DAY].actual[W1] = { entries: [{ placeId: B }],
+        rates: { daily: 400, hourly: 0 } };
+    moved.updatedAt = new Date().toISOString();
+    moved.updatedBy = 'd_other_phone';
+    one.putRaw(V2, JSON.stringify(moved));
+
+    const back = opened('r2_back', disk);
+    check('this is NOT read as a loss: something is there',
+        back.State.recordRegressed() === false, String(back.State.recordRegressed()));
+    check('AND THE OTHER PHONE\'S CORRECTION STANDS',
+        sitesOn(back, W1) === B, sitesOn(back, W1));
+    check('the ring put nothing back',
+        (Array.isArray(back.State.recovered) ? back.State.recovered : []).length === 0,
+        JSON.stringify(back.State.recovered));
+}
+
+// ========== R3 · and it does not resurrect a day somebody cleared on purpose
+{
+    suite('R3 · a day the person cleared is not brought back by the ring');
+
+    // The other half of the same hazard. A cleared day is absence - which is what the
+    // ring's trigger looks for - so the clearing has to be confirmed in the ring too, or
+    // the repair would undo somebody's deliberate deletion at every reopen.
+    const sky = makeCloud();
+    const disk = sharedStore();
+    const one = crewed('r3_one', disk, sky);
+    await settle(TICK * 10);
+    addTap(one, W1, A);
+    await settleUntil(() => one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    removeTap(one, W1, A);
+    await settleUntil(() => one.Sync.pendingCount() === 0, 5000);
+    one.Sync.collectQueueGarbage();
+    given('the day is empty and the clearing was confirmed too',
+        sitesOnDisk(disk, W1) === '-', sitesOnDisk(disk, W1));
+
+    const back = opened('r3_back', disk);
+    check('THE CLEARED DAY STAYS CLEARED',
+        sitesOn(back, W1) === '-', sitesOn(back, W1));
+    check('and nothing was reported as lost',
+        back.State.recordRegressed() === false, String(back.State.recordRegressed()));
 }
 
 // ================= the refusal on a full device, WITH A RING THAT IS NOT EMPTY

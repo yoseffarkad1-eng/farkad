@@ -121,22 +121,17 @@ const State = {
             // BOUNDED, and the bound is the point: the last 32 collected field paths.
             // Anything older than that is not recoverable from the device, and the ⋯
             // panel's regression line says so rather than implying a complete rescue.
-            if (typeof FarkadSync !== 'undefined' && FarkadSync.keptEntries) {
-                this.recovered = [];
-                try {
-                    const parsed = JSON.parse(v2);
-                    // ONLY WHAT THE RECORD IS ACTUALLY MISSING. The stale record is not
-                    // empty - it is an older build's whole copy - and most of what it
-                    // holds is perfectly good. Asked with the collector's own question,
-                    // so "missing" means the same thing here as it does there.
-                    FarkadSync.keptEntries().forEach(entry => {
-                        if (scheduleHoldsEntry(parsed, entry.path, entry.value)) return;
-                        applyJournalEntry(parsed, entry.path, entry.value);
-                        this.recovered.push(entry.path);
-                    });
-                    if (this.recovered.length > 0) v2 = JSON.stringify(parsed);
-                } catch (error) { this.recovered = []; }
-            }
+            this.recovered = [];
+            try {
+                const parsed = JSON.parse(v2);
+                // THE SAME LIST recordRegressed answered from, so the trigger and the
+                // repair can never be about different fields.
+                this.lostFields().forEach(entry => {
+                    applyJournalEntry(parsed, entry.path, entry.value);
+                    this.recovered.push(entry.path);
+                });
+                if (this.recovered.length > 0) v2 = JSON.stringify(parsed);
+            } catch (error) { this.recovered = []; }
         }
 
         if (v2) {
@@ -609,24 +604,52 @@ const State = {
 
     // HAS SOMETHING OLDER REPLACED THE RECORD?
     //
-    // Asked of `updatedAt`, which every build this app has ever shipped writes on every
-    // save, because the question is about a writer that knows nothing of this build's
-    // keys or its fence. A record stamped EARLIER than the last one this device confirmed
-    // is a record that went backwards; a later stamp is another window doing its job,
-    // whatever it changed.
+    // ASKED OF WHAT IS MISSING, NOT OF A TIMESTAMP.
     //
-    // An equal stamp is NOT a regression. Two writes inside the same millisecond are
-    // ordinary on a phone, and answering true there would make every busy second look
-    // like damage.
+    // THE TIMESTAMP VERSION OF THIS WAS DEAD ON THE ONE PATH IT EXISTED FOR, and the
+    // review that found it was right. It asked `recordOnDisk().updatedAt < theStamp`,
+    // reasoning that a writer carrying older bytes carries an older stamp. It does not:
+    // `save` a few lines down sets updatedAt to `new Date()` on every write, and so does
+    // every build this app has ever shipped. An older build writing its own stale memory
+    // is RUNNING, so it stamps NOW - the comparison answered false exactly when it
+    // mattered, and the three suites that covered it only passed because they forced an
+    // old stamp into the bytes by hand, which nothing in the field does.
+    //
+    // The question that is actually answerable: does the record hold NOTHING where this
+    // device has a confirmed value? The ring is the list of those (see KEPT_PREFIX), and
+    // absence is the signal because it is the only one that cannot be confused with
+    // somebody else's newer decision:
+    //
+    //   nothing there   - an older build's copy never had this field. A loss, and ours
+    //                     to put back.
+    //   something else  - another phone corrected it and a snapshot brought the
+    //                     correction. NOT a loss, and re-applying the ring over it would
+    //                     be this device overruling a decision somebody else made. The
+    //                     timestamp version could not tell these apart either.
+    //   nothing, and the ring says nothing too - a day somebody cleared on purpose, and
+    //                     the clearing was itself confirmed. Nothing to put back.
+    //
+    // The stamp is kept because `⋯` reads it, and because it is what tells a person WHEN
+    // the record they are looking at was last confirmed by this device. It is no longer
+    // the trigger.
     recordRegressed() {
-        const stamp = this.confirmedStamp();
+        return this.lostFields().length > 0;
+    },
+
+    // The confirmed fields the record on the disk holds nothing at. The answer to
+    // recordRegressed, and the list the recovery applies - asked once so the two can
+    // never disagree about what was lost.
+    lostFields() {
         const held = this.recordOnDisk();
-        if (typeof stamp !== 'string' || typeof held !== 'string') return false;
+        if (typeof held !== 'string') return [];
+        if (typeof FarkadSync === 'undefined' || !FarkadSync.keptEntries) return [];
         let theirs = null;
-        try { theirs = JSON.parse(held); } catch (error) { return false; }
-        const at = theirs && typeof theirs.updatedAt === 'string' ? theirs.updatedAt : null;
-        if (at === null) return false;
-        return at < stamp;
+        try { theirs = JSON.parse(held); } catch (error) { return []; }
+        const nothing = value => value === undefined || value === null;
+        return FarkadSync.keptEntries().filter(entry => {
+            if (nothing(entry.value)) return false;
+            return nothing(readPath(theirs, entry.path));
+        });
     },
 
     // Whether the record is still the one the decision above was made against. Asked in

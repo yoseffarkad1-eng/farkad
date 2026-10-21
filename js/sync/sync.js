@@ -101,6 +101,11 @@ const ANSWER_PREFIX = 'farkad:holdanswer:';
 // tests/capacity.test.mjs says so.
 const KEPT_PREFIX = 'farkad:kept:';
 const KEPT_LIMIT = 32;
+// OUTSIDE the ring's own prefix, deliberately: anything that wipes or refuses the ring -
+// a quota rule, a cleanup, a person clearing site data for that family - would otherwise
+// take the flag that says the ring is incomplete with it, and the device would go back to
+// claiming a protection it has lost.
+const KEPT_INCOMPLETE_KEY = 'farkad:keptgap';
 const KEPT_BYTES_CEILING = 32 * 1024;
 const KEPT_BYTES_SHARE = 4;        // a quarter of the record
 
@@ -2000,7 +2005,16 @@ const FarkadSync = {
             // into the bounded ring. See KEPT_PREFIX. Best effort and optional - an entry
             // that will not fit costs the recovery of that one field and nothing else,
             // and the operation is leaving either way because the cloud has it.
-            ops.forEach(op => this.keepConfirmed(op));
+            // A RING WRITE THAT FAILED IS WRITTEN DOWN, not shrugged off. The operation
+            // leaves either way - the cloud has it, which is what let it be collected -
+            // but the offline protection for that field is gone, and the guarantee in
+            // contract.md §5a is about exactly that protection. Silently dropping one
+            // means the panel keeps claiming a recovery this device can no longer make.
+            // The flag is one key, written once, and `⋯` reads it.
+            ops.forEach(op => {
+                if (!replacesWhole(op.path)) return;
+                if (!this.keepConfirmed(op)) this.noteKeptIncomplete(op.path);
+            });
 
             try { Store.remove(key); } catch (error) { whole = false; }
             Store.forget(key);
@@ -2101,8 +2115,39 @@ const FarkadSync = {
     // A SENT operation is replayable whether or not it carries a mark. Its value is in
     // the cloud and in the record already; the mark on it says a path was contested, not
     // that this device should forget what it has already published.
+    //
+    // AND THE SESSION-ONLY HOLD COUNTS HERE TOO. `op.held` reads the durable mark, and the
+    // mark is one of the things a full disk refuses - so on the one device where the hold
+    // could not be written down, this filter answered "replayable" about an operation the
+    // send was correctly refusing, and a rollback or a boot replay laid the undecided
+    // value straight back onto the schedule. Only the snapshot path had been taught;
+    // these two had not. _heldLocalNow is the same session set holdHere adds to when
+    // holdContested reports the mark undurable.
+    //
+    // Asked as `op.held || _heldLocalNow`, deliberately, and NOT as heldAgainstOwnDisk:
+    // that question answers false for the cloud kind, which would make a write that lost
+    // a race to another PHONE replayable again - and what that phone keeps on its own
+    // screen while the panel offers the choice is what tests/contested.test.mjs and
+    // tests/held.test.mjs pin.
     replayable() {
-        return this.physicalOperations().filter(op => op.sent || !op.held);
+        return this.physicalOperations().filter(op => op.sent
+            || !(op.held || this._heldLocalNow.has(String(op.opId))))
+            .filter(op => !this.answeredAway(op));
+    },
+
+    // DID A PERSON DECIDE AGAINST THIS EXACT OPERATION?
+    //
+    // holdAnswer was written and then read by nothing, which made the durable record of a
+    // decision worth nothing: after a reopen the marks were gone, the queue looked
+    // ordinary, and the value the person had rejected was an ordinary candidate again.
+    // This is the consumer. Belt and braces with the retirement written in answerHold:
+    // the retirement is what the projection reads, and this is what holds if that write
+    // was later lost to a wipe of one key - a decision against a value is not something
+    // to re-derive from bookkeeping that can go missing.
+    answeredAway(op) {
+        if (!op || !op.opId) return false;
+        const answer = this.holdAnswer(op.opId);
+        return Boolean(answer) && answer.choice && answer.choice !== 'mine';
     },
 
     // The durable journal, replayed over `schedule`. False when the disk could not be
@@ -2287,35 +2332,36 @@ const FarkadSync = {
         if (!path) return false;
         const key = String(path);
 
-        // THE LOAD-BEARING HALF IS THE MARK THE CLOUD HALF ALREADY USES.
-        //
-        // holdContested writes one small key per OPERATION and the decode reads it back
-        // off the disk on every rebuild, so every window of this app sees it and a reopen
-        // sees it. v163 wrote a second, parallel family for this case and filtered on a
-        // Set of paths in one window's memory, which is how the other window came to send
-        // what this one was holding. There is one hold mechanism now.
-        //
-        // A mark the disk refuses leaves the operation unmarked, so `_heldNow` carries the
-        // PATH for the rest of this session - the same session-long block the cloud half
-        // has had since v100, and the same honest limit: a disk that will not take a
-        // decision to withhold cannot be made to remember it across a reopen.
-        const wrote = this.holdContested([key]);
-        if (!wrote.durable) {
-            this._heldNow.add(key);
-            // AND SEPARATELY, because the two kinds behave differently - see holdIsLocal.
-            // The descriptive record is what normally tells them apart and it is written
-            // on the same disk that has just refused the mark, so for this session the
-            // kind is remembered here instead. It is session memory on purpose: the whole
-            // case is a disk that will not record a decision to withhold, and nothing
-            // written anywhere can outlive that.
-            this._heldLocalNow.add(key);
-        }
-
-        // The operation this hold is about. Without one there is nothing to name, and a
-        // hold on a path with no queued operation would be a hold on nothing.
+        // The operation this hold is about: the one this window has just queued, which is
+        // the current one for the path. Without one there is nothing to name, and a hold
+        // on a path with no queued operation would be a hold on nothing.
+        this.loadOutbox();
         let op = null;
         try { op = this.projectedQueue().get(key) || null; } catch (error) { op = null; }
         if (!op || !op.opId) return true;
+
+        // ONE OPERATION, AND IT IS THIS WINDOW'S.
+        //
+        // The mark is the same per-operation mark the cloud half uses, and the decode
+        // reads it off the disk on every rebuild, so every window of this app sees it and
+        // a reopen sees it. But it is written HERE rather than through holdContested,
+        // because holdContested marks every unsent operation at the path - which is the
+        // cloud half's rule, where everything pending at a contested path has lost - and
+        // for a two-window conflict the other window's operation is the one being ADOPTED,
+        // not held. Marking it too meant its correction was never sendable and never
+        // replayable: holding this window's edit silently held the record it was being
+        // held in favour of. Measured in tests/codex3.probes.test.mjs, R4.
+        const mark = outboxHoldKey(op.slot, op.opId);
+        if (Store.durableGet(mark) !== ACK_VALUE && !Store.setVerified(mark, ACK_VALUE)) {
+            Store.forget(mark);
+            // A mark the disk refuses leaves the operation unmarked, so this session
+            // carries it instead - the PATH for the status line, and the OPERATION for
+            // every decision, because a path-shaped answer is what held the other
+            // window's correction. The honest limit is unchanged: a disk that will not
+            // take a decision to withhold cannot be made to remember it across a reopen.
+            this._heldNow.add(key);
+            this._heldLocalNow.add(String(op.opId));
+        }
 
         const already = Store.durableGet(HOLD_PREFIX + op.opId);
         if (already) return true;           // decided once; a second look does not rewrite it
@@ -2409,12 +2455,32 @@ const FarkadSync = {
             by: typeof syncDeviceId === 'function' ? syncDeviceId() : null });
         if (!Store.setVerified(ANSWER_PREFIX + id, record)) return false;
 
-        // Now, and not before. Both marks: the one that bars the send, and the
-        // descriptive pair the panel was drawing.
+        // THE REJECTED VALUE IS RETIRED BEFORE ANYTHING IS UNBARRED.
+        //
+        // Taking the mark off was the FIRST thing this used to do after writing the
+        // answer, and between that and the caller's commit the operation was unheld and
+        // unsent - so a crash in the gap sent `mine`, which when the person had chosen
+        // the other side is the value they had just rejected. An inversion, not a delay.
+        //
+        // Retirement is the mechanism that already exists for "this operation lost and
+        // must never be current again" (see collectQueueGarbage), it is one verified
+        // write of its own key, and it is read off the disk by every projection. Written
+        // FIRST, and if it cannot be written the hold stands: nothing is unbarred, the
+        // answer record stays, and the caller is told.
+        if (picked !== 'mine') {
+            if (!Store.setVerified(outboxBeatKey(op.slot, id), ACK_VALUE)) {
+                Store.forget(outboxBeatKey(op.slot, id));
+                return false;
+            }
+        }
+
+        // Only now, and only for the side that keeps its own value. Both marks: the one
+        // that bars the send, and the descriptive pair the panel was drawing.
         Store.forget(outboxHoldKey(op.slot, id));
         Store.remove(outboxHoldKey(op.slot, id));
         Store.remove(HOLD_PREFIX + id);
         this._heldNow.delete(String(op.path));
+        this._heldLocalNow.delete(String(id));
         return true;
     },
 
@@ -2437,8 +2503,7 @@ const FarkadSync = {
     // mark either way.
     holdIsLocal(opId) {
         if (this.durableHold(opId)) return true;
-        const op = this.physicalOperations().find(item => String(item.opId) === String(opId));
-        return Boolean(op) && this._heldLocalNow.has(String(op.path));
+        return this._heldLocalNow.has(String(opId));
     },
 
     // Asked of the OPERATION ITSELF, because the mark is one of the things a full disk
@@ -2449,12 +2514,14 @@ const FarkadSync = {
     // it is the whole answer in exactly the case the disk refused.
     heldAgainstOwnDisk(item) {
         if (!item || item.sent) return false;
-        if (this._heldLocalNow.has(String(item.path))) return true;
+        if (this._heldLocalNow.has(String(item.opId))) return true;
         return Boolean(item.held) && Boolean(this.durableHold(item.opId));
     },
 
-    // Paths held against this device's OWN other window where the disk refused to record
-    // it. See holdHere. Session-scoped, like _heldNow beside it and for the same reason.
+    // OPERATION ids held against this device's OWN other window where the disk refused to
+    // record it. By id and not by path: a path carries both windows' operations, and the
+    // other window's is the one being adopted. See holdHere. Session-scoped, like
+    // _heldNow beside it and for the same reason.
     _heldLocalNow: new Set(),
 
     // The enforced byte cap, read off the record it is insuring. Zero when there is no
@@ -2560,6 +2627,37 @@ const FarkadSync = {
 
     // What this device kept of fields the collector has already taken. Read off the disk
     // every time, like everything else in contract.md.
+    // THE RING IS NOT COMPLETE, and the device says so rather than letting a panel claim
+    // a protection it has lost. One key, not a list: the person needs to know the ring has
+    // a hole in it, and the field names would be a list nobody can act on.
+    noteKeptIncomplete(path) {
+        try { Store.setVerified(KEPT_INCOMPLETE_KEY, String(path), { optional: true }); }
+        catch (error) { /* a flag that cannot be written is the same situation twice */ }
+    },
+
+    keptIncomplete() {
+        try { return typeof Store.durableGet(KEPT_INCOMPLETE_KEY) === 'string'; }
+        catch (error) { return false; }
+    },
+
+    // THE WHOLE RING GOES WHEN THE WHOLE RECORD IS REPLACED ON PURPOSE.
+    //
+    // A restore is the one transaction whose point is to replace everything, and after it
+    // this device's earlier confirmations are not the truth any more - they are what the
+    // person just asked to be rid of. Left in place they are absences in the new record,
+    // which is precisely what the ring's trigger looks for, so the next reopen put the
+    // restored-away days back. Measured by tests/data.test.mjs ("after a close and reopen
+    // it still does") and tests/concurrency.test.mjs ("a reopen does not put the
+    // restored-away day back") - two suites that already existed and were right.
+    //
+    // Dropping the ring costs insurance and never a record: everything the restore kept is
+    // in the restored record, and everything queued after it is in the journal.
+    forgetKept() {
+        this.keptEntries(true).forEach(row => Store.remove(row.key));
+        Store.remove(KEPT_INCOMPLETE_KEY);
+        return true;
+    },
+
     keptEntries(withKeys) {
         let keys = [];
         try { keys = Store.keys ? Store.keys() : []; } catch (error) { return []; }

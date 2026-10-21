@@ -389,6 +389,11 @@ const HELD_UNREADABLE = 'הרישום שבענן אינו קריא במכשיר 
 // told now.
 const HELD_UNDECIDED = 'אין מקום פנוי במכשיר לשמור את ההחלטה, ולכן היא לא נשמרה. '
     + 'שני הצדדים נשארו כמו שהם. פנה מקום ונסה שוב.';
+// The decision stuck and the record did not. Two different things, and telling somebody
+// their choice was applied when the write was refused is how they find out tomorrow.
+const HELD_UNWRITTEN = 'ההחלטה שלך נשמרה והקונפליקט נסגר, אבל לא הצלחנו לכתוב את '
+    + 'הרישום עצמו למכשיר כרגע. מה שכבר שמור לא נפגע. נסה לרשום את היום הזה שוב '
+    + 'בעוד רגע, ואם זה חוזר - פנה מקום במכשיר.';
 const HELD_MOVED = 'הרישום בענן השתנה בזמן שהחלון היה פתוח. ההשוואה עודכנה - בדוק שוב והחלט.';
 // A held ledger entry has no fresh-edit way out: the ledger is append-only and its ids
 // are deterministic, so "edit it again from its screen" would be a lie.
@@ -567,13 +572,24 @@ function resolveHeldRecord(row, takeCloud) {
         State.adoptDiskBaseline(State.recordOnDisk());
         const chosen = takeCloud ? row.disk : row.mine;
         const localParts = String(row.path).split('.');
+        let wrote = true;
         if (localParts[0] === 'days' && localParts.length === 4) {
             const side = ensureDay(State.schedule, localParts[1], localParts[2]);
             side[localParts[3]] = chosen === undefined ? null : chosen;
-            State.commit({ path: row.path, value: chosen === undefined ? null : chosen });
+            // READ, not discarded. This answer used to be thrown away and `true` returned
+            // regardless, so a commit the device refused - a full disk, a record that had
+            // moved again - was reported to the person as a decision applied. The hold is
+            // already answered durably by this point and the operation is already retired
+            // or released, so what is left to say is that the WRITE did not land, which is
+            // the one thing they would otherwise find out tomorrow.
+            wrote = State.commit({ path: row.path,
+                value: chosen === undefined ? null : chosen }) === true;
+        }
+        if (!wrote && typeof askTell === 'function') {
+            askTell({ title: 'ההחלטה נרשמה, הרישום לא נכתב', message: HELD_UNWRITTEN });
         }
         if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
-        return Promise.resolve(true);
+        return Promise.resolve(wrote);
     }
     const parts = String(row.path).split('.');
     if (parts[0] !== 'days' || parts.length !== 4) return Promise.resolve(false);
