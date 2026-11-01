@@ -364,7 +364,9 @@ function readReportPrintout() {
     // Weekly and fortnightly payroll have separate tables, often with different
     // columns. Reading only the first silently omitted the whole second crew.
     const groups = tables.map(table => {
-        const wrap = table.closest('.report-payroll-group');
+        // The reconciliation band is its own wrapper - a header-and-footer table with no
+        // body - so its heading «סיכום התקופה» is found the same way a cycle's is.
+        const wrap = table.closest('.report-payroll-group, .report-reconcile-group');
         let heading = wrap && wrap.previousElementSibling;
         while (heading && !heading.matches('h3.report-group')) heading = heading.previousElementSibling;
         return {
@@ -386,7 +388,11 @@ function readReportPrintout() {
         rows: first ? first.rows : [],
         totals: first ? first.totals : [],
         empty: first ? '' : printoutText(section.querySelector('.empty-hint')),
-        notes: [...section.querySelectorAll('.hint-warn, .hint-money')]
+        // .report-finance-text is a PRINTING class, like hint-warn and hint-money: it is
+        // how the financial section's men reach the picture. They are lines rather than a
+        // table on purpose (see renderFinanceBlock), so they arrive as notes - which also
+        // keeps every row count in the suites counting the crew and not accounts.
+        notes: [...section.querySelectorAll('.hint-warn, .hint-money, .report-finance-text')]
             .map(printoutText).filter(Boolean)
     };
 }

@@ -208,10 +208,10 @@ try {
     const simple = page.locator('[data-report-worker-id="w_simple"]');
     same('only plain work and holiday labels appear on the card',await simple.locator('.report-tile-metrics .report-tile-label').allTextContents(),['ימי עבודה','חופש']);
     same('normal day, double day and overtime day are four payable units',await simple.locator('.report-tile-metrics strong').allTextContents(),['4','1']);
-    same('the original attendance count stays three',await page.locator('.report-payroll tbody [data-label="ימי נוכחות"]').textContent(),'3');
+    same('the original attendance count stays three',await page.locator('.report-payroll tbody [data-label="נוכחות"]').textContent(),'3');
     same('the original pay count stays four',await page.locator('.report-payroll tbody [data-label="ימי שכר"]').textContent(),'4');
     same('no deduction line crowds the outer card',await simple.locator('.report-tile-deduction').count(),0);
-    check('compact total hides detailed attendance labels',!(await page.locator('.report-payroll tfoot [data-label="ימי נוכחות"]').isVisible()));
+    check('compact total hides detailed attendance labels',!(await page.locator('.report-payroll tfoot [data-label="נוכחות"]').isVisible()));
     const simpleOutput = await page.evaluate(()=>JSON.stringify(reportSheets()));
     const simpleRecord = await page.evaluate(()=>JSON.stringify(State.schedule));
     await simple.click();
@@ -226,8 +226,8 @@ try {
     check('worker details keep a reachable return action after scrolling',await page.locator('.worker-detail-back').evaluate(n=>{const r=n.getBoundingClientRect();return r.top>=0&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===n;}));
     await page.evaluate(()=>closeWorkerDays());
     await page.locator('.report-layout-toggle').click();
-    check('full report retains the attendance breakdown',await page.locator('.report-payroll tbody [data-label="ימי נוכחות"]').isVisible());
-    check('full total retains the attendance breakdown',await page.locator('.report-payroll tfoot [data-label="ימי נוכחות"]').isVisible());
+    check('full report retains the attendance breakdown',await page.locator('.report-payroll tbody [data-label="נוכחות"]').isVisible());
+    check('full total retains the attendance breakdown',await page.locator('.report-payroll tfoot [data-label="נוכחות"]').isVisible());
     same('simplified cards and details leave every export unchanged',await page.evaluate(()=>JSON.stringify(reportSheets())),simpleOutput);
     same('simplified cards and details leave the record unchanged',await page.evaluate(()=>JSON.stringify(State.schedule)),simpleRecord);
     suite('large amounts and unknown wages stay readable in compact cards');

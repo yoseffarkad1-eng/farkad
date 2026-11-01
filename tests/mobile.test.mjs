@@ -1927,12 +1927,19 @@ for (const width of [320, 390]) {
         const net = tr ? tr.querySelector('td.cell-net') : null;
         if (!net) return { present: false };
         const style = getComputedStyle(net);
-        const metricTops = ['ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'מקדמות']
+        const metricCells = ['נוכחות', 'ימי שכר', 'כפולים', 'מקדמות']
             .map(label => tr.querySelector(`td[data-label="${label}"]`))
-            .filter(Boolean)
+            .filter(Boolean);
+        const metricTops = metricCells
             .map(node => Math.round(node.getBoundingClientRect().top));
+        // On the card there is no header row: the word under each number IS the heading,
+        // drawn from data-label through content: attr(data-label). So this is where the
+        // shortened headings of 17 October have to be read back from.
+        const metricLabels = metricCells
+            .map(node => getComputedStyle(node, '::before').content.replace(/^"|"$/g, ''));
         return {
             present: true,
+            metricLabels,
             netTop: Math.round(net.getBoundingClientRect().top),
             otherTops: [...tr.querySelectorAll('td')].filter(td => td !== net)
                 .map(td => Math.round(td.getBoundingClientRect().top)),
@@ -1957,8 +1964,199 @@ for (const width of [320, 390]) {
     check(`${width}px: the four counts share one labelled row beneath it`,
         card.metricTops.length === 4 && new Set(card.metricTops).size === 1,
         JSON.stringify(card.metricTops));
+    // The shortened headings, read off the card where they are the only naming of the
+    // number. css/app.css selects these cells BY THIS TEXT, so a rename that moved the
+    // table and not the stylesheet dropped two of them out of the row above without
+    // failing anywhere - which is how this check came to exist.
+    check(`${width}px: and each one is named by its shortened heading`,
+        card.metricLabels.join('|') === 'נוכחות|ימי שכר|כפולים|מקדמות',
+        JSON.stringify(card.metricLabels));
     check(`${width}px: and the card does not widen the page`,
         card.across === true);
+
+    await page.context().close();
+}
+
+// -------------------------------------------- the weekly fold under the pay card
+//
+// A weekly man inside a longer range is worked out week by week in a fold under his
+// group (renderWeeklyBreakdown). Two things about it are measured here and nowhere else,
+// because every payroll fixture in this suite and in the print suite is fortnightly, so
+// the fold is never drawn in them at all:
+//
+//   - IT IS NOT A TABLE. A <tbody><tr> inside .report-payroll is a worker row to the
+//     card rules above, to the compact grid's count and to the suites that prove the
+//     exported numbers against the screen; three weeks of one man read as three more men
+//     in all of them.
+//   - ITS SUMMARY IS A 44px TARGET, like every other fold in this app (iron law 9).
+for (const [width, scale] of [[320, '100%'], [390, '100%'], [430, '100%'], [320, '200%']]) {
+    const label = scale === '200%'
+        ? `${width}px at 200% text: the weekly fold`
+        : `${width}px: the weekly fold is lines, and a finger can open it`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    if (scale === '200%') {
+        // The same cascade rewrite the 200% block above uses - the app rebuilds its own
+        // nodes, so nothing attached to an element survives a render().
+        await doubleEveryFontSize(page);
+        await page.waitForTimeout(200);
+    }
+    const fold = await page.evaluate(() => {
+        // Weekly from the first week start inside the range, so every slice the fold
+        // asks for is a real weekly period rather than a date somebody guessed.
+        let start = '2026-08-01';
+        for (let i = 0; i < 14 && !isWeekStart(start); i += 1) {
+            const next = parseLocalDate(start);
+            next.setDate(next.getDate() + 1);
+            start = toLocalDateStr(next);
+        }
+        const day = (from, add) => {
+            const at = parseLocalDate(from);
+            at.setDate(at.getDate() + add);
+            return toLocalDateStr(at);
+        };
+        State.worker('w_01').payCycles = `${start}=weekly`;
+        assignPlace(State.schedule, start, 'w_01', 'actual', 'p_1');
+        assignPlace(State.schedule, day(start, 8), 'w_01', 'actual', 'p_1');
+        State.save({ silent: true });
+        REPORT_CARD_GRID = false;
+        REPORT_RANGE.from = start;
+        REPORT_RANGE.to = day(start, 13);
+        showView('reports');
+        render();
+
+        const box = document.querySelector('.report-weekly-breakdown');
+        if (!box) return { present: false };
+        const summary = box.querySelector('summary').getBoundingClientRect();
+        box.open = true;                       // the person taps it; the layout is the test
+        const lines = [...box.querySelectorAll('.report-weekly-line')];
+        // The property that makes the fold readable, measured on the DRAWN text rather
+        // than through the function that produced it: the weeks add up to the line under
+        // them. A fold whose own total disagrees with its own weeks is worse than none.
+        const valuesOf = line => [...line.querySelectorAll('.report-weekly-value')]
+            .map(node => Number(String(node.textContent).replace(/[^\d.-]/g, '')) || 0);
+        const weeks = lines.filter(line => !line.classList.contains('report-weekly-total'));
+        const totalLine = lines.find(line => line.classList.contains('report-weekly-total'));
+        const summed = weeks.reduce((into, line) => valuesOf(line)
+            .map((value, at) => (into[at] || 0) + value), []);
+        const shown = totalLine ? valuesOf(totalLine) : [];
+        return {
+            present: true,
+            adds: shown.length > 0 && summed.length === shown.length
+                && shown.every((value, at) => Math.abs(value - summed[at]) < 0.005),
+            summed,
+            shown,
+            tables: box.querySelectorAll('table').length,
+            // What the rest of the app counts as a worker row, against what the pay
+            // sheet's own tables hold: the fold must add nothing to the first number.
+            payrollRows: document.querySelectorAll('.report-payroll tbody tr').length,
+            tableRows: document.querySelectorAll('.report-payroll .report-table tbody tr').length,
+            lines: lines.length,
+            total: lines.filter(line => line.classList.contains('report-weekly-total')).length,
+            says: lines.map(line => line.textContent.replace(/\s+/g, ' ').trim()),
+            summary: { w: Math.round(summary.width), h: Math.round(summary.height) },
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+
+    check(`${label}: a weekly man inside a longer range gets his weeks`,
+        fold.present === true && fold.lines >= 3 && fold.total === 1, JSON.stringify(fold));
+    check(`${label}: holds no table, so nothing else reads its weeks as men`,
+        fold.tables === 0, JSON.stringify(fold));
+    check(`${label}: and adds not one row to what the app reads as the crew`,
+        fold.payrollRows > 0 && fold.payrollRows === fold.tableRows,
+        JSON.stringify({ payrollRows: fold.payrollRows, tableRows: fold.tableRows }));
+    check(`${label}: can be opened by a finger`,
+        fold.summary.h >= 44 && fold.summary.w >= 44, JSON.stringify(fold.summary));
+    check(`${label}: every line says which week and what it came to`,
+        fold.says.length >= 3
+        && fold.says.every(text => text.includes('נוכחות') && text.includes('נצבר')),
+        JSON.stringify(fold.says));
+    check(`${label}: the weeks add up to the line under them, on the screen`,
+        fold.adds === true, JSON.stringify(fold.says));
+    check(`${label}: and it does not widen the page`,
+        fold.across === true, JSON.stringify(fold));
+
+    await page.context().close();
+}
+
+// ---------------------------------- the financial section, on the narrowest screen
+//
+// Since 18 October 2026 a man whose money moved in the period and who worked no day in it
+// is not a row in the work table: he is a line in the financial section under it, with a
+// reconciliation band below that. Three facts about those two are phone facts and are
+// measured nowhere else:
+//
+//   - THE WORK BAND MUST NOT CLAIM TO BE THE PAYDAY while somebody's money is outside the
+//     table. In card mode - the default here - css/app.css draws exactly two footer cells,
+//     the label and the one carrying data-label="לתשלום", styled as the biggest number on
+//     the page. A number left in that cell would be read as the fortnight's payable.
+//   - THE LINES ARE NOT ROWS. They are divs, so the pay-card rules, the card grid's count
+//     and every row count in the suites keep meaning the crew.
+//   - IT ALL FITS 320px, with the text at twice the size as well.
+for (const [width, scale] of [[320, '100%'], [390, '100%'], [320, '200%']]) {
+    const label = scale === '200%'
+        ? `${width}px at 200% text: the financial section`
+        : `${width}px: the financial section under the work table`;
+    suite(label);
+
+    const page = await open({ width, height: HEIGHTS[width] });
+    if (scale === '200%') {
+        await doubleEveryFontSize(page);
+        await page.waitForTimeout(200);
+    }
+    const seen = await page.evaluate(() => {
+        // One man works, one man only took cash in the same fortnight.
+        State.schedule.workers = State.schedule.workers.slice(0, 1);
+        State.schedule.workers.push({ id: 'w_cash', name: 'רגא',
+            active: true, dailyRate: 0, hourlyRate: 0 });
+        assignPlace(State.schedule, '2026-08-10', 'w_01', 'actual', 'p_1');
+        State.commit(addAdvance(State.schedule, 'w_cash', '2026-08-10', 250, ''));
+        State.save({ silent: true });
+        REPORT_CARD_GRID = true;          // the owner's default on a phone
+        REPORT_RANGE.from = '2026-08-07';
+        REPORT_RANGE.to = '2026-08-20';
+        REPORT_WORKERS = null;
+        showView('reports');
+        render();
+
+        const lines = [...document.querySelectorAll('.report-payroll .report-finance-text')];
+        const band = document.querySelector('.report-payroll .report-reconcile-group');
+        const bandCells = band
+            ? [...band.querySelectorAll('tfoot td')]
+                .filter(td => td.getBoundingClientRect().height > 0)
+                .map(td => td.textContent.trim())
+            : [];
+        const workFoot = [...document.querySelectorAll('.report-payroll-group tfoot td')]
+            .filter(td => td.getBoundingClientRect().height > 0)
+            .map(td => td.textContent.trim());
+        return {
+            lines: lines.map(node => node.textContent.replace(/\s+/g, ' ').trim()),
+            tbody: document.querySelectorAll('.report-payroll tbody tr').length,
+            cards: document.querySelectorAll('.report-worker-tile').length,
+            workFoot,
+            bandCells,
+            across: document.documentElement.scrollWidth <= window.innerWidth + 1
+        };
+    });
+
+    check(`${label}: the man who only took cash is a line, not a row`,
+        seen.lines.length === 1 && seen.lines[0].indexOf('רגא') !== -1
+        && seen.tbody === 1, JSON.stringify(seen));
+    check(`${label}: so the card grid still owes one card per man in the table`,
+        seen.cards === seen.tbody, JSON.stringify({ cards: seen.cards, tbody: seen.tbody }));
+    check(`${label}: his deduction is on his line`,
+        seen.lines[0] && seen.lines[0].indexOf('250') !== -1, JSON.stringify(seen.lines));
+    // THE CELL A PERSON PAYS FROM. On the phone the work band shows its label and its
+    // לתשלום cell and nothing else, so that cell must not hold a number here.
+    check(`${label}: the work band does not show a payday number it does not own`,
+        seen.workFoot.some(text => text.indexOf('סה״כ בטבלת העבודה') === 0)
+        && seen.workFoot.indexOf('—') !== -1, JSON.stringify(seen.workFoot));
+    check(`${label}: and the band below it does`,
+        seen.bandCells.some(text => text.indexOf('סה״כ לתשלום') === 0)
+        && seen.bandCells.some(text => /\d/.test(text)), JSON.stringify(seen.bandCells));
+    check(`${label}: nothing widens the page`, seen.across === true, JSON.stringify(seen));
 
     await page.context().close();
 }

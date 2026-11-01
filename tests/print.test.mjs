@@ -329,7 +329,7 @@ for (const scenario of [
         JSON.stringify(grey.slice(0, 3)));
 
     // The pay sheet's own pages, and the headings that have to be on all of them.
-    const payrollPages = pages.filter(item => says(pageText(item), 'ימי נוכחות'));
+    const payrollPages = pages.filter(item => says(pageText(item), 'נוכחות'));
     check('the pay sheet spans more than one page', payrollPages.length >= 2,
         String(payrollPages.length));
     check('and its column headings are repeated on every one of them',
@@ -358,7 +358,7 @@ for (const scenario of [
     // Measured as positions rather than read as text: the heading row's rightmost run
     // must be the worker column, and the leftmost must be the money.
     const headingLine = linesOf(payrollPages[0])
-        .filter(line => says(line.text, 'ימי נוכחות')).shift();
+        .filter(line => says(line.text, 'נוכחות')).shift();
     check('the pay sheet has a heading row on the paper', Boolean(headingLine),
         JSON.stringify(linesOf(payrollPages[0]).slice(0, 3).map(l => l.text.slice(0, 40))));
 
@@ -1006,7 +1006,7 @@ for (const scenario of [
     // The totals block, the other half of the same rule: the label, the numbers it adds
     // up and the row they sit on have to be one thing on one sheet.
     const totalsPages = shipped.pages
-        .filter(item => says(pageText(item), 'סה״כ') && says(pageText(item), 'ימי נוכחות'));
+        .filter(item => says(pageText(item), 'סה״כ') && says(pageText(item), 'נוכחות'));
     check('the pay sheet\'s totals row is on exactly one sheet',
         totalsPages.length === 1, JSON.stringify(totalsPages.map(item => item.index)));
     if (totalsPages.length === 1) {
@@ -1042,6 +1042,71 @@ for (const scenario of [
         carries('.report-table tr').length > 0 && carries('.report-table tfoot').length > 0,
         JSON.stringify(carries('.report-table tr').concat(carries('.report-table tfoot'))
             .map(rule => rule.replace(/\s+/g, ' '))));
+
+    await page.context().close();
+}
+
+// ---------------------------------------------- the financial section, on the paper
+//
+// A man whose money moved in the period and who worked no day in it is off the WORK
+// table since 18 October 2026 - the owner asked for a sheet about days to be about days -
+// and his money is a line in the financial section under it, with a reconciliation band
+// below that. THE PAPER IS THE DOCUMENT A DEDUCTION IS READ ON, so this suite asks the
+// printed PDF, not the screen: a screen-only section would move the record off the
+// document, which is the one thing the owner's condition rules out.
+//
+// And the same question from the client's side. The financial section is a CHILD of
+// section.report-payroll for exactly this reason: one selector keeps the crew's pay off a
+// client's printed invoice, and a sibling section would have been outside it.
+{
+    suite('a man with no work days has his money on the printed pay sheet');
+
+    const page = await open();
+    await seed(page, 3);
+    await page.evaluate(() => {
+        State.schedule.workers.push({ id: 'w_cash', name: 'Cashman',
+            active: true, dailyRate: 0, hourlyRate: 0 });
+        State.commit(addAdvance(State.schedule, 'w_cash', '2026-08-10', 250, ''));
+        REPORT_SECTION = 'workers';
+        showView('reports');
+        render();
+    });
+    await page.waitForTimeout(350);
+
+    const placed = await page.evaluate(() => ({
+        offTable: [...document.querySelectorAll('.report-payroll tbody tr')]
+            .every(tr => tr.textContent.indexOf('Cashman') === -1),
+        onLine: [...document.querySelectorAll('.report-payroll .report-finance-text')]
+            .some(node => node.textContent.indexOf('Cashman') !== -1),
+        banded: document.querySelectorAll('.report-payroll .report-reconcile-group').length
+    }));
+    given('he is off the work table and on a line of his own, inside the pay sheet',
+        placed.offTable && placed.onLine && placed.banded === 1, JSON.stringify(placed));
+
+    const paper = readPdf(await page.pdf({ format: 'A4', printBackground: true }));
+    const text = paper.pages.map(pageText).join('\n').replace(/,/g, '');
+    check('his name is on the paper', text.includes('Cashman'), text.slice(0, 120));
+    check('and so is the money that was handed to him', text.includes('250'),
+        text.slice(0, 160));
+    check('the paper says why he has no days',
+        says(text, 'אין להם ימי עבודה בתקופה הזו'), text.slice(0, 160));
+    check('and carries the band a person pays from',
+        says(text, 'סה״כ לתשלום'), text.slice(0, 160));
+    // The work table's own band must NOT claim to be the payday while somebody's money is
+    // outside it: on a phone in card mode that cell is the only number shown.
+    check('while the work table says what it totals',
+        says(text, 'סה״כ בטבלת העבודה'), text.slice(0, 200));
+
+    // THE CLIENT'S PAPER, the same record, the other side of the one selector.
+    await page.locator('.report-section-toggle button', { hasText: 'לפי אתר' }).click();
+    await page.waitForTimeout(300);
+    const client = readPdf(await page.pdf({ format: 'A4', printBackground: true }));
+    const clientText = client.pages.map(pageText).join('\n').replace(/,/g, '');
+    check('the client\'s page names nobody from the financial section',
+        !clientText.includes('Cashman'), clientText.slice(0, 160));
+    check('and carries no band of the crew\'s pay',
+        !says(clientText, 'סה״כ לתשלום') && !says(clientText, 'סה״כ בטבלת העבודה'),
+        clientText.slice(0, 200));
 
     await page.context().close();
 }

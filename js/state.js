@@ -7,7 +7,37 @@
 
 const V1_KEY = 'scheduleData';
 const V2_KEY = 'scheduleData:v2';
+
+// THE STAMP OF THE LAST RECORD THIS DEVICE CONFIRMED, under a key no older build writes.
+//
+// G2 in features/stale-window/contract.md: a value this device has confirmed stays
+// reconstructible until something newer for that field is confirmed - INCLUDING after the
+// cloud has acknowledged the operation and the collector has taken it off the queue.
+//
+// A WHOLE SECOND COPY WAS THE FIRST ANSWER AND IT WAS THE WRONG ONE, measured rather than
+// argued. It cost one copy of the record, permanently, and the capacity model has two
+// guarantees that copy cannot coexist with: the reclaim ladder's only currency is restore
+// points (tests/capacity.test.mjs, "a device with nowhere left refuses the edit rather
+// than claiming it" - no snapshots there, so a shadow rung turns a refusal into a sale),
+// and a device whose room is in its album must not be called critical
+// (tests/data.test.mjs C1 - measured at 5,084 bytes used against a 2,793 budget, of which
+// 848 were the copy, leaving 271 where a copy costs 798). Insurance that is spent by the
+// ladder breaks the first; insurance the ladder cannot spend breaks the second.
+//
+// So what is kept is the STAMP, about sixty bytes: enough to KNOW the record went
+// backwards. The recovery itself needs no second copy, because the collector's gate is
+// `op.sent && the disk holds it` - and `op.sent` means the cloud has it. A device with no
+// cloud configured never marks anything sent, so it never collects, so its journal still
+// holds every edit; a device with a cloud has the collected ones in the cloud, and the
+// next snapshot merge brings them back. The two cases cover each other, and neither costs
+// a byte of the budget.
+const STAMP_KEY = 'scheduleData:v2.stamp';
 const ISSUES_KEY = 'scheduleData:migrationIssues';
+// There was a lock key here. It is gone, and the reason is written out in full above
+// recordOnDisk: a read followed by a write is not a test-and-set, so what it held was a
+// belief rather than a lock. Nothing reads or writes this key any more; a value left
+// under it by v162 is inert and is deliberately not deleted - this round removes no
+// stored bytes of any kind.
 // An unreadable v2 blob is handled by Recovery, which copies it to
 // `scheduleData:v2:damaged` and leaves the original alone. A build before v67 put its
 // copy under `scheduleData:v2damaged` - no colon - and then overwrote the original;
@@ -48,7 +78,62 @@ const State = {
 
     loadRecord() {
         let damaged = false;
-        const v2 = Store.get(V2_KEY);
+        // THE DISK, NOT THE SESSION CACHE - the same reading diskVerdict needs, and for
+        // the same reason.
+        //
+        // Store.get answers from Store.memory first, which holds what THIS window last
+        // wrote. At the first boot memory is empty and the two readings agree, so this
+        // looked harmless; a window that reads the record again later - after a snapshot
+        // was adopted and persisted, or any time a second window re-reads - was handed
+        // its own older text and set `durableText` from it. durableText is the claim
+        // "this is what the disk holds", every later comparison is made against it, and
+        // a false one makes every edit afterwards look like somebody else's conflict.
+        //
+        // Falling back to memory keeps the one case the cache is right about: a disk that
+        // cannot be read at all, where what this session wrote is all there is. What the
+        // disk refused and memory still holds is not lost by preferring the disk - the
+        // journal is replayed over it a few lines below, which is what the journal is for.
+        const durable = Store.durableGet(V2_KEY);
+        let v2 = durable === null || durable === undefined ? Store.get(V2_KEY) : durable;
+
+        // A RECORD THAT WENT BACKWARDS IS NOTED, AND NOTHING IS OVERWRITTEN TO FIX IT.
+        //
+        // See recordRegressed and STAMP_KEY. The bytes under V2_KEY are older than the
+        // last record this device confirmed, so a writer this build cannot refuse has
+        // replaced it. They are left exactly where they are - law 10 is about losing a
+        // record, and a readable stale one is still a record, and overwriting it is how a
+        // repair destroys the thing it repairs. What was lost comes back the way it
+        // always does: the journal replay below for everything the collector has not
+        // taken, and the next snapshot merge for everything it has, because the
+        // collector's gate requires the cloud to hold it first. The ⋯ panel says it
+        // happened, because a recovery nobody is told about looks like nothing happened.
+        if (this.recordRegressed()) {
+            this.recordWasReplaced = true;
+            // AND THE BOUNDED RING IS LAID BACK OVER IT, field by field.
+            //
+            // See KEPT_PREFIX in js/sync/sync.js. These are fields the collector has
+            // already taken off the queue, so the journal replay below cannot bring them
+            // back and before this there was nothing on the device that could. Applied
+            // only where the record has gone backwards, and only to the record in memory -
+            // the stale bytes on the disk are left exactly where they are, because
+            // overwriting them is how a repair destroys the thing it repairs.
+            //
+            // BOUNDED, and the bound is the point: the last 32 collected field paths.
+            // Anything older than that is not recoverable from the device, and the ⋯
+            // panel's regression line says so rather than implying a complete rescue.
+            this.recovered = [];
+            try {
+                const parsed = JSON.parse(v2);
+                // THE SAME LIST recordRegressed answered from, so the trigger and the
+                // repair can never be about different fields.
+                this.lostFields().forEach(entry => {
+                    applyJournalEntry(parsed, entry.path, entry.value);
+                    this.recovered.push(entry.path);
+                });
+                if (this.recovered.length > 0) v2 = JSON.stringify(parsed);
+            } catch (error) { this.recovered = []; }
+        }
+
         if (v2) {
             try {
                 // Parsing is not the question. A record that parses into
@@ -247,17 +332,420 @@ const State = {
 
     // True only when the schedule is on the disk. Every caller that tells somebody
     // something happened needs to be able to find that out.
+    // Set when loadRecord found the record had gone backwards and put the confirmation
+    // back. Read by the ⋯ panel: a recovery nobody is told about is a recovery that looks
+    // like nothing happened, and the stale bytes are left exactly where they are.
+    recordWasReplaced: false,
+
+    // The field paths the bounded ring put back at the last load, for the ⋯ panel. Empty
+    // is not "nothing was lost": it is "nothing the ring still held was missing".
+    recovered: [],
+
     saveFailed: false,
 
     // The schedule exactly as it was last CONFIRMED on the disk. What memory is put back
     // to when an edit turns out to have nowhere durable to live.
     durableText: null,
 
+    // ANOTHER WINDOW OF THIS APP WROTE WHILE THIS ONE WAS LOOKING AWAY.
+    //
+    // save() writes the WHOLE schedule out of memory, and nothing in this app ever hears
+    // that a second window wrote: there is no 'storage' listener anywhere in js/. So a
+    // window that has been open since before somebody moved a man - backgrounded, its
+    // listener dropped, or an older build still being served from the cache (law 7) -
+    // still holds that man at his old site and lays it straight back over the disk on
+    // its own next ordinary edit. That edit is somebody recording ANOTHER man, so
+    // nothing on either screen looks like a conflict: the window that made the move
+    // still shows it, the disk no longer has it, and a reopen produces the old site,
+    // because the moving window's journal entry was acknowledged and collected long
+    // before. What that produces is «I move him and a few seconds later he is back».
+    //
+    // Measured in tests/move.late.test.mjs, with two windows on one disk.
+    //
+    // The disk is compared with what THIS window last confirmed on it - see diskVerdict,
+    // which is the one place that asks. That is one getItem beside the one setVerified
+    // already pays on the same key, so it costs the same order as the write it guards.
+
+    // What the disk holds right now, or null. Read once per rebase and handed to
+    // rollback() as the new baseline - rollback restores durableText, which is THIS
+    // window's own last confirmation, and restoring that is exactly the stale copy the
+    // rebase exists to stop writing. The disk is the baseline because the disk is what
+    // was confirmed there, whichever window confirmed it.
+    adoptDiskBaseline(held) {
+        if (typeof held !== 'string') return false;
+        const previous = this.durableText;
+        this.durableText = held;
+        // A blob this app wrote and read back. If it will not parse, rollback says so
+        // and nothing is changed: the baseline goes back and the write proceeds exactly
+        // as it does today, which is the direction to be wrong in.
+        if (this.rollback()) return true;
+        this.durableText = previous;
+        return false;
+    },
+
+    // The repair is one this file already had: re-read the disk and replay the journal
+    // over it. Journal-first is what makes it safe - the edit being committed is in that
+    // journal before this runs, so rebasing onto the other window's newer record cannot
+    // lose it, and whatever that window queued and has not sent comes back too, because
+    // on one phone the journal is one journal.
+    //
+    // Only for an edit the journal is holding: one with no path is not in it, and
+    // rebasing would be a way to drop it. And only from commit() and commitMany() -
+    // save() is also called by persist, by the restore doors and by the ledger mirror,
+    // where there is no journalled edit to come back on.
+    //
+    // WHAT THIS WINDOW MAY DO WITH THE DISK, asked once before a write of the whole
+    // schedule. Four answers, and both callers handle all four:
+    //
+    //   'clear'       the disk is what this window last confirmed; write as usual.
+    //   'rebased'     the disk had moved; memory was rebuilt from it plus the journal.
+    //   'unsafe'      the disk moved and there is NO journalled change to rebuild this
+    //                 edit from, so a rebase would drop it and a write would put this
+    //                 window's stale copy over the other one's record. Neither is
+    //                 allowed. Defensive: every change that reaches commit() and
+    //                 commitMany() today comes from a model function that returns a
+    //                 field path, so this answer is not reachable from the shipped
+    //                 screens - it is here because the alternative to an unreachable
+    //                 branch is an unguarded write.
+    //   'unreadable'  the disk holds something this build will not accept as a schedule.
+    //                 It is quarantined, NOT adopted, and NOT written over - law 10.
+    diskVerdict(journalled) {
+        if (typeof Store === 'undefined' || !Store.available) return 'clear';
+        // durableGet, NOT get. Store.get answers from Store.memory first, and memory holds
+        // what THIS window last wrote - so for any window that has saved even once the
+        // comparison below was its own text against its own text, and the verdict was
+        // 'clear' every time. The guard protected only a window that had never written,
+        // which is the one case it was not needed for. durableGet exists for exactly this
+        // question - "what would the next session see" - and bypasses the cache without
+        // changing what Store.get means for everybody else.
+        const held = Store.durableGet(V2_KEY);
+        if (typeof held !== 'string') return 'clear';   // nothing there to lose
+        if (held === this.durableText) return 'clear';
+
+        // THE SAME GATE loadRecord KEEPS, and for the same reason it keeps it.
+        //
+        // rollback() only parses and normalises, and normaliseSchedule answers with a
+        // schedule-shaped object for very nearly anything - that is its job. So adopting
+        // the disk through rollback() alone would take a damaged record into memory, and
+        // the save after it would write that back over the only copy of the damage there
+        // is. loadRecord refuses such a record and quarantines it; this must too, and
+        // through the same two functions rather than a second opinion about what a
+        // schedule is.
+        let problems;
+        try {
+            const upgraded = upgradeStoredSchedule(JSON.parse(held));
+            problems = upgraded
+                ? storedScheduleProblems(upgraded)
+                : ['הרישום השמור אינו מסמך של לוח עבודה.'];
+        } catch (error) {
+            problems = ['הרישום השמור במכשיר לא נקרא: '
+                + String((error && error.message) || error)];
+        }
+        if (problems.length > 0) {
+            // The original stays where it is and a copy is set aside. The caller refuses
+            // on this answer rather than leaning on the write being blocked: whether the
+            // hold stands depends on whether the copy could be made, and "the disk may
+            // not be overwritten" must not depend on that.
+            if (typeof Recovery !== 'undefined' && Recovery.damaged) {
+                Recovery.damaged(V2_KEY, held,
+                    'הרישום השמור במכשיר לא נקרא: ' + problems[0]);
+            }
+            return 'unreadable';
+        }
+
+        // NO BASE AT ALL IS NOT "NO CONFLICT IS POSSIBLE".
+        //
+        // This test used to be the first line of the function, and it answered 'clear' -
+        // so a window that had never successfully read or written the record treated
+        // every disk state as its own and wrote the whole schedule over it. That window
+        // is not exotic: it is the second window of a new project, open before the first
+        // record exists, and for as long as its own save never lands it has no base. Every
+        // man the first window recorded was erased by its first ordinary edit, with no
+        // hold, no refusal and nothing said. The journal did recover them - and the
+        // journal is collected the moment the cloud has the operation and the disk holds
+        // it, so that is not a guarantee. Measured in tests/codex3.probes.test.mjs, D1,
+        // which asks the RECORD and not the reopen.
+        //
+        // "I have no base" means "I have not read this record", and the honest answer to
+        // that is to read it: adopt the disk and replay this window's journal over it,
+        // which is the same repair the rebase below makes and loses nothing, because
+        // journal-first put the edit being committed there before any of this ran.
+        if (typeof this.durableText !== 'string') {
+            if (!this.adoptDiskBaseline(held)) return 'unsafe';
+            return journalled ? 'rebased' : 'unsafe';
+        }
+
+        if (!journalled) return 'unsafe';
+
+        // A FIELD BOTH WINDOWS HAVE CHANGED IS A CONFLICT, AND NOT THIS CODE'S TO SETTLE.
+        //
+        // The rebase adopts the disk and replays this window's journal over it. That is a
+        // merge only where the two windows touched different fields. Where they touched
+        // the SAME worker-day it is not a merge at all: the journal entry is the WHOLE
+        // record for that field, so replaying it puts back a site the other window
+        // deliberately removed and takes their edit off the disk with nobody told.
+        //
+        // The comparison is against what THIS window last agreed the disk held - the
+        // version the person was looking at when they made their edit - and never against
+        // the value just read off the disk. Reading a newer value is not the person
+        // consenting to replace it.
+        const contested = this.contestedPaths(held);
+        if (contested.length > 0) {
+            // Both sides are kept: theirs is what the disk already holds and is left
+            // alone, ours stays in the journal and is marked held so that nothing sends
+            // it behind the person's back. The ⋯ panel shows the pair and releases them
+            // one at a time - the machinery that already exists for exactly this.
+            //
+            // The three sides go with it, apart: what the person was looking at, and
+            // what the other writer had put there. Handing over only "mine" would leave
+            // the panel asking somebody to decide against nothing, and a newer value on
+            // the disk is not the person agreeing to be replaced by it.
+            if (typeof FarkadSync !== 'undefined' && FarkadSync.holdHere) {
+                let seenDoc = null;
+                let diskDoc = null;
+                try { seenDoc = JSON.parse(this.durableText); } catch (error) { seenDoc = null; }
+                try { diskDoc = JSON.parse(held); } catch (error) { diskDoc = null; }
+                const at = (document, path) => {
+                    const parts = String(path).split('.');
+                    let node = document;
+                    for (let step = 0; step < parts.length; step += 1) {
+                        if (!node || typeof node !== 'object') return undefined;
+                        node = node[parts[step]];
+                    }
+                    return node;
+                };
+                contested.forEach(path => FarkadSync.holdHere(path, {
+                    seen: at(seenDoc, path),
+                    disk: at(diskDoc, path)
+                }));
+            }
+            return 'contested';
+        }
+
+        // Readable, no field contested, and the journal can rebuild the edit. If the
+        // rebase still fails - normaliseSchedule throwing on a record the two validators
+        // passed - nothing was adopted and nothing may be written either.
+        return this.adoptDiskBaseline(held) ? 'rebased' : 'unsafe';
+    },
+
+    // WHAT THIS PLATFORM CAN AND CANNOT GUARANTEE, AND WHAT IS CLAIMED HERE INSTEAD.
+    //
+    // There was a lock here, built from reading localStorage and then writing a token to
+    // it. It was not a lock. Two windows can both read "free" before either writes, and
+    // both then believe they hold it; a read followed by a write is not a test-and-set,
+    // and localStorage offers no test-and-set, no transaction, and no compare-and-swap.
+    // Widening the staleness bound or changing the token does not touch that - the flaw
+    // is in the shape of the protocol, not in its constants. It has been removed rather
+    // than tuned, because a guard that is believed and does not hold is worse than none.
+    //
+    // The platform DOES have one real primitive: navigator.locks, which is genuinely
+    // exclusive across windows of one origin. It is ASYNCHRONOUS. Every write path in
+    // this app is synchronous by construction - commit() returns a verdict that
+    // editWithUndo branches on in the same tick, and the undo bar, the sheet's advance to
+    // the next worker and the refusal dialog all read that answer. Making the write path
+    // async is a different app, not a repair.
+    //
+    // SO THE GUARANTEE IS NOT EXCLUSION. It is this, and it is what the suites measure:
+    //
+    //   A committed edit is never lost. It is in the stored record, or it is in the
+    //   journal and a reopen produces it.
+    //
+    // Three things hold that up:
+    //
+    //   1. OWNERSHIP BY KEY. Every operation is journalled under a key only its own
+    //      writer writes (farkad:outbox:op:<id>). A single setItem is atomic, and two
+    //      windows writing different keys never collide. The journal is the record; the
+    //      schedule blob is a projection of it.
+    //   2. VALIDATE, THEN RE-VALIDATE IMMEDIATELY BEFORE WRITING. diskVerdict reads the
+    //      real disk and refuses a contested field. writeIfStillCurrent re-reads once
+    //      more in the instruction before the write, so the gap between the reading a
+    //      decision was made on and the write it authorises is as narrow as a synchronous
+    //      language permits.
+    //   3. THE COLLECTOR'S GATE. An operation is dropped only when the cloud has it AND
+    //      the STORED schedule demonstrably holds its value. A write that was overwritten
+    //      therefore cannot take its operation with it: the gate reads the disk at
+    //      collection time, finds the value gone, and keeps the operation.
+    //
+    // WHAT IS LEFT, STATED AND NOT PAPERED OVER: between the last read and the setItem
+    // that follows it, another window's setItem can land, and this one will overwrite it.
+    // That window is irreducible without an atomic primitive. It is not a loss, because
+    // of (1) and (3) - the overwritten window's operations are still under its own keys
+    // and are not collectable while the record lacks them - and tests/codex2.probes
+    // measures exactly that, by reading the worker's value back after a reopen rather
+    // than by believing a save that returned true.
+    //
+    // The disk as it would be seen by the next session. One reading, one meaning.
+    recordOnDisk() {
+        if (typeof Store === 'undefined' || !Store.available) return null;
+        return Store.durableGet(V2_KEY);
+    },
+
+    // Best effort, and it says so. A shadow that cannot be written costs the recovery of
+    // G2 and nothing else: the record itself has already landed and been read back by the
+    // line above this one, so no edit is at risk from this failing.
+    // OPTIONAL, in Store's own sense of the word: a write the app can live without. It
+    // never reclaims - buying room for a stamp by deleting somebody's restore points
+    // would be the stamp costing more than it is worth - and it never raises `full`,
+    // which is reserved for a write that actually mattered. About sixty bytes, which is
+    // the whole point: see STAMP_KEY for what a full copy cost and why it is gone.
+    rememberConfirmed(text) {
+        if (typeof Store === 'undefined' || !Store.available) return false;
+        let at = null;
+        try { at = JSON.parse(text).updatedAt; } catch (error) { at = null; }
+        if (typeof at !== 'string') return false;
+        try { return Store.setVerified(STAMP_KEY, at, { optional: true }) === true; }
+        catch (error) { return false; }
+    },
+
+    confirmedStamp() {
+        if (typeof Store === 'undefined' || !Store.available) return null;
+        try { return Store.durableGet(STAMP_KEY); } catch (error) { return null; }
+    },
+
+    // HAS SOMETHING OLDER REPLACED THE RECORD?
+    //
+    // ASKED OF WHAT IS MISSING, NOT OF A TIMESTAMP.
+    //
+    // THE TIMESTAMP VERSION OF THIS WAS DEAD ON THE ONE PATH IT EXISTED FOR, and the
+    // review that found it was right. It asked `recordOnDisk().updatedAt < theStamp`,
+    // reasoning that a writer carrying older bytes carries an older stamp. It does not:
+    // `save` a few lines down sets updatedAt to `new Date()` on every write, and so does
+    // every build this app has ever shipped. An older build writing its own stale memory
+    // is RUNNING, so it stamps NOW - the comparison answered false exactly when it
+    // mattered, and the three suites that covered it only passed because they forced an
+    // old stamp into the bytes by hand, which nothing in the field does.
+    //
+    // The question that is actually answerable: does the record hold NOTHING where this
+    // device has a confirmed value? The ring is the list of those (see KEPT_PREFIX), and
+    // absence is the signal because it is the only one that cannot be confused with
+    // somebody else's newer decision:
+    //
+    //   nothing there   - an older build's copy never had this field. A loss, and ours
+    //                     to put back.
+    //   something else  - another phone corrected it and a snapshot brought the
+    //                     correction. NOT a loss, and re-applying the ring over it would
+    //                     be this device overruling a decision somebody else made. The
+    //                     timestamp version could not tell these apart either.
+    //   nothing, and the ring says nothing too - a day somebody cleared on purpose, and
+    //                     the clearing was itself confirmed. Nothing to put back.
+    //
+    // The stamp is kept because `⋯` reads it, and because it is what tells a person WHEN
+    // the record they are looking at was last confirmed by this device. It is no longer
+    // the trigger.
+    recordRegressed() {
+        return this.lostFields().length > 0;
+    },
+
+    // The confirmed fields the record on the disk holds nothing at. The answer to
+    // recordRegressed, and the list the recovery applies - asked once so the two can
+    // never disagree about what was lost.
+    lostFields() {
+        const held = this.recordOnDisk();
+        if (typeof held !== 'string') return [];
+        if (typeof FarkadSync === 'undefined' || !FarkadSync.keptEntries) return [];
+        let theirs = null;
+        try { theirs = JSON.parse(held); } catch (error) { return []; }
+        const nothing = value => value === undefined || value === null;
+        return FarkadSync.keptEntries().filter(entry => {
+            if (nothing(entry.value)) return false;
+            return nothing(readPath(theirs, entry.path));
+        });
+    },
+
+    // Whether the record is still the one the decision above was made against. Asked in
+    // the instruction before the write, which is the last moment anything can be asked.
+    stillCurrent() {
+        if (typeof Store === 'undefined' || !Store.available) return true;
+        const held = this.recordOnDisk();
+        if (typeof held !== 'string') return true;      // nothing there to lose
+        // A window with no base has not read this record, so it is not current with it -
+        // the same answer diskVerdict now gives, and for the same reason. Answering true
+        // here was the other half of D1: the verdict was made to say 'clear' and then the
+        // write was let through by the check that exists to catch exactly this.
+        if (typeof this.durableText !== 'string') return false;
+        return held === this.durableText;
+    },
+
+    // The field paths this window has queued that the disk ALSO moved since this window
+    // last agreed with it. One entry here is a genuine two-window conflict over one
+    // record; an empty answer means the two windows wrote about different things and the
+    // rebase is a merge that loses nothing.
+    contestedPaths(held) {
+        if (typeof FarkadSync === 'undefined' || !FarkadSync.pendingPaths) return [];
+        let base;
+        let theirs;
+        try {
+            base = JSON.parse(this.durableText);
+            theirs = JSON.parse(held);
+        } catch (error) {
+            // Unparseable is handled above this; answering "no conflict" here would be a
+            // second opinion about the same bytes.
+            return [];
+        }
+        const at = (document, path) => {
+            const parts = String(path).split('.');
+            let node = document;
+            for (let step = 0; step < parts.length; step += 1) {
+                if (!node || typeof node !== 'object') return undefined;
+                node = node[parts[step]];
+            }
+            return node;
+        };
+        const same = (one, other) => {
+            try { return JSON.stringify(one) === JSON.stringify(other); }
+            catch (error) { return false; }
+        };
+        let pending;
+        try { pending = FarkadSync.pendingPaths() || []; } catch (error) { return []; }
+
+        // THREE SIDES, and all three are needed.
+        //
+        //   base   - the record as this window last agreed the disk held it: the version
+        //            the person was looking at when they made their edit.
+        //   theirs - what the disk holds now.
+        //   mine   - what this window holds in memory, which is base plus what the person
+        //            has just done.
+        //
+        // A field is contested only when BOTH have moved away from base. Where only
+        // theirs moved, the other window is the only one with an opinion and the rebase
+        // takes it. Where only mine moved, nobody is arguing.
+        //
+        // The queue cannot answer "is this mine": on one phone the journal is ONE journal,
+        // shared by every window of the app, so the other window's own operations are in
+        // it too. Asking the queue made every path the other window had touched look
+        // contested. Memory is what distinguishes them, because memory is per window.
+        return pending.filter(path => {
+            const theirSide = at(theirs, path);
+            if (same(at(base, path), theirSide)) return false;
+            return !same(at(this.schedule, path), theirSide)
+                && !same(at(this.schedule, path), at(base, path));
+        });
+    },
+
     save(options) {
         // Blocked: either the page and the scripts are from different builds, or a
         // damaged record is sitting under one of these keys. Either way what is already
         // saved stays saved and nothing new is written. See js/recovery.js.
         if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
+
+        // THE LAST DOOR, AND IT IS INSIDE THE FUNCTION THAT WRITES.
+        //
+        // guardedSave validates, writes and re-validates around this call, and that is
+        // where the verdict a person is told about is decided. This is not a second
+        // opinion on that verdict. It is here because `save` writes the WHOLE schedule
+        // and was reachable WITHOUT the guard - the boot-time ledger mirror calls it
+        // directly - so the only thing keeping a whole-record write off a record this
+        // window had not read was every caller remembering to ask first. A guarantee that
+        // rests on that is not a guarantee, and the independent review named `save`
+        // alongside the three commits for exactly this reason.
+        //
+        // It also narrows the window the comment above recordOnDisk is honest about:
+        // nothing at all happens between this reading and the setItem below.
+        //
+        // `whole` is the one declared exception, and it belongs to the transactions whose
+        // PURPOSE is to replace the whole record: the restore, in js/sync/restore.js.
+        // Refusing those here would break the one door the record is rebuilt through.
+        if (!(options && options.whole) && !this.stillCurrent()) return false;
 
         this.schedule.updatedAt = new Date().toISOString();
         this.schedule.updatedBy = syncDeviceId();
@@ -269,8 +757,19 @@ const State = {
         const landed = Store.setVerified(V2_KEY, text);
         this.saveFailed = !landed;
 
+        // DID OUR WRITE SURVIVE THE INSTANT AFTER IT?
+        //
+        // setVerified reads back immediately, which catches a disk that accepted the
+        // write and stored something else. It cannot catch another window writing a
+        // moment later - nothing synchronous can. This second reading is not a guarantee
+        // and is not treated as one: it is the one place a clobber becomes VISIBLE
+        // rather than silent, so the collector, the status line and the suites have a
+        // fact to work from instead of an assumption. See recordOnDisk.
+        this.lastWriteWon = landed && this.recordOnDisk() === text;
+
         if (landed) {
             this.durableText = text;
+            this.rememberConfirmed(text);
             // Everything journalled up to now is inside the blob just written, so the
             // journal no longer has to hold the ones the cloud already has.
             if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
@@ -340,13 +839,24 @@ const State = {
     // `removed` is passed straight through to editRoster: see the note there. It is how a
     // deletion reaches the other two phones on a device that has never had a snapshot.
     commitRoster(removed, changes) {
-        const journalled = (typeof FarkadSync === 'undefined' || !FarkadSync.editRoster)
-            ? !Store.available
-            : Boolean(FarkadSync.editRoster(this.schedule, removed, { changes })) || !Store.available;
+        const queued = typeof FarkadSync !== 'undefined' && FarkadSync.editRoster
+            ? Boolean(FarkadSync.editRoster(this.schedule, removed, { changes }))
+            : false;
+        const journalled = queued || !Store.available;
 
         if (!journalled) return this.refuseEdit();
 
-        this.save();
+        // THE SAME GUARD AS THE OTHER TWO DOORS, and it was missing here.
+        //
+        // save() writes the WHOLE schedule, days included. A roster edit made in a window
+        // that has gone out of date therefore carried that window's copy of every
+        // recorded day back onto the disk - so renaming one man silently rewrote another
+        // man's work. The roster edit itself is about names and rates and has nothing to
+        // do with days, which is exactly why nobody would look for the loss there.
+        //
+        // `queued` is what the journal is holding: editRoster's own entries, which a
+        // replay can rebuild this change from.
+        if (!this.guardedSave(queued)) return false;
         return true;
     },
 
@@ -392,9 +902,80 @@ const State = {
         // of the screen: a refused edit is never written anywhere.
         if (!this.journal(change)) return this.refuseEdit();
 
-        this.save();
-        render();
-        return true;
+        // FROM HERE THE EDIT IS DURABLE. It is in the journal, it will be replayed at the
+        // next open, and it is owed to the cloud - so nothing below may describe it as
+        // cancelled. See refuseEdit's `kept`.
+        return this.guardedSave(Boolean(change && change.path));
+    },
+
+    // The whole-schedule write, with the disk between two windows taken into account.
+    // Shared by the three doors that reach save() with a journalled edit behind them.
+    //
+    // `journalled` says whether the journal is holding something a replay could rebuild
+    // this edit from. The lock is taken FIRST, so the verdict's read and the write it
+    // guards are one critical section rather than two steps with a gap between them.
+    guardedSave(journalled) {
+        // VALIDATE, RE-VALIDATE, WRITE - and go round again if the disk moved in between.
+        //
+        // The loop is what replaces the lock. Each pass reads the real disk, decides, and
+        // then checks once more that the record is still the one it decided against; if
+        // another window wrote in that gap the decision is stale and is made again rather
+        // than acted on. Bounded, because an unbounded retry on the main thread is a hung
+        // screen: after three passes the answer is that the record is too busy to write
+        // into right now, which is true, and the edit stays in the journal.
+        for (let pass = 0; pass < 3; pass += 1) {
+            const verdict = this.diskVerdict(journalled);
+            if (verdict !== 'clear' && verdict !== 'rebased') {
+                return this.refuseEdit({ kept: journalled, verdict });
+            }
+            // The last thing asked before the write. A disk that moved since the verdict
+            // invalidates it - including the case where the verdict was 'rebased' and the
+            // baseline it adopted is already out of date.
+            if (!this.stillCurrent()) continue;
+
+            // A SCHEDULE WRITE THAT FAILS IS NOT A REFUSAL WHEN THE JOURNAL TOOK THE EDIT.
+            //
+            // save() answers false on a full or blocked device. The edit is still on this
+            // disk - journal-first put it there before any of this - so a reopen rebuilds
+            // it, and that is why it may stand on the screen: the screen and the device
+            // agree. save() has already raised saveFailed and the notice that says the
+            // record itself could not be written. Rolling back here would take a durable
+            // edit off the screen and tell the person it did not happen, which is the
+            // opposite of the truth and is pinned against in tests/data.test.mjs.
+            //
+            // With nothing journalled there is nothing to stand on, and the refusal is
+            // the honest answer - EXCEPT in a browser that has no durable storage at all,
+            // where an edit standing in memory is the deliberate behaviour and the app
+            // says so in a permanent banner. That is what `journal` and `journalBatch`
+            // mean by answering true when Store.available is false; commitRoster hands
+            // over `queued` - what the journal is actually holding - which is false in
+            // exactly that browser. Reading it as "nothing to stand on" took the added
+            // worker back off the screen and told the person the device was full, in the
+            // one browser where that is not what happened. Measured in tests/smoke.mjs,
+            // in the sandboxed frame.
+            const wrote = this.save();
+            if (wrote) {
+                render();
+                return true;
+            }
+            // REFUSED BY THE RECORD MOVING, NOT BY THE DISK - so decide again.
+            //
+            // save() asks stillCurrent() once more in the instruction before its own
+            // write, which is the narrowest the gap gets. When that is what refused it,
+            // this pass was simply built on a record that is no longer there, and going
+            // round produces a fresh verdict that can rebase onto what the other window
+            // wrote and then land. Leaving it here instead would let the edit stand on
+            // the screen with the record never written, which is exactly the quiet
+            // divergence the whole round is about. Bounded by the same three passes.
+            if (!this.stillCurrent()) continue;
+            const nowhereDurable = typeof Store === 'undefined' || !Store.available;
+            if (journalled || nowhereDurable) {
+                render();
+                return true;
+            }
+            return this.refuseEdit({ kept: false, verdict: 'unwritten' });
+        }
+        return this.refuseEdit({ kept: journalled, verdict: 'busy' });
     },
 
     // Puts one change in the journal. True when it is durably there - or when this
@@ -421,9 +1002,36 @@ const State = {
     },
 
     // The shared ending for a commit with nowhere to live.
-    refuseEdit() {
+    refuseEdit(options) {
         this.rollback();
         render();
+
+        // AN EDIT THE JOURNAL IS HOLDING WAS NOT CANCELLED, AND MUST NOT BE CALLED
+        // CANCELLED.
+        //
+        // The two sentences below were written for the one case this function originally
+        // had: the journal itself would not take the edit, so nothing of it existed
+        // anywhere and «השינוי בוטל כדי שלא ייראה כאילו נרשם» was exactly true. The disk
+        // guard reaches here from the other side - the journal HAS taken the edit, it is
+        // on this device, rollback() has just replayed it back onto the screen, and it is
+        // still owed to the cloud. Telling the person it was cancelled is false about the
+        // one thing they need to be able to trust, and it invites them to type the
+        // evening again over a record that already holds it.
+        //
+        // Nothing is dropped from the queue here. The operation stays exactly where it
+        // was; what changes is only what the person is told about it.
+        if (options && options.kept) {
+            if (typeof askTell === 'function') {
+                askTell({
+                    title: 'הרישום לא נכתב למכשיר',
+                    message: 'השינוי נשמר ברשימת ההמתנה ולא אבד, אבל לא הצלחנו לכתוב ' +
+                        'אותו לרישום שבמכשיר כרגע. מה שכבר שמור לא נפגע. נסה שוב בעוד ' +
+                        'רגע, ואם זה חוזר - פתח את ⋯ כדי לראות מה ממתין.'
+                });
+            }
+            return false;
+        }
+
         // Two different refusals, and the dialog must name the right one. A held
         // transaction - quarantine, a build mismatch - is not a space problem, and
         // claiming "אין מקום" over it sends somebody to delete photos that will not
@@ -490,6 +1098,7 @@ const State = {
         this.saveFailed = !landed;
         if (landed) {
             this.durableText = text;
+            this.rememberConfirmed(text);
             if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
             // Adopted, not restored: another phone's snapshot swaps the object here,
             // and that is not a moment to mirror. An advance arriving from a v79 phone
@@ -511,14 +1120,45 @@ const State = {
         const refused = (changes || []).filter(change => change && change.refused);
         const accepted = (changes || []).filter(change => change && !change.refused);
 
+        // NOTHING ACCEPTED IS NOT A REASON TO WRITE.
+        //
+        // save() writes the WHOLE schedule out of memory, and journalBatch answers true
+        // for an empty set - rightly, nothing is owed - so a call that accepted nothing
+        // fell straight through to that write. With another window's newer record on the
+        // disk, this window's entire copy of it went down on top, and there was no
+        // journalled edit behind it for a rebase to rebuild from or for a refusal to be
+        // about: a whole-record write with nothing to justify it. The ordinary way in is
+        // an all-refused batch - copying a day across where every worker is already at
+        // the two-site cap - so this is not a corner.
+        //
+        // The refusals are named in the same words as a partial batch, and the answer is
+        // false, because nothing was recorded. Every caller already treats false as
+        // "nothing happened": the two that pass the answer on refuse an empty list of
+        // their own before they get here.
+        if (accepted.length === 0) {
+            if (refused.length > 0 && typeof askTell === 'function') {
+                askTell(`${refused.length} רישומים לא נוספו: ${refused[0].reason}`);
+            }
+            return false;
+        }
+
         // All or nothing, and ONE write. Journalling them one at a time was all-or-nothing
         // in what it reported and not in what it did: the first entry landed, the second
         // ran out of room, and the app said the copy had not happened while half of it sat
         // on the disk waiting to come back at the next open.
         if (!this.journalBatch(accepted)) return this.refuseEdit();
 
-        this.save();
-        render();
+        // THE REBASE IS ASKED OF A CHANGE THE JOURNAL IS ACTUALLY HOLDING.
+        //
+        // journalBatch keeps only the changes that carry a path, so a batch can be
+        // accepted with some paths and some not - and the first element is then not
+        // necessarily one of the journalled ones. Asking the question of accepted[0] left
+        // the whole batch unguarded whenever that first element had no path, which is the
+        // one case the guarantee had to cover. It is explicit now: the first accepted
+        // change WITH a path, which is the first thing a replay could rebuild, and
+        // diskVerdict is told plainly when there is none.
+        if (!this.guardedSave(accepted.some(change => change && change.path))) return false;
+
         if (refused.length > 0 && typeof askTell === 'function') {
             askTell(`${refused.length} רישומים לא נוספו: ${refused[0].reason}`);
         }

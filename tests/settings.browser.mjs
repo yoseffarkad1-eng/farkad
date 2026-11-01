@@ -132,6 +132,85 @@ try {
         if (scale === 2) await page.evaluate(() => document.querySelectorAll('#settingsPanel *').forEach(node => node.style.removeProperty('font-size')));
     }
     same('opening, navigating and inspecting settings preserves worker data', await page.evaluate(() => JSON.stringify(State.schedule)), before);
+
+    // ---------------------------------------------------------------- D4b, the real button
+    //
+    // A CONFLICT BETWEEN TWO WINDOWS OF THIS APP, ANSWERED BY A TAP, on a phone where
+    // sync was never configured - which is every phone until firebase-config.js is
+    // filled in. v163 added this family of hold and left the panel offering a decision
+    // only when the CLOUD's side was known, so the question could never be answered and
+    // the record stayed split. Driven here through the panel a person actually touches:
+    // the row, its two lines, the button, and what the record says afterwards.
+    //
+    // The other window is simulated the way the other window really behaves - it writes
+    // the whole record to localStorage - because that is precisely what this device
+    // cannot distinguish from a second tab of itself.
+    suite('a two-window conflict is answerable with no cloud, through the panel');
+    await page.keyboard.press('Escape');
+    const setUp = await page.evaluate(() => {
+        State.schedule.workers = [{id: 'w_hold', name: 'עובד החזקה', active: true, dailyRate: 400}];
+        State.schedule.places = [{id: 'p_one', name: 'אתר אחד', active: true},
+            {id: 'p_two', name: 'אתר שני', active: true},
+            {id: 'p_three', name: 'אתר שלישי', active: true}];
+        State.commitRoster();
+        const day = todayStr();
+        State.date = day;
+        State.commit(assignPlace(State.schedule, day, 'w_hold', 'actual', 'p_one', 'normal'));
+
+        // The other window: the same day moved to the second site, written straight to
+        // the record with a NEWER stamp, which is what makes it the other window's answer
+        // rather than a record that has gone backwards.
+        const held = JSON.parse(localStorage.getItem('scheduleData:v2'));
+        held.days[day].actual.w_hold.entries = [{placeId: 'p_two'}];
+        held.updatedAt = new Date(Date.now() + 60000).toISOString();
+        held.updatedBy = 'd_other_window';
+        localStorage.setItem('scheduleData:v2', JSON.stringify(held));
+
+        // And this window, which has not seen that, moves the man to the third site.
+        State.commit(assignPlace(State.schedule, day, 'w_hold', 'actual', 'p_three', 'normal'));
+        return {day, rows: FarkadSync.heldRecords().map(row =>
+            ({path: row.path, heard: row.heard, answerable: row.answerable}))};
+    });
+    check('the conflict is held, and the panel can answer it with no cloud',
+        setUp.rows.length === 1 && setUp.rows[0].heard === false
+        && setUp.rows[0].answerable === true, JSON.stringify(setUp.rows));
+
+    // The refusal said so, in a dialog. A person reads it and closes it; so does this.
+    check('the refused edit was said out loud, not swallowed',
+        await page.locator('#askModal').isVisible());
+    await page.keyboard.press('Escape');
+    await page.locator('#askModal').waitFor({state: 'hidden'});
+
+    await page.locator('#settingsBtn').click();
+    const card = page.locator('#heldRecords .held-row').first();
+    check('the row is drawn', await card.count() === 1);
+    const lines = await card.locator('.held-side').allTextContents();
+    check('it names this device and the other window as the two sides, not the cloud',
+        lines.length === 2 && lines[0].indexOf('במכשיר הזה:') === 0
+        && lines[1].indexOf('במכשיר, מחלון אחר:') === 0, JSON.stringify(lines));
+    check('and both answers are offered as buttons',
+        await card.getByRole('button', {name: 'להשאיר את שלי', exact: true}).count() === 1
+        && await card.getByRole('button', {name: 'לקחת מהחלון האחר', exact: true}).count() === 1);
+
+    await card.getByRole('button', {name: 'להשאיר את שלי', exact: true}).click();
+    await page.waitForTimeout(250);
+    const after = await page.evaluate(day => ({
+        rows: FarkadSync.heldRecords().length,
+        answers: Object.keys(localStorage).filter(key => key.indexOf('farkad:holdanswer:') === 0).length,
+        onScreen: entriesFor(State.schedule, day, 'w_hold', 'actual').map(e => e.placeId).sort().join('+'),
+        onDisk: (() => {
+            const record = JSON.parse(localStorage.getItem('scheduleData:v2'));
+            return ((((record.days || {})[day] || {}).actual || {}).w_hold || {entries: []})
+                .entries.map(e => e.placeId).sort().join('+');
+        })()
+    }), setUp.day);
+    check('THE DECISION IS ON THE DISK, NAMING THE OPERATION', after.answers === 1,
+        String(after.answers));
+    check('the question is gone from the panel', after.rows === 0, String(after.rows));
+    check('and the record now holds what the person chose',
+        after.onDisk === after.onScreen && after.onDisk.indexOf('p_three') !== -1,
+        JSON.stringify(after));
+
     check('no uncaught errors during navigation', errors.length === 0, JSON.stringify(errors));
 } finally { await browser.close(); await server.close(); }
 report();

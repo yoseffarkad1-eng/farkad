@@ -145,9 +145,9 @@ const Store = {
     // It deliberately does NOT consult memory: reading through Store.get would find the
     // value this call just put there and confirm every write, including the ones that
     // never reached the disk. This has to ask the disk itself.
-    setVerified(key, value) {
+    setVerified(key, value, options) {
         const text = String(value);
-        if (!this.set(key, text)) return false;
+        if (!this.set(key, text, options)) return false;
         if (!this.available) return false;
 
         try {

@@ -344,7 +344,7 @@ async function staged(options = {}) {
 
     const sheet = run('payrollSheetRows()');
     same('the exported pay sheet is the twelve columns and no others', sheet[0],
-        ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר',
+        ['עובד', 'נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נעדר',
             'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה', 'מחזור תשלום']);
     check('and every row is twelve cells wide',
         sheet.every(row => row.length === 12), JSON.stringify(sheet[1]));
@@ -375,7 +375,7 @@ async function staged(options = {}) {
         csv.files.map(f => f.text.split('\r\n')[0]).join(' | ').slice(0, 160));
     check('the pay sheet CSV opens with the same twelve headings as the screen',
         csv.files[0].text.split('\r\n')[0]
-            === '﻿"עובד","ימי נוכחות","ימי שכר","מתוכם כפולים","שעות נוספות","נעדר",'
+            === '﻿"עובד","נוכחות","ימי שכר","כפולים","שעות נוספות","נעדר",'
             + '"שכר יומי","נצבר","מקדמות","לתשלום","הערה","מחזור תשלום"',
         csv.files[0].text.split('\r\n')[0]);
 
@@ -578,7 +578,7 @@ async function staged(options = {}) {
         paper.slice(0, 120));
     const sheet = open.run('payrollSheetRows()');
     same('and the exported pay sheet grows to fourteen, in their old places', sheet[0],
-        ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר',
+        ['עובד', 'נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נעדר',
             'ימי רכב', 'שכר רכב',
             'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה', 'מחזור תשלום']);
     check('the tray is drawn on the day screen again',

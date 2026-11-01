@@ -313,7 +313,7 @@ const toldText = device => {
     // fortnight is a file that cannot be.
     same('the stable columns include payment frequency for the bookkeeper',
         rows[0],
-        ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר',
+        ['עובד', 'נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נעדר',
             'שכר יומי', 'נצבר', 'מקדמות', 'לתשלום', 'הערה', 'מחזור תשלום']);
 
     // Four dates, one of them double, one absence, two paid hours, five hundred already

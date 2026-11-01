@@ -393,7 +393,7 @@ async function openInstalled() {
         payroll.some(row => row[0] === 'דוד כהן'),
         JSON.stringify(payroll.map(row => row[0])));
     check('and the Hebrew column headings came through whole',
-        payroll[0].includes('ימי נוכחות') && payroll[0].includes('נצבר'),
+        payroll[0].includes('נוכחות') && payroll[0].includes('נצבר'),
         JSON.stringify(payroll[0]));
     check('the site name reached the billing sheet in Hebrew',
         book.sheets['חיוב'].values[0].includes('הרצליה'),

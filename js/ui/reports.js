@@ -709,13 +709,43 @@ function payrollRows() {
                 carry: reportAccount(row.workerId)
             });
         })
+        // WHAT KEEPS A ROW ALIVE IS A RECORD OF THE PERIOD - and an advance IS one.
+        //
+        // The owner asked on 17 October 2026 for the opposite: a balance or an advance
+        // alone should not put a man in the WORK report, which is a sheet about days
+        // worked and is read as one. That was tried here, in this filter, and it was
+        // taken back out, because in THIS build hiding him does not hide a row - it
+        // loses a deduction. Three suites said so, independently, before any of this was
+        // believed:
+        //
+        //   tests/repayment.test.mjs  עומר סעד - 1,950 carried in, 200 handed back
+        //     inside the open period, no day worked - and the sheet then reported no
+        //     opening balance and no deduction at all.
+        //   tests/smoke.mjs           the man who took 250 and worked nothing: with his
+        //     row gone, the sheet has no in-range advance left to show, so the three
+        //     money columns (נצבר · מקדמות · לתשלום) leave the page altogether and the
+        //     footer stops reconciling. His 250 is then deducted NOWHERE: not here, and
+        //     not next period, where it is out of range.
+        //   tests/smoke.mjs           and the one RTL guarantee about that cell - the
+        //     mark that keeps the minus before the digits, so nobody reads «500-» - has
+        //     no cell to be about any more.
+        //
+        // That is the advance-deduction-dropped-through-the-transition defect by another
+        // road, and it is the one thing this record must not do. So the clause stays, the
+        // arithmetic is untouched, and the owner's decision is reported rather than
+        // implemented: the hiding he asked for cannot be given on this sheet without
+        // taking the deduction with it, and which of the two he wants is his to settle.
+        //
+        // What his instruction DID change is pinned and holds: a man who worked with no
+        // rate set stays, a man who worked but is inactive today stays, an absence stays
+        // because somebody recorded it, and the sites report does not move when the
+        // payroll is filtered. A man with nothing at all in the period - no day, no
+        // absence, no money - has no row, which is what it was already.
+        //
+        // tests/reports.rules.test.mjs holds all of it, including this refusal and its
+        // reason, so the next person to try the same clause finds the three suites named
+        // before the gate names them.
         .filter(row => row.attendanceDays > 0 || row.absent > 0 || row.advances > 0
-            // A DEBT KEEPS A ROW ALIVE TOO, for the same reason an advance does, one line
-            // up: a man who owes a carried balance and worked no days this fortnight had
-            // no row to owe it on, so he dropped off the sheet and the debt went with
-            // him - out of the total, off the paper, and off the screen that is supposed
-            // to say what is still outstanding. Found by a check that asked the open
-            // period for his opening balance and got back undefined.
             || (row.carry && (row.carry.carriedIn > 0 || row.carry.carriedForward > 0))
             || (vehiclesEnabled() && row.vehicleDays > 0));
 }
@@ -729,18 +759,78 @@ function invoiceRows() {
 // on paper from the day counts; the rates are in the app now, so it is done here.
 // Name the payment frequency even when everybody shares it. The printed report must
 // explain whether this is a weekly or fortnightly account; mixed crews get two groups.
-function payrollGroups(rows) {
-    const weekly = rows.filter(row => row.payCycle === 'weekly');
-    if (weekly.length === 0 || weekly.length === rows.length) {
+// ---------------------------------------------------- the display, and the calculation
+//
+// WHAT A ROW IS SHOWN FOR is not the question WHAT IT IS COUNTED IN, and keeping those
+// two apart is the whole of this block.
+//
+// The owner asked on 17 October for a man with no work days to be off the WORK table, and
+// on 18 October for the condition that makes it safe: his advances and balances stay in a
+// financial section of their own, and every total still reconciles. The first attempt hid
+// him by taking the clause out of payrollRows() - and lost his deduction, because
+// payrollRows() IS the calculation: the band is summed off it, the exported file is
+// written off it, and with his row gone the sheet had no in-range advance left at all, so
+// the three money columns left the page and his 250 was deducted in no period, this one or
+// the next. Measured on this tree when it was tried: 750 off the crew's payable with the
+// money gates shut, 250 with them open.
+//
+// So payrollRows() keeps every man it has ever kept, and the hiding happens HERE, one
+// layer above it, where nothing is added up.
+
+// Shown in the work table. The amount term is not decoration: a man with EARNINGS must
+// never leave the table his earnings are totalled in, whatever his day counts say - a
+// frozen closure can carry a gross with no basis recorded (js/model/money.js, the basis
+// loop), and a definition error here would otherwise move a shekel out of the band.
+function workRecordedIn(row) {
+    return row.attendanceDays > 0 || row.absent > 0
+        || (vehiclesEnabled() && row.vehicleDays > 0)
+        || agora(row.amount || 0) !== 0;
+}
+
+// Disjoint and exhaustive by construction: work ∪ finance is payrollRows(), which
+// tests/finance.test.mjs pins field by field. Nothing is dropped by splitting; a man only
+// changes which part of one page he is read on.
+function payrollDisplaySplit(rows = payrollRows()) {
+    return {
+        work: rows.filter(workRecordedIn),
+        finance: rows.filter(row => !workRecordedIn(row))
+    };
+}
+
+// THE BAND ARITHMETIC, in one function because it is now summed over two sets: the work
+// table's own rows, and - in the reconciliation band - every row of the group. Lifted
+// verbatim out of payrollGroupTable so the two cannot drift apart, which is the only way
+// the band can be proved identical to the footer this page printed yesterday.
+function payrollBandTotals(rows) {
+    const totals = rows.reduce((sum, row) => ({
+        amount: sum.amount + (row.amount || 0),
+        advances: sum.advances - moneyOf(row).netted
+    }), { amount: 0, advances: 0 });
+    const gross = agora(totals.amount);
+    const taken = agora(totals.advances);
+    return { gross, taken, net: agora(gross - taken) };
+}
+
+// `extra` is the financial side of the same crew: it decides which CYCLES exist, so a pay
+// cycle whose only men are financial still gets its own heading and its own period note,
+// and it is handed back per group rather than mixed in - a weekly payday added to a
+// fortnightly one in a cell called לתשלום would be a new wrong number.
+function payrollGroups(rows, extra = []) {
+    const all = rows.concat(extra);
+    const weekly = all.filter(row => row.payCycle === 'weekly');
+    if (weekly.length === 0 || weekly.length === all.length) {
         const cycle = weekly.length > 0 ? 'weekly' : 'biweekly';
-        return [{ cycle, title: PAY_CYCLE_LABELS[cycle], rows }];
+        return [{ cycle, title: PAY_CYCLE_LABELS[cycle], rows, finance: extra }];
     }
-    return [
-        { cycle: 'weekly', title: PAY_CYCLE_LABELS.weekly,
-            rows: weekly },
-        { cycle: 'biweekly', title: PAY_CYCLE_LABELS.biweekly,
-            rows: rows.filter(row => row.payCycle !== 'weekly') }
-    ];
+    const inCycle = (list, cycle) => cycle === 'weekly'
+        ? list.filter(row => row.payCycle === 'weekly')
+        : list.filter(row => row.payCycle !== 'weekly');
+    return ['weekly', 'biweekly'].map(cycle => ({
+        cycle,
+        title: PAY_CYCLE_LABELS[cycle],
+        rows: inCycle(rows, cycle),
+        finance: inCycle(extra, cycle)
+    }));
 }
 
 // The period a group is settled over, said in that group's own dates rather than the
@@ -748,7 +838,10 @@ function payrollGroups(rows) {
 // the line says which - because the number beside his name is the same either way and
 // the difference is entirely in what it means.
 function groupPeriodNote(group) {
-    const rows = group.rows || [];
+    // A group whose only men are financial still needs this line, and it is the warning
+    // half that matters there: the sentence below is what gates the carry, so losing it on
+    // a finance-only cycle would be the worst kind of silence.
+    const rows = (group.rows && group.rows.length ? group.rows : group.finance) || [];
     if (!rows.length || !group.cycle) return null;
     const spans = rows.map(row => `${row.periodFrom}..${row.periodTo}`);
     const one = spans.every(span => span === spans[0]);
@@ -762,6 +855,214 @@ function groupPeriodNote(group) {
     return el('p', 'hint hint-warn',
         'הטווח שנבחר אינו תקופת התשלום של העובדים האלה, ולכן זאת תצוגה של ימים ולא '
         + 'חשבון לתשלום: אין כאן יתרה מועברת ואי אפשר לסגור מכאן.');
+}
+
+// A WEEKLY MAN INSIDE A LONGER RANGE, WEEK BY WEEK.
+//
+// A fortnight is one period for the men paid fortnightly and two for the men paid
+// weekly. The sheet has said which since the cycles arrived, in a line under the group -
+// but it still showed a weekly man one row of totals for fourteen days, which is not how
+// he is paid and not what anybody hands him. Asked for on 17 October 2026: each week
+// worked out on its own, then the total for the range.
+//
+// The boundaries are NOT invented here. Each slice is periodRangeFor's own answer for
+// that man on that day - the same function the closure, the carry and the group note
+// use - stepped with nextPeriodFor, so a cycle change mid-range splits exactly where the
+// record says it does. A slice is then CLAMPED to the chosen range, which is what makes
+// the weeks add up to the row above them: a week half outside the range would count days
+// the range does not, and the person would be reading two different periods in one table.
+//
+// The money column is נצבר and only נצבר. A deduction belongs to the period a man is
+// settled over, never to a week inside it, so splitting לתשלום across weeks would invent
+// an account nobody keeps. Said under the table in one line rather than left to be
+// guessed.
+// THE CEILING, named once so the loop and the sentence under the table cannot drift apart.
+// It is a ceiling and not a rule: a range long enough to hold more weekly periods than this
+// is a range nobody settles, and a loop that cannot end is worse than a table that stops.
+// Nothing limits the RANGE to this - dateInput only refuses an inverted one - so the stop
+// is reachable with two taps on the calendar, and the page has to say when it happened.
+const WEEKLY_SLICE_CEILING = 16;
+
+function weeklyBreakdownFor(workerId, from, to) {
+    const worker = State.worker(workerId);
+    if (!worker) return [];
+    const slices = [];
+    let at = from;
+    for (let guard = 0; guard < WEEKLY_SLICE_CEILING && at <= to; guard += 1) {
+        const period = periodRangeFor(worker, at);
+        if (period.cycle !== 'weekly') return [];
+        const sliceFrom = period.from < from ? from : period.from;
+        const sliceTo = period.to > to ? to : period.to;
+        slices.push({ from: sliceFrom, to: sliceTo, whole: period.from === sliceFrom && period.to === sliceTo });
+        const after = parseLocalDate(period.to);
+        after.setDate(after.getDate() + 1);
+        at = toLocalDateStr(after);
+    }
+    if (slices.length < 2) return [];
+    const weeks = slices.map(slice => {
+        const row = payrollReport(State.schedule, slice.from, slice.to)
+            .find(item => String(item.workerId) === String(workerId)) || null;
+        return Object.assign({}, slice, {
+            attendanceDays: row ? row.attendanceDays : 0,
+            payUnits: row ? row.payUnits : 0,
+            doubleDays: row ? row.doubleDays : 0,
+            amount: row ? row.amount : null
+        });
+    });
+
+    // WHAT THIS ANSWER DOES NOT COVER, carried on the answer itself.
+    //
+    // The loop above has two exits and they mean opposite things: it ran out of RANGE, or
+    // it ran out of CEILING. Returning the slices with no mark on them left the caller
+    // unable to tell, and renderWeeklyBreakdown summed whatever it was handed and called
+    // the sum «סה״כ לטווח» - the total for the chosen range - over a range the fold had
+    // not finished reading. A person settling a long range read a partial sum as a
+    // complete one. Reported by the independent read of v158 (R1), 18 October 2026.
+    //
+    // Two properties on the array rather than a new return shape: every caller and every
+    // suite already reads this as a list of weeks, JSON.stringify ignores them, and the
+    // fold needs exactly these two facts - whether it finished, and where it got to.
+    weeks.complete = at > to;
+    weeks.coveredTo = slices[slices.length - 1].to;
+    return weeks;
+}
+
+// The fold under a weekly group: one line per week for each man, and the range's total
+// under them.
+//
+// NOT A TABLE, and that is the whole design of it. A <tbody><tr> inside .report-payroll
+// IS a worker row as far as the rest of this app is concerned: the phone's pay-card rules
+// are scoped to that section, the compact card grid counts those rows to decide how many
+// cards it owes, and the suites that prove the exported numbers against the screen read
+// them as the crew. Three weeks of one man arrived in all of them as three more men -
+// tests/reports.browser.mjs counted six rows against three cards. Lines carry the same
+// five facts, read better at 320px than five columns do, and belong to nobody else's
+// query.
+function weeklyLine(when, facts, extra) {
+    const line = el('div', extra ? `report-weekly-line ${extra}` : 'report-weekly-line');
+    line.appendChild(el('span', 'report-weekly-when', when));
+    const list = el('span', 'report-weekly-facts');
+    facts.forEach(([name, value]) => {
+        const fact = el('span', 'report-weekly-fact');
+        fact.appendChild(el('span', 'report-weekly-label', name));
+        fact.appendChild(el('span', 'report-weekly-value', value));
+        list.appendChild(fact);
+    });
+    line.appendChild(list);
+    return line;
+}
+
+function renderWeeklyBreakdown(rows) {
+    const withWeeks = rows
+        .map(row => ({ row, weeks: weeklyBreakdownFor(row.workerId, REPORT_RANGE.from, REPORT_RANGE.to) }))
+        .filter(item => item.weeks.length > 1);
+    if (withWeeks.length === 0) return null;
+
+    // Did ANY man's weeks stop at the ceiling? The opening line has to agree with the
+    // totals under it, and two sentences contradicting each other on one page is the fault
+    // this change exists to remove rather than to move.
+    const anyShort = withWeeks.some(item => item.weeks.complete === false);
+
+    const fold = el('details', 'report-weekly-breakdown');
+    fold.appendChild(el('summary', null, 'פירוט שבועי'));
+    fold.appendChild(el('p', 'hint',
+        'כל שבוע מחושב בנפרד לפי גבולות המחזור, והשורה האחרונה היא '
+        + (anyShort ? 'הסכום של השבועות שמוצגים. ' : 'הסכום לטווח שנבחר. ')
+        + 'מקדמות וניכויים שייכים לתקופת התשלום ולא לשבוע בתוכה, ולכן אינם כאן.'));
+    withWeeks.forEach(item => {
+        fold.appendChild(el('h4', 'report-weekly-name', isolate(item.row.name)));
+        const facts = week => [
+            ['נוכחות', String(week.attendanceDays)],
+            ['ימי שכר', String(week.payUnits)],
+            ['כפולים', String(week.doubleDays)],
+            ['נצבר', week.amount === null ? '—' : `${moneyText(week.amount)} ₪`]
+        ];
+        item.weeks.forEach(week => fold.appendChild(weeklyLine(
+            dateRange(formatShortDate(parseLocalDate(week.from)),
+                formatShortDate(parseLocalDate(week.to))),
+            facts(week))));
+        const sum = pick => item.weeks.reduce((total, week) => total + Number(pick(week) || 0), 0);
+
+        // A WEEK'S WAGE CAN BE UNKNOWN, AND UNKNOWN IS NOT NOTHING.
+        //
+        // Two kinds of week come back with no amount and they are different statements:
+        //
+        //   - work recorded and no wage to price it with - a MISSING WAGE. A day is priced
+        //     by its own stamp, or by the roster's rate when it has none, and when neither
+        //     exists the day is worth an unknown amount. money.js refuses to call that
+        //     nought on purpose: "showing 0 for a worker whose rate has not been entered
+        //     would read as owed nothing, which is a different thing entirely".
+        //   - no work recorded at all - nothing earned; and if the roster has no rate
+        //     either, nothing to price. A week missing DAYS, not a wage.
+        //
+        // Only the first makes the sum below partial. Nothing here invents a figure for
+        // it: the unknown weeks are left out of the addition, the cell says that is what
+        // it did, and the sentence under it names the weeks and refuses both a nought and
+        // a guess. Reported by the independent read of v158 (R3) and measured before it
+        // was repaired - tests/weekly.unpriced.test.mjs, 18 October 2026.
+        const unpricedWorked = item.weeks
+            .filter(week => week.amount === null && week.attendanceDays > 0);
+        const unknownEmpty = item.weeks
+            .filter(week => week.amount === null && week.attendanceDays === 0);
+        const known = item.weeks.filter(week => week.amount !== null);
+        const knownAmount = known.reduce((total, week) => total + week.amount, 0);
+        const anyPriced = known.length > 0;
+        const partial = unpricedWorked.length > 0;
+
+        // THE TOTAL IS CALLED WHAT IT IS, on two axes that are not the same question:
+        // the ROW label says how much of the range was read (the ceiling, R1), and the
+        // MONEY cell says which weeks its figure adds up (the wages, R3).
+        const whole = item.weeks.complete !== false;
+        fold.appendChild(weeklyLine(whole
+            ? 'סה״כ לטווח'
+            : `סה״כ ${WEEKLY_SLICE_CEILING} השבועות שמוצגים`, [
+            ['נוכחות', String(sum(w => w.attendanceDays))],
+            ['ימי שכר', String(sum(w => w.payUnits))],
+            ['כפולים', String(sum(w => w.doubleDays))],
+            [partial && anyPriced ? 'נצבר - ידוע בלבד' : 'נצבר',
+                anyPriced ? `${moneyText(knownAmount)} ₪` : '—']
+        ], 'report-weekly-total'));
+        // AND WHAT IS MISSING IS NAMED, beside the number it is missing from: the ceiling,
+        // the last week this fold reached, and that the sum belongs to those weeks alone.
+        //
+        // Deliberately NOT .hint-warn and NOT .hint-money. Those two are the classes the
+        // print stylesheet lifts onto the paper and js/ui/printout.js reads into the
+        // picture - and this whole fold is off both of them, so a warning carrying either
+        // class would arrive on a page that does not show the table it is about. It is a
+        // screen sentence about a screen table, and it is styled by .hint like the line
+        // above it.
+        if (!whole) {
+            // BOTH BOUNDS of what is shown, not only the far end: somebody checking a
+            // long range needs to know where the shown weeks begin as well as where they
+            // stop, or the sentence cannot be acted on.
+            fold.appendChild(el('p', 'hint report-weekly-short',
+                `הטווח שנבחר מכיל יותר מ-${WEEKLY_SLICE_CEILING} שבועות. מוצגים `
+                + `${WEEKLY_SLICE_CEILING} השבועות הראשונים, מ-`
+                + `${formatShortDate(parseLocalDate(item.weeks[0].from))} עד `
+                + `${formatShortDate(parseLocalDate(item.weeks.coveredTo))}, והסכום `
+                + 'שלמעלה הוא שלהם בלבד ולא של כל הטווח. לשאר השבועות בחר טווח שמתחיל '
+                + 'אחרי התאריך הזה.'));
+        }
+        // AND WHAT THE WAGE TOTAL IS MISSING, by week, in words. Screen only, like the
+        // ceiling line above it and for the same reason: this whole fold is off the paper
+        // and out of the picture, so a sentence carrying .hint-warn or .hint-money would
+        // arrive on a surface that does not show the table it is about.
+        if (partial) {
+            const spans = unpricedWorked.map(week => dateRange(
+                formatShortDate(parseLocalDate(week.from)),
+                formatShortDate(parseLocalDate(week.to)))).join(', ');
+            fold.appendChild(el('p', 'hint report-weekly-partial',
+                `שכר חלקי: בשבועות ${spans} נרשמה עבודה בלי שכר יומי, ולכן `
+                + (anyPriced
+                    ? 'הנצבר שלמעלה מסכם את השבועות הידועים בלבד ולא הנצבר של כל הטווח.'
+                    : 'אין נצבר להציג כאן.')
+                + ' הסכום החסר אינו ידוע - אין כאן אפס ואין השערה.'
+                + (unknownEmpty.length > 0
+                    ? ' שבוע בלי ימי עבודה מסומן «—» גם הוא, והוא חסר ימים ולא חסר שכר.'
+                    : '')));
+        }
+    });
+    return fold;
 }
 
 function renderPayrollTable() {
@@ -794,18 +1095,23 @@ function renderPayrollTable() {
     const browse = el('div', 'report-browse-tools');
     browse.appendChild(layout);
     section.appendChild(browse);
-    const groups = payrollGroups(allRows);
+    // THE ONE PLACE THE HIDING HAPPENS. Above payrollRows(), never inside it.
+    const split = payrollDisplaySplit(allRows);
+    const groups = payrollGroups(split.work, split.finance);
+    // The crew of a group is everybody in it, on both sides of the split: a count that
+    // dropped the financial men would say the fortnight had fewer people in it than it did.
+    const crewOf = group => group.rows.length + group.finance.length;
     if (groups.length > 1) {
         const jump = el('nav', 'report-cycle-nav');
         jump.setAttribute('aria-label', 'מעבר בין קבוצות התשלום');
         groups.forEach(group => jump.appendChild(button(
-            `${group.title} · ${group.rows.length}`, 'btn-secondary', () => {
+            `${group.title} · ${crewOf(group)}`, 'btn-secondary', () => {
                 const target = document.getElementById(`report-cycle-${group.cycle}`);
                 if (target) {
                     target.scrollIntoView({ block: 'start' });
                     target.focus({ preventScroll: true });
                 }
-            }, `${group.title} · ${countedIn(group.rows.length, 'עובד אחד', 'עובדים')} בדוח`)));
+            }, `${group.title} · ${countedIn(crewOf(group), 'עובד אחד', 'עובדים')} בדוח`)));
         browse.appendChild(jump);
     }
     groups.forEach(group => {
@@ -813,14 +1119,177 @@ function renderPayrollTable() {
             const heading = el('h3', 'report-group', group.title);
             heading.id = `report-cycle-${group.cycle}`;
             heading.setAttribute('tabindex', '-1');
-            heading.setAttribute('data-workers', countedIn(group.rows.length, 'עובד אחד', 'עובדים'));
+            heading.setAttribute('data-workers', countedIn(crewOf(group), 'עובד אחד', 'עובדים'));
             section.appendChild(heading);
         }
         const note = groupPeriodNote(group);
         if (note) section.appendChild(note);
-        section.appendChild(payrollGroupTable(group.rows));
+        const financial = group.finance.length > 0;
+        // THE WORK TABLE'S BAND STOPS CLAIMING TO BE THE PAYDAY the moment somebody's
+        // money is outside the table. Relabelling it is not enough on the surface the
+        // owner actually uses: in card mode the phone shows exactly two footer cells - the
+        // label and the one carrying data-label="לתשלום" (css/app.css) - styled as the
+        // biggest number on the page. A cell reading «לתשלום 450» for a fortnight whose
+        // payable is -300 is the whole defect this section exists to prevent, so that cell
+        // says «—» here and the reconciliation band below carries the number.
+        if (group.rows.length) {
+            section.appendChild(payrollGroupTable(group.rows, financial
+                ? { bandLabel: 'סה״כ בטבלת העבודה', bandNet: false,
+                    nameRows: group.rows.concat(group.finance) }
+                : {}));
+        } else {
+            // hint-money, not plain .hint: a cycle whose men all have money and no days
+            // would otherwise print a heading and a financial block with nothing saying
+            // why there is no table - .hint is hidden on paper and is not in the
+            // picture's note selector, and hint-money is one of the two that are kept.
+            section.appendChild(el('p', 'hint hint-money', 'אין ימי עבודה בתקופה הזו.'));
+        }
+        if (group.cycle === 'weekly') {
+            const weeks = renderWeeklyBreakdown(group.rows);
+            if (weeks) section.appendChild(weeks);
+        }
+        if (financial) {
+            renderFinanceBlock(group).forEach(node => section.appendChild(node));
+            renderReconcileBand(group).forEach(node => section.appendChild(node));
+        }
     });
     return section;
+}
+
+// ------------------------------------------------------- the financial section, and
+// ------------------------------------------------------- the one band a person pays from
+//
+// The men whose money moved in this period and who worked no day in it. They are off the
+// work table because the owner asked for a sheet about days to be about days - and their
+// money is HERE, on the same page, on the same paper, inside the same printed document,
+// because the pay sheet is where a deduction is read and a screen-only panel would move
+// the record off the document.
+//
+// LINES, NOT A TABLE, and for the same reason the weekly fold is lines: a <tbody><tr>
+// inside .report-payroll is a WORKER ROW to the rest of this app - the phone's pay-card
+// rules are scoped to that section, the compact grid counts those rows to know how many
+// cards it owes, and four suites read them as the crew. Three men's accounts would arrive
+// in all of them as three more men. The picture gets them through printout.js's note
+// selector instead, which is one selector rather than a second table.
+//
+// NO NEW FIGURE AND NO SECOND DERIVATION. Each line carries the same three money figures
+// the work table prints for a man, formatted by the same expressions, and then the row's
+// own notes - the sentences the exported file already writes into its הערה cell, which is
+// where this app has always said what a man's balance did.
+
+// Named for what this build can actually show. With the carry gate shut there are no
+// balances to show at all - every figure is an advance and the deduction it caused - and a
+// heading promising «יתרות» over figures that do not exist would be the next quiet lie.
+function financeSectionTitle() {
+    return carryReportingEnabled(State.schedule)
+        ? 'כספים - מקדמות ויתרות'
+        : 'כספים - מקדמות וניכויים';
+}
+
+// WHAT THE SECTION MAY PROMISE ABOUT MONEY IT DID NOT DEDUCT.
+//
+// The sentence under the heading promised, with no condition on it, that what was not
+// deducted this period moves to the next one and is not erased. That promise belongs to
+// ONE of the three states this app ships in. Read in js/model, and not changed by this:
+//
+//   carryReportingEnabled(schedule) = advanceCarryEnabled() && carryMigrationSettled(schedule)
+//   advanceCarryEnabled()           = FARKAD_FLAGS.carryAdvances === true      (the BUILD)
+//   carryMigrationSettled(schedule) = the migration is not needed, or it is APPROVED
+//                                     on this record                            (the RECORD)
+//
+// With either half missing there is no balance crossing periods at all: the advance is
+// netted in the period it falls in, and what is left of it lives on the man's advances
+// record and is read on the מקדמות screen. So the sentence asks the same gate the heading
+// asks - one function, because this text reaches the screen, the paper and the picture
+// through .hint-money, and three surfaces must not be able to say different things.
+// Reported by the independent read of v158 (R2), 18 October 2026.
+function financeCarryPromise() {
+    return carryReportingEnabled(State.schedule)
+        ? 'מה שלא נוכה בתקופה הזו עובר לתקופה הבאה ולא נמחק.'
+        : 'בתצוגה הזו אין יתרה שעוברת בין תקופות: מה שלא נוכה כאן נשאר רשום בחשבון '
+            + 'המקדמות של העובד ונקרא במסך מקדמות.';
+}
+
+function financeLineText(row, label) {
+    const money = moneyOf(row);
+    // The same three expressions payrollGroupTable prints, cell for cell: '—' where the
+    // amount is unknown rather than zero, the deduction through minusAmount so the sign
+    // cannot lay out behind the digits in Hebrew, and the net through bidiAmount.
+    const parts = [
+        isolate(row.name),
+        `נצבר ${money.gross === null ? '—' : `${moneyText(money.gross)} ₪`}`,
+        `${label} ${money.netted === 0 ? '0' : `${minusAmount(-money.netted)} ₪`}`,
+        `לתשלום ${money.net === null ? '—' : `${bidiAmount(moneyText(money.net))} ₪`}`
+    ];
+    return parts.concat(moneyNotes(row)).join(' · ');
+}
+
+// Returns the nodes rather than one wrapper: the heading has to be an h3.report-group like
+// every other heading on this page, because that is what js/ui/printout.js walks back to
+// for a group's title and what the phone's stylesheet names.
+function renderFinanceBlock(group) {
+    const all = group.rows.concat(group.finance);
+    const label = deductionColumnName(all);
+    const nodes = [el('h3', 'report-group', financeSectionTitle())];
+    // WHY THESE MEN ARE HERE, said on the paper. .hint-money, because this is money and
+    // money belongs on the printed page - see the print rules beside .hint-warn.
+    nodes.push(el('p', 'hint hint-money',
+        `אין להם ימי עבודה בתקופה הזו, והכסף שלהם נקרא מכאן. ${financeCarryPromise()}`));
+    group.finance.forEach(row => {
+        const line = el('div', 'report-finance-line');
+        line.appendChild(el('span', 'report-finance-text', financeLineText(row, label)));
+        nodes.push(line);
+    });
+    return nodes;
+}
+
+// THE BAND, one per group, and the only cell in this app that says «סה״כ לתשלום».
+//
+// It is a header-and-footer table with ZERO tbody rows, on purpose: every row count in
+// the app and in the suites is a count of tbody rows inside .report-payroll, so a band
+// with none is invisible to all of them while still being read as a group by the picture
+// and repeated by the paper like any other table. A future rule that assumes a tbody has
+// at least one row would meet this table first.
+//
+// Its numbers are payrollBandTotals over the WHOLE group - the same expression over the
+// same set the single footer summed before the split - so it is identical to what this
+// page printed yesterday. tests/finance.test.mjs pins that identity in both readings of
+// the record, because the two lose different amounts when it is got wrong.
+function renderReconcileBand(group) {
+    const all = group.rows.concat(group.finance);
+    const band = payrollBandTotals(all);
+    const label = deductionColumnName(all);
+    const headers = ['כל העובדים', 'נצבר', label, 'לתשלום'];
+    const paid = all.filter(row => row.amount !== null).length;
+    const table = buildTable(headers, []);
+    table.appendChild(totalRow([
+        `סה״כ לתשלום · ${countedIn(paid, 'עובד אחד', 'עובדים')}`,
+        moneyText(band.gross),
+        band.taken === 0 ? 0 : minusAmount(band.taken),
+        bidiAmount(moneyText(band.net))
+    ], headers));
+    const wrap = el('div', 'report-reconcile-group');
+    wrap.appendChild(scrollWrap(table));
+    const nodes = [el('h3', 'report-group', 'סיכום התקופה')];
+    // THE BAND'S GROSS COUNTS AN UNKNOWN WAGE AS NOTHING while counting that man's
+    // deduction in full - payrollBandTotals sums `row.amount || 0` - so a man the sheet
+    // cannot price is named beside the band in the same sentence the work table uses for
+    // the men IT cannot price. Only the men off the table: the ones on it are named
+    // there already, and saying it twice reads as two different problems.
+    const unpriced = group.finance.filter(row => row.amount === null);
+    if (unpriced.length > 0) {
+        nodes.push(el('p', 'hint hint-warn',
+            `⚠️ ${unpriced.length} עובדים בלי שכר יומי, ולכן הסכום למטה חסר אותם: `
+            + `${unpriced.map(row => isolate(row.name)).join(', ')}. `
+            + 'הוסף להם שכר במסך "עובדים ואתרים".'));
+    }
+    return nodes.concat([
+        wrap,
+        // The sentence that lets a person check the two parts against one number by eye.
+        el('p', 'hint hint-money',
+            'נצבר הוא מה שהצטבר בטבלת העבודה. הניכוי כולל גם את העובדים שאינם בטבלת '
+            + 'העבודה, ולכן ההפרש ביניהם הוא התשלום לכל התקופה.')
+    ]);
 }
 
 // The compact phone cards read the cells already prepared for the full report,
@@ -862,7 +1331,15 @@ function renderReportCards(table, rows, headers) {
     return grid;
 }
 
-function payrollGroupTable(rows) {
+// `options` is display only, and there are exactly three, each because the work table is
+// no longer the whole page:
+//   bandLabel - what its band is called when it is not the period's payable;
+//   bandNet   - false puts «—» in the לתשלום cell, so the one cell the phone shows in
+//               card mode cannot read as a payday it is not;
+//   nameRows  - the set deductionColumnName is asked about, which must be the SAME set for
+//               the table, the financial lines and the band, or three headings over one
+//               number could disagree (tests/wording.test.mjs exists for that).
+function payrollGroupTable(rows, options = {}) {
     const section = el('div', 'report-payroll-group');
 
     const anyRate = rows.some(row => row.dailyRate > 0);
@@ -881,10 +1358,16 @@ function payrollGroupTable(rows) {
     // "רגיל" is gone with it. It was the count of the days that were not double, which
     // is now the difference between the two columns either side of it - a third number
     // saying the same thing is a third number to reconcile.
+    // SHORTENED, 17 October 2026, by the owner: «נוכחות», «ימי שכר», «כפולים». On a
+    // phone the head of a column is read in the corner of the eye while the number is
+    // what is being looked at, and three words that each start with «ימי» are three
+    // words that have to be read to the end before they are told apart. Nothing under
+    // them moved: the same attendanceDays, the same payUnits, the same doubleDays, and
+    // the sentence below the table still spells out what each one counts.
     const columns = [
-        { header: 'ימי נוכחות', value: row => row.attendanceDays, always: true },
+        { header: 'נוכחות', value: row => row.attendanceDays, always: true },
         { header: 'ימי שכר', value: row => row.payUnits, always: true },
-        { header: 'מתוכם כפולים', value: row => row.doubleDays },
+        { header: 'כפולים', value: row => row.doubleDays },
         { header: 'שעות נוספות', value: row => row.extraHours },
         { header: 'נעדר', value: row => row.absent }
     ].filter(column => column.always || rows.some(row => column.value(row) > 0));
@@ -913,7 +1396,7 @@ function payrollGroupTable(rows) {
     // the DEDUCTION - what came off this fortnight - which for an advance larger than the
     // wage is not the advance, and for a man in review is zero while he holds one. See
     // moneyOf. With the account shut it is the advances, and then מקדמות is the truth.
-    if (anyAdvance) headers.push(deductionColumnName(rows));
+    if (anyAdvance) headers.push(deductionColumnName(options.nameRows || rows));
     if (anyRate) headers.push('לתשלום');
 
     const table = buildTable(headers, rows.map(row => {
@@ -960,10 +1443,9 @@ function payrollGroupTable(rows) {
     // Summed off the SAME number each row printed - see moneyOf. Summing row.advances
     // while the rows printed the deduction is how a band comes to contradict every line
     // above it.
-    const totals = rows.reduce((sum, row) => ({
-        amount: sum.amount + (row.amount || 0),
-        advances: sum.advances - moneyOf(row).netted
-    }), { amount: 0, advances: 0 });
+    // Lifted into payrollBandTotals, which the reconciliation band sums over the whole
+    // group with the same expression. Nothing about this table's own band moved.
+    const band = payrollBandTotals(rows);
 
     // The band names what it totals and over how many people. Thirty rows of cards end
     // in one number, and "סה״כ" alone does not say whether that number is the gross,
@@ -973,15 +1455,17 @@ function payrollGroupTable(rows) {
     // him asserts a coverage the warning four lines down denies.
     const paid = rows.filter(row => row.amount !== null).length;
     const footer = [anyRate
-        ? `סה״כ לתשלום · ${countedIn(paid, 'עובד אחד', 'עובדים')}`
+        ? `${options.bandLabel || 'סה״כ לתשלום'} · ${countedIn(paid, 'עובד אחד', 'עובדים')}`
         : 'סה״כ'].concat(columns.map(column =>
         rows.reduce((sum, row) => sum + column.value(row), 0)));
     // The band under the column adds up the same way each row did - see moneyOf.
-    const bandGross = agora(totals.amount);
-    const bandTaken = agora(totals.advances);
+    const bandGross = band.gross;
+    const bandTaken = band.taken;
     if (anyRate) footer.push('', moneyText(bandGross));
     if (anyAdvance) footer.push(bandTaken === 0 ? 0 : minusAmount(bandTaken));
-    if (anyRate) footer.push(bidiAmount(moneyText(agora(bandGross - bandTaken))));
+    if (anyRate) footer.push(options.bandNet === false
+        ? '—'
+        : bidiAmount(moneyText(agora(bandGross - bandTaken))));
     table.appendChild(totalRow(footer, headers));
 
     // The net is the last cell of every row - the column order is the ledger's - and it
@@ -2828,7 +3312,7 @@ function payrollSheetRows() {
     // that reaches a bookkeeper are not neutral: they are a heading that says this app
     // still accounts for vehicles, beside a number saying it accounted for none.
     const withVehicles = vehiclesEnabled();
-    const headers = ['עובד', 'ימי נוכחות', 'ימי שכר', 'מתוכם כפולים', 'שעות נוספות', 'נעדר']
+    const headers = ['עובד', 'נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נעדר']
         .concat(withVehicles ? ['ימי רכב', 'שכר רכב'] : [])
         .concat(['שכר יומי', 'נצבר', deductionColumnName(), 'לתשלום', 'הערה', 'מחזור תשלום']);
 
@@ -2998,6 +3482,21 @@ function moneyCells(row) {
     const gross = priced ? money.gross : (advances === 0 ? '' : 0);
     const net = gross === '' ? '' : agora(gross + advances);
     const rate = rateOf(row);
+    // Empty rather than the roster's rate where a closed fortnight recorded none - see
+    // rateOf, and the note inside moneyNotes that says so in words.
+    return [rate === null ? '' : rate, gross, advances, net, moneyNotes(row).join(' · ')];
+}
+
+// THE SENTENCES A ROW'S MONEY NEEDS, in one place because two surfaces say them now: the
+// הערה cell of the exported file, and the financial section's line on the screen and on
+// the paper. Lifted out of moneyCells unchanged - the exported string is byte for byte
+// what it was - so a man's account cannot be explained one way in the workbook and
+// another way on the sheet he is paid from.
+function moneyNotes(row) {
+    const money = moneyOf(row);
+    const advances = money.netted;
+    const priced = row.amount !== null;
+    const rate = rateOf(row);
 
     const notes = [];
     // WHICH ARITHMETIC THIS FILE DID, before any figure it produced.
@@ -3107,9 +3606,7 @@ function moneyCells(row) {
     if (overpayment) notes.push(overpayment);
     if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
     if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');
-    // Empty rather than the roster's rate where a closed fortnight recorded none - see
-    // rateOf, and the note two blocks up that says so in words.
-    return [rate === null ? '' : rate, gross, advances, net, notes.join(' · ')];
+    return notes;
 }
 
 function invoiceSheetRows() {

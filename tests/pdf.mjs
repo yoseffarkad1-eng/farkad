@@ -173,8 +173,66 @@ function readContent(content, fonts) {
         return out;
     };
 
+    // A PDF string, as the file writes it: a literal in PDFDocEncoding, or hex - and hex
+    // beginning FEFF is UTF-16BE, which is how a non-Latin /ActualText arrives.
+    const stringOf = raw => {
+        if (raw.startsWith('<')) {
+            const hex = raw.slice(1, -1).replace(/\s+/g, '');
+            const bytes = [];
+            for (let i = 0; i + 1 < hex.length; i += 2) bytes.push(parseInt(hex.slice(i, i + 2), 16));
+            if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+                let out = '';
+                for (let i = 2; i + 1 < bytes.length; i += 2) out += String.fromCharCode((bytes[i] << 8) + bytes[i + 1]);
+                return out;
+            }
+            return bytes.map(b => String.fromCharCode(b)).join('');
+        }
+        // One pass, left to right, so an escaped backslash cannot be read as the start of
+        // the escape after it: \\n is a backslash and an n, not a newline.
+        return raw.slice(1, -1).replace(/\\([0-7]{1,3}|[nrtbf()\\])/g, (all, what) => {
+            if (/^[0-7]/.test(what)) return String.fromCharCode(parseInt(what, 8));
+            return { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' }[what] || what;
+        });
+    };
+
+    // WHAT THE PAGE SAYS, WHEN THE FONT WILL NOT SAY IT.
+    //
+    // A glyph picked by an OpenType feature - the tabular figures behind
+    // `font-variant-numeric: tabular-nums`, the hyphen `calt` swaps between figures - need
+    // not appear in its font's cmap at all, and some fonts (Inter is one) give it a home
+    // only in the Private Use Area. The ToUnicode map is built by looking the glyph back
+    // up in that cmap, so it names the digit 8 as U+E079: a code point that means nothing
+    // to anybody, and that this reader used to hand back as if it were the character on
+    // the paper. A money column read as a row of blanks, and a check on the amount failed
+    // while the amount was printed correctly - the worst shape a test failure comes in.
+    //
+    // The writer already says what it drew: it wraps exactly those glyphs in
+    // `/Span <</ActualText (8)>> BDC ... EMC`, and /ActualText is the authority for what
+    // the text IS (PDF 32000-1, 14.9.4).
+    //
+    // IT IS BELIEVED ONLY WHERE THE FONT NAMES NOTHING - an empty run, or a run made of
+    // Private Use code points, which is a name for nobody. Everywhere else the glyph is
+    // still what this reader reports, which is the narrower of the two fixes that were
+    // measured: inside a marked span the reader otherwise stops saying what was DRAWN and
+    // starts saying what the writer SAYS it drew, and a renderer that shaped the wrong
+    // glyph with the right /ActualText would pass. Measured over 478 spans in three real
+    // PDFs: none contradicts its glyph, so the narrow reading loses nothing - and it also
+    // keeps the bidi isolate's space glyph out of the extracted text, which the wider one
+    // injected as U+2069.
+    //
+    // If a future engine stops emitting /ActualText these checks fail loudly rather than
+    // passing quietly, which is the right direction for a suite about money on paper.
+    const marks = [];
     const show = raw => {
-        const text = decode(raw);
+        const open = marks[marks.length - 1];
+        const unnamed = value => value === ''
+            || [...value].every(ch => ch.codePointAt(0) >= 0xE000 && ch.codePointAt(0) <= 0xF8FF);
+        let text = decode(raw);
+        if (open && open.actual !== null && unnamed(text)) {
+            if (open.spent) return;
+            open.spent = true;
+            text = open.actual;
+        }
         if (!text) return;
         const where = applyTo(multiply(textMatrix, ctm), 0, 0);
         texts.push({ text, x: where.x, y: where.y });
@@ -213,6 +271,18 @@ function readContent(content, fonts) {
                 }
                 break;
             }
+            case 'BDC':
+            case 'BMC': {
+                // The property list arrived as operands: /ActualText then its string.
+                const at = operands.lastIndexOf('/ActualText');
+                const value = at < 0 ? null : operands.slice(at + 1).find(item =>
+                    String(item).startsWith('(') || String(item).startsWith('<'));
+                marks.push({ actual: value === undefined || value === null ? null : stringOf(String(value)), spent: false });
+                break;
+            }
+            case 'EMC':
+                marks.pop();
+                break;
             case 'BT':
                 textMatrix = [1, 0, 0, 1, 0, 0];
                 lineMatrix = textMatrix;

@@ -22,6 +22,12 @@
 //     the queue when the cloud names its operation, and never because a document arrived
 //     that happens to contain the same value.
 
+// The highest revision this device has ADOPTED, kept where a reopen can find it. See
+// loadRevision: in memory alone it was forgotten the moment the app closed, and a
+// forgotten revision reads as "never seen one", which is the single state that makes a
+// document without a revision adoptable.
+const REVISION_KEY = 'farkad:revision';
+
 Object.assign(FarkadSync, {
     // Moved here from js/sync/sync.js at v102, with the code it describes. It is the
     // receive path's own state and the prose that explains it, and it was left behind
@@ -59,6 +65,75 @@ Object.assign(FarkadSync, {
     // against a base that has moved is refused rather than landing on somebody's evening.
     PROTOCOL: 1,
     _revision: null,
+
+    // THE REVISION THIS DEVICE HAS ADOPTED SURVIVES THE APP BEING CLOSED.
+    //
+    // It used to live only here, in memory. A reopen therefore started at null - "this
+    // device has never seen a revision" - which is the one state that makes a document
+    // WITHOUT a revision adoptable. So the F5 repair held only until the app was closed:
+    // the next open would take a legacy delivery and put the record back to whatever it
+    // carried, exactly as before. A guard that forgets is not a guard.
+    //
+    // Its own key, written by whoever adopts, read before the first delivery can arrive.
+    // A device that genuinely has never seen one finds nothing here and keeps null - the
+    // legacy transition is untouched, which is the whole reason the field is nullable.
+    _revisionLoaded: false,
+
+    // Read once at the start of a session, and re-read whenever the question is asked
+    // again with `fresh` - which is what the adoption test does, because another window
+    // of this app may have heard more since. The session cache is kept for the hot path
+    // (every delivery asks), and the one decision that must not be made on a stale number
+    // asks for the disk. See rememberRevision.
+    loadRevision(fresh) {
+        if (this._revisionLoaded && !fresh) return this._revision;
+        this._revisionLoaded = true;
+        let stored = null;
+        try { stored = Store.durableGet(REVISION_KEY); } catch (error) { stored = null; }
+        const said = stored === null || stored === undefined ? NaN : Number(stored);
+        // Only a whole number counts. Anything else is treated as "never seen one",
+        // which is the direction that keeps a pre-protocol project working rather than
+        // the one that would cut it off.
+        if (Number.isInteger(said) && said >= 0) this._revision = said;
+        return this._revision;
+    },
+
+    // MONOTONIC AT THE DISK, not only in this window's memory.
+    //
+    // v163 wrote String(said) unconditionally, and loadRevision cached for the session
+    // behind _revisionLoaded. Both together are a way back down: window A reaches 9 and
+    // writes it; window B read 7 when it opened and never looks again; B adopts a
+    // snapshot at 8 and writes 8 OVER 9. The next window to open then presents itself to
+    // the cloud as a device that is behind, and the key exists precisely so that it does
+    // not. The server cannot be talked into this - firestore.rules' nextRevision()
+    // requires exactly one more, and legacyWrite() is gated on noRevisionYet() - so this
+    // key was the only place the shared number could go backwards. Measured in
+    // tests/codex3.probes.test.mjs, D6.
+    //
+    // The read also HEALS the stale cache: a number on the disk higher than this window's
+    // is adopted into memory, which is the honest answer to "another window has heard
+    // more recently than I have".
+    rememberRevision(said) {
+        if (!Number.isInteger(said) || said < 0) return;
+        let held = null;
+        try { held = Store.durableGet(REVISION_KEY); } catch (error) { held = null; }
+        const onDisk = held === null || held === undefined ? NaN : Number(held);
+        if (Number.isInteger(onDisk) && onDisk >= said) {
+            // Somebody else has been further. Take their number rather than our own, and
+            // write nothing: the disk is already right and a write could only lower it.
+            if (onDisk > (this._revision === null ? -1 : this._revision)) this._revision = onDisk;
+            return;
+        }
+        try { Store.setVerified(REVISION_KEY, String(said)); }
+        catch (error) {
+            // A revision that cannot be written down is still the one in memory for this
+            // session. What is lost is its survival of a reopen, and the next adoption
+            // will try again.
+        }
+    },
+    // How many deliveries were older than a document this device had already been shown.
+    // Counted rather than merely dropped: a listener that keeps handing back the past is
+    // worth seeing in the diagnostic, and a count is the only honest way to notice it.
+    _staleSnapshots: 0,
     _sendOpId: null,
     _rebases: 0,
     // The base values, per field path, that the write currently in flight was built on.
@@ -289,8 +364,31 @@ Object.assign(FarkadSync, {
         // increments it too, so the highest number this device has been shown is the
         // best base it has. Being too high is refused and rebased below; being too low
         // would be refused forever, because nothing would ever correct it.
-        if (this._revision === null || said > this._revision) {
+        // What a reopen left behind counts as "already shown", so the comparison below is
+        // made against the highest this device has ever adopted rather than the highest
+        // it has adopted since the app was last opened.
+        this.loadRevision();
+        // A SESSION HOLDING NO DOCUMENT TAKES THIS ONE, even at the number it already
+        // remembers.
+        //
+        // The monotonic test compares revisions, and that was exact while the revision
+        // lived only in memory: a session that knew a number had, by construction,
+        // adopted the document the number came from. Remembering the number across a
+        // reopen broke that pairing. The reopened session knew revision N and held no
+        // document at all, so the first delivery - the current one, at exactly N - failed
+        // `said > _revision` and was not adopted; `_baseDoc` stayed null, which every
+        // pre-send hold reads as "nothing heard, nothing to compare"; and the queued write
+        // nobody had decided about went out over the other phone's correction on the first
+        // flush. Measured in tests/contested.test.mjs, which is the record of that send.
+        //
+        // An EQUAL revision is not a delivery from behind - it is the document as it
+        // stands - so adopting it lowers no base. The cached-first hazard the paragraph
+        // above exists for is a delivery at a LOWER number, and that is refused here
+        // exactly as it was.
+        const unbased = this._baseDoc === null && said === this._revision;
+        if (this._revision === null || said > this._revision || unbased) {
             this._revision = said;
+            this.rememberRevision(said);
             try {
                 this._baseDoc = JSON.parse(JSON.stringify(raw));
             } catch (error) {
@@ -567,6 +665,56 @@ Object.assign(FarkadSync, {
         // still a snapshot that tells it what revision the document is at, and writing
         // against a stale base is refused by the rules, which is a worse way to find out.
         this.noteRevision(raw);
+
+        // A DOCUMENT OLDER THAN ONE THIS DEVICE HAS ALREADY BEEN SHOWN IS NOT ADOPTED.
+        //
+        // noteRevision above has refused to LOWER the write base since the cached-first
+        // suite proved a stale base gets every later write refused. Nothing did the same
+        // for the RECORD. receive() replaced State.schedule with whatever turned up, and
+        // reapplyPending puts back only what the cloud has NOT acknowledged - so an edit
+        // that had LANDED was reverted on the screen by any later delivery of an older
+        // document, with the line still saying «מסונכרן».
+        //
+        // That is not a race between two people. Firestore delivers a cached snapshot
+        // before the server's and the cached one can be behind - the comment above
+        // noteRevision says so in this repository's own words - and the same shape
+        // arrives when a listener reconnects after a resume and when a write's own echo
+        // is delivered late. One phone, one cloud, one late delivery: the move goes back
+        // to the site it came from, the person does it again, it lands, and the next
+        // delivery takes it off again. Measured in tests/snapshot.stale.test.mjs.
+        //
+        // STRICTLY older, and only when the arriving document says what it is: equal is
+        // the same document delivered twice and is adopted as before, and a document
+        // with no revision at all is a phone that has not reached the protocol, which
+        // this must not cut off. Nothing else is skipped and nothing is thrown away: the
+        // document is not adopted, the queue is untouched, the status is left exactly as
+        // the last real snapshot set it, and `_latestRaw` keeps the NEWER document so
+        // the held-snapshot replay and readoptAfter still have the right one to re-run.
+        // A DOCUMENT WITH NO REVISION AT ALL IS THE SAME HAZARD, and it walked past this
+        // guard because the guard asked for an integer before it asked anything else.
+        //
+        // Once this device has been shown a revision it is past the protocol, and every
+        // document the cloud holds from then on carries one. A delivery with the field
+        // missing is a cached copy from before the cutover, or a write by a phone that
+        // has not reached the protocol - and adopting it undoes, in one delivery,
+        // everything this device has accepted since. The symptom is the stale one
+        // exactly: the move goes back to the site it came from.
+        //
+        // THE LEGACY PATH STAYS OPEN where it is still the truth. A device that has never
+        // seen a revision has `_revision === null`, and for it a document without one is
+        // the only kind there is; nothing about that case changes here.
+        const said = Number.isInteger(raw.revision) ? raw.revision : null;
+        // Read off the disk if this session has not been told one yet - a reopen must not
+        // present itself to a legacy document as a device that has never seen a revision.
+        this.loadRevision();
+        if (this._revision !== null && (said === null || said < this._revision)) {
+            this._staleSnapshots += 1;
+            // A delivery is still a sighting of the cloud, and the barrier it opens is
+            // what sends anything this device still owes.
+            this.noteCloudHeard();
+            return;
+        }
+
         this._latestRaw = raw;
         this._heldSnapshot = false;
 
@@ -1236,8 +1384,16 @@ Object.assign(FarkadSync, {
         // Unsent only. An entry the cloud has already acknowledged is IN the snapshot
         // that just arrived, and putting it back on top would undo whatever another
         // phone has changed since.
+        // AND NOT A CONFLICT WITH THIS DEVICE'S OWN OTHER WINDOW. See holdIsLocal: the
+        // other side of that one is on this disk already, so putting our undecided value
+        // back on top and persisting it - which is what this function's caller does next
+        // - writes it over the answer the other window wrote. The third replay path, and
+        // the one that was missed: the journal replays were taught to withhold a held
+        // operation and this was not, so the value nobody had agreed to reached the record
+        // by way of a snapshot. Measured in tests/codex3.probes.test.mjs, D3.
         const pending = [...this._outbox.entries()]
             .filter(([, item]) => !item.sent)
+            .filter(([, item]) => !this.heldAgainstOwnDisk(item))
             .sort((a, b) => a[1].seq - b[1].seq);
 
         // Which lists already have a per-person edit waiting. The legacy whole-array

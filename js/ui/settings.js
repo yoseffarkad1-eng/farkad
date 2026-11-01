@@ -360,6 +360,16 @@ const HELD_CLOUD = 'בענן:';
 const HELD_KEEP = 'להשאיר את שלי';
 const HELD_TAKE = 'לקחת מהענן';
 const HELD_UNHEARD = 'הענן טרם ענה - ההשוואה תוצג כשיענה.';
+// THE OTHER SIDE WHEN IT IS NOT THE CLOUD'S.
+//
+// A conflict between two windows of this app on one phone has its other side on this
+// very disk, not in a document somebody else wrote. v163 added that family and left the
+// panel offering a decision only when the CLOUD's side was known - so on a phone where
+// sync was never configured the conflict could never be answered, the record stayed
+// split, and the hold was a trap rather than a question. These two lines are what it is
+// asked with. New strings, deliberately, and pinned in tests/settings.browser.mjs.
+const HELD_DISK = 'במכשיר, מחלון אחר:';
+const HELD_TAKE_DISK = 'לקחת מהחלון האחר';
 const HELD_ELSEWHERE = 'לשחרור: ערוך את הרישום הזה שוב מהמסך שלו.';
 const HELD_NOTHING = 'אין רישום';
 const HELD_ABSENT = 'נעדר';
@@ -374,6 +384,16 @@ const HELD_UNREADABLE = 'הרישום שבענן אינו קריא במכשיר 
 // and the value from the row would go out over the other phone's newer correction (the
 // sync layer lets it: `seen` is stamped at commit time with the new base). The carry
 // approval on this same sheet refuses the same race the same way.
+// A decision the disk would not take. The hold stands and the person is told, because
+// believing you have decided and finding the question again tomorrow is worse than being
+// told now.
+const HELD_UNDECIDED = 'אין מקום פנוי במכשיר לשמור את ההחלטה, ולכן היא לא נשמרה. '
+    + 'שני הצדדים נשארו כמו שהם. פנה מקום ונסה שוב.';
+// The decision stuck and the record did not. Two different things, and telling somebody
+// their choice was applied when the write was refused is how they find out tomorrow.
+const HELD_UNWRITTEN = 'ההחלטה שלך נשמרה והקונפליקט נסגר, אבל לא הצלחנו לכתוב את '
+    + 'הרישום עצמו למכשיר כרגע. מה שכבר שמור לא נפגע. נסה לרשום את היום הזה שוב '
+    + 'בעוד רגע, ואם זה חוזר - פנה מקום במכשיר.';
 const HELD_MOVED = 'הרישום בענן השתנה בזמן שהחלון היה פתוח. ההשוואה עודכנה - בדוק שוב והחלט.';
 // A held ledger entry has no fresh-edit way out: the ledger is append-only and its ids
 // are deterministic, so "edit it again from its screen" would be a lie.
@@ -484,6 +504,14 @@ function describeHeldRecord(row, schedule) {
     const stamp = value => (value && value.rates && Number.isFinite(Number(value.rates.daily))
         ? ` · תעריף ${Number(value.rates.daily)}` : '');
     const stampsDiffer = heard && stamp(row.mine) !== stamp(row.cloud);
+    // The other side is THIS DISK, and there is something to ask. See HELD_DISK.
+    const local = !heard && readable && Boolean(row && row.answerable)
+        && row.disk !== undefined;
+    if (local) {
+        return { kind: 'day', title, mine, cloud: describeDayValue(row.disk, roster),
+            otherLabel: HELD_DISK, takeLabel: HELD_TAKE_DISK, local: true, note: '',
+            decidable: true, takeable: !sameHeldBytes(row.mine, row.disk) };
+    }
     if (heard && sameHeldBytes(row.mine, row.cloud)) {
         // The cloud caught up with this value after the hold was written. There is
         // nothing to take; keeping this one sends it, changes nothing, and clears the row.
@@ -497,7 +525,9 @@ function describeHeldRecord(row, schedule) {
         // show. Said, rather than two identical lines with a decision under them.
         cloud += ' ' + HELD_UNSEEN;
     }
-    return { kind: 'day', title, mine, cloud, note: '', decidable: heard && readable, takeable };
+    return { kind: 'day', title, mine, cloud, otherLabel: HELD_CLOUD,
+        takeLabel: HELD_TAKE, local: false, note: '',
+        decidable: heard && readable, takeable };
 }
 
 // One row's decision. Resolves to true when a commit was made, false when nothing was.
@@ -511,7 +541,56 @@ function describeHeldRecord(row, schedule) {
 // at the path is a side too - the other phone cleared the day - and taking it clears the
 // day here the way the ✕ on the day screen does, which keeps the stamp on the record.
 function resolveHeldRecord(row, takeCloud) {
-    if (!row || row.heard !== true) return Promise.resolve(false);
+    if (!row) return Promise.resolve(false);
+    // THE DECISION IS WRITTEN DOWN FIRST, and only then acted on - see
+    // FarkadSync.answerHold. A decision that cannot be written down unbars nothing: the
+    // operation stays held, which is the direction that cannot lose work, and the person
+    // is told rather than left believing they have decided.
+    if (row.heard !== true) {
+        const said = describeHeldRecord(row, State.schedule);
+        if (!said.local || !said.decidable) return Promise.resolve(false);
+        if (takeCloud && !said.takeable) return Promise.resolve(false);
+        if (typeof FarkadSync === 'undefined'
+            || typeof FarkadSync.answerHold !== 'function') return Promise.resolve(false);
+        if (!FarkadSync.answerHold(row.opId, takeCloud ? 'disk' : 'mine')) {
+            if (typeof askTell === 'function') {
+                askTell({ title: 'ההחלטה לא נשמרה', message: HELD_UNDECIDED });
+            }
+            if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
+            return Promise.resolve(false);
+        }
+        // THE PERSON HAS NOW SEEN THE OTHER WINDOW'S VALUE: the panel is what showed it
+        // to them. So this window's base becomes the disk, and the answer is written on
+        // top of it as an ordinary edit.
+        //
+        // Without this the decision re-contested itself the instant it was made: the
+        // commit below asked the disk, found it moved - which it had, and which is the
+        // very thing just answered - and wrote a fresh hold over the fresh answer. The
+        // person tapped, the question came back, and the record stayed split. The base an
+        // edit was built on is what the person was looking at, and after the panel that
+        // is the disk.
+        State.adoptDiskBaseline(State.recordOnDisk());
+        const chosen = takeCloud ? row.disk : row.mine;
+        const localParts = String(row.path).split('.');
+        let wrote = true;
+        if (localParts[0] === 'days' && localParts.length === 4) {
+            const side = ensureDay(State.schedule, localParts[1], localParts[2]);
+            side[localParts[3]] = chosen === undefined ? null : chosen;
+            // READ, not discarded. This answer used to be thrown away and `true` returned
+            // regardless, so a commit the device refused - a full disk, a record that had
+            // moved again - was reported to the person as a decision applied. The hold is
+            // already answered durably by this point and the operation is already retired
+            // or released, so what is left to say is that the WRITE did not land, which is
+            // the one thing they would otherwise find out tomorrow.
+            wrote = State.commit({ path: row.path,
+                value: chosen === undefined ? null : chosen }) === true;
+        }
+        if (!wrote && typeof askTell === 'function') {
+            askTell({ title: 'ההחלטה נרשמה, הרישום לא נכתב', message: HELD_UNWRITTEN });
+        }
+        if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
+        return Promise.resolve(wrote);
+    }
     const parts = String(row.path).split('.');
     if (parts[0] !== 'days' || parts.length !== 4) return Promise.resolve(false);
     if (typeof State === 'undefined' || !State.schedule) return Promise.resolve(false);
@@ -639,14 +718,14 @@ function renderHeldRecords() {
             return;
         }
         card.appendChild(sideLine(HELD_MINE, said.mine));
-        card.appendChild(sideLine(HELD_CLOUD, said.cloud));
+        card.appendChild(sideLine(said.otherLabel || HELD_CLOUD, said.cloud));
         if (said.note) card.appendChild(el('p', 'hint', said.note));
         if (said.decidable) {
             const actions = el('div', 'held-actions');
             actions.appendChild(button(HELD_KEEP, 'btn-secondary',
                 () => { resolveHeldRecord(row, false); }));
             if (said.takeable) {
-                actions.appendChild(button(HELD_TAKE, 'btn-secondary',
+                actions.appendChild(button(said.takeLabel || HELD_TAKE, 'btn-secondary',
                     () => { resolveHeldRecord(row, true); }));
             }
             card.appendChild(actions);
