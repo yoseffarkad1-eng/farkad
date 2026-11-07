@@ -629,6 +629,9 @@ const State = {
     //   nothing, and the ring says nothing too - a day somebody cleared on purpose, and
     //                     the clearing was itself confirmed. Nothing to put back.
     //
+    // A Rima count is not asked at all: its clear is a deleted field, so "nothing there"
+    // cannot tell an older build's copy from another phone's clear. See lostFields.
+    //
     // The stamp is kept because `⋯` reads it, and because it is what tells a person WHEN
     // the record they are looking at was last confirmed by this device. It is no longer
     // the trigger.
@@ -648,6 +651,12 @@ const State = {
         const nothing = value => value === undefined || value === null;
         return FarkadSync.keptEntries().filter(entry => {
             if (nothing(entry.value)) return false;
+            // A RIMA COUNT IS NEVER A LOSS TO PUT BACK (v166). Its clear is a deleted field
+            // - the very absence read here as "an older build never had it" - so an entry
+            // for one would lay a count somebody cleared back over the clear. The keep loop
+            // no longer writes one (js/sync/sync.js); an entry already in the ring is
+            // refused here, because this is where boot reads it.
+            if (isRimaFieldPath(entry.path)) return false;
             return nothing(readPath(theirs, entry.path));
         });
     },
@@ -879,6 +888,10 @@ const State = {
     // available here: it looks done, it reads back all evening, and it is gone in the
     // morning.
     commit(change) {
+        // Whether the last commit that answered false was nonetheless KEPT in the journal
+        // (v166) - see refuseEdit. Read by the controls that keep a one-step undo: an edit
+        // that is owed to the cloud is an edit, and the step before it is not the last one.
+        this.lastCommitKept = false;
         // A write the model refused. Nothing is saved and nothing is sent, and the reason
         // is said out loud - a refusal handled in silence looks exactly like a tap that
         // did not register, and the person taps again.
@@ -1021,6 +1034,7 @@ const State = {
         // Nothing is dropped from the queue here. The operation stays exactly where it
         // was; what changes is only what the person is told about it.
         if (options && options.kept) {
+            this.lastCommitKept = true;
             if (typeof askTell === 'function') {
                 askTell({
                     title: 'הרישום לא נכתב למכשיר',
@@ -1114,6 +1128,8 @@ const State = {
     // skipped this landed on this device and nowhere else: the other two would keep
     // building the evening against a day they could not see.
     commitMany(changes) {
+        // Said afresh by every commit, as commit() says it - see refuseEdit.
+        this.lastCommitKept = false;
         // Copying a day across can meet the two-site cap partway through. The rest of the
         // copy still lands - refusing the whole thing over one worker would be a worse
         // answer - and what did not is named once rather than per row.
@@ -1334,6 +1350,30 @@ function normaliseSchedule(raw, hints) {
         if (Array.isArray(day.vehiclesOff)) {
             schedule.days[date].vehiclesOff = day.vehiclesOff
                 .filter(id => typeof id === 'string').map(String);
+        }
+        // HOW MANY OF RIMA'S MEN were on each site (v166) - see the רימא section of
+        // js/model/schema.js. This function keeps only what it names, so a layer it did
+        // not name here would leave at the next save; that is exactly what v145 and v165
+        // do with this one, on their own copy, and why it is named.
+        //
+        // Carried as it arrived, not filtered. A count this build cannot read is still
+        // somebody's record of a day: the doors in front of this function refuse one
+        // (dayProblems at the disk and at a restore, the sync layer's refusal at the
+        // cloud), so filtering here would only ever hide what got past them. A poison
+        // name is the exception - assigning it reparents the map - and it is quarantined
+        // by poisonedContainers above. A null is a clear in flight, never a count.
+        if (day.rima !== undefined && day.rima !== null) {
+            if (isPlainObject(day.rima)) {
+                const rima = {};
+                Object.keys(day.rima).forEach(placeId => {
+                    if (POISON_SEGMENTS.indexOf(placeId) !== -1) return;
+                    if (day.rima[placeId] === null || day.rima[placeId] === undefined) return;
+                    rima[placeId] = JSON.parse(JSON.stringify(day.rima[placeId]));
+                });
+                if (Object.keys(rima).length > 0) schedule.days[date].rima = rima;
+            } else {
+                schedule.days[date].rima = JSON.parse(JSON.stringify(day.rima));
+            }
         }
     });
 

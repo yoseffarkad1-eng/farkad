@@ -500,7 +500,25 @@ Object.assign(FarkadSync, {
         }
         if (settledHere.size > 0) this.acknowledge(settledHere);
 
+        // A COUNT'S EARLIER ATTEMPT, sent again under its own name (v166). Decided before
+        // the hold below, which asks of every count handed over before whether it is being
+        // replayed: one that is goes out exactly as it went and the receipt answers for
+        // it; one that is not may already be on the server, and the nothing it was built
+        // on says nothing about a nothing there now. See TRY_MARK in js/sync/sync.js.
+        const replays = this.replayableAttempts((item, path) => !item.sent
+            && !settledHere.has(path) && !item.held && !this._heldNow.has(path)
+            && !(held && this.rosterShaped(path)));
+        let replayed = new Set();
+        const listReplayed = () => {
+            replayed = new Set();
+            replays.forEach(paths => paths.forEach(path => replayed.add(path)));
+        };
+        listReplayed();
+        const mayHaveLanded = item => this.triedNameFor(item) !== null
+            && !replayed.has(String(item.path));
+
         const movedUnder = [];
+        const ask = (item, path) => this.movedUnder(item, path, this._baseDoc, mayHaveLanded);
         this._outbox.forEach((item, path) => {
             if (item.sent || item.held || this._heldNow.has(String(path))) return;
             // Settled above: on the server already, under this id, as the same fact.
@@ -521,8 +539,45 @@ Object.assign(FarkadSync, {
             // stopped a worker added after a prepared restore from ever reaching the
             // cloud - a guarantee that already has a suite of its own. See replacesWhole.
             if (!replacesWhole(path)) return;
-            if (this.movedUnder(item, path, this._baseDoc)) movedUnder.push(String(path));
+            if (ask(item, path)) movedUnder.push(String(path));
         });
+        // A DAY'S COUNTS ARE HELD TOGETHER (v166) - see rimaCompanions - and AN ATTEMPT ANY OF
+        // WHOSE PATHS IS THEN HELD, OR WHOSE BATCH IS, CANNOT GO OUT WHOLE: it is not a replay
+        // after all, and its counts are asked again as what they then are, counts that may
+        // already be on the server. Settled together, to a fixed point, because each answer
+        // moves the other. This decided the replays first and the day's companions after, so
+        // a companion could be one of a replay's own counts: the attempt could then no longer
+        // go out alone, and its other day's count left under a new name with its own nothing
+        // already believed - over the other phone's clear of it, both phones saying synced.
+        // Measured in tests/rima.test.mjs, one attempt carrying two days' counts. Bounded:
+        // every pass that goes round takes at least one replay away.
+        for (;;) {
+            this.rimaCompanions(movedUnder, path => settledHere.has(path), this._baseDoc)
+                .forEach(path => movedUnder.push(path));
+            const heldKeys = new Set();
+            this._outbox.forEach((item, path) => {
+                if (item.sent) return;
+                if (item.held || this._heldNow.has(String(path))
+                    || movedUnder.indexOf(String(path)) !== -1) heldKeys.add(item.batchKey);
+            });
+            let broken = false;
+            replays.forEach((paths, name) => {
+                if (paths.some(path => movedUnder.indexOf(path) !== -1
+                    || heldKeys.has((this._outbox.get(path) || {}).batchKey))) {
+                    replays.delete(name);
+                    broken = true;
+                }
+            });
+            if (!broken) break;
+            listReplayed();
+            this._outbox.forEach((item, path) => {
+                if (movedUnder.indexOf(String(path)) !== -1) return;
+                if (item.sent || item.held || this._heldNow.has(String(path))) return;
+                if (settledHere.has(String(path)) || !isRimaFieldPath(path)) return;
+                if (!mayHaveLanded(item)) return;
+                if (ask(item, path)) movedUnder.push(String(path));
+            });
+        }
         if (movedUnder.length > 0) {
             const wrote = this.holdContested(movedUnder);
             if (!wrote.durable) {
@@ -556,8 +611,20 @@ Object.assign(FarkadSync, {
                 heldBatches.add(item.batchKey);
             }
         });
+        // One replay, alone, when there is one: the oldest. Anything beside it would rename
+        // it; the rest of the queue goes on the next flush.
+        let alone = null;
+        let oldest = Infinity;
+        replays.forEach(paths => {
+            const items = paths.map(path => this._outbox.get(path)).filter(Boolean);
+            if (items.length !== paths.length) return;
+            if (items.some(item => heldBatches.has(item.batchKey))) return;
+            const seq = Math.min(...items.map(item => Number(item.seq) || 0));
+            if (seq < oldest) { oldest = seq; alone = new Set(paths); }
+        });
         [...this._outbox.entries()]
             .filter(([, item]) => !item.sent)
+            .filter(([path]) => !alone || alone.has(String(path)))
             .filter(([path]) => !settledHere.has(String(path)))
             .filter(([path, item]) => {
                 if (!item.held && !heldBatches.has(item.batchKey)
@@ -692,6 +759,17 @@ Object.assign(FarkadSync, {
         // arriving through the receipt.
         this._sendOpId = this.operationIdFor(sent);
         this.stampProtocol(patch, this._sendOpId);
+        // Written down before it leaves, under this name and this claim - see TRY_MARK.
+        const handedOver = this.noteHandedOver(sent, this._sendOpId, patch.revision);
+        // WHETHER THE EDIT ITSELF HAS LEFT YET (v166). Only update() and the create carry it;
+        // the cutover in front of them (bootstrapCutover) carries no business field at all.
+        // A send that fails before either was called - no signal for the bootstrap, or for
+        // its reread - certainly put none of this batch on the server, whatever the adapter
+        // says about it, and the production adapter says nothing: `unsent` is withReceipt's
+        // word. The marks were kept, and a phone never told a revision held its own
+        // correction at the next signal, mine against a cloud that had never seen either.
+        let editLeft = false;
+        const handOver = write => { editLeft = true; return write(); };
 
         // Through the chain, so that a whole-document replacement started after this one
         // cannot land before it. createDocument is inside the same slot on purpose - it
@@ -724,7 +802,7 @@ Object.assign(FarkadSync, {
                 // the same slot on purpose - this write taking the other branch, not a
                 // second one.
                 if (error && error.code === 'not-found') {
-                    return this.createDocument(patch, onFailure);
+                    return handOver(() => this.createDocument(patch, onFailure));
                 }
 
                 // A REFUSAL THAT IS REALLY A RACE, told apart by looking.
@@ -846,7 +924,7 @@ Object.assign(FarkadSync, {
                         // second refusal used to escape to the retry ladder - correct, and
                         // two seconds of "sync error" for a merge that was one call away.
                         // Bounded by the same ceiling: _rebases is not reset here.
-                        return Promise.resolve(this.adapter.update(patch)).catch(onFailure);
+                        return handOver(() => Promise.resolve(this.adapter.update(patch))).catch(onFailure);
                     }
                     error.contested = live;
                     // HELD, DURABLY, BY ITS OWN ID - and this is the line the whole of
@@ -908,6 +986,8 @@ Object.assign(FarkadSync, {
                             return Boolean(frozen) && (frozen.own || someoneElse);
                         })
                         : [];
+                    // And the day's other counts with a held one - see rimaCompanions.
+                    this.rimaCompanions(moved, null, error.document).forEach(path => moved.push(path));
                     if (moved.length > 0) {
                         const wrote = this.holdContested(moved);
                         if (!wrote.durable) {
@@ -936,13 +1016,14 @@ Object.assign(FarkadSync, {
             };
 
             return first
-                .then(() => Promise.resolve(this.adapter.update(patch)))
+                .then(() => handOver(() => Promise.resolve(this.adapter.update(patch))))
                 .catch(onFailure);
         })
             .then(answer => {
                 // Only now. Up to this point the edits were on disk and would have been
                 // replayed by the next session; from here the cloud is holding them.
                 const acked = this.acknowledge(sent);
+                this.noteCountsLanded(sent, patch, answer);
                 this._sending = new Map();
                 this._retryAt = 0;
                 // AND THE TIMER WITH IT. _retryAt was reset and the pending timer left
@@ -994,6 +1075,9 @@ Object.assign(FarkadSync, {
                 // this survives the app being closed as well as the network coming back.
                 this._sending = new Map();
                 this._sendBase = null;
+                // Except a count's first try mark, when nothing of this batch left: the
+                // adapter says so, or the edit was never handed to it (editLeft, above).
+                if (!editLeft || (error && error.unsent === true)) this.forgetHandedOver(handedOver);
 
                 // IS THERE STILL ANYTHING THIS REFUSAL IS ABOUT?
                 //
@@ -1080,6 +1164,66 @@ Object.assign(FarkadSync, {
     // that already carried another phone's correction left the older value on this
     // screen and on this disk, saying synced. Returns whether the snapshot was re-run,
     // in which case receive() has set the status and scheduled anything still owed.
+    // A DAY'S RIMA COUNTS, HELD TOGETHER (v166).
+    //
+    // A count moved from one site to another is two field paths, and each is judged on its
+    // own. This phone, offline, moved Herzliya's three to Tel Aviv while the other phone
+    // corrected Herzliya to four: the clear was held, rightly, but the new site's count had
+    // been built on nothing and found nothing, and went up alone - the cloud said four and
+    // three, the other phone billed seven with nothing pending and nothing said, and taking
+    // the cloud's side here made it permanent. So when a count is held at the moment the
+    // hold is decided, every other count still owed for THAT DAY is held with it, and each
+    // is decided in ⋯ with the day's other sites drawn beside it. Only at that moment: a
+    // decision a person makes afterwards is a fresh edit and is not held again for this.
+    //
+    // NOT ONE THE CLOUD ALREADY HOLDS EXACTLY. `document` is what the hold was decided
+    // against - the last snapshot before the send, the server's own on a refusal - and a
+    // count it already holds as this phone does is no part of any disagreement: sending it
+    // changes nothing. Held anyway, both phones having moved one count to the same new site
+    // left the old site's clear in ⋯ as «אין רישום» against «אין רישום», with nothing to
+    // decide and the phone saying there was, after the real row had been decided.
+    rimaCompanions(held, skip, document) {
+        const days = new Set((held || []).filter(path => isRimaFieldPath(path))
+            .map(path => String(path).split('.')[1]));
+        const out = [];
+        if (days.size === 0) return out;
+        const known = Boolean(document) && typeof document === 'object';
+        this._outbox.forEach((item, path) => {
+            const key = String(path);
+            if (!isRimaFieldPath(key) || held.indexOf(key) !== -1) return;
+            if (item.sent || item.held || this._heldNow.has(key)) return;
+            if (typeof skip === 'function' && skip(key)) return;
+            if (known && marksOf(key, readPath(document, key)).indexOf(valueMark(item.value)) !== -1) return;
+            if (days.has(key.split('.')[1])) out.push(key);
+        });
+        return out;
+    },
+
+    // A COUNT THE SERVER HAS JUST ANSWERED FOR, laid into the base (v166).
+    //
+    // The base is the last snapshot, and a transaction's answer comes back on another
+    // channel than the snapshot that carries it. Until that echo arrived the base still
+    // held the nothing from before - and a count's clear IS a nothing, so a correction
+    // made in that gap, the signal gone, read the server's nothing after another phone's
+    // clear as the nothing this phone had seen, and went over the clear with both phones
+    // saying synced. The write reached the revision it claimed (a replay, its receipt's);
+    // a base below that revision is older than the write and takes the value at the path,
+    // and the next snapshot replaces it whole. A base at or above it already says what
+    // came after, and is left alone. Counts only: every other clear leaves a value.
+    noteCountsLanded(sent, patch, answer) {
+        if (!sent || sent.size === 0 || !this._baseDoc || typeof this._baseDoc !== 'object') return;
+        const replayed = Boolean(answer && typeof answer === 'object' && answer.replayed === true);
+        const reached = replayed && Number.isInteger(answer.revision) ? answer.revision : patch.revision;
+        if (!Number.isInteger(reached)) return;
+        const base = Number(this._baseDoc.revision);
+        if (Number.isInteger(base) && base >= reached) return;
+        sent.forEach((entry, path) => {
+            if (!isRimaFieldPath(path)) return;
+            if (!Object.prototype.hasOwnProperty.call(patch, path)) return;
+            writeFieldPath(this._baseDoc, String(path), patch[path]);
+        });
+    },
+
     readoptAfter(sent, patch, answer) {
         const replayed = Boolean(answer && typeof answer === 'object'
             && answer.replayed === true);
@@ -1468,7 +1612,13 @@ Object.assign(FarkadSync, {
                                 if (!replacesWhole(path)) return;
                                 const item = this._outbox.get(path);
                                 if (!item || item.held || this._heldNow.has(String(path))) return;
-                                if (this.movedUnder(item, path, fresh)) moved.push(String(path));
+                                // This very attempt is not one that may have landed
+                                // elsewhere; an earlier one under another name is.
+                                const elsewhere = op => this.triedNameFor(op) !== null
+                                    && this.triedNameFor(op) !== this._sendOpId;
+                                if (this.movedUnder(item, path, fresh, elsewhere)) {
+                                    moved.push(String(path));
+                                }
                             });
                         }
                         if (moved.length > 0) {

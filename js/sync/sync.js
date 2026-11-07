@@ -205,6 +205,29 @@ const BEAT_MARK = ':beat:';
 // later operation and wins the path on its own.
 const HOLD_MARK = ':hold:';
 
+// A COUNT THAT MAY ALREADY BE ON THE SERVER, written down (v166).
+//
+// A write can land and its answer be lost; the retry of the same batch is answered from
+// its receipt, which is how that ordinary failure costs nothing. A RIMA COUNT is the one
+// value where it could cost a record. Its clear is a deleted field, so once the count had
+// landed and another phone cleared or moved it, the server held the very nothing this
+// phone's write had been built on - and the snapshot this phone last heard, from before
+// the write, said nothing too. The next attempt went out under another name (a later
+// edit beside it renamed the batch, or a correction superseded it), the receipt was never
+// asked, and the count somebody had cleared went back over the clear with both phones
+// saying synced. The same happened to a correction made after an answer whose snapshot
+// had not arrived yet.
+//
+// One small key per operation: `<name>~<claim>`. The name is the batch - the receipt -
+// this operation was FIRST handed over under ('-' when it never was itself), so the
+// batch can be sent again under that name; the claim is the highest revision an
+// attempt at its path has claimed while unanswered, carried over to the operation that
+// supersedes it, so that a snapshot below it is known to be from before the write may
+// have landed. Written only for a batch that carries a count: a worker-day clear leaves
+// a value, and none of this was ever needed for it. An older build reads the key as
+// somebody else's record and leaves it alone.
+const TRY_MARK = ':try:';
+
 // What an acknowledgement record says, exactly. Compared rather than merely found: a
 // disk that takes the write and hands back something else leaves a key that EXISTS and
 // says nothing, and reading its presence alone was enough to make collection throw the
@@ -326,11 +349,35 @@ function queueKeyKind(key) {
     if (holdAt > 0 && slotIndexOf(key.slice(0, holdAt)) !== -1
         && SAFE_ID.test(key.slice(holdAt + HOLD_MARK.length))) return 'hold';
 
+    const tryAt = key.lastIndexOf(TRY_MARK);
+    if (tryAt > 0 && slotIndexOf(key.slice(0, tryAt)) !== -1
+        && SAFE_ID.test(key.slice(tryAt + TRY_MARK.length))) return 'try';
+
     return null;
 }
 
 function outboxBeatKey(slotKey, opId) { return slotKey + BEAT_MARK + opId; }
 function outboxHoldKey(slotKey, opId) { return slotKey + HOLD_MARK + opId; }
+function outboxTryKey(slotKey, opId) { return slotKey + TRY_MARK + opId; }
+
+// A try mark's bytes, read. Bytes that do not read still say something was handed to
+// the cloud: a name that matches no batch, and a claim no snapshot reaches - the careful
+// reading on both counts.
+function readTryMark(raw) {
+    if (typeof raw !== 'string') return null;
+    const at = raw.lastIndexOf('~');
+    const name = at === -1 ? '' : raw.slice(0, at);
+    const claim = at === -1 ? NaN : Number(raw.slice(at + 1));
+    const named = name === '-' || (name !== '' && name.length <= 64 && SAFE_ID.test(name));
+    if (!named || !Number.isSafeInteger(claim) || claim < 0) {
+        return { name: '?', claim: Number.MAX_SAFE_INTEGER };
+    }
+    return { name: name === '-' ? null : name, claim };
+}
+
+function tryMarkText(mark) {
+    return `${mark.name || '-'}~${Number.isSafeInteger(mark.claim) ? mark.claim : 0}`;
+}
 
 // The identity of an item an older build left inside a slot record.
 //
@@ -409,6 +456,7 @@ function decodeQueue(records) {
     const acknowledged = new Set();
     const retired = new Set();
     const holds = new Set();
+    const tries = new Map();
     const batches = [];
 
     Object.keys(records).forEach(key => {
@@ -425,6 +473,7 @@ function decodeQueue(records) {
         if (kind === 'ack' && records[key] === ACK_VALUE) acknowledged.add(key);
         if (kind === 'beat' && records[key] === ACK_VALUE) retired.add(key);
         if (kind === 'hold' && records[key] === ACK_VALUE) holds.add(key);
+        if (kind === 'try') tries.set(key, readTryMark(records[key]));
     });
 
     batches.sort((one, two) => (slotIndexOf(one.slot) - slotIndexOf(two.slot))
@@ -447,7 +496,8 @@ function decodeQueue(records) {
             slot, batchKey: key, batchId,
             sent: acknowledged.has(outboxAckKey(slot, op.opId)),
             retired: retired.has(outboxBeatKey(slot, op.opId)),
-            held: holds.has(outboxHoldKey(slot, op.opId))
+            held: holds.has(outboxHoldKey(slot, op.opId)),
+            tried: tries.get(outboxTryKey(slot, op.opId)) || null
         })));
     });
 
@@ -523,7 +573,8 @@ function decodeQueue(records) {
                 // a shared record to change.
                 sent: item.sent === true || acknowledged.has(outboxAckKey(slot, opId)),
                 retired: retired.has(outboxBeatKey(slot, opId)),
-                held: holds.has(outboxHoldKey(slot, opId))
+                held: holds.has(outboxHoldKey(slot, opId)),
+                tried: tries.get(outboxTryKey(slot, opId)) || null
             });
         });
     }
@@ -1267,10 +1318,10 @@ function writeFieldPath(target, path, value) {
     }
 
     const last = parts[parts.length - 1];
-    // Only worker-day nulls become deleteField() in the production adapter.
-    // Roster nulls are persistent tombstones, including when creating a document.
+    // Only worker-day and Rima-count nulls become deleteField() in the production
+    // adapter. Roster nulls are persistent tombstones, including when creating a document.
     if (value === null && parts.length === 4 && parts[0] === 'days'
-        && (parts[2] === 'plan' || parts[2] === 'actual')) delete node[last];
+        && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima')) delete node[last];
     else node[last] = value;
 }
 
@@ -1299,6 +1350,12 @@ const FarkadSync = {
     // write that waits for the next open and a write that goes out over somebody's
     // correction in the next two seconds.
     _heldNow: new Set(),
+    // A count's try marks for THIS SESSION, beside the keys - for when the disk would not
+    // take one (v166, TRY_MARK). opId -> { name, claim }.
+    _triedNow: new Map(),
+    // Paths whose next edit is a person's answer to a held row in ⋯, made looking at the
+    // cloud's side: the base IS what they saw, whatever came before it. See seenMarksAt.
+    _decidedAt: new Set(),
     // Every write to the shared cloud document, in the order it was started. See
     // cloudWrite: two writes that overlap can land in either order, and one of them is
     // allowed to erase the whole document.
@@ -1624,6 +1681,13 @@ const FarkadSync = {
         const stored = this.storedSchedule();
         const heard = this._baseDoc !== null;
         const inBatch = new Map();
+        // A COUNT THIS DEVICE MAY ALREADY HAVE PUT ON THE SERVER (v166): an operation for
+        // the path has been handed to the cloud, or answered for. What that operation had
+        // seen - the nothing before it - is not what the server held after it; and the
+        // claim of one still unanswered passes to the operation that supersedes it.
+        const handedOver = path => isRimaFieldPath(path)
+            && all.some(op => op.path === path && (op.sent || this.tryMarkOf(op) !== null));
+        const inherited = new Map();
         entries.forEach(entry => {
             if (!entry || !entry.path) return;
             seq += 1;
@@ -1670,7 +1734,14 @@ const FarkadSync = {
             const previous = live.get(entry.path) || inBatch.get(entry.path) || null;
             const held = this.storedMarkAt(entry.path, stored);
             const seen = replacesWhole(entry.path)
-                ? this.seenMarksAt(entry.path, held, previous) : null;
+                ? this.seenMarksAt(entry.path, held, previous, {
+                    handedOver: handedOver(entry.path),
+                    decided: this._decidedAt.has(String(entry.path))
+                }) : null;
+            if (isRimaFieldPath(entry.path)) {
+                const claim = this.claimAt(entry.path);
+                if (claim !== null) inherited.set(entry.path, claim);
+            }
             const lastHeard = this.baseValueAt(entry.path);
             let built = lastHeard === undefined ? null : canonicalJson(lastHeard);
             if (!heard && seen) built = held && held !== VALUE_ABSENT ? held : null;
@@ -1722,6 +1793,13 @@ const FarkadSync = {
         // record and can never be sent, and the pre-send pass asks movedUnder of the
         // fresh operation on its own evidence.
         ops.forEach(op => this._heldNow.delete(String(op.path)));
+        ops.forEach(op => this._decidedAt.delete(String(op.path)));
+        // The claim of an unanswered attempt, carried by what superseded it - see TRY_MARK.
+        ops.forEach(op => {
+            if (!inherited.has(op.path) || inBatch.get(op.path) !== op) return;
+            this.writeTryMark({ opId: op.opId, slot: this._activeKey },
+                { name: null, claim: inherited.get(op.path) });
+        });
 
         // The mark, raised and never lowered. Its own write, and its own failure: the
         // work is already down, and a mark that could not move costs a number, not a day.
@@ -1733,6 +1811,139 @@ const FarkadSync = {
             }));
         }
         return true;
+    },
+
+    // ------------------------------------------------------------ a count's attempts
+
+    // What is written down about this operation having been handed to the cloud, or null
+    // if nothing is. See TRY_MARK.
+    tryMarkOf(op) {
+        if (!op) return null;
+        const disk = op.tried && typeof op.tried === 'object' ? op.tried : null;
+        const session = this._triedNow.get(String(op.opId)) || null;
+        if (!session) return disk;
+        if (!disk) return session;
+        return { name: disk.name || session.name, claim: Math.max(disk.claim, session.claim) };
+    },
+
+    // The batch name this operation was first handed over under itself, or null.
+    triedNameFor(op) {
+        const mark = this.tryMarkOf(op);
+        return mark ? mark.name : null;
+    },
+
+    // A mark is kept for the session whatever the disk says; the send is never refused
+    // for one, because the alternative to this record is the behaviour before it, not a
+    // lost edit.
+    writeTryMark(op, mark) {
+        if (!op || !op.slot) return;
+        this._triedNow.set(String(op.opId), { name: mark.name || null, claim: mark.claim || 0 });
+        const key = outboxTryKey(op.slot, op.opId);
+        if (!Store.setVerified(key, tryMarkText(mark))) Store.forget(key);
+    },
+
+    // The highest revision an attempt at `path` has claimed and not been answered for.
+    claimAt(path) {
+        let claim = null;
+        this.physicalOperations().forEach(op => {
+            if (op.path !== String(path) || op.sent) return;
+            const mark = this.tryMarkOf(op);
+            if (!mark || !(mark.claim > 0)) return;
+            claim = claim === null ? mark.claim : Math.max(claim, mark.claim);
+        });
+        return claim;
+    },
+
+    // BEFORE THE HANDOVER, after the stamp: every operation of a batch that carries a
+    // count is written down under this batch's name - unless it already has one, since
+    // the FIRST name is the one a receipt may exist for - and under the revision it
+    // claims.
+    //
+    // Returns the operations whose mark this attempt wrote for the first time, so that an
+    // attempt the adapter says never left the device takes them back off (forgetHandedOver).
+    noteHandedOver(sent, batchName, claim) {
+        const fresh = [];
+        if (!sent || sent.size === 0 || typeof batchName !== 'string') return fresh;
+        if (![...sent.keys()].some(path => isRimaFieldPath(path))) return fresh;
+        const live = this._outbox;
+        sent.forEach((entry, path) => {
+            const op = live.get(path);
+            if (!op || op.opId !== entry.opId) return;
+            const mark = this.tryMarkOf(op);
+            const next = {
+                name: (mark && mark.name) || batchName,
+                claim: Math.max(mark ? mark.claim : 0, Number.isSafeInteger(claim) ? claim : 0)
+            };
+            if (mark && mark.name === next.name && mark.claim === next.claim) return;
+            if (!mark) fresh.push({ opId: op.opId, slot: op.slot });
+            this.writeTryMark(op, next);
+        });
+        return fresh;
+    },
+
+    // AN ATTEMPT THAT NEVER LEFT THE DEVICE, taken back off (v166). With no signal at all the
+    // request fails before it is sent, and the adapter says so (`unsent`). Left written
+    // down, it made every count in that batch one that "may already be on the server", and
+    // correcting one of them held the others at the next signal over a cloud that had never
+    // seen them. Only the marks this attempt wrote: one from an earlier attempt stays.
+    forgetHandedOver(fresh) {
+        (fresh || []).forEach(op => {
+            this._triedNow.delete(String(op.opId));
+            const key = outboxTryKey(op.slot, op.opId);
+            if (Store.durableGet(key) === null) return;
+            try { Store.remove(key); } catch (error) { /* bytes, not truth */ }
+            Store.forget(key);
+        });
+    },
+
+    // A REBASE claims a higher revision for the same attempt; the mark follows it.
+    noteClaimed(patch) {
+        if (!patch || !Number.isSafeInteger(patch.revision)) return;
+        Object.keys(patch).forEach(path => {
+            if (!isRimaFieldPath(path)) return;
+            const op = this._outbox.get(path);
+            const mark = this.tryMarkOf(op);
+            if (!mark || mark.claim >= patch.revision) return;
+            this.writeTryMark(op, { name: mark.name, claim: patch.revision });
+        });
+    },
+
+    // The person is answering a held row in ⋯ - see _decidedAt.
+    noteDecision(path, deciding) {
+        if (deciding) this._decidedAt.add(String(path));
+        else this._decidedAt.delete(String(path));
+    },
+
+    // THE ATTEMPT THAT MAY HAVE LANDED, sent again exactly as it went.
+    //
+    // A batch name is a digest of what it carries, so whether a set of operations IS that
+    // batch can be computed rather than assumed. When every operation first handed over
+    // under one name is still the current, sendable one for its path and their digest is
+    // that name, the batch is sent again ALONE: if it landed, the server answers from its
+    // receipt and writes nothing, whatever has happened at the path since; if it did not,
+    // it lands now. Anything beside it would rename it, and the receipt would never be
+    // asked. Returns name -> the paths it carries.
+    replayableAttempts(sendable) {
+        const groups = new Map();
+        this.physicalOperations().forEach(op => {
+            const name = this.triedNameFor(op);
+            if (name === null || name === '?' || op.sent) return;
+            if (!groups.has(name)) groups.set(name, []);
+            groups.get(name).push(op);
+        });
+        const out = new Map();
+        const live = this._outbox;
+        groups.forEach((ops, name) => {
+            const whole = ops.every(op => {
+                const current = live.get(op.path);
+                return current && current.opId === op.opId && sendable(current, String(op.path));
+            });
+            if (!whole) return;
+            const named = new Map(ops.map(op => [op.path, { opId: op.opId, seq: op.seq }]));
+            if (this.operationIdFor(named) !== name) return;
+            out.set(name, ops.map(op => String(op.path)));
+        });
+        return out;
     },
 
     // ------------------------------------------------------------ what the cloud has
@@ -2013,6 +2224,19 @@ const FarkadSync = {
             // The flag is one key, written once, and `⋯` reads it.
             ops.forEach(op => {
                 if (!replacesWhole(op.path)) return;
+                // NOT A RIMA COUNT (v166). What the ring keeps is laid back at boot over a
+                // disk that holds NOTHING at its path - see lostFields in js/state.js - and a
+                // count's clear is exactly that nothing: setRimaCount deletes the field, and
+                // so does the snapshot carrying another phone's clear. Kept here, a count
+                // this phone sent and somebody else then cleared came back at every open
+                // with no signal, and correcting it was refused as a conflict with this
+                // phone's own disk - while every count took a ring slot from a pay record.
+                // The price, accepted: a count an OLDER build's window wiped off this disk
+                // is not put back offline at boot. The cloud still has it, and the next
+                // snapshot brings it back (receive's own-echo rule compares the counts).
+                // replacesWhole itself is unchanged: the pre-send hold and the seen marks
+                // need a count to be a value that replaces what is there.
+                if (isRimaFieldPath(op.path)) return;
                 if (!this.keepConfirmed(op)) this.noteKeptIncomplete(op.path);
             });
 
@@ -2062,8 +2286,8 @@ const FarkadSync = {
         if (!this.outboxDamaged && !decodedUnreadable) {
             this.queueKeys().forEach(key => {
                 const kind = queueKeyKind(key);
-                if (kind !== 'ack' && kind !== 'beat') return;
-                const mark = kind === 'ack' ? ACK_MARK : BEAT_MARK;
+                if (kind !== 'ack' && kind !== 'beat' && kind !== 'try') return;
+                const mark = kind === 'ack' ? ACK_MARK : kind === 'beat' ? BEAT_MARK : TRY_MARK;
                 const opId = key.slice(key.lastIndexOf(mark) + mark.length);
                 if (present.has(opId)) return;
                 try { Store.remove(key); } catch (error) { /* bytes, not truth */ }
@@ -2078,7 +2302,9 @@ const FarkadSync = {
     // retirement. Removed only once the operation itself is gone, and never a reason to
     // report a failure: they are bookkeeping about bytes that no longer exist.
     forgetQueueMarks(op) {
-        [outboxAckKey(op.slot, op.opId), outboxBeatKey(op.slot, op.opId)].forEach(key => {
+        this._triedNow.delete(String(op.opId));
+        [outboxAckKey(op.slot, op.opId), outboxBeatKey(op.slot, op.opId),
+            outboxTryKey(op.slot, op.opId)].forEach(key => {
             if (Store.durableGet(key) === null) return;
             try { Store.remove(key); } catch (error) { /* bytes, not truth */ }
             Store.forget(key);
@@ -2691,7 +2917,7 @@ const FarkadSync = {
             // writer had put there - so the panel can show a pair instead of asking
             // somebody to decide against nothing.
             const hold = this.durableHold(item.opId);
-            rows.push({
+            const row = {
                 path: String(path),
                 opId: item.opId,
                 mine: cloneValue(item.value),
@@ -2710,7 +2936,14 @@ const FarkadSync = {
                 // tests/codex3.probes.test.mjs, D4b.
                 answerable: !item.sent && (heard || Boolean(hold)),
                 heard
-            });
+            };
+            // A COUNT (v166) carries the cloud's counts for its whole day: a move is two
+            // paths and a hold names one, so the panel shows the day's other sites beside it.
+            if (isRimaFieldPath(path)) {
+                row.cloudDay = heard
+                    ? cloneValue(this.baseValueAt(`days.${String(path).split('.')[1]}.rima`)) : undefined;
+            }
+            rows.push(row);
         });
         return rows.sort((one, other) => (one.path < other.path ? -1 : one.path > other.path ? 1 : 0));
     },

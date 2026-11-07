@@ -62,6 +62,9 @@ try {
     check('add uses the existing durable assignment', await page.evaluate(()=>workersAtPlace(State.schedule,State.date,'p_a','actual').includes('w_a')));
     same('selected worker action exposes its pressed state', await page.locator('.picker-row button').getAttribute('aria-pressed'), 'true');
     check('remove action names both worker and site', /David דוד.*הרצליה/.test((await page.locator('.picker-row button').getAttribute('aria-label')).replace(/[\u2066-\u2069]/g,'')));
+    // The removal is a second decision: inside 700 ms a second tap on the same row is the
+    // first one again and does nothing (DOUBLE_TAP_GUARD_MS, js/ui/day.js).
+    await page.waitForTimeout(800);
     await page.locator('.picker-row button').click();
     check('remove uses the existing unassignment', await page.evaluate(()=>!workersAtPlace(State.schedule,State.date,'p_a','actual').includes('w_a')));
     await search.fill('');

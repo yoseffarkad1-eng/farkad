@@ -484,10 +484,24 @@ export function makeCloud(options = {}) {
         hold: options.hold || null
     };
 
-    const offlineError = () => {
+    // `unsent`: nothing left the device, which the production adapter says the same way
+    // when its transaction failed before it had written anything - and says ONLY THERE, in
+    // withReceipt (update, save). Its cutover (bootstrap) and its create say nothing of the
+    // kind, so neither does this. A fake that tagged every offline failure proved the client
+    // right about a word the production adapter never says: a phone never told a revision
+    // goes the cutover road, and its attempts there kept their try marks in the field while
+    // every suite here took them back off.
+    const offlineError = kind => {
         const error = new Error('client is offline');
         error.code = 'unavailable';
+        if (kind === 'update' || kind === 'save') error.unsent = true;
         return error;
+    };
+    // The same for a refusal: withReceipt throws it before it stages a write and says so;
+    // the cutover and the create do not.
+    const untagged = error => {
+        if (error && typeof error === 'object') delete error.unsent;
+        throw error;
     };
 
     // Runs `apply` - the part that actually changes the document - either now or when
@@ -516,7 +530,7 @@ export function makeCloud(options = {}) {
 
     function guard(kind, payload) {
         cloud.attempts.push({ kind, payload });
-        if (!cloud.online) return offlineError();
+        if (!cloud.online) return offlineError(kind);
         if (cloud.reject) return cloud.reject(kind, payload) || null;
         return null;
     }
@@ -530,10 +544,10 @@ export function makeCloud(options = {}) {
             node = node[key];
         }
         const last = parts[parts.length - 1];
-        // Match patchToUpdateArgs: worker-day nulls remove the field; all other
-        // nulls, including roster tombstones, remain literal values.
+        // Match patchToUpdateArgs: worker-day and Rima-count nulls remove the field; all
+        // other nulls, including roster tombstones, remain literal values.
         if (value === null && parts.length === 4 && parts[0] === 'days'
-            && (parts[2] === 'plan' || parts[2] === 'actual')) delete node[last];
+            && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima')) delete node[last];
         else node[last] = value;
     }
 
@@ -569,6 +583,8 @@ export function makeCloud(options = {}) {
     function refuse(code, message) {
         const error = new Error(message);
         error.code = code;
+        // Refused before anything was applied, so nothing of it is on the document.
+        error.unsent = true;
         return error;
     }
 
@@ -704,7 +720,7 @@ export function makeCloud(options = {}) {
                 cloud.writes.push({ kind: 'bootstrap', payload });
                 publish();
                 return JSON.parse(JSON.stringify(cloud.doc));
-            });
+            }).catch(untagged);
         },
         // The authoritative document, outside any transaction.
         read() {
@@ -727,7 +743,7 @@ export function makeCloud(options = {}) {
                 landReceipt(data);
                 cloud.writes.push({ kind: 'create', data });
                 publish();
-            });
+            }).catch(untagged);
         },
         archive(key, data) {
             const problem = guard('archive', { key, data });

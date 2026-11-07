@@ -35,9 +35,15 @@ function shellFiles(root) {
         .filter(entry => existsSync(join(root, entry)));
 }
 
+// With the GIT_* environment taken away: GIT_DIR outranks `-C`, and a verdict about the
+// tree at `root` read out of whatever repository GIT_DIR names is a verdict about nothing
+// (tests/build.test.mjs, above its own helper, says what that cost once).
+const GIT_ENV = Object.fromEntries(Object.entries(process.env)
+    .filter(([name]) => !/^GIT_/i.test(name)));
+
 function gitIn(root, args) {
     return execFileSync('git', ['-C', root].concat(args),
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV });
 }
 
 // Every blob the commit holds for those paths, by path. Read from the object database of

@@ -486,13 +486,27 @@ function invoiceReport(schedule, fromDate, toDate) {
 
         dates.forEach(date => {
             const workerIds = workersAtPlace(schedule, date, place.id, 'actual');
-            if (workerIds.length === 0) return;
+            // RIMA'S MEN ARE BILLED LIKE HIS OWN (v166). The owner's ruling, 2026-11-01:
+            // for the client's account a Rima worker is one worker-site day, exactly like
+            // one of the owner's - three of his and two of Rima's on a site is five. So
+            // the count is added here, in the one function every billing surface reads
+            // (the grid, the bars, the paper, the picture, the חיוב sheet), and a day
+            // with Rima and none of his men is a billed day. It is a count of PEOPLE, not
+            // money: nothing on the pay sheet reads this function. The Rima table keeps
+            // its own count beside it, for the account with the other company.
+            const rima = typeof rimaCount === 'function' ? rimaCount(schedule, date, place.id) : 0;
+            const count = workerIds.length + rima;
+            if (count === 0) return;
 
-            row.byDate[date] = workerIds.length;
-            row.workerDays += workerIds.length;
+            row.byDate[date] = count;
+            row.workerDays += count;
             // The client is invoiced day by day, so the detail has to survive the
-            // aggregation rather than be recomputed by whoever reads the total.
-            row.days.push({ date, count: workerIds.length, workerIds });
+            // aggregation rather than be recomputed by whoever reads the total. The
+            // Rima share is named on the day only when there is one, so a day without
+            // it reads exactly as it always did.
+            const day = { date, count, workerIds };
+            if (rima > 0) day.rima = rima;
+            row.days.push(day);
         });
 
         return row;

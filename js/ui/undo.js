@@ -45,7 +45,15 @@ function editWithUndo(workerId, label, mutate) {
 
     // No undo bar for an edit that did not happen. commit() has already put the screen
     // back and said why; offering "undo" over that would name a change nobody made.
-    if (!State.commit(mutate())) return false;
+    //
+    // AND NO OLDER STEP LEFT ARMED OVER ONE THE JOURNAL KEPT (v166). Another window of this
+    // app wrote the same day first, so the disk guard held this edit in the journal and
+    // said so; it is owed to the cloud. ↶ still held the step before it, and pressed to
+    // take this edit back it took back that one instead - another man's day.
+    if (!State.commit(mutate())) {
+        if (State.lastCommitKept) hideUndo();
+        return false;
+    }
 
     // Taken AFTER the commit, so redo restores exactly what the edit produced rather
     // than being a guess at how to repeat it.

@@ -417,7 +417,7 @@ function poisonedContainers(raw) {
             const day = days[date];
             if (!isPlainObject(day)) return;
             look(day, `days.${date}`);
-            ['plan', 'actual'].forEach(layer => look(day[layer], `days.${date}.${layer}`));
+            ['plan', 'actual', RIMA_LAYER].forEach(layer => look(day[layer], `days.${date}.${layer}`));
         });
     }
     look(raw && raw.advances, 'advances');
@@ -816,11 +816,23 @@ function dayProblems(raw, known) {
         // the whole record: the app would open on a phone whose schedule it will not
         // read, hold every write, and tell somebody their data is unreadable, over a
         // field naming a van that stayed in the yard one evening in June.
+        // `rima` (v166) is the count of another company's workers per site - see
+        // rimaProblems. A build before v166 refuses it here, which is the right answer
+        // for that build: a v166 backup opened on an older phone is refused out loud
+        // rather than restored with the counts silently stripped off it.
         const extra = Object.keys(day).filter(key =>
-            key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff' && key !== 'vehicleRuns');
+            key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff' && key !== 'vehicleRuns'
+            && key !== RIMA_LAYER);
         if (extra.length > 0) {
             problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
             return;
+        }
+        if (day.rima !== undefined) {
+            const rima = rimaProblems(day.rima, date, known);
+            if (rima.length > 0) {
+                rima.forEach(problem => problems.push(problem));
+                return;
+            }
         }
         if (day.vehiclesOff !== undefined
             && !(Array.isArray(day.vehiclesOff)
@@ -834,7 +846,9 @@ function dayProblems(raw, known) {
             problems.push('ליום ' + date + ' יש רישום נסיעת רכב שאינו תקין.');
             return;
         }
-        if (day.plan === undefined && day.actual === undefined) {
+        // A day with only a Rima count on it is a real day: the owner's crew can be
+        // elsewhere, or off, while the other company's men are on his site.
+        if (day.plan === undefined && day.actual === undefined && day.rima === undefined) {
             problems.push('ליום ' + date + ' אין רישום כלל.');
             return;
         }
@@ -1171,6 +1185,15 @@ function journalEntryProblems(path, value) {
         if (parts[2] === 'vehicleRuns') {
             if (!isSafeId(parts[3])) return ['a vehicle path with an unusable id'];
             return value === null ? [] : vehicleRunProblems(value);
+        }
+        // days.<date>.rima.<placeId> - how many of the other company's men were on one
+        // site that day. A null is the count being cleared, sent as deleteField() like a
+        // worker-day removal.
+        if (parts[2] === RIMA_LAYER) {
+            if (!isSafeSegment(parts[3])) return ['a Rima path with an unusable site id'];
+            if (value === null) return [];
+            return isRimaCount(value) ? [] : ['a Rima count that is not a whole number from 1 to '
+                + RIMA_MAX];
         }
         if (parts[2] !== 'plan' && parts[2] !== 'actual') return ['a layer nobody wrote'];
         if (!isSafeSegment(parts[3])) return ['a day path with an unusable worker id'];
@@ -1631,6 +1654,17 @@ function referencedEntityIds(schedule) {
     Object.values(days).forEach(day => Object.values(day?.vehicleRuns || {}).forEach(run => {
         if (run && isSafeId(String(run.ownerId || ''))) workers.add(String(run.ownerId));
     }));
+    // A site with a Rima count on it is a site somebody bills for, exactly as a site
+    // with a worker on it is: a tombstone does not take it off the record, it comes back
+    // archived. Without this a whole-document restore of this phone's own record would
+    // be refused for naming a site its roster does not have.
+    Object.values(days).forEach(day => {
+        const rima = day && isPlainObject(day.rima) ? day.rima : null;
+        if (!rima) return;
+        Object.keys(rima).forEach(placeId => {
+            if (isSafeId(placeId) && isRimaCount(rima[placeId])) places.add(String(placeId));
+        });
+    });
     return { workers, places };
 }
 
@@ -1665,6 +1699,15 @@ function unlistedPlaceIds(schedule, fromDate, toDate) {
         Object.keys(layers).forEach(layer => {
             const byWorker = layers[layer] || {};
             if (layer === 'vehiclesOff' || layer === 'vehicleRuns') return;
+            // Keyed by site, not by worker: the keys ARE the site ids.
+            if (layer === RIMA_LAYER) {
+                if (!isPlainObject(byWorker)) return;
+                Object.keys(byWorker).forEach(placeId => {
+                    if (isSafeId(placeId) && isRimaCount(byWorker[placeId])
+                        && !known.has(placeId)) found.add(placeId);
+                });
+                return;
+            }
             Object.keys(byWorker).forEach(workerId => {
                 const record = byWorker[workerId];
                 const entries = (record && record.entries) || [];
@@ -2659,4 +2702,238 @@ function ensureDay(schedule, date, layer) {
     if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
     if (!schedule.days[date][layer]) schedule.days[date][layer] = {};
     return schedule.days[date][layer];
+}
+
+// ---------------------------------------------------------------- רימא (v166)
+//
+// Men from another company, Rima, work on the owner's sites. They are NOT his workers:
+// he records only HOW MANY came, per site, per day, so that he can bill that company.
+//
+//   days["2026-11-01"].rima["p_herzliya"] = 3
+//
+// A number and nothing else. No name, because nobody here knows them by name and a name
+// on the Rima table would be a stranger on the invoice. No rate and no worker id, so the
+// pay sheet, the advances, the pay cycles and the closures cannot see it: every one of
+// them reads `plan`/`actual` by worker and nothing else (payrollReport, workerDaysReport,
+// advanceWalk). That is what keeps a Rima count from moving a shekel, and
+// tests/rima.test.mjs measures it rather than trusting this paragraph.
+//
+// The CLIENT'S invoice is the one place it is counted, and on purpose: the owner ruled on
+// 2026-11-01 that for the client a Rima worker is one worker-site day like any of his own,
+// so invoiceReport (js/model/money.js) adds the count to the site's day. A count of people
+// billed, not money paid.
+//
+// Its own layer under the DAY, not a field at the top of the document, for the phones
+// that have not updated. v145 and v165 rebuild a day from the layers they know, so they
+// do not keep `rima` in their own copy - but they never write it away from the cloud
+// either, because every ordinary edit is one field path. And when one of them is handed
+// a v166 backup or cloud copy to restore, its own day check refuses the unknown layer
+// out loud, where a top-level field would have been restored without the counts and
+// sent to all three phones. See docs/releases.md, v166, for what is still exposed.
+//
+// One site per path, so two people entering two sites' counts that evening write two
+// different fields, and a count is cleared by deleting its field - the same deleteField()
+// a worker-day removal sends - rather than by storing a zero for ever.
+const RIMA_LAYER = 'rima';
+
+// The field is sized for 1-10, which is what a site sees. 10 is a guide and not a cap;
+// 99 is the cap, because a three-digit count on one site is a typo on somebody's bill
+// and refusing it costs a retype.
+const RIMA_MAX = 99;
+
+// Said when a count is refused. Hebrew strings are product decisions - see CLAUDE.md.
+const RIMA_REFUSED = 'אפשר לרשום לרימא רק מספר שלם בין 0 ל-99.';
+
+function isRimaCount(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value)
+        && value >= 1 && value <= RIMA_MAX;
+}
+
+function rimaPath(date, placeId) {
+    return `days.${date}.${RIMA_LAYER}.${placeId}`;
+}
+
+// Whether a field path is one site's count on one day: days.<date>.rima.<placeId>. Asked by
+// the sync layer wherever a count has to be told apart from a worker's day, because the two
+// are cleared differently - a count by deleting its field, a day by a placeholder value
+// (clearWorkerDay) - so "nothing there" means something different for each.
+function isRimaFieldPath(path) {
+    const parts = String(path).split('.');
+    return parts.length === 4 && parts[0] === 'days' && parts[2] === RIMA_LAYER;
+}
+
+// Whether two schedules hold the same Rima counts, every day and every site. A day or a map
+// that is not there holds no count. Asked by receive() before it calls a snapshot this
+// phone's own echo: the stamps on a copy say who wrote it last, not whether the build that
+// wrote it kept this layer - v145 and v165 do not. `skip(date, placeId)`, when given, names
+// the sites whose counts are not compared at all.
+function sameRimaLayers(one, other, skip) {
+    const daysOf = schedule => (schedule && isPlainObject(schedule.days) ? schedule.days : {});
+    const mapOf = (schedule, date) => {
+        const day = daysOf(schedule)[date];
+        return day && typeof day === 'object' ? day.rima : undefined;
+    };
+    const countIn = (map, placeId) => (Object.prototype.hasOwnProperty.call(map, placeId)
+        && map[placeId] !== null ? map[placeId] : undefined);
+    const dates = new Set(Object.keys(daysOf(one)).concat(Object.keys(daysOf(other))));
+    for (const date of dates) {
+        const mine = mapOf(one, date);
+        const theirs = mapOf(other, date);
+        // A map that is not a map is somebody's unreadable record, never "no counts": it
+        // is compared as it stands, byte for byte.
+        if ((mine !== undefined && !isPlainObject(mine))
+            || (theirs !== undefined && !isPlainObject(theirs))) {
+            if (JSON.stringify(mine) !== JSON.stringify(theirs)) return false;
+            continue;
+        }
+        const left = mine || {};
+        const right = theirs || {};
+        const sites = new Set(Object.keys(left).concat(Object.keys(right)));
+        for (const placeId of sites) {
+            if (typeof skip === 'function' && skip(date, placeId)) continue;
+            if (countIn(left, placeId) !== countIn(right, placeId)) return false;
+        }
+    }
+    return true;
+}
+
+// What is wrong with one day's Rima map, in sentences for a person. Empty means none.
+// `known` is the roster on a whole-document replacement and null on a stored record,
+// the same convention dayProblems uses for worker-day entries.
+function rimaProblems(map, date, known) {
+    if (!isPlainObject(map)) return ['ליום ' + date + ' יש רישום רימא שאינו תקין.'];
+    const problems = [];
+    Object.keys(map).forEach(placeId => {
+        if (!isSafeId(placeId)) {
+            problems.push('ביום ' + date + ' יש רישום רימא תחת מזהה שאינו תקין.');
+            return;
+        }
+        if (!isRimaCount(map[placeId])) {
+            problems.push('ביום ' + date + ' יש מספר עובדי רימא שאינו תקין באתר ' + placeId + '.');
+            return;
+        }
+        if (known && !known.places.has(String(placeId))) {
+            problems.push('ביום ' + date + ' יש רישום רימא באתר ' + placeId + ' שאינו ברשימה.');
+        }
+    });
+    return problems;
+}
+
+// The same question asked of a document arriving from the cloud, in the words the sync
+// layer's refusal is built from. Nulls are tolerated here and nowhere else: on the wire a
+// null is a clear in flight, never a count.
+function rimaWireProblems(raw) {
+    const days = raw && isPlainObject(raw.days) ? raw.days : {};
+    const problems = [];
+    Object.keys(days).forEach(date => {
+        const day = days[date];
+        if (!isPlainObject(day) || day.rima === undefined) return;
+        if (!isPlainObject(day.rima)) {
+            problems.push('רישום רימא אינו תקין.');
+            return;
+        }
+        Object.keys(day.rima).forEach(placeId => {
+            // A poisoned name is held by poisonedContainers with its own evidence.
+            if (POISON_SEGMENTS.indexOf(placeId) !== -1) return;
+            const value = day.rima[placeId];
+            if (value === null) return;
+            if (!isSafeId(placeId) || !isRimaCount(value)) problems.push('רישום רימא אינו תקין.');
+        });
+    });
+    return problems;
+}
+
+// How many were recorded for one site on one day. 0 means nothing recorded.
+function rimaCount(schedule, date, placeId) {
+    const day = dayRecord(schedule, date);
+    const map = day && isPlainObject(day.rima) ? day.rima : null;
+    const id = String(placeId);
+    if (!map || !Object.prototype.hasOwnProperty.call(map, id)) return 0;
+    return isRimaCount(map[id]) ? map[id] : 0;
+}
+
+// Sets - or clears, with 0, null or an empty field - one site's count on one day.
+// Returns the one field path it changed, like every writer in this section, or a
+// refusal State.commit says out loud.
+function setRimaCount(schedule, date, placeId, count) {
+    const id = String(placeId);
+    const value = (count === 0 || count === null || count === undefined || count === '')
+        ? null : count;
+    if (!isRealDate(date) || !isSafeId(id) || (value !== null && !isRimaCount(value))) {
+        return { refused: true, reason: RIMA_REFUSED };
+    }
+    if (!schedule.days) schedule.days = {};
+    const day = schedule.days[date];
+    // A map this build cannot read is somebody's record, not an empty one. Nothing is
+    // written over it; Recovery is what holds it.
+    if (day && day.rima !== undefined && !isPlainObject(day.rima)) {
+        return { refused: true, reason: RIMA_REFUSED };
+    }
+    if (value === null) {
+        if (day && isPlainObject(day.rima)) {
+            delete day.rima[id];
+            if (Object.keys(day.rima).length === 0) delete day.rima;
+        }
+        return { path: rimaPath(date, id), value: null };
+    }
+    if (!day) schedule.days[date] = { plan: {}, actual: {} };
+    if (!schedule.days[date].rima) schedule.days[date].rima = {};
+    schedule.days[date].rima[id] = value;
+    return { path: rimaPath(date, id), value };
+}
+
+// The Rima table over a span: one row per date that HAS a count, one column per site
+// that has one - two sites of ten give two columns, and a day with nothing for Rima is
+// not on it. Its own date list: the invoice above it lists every billed day, and a day
+// with Rima and none of the owner's men is one of those (invoiceReport counts each of
+// Rima's men as a worker-site day), so here it is a row too - and a day with only the
+// owner's men is a row there and not here.
+//
+// `onlyPlaceId` narrows it to one client's site, the same narrowing the invoice takes
+// when one site is chosen for printing: every other site is somebody else's business.
+//
+// Counts only. No name of anybody appears in what this returns.
+function rimaReport(schedule, fromDate, toDate, onlyPlaceId) {
+    const labels = placeLabelsIn(schedule, fromDate, toDate);
+    const days = (schedule && schedule.days) || {};
+    const only = onlyPlaceId === undefined || onlyPlaceId === null ? null : String(onlyPlaceId);
+    const byPlace = new Map();
+    const dates = new Set();
+
+    Object.keys(days).filter(date => date >= fromDate && date <= toDate).sort().forEach(date => {
+        const map = days[date] && isPlainObject(days[date].rima) ? days[date].rima : null;
+        if (!map) return;
+        Object.keys(map).forEach(placeId => {
+            if (only !== null && placeId !== only) return;
+            if (!isSafeId(placeId) || !isRimaCount(map[placeId])) return;
+            dates.add(date);
+            if (!byPlace.has(placeId)) {
+                byPlace.set(placeId, { placeId, name: placeLabelFrom(labels, placeId),
+                    total: 0, byDate: {} });
+            }
+            const row = byPlace.get(placeId);
+            row.byDate[date] = map[placeId];
+            row.total += map[placeId];
+        });
+    });
+
+    // The roster's order, which is the order every other surface draws sites in; a site
+    // the roster has not got goes after them, in the order its id sorts.
+    const order = ((schedule && schedule.places) || []).map(place => String(place.id));
+    const places = order.filter(id => byPlace.has(id)).map(id => byPlace.get(id))
+        .concat([...byPlace.keys()].filter(id => order.indexOf(id) === -1).sort()
+            .map(id => byPlace.get(id)));
+
+    return {
+        dates: Array.from(dates).sort(),
+        places,
+        countAt(placeId, date) {
+            const row = byPlace.get(String(placeId));
+            return (row && row.byDate[date]) || 0;
+        },
+        dayTotal(date) {
+            return places.reduce((sum, row) => sum + (row.byDate[date] || 0), 0);
+        },
+        total: places.reduce((sum, row) => sum + row.total, 0)
+    };
 }

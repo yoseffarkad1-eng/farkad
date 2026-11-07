@@ -120,7 +120,7 @@ downloading anything. The emulator suites need Java and run through
 Financial suites cover both enabled operation and explicit legacy-client fixtures
 with both financial gates closed. The v116 release candidate enables the financial
 pair by owner request; deployment remains held until cloud rules and device readiness
-are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. Test-only overrides are
+are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. Test-only overrides are
 provided before scripts load, never defined by the production shell.
 
 ## The culture
@@ -223,6 +223,14 @@ written down so it cannot happen twice.
     tests/held.test.mjs        the held records shown with both sides in ⋯, and released by a person one at a time
     tests/receipt.test.mjs     a receipt names the operation, not just the revision it reached
     tests/bootstrap.rules.test.mjs the server's own answer to a bootstrap carrying business data
+    tests/rima.test.mjs        v166 Rima count: one path, no shekel of pay moves, the client invoice counts
+                               each one, the Rima table and sheet, no Rima in the WhatsApp message, held rows,
+                               and v145/v165 (their real bytes, out of Git) not wiping it off the cloud
+    tests/rima.browser.mjs     the רימא field on every site card, the רישום לרימא section on screen,
+                               on paper and in the picture, ten sites on a 320px phone
+    tests/scroll.browser.mjs   the day keeps its place: every commit and every adopted snapshot leaves the
+                               rows on screen where they were; a new date still opens at its top;
+                               a double tap on a ✕ or a picker row is one tap
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe

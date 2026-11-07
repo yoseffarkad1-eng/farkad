@@ -28,7 +28,7 @@
 //   5. "A suite run from another checkout reads that checkout" asserts a path string and
 //      a version constant. It never CONSTRUCTS another checkout, so it cannot fail.
 
-import { readFileSync, readdirSync, lstatSync, existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, lstatSync, existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -42,9 +42,22 @@ const ROOT = join(HERE, '..');
 
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
+// Every git call in this file runs with the GIT_* environment taken away, for the reason
+// tests/build.test.mjs gives above its own helper: GIT_DIR outranks `-C`, so with it
+// exported every question below would be asked of another repository - and two of them
+// WRITE: `status` refreshes the index it reads, and the last suite adds a worktree and
+// removes it again. tests/treecheck.mjs, which that suite calls, does the same.
+const GIT_ENV = Object.fromEntries(Object.entries(process.env)
+    .filter(([name]) => !/^GIT_/i.test(name)));
+
 function git(args, options) {
     return execFileSync('git', ['-C', ROOT].concat(args),
-        Object.assign({ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }, options || {}));
+        Object.assign({ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV }, options || {}));
+}
+
+// Whether two paths are one folder once both are real paths.
+function sameFolder(one, other) {
+    try { return realpathSync(one) === realpathSync(other); } catch (error) { return false; }
 }
 
 let HEAD = '';
@@ -179,10 +192,19 @@ try { HEAD = git(['rev-parse', 'HEAD']).trim(); } catch (error) { HEAD = ''; }
     // in - so it could not fail, and a suite reading the wrong tree would have sailed
     // through it.
     const work = mkdtempSync(join(tmpdir(), 'farkad-other-'));
+    // The worktree is registered in the repository git finds from ROOT, so that has to BE
+    // this checkout's own - not one that a copy of the tree with no .git of its own happens
+    // to sit inside. Nothing is added anywhere until git has said which it is.
+    let top = '';
+    try { top = git(['rev-parse', '--show-toplevel']).trim(); } catch (error) { top = ''; }
+    const own = top !== '' && sameFolder(top, ROOT);
+    if (!own) rmSync(work, { recursive: true, force: true });
+    given('the repository a worktree is added to is this checkout\'s own', own,
+        `git found ${top || '(nothing)'} for ${ROOT}`);
     let built = false;
     try {
         execFileSync('git', ['-C', ROOT, 'worktree', 'add', '--detach', work, HEAD],
-            { stdio: ['ignore', 'pipe', 'pipe'] });
+            { stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV });
         built = true;
     } catch (error) {
         built = false;
@@ -230,7 +252,7 @@ try { HEAD = git(['rev-parse', 'HEAD']).trim(); } catch (error) { HEAD = ''; }
 
     try {
         execFileSync('git', ['-C', ROOT, 'worktree', 'remove', '--force', work],
-            { stdio: ['ignore', 'pipe', 'pipe'] });
+            { stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV });
     } catch (error) {
         rmSync(work, { recursive: true, force: true });
     }

@@ -342,6 +342,8 @@ function scheduleBarMeasure() {
         applyKeyboardInset(keyboardHeight());
         correctRaisedBars();
         measureBottomBars();
+        // The day list's place, finished now that the page knows how far it can scroll.
+        if (typeof settleDayAnchor === 'function') settleDayAnchor();
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
     else setTimeout(run, 0);

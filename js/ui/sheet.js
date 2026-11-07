@@ -374,6 +374,11 @@ function renderWorkerPicker() {
         row.appendChild(label);
 
         const action = button(inHere ? '✓ נמצא' : '+ הוסף', inHere ? 'btn-on' : 'btn-add', () => {
+            // «+ הוסף» becomes «✓ נמצא» in place, under the finger: a second tap on this
+            // row inside DOUBLE_TAP_GUARD_MS is the first tap again, not a removal
+            // (secondTapTooSoon, js/ui/day.js). Keyed by site and man, so the guard
+            // outlives the redraw of the list below.
+            if (secondTapTooSoon(`picker:${place.id}:${worker.id}`)) return;
             const label = inHere
                 ? `${isolate(worker.name)} הוסר מ${isolate(place.name)}`
                 : `${isolate(worker.name)} נוסף ל${isolate(place.name)}`;
@@ -416,8 +421,12 @@ async function clearWorkerPicker() {
     const date = State.date;
     const layer = State.layer;
 
+    // Kept in the journal by the disk guard, it is an edit all the same - see editWithUndo.
     if (!State.commitMany(here.map(workerId =>
-        unassignPlace(State.schedule, date, workerId, layer, place.id)))) return;
+        unassignPlace(State.schedule, date, workerId, layer, place.id)))) {
+        if (State.lastCommitKept) hideUndo();
+        return;
+    }
 
     offerUndo(`${here.length} עובדים הוסרו מ${isolate(place.name)}`, () => {
         State.commitMany(previous.map(item =>
@@ -453,6 +462,10 @@ function openPlacePicker(workerId) {
             '',
             inHere ? 'place-btn place-on' : 'place-btn',
             () => {
+                // This site turns into its own opposite in place (the picker is redrawn
+                // under the finger): the same site tapped again for the same man inside
+                // DOUBLE_TAP_GUARD_MS is the first tap again (secondTapTooSoon, js/ui/day.js).
+                if (secondTapTooSoon(`place:${workerId}:${place.id}`)) return;
                 const change = inHere
                     ? unassignPlace(State.schedule, State.date, workerId, State.layer, place.id)
                     : assignPlace(State.schedule, State.date, workerId, State.layer, place.id, RATE_NORMAL);
@@ -533,8 +546,12 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
 
     // One save and one render for the whole copy, but every path is still sent - see
     // State.commitMany. No "copied N workers" over a copy that was refused: commit has
-    // already said what happened.
-    if (!State.commitMany(changes)) return;
+    // already said what happened. Kept in the journal by the disk guard, it is an edit all
+    // the same, and the step behind it is not the last one - see editWithUndo.
+    if (!State.commitMany(changes)) {
+        if (State.lastCommitKept) hideUndo();
+        return;
+    }
 
     // Only the rows the copy actually filled: a worker it skipped must not be dragged
     // back and forth by somebody else's undo.

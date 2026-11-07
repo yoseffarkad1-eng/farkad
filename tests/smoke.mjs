@@ -166,6 +166,9 @@ async function seedRoster(page) {
 
   // The list used to re-sort on every tap, so a name jumped the moment it was touched -
   // a mis-tap removed someone AND threw them to the top, leaving no way to see who moved.
+  // The mis-tap comes after the add was seen: inside 700 ms a second tap on the same row
+  // is the first one again and does nothing (DOUBLE_TAP_GUARD_MS, js/ui/day.js).
+  await page.waitForTimeout(800);
   const orderBefore = await page.evaluate(() =>
     [...document.querySelectorAll('#workerPickerList .picker-name')].map(n => n.firstChild.textContent));
   await page.locator('#workerPickerList .picker-row').filter({ hasText: 'שרה' }).getByRole('button').click();
@@ -177,7 +180,8 @@ async function seedRoster(page) {
   check('and the mistake is undoable from the header',
     !(await page.locator('#undoBtn').isDisabled()));
 
-  // put שרה back, in place, with the same button
+  // put שרה back, in place, with the same button - a second decision, not a bounce
+  await page.waitForTimeout(800);
   await page.locator('#workerPickerList .picker-row').filter({ hasText: 'שרה' }).getByRole('button').click();
   await page.waitForTimeout(200);
   check('tapping the same row again puts them back',
@@ -7532,7 +7536,9 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     JSON.stringify(restored) === '["p_01:double:0","p_02:extra:2"]', JSON.stringify(restored));
   check('and the bar goes away once used', !(await page.locator('#undoBar').isVisible()));
 
-  // an undo taken to a different day would be a second mistake, not a fix
+  // an undo taken to a different day would be a second mistake, not a fix. (A second ✕,
+  // after the first was seen and undone - not inside the 700 ms DOUBLE_TAP_GUARD_MS.)
+  await page.waitForTimeout(800);
   await page.locator('.wrow').first().getByRole('button', { name: /נקה/ }).click();
   await page.waitForTimeout(250);
   await page.evaluate(() => { State.date = '2026-08-05'; render(); });
