@@ -101,6 +101,11 @@ function dayMessage(date, layer, styleKey, placeId) {
             : 'אין'));
     }
 
+    // NO RIMA IN THIS MESSAGE (the owner's decision, 2026-11-02). It is the seder for his
+    // own crew; Rima's men are counted for the client's bill and for nothing else - the
+    // day screen's box, the invoice, the Rima table, the sheet. So a day with only Rima's
+    // men on it reads as a day with nobody assigned, which to the men it goes to is what
+    // it is.
     if (!any && absent.length === 0) {
         return lines[0] + (only
             ? `\n\n${isolate(only.name)}: אין שיבוצים ליום הזה.`

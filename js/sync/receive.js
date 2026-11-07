@@ -292,21 +292,55 @@ Object.assign(FarkadSync, {
     // signed their writes with, and the value one of them put there is a value the other
     // has held - which is why the person's later decision on one tab is never held
     // against their earlier one on another. See tests/probes.test.mjs, Q2 and Q3.
-    seenMarksAt(path, held, previous) {
+    //
+    // A RIMA COUNT THIS DEVICE MAY ALREADY HAVE PUT ON THE SERVER (v166) is where a
+    // 'nothing' in that list can be wrong about the present. A count's clear is a deleted
+    // field, so once an earlier count here was handed over - its answer lost, or answered
+    // with its snapshot not yet heard - the nothing that count was built on, and a
+    // snapshot from before it landed, say what the server held BEFORE it; the server's
+    // nothing now can be another phone's clear of it. Read as this device's own, that
+    // nothing sent a correction over the clear, or a moved count back to the old site,
+    // with both phones saying synced. So for a count `options.handedOver` keeps the
+    // inherited nothing out, and a base below a revision an unanswered attempt claimed
+    // keeps its nothing out too - unless `options.decided`: the person is answering a
+    // held row in ⋯, looking at the cloud's side, and the base is what they saw.
+    seenMarksAt(path, held, previous, options) {
         const marks = [];
         const add = mark => {
             if (typeof mark === 'string' && mark !== '' && marks.indexOf(mark) === -1) {
                 marks.push(mark);
             }
         };
+        const said = options || {};
+        const rima = isRimaFieldPath(path);
+        const inherit = mark => {
+            if (rima && said.handedOver && mark === VALUE_ABSENT) return;
+            add(mark);
+        };
         add(held);
-        if (this._baseDoc !== null) add(valueMark(this.baseValueAt(path)));
+        if (this._baseDoc !== null) {
+            const mark = valueMark(this.baseValueAt(path));
+            if (!(rima && mark === VALUE_ABSENT && !said.decided && this.baseBelowAttempt(path))) {
+                add(mark);
+            }
+        }
         if (previous) {
-            if (Array.isArray(previous.seen)) previous.seen.forEach(add);
-            else if (typeof previous.base === 'string') add(markOfRecorded(previous.base));
+            if (Array.isArray(previous.seen)) previous.seen.forEach(inherit);
+            else if (typeof previous.base === 'string') inherit(markOfRecorded(previous.base));
             add(valueMark(previous.value));
         }
         return marks;
+    },
+
+    // Is the base older than an attempt at a count's `path` that has not been answered?
+    // A write lands at the revision it claims, so a base at or above every such claim
+    // carries the write or something after it; one below may be from before it.
+    baseBelowAttempt(path) {
+        if (this._baseDoc === null || !isRimaFieldPath(path)) return false;
+        const claim = this.claimAt(path);
+        if (claim === null) return false;
+        const revision = Number(this._baseDoc.revision);
+        return !(Number.isSafeInteger(revision) && revision >= claim);
     },
 
     // Has somebody else changed what `document` holds at `path` since the values this
@@ -315,23 +349,50 @@ Object.assign(FarkadSync, {
     // write leaves, because a phone that comes back, hears the winner and only then
     // flushes is refused by nothing - its revision is current - and the collision it is
     // about to lose already happened while it was away.
-    movedUnder(item, path, document) {
+    movedUnder(item, path, document, mayHaveLanded) {
         // Nothing heard: nothing to compare against, and nothing to decide here. The
         // write goes out against no revision, the server answers with its document, and
         // the conflict branch asks this question of that answer.
         if (!document || typeof document !== 'object') return false;
+        const rima = isRimaFieldPath(path);
+        // A COUNT, AND A BASE OLDER THAN THIS DEVICE'S OWN UNANSWERED ATTEMPT AT IT (v166).
+        // That base cannot say what the server holds now - the attempt may have landed
+        // after it - so it decides nothing, exactly like no base at all: the write claims
+        // the revision this device last adopted, a landed attempt has moved past it, and
+        // the conflict branch asks the question of the server's own document.
+        if (rima && document === this._baseDoc && this.baseBelowAttempt(path)) return false;
         const marks = marksOf(path, readPath(document, path));
         // A path the server holds nothing at is not a path anybody's record is lost on.
         // Two phones reaching an empty project are the ordinary case: one creates the
         // document, and the other's evening - on the days the first never wrote - goes.
-        if (marks[0] === VALUE_ABSENT) return false;
+        //
+        // EXCEPT A RIMA COUNT (v166), whose clear IS nothing there: setRimaCount deletes the
+        // field where a worker-day clear leaves a placeholder value. At a count's path the
+        // server's nothing can be another phone's deliberate clear, and waving it through
+        // sent a count changed offline straight over it - the cloud said 4 where somebody
+        // had decided nobody came, a count moved to the right site was billed at both, and
+        // every phone said synced. For a count the seen marks below decide, as they do for
+        // any value: a write built on having seen nothing there - a new count, one typed
+        // after the clear arrived - still goes, and so does this phone's own clear, which
+        // is the same nothing.
+        if (marks[0] === VALUE_ABSENT && !isRimaFieldPath(path)) return false;
         // Nor is a path the server already holds THIS VALUE at. An earlier attempt whose
         // answer was lost landed it, and the retry is answered from its receipt; or
         // another phone recorded the same thing. Either way, sending it changes nothing
         // and loses nothing - and holding it left a phone owing a day the cloud had.
         if (marks.indexOf(valueMark(item.value)) !== -1) return false;
         if (Array.isArray(item.seen)) {
-            return !marks.some(mark => item.seen.indexOf(mark) !== -1);
+            // A COUNT HANDED TO THE CLOUD BEFORE ITSELF, and not being sent again under its
+            // own name (v166). What it had seen is what the server held before that attempt;
+            // if the attempt landed, the nothing there now is somebody's clear of it. (One
+            // that only supersedes such an attempt left that nothing out when it was made -
+            // see seenMarksAt - so whatever nothing it carries is one it did see.) See
+            // TRY_MARK in js/sync/sync.js.
+            const handed = typeof mayHaveLanded === 'function'
+                ? mayHaveLanded(item) : this.triedNameFor(item) !== null;
+            const seen = rima && handed
+                ? item.seen.filter(mark => mark !== VALUE_ABSENT) : item.seen;
+            return !marks.some(mark => seen.indexOf(mark) !== -1);
         }
         // A QUEUE AN OLDER BUILD WROTE carries no record of what this device produced,
         // so the document's last writer is the only signal there is, and it is read as
@@ -477,7 +538,18 @@ Object.assign(FarkadSync, {
                 // of the create race hold its whole roster.
                 const queued = this._outbox.get(path);
                 if (queued && Array.isArray(queued.seen)) {
-                    this._sendBase[path] = { seen: queued.seen.slice(), own: true };
+                    // A count first handed over under ANOTHER name (v166) may be on the
+                    // server already, and the nothing it was built on is not evidence that
+                    // a nothing there now is its own - see movedUnder. Under THIS name a
+                    // refusal is itself the proof that the batch never landed: the server
+                    // answers a batch it has from the receipt, before any revision.
+                    const name = isRimaFieldPath(path) ? this.triedNameFor(queued) : null;
+                    const elsewhere = name !== null && name !== String(opId);
+                    this._sendBase[path] = {
+                        seen: elsewhere ? queued.seen.filter(mark => mark !== VALUE_ABSENT)
+                            : queued.seen.slice(),
+                        own: true
+                    };
                     return;
                 }
                 if (queued && typeof queued.base === 'string') {
@@ -501,6 +573,8 @@ Object.assign(FarkadSync, {
         // not exist can be created at, and the rules refuse anything else - so a device
         // that guessed would simply be refused, which is the right failure.
         patch.revision = (this._revision === null ? 0 : this._revision) + 1;
+        // A count's attempt rebased: the revision it may land at has moved - see TRY_MARK.
+        this.noteClaimed(patch);
         return patch;
     },
 
@@ -633,6 +707,17 @@ Object.assign(FarkadSync, {
                 || (runs[id] !== null && vehicleRunProblems(runs[id]).length > 0)))
                 ledger.push('רישום נסיעת רכב אינו תקין.');
         });
+        // A RIMA COUNT this build cannot read (v166), refused on the same terms and for
+        // the same reason as a vehicle run: it is what the other company is billed from,
+        // and normaliseSchedule carries it as it arrived - so adopting it would put on
+        // this disk a record dayProblems refuses at the next open, and the phone would
+        // open held over a number. Refused here, the snapshot is kept whole as evidence
+        // and nothing on the device is replaced. Only v166 and later write this layer,
+        // through journalEntryProblems, so this is a guard against a future build or a
+        // hand edit, not a state the app produces.
+        if (typeof rimaWireProblems === 'function') {
+            rimaWireProblems(raw).forEach(problem => ledger.push(problem));
+        }
         if (ledger.length > 0) {
             // Keep the whole snapshot: valid payments beside the malformed one are
             // evidence too, and none of this snapshot may replace the good local record.
@@ -853,8 +938,37 @@ Object.assign(FarkadSync, {
         // alone said "somebody wrote at this instant", and after this device adopted
         // another phone's document that was a stamp it did not own - so the next write
         // from THAT phone looked like an echo of this one and was skipped.
+        //
+        // AND THE SAME RIMA COUNTS (v166). The stamps say who wrote last, not what this copy
+        // holds. A phone that wrote last on v145 or v165 carries that build's copy - which
+        // never kept `rima` - under exactly the cloud's stamps, so when it updated, its
+        // first snapshot was skipped as an echo: no count on the screen while the line said
+        // synced, and the day's cloud copy below written without them, until another phone
+        // happened to write. Where the counts differ the snapshot is adopted like any other.
+        //
+        // EXCEPT WHERE THIS COPY HOLDS A COUNT THE QUEUE STILL OWES - unsent, or held for a
+        // person. There this copy differs from the cloud by design, and adopting changes
+        // nothing at those sites: the owed value is laid straight back over the snapshot
+        // (reapplyPending). Compared, a held count made every echo of this phone's own
+        // saves differ, and each one was adopted - two redraws a save, under the finger of
+        // somebody typing the next site's count, for as long as the hold stood.
+        //
+        // AND ONLY WHILE THIS COPY SHOWS WHAT IS OWED. A copy that has lost the count - an
+        // older build's window writing the shared disk, the price of keeping counts out of
+        // the kept ring - was looked away from all the same, so the snapshot that would
+        // have laid it back was skipped as this phone's echo: the held count gone from the
+        // screen and the Rima table, the line saying contested over nothing visible, until
+        // somebody decided it in ⋯ or the other phone wrote.
+        const owed = this._outbox;
+        const owes = (date, placeId) => {
+            const item = owed.get(`days.${date}.rima.${placeId}`);
+            if (!item || item.sent) return false;
+            const wanted = isRimaCount(item.value) ? item.value : 0;
+            return rimaCount(State.schedule, date, placeId) === wanted;
+        };
         if (remote.updatedAt === State.schedule.updatedAt
-            && remote.updatedBy === syncDeviceId()) {
+            && remote.updatedBy === syncDeviceId()
+            && sameRimaLayers(remote, State.schedule, owes)) {
             this.noteCloudHeard();
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
@@ -1476,6 +1590,16 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
             if (parts.length === 4 && parts[0] === 'days') {
                 const [, date, layer, workerId] = parts;
                 if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
+                // A cleared Rima count is a deletion, like a worker-day removal - and the
+                // map goes with its last count, the way setRimaCount leaves it.
+                if (value === null && layer === 'rima') {
+                    const rima = schedule.days[date].rima;
+                    if (rima && typeof rima === 'object') {
+                        delete rima[workerId];
+                        if (Object.keys(rima).length === 0) delete schedule.days[date].rima;
+                    }
+                    return;
+                }
                 if (!schedule.days[date][layer]) schedule.days[date][layer] = {};
                 if (value === null && (layer === 'plan' || layer === 'actual')) {
                     delete schedule.days[date][layer][workerId];
@@ -1641,7 +1765,9 @@ function scheduleHoldsEntry(schedule, path, value) {
         const [, date, layer, workerId] = parts;
         const day = (schedule.days || {})[date];
         const held = day && day[layer] ? day[layer][workerId] : undefined;
-        if (value === null && (layer === 'plan' || layer === 'actual')) return held === undefined;
+        if (value === null && (layer === 'plan' || layer === 'actual' || layer === 'rima')) {
+            return held === undefined;
+        }
         return same(held, value);
     }
 

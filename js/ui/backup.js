@@ -528,7 +528,15 @@ function dropUndoState(raw) {
 // One place decides what to say about a restore, so the four that perform one cannot
 // drift apart. FarkadSync.replaceEverything does the ordering; this reads the stage it
 // stopped at.
+//
+// AND THE ONE STEP ↶ HOLDS IS FORGOTTEN HERE, whatever the stage. It restores one worker's
+// day to what it was before an edit made on the record that the restore has just replaced
+// whole, or may have: pressed after a restore point had put a man on Site B, it put back
+// his day from before the step it named - nothing - over the restored one, on the screen
+// and on the disk, and said nothing. Inherited from v165; the restore's own way back is the
+// state kept before it, which ↶ never was.
 function tellRestoreResult(result, done) {
+    if (typeof hideUndo === 'function') hideUndo();
     if (result.ok) { askTell(done); return; }
 
     if (result.stage === 'invalid') { askTell(notAScheduleNotice()); return; }
@@ -1165,6 +1173,15 @@ function recoveryFacts(schedule) {
         });
         if ((days[date] || {}).vehicles !== undefined) {
             put(`dayVehicles:${date}`, days[date].vehicles);
+        }
+        // The Rima counts (v166), one fact per site per day. Without them a capture that
+        // had lost every count still "contained everything" the others held, and the
+        // rescue could choose it.
+        const rima = (days[date] || {}).rima;
+        if (rima && typeof rima === 'object' && !Array.isArray(rima)) {
+            Object.keys(rima).forEach(placeId => put(`rima:${date}:${placeId}`, rima[placeId]));
+        } else if (rima !== undefined) {
+            put(`rimaUnreadable:${date}`, rima);
         }
     });
 

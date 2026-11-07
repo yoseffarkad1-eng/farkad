@@ -128,7 +128,11 @@ function watchModals() {
             focusBeforeModal = outside ? active : lastFocusOutsideModal;
             focusFirst(topModal());
         } else if (open.length === 0 && focusBeforeModal) {
-            if (document.contains(focusBeforeModal)) focusBeforeModal.focus();
+            // preventScroll: the focus goes back and the page stays. Where it goes back to
+            // can be off the screen - on an iPhone a tap focuses nothing, so it can be ⚙ in
+            // the top bar, which closeSettings() focused - and a focus() that scrolled there
+            // threw the day list to the top each time a dialog closed (v166).
+            if (document.contains(focusBeforeModal)) focusBeforeModal.focus({ preventScroll: true });
             focusBeforeModal = null;
         }
     });

@@ -1,3 +1,284 @@
+## v166 — רישום לרימא: the other company's men, counted per site (candidate, not served)
+
+**Not served. Not merged. On no phone.** One commit on v165 (`e34fb66`), the build on the
+owner's phones, on a local branch with no remote. Owner-approved spec, 2026-11-01. No gate
+result is written here: validation is recorded against the exact clean commit in the
+release PR, and no count is carried over from another commit.
+
+Workers from another company, Rima (רימא), work on the owner's sites. Each site card on
+the day screen gains a small number field labelled `רימא`: how many of Rima's men were on
+that site that day. A number only, 1-99 (sized for 1-10; 0 or empty clears it). A day may
+carry Rima and none of the owner's men.
+
+It is stored as one field path per edit, `days.<date>.rima.<placeId>`, and a clear is a
+field deletion. No rate, no name, no worker id: payroll, advances, pay cycles and
+closures read only `plan`/`actual`, so no shekel moves (`tests/rima.test.mjs` measures it).
+
+The client's invoice DOES count them - the owner's ruling, 2026-11-01: for the client a
+Rima worker is one worker-site day exactly like one of his own, so three of his and two
+of Rima's on a site is five, and a day with only Rima's men is a billed day. That is in
+`invoiceReport`, so the grid, the bars, the paper, the picture and the `חיוב` sheet all
+carry it.
+
+How many of those were Rima's is shown as its own table, never as a column of an
+existing one, on three surfaces built from one function (`rimaReport`): under «לפי אתר»
+on screen and on paper as `רישום לרימא` with its own dates, only the sites that had
+Rima, `סה״כ עובדי רימא`, and the line
+`עובדי רימא בלבד. אינם נכללים בשכר. בחיוב שלמעלה כל אחד מהם נספר כיום עובד־אתר אחד.`;
+and in the workbook as a last sheet `רימא` of real numbers. With one client's site chosen
+for printing, the table and the sheet narrow to that site. «לפי עובד» is unchanged.
+
+The day's WhatsApp message carries NO Rima - the owner's decision, 2026-11-02: the
+message is the seder, in Hebrew, for his own crew, and Rima's men are for the client's
+bill and nothing else. No heading, no site line, no total, in any template, for the whole
+day or for one site; a day with only Rima's men reads exactly as v165 reads a day with no
+assignments (`אין שיבוצים ליום הזה.`, or its one-site form). `tests/rima.test.mjs`
+measures every template, the whole day and each site, against what the same phone wrote
+before a count was typed and against v165's own `share.js`, out of Git.
+
+Rules: `firestore.rules` does not restrict nested field paths, so an ordinary protocol
+write admits the new path. NO rules change and no rules-first step.
+
+**THE ROLLOUT RULE: every phone on v166 before the first Rima count is typed.** The owner
+has two active phones and they update separately. Until both show v166 (⋯ names the
+version), nobody types a count, and:
+
+- no rescue file, backup file, restore point or cloud copy is restored across builds -
+  not an older phone opening what a v166 phone wrote, not a v166 phone opening what an
+  older one wrote;
+- no window of an older build stays open beside a v166 window on the same phone;
+- client invoices are printed and exported only from an updated phone.
+
+Every item under WHAT THE RULE IS FOR below needs a phone or a window still on v145/v165
+while counts exist, so the rule closes all of them. WHAT STAYS OPEN stays open whatever
+is done.
+
+Before anything was served, the first review's findings were fixed in this same commit
+(2026-11-02), each measured in `tests/rima.test.mjs` or `tests/rima.browser.mjs`:
+
+- a count another phone cleared no longer comes back at an offline open, and correcting
+  it is no longer refused;
+- a stale offline count no longer beats another phone's clear or move - it is held;
+- a held count is drawn in ⋯ with both sides and both buttons, so it can be decided;
+- a phone that last wrote on v145/v165 shows the cloud's counts as soon as it updates,
+  and its daily cloud copy carries them;
+- ↶ no longer takes back a man's day after a count is typed;
+- the day arrows land on a Saturday that holds only a Rima count;
+- tapping from one site's box to the next moves the focus into the next box (measured in
+  Chromium; whether the iPhone keeps its keyboard up was not checked on a phone).
+
+And the second review's (2026-11-07), in the same commit:
+
+- the stale count is held on the roads the first fix missed too: the phone's own first
+  write of it landed and its answer was lost, or was answered while its echo had not yet
+  arrived. A count handed to the cloud is written down as possibly there (a try mark),
+  sent again alone under its own name so the receipt can answer for it, and its own
+  earlier 'nothing' is no longer read as the cloud's. An attempt that never left the
+  phone is not written down: the adapter says so (no signal), or the edit was never
+  handed to it - a phone never told a revision (a new install, storage the browser
+  evicted) sends first through a cutover that carries no edit, and its correction is no
+  longer held at the next signal against a cloud that never saw it;
+- one attempt carrying two days' counts, its answer lost: a hold on one day that takes in
+  that attempt's own count no longer sends the other day's count alone, over the other
+  phone's clear of it - the attempt is no longer a replay, and the other day's count is
+  asked again as one that may already be there;
+- a count moved offline while the other phone corrected the old site holds the day's
+  counts together, so the other phone no longer bills both sites while the hold stands; a
+  count the cloud already holds exactly as this phone does is not held with them;
+- a held count's row in ⋯ draws the day's other sites, both sides, so a move is seen as a
+  move before it is kept or taken;
+- while a count is held, the phone's own saves are heard as its own echo again and
+  redraw nothing - and a copy that has lost the held count gets it back at the first
+  snapshot;
+- a redraw (another phone's write, a late echo) no longer commits half-typed digits in a
+  Rima box or an extra-hours box on Chromium (the Galaxy): the 1 of a 12, or a clear while
+  deleting to retype. They are dropped there, as they are in Playwright's WebKit (not
+  checked on a phone);
+- ↶ is forgotten after a count, or a worker's edit - one man's, or a bulk one: every
+  unrecorded man into one site, a day copied in, a site emptied - that the disk guard
+  kept in the journal because another window of the app wrote first;
+- ↶ is forgotten by every restore door, so it can no longer put a man's day from before
+  the restore over the restored record (inherited from v165);
+- a client's CSV fallback that hands over the billing file AND the Rima table says
+  "the files", not "the billing file";
+- an export of chosen workers no longer fails: the workbook ended in «היצוא נכשל», and
+  the CSV fallback stopped after the pay sheet without a word (inherited from v117).
+
+WHAT THE RULE IS FOR - the phones that have not updated:
+
+- v145 and v165 rebuild a day from the layers they know, so they do not keep `rima` in
+  their OWN copy and do not show it. They never remove it from the cloud through an
+  ordinary edit (one field path each; worker deletion removes worker paths only) -
+  measured against their real code in `tests/rima.test.mjs`.
+- Because the client's invoice now counts Rima's men, an invoice printed or exported on
+  a v145/v165 phone is SHORT by every Rima count.
+- A whole-document RESTORE run on a phone still on v145/v165 (a backup file, a restore
+  point, a cloud copy) writes a document with no Rima counts and erases them for all
+  phones.
+- The same erasure from a v166 phone: a daily cloud copy, restore point, undo entry or
+  backup file WRITTEN by a v145/v165 phone carries no counts, and v166 restores it
+  without a word - a missing layer is not a problem to its restore gate - so every Rima
+  count on every date is gone from the cloud and from every phone, and the person is told
+  only that it was restored («שוחזר מהענן.», «שוחזר.» or «הגיבוי נטען.», by door). The
+  daily cloud copy is written by whichever phone opens first
+  that day, and the list shows dates, not builds. The way back is the restoring phone's
+  own state from before the restore, which undoes the restore with it.
+- A v166 backup or cloud copy opened on a v145/v165 phone is refused there with
+  "שכבה שאינה מוכרת: rima" - refused out loud, not restored without the counts.
+- A v166 RESCUE file is the exception. When the exporting phone still carries the legacy
+  v1 record (`scheduleData`, kept for ever on a phone that started on v1), the older
+  rescue door skips the v2 record it cannot read and offers the v1 reading instead, with
+  whatever edits were still queued in the file, naming only `scheduleData` in its
+  «לטעון קובץ חילוץ?» dialog. Confirming replaces the record on every phone: every Rima
+  count, and everything recorded since the v1 migration, is gone. Without those v1 bytes
+  the file is refused out loud, as above.
+- A v145/v165 window still open on a phone where a v166 window writes a count is held
+  out loud there (the shared disk now holds a layer it cannot read); a v166 reopen has
+  everything. If that older window instead adopts a snapshot after the count was
+  collected, it writes the shared disk without the count, and the v166 window can show
+  it missing until its next snapshot; the cloud keeps it.
+
+WHAT STAYS OPEN, rule or no rule:
+
+- Digits typed into a Rima box or an extra-hours box and not yet committed (the box not
+  yet left) are dropped when a render arrives first - another phone's write, a late echo
+  of this phone's own - and the focus leaves the box with them. The box then shows what is
+  stored, so nothing is claimed as saved. Until the second review Chromium (the Galaxy)
+  COMMITTED them instead; it no longer does. A count of 1-9 is complete at its first key
+  and is dropped the same way: look at each box once the keyboard is gone.
+- The same Rima men recorded at two different sites by two phones - typed fresh on each,
+  or each phone moving one count to a different site - are both kept and both billed. A
+  count has no identity beyond its site, so nothing collides: nothing is held and every
+  phone says synced. Both counts are on the day screen and in רישום לרימא. The rule for
+  the owner: a count, and the site it sits on, is entered or corrected from one phone.
+- A count whose own earlier attempt may have reached the cloud (its answer lost) and
+  that is then corrected can be held against an empty cloud even when nobody cleared it -
+  once another phone has written anything since - because this phone cannot tell its own
+  landed count cleared by somebody from one that never landed. ⋯ keeps it in one tap.
+- A count held at the moment a hold is decided holds every other count still owed for
+  that day with it - a move is two counts, and nothing tells it from two new ones - so an
+  unrelated new count typed the same day offline is held too, and is sent by keeping it
+  in ⋯.
+- A held count decided in ⋯ before the snapshot carrying the other phone's change has
+  arrived is decided on what this phone has heard: the row can show no move and an older
+  cloud side, and a count kept there is not held again. Narrow: the count's first answer
+  lost, the flush refused by the server, and the decision made inside that window.
+- The workbook and the CSV carry the רימא sheet with no sentence saying its men are
+  already counted inside חיוב; the screen, the paper and the picture carry the note. A
+  wording for the file is the owner's to choose (law 6) and is not in this build.
+- One malformed count in the cloud (only a hand edit or a future build could write one)
+  is refused like a malformed vehicle run: the snapshot is kept whole as evidence under
+  the existing sentence about an invalid financial record, and nothing on the device is
+  replaced - on EVERY phone, and every further snapshot spends one more quarantine slot.
+  Once the ladder is full the phone can no longer commit, and every reopen is held again
+  until acknowledged, even after the cloud is corrected (measured by the first review on
+  `cc23b58`: twenty snapshots).
+- `firestore.rules` does not type-check `days.*.rima.*`: any value is admitted at that
+  path, so the refusal above is the client's alone.
+- ↶ after the rate select, the extra-hours box, נעדר, הכל חופש, the 'לא נרשמו' tray's
+  site picker, or a held record decided in ⋯ still takes back the step before them: those
+  commit without offering or forgetting an undo. Inherited from v165 (a Rima count decided
+  in ⋯ goes the same way); a count typed on the day screen no longer adds one.
+- The price of keeping counts out of the kept ring: a count wiped from this disk by an
+  OLDER build's window is no longer put back offline at boot. The cloud keeps it, and the
+  next snapshot brings it back - one that carries this phone's own stamps included, and a
+  count this phone holds for a person included.
+- Focus moving from one Rima box to the next was measured in Chromium and probed in
+  Playwright's WebKit. It was not checked on a real iPhone.
+- The 13:00 Rima reminder (Cloud Functions) is not in this build.
+
+THE DAY SCREEN NO LONGER JUMPS TO THE TOP (same build; not a Rima change). Every tap that
+recorded something on the day screen threw the page back to its top: a ✕, «בטל» on the
+undo bar, ↶ and ↷, a man added from a site's ＋, a site chosen for a man in «לא נרשמו», a
+rate, a Rima count - and every snapshot adopted from the other phone, with no tap at all.
+renderDay emptied the day, put the header back alone and then read `window.scrollY`
+(readDayScroll); that read laid out a page one header tall, the browser clamped the
+scroll to 0 there, and the compact header was dropped with it. Closing a dialog did the
+same through the focus it gives back: on an iPhone a tap focuses nothing, so that focus
+could be ⚙ in the top bar, and `focus()` scrolled up to it.
+
+The day is now built off the page into a fragment and swapped in whole
+(`replaceChildren`, with a two-step fallback for a browser without it - every phone here
+has it, iOS 14 and later); the rows that were on the screen, keyed by `data-anchor` (a
+site's head, a man's row on it, its רימא box, the two trays, a by-worker row), are put
+back where they were - so the page moves only when something ABOVE the screen grew or
+shrank, and then by exactly that much; and the scroll is read last, on the page the
+person will see. The keys are matched through a map, so no id is ever escaped into a CSS
+selector. A dialog gives the focus back with `preventScroll`. What must still move does:
+a new date opens at its top, and the header still compacts and comes back.
+`tests/scroll.browser.mjs` measures all of it at 440x894, 390x844 and 375x667, dark, 3x,
+touch, with every site's number on screen checked against the record and the disk after
+each operation: 174/286 on the commit before this fix, 286/286 with it.
+
+A DOUBLE TAP IS ONE TAP. With the page held still, the man below a ✕ slides up under the
+finger, and a double tap - 120 ms or 400 ms apart, measured at all three sizes - took off
+two men of one site. The site's picker had the same trap without any sliding: «+ הוסף»
+turns into «✓ נמצא» in place, and the second tap took the man straight off again, the
+undo bar saying he was removed - the owner's "I added him twice and he was deleted". Two
+more of the same, measured at all three sizes: the ✕ on a chip in «נעדרים», where the next
+man's chip slides into its place (a double tap cancelled two absences), and a site in the
+tray's place picker «לאן הלך», which also turns into its own opposite in place (a double
+tap put the man on the site and took him off again, leaving him unplaced). Now a row's ✕
+(by site or by worker) less than 700 ms after the previous one (`DOUBLE_TAP_GUARD_MS`,
+js/ui/day.js), a «נעדרים» ✕ less than 700 ms after the previous one, the same man's row in
+the same site's picker tapped again within 700 ms, and the same site in «לאן הלך» tapped
+again for the same man within 700 ms, do nothing at all: no commit, no undo bar, no
+redraw. The 700 ms run from the previous tap whether or not that one was let through, so a
+burst of taps is one tap. A second tap 900 ms later does what its button says - the next
+man off, the next man's absence cancelled, or the site taken away again. Each pair in the
+suite is judged by the gap the PAGE saw between its two taps - the clock the guard reads -
+because a loaded machine delivers them further apart than they were sent: 400 ms arrived
+as up to 608 ms on a quiet run, and a busy machine can push a pair past 700 - the likely
+reason seven checks of an earlier draft, which judged by the gap sent, failed on one heavily
+loaded run. A pair that lands on the wrong side of 700 ms is tried again in a fresh page,
+and a third such pair fails. `tests/scroll.browser.mjs` with this commit's
+checks: 602/646 before it, 646/646 with it;
+`tests/move.browser.mjs` 57/58 before it, 58/58 with it - its pair of fast taps on one
+picker row used to pin add-then-remove, and now pins one add. No Hebrew string and no
+record path changes.
+
+A RENDER UNDER A FOCUSED BOX, measured and not changed. The swap takes a focused Rima box,
+hours box or rate select out of the page, and Chromium fires its blur - and, for a box
+that was typed in, its `change` - right there, inside renderDay. A `change` that committed
+would render inside the render (a first draft of this fix, on a tree without v166's
+dayTearingDown, threw NotFoundError from replaceChildren that way) and would record
+digits nobody finished typing. Measured for each of the three boxes under a commit
+elsewhere, an adopted snapshot, and the assign sheet closing, at all three sizes: nothing
+throws, no console error, no commit but the one made, exactly the change the render
+brought, in memory and on the disk. It already held before
+this commit - dayTearingDown keeps the two boxes from committing as the swap takes them
+away, and a select fires no `change` when removed - so no re-entrancy guard is added.
+
+COMING BACK FROM THE WEEK. Back on the day from the week tab, the window now stays where it
+was instead of landing at the top - measured at 703 px after the week at 440x894 and 800 at
+375x667, with the day scrolled to 800. The top it used to land on was the clamp's doing,
+not anybody's decision; it is pinned now, in `tests/scroll.browser.mjs`. A new date still
+opens at its top.
+
+What the fix does NOT cover:
+
+- It was never measured on a real iPhone. Chromium with touch emulation, and Playwright's
+  WebKit by hand, which is not iOS Safari: no on-screen keyboard, no visual viewport that
+  shrinks under it, no rubber band.
+- The end of the page. The browser cannot scroll past the bottom, so nothing there can be
+  held: when the undo bar times out with the list scrolled to its very end, the page gets
+  shorter by the bar and what is on the screen comes down with it (not measured here); and
+  when a site is chosen for the last man in «לא נרשמו» with the page at its end, the card
+  above grows by his row while the tray shrinks by as much. The bottom bars, measured a
+  frame after the render, give 22 px of it back, and settleDayAnchor (called from
+  js/ui/bars.js once they are measured) takes them: the rows on the screen move down by the
+  remaining 36 px, less than a row (54 px), measured at 440x894 and at 390x844 - 58 px
+  before that settle. Pinned in `tests/scroll.browser.mjs` as less than one row.
+- A rate select or a Rima box that has the focus is still a new element after any render,
+  another phone's snapshot included: the focus goes, and digits not yet saved go with it,
+  exactly as before.
+- The double-tap guard is a window of time, not a test of where the finger landed: a
+  second ✕ the person MEANS, inside 700 ms of the first - on a row or on a «נעדרים» chip -
+  is ignored too, and so is a picker row or a «לאן הלך» site tapped again that fast.
+- The header's ↶ and ↷ sit on the row the compact header hides, as in v165. Scrolled down,
+  «בטל» on the undo bar is the way back for its twelve seconds; after that, the header,
+  scrolled up to.
+
 ## v142 — Galaxy reminder setup (2026-10-05)
 
 Reminder settings now support the owner's father's Galaxy phone as well as iPhone.

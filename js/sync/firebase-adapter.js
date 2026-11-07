@@ -62,9 +62,11 @@ export function patchToUpdateArgs(patch) {
     Object.keys(patch).forEach(path => {
         const parts = path.split('.');
         // Remove empty worker-day placeholders without leaving nulls that older
-        // readers reject. Roster nulls still travel as permanent tombstones.
+        // readers reject. Roster nulls still travel as permanent tombstones. A cleared
+        // Rima count (v166) is removed the same way: a null left under `rima` would be a
+        // field every phone carries for ever saying nothing.
         const removeDay = patch[path] === null && parts.length === 4 && parts[0] === 'days'
-            && (parts[2] === 'plan' || parts[2] === 'actual');
+            && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima');
         args.push(new FieldPath(...parts), removeDay ? deleteField() : patch[path]);
     });
     return args;
@@ -72,7 +74,14 @@ export function patchToUpdateArgs(patch) {
 
 export function firestoreOps(db, scheduleRef, receiptRef) {
     // One write, one receipt, one transaction. `apply` does the schedule half.
+    //
+    // A FAILURE BEFORE ANYTHING WAS WRITTEN SAYS SO (`unsent`, v166). The client keeps a note
+    // that a batch carrying a Rima count may already be on the server - its answer can be
+    // lost after it landed - and an attempt that never got as far as staging its writes
+    // (no signal for the first read, a refusal thrown before the writes) is certainly not
+    // on it. Any attempt that staged writes may have committed, and is not marked.
     function withReceipt(payload, apply) {
+        let staged = false;
         return runTransaction(db, transaction =>
             transaction.get(receiptRef(payload.lastOpId)).then(receipt =>
                 transaction.get(scheduleRef).then(snapshot => {
@@ -167,6 +176,7 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                         error.document = JSON.parse(JSON.stringify(snapshot.data()));
                         throw error;
                     }
+                    staged = true;
                     apply(transaction);
                     transaction.set(receiptRef(payload.lastOpId), {
                         revision: payload.revision,
@@ -179,7 +189,12 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                         by: payload.updatedBy || null
                     });
                 });
-            })));
+            }))).catch(error => {
+            if (!staged && error && typeof error === 'object') {
+                try { error.unsent = true; } catch (ignored) { /* a frozen error says less */ }
+            }
+            throw error;
+        });
     }
 
     return {

@@ -811,4 +811,96 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
         note.indexOf(`400 ₪ ${'תיקון-היפוך'}`) !== -1, note);
 }
 
+// ---------------------------------------------------------------- the רימא sheet (v166)
+//
+// The other company's men, counted per site per day - see the רימא section of
+// js/model/schema.js. Read out of the real bytes, because "real numbers so Excel sums
+// work" is a statement about the CELL TYPE in the file, and an object in memory cannot
+// make it: a count SheetJS wrote as text sums to nothing.
+{
+    suite('the רימא sheet: last, numbers in the cells, summing to its own total');
+
+    const RIMA = `
+        State.commit(setRimaCount(State.schedule, '2026-08-10', 'p_01', 3));
+        State.commit(setRimaCount(State.schedule, '2026-08-11', 'p_02', 4));
+        State.commit(setRimaCount(State.schedule, '2026-08-11', 'p_01', 1));
+        State.commit(setRimaCount(State.schedule, '2026-08-15', 'p_02', 6));
+        State.save({ silent: true });
+    `;
+    const withRima = phone(FORTNIGHT + RIMA);
+    const workbook = await withRima.exportOnce();
+    same('the workbook is the three sheets it always was, then רימא', workbook.names,
+        ['שכר', 'חיוב', 'פירוט', 'רימא']);
+    const sheet = workbook.sheets['רימא'];
+    same('header: the date, the two sites that had Rima, the total', sheet.values[0],
+        ['תאריך', 'הרצליה', 'תל אביב', 'סה״כ']);
+    same('a day with Rima and none of the owner\'s men is a row of its own',
+        sheet.values.find(cells => cells[0] === '2026-08-15'), ['2026-08-15', 0, 6, 6]);
+    const last = sheet.values[sheet.values.length - 1];
+    same('the last row is the pinned total line', last, ['סה״כ עובדי רימא', 4, 10, 14]);
+    check('every count in the file is a NUMBER cell - a SUM over it works',
+        sheet.types.slice(1).every(types => types.slice(1).every(type => type === 'number' || type === 'n')),
+        JSON.stringify(sheet.types));
+    const body = sheet.values.slice(1, -1);
+    same('summed in the file, the date rows give the total row', [1, 2, 3].map(col =>
+        body.reduce((sum, cells) => sum + cells[col], 0)), [4, 10, 14]);
+    check('right to left, like every other sheet',
+        workbook.worksheets.every(part => tags(workbook.parts[part].toString('utf8'), 'sheetView')
+            .every(view => attr(view, 'rightToLeft') === '1')));
+    same('and the pay sheet gained no column', workbook.sheets['שכר'].values[0], PAYROLL_HEAD);
+    // The owner's ruling, 2026-11-01: on the client's invoice each of Rima's men is one
+    // worker-site day, like his own - so the חיוב sheet carries them, as numbers.
+    const invoice = workbook.sheets['חיוב'].values;
+    same('the חיוב sheet adds Rima\'s men to his on each site and day',
+        invoice.find(cells => cells[0] === '2026-08-11'), ['2026-08-11', 2, 5, 7]);
+    same('bills the Rima-only day', invoice.find(cells => cells[0] === '2026-08-15'), ['2026-08-15', 0, 6, 6]);
+    same('and its total row is his worker-site days plus every Rima count',
+        invoice[invoice.length - 1], ['סה״כ', 7, 12, 19]);
+    same('no worker\'s name is on the רימא sheet', ['דוד', 'שרה'].filter(name =>
+        JSON.stringify(sheet.values).includes(name)), []);
+
+    suite('the client\'s file: the billing grid and that site\'s Rima, nobody\'s name');
+    const scoped = phone(FORTNIGHT + RIMA + `REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
+    const file = await scoped.exportOnce();
+    same('two sheets, the billing grid then רימא', file.names, ['חיוב', 'רימא']);
+    same('the Rima sheet is narrowed to the client\'s site', file.sheets['רימא'].values[0],
+        ['תאריך', 'הרצליה', 'סה״כ']);
+    same('no worker\'s name anywhere in the data parts of the file',
+        ['דוד', 'שרה'].filter(name => file.text.includes(name)), []);
+
+    suite('no Rima in the range, no רימא sheet');
+    same('the plain fortnight\'s workbook is still exactly three sheets', book.names,
+        ['שכר', 'חיוב', 'פירוט']);
+}
+
+// ---------------------------------------------------------------- one man chosen
+{
+    // A selected-worker export is his pay sheet and his days, and no client invoice behind
+    // them - reportSheets says so. The workbook and the CSV fallback both asked for the
+    // invoice sheet anyway: the workbook ended in «היצוא נכשל», and the fallback threw once
+    // the pay sheet had gone, so his days never followed and nothing at all was said.
+    // Since v117, not v166; found reviewing the CSV branch v166 changed.
+    suite('one man chosen: his pay sheet and his days, in the workbook and in the CSV fallback');
+    const chosen = phone(FORTNIGHT + `REPORT_WORKERS = new Set(['w_01']);`);
+    let thrown = null;
+    try { await chosen.run('exportReports()'); } catch (error) { thrown = error.message; }
+    check('the workbook is written', thrown === null && chosen.caught.length === 1,
+        JSON.stringify([thrown, chosen.caught.length, chosen.told]));
+    const file = chosen.caught.length === 1 ? workbookOf(Buffer.from(chosen.caught[0].bytes)) : null;
+    same('his pay sheet and his days, and no client invoice', file ? file.names : null, ['שכר', 'פירוט']);
+    check('and the pay sheet is his alone', Boolean(file) && file.text.includes('דוד') && !file.text.includes('שרה'),
+        file ? file.text.slice(0, 200) : '');
+
+    const fallback = phone(FORTNIGHT + `REPORT_WORKERS = new Set(['w_01']);`, { sheetjs: false });
+    fallback.failOnFetch();
+    let fell = null;
+    try { await fallback.run('exportReports()'); } catch (error) { fell = error.message; }
+    same('the fallback hands over his pay sheet and his days, and nothing is thrown',
+        [fell, fallback.downloads.map(item => item.name)],
+        [null, ['farkad-payroll_2026-08-01_2026-08-31.csv', 'farkad-detail_2026-08-01_2026-08-31.csv']]);
+    same('and the person is told it was the files that fell back', fallback.told,
+        ['חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
+            + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.']);
+}
+
 report();

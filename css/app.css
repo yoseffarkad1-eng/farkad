@@ -896,6 +896,15 @@ a[href]:focus-visible,
     padding: 10px 12px;
 }
 .held-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+/* A held Rima count's day: the other sites, both sides, under the row (v166). */
+.held-context {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 6px;
+    border-top: 1px solid var(--warn);
+}
+.held-context-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
 .held-side { margin: 0; font-size: 14px; color: var(--ink-2); }
 .held-side b { color: var(--ink); font-weight: 600; }
 .held-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
@@ -1399,6 +1408,36 @@ a[href]:focus-visible,
     color: var(--ink);
 }
 .rate-hours { width: 62px; }
+
+/* THE RIMA COUNT (v166): one slim line at the foot of each site card - the label and a
+   number box, nothing else. The other company's men are counted, not named, so this is
+   deliberately not an .assign-row: nothing that counts the crew's rows may count it.
+   44px tall and 16px in the box, both floors (CLAUDE.md, law 9), written here and not
+   left to the phone block. */
+.rima-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 6px;
+    border-top: 1px solid var(--line-soft);
+}
+.site-card-empty .rima-field { border-top: none; }
+.rima-label { font-size: 15px; font-weight: 600; color: var(--ink-2); }
+.rima-input {
+    width: 64px;
+    min-height: 44px;
+    font-family: inherit;
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    padding: 3px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    color: var(--ink);
+}
+@media print { .rima-field { display: none !important; } }
 
 .badge {
     font-size: 11px;
@@ -2357,6 +2396,26 @@ a[href]:focus-visible,
 .invoice-bars-total strong { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
 @media screen { .report-invoice .invoice-grid { display: none; } }
 @media print { .invoice-bars { display: none !important; } }
+
+/* רישום לרימא (v166): the other company's men, under the invoice and apart from it. The
+   table is an ordinary .report-table inside .report-invoice, so it takes the invoice's
+   phone cards (a card per date, the empty sites dropped) and its paper rules as they
+   are; only the heading's distance and the note are its own. The note is NOT .hint -
+   .hint never reaches paper, and this line has to. */
+.report-rima { margin-top: 18px; }
+.report-rima-note {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    margin: 6px 0 0;
+}
+@media print {
+    .report-rima { margin-top: 6mm; }
+    .report-rima-title { font-size: 12pt; margin: 0 0 2mm; color: #000; }
+    .report-rima-note { font-size: 10pt; color: #000; }
+    /* The heading never strands at the foot of a page with its table on the next. */
+    .report-rima-title { page-break-after: avoid; break-after: avoid; }
+}
 
 /* A name in the pay sheet is a way in, so it looks like one - but it stays a table cell
    and does not turn the row into a wall of buttons. */

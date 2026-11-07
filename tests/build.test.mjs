@@ -23,11 +23,11 @@
 // law 5 exists to prevent is exactly that - a shell file changed and the stamps left
 // where they were. So the last suite asks git what has moved since the stamps last did.
 
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import { suite, check, same, given, report } from './runner.mjs';
 
@@ -402,9 +402,31 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
 // It reads HEAD, not the working tree. A dirty tree mid-edit is the ordinary state of
 // somebody about to do the right thing; the gate is run from one clean detached worktree
 // (see CLAUDE.md, "Running it"), and there HEAD is the whole of what is being asked about.
+//
+// EVERY GIT CALL IN THIS FILE IS MADE WITH THE GIT_* ENVIRONMENT TAKEN AWAY. GIT_DIR
+// outranks `-C <dir>`: git uses the repository it names and takes the current directory
+// for that repository's working tree. The planted history below is built with
+// `git -C <temp> init / add -A / commit`, so a run with GIT_DIR in its environment - a
+// hook, a shell that exported it - wrote that fixture history onto the owner's real `main`
+// (2026-11-02), and `add -A` stages every file of the repository it lands in that the
+// temporary folder lacks as deleted. Every question here names its directory, so git is
+// made to find the repository from that directory alone.
+const GIT_ENV = Object.fromEntries(Object.entries(process.env)
+    .filter(([name]) => !/^GIT_/i.test(name)));
+
 function git(args, root) {
     return execFileSync('git', ['-C', root || ROOT].concat(args),
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV });
+}
+
+// Whether `path` lies inside `folder` once both are real paths. The folder itself is not.
+function insideFolder(path, folder) {
+    try {
+        const rel = relative(realpathSync(folder), realpathSync(path));
+        return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    } catch (error) {
+        return false;
+    }
 }
 
 // The commit that last WROTE each stamp line, found by the line itself rather than by the
@@ -505,9 +527,24 @@ function shellMovedSince(root, since, paths) {
     };
     const watched = ['js/store.js', 'index.html', 'js/app.js'];
 
-    let built = true;
+    // NOTHING IS COMMITTED UNTIL GIT HAS NAMED THE REPOSITORY IT WOULD COMMIT INTO, and that
+    // is the one just made inside the temporary folder. The environment above is the first
+    // line; this is the second, and it does not take the first on trust. If git names any
+    // other repository the run stops here: no commit, and no further git call.
+    let gitDir = '';
     try {
         git(['init', '-q', '-b', 'main'], work);
+        gitDir = git(['rev-parse', '--absolute-git-dir'], work).trim();
+    } catch (error) {
+        gitDir = '';
+    }
+    const ownRepository = gitDir !== '' && insideFolder(gitDir, work);
+    if (!ownRepository) rmSync(work, { recursive: true, force: true });
+    given('the repository the planted history goes into is the one in the temporary folder',
+        ownRepository, `git would write to ${gitDir || '(nothing)'}; the folder is ${work}`);
+
+    let built = true;
+    try {
         layDown('v1');
         write('js/store.js', 'const a = 1;\n');
         write('docs/notes.md', 'not shipped\n');

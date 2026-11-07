@@ -286,6 +286,11 @@ const conflictOf = async promise => {
     check('and both carry a document with a revision in it',
         Number.isInteger(fake.document.revision) && Number.isInteger(real.document.revision),
         JSON.stringify([fake.document.revision, real.document.revision]));
+    // A refusal made before anything was written says so (v166): the client takes back its
+    // note that a batch carrying a Rima count may already be on the server - see TRY_MARK
+    // in js/sync/sync.js - only on this word, never on a bare 'unavailable'.
+    check('and both say nothing of it was written', fake.unsent === true && real.unsent === true,
+        JSON.stringify([fake.unsent, real.unsent]));
 }
 
 
@@ -398,6 +403,47 @@ const conflictOf = async promise => {
     check('stale deletion refuses to erase newer work',refused?.code==='conflict');
     const preserved=await readDoc();
     check('newer work remains at its original rate',preserved.days['2026-08-14'].actual.w_typo.rates.daily===500);
+}
+
+// ------------------------------------------------ the Rima count (v166), on the real rules
+//
+// days.<date>.rima.<placeId>: a layer firestore.rules has never heard of. The rules do not
+// enumerate nested paths - they cannot, see the note above receiptMatchesSchedule - so an
+// ordinary protocol write admits it with NO rules change, and this is where that claim is
+// measured rather than read off the file. And a cleared count leaves through the same
+// deleteField() a worker-day removal does, so no null stands under `rima` for ever.
+{
+    suite('a Rima count is an ordinary field write the published rules admit');
+    await reset();
+    const ops = opsFor(as(ALLOWED));
+    const stamp = (revision, id) => ({ protocol: 1, revision, lastOpId: id, opFingerprint: 'f_' + id });
+    const wrote = await conflictOf(ops.update({
+        ...stamp(2, 'op_rima_set'),
+        'days.2026-11-01.rima.p_01': 3,
+        'days.2026-11-01.actual.w_01': { entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } }
+    }));
+    check('the rules accept the count beside a worker-day in one write', wrote === null,
+        wrote ? `${wrote.code}: ${wrote.message}` : 'accepted');
+    const set = await readDoc();
+    check('the cloud holds the count as a number, under the day, by site',
+        set.days['2026-11-01'].rima.p_01 === 3, JSON.stringify(set.days['2026-11-01']));
+
+    const alone = await conflictOf(ops.update({ ...stamp(3, 'op_rima_alone'), 'days.2026-11-02.rima.p_01': 5 }));
+    check('and a day carrying Rima and nothing else', alone === null,
+        alone ? `${alone.code}: ${alone.message}` : 'accepted');
+
+    const cleared = await conflictOf(ops.update({ ...stamp(4, 'op_rima_clear'), 'days.2026-11-01.rima.p_01': null }));
+    check('a clear is accepted', cleared === null, cleared ? `${cleared.code}: ${cleared.message}` : 'accepted');
+    const after = await readDoc();
+    check('and the production adapter removes the field rather than storing null',
+        !Object.hasOwn(after.days['2026-11-01'].rima || {}, 'p_01'), JSON.stringify(after.days['2026-11-01']));
+    check('the worker-day beside it is untouched',
+        JSON.stringify(after.days['2026-11-01'].actual.w_01)
+            === JSON.stringify({ entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } }));
+    check('and the Rima-only day keeps its count', after.days['2026-11-02'].rima.p_01 === 5);
+    const stale = await conflictOf(ops.update({ ...stamp(4, 'op_rima_stale'), 'days.2026-11-02.rima.p_01': 9 }));
+    check('a stale Rima write is refused by the same compare-and-set as any other', stale?.code === 'conflict',
+        stale ? stale.code : 'accepted');
 }
 
 await env.cleanup();

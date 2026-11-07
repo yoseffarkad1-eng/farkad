@@ -489,6 +489,42 @@ const toldText = device => {
         && bill.indexOf('נצבר') === -1, csvRows(bill)[0].join(','));
 }
 
+// ---------------------------------------------------------------- the client's own file, with Rima (v166)
+{
+    // A client whose site had Rima's men gets the billing file AND the Rima table - two
+    // files - and was told about one: «קובץ החיוב יוצא כ-CSV». The sentence is the one the
+    // other exports already say when more than one file falls back.
+    suite('a client whose site had Rima: two files fall back, and the person is told files');
+
+    const device = phone();
+    seed(device);
+    device.State.commit(device.call('setRimaCount', device.State.schedule, '2026-08-10', 'p_01', 2));
+    device.State.commit(device.call('setRimaCount', device.State.schedule, '2026-08-12', 'p_01', 4));
+    device.State.commit(device.call('setRimaCount', device.State.schedule, '2026-08-12', 'p_02', 9));
+    run(device, `REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
+    await run(device, 'exportReports()');
+
+    same('the billing file and the Rima table go out',
+        device.downloads.map(item => item.name), [`farkad-invoice_${STAMP}.csv`, `farkad-rima_${STAMP}.csv`]);
+    same('and the person is told it was the files that fell back',
+        device.ctx.told, 'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
+        + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
+    same('the billing file counts his men and Rima\'s at his site, the Rima-only day a billed day',
+        csvRows(fileNamed(device, `farkad-invoice_${STAMP}.csv`)),
+        [['תאריך', 'הרצליה', 'סה״כ'],
+         ['2026-08-10', '3', '3'],
+         ['2026-08-11', '1', '1'],
+         ['2026-08-12', '4', '4'],
+         ['2026-08-13', '1', '1'],
+         ['סה״כ', '9', '9']]);
+    same('and the Rima table is his site\'s Rima alone, with its own total',
+        csvRows(fileNamed(device, `farkad-rima_${STAMP}.csv`)),
+        [['תאריך', 'הרצליה', 'סה״כ'],
+         ['2026-08-10', '2', '2'],
+         ['2026-08-12', '4', '4'],
+         ['סה״כ עובדי רימא', '6', '6']]);
+}
+
 // ---------------------------------------------------------------- the handover file
 {
     suite('the backup file, and the phone that opens it');

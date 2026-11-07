@@ -451,6 +451,63 @@ function describeHeldRecord(row, schedule) {
             note: closed ? 'החשבון נסגר. רישום הרכב נשמר לבדיקה ולא ישתנה כאן.' : !vehiclesEnabled() ? HELD_ELSEWHERE : '',
             decidable, takeable: decidable && !sameHeldBytes(row.mine, row.cloud) };
     }
+    // A RIMA COUNT (v166): days.<date>.rima.<placeId>. The last segment is a SITE, so the
+    // worker-day reading below would name a man who does not exist. Two people typing two
+    // counts for one site that evening is the ordinary way this row appears; each side is
+    // the number it says, and the decision is a count, written through setRimaCount.
+    if (parts[0] === 'days' && parts.length === 4 && parts[2] === 'rima') {
+        const site = placeLabelFrom(placeLabelsIn(roster), parts[3]);
+        const dated = isRealDate(parts[1]);
+        const when = dated
+            ? `${hebrewDayName(parseLocalDate(parts[1]))} ${formatShortDate(parseLocalDate(parts[1]))}`
+            : parts[1];
+        const describe = value => {
+            if (value === null || value === undefined) return HELD_NOTHING;
+            return isRimaCount(value) ? String(value) : HELD_UNREADABLE;
+        };
+        const readable = [row.mine, row.cloud, row.disk]
+            .every(value => value === null || value === undefined || isRimaCount(value));
+        const title = `${when} · רימא · ${isolate(site)}`;
+        const heard = Boolean(row && row.heard);
+        if (!heard && dated && readable && Boolean(row && row.answerable) && row.disk !== undefined) {
+            return { kind: 'rima', title, mine: describe(row.mine), cloud: describe(row.disk),
+                otherLabel: HELD_DISK, takeLabel: HELD_TAKE_DISK, local: true, note: '',
+                decidable: true, takeable: !sameHeldBytes(row.mine, row.disk) };
+        }
+        let cloud = heard ? describe(row.cloud) : HELD_UNHEARD;
+        if (heard && sameHeldBytes(row.mine, row.cloud)) cloud += ' ' + HELD_SAME;
+        const decidable = heard && dated && readable;
+        // THE DAY'S OTHER SITES, on both sides. A count moved from one site to another is two
+        // field paths, and a hold names one: the row said «4 against nothing» for a count the
+        // other phone had MOVED, the move was on the day screen and nowhere here, and keeping
+        // it billed the same men at both sites on every phone, all of them saying synced.
+        // Every other site that day with a count on either side is drawn under the row, in
+        // the row's own words - this phone's copy (what it bills while it waits) and the
+        // cloud's.
+        const context = [];
+        if (heard && dated) {
+            const cloudDay = row && row.cloudDay && typeof row.cloudDay === 'object' ? row.cloudDay : {};
+            const day = ((roster.days || {})[parts[1]]) || {};
+            const mineDay = day.rima && typeof day.rima === 'object' ? day.rima : {};
+            const order = (roster.places || []).map(item => item && item.id);
+            const rank = id => (order.indexOf(id) === -1 ? order.length : order.indexOf(id));
+            [...new Set(Object.keys(mineDay).concat(Object.keys(cloudDay)))]
+                .filter(id => id !== parts[3])
+                .sort((one, two) => (rank(one) - rank(two)) || (one < two ? -1 : one > two ? 1 : 0))
+                .forEach(id => {
+                    const here = rimaCount(roster, parts[1], id);
+                    const there = Object.prototype.hasOwnProperty.call(cloudDay, id) ? cloudDay[id] : undefined;
+                    const sideHere = describe(here > 0 ? here : undefined);
+                    const sideThere = describe(there);
+                    if (sideHere === HELD_NOTHING && sideThere === HELD_NOTHING) return;
+                    context.push({ title: `${when} · רימא · ${isolate(placeLabelFrom(placeLabelsIn(roster), id))}`,
+                        mine: sideHere, cloud: sideThere });
+                });
+        }
+        return { kind: 'rima', title, mine: describe(row.mine), cloud, otherLabel: HELD_CLOUD,
+            takeLabel: HELD_TAKE, local: false, note: '', context,
+            decidable, takeable: decidable && !sameHeldBytes(row.mine, row.cloud) };
+    }
     if (parts[0] !== 'days' || parts.length !== 4) {
         let title = isolateLtr(parts.join('.'));
         const named = kind => {
@@ -573,7 +630,12 @@ function resolveHeldRecord(row, takeCloud) {
         const chosen = takeCloud ? row.disk : row.mine;
         const localParts = String(row.path).split('.');
         let wrote = true;
-        if (localParts[0] === 'days' && localParts.length === 4) {
+        if (localParts[0] === 'days' && localParts.length === 4 && localParts[2] === 'rima') {
+            // A count, cleared by deletion - never a null left standing in the map.
+            const change = setRimaCount(State.schedule, localParts[1], localParts[3],
+                chosen === undefined ? null : chosen);
+            wrote = !change.refused && State.commit(change) === true;
+        } else if (localParts[0] === 'days' && localParts.length === 4) {
             const side = ensureDay(State.schedule, localParts[1], localParts[2]);
             side[localParts[3]] = chosen === undefined ? null : chosen;
             // READ, not discarded. This answer used to be thrown away and `true` returned
@@ -601,10 +663,25 @@ function resolveHeldRecord(row, takeCloud) {
     const layer = parts[2];
     const workerId = parts[3];
     const vehicle = layer === 'vehicleRuns';
-    if (vehicle && !describeHeldRecord(row, State.schedule).decidable) return Promise.resolve(false);
-    if (!vehicle && layer !== 'plan' && layer !== 'actual') return Promise.resolve(false);
+    const rima = layer === 'rima';
+    if ((vehicle || rima) && !describeHeldRecord(row, State.schedule).decidable) return Promise.resolve(false);
+    if (!vehicle && !rima && layer !== 'plan' && layer !== 'actual') return Promise.resolve(false);
     const write = value => {
         if (vehicle && !describeHeldRecord(row, State.schedule).decidable) return false;
+        if (rima) {
+            const change = setRimaCount(State.schedule, date, workerId, value);
+            if (change.refused) return false;
+            // An answer given looking at the cloud's side: the base is what the person saw,
+            // even where this phone's own earlier attempt keeps it from counting otherwise
+            // (seenMarksAt) - without this, keeping this phone's count re-held itself.
+            const deciding = typeof FarkadSync.noteDecision === 'function';
+            if (deciding) FarkadSync.noteDecision(row.path, true);
+            try {
+                return State.commit(change) === true;
+            } finally {
+                if (deciding) FarkadSync.noteDecision(row.path, false);
+            }
+        }
         const side = ensureDay(State.schedule, date, layer);
         side[workerId] = value;
         return State.commit({ path: row.path, value }) === true;
@@ -629,7 +706,7 @@ function resolveHeldRecord(row, takeCloud) {
         if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
         return false;
     };
-    if (!vehicle && (!row.mine || typeof row.mine !== 'object')) return Promise.resolve(false);
+    if (!vehicle && !rima && (!row.mine || typeof row.mine !== 'object')) return Promise.resolve(false);
     if (!takeCloud) {
         const state = asDrawn();
         if (state !== 'same') return Promise.resolve(refuse(state));
@@ -662,7 +739,7 @@ function resolveHeldRecord(row, takeCloud) {
         if (yes !== true) return false;
         const state = asDrawn();
         if (state !== 'same') return refuse(state);
-        if (theirs === null && vehicle) return write(null);
+        if (theirs === null && (vehicle || rima)) return write(null);
         if (theirs === null) {
             return State.commit(clearWorkerDay(State.schedule, date, workerId, layer)) === true;
         }
@@ -687,9 +764,17 @@ function renderHeldRecords() {
     // open - every snapshot, every save - and a button rebuilt under a finger is a tap
     // that lands on nothing. The signature is the rows as drawn, both sides, bytes and
     // all, so a snapshot that moves a row still redraws it.
+    // A count's row also draws its day's other sites (describeHeldRecord), so their two
+    // sides are part of what is drawn.
+    const rimaDayHere = row => {
+        const parts = String(row.path).split('.');
+        if (parts[0] !== 'days' || parts.length !== 4 || parts[2] !== 'rima') return null;
+        const day = (((State.schedule || {}).days || {})[parts[1]]) || {};
+        return [day.rima || null, row.cloudDay === undefined ? null : row.cloudDay];
+    };
     const signature = unreadable ? 'unreadable' : JSON.stringify(rows.map(row =>
         [row.path, row.heard, row.mine === undefined ? null : row.mine,
-            row.cloud === undefined ? null : row.cloud]));
+            row.cloud === undefined ? null : row.cloud, rimaDayHere(row)]));
     if (box.getAttribute('data-held') === signature) return;
     box.setAttribute('data-held', signature);
     clear(box);
@@ -712,13 +797,24 @@ function renderHeldRecords() {
         const said = describeHeldRecord(row, State.schedule);
         const card = el('div', 'held-row');
         card.appendChild(el('div', 'held-title', said.title));
-        if (said.kind !== 'day' && said.kind !== 'vehicle') {
+        // A day, a vehicle run and a Rima count are each two sides and a decision; every
+        // other kind is a title and a note. A count sent down the note branch was drawn as a
+        // title over an empty hint - no sides, no buttons - and its hold could not be
+        // answered from anywhere, the field included: retyping the held number is no change.
+        if (said.kind !== 'day' && said.kind !== 'vehicle' && said.kind !== 'rima') {
             card.appendChild(el('p', 'hint', said.note));
             list.appendChild(card);
             return;
         }
         card.appendChild(sideLine(HELD_MINE, said.mine));
         card.appendChild(sideLine(said.otherLabel || HELD_CLOUD, said.cloud));
+        (said.context || []).forEach(other => {
+            const block = el('div', 'held-context');
+            block.appendChild(el('p', 'held-context-title', other.title));
+            block.appendChild(sideLine(HELD_MINE, other.mine));
+            block.appendChild(sideLine(HELD_CLOUD, other.cloud));
+            card.appendChild(block);
+        });
         if (said.note) card.appendChild(el('p', 'hint', said.note));
         if (said.decidable) {
             const actions = el('div', 'held-actions');

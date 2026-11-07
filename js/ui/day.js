@@ -46,7 +46,8 @@ const COMPACT_OFF = 12;
 // killed. A scroll position is not that kind of number - it is reported directly, it is
 // never stale, and it comes back down. Nothing here reads a layout, measures a box, or
 // asks the visual viewport anything; adding one would be re-opening that fault by
-// another door.
+// another door. (dayAnchor, under renderDay, does measure boxes - for another question,
+// and only on a render. Its comment says why that is not this fault.)
 function readDayScroll() {
     if (typeof document === 'undefined' || !document.body) return;
     const body = document.body;
@@ -69,18 +70,180 @@ function watchDayScroll() {
     window.addEventListener('scroll', readDayScroll, { passive: true });
 }
 
+// THE SECOND TAP OF A DOUBLE TAP IS THE FIRST TAP AGAIN (v166).
+//
+// The day no longer jumps after a ✕ (renderDay keeps the rows where they were), so the man
+// under the one taken off slides up into his row - under the finger - and a double tap, or
+// a tap that bounced, took off two men of the same site: measured 120 ms and 400 ms apart
+// at three phone sizes (tests/scroll.browser.mjs). The site's picker has the same trap
+// without any sliding: «+ הוסף» turns into «✓ נמצא» in place, so the second tap took the
+// man straight off again, the undo bar saying he was removed - the owner's own words, "I
+// added him twice and he was deleted".
+//
+// Two more of the same, measured: the ✕ on a chip in «נעדרים», where the next man's chip
+// slides into its place and a double tap cancelled two absences; and a site in the tray's
+// place picker «לאן הלך», which also turns into its own opposite in place, so a double tap
+// put the man on the site and took him off again, leaving him unplaced.
+//
+// So a row's ✕ that comes less than DOUBLE_TAP_GUARD_MS after the previous row ✕, a
+// «נעדרים» ✕ after the previous one, and a picker row or a «לאן הלך» site tapped again
+// within it, do NOTHING: no commit, no undo bar, no redraw.
+// Measured from the previous activation whether or not that one was let through, so a
+// burst of taps is one tap. 700 ms is longer than any double tap or bounce and shorter
+// than seeing what the first tap did and deciding on a second man.
+const DOUBLE_TAP_GUARD_MS = 700;
+const lastTapAt = new Map();
+
+// True when this activation of `key` is the second of a pair and is to be ignored.
+function secondTapTooSoon(key) {
+    const now = typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
+        ? performance.now() : Date.now();
+    const last = lastTapAt.get(key);
+    lastTapAt.set(key, now);
+    return last !== undefined && now - last < DOUBLE_TAP_GUARD_MS;
+}
+
+// TRUE WHILE THE DAY IS BEING TAKEN DOWN TO BE DRAWN AGAIN (v166).
+//
+// The two boxes on this screen that are saved on `change` - a site's Rima count and the
+// extra hours beside a rate - are saved when the person LEAVES them: "1" on its way to
+// "12" is nothing anybody recorded. But Chromium (the Galaxy) fires `change` on a focused,
+// edited box when the box is taken out of the page, and every render takes the whole day
+// out: a snapshot from the other phone, a late echo of this phone's own count. Whatever
+// was half-typed was committed by the redraw - the 1 of a 12, a clear while deleting to
+// retype, an hour short - sent, billed or paid, and able to replace the other phone's
+// count with nothing held. The iPhone simply drops the digits. Both do now: a box taken
+// away by a redraw commits nothing, and the box drawn in its place shows what is stored.
+let dayTearingDown = false;
+
+// BUILT OFF THE PAGE, SWAPPED IN WHOLE, AND WHAT WAS ON THE SCREEN KEPT WHERE IT WAS (v166).
+//
+// This used to empty #dayView, append the header alone and then call readDayScroll, whose
+// window.scrollY read forced a layout of a page one header tall. The browser clamped the
+// scroll to 0 right there, and the compact header went with it. Every commit goes through
+// here - a ✕, «בטל», ↶ and ↷, a man added from a site's picker, a site chosen in the tray,
+// a rate, a Rima count - and so does every snapshot adopted from the other phone: every
+// tap threw the person back to the top of the day, on his iPhone as everywhere. So:
+//
+//   1. dayAnchor notes where the rows on the screen are, on the page as it still is;
+//   2. the whole day is built into a fragment, off the page - nothing has been taken away
+//      while it is built, so nothing can be laid out short;
+//   3. one swap puts it in, and that is the only moment the old day leaves;
+//   4. keepDayAnchor scrolls by however far the first of those rows moved - which is
+//      nothing, unless something above the screen grew or shrank (a man added to a site
+//      higher up, by this phone or by the other one);
+//   5. readDayScroll runs LAST, on the page the person will see.
+//
+// A new date is not kept: renderProgress sends it to the top on purpose, and dayAnchor
+// sees the date change and keeps nothing. Not kept either, still: a rate select or a Rima
+// box that has the focus is a new element after any render, like everything else here.
 function renderDay() {
     const root = document.getElementById('dayView');
     if (!root) return;
 
-    root.innerHTML = '';
-    root.appendChild(renderDayHeader());
+    pendingDayAnchor = null;
+    const anchor = dayAnchor(root);
+    const next = document.createDocumentFragment();
+    buildDay(next);
     watchDayScroll();
+    dayTearingDown = true;
+    try {
+        swapDay(root, next);
+    } finally {
+        dayTearingDown = false;
+    }
+    if (anchor) keepDayAnchor(root, anchor);
     // Asked again on every render, not only on scroll: a render can arrive with the page
     // already scrolled - coming back to the day from the week, a snapshot landing under a
     // scrolled list - and a header drawn full under a scrolled page is a header that
     // stays full until the next flick.
     readDayScroll();
+}
+
+// WHERE THE ROWS ON THE SCREEN ARE, before a render takes them away: up to eight keyed
+// nodes (data-anchor - a site's head, a man's row on it, its רימא box, the two trays, a
+// row of the by-worker list) showing under the sticky header, top first, each with its top.
+//
+// This one DOES read a layout, and the rule above readDayScroll is not broken by it. It
+// decides nothing about the bars, the keyboard or the header; it only says how far the
+// page must scroll to put back what was already on it. It compares a node with ITSELF,
+// before and after, in one coordinate space and inside one task, so two viewports that
+// disagree (the v99 fault) cancel out of the difference. It reads the page while it is
+// still whole - the opposite of the read that clamped the scroll. And it runs on a
+// render only, never on scroll.
+//
+// Nothing to keep at the top of the page, or when the date changed: a new day starts at
+// its top (renderProgress).
+function dayAnchor(root) {
+    if (!(window.scrollY > 0) || lastRenderedDate !== State.date) return null;
+    const header = root.querySelector('.day-header');
+    const floor = header ? header.getBoundingClientRect().bottom : 0;
+    const seen = [];
+    for (const node of root.querySelectorAll('[data-anchor]')) {
+        const box = node.getBoundingClientRect();
+        if (box.height === 0 || box.bottom <= floor) continue;
+        if (box.top >= window.innerHeight) break;
+        seen.push({ key: node.dataset.anchor, top: box.top });
+        if (seen.length >= 8) break;
+    }
+    return seen.length ? seen : null;
+}
+
+// The first of them still on the page goes back to where it was. One that is gone - a
+// man taken off by ✕, or by the other phone - is passed over, and the next one is held
+// where IT was. Found through a map of the new nodes, not a selector built from the key,
+// so no site or worker id ever has to be escaped into CSS.
+function keepDayAnchor(root, anchor) {
+    pendingDayAnchor = null;
+    const now = new Map();
+    root.querySelectorAll('[data-anchor]').forEach(node => {
+        if (!now.has(node.dataset.anchor)) now.set(node.dataset.anchor, node);
+    });
+    for (const item of anchor) {
+        const node = now.get(item.key);
+        if (!node) continue;
+        const box = node.getBoundingClientRect();
+        if (box.height === 0) continue;
+        const delta = box.top - item.top;
+        if (Math.abs(delta) < 1) return;
+        const want = window.scrollY + delta;
+        window.scrollBy(0, delta);
+        // Short of it: the page cannot scroll that far yet. The bottom bars are measured a
+        // frame AFTER a render (js/ui/bars.js), and a bar that changed height changes how
+        // far the page can scroll; settleDayAnchor finishes the job once they have been.
+        if (Math.abs(window.scrollY - want) >= 1) pendingDayAnchor = { root, anchor, at: window.scrollY };
+        return;
+    }
+}
+
+// Set by keepDayAnchor when the page fell short; dropped by the next render, and by the
+// person's own scroll in between (the page is no longer where it was left).
+let pendingDayAnchor = null;
+
+// Called by js/ui/bars.js once the bottom bars have been measured after a render.
+function settleDayAnchor() {
+    const pending = pendingDayAnchor;
+    pendingDayAnchor = null;
+    if (!pending || Math.abs(window.scrollY - pending.at) >= 1 || !document.contains(pending.root)) return;
+    keepDayAnchor(pending.root, pending.anchor);
+    pendingDayAnchor = null;
+}
+
+// replaceChildren where there is one (Safari and iOS 14, Chrome 86); before that the same
+// two steps by hand. Either way nothing reads a layout between the old day going out and
+// the new one coming in, so nothing is ever laid out short.
+function swapDay(root, next) {
+    if (typeof root.replaceChildren === 'function') {
+        root.replaceChildren(next);
+        return;
+    }
+    root.textContent = '';
+    root.appendChild(next);
+}
+
+// The day itself, into `root` - a fragment, off the page (renderDay).
+function buildDay(root) {
+    root.appendChild(renderDayHeader());
 
     // The empty states carry the button that fixes them. Sending someone to another
     // screen to find it is how a first evening ends with a worker added, nothing on the
@@ -479,7 +642,12 @@ function bulkAssign(place) {
     const date = State.date;
     const changes = workers.map(worker =>
         assignPlace(State.schedule, date, worker.id, 'actual', place.id, RATE_NORMAL));
-    if (!State.commitMany(changes)) return;
+    // Kept in the journal by the disk guard, it is an edit all the same, and the step
+    // behind it is not the last one - see editWithUndo.
+    if (!State.commitMany(changes)) {
+        if (State.lastCommitKept) hideUndo();
+        return;
+    }
 
     offerUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`, () => {
         State.commitMany(workers.map(worker =>
@@ -623,6 +791,7 @@ function renderDayWorkerList() {
         const empty = !absent && entries.length === 0;
 
         const row = el('div', empty ? 'wrow wrow-empty' : absent ? 'wrow wrow-absent' : 'wrow');
+        row.dataset.anchor = 'w:' + worker.id;
 
         // The whole row is the target. On a phone a name-sized tap area is a miss
         // waiting to happen, and this row gets tapped thirty times an evening.
@@ -661,6 +830,8 @@ function renderDayWorkerList() {
 
         if (!empty) {
             row.appendChild(button('✕', 'btn-icon', () => {
+                // The second tap of a double tap is the first one again (secondTapTooSoon).
+                if (secondTapTooSoon('row-remove')) return;
                 // One tap on one row out of twelve, on a phone, at night. It will be the
                 // wrong row sometimes, so it is undoable rather than guarded by a dialog.
                 editWithUndo(worker.id, `הרישום של ${isolate(worker.name)} נמחק`,
@@ -871,8 +1042,15 @@ function stepDay(days) {
 // The wider net than anyRecordOn is deliberate: the cost of stepping over a Saturday that
 // held something is a day of pay nobody can reach with the arrows, and a planned-layer
 // entry from an older document is still something.
+//
+// And a Rima count (v166), on any site, the archived ones included. It is keyed by SITE,
+// not by worker, so the walk below never meets one - and a Saturday holding only Rima's
+// men is a day billed to the client.
 function anyRecordOnRestDay(date) {
-    const layers = Object.keys((State.schedule.days && State.schedule.days[date]) || {});
+    const day = (State.schedule.days && State.schedule.days[date]) || {};
+    if (Object.keys(isPlainObject(day.rima) ? day.rima : {})
+        .some(placeId => rimaCount(State.schedule, date, placeId) > 0)) return true;
+    const layers = Object.keys(day);
     return State.schedule.workers.some(worker => layers.some(layer =>
         isAbsent(State.schedule, date, worker.id, layer) ||
         entriesFor(State.schedule, date, worker.id, layer).length > 0));
@@ -902,6 +1080,7 @@ function renderSiteCard(place) {
     // By-site view: here the card IS one site, so there is no ambiguity in colouring its
     // heading - and it keeps the same identity the badges use in the list.
     const head = el('div', 'site-head site-head-color');
+    head.dataset.anchor = 'head:' + place.id;
     const title = el('h3');
     appendSiteName(title, place.id, place.name);
     if (workerIds.length === 0) title.appendChild(el('span', 'site-empty', 'אין עובדים באתר הזה.'));
@@ -948,7 +1127,96 @@ function renderSiteCard(place) {
         card.appendChild(list);
     }
 
+    // On every card, the empty ones included: Rima's men can be on a site that has none
+    // of the owner's that day, and that day is billed all the same.
+    card.appendChild(renderRimaField(place));
+
     return card;
+}
+
+// HOW MANY OF RIMA'S MEN were on this site today (v166) - the other company's workers,
+// counted and never named. See the רימא section of js/model/schema.js.
+//
+// A number field and nothing else: no free text, so nothing but a count can be written.
+// Sized for 1-10, which is what a site sees; 10 is a guide, not a cap, and the model's
+// cap (RIMA_MAX) is what refuses a three-digit typo. An empty field or 0 clears the count.
+//
+// Saved on `change` - when the field is left or Enter is pressed - not on every key, the
+// same as the extra-hours box beside the rates: "1" on its way to "12" is not a count
+// anybody recorded.
+function renderRimaField(place) {
+    const date = State.date;
+    const stored = rimaCount(State.schedule, date, place.id);
+
+    const row = el('label', 'rima-field');
+    row.dataset.anchor = 'rima:' + place.id;
+    row.appendChild(el('span', 'rima-label', 'רימא'));
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'rima-input';
+    input.inputMode = 'numeric';
+    input.min = '0';
+    input.max = String(RIMA_MAX);
+    input.step = '1';
+    input.dir = 'ltr';
+    input.placeholder = '0';
+    input.value = stored > 0 ? String(stored) : '';
+    // Named with the site, like every other control on a card: there are ten of these
+    // on the screen at once.
+    input.setAttribute('aria-label', `רימא ב${isolate(place.name)}`);
+    input.dataset.placeId = place.id;
+
+    // Set by a commit of this box that stood; read by the blur that follows it (below).
+    let stood = false;
+    input.addEventListener('change', () => {
+        // Taken away by a redraw, not left by the person - see dayTearingDown.
+        if (dayTearingDown) return;
+        const text = String(input.value || '').trim();
+        // badInput is how a number field says "something was typed that is not a
+        // number" - its value is then '' and would otherwise read as a clear.
+        const bad = Boolean(input.validity && input.validity.badInput);
+        const next = bad ? NaN : (text === '' ? 0 : (/^\d+$/.test(text) ? Number(text) : NaN));
+        if (next === rimaCount(State.schedule, date, place.id)) return;
+        const change = Number.isNaN(next)
+            ? { refused: true, reason: RIMA_REFUSED }
+            : setRimaCount(State.schedule, date, place.id, next);
+        // A refusal, or a commit with nowhere durable to live, puts the field back to
+        // what the record says - the screen never shows a count the record does not hold.
+        // A count the disk guard KEPT in the journal - another window of this app wrote
+        // the same site first - did not stand, but it is an edit all the same, and ↶ is
+        // forgotten for it exactly as for one that stood (below).
+        if (!State.commit(change)) {
+            if (State.lastCommitKept) hideUndo();
+            render();
+            return;
+        }
+        // THE HEADER'S ↶ HOLDS THE STEP BEFORE THIS ONE. A count offers no undo of its own,
+        // so after one stood ↶ was still armed with whatever went before - a man put on a
+        // site, often on a card off the screen - and pressed to take the count back it took
+        // back HIS day instead, pay and all, and queued that for the cloud. So a count that
+        // stands forgets the step behind it, the way leaving the day does.
+        hideUndo();
+        stood = true;
+    });
+    // FROM ONE SITE'S BOX STRAIGHT TO THE NEXT. `change` fires while the focus is on its way
+    // there, the commit above redraws every card, and the box the finger landed on is gone
+    // before it can take the focus - the keyboard drops and the tap is lost. The blur that
+    // follows still names where the focus was going; when that was another site's Rima box,
+    // that site's new box takes it. Focus only, never a value: what a box shows is either
+    // typed by the person or stored.
+    input.addEventListener('blur', event => {
+        const going = event.relatedTarget;
+        const redrawn = stood;
+        stood = false;
+        if (!redrawn || !going || going.isConnected || !going.classList
+            || !going.classList.contains('rima-input')) return;
+        const replacement = [...document.querySelectorAll('.rima-input')]
+            .find(node => node.dataset.placeId === going.dataset.placeId);
+        if (replacement) replacement.focus({ preventScroll: true });
+    });
+    row.appendChild(input);
+    return row;
 }
 
 function renderAssignmentRow(place, workerId) {
@@ -957,6 +1225,7 @@ function renderAssignmentRow(place, workerId) {
     const entry = entries.find(e => e.placeId === place.id);
 
     const row = el('div', 'assign-row');
+    row.dataset.anchor = 'row:' + place.id + ':' + workerId;
 
     const name = el('span', 'assign-name', worker ? worker.name : workerId);
     // A worker at two sites today is normal here, not an error - but it has to be visible,
@@ -979,6 +1248,9 @@ function renderAssignmentRow(place, workerId) {
     row.appendChild(renderRateControl(place, workerId, entry));
 
     row.appendChild(button('✕', 'btn-icon', () => {
+        // The man below slides up into this row; a second tap inside DOUBLE_TAP_GUARD_MS
+        // would take HIM off. It is the first tap again (secondTapTooSoon).
+        if (secondTapTooSoon('row-remove')) return;
         editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
             () => unassignPlace(State.schedule, State.date, workerId, State.layer, place.id));
     }, `הסר את ${isolate(worker ? worker.name : '')} מ${isolate(place.name)}`));
@@ -1031,6 +1303,8 @@ function renderRateControl(place, workerId, entry) {
         hours.placeholder = 'ש׳';
         hours.setAttribute('aria-label', 'שעות נוספות');
         hours.addEventListener('change', () => {
+            // Taken away by a redraw, not left by the person - see dayTearingDown.
+            if (dayTearingDown) return;
             State.commit(setRate(State.schedule, State.date, workerId, State.layer, placeId, RATE_EXTRA, hours.value));
         });
         wrap.appendChild(hours);
@@ -1043,6 +1317,7 @@ function renderRateControl(place, workerId, entry) {
 // against the failure that costs real money: forgetting someone entirely.
 function renderUnassignedTray(unrecorded) {
     const tray = el('div', unrecorded.length ? 'tray tray-pending' : 'tray tray-complete tray-is-empty');
+    tray.dataset.anchor = 'tray:unrecorded';
     // The count rides on the header: this tray is the day's debt, and how deep it is
     // should not take a chip-by-chip count to know. An empty tray keeps the bare word -
     // the line under it already says "nobody" in words, and (0) next to that is noise.
@@ -1168,6 +1443,7 @@ async function editVehicleDeparture(vehicleId) {
 function renderAbsentTray() {
     const absent = State.absentToday();
     const tray = el('div', absent.length ? 'tray tray-absent' : 'tray tray-absent tray-is-empty');
+    tray.dataset.anchor = 'tray:absent';
     // Same rule as the tray above: a count when there is anyone to count.
     tray.appendChild(el('h4', null,
         absent.length > 0 ? `נעדרים (${absent.length})` : 'נעדרים'));
@@ -1182,6 +1458,9 @@ function renderAbsentTray() {
         const chip = el('div', 'chip chip-absent');
         chip.appendChild(el('span', 'chip-main', worker.name));
         chip.appendChild(button('✕', 'chip-side', () => {
+            // The next man's chip slides into this one's place, under the finger: a second
+            // tap inside DOUBLE_TAP_GUARD_MS is this one again (secondTapTooSoon).
+            if (secondTapTooSoon('absent-remove')) return;
             editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`,
                 () => clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
         }, `בטל היעדרות של ${isolate(worker.name)}`));

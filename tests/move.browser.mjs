@@ -367,6 +367,11 @@ const holds = (snapshot, who, placeId) => ({
     const story = [];
     let dishonoured = 0;
     for (let round = 1; round <= 5; round += 1) {
+        // Five DECISIONS, each made after the last one was drawn. Inside 700 ms a second tap
+        // on the same row is the first one again and does nothing (DOUBLE_TAP_GUARD_MS,
+        // js/ui/day.js - suite 3 below measures that); what this suite asks is that every
+        // tap a person means does what its button said.
+        if (round > 1) await page.waitForTimeout(800);
         const step = await tap(page, `round ${round}`, pickerRow(W1.id));
         if (!step.promise) { dishonoured += 1; story.push({ round, missing: true }); continue; }
         // The promise, read off the button before the tap: pressed=false means «+ הוסף»
@@ -466,12 +471,15 @@ const holds = (snapshot, who, placeId) => ({
         }
     });
 
-    // Two taps on a toggle are add-then-remove: he ends where he started. The failure
-    // this looks for is an end state that is NEITHER - a duplicate, a third site, or
-    // the OTHER man moved because the row under the finger changed identity.
-    check('two fast taps on one spot are two honest toggles, not a lost or stray write',
-        holds(twice, 'one', SITES[B].id).live === false
-        && holds(twice, 'one', SITES[B].id).disk === false
+    // Two taps at one spot inside 700 ms are ONE tap (DOUBLE_TAP_GUARD_MS, js/ui/day.js).
+    // This used to pin add-then-remove - he ended where he started - and that is the owner's
+    // report, word for word: «+ הוסף» had turned into «✓ נמצא» under his finger, and "I
+    // added him twice and he was deleted". So he ends where the FIRST tap put him. The
+    // failure this still looks for is an end state that is neither - a duplicate, a third
+    // site, or the OTHER man moved because the row under the finger changed identity.
+    check('two fast taps on one spot are one tap: he is added, and nothing stray is written',
+        holds(twice, 'one', SITES[B].id).live === true
+        && holds(twice, 'one', SITES[B].id).disk === true
         && holds(twice, 'one', SITES[A].id).live === true,
         JSON.stringify({ one: placesOf(twice, 'one'), disk: diskOf(twice, 'one') }));
     check('and the second tap did not land on the other man',
@@ -621,6 +629,9 @@ const holds = (snapshot, who, placeId) => ({
     given('the picker survived the refusal and still lists him',
         again.picker.display === 'flex' && again.picker.rows.indexOf(W1.id) !== -1,
         JSON.stringify(again.picker));
+    // A person reads the refusal before trying again; inside 700 ms the retry would be taken
+    // for the refused tap itself (DOUBLE_TAP_GUARD_MS, js/ui/day.js).
+    await page.waitForTimeout(800);
     const retry = await tap(page, 'picker B: + הוסף (retry)', pickerRow(W1.id));
     check('ONE retry after an explained failure records him',
         holds(retry.after, 'one', SITES[B].id).live === true

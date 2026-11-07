@@ -366,7 +366,9 @@ function readReportPrintout() {
     const groups = tables.map(table => {
         // The reconciliation band is its own wrapper - a header-and-footer table with no
         // body - so its heading «סיכום התקופה» is found the same way a cycle's is.
-        const wrap = table.closest('.report-payroll-group, .report-reconcile-group');
+        // And the Rima table under the invoice (v166), titled «רישום לרימא» the same way,
+        // so the picture says whose men the second table counts.
+        const wrap = table.closest('.report-payroll-group, .report-reconcile-group, .report-rima-group');
         let heading = wrap && wrap.previousElementSibling;
         while (heading && !heading.matches('h3.report-group')) heading = heading.previousElementSibling;
         return {
@@ -392,7 +394,11 @@ function readReportPrintout() {
         // how the financial section's men reach the picture. They are lines rather than a
         // table on purpose (see renderFinanceBlock), so they arrive as notes - which also
         // keeps every row count in the suites counting the crew and not accounts.
-        notes: [...section.querySelectorAll('.hint-warn, .hint-money, .report-finance-text')]
+        //
+        // .report-rima-note is one too: the line under the Rima table that says those men
+        // are not the owner's, are in no pay figure, and are each one worker-site day in
+        // the billing above (the owner's ruling, 2026-11-01).
+        notes: [...section.querySelectorAll('.hint-warn, .hint-money, .report-finance-text, .report-rima-note')]
             .map(printoutText).filter(Boolean)
     };
 }
