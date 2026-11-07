@@ -1344,7 +1344,10 @@ a[href]:focus-visible,
 .site-empty { color: var(--ink-3); font-size: 14px; margin: 4px 0; }
 .site-list { display: flex; flex-direction: column; gap: 4px; }
 
-/* THE ROW WRAPS, and the name has a floor under it. Both halves are one repair.
+/* THE ROW WRAPS, and the name has a floor under it. Both halves are one repair. (v167: the
+   rate <select> this was written for has left the row - see .assign-main below - and the
+   floor and the wrap stay, because what they protect, a name with a box to be read in at
+   twice the text, is still the point.)
 
    The rate <select> will not go under its longest option (שעות נוספות), so with the text
    turned up it wants 215px on a 320px phone. The row used to answer that by refusing to
@@ -1383,22 +1386,44 @@ a[href]:focus-visible,
     overflow-wrap: anywhere;
     font-weight: 700;
 }
-/* Dividers keep each worker's rate on a readable row without adding another box. */
+/* Dividers keep each worker's row readable without adding another box. */
 .site-list .assign-row + .assign-row { border-top: 1px solid var(--line-soft); }
 .site-list .assign-row { border-radius: 0; }
-.site-list .rate-select { background: var(--surface-2); }
-.site-list .rate-hours { font-variant-numeric: tabular-nums; }
 @media (max-width: 375px) {
-    /* Give names a full line before the controls on the narrowest phones. */
+    /* Give names a full line on the narrowest phones. */
     .site-list .assign-name { flex-basis: 100%; min-width: 0; }
-    .site-list .rate-control { margin-inline-end: auto; }
 }
 
-.rate-control { display: flex; gap: 4px; align-items: center; }
+/* THE NAME IS THE ROW'S WAY IN (v167, the declutter the owner approved on 2026-11-04). It
+   opens the assign sheet for that man, where the rate is chosen; the row itself writes the
+   rate only when it is not רגיל (.assign-rate). A button as quiet as the text it holds, 44px
+   tall at the least (CLAUDE.md, law 9) and as wide as the row leaves it beside the ✕.
+
+   flex-basis 0, not the mockup's auto. With auto, a long name and its tag ask for more than
+   the row has at 320px, and the wrapping row would put the ✕ on a line of its own under the
+   name; from 0 the name takes what the ✕ leaves and wraps inside its own box instead. */
+.site-list .assign-main {
+    flex: 1 1 0; min-width: 0; min-height: 44px;
+    display: flex; align-items: center;
+    margin: 0; padding: 0 4px;
+    background: none; border: 0; border-radius: 8px;
+    color: inherit; font: inherit; text-align: start; cursor: pointer;
+}
+.site-list .assign-main .assign-name { flex: 1 1 auto; }
+/* The rate, worded only when it is not רגיל - RATE_LABELS' own words, in the warning colours
+   .badge-double already uses for a double day. */
+.assign-rate {
+    font-size: 15px; font-weight: 700; line-height: 1.35; padding: 1px 8px;
+    border-radius: 6px; white-space: nowrap; background: var(--warn-bg); color: var(--warn);
+}
+/* «2 אתרים» up to the app's own 14px text floor on the row (11px as a .badge elsewhere). */
+.site-list .badge-split { font-size: 14px; }
+
 /* 16px is not a taste here, it is the threshold below which iOS magnifies the whole page
    the moment the field is focused - and then leaves the person to pinch back out with a
-   half-entered day on screen. Every focusable field in the app is at or above it. */
-.rate-select, .rate-hours {
+   half-entered day on screen. Every focusable field in the app is at or above it. The
+   hours box is in the assign sheet (v167: it left the day's rows with the rate select). */
+.rate-hours {
     font-family: inherit;
     font-size: 16px;
     padding: 3px 6px;
@@ -2409,6 +2434,12 @@ a[href]:focus-visible,
     color: var(--ink-2);
     margin: 6px 0 0;
 }
+/* בלי עובדי רימא (v167): the invoice's grid with the owner's men only, between the invoice
+   and the Rima table. An ordinary .report-table inside .report-invoice like the Rima table,
+   so it takes the same phone cards. SCREEN AND WORKBOOK ONLY - the owner's choice: never on
+   the paper the client is handed (and readReportPrintout leaves it out of the picture). */
+.report-norima { margin-top: 18px; }
+@media print { .report-norima { display: none !important; } }
 @media print {
     .report-rima { margin-top: 6mm; }
     .report-rima-title { font-size: 12pt; margin: 0 0 2mm; color: #000; }
@@ -3049,6 +3080,94 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
     font-size: 14px;
     line-height: 1.45;
 }
+
+/* THE SEDER TO EACH WORKER (v167), js/ui/seder.js. Its way in is a full-width row of the
+   WhatsApp dialog's actions, under the green button. The list: a row per man with a site
+   that day - his tick and his name at the start, his own WhatsApp door at the end - over a
+   foot holding the next man in the run. The content scrolls and the foot sticks to its
+   bottom edge, so the run stays under the thumb with a crew of thirty; the content drops
+   its own bottom padding so the foot meets that edge and nothing scrolls by beneath it.
+   An <a> and a <label> are not in the 44px floor the buttons get from "a thumb's worth",
+   so each is held to it here, both ways - tests/seder.browser.mjs measures them. */
+#shareModal .modal-actions .seder-entry { grid-column: 1 / -1; }
+#sederModal .modal-content { padding-bottom: 0; }
+#sederModal .modal-content > h3 { line-height: 1.3; margin: 0 0 4px; overflow-wrap: anywhere; }
+#sederLead { margin: 0 0 10px; }
+.seder-note {
+    margin: 0 0 10px;
+    padding: 9px 12px;
+    border-inline-start: 3px solid var(--warn);
+    border-radius: var(--radius);
+    background: var(--warn-bg);
+    color: var(--warn);
+    font-size: 14px;
+    line-height: 1.45;
+}
+.seder-list { display: flex; flex-direction: column; }
+.seder-row { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line-soft); }
+.seder-row:last-child { border-bottom: none; }
+.seder-pick {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 2px;
+    cursor: pointer;
+}
+div.seder-pick { cursor: default; }
+.seder-check { inline-size: 24px; block-size: 24px; flex: 0 0 24px; margin: 0; font-size: 16px; accent-color: var(--ok); }
+.seder-check-gap { inline-size: 24px; flex: 0 0 24px; }
+.seder-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.seder-name { font-weight: 650; overflow-wrap: anywhere; }
+.seder-sites { color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.seder-state { color: var(--ok); font-size: 14px; font-weight: 600; }
+.seder-state-warn { color: var(--warn); }
+/* Two men on the list with one number: a line of its own under his sites, beside a mark. */
+.seder-shared { color: var(--warn); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.seder-row-off .seder-name, .seder-row-off .seder-sites { color: var(--ink-3); }
+.seder-one {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: var(--radius-sm);
+    color: var(--ok);
+}
+.seder-one:hover { background: var(--surface-2); }
+.seder-one svg { width: 24px; height: 24px; }
+.seder-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 12px 0 18px;
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+}
+.seder-status { margin: 0; color: var(--ink-2); font-size: 14px; }
+.seder-status:empty, .seder-go-slot:empty { display: none; }
+.seder-go {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 50px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--ok);
+    color: var(--on-accent);
+    font-weight: 650;
+    text-align: center;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+.seder-go:hover { filter: brightness(1.08); }
+.seder-foot button { min-height: 44px; }
 
 .issue {
     border: 1px solid var(--line);
@@ -3880,7 +3999,6 @@ button.now-count:hover { filter: none; background: var(--surface-2); }
     .sheet-actions button { min-height: 54px; font-size: 16.5px; }
     .chip-on, .chip-off { font-size: 14.5px; padding: 8px 14px; }
     .rate-hours { font-size: 16px; }
-    .rate-select { font-size: 16px; padding: 7px 9px; }
 
     /* day navigation */
     .day-label strong { font-size: 22px; }
@@ -4210,7 +4328,7 @@ body.reorder-dragging .reorder-list::after {
    day name, its date and the two arrows, because the one input error that actually costs
    money is a day recorded against the wrong date, and halfway down a list of names nothing
    else on screen says what day this is. What goes is undo, redo, "היום", the switcher, the
-   fold's button and the progress line's TEXT.
+   fold's button, «הכל חופש» and the progress line's TEXT.
 
    The 4px track stays. It is already the header's own bottom edge (absolute - see
    `.day-header .progress-bar` above), so it costs no row and still says how much of the
@@ -4228,6 +4346,12 @@ body.reorder-dragging .reorder-list::after {
 body.day-compact .day-header .day-steps,
 body.day-compact .day-header .mode-toggle,
 body.day-compact .day-header .bulk-toggle { display: none; }
+/* B1 (v167). The switcher's LINE goes, not only the switcher in it. v116 put «הכל חופש» on
+   that line (appendModeSwitch, js/ui/day.js); the rules above hid the pair and the fold's
+   button and left the line standing with «הכל חופש» on it - a second row under the date on
+   every scroll, against the one row v101 promised. Measured at 440, 390 and 320 before this
+   (tests/declutter.browser.mjs): a compact header 104px tall around a 44px row. */
+body.day-compact .day-header .day-switch { display: none; }
 body.day-compact .day-header .day-tools { margin-top: 0; }
 body.day-compact .day-header .progress { flex: 0 0 auto; margin: 0; padding: 0; }
 /* The count is a button. Clipped to the live region's 1px it would still be a 6px-wide
@@ -4613,6 +4737,25 @@ body.day-tight .topbar { margin-bottom: 2px; }
     body.bars-lowered .tabs,
     body.bars-lowered .day-actions,
     body.bars-lowered .undo-bar { transform: translateY(var(--bar-drop, 0px)); }
+}
+
+/* The rest of the frame iOS pushed up (js/ui/bars.js, applyFrameDrop): every overlay
+   fixed to the layout viewport, and the pinned date header, by the same offsetTop as the
+   bars. `translate`, not `transform`: the drawer slides on its own transform and a sheet
+   animates on its own, and the separate property composes with them instead of
+   replacing them. On only while the frame is stuck; 0 and off the rest of the time.
+   EVERY fixed layer is on this list or on the bars' list above - .modal is every dialog,
+   the assign sheet and v167's seder list among them - and tests/bars.stale.browser.mjs
+   counts every element whose computed position is fixed and fails on one that is on
+   neither. The reminder banner (css/readability.css) is the one the first design missed. */
+@media screen and (max-width: 700px) {
+    body.frame-lowered .modal,
+    body.frame-lowered .settings-panel,
+    body.frame-lowered .reorder-panel,
+    body.frame-lowered .drawer-backdrop,
+    body.frame-lowered .drawer-wrap,
+    body.frame-lowered .push-reminder-pending { translate: 0 var(--frame-drop, 0px); }
+    body.frame-lowered #dayView .day-header { translate: 0 var(--header-drop, 0px); }
 }
 
 /* A vehicle may serve several sites; each choice remains a full touch target. */

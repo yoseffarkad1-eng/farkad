@@ -1265,8 +1265,9 @@ for (const width of [320, 390]) {
     await page.evaluate(() => closeAssignSheet());
     await page.waitForTimeout(100);
 
-    // (4) A select opens a picker, not a keyboard. There is none in the app today; one is
-    // put on the page for the question and taken off after it.
+    // (4) A select opens a picker, not a keyboard. Since v167 the day screen has none - the
+    // rate select left the site's rows, and the rate is chosen with the assign sheet's chips
+    // - so a probe is put on the page for the question and taken off after it.
     await page.evaluate(() => {
         const pick = document.createElement('select');
         pick.id = 'kbdProbeSelect';
@@ -4095,7 +4096,9 @@ for (const width of WIDTHS) {
             .find(node => node.querySelectorAll('.assign-row').length > 0);
         const row = card && card.querySelector('.assign-row');
         const name = row && row.querySelector('.assign-name');
-        const rate = row && row.querySelector('.rate-select');
+        // v167: the rate select left the row; the name is the row's way in now (.assign-main),
+        // so it is what is measured beside the name's own box.
+        const target = row && row.querySelector('.assign-main');
         return {
             doc: document.documentElement.scrollWidth,
             client: document.documentElement.clientWidth,
@@ -4103,7 +4106,7 @@ for (const width of WIDTHS) {
             widest: Math.max(0, ...[...document.querySelectorAll('.site-card')]
                 .map(node => Math.round(box(node).width))),
             name: name ? Math.round(box(name).width) : null,
-            rate: rate ? Math.round(box(rate).width) : null,
+            target: target ? [Math.round(box(target).width), Math.round(box(target).height)] : null,
             // The two head buttons, and whether both ends of each are on the screen.
             head: card ? [...card.querySelectorAll('.site-head button')].map(node => ({
                 label: (node.getAttribute('aria-label') || '').replace(/[⁦-⁩]/g, '').slice(0, 22),
@@ -4129,10 +4132,12 @@ for (const width of WIDTHS) {
         m.head.length === 2 && m.head.every(item => item.inside),
         JSON.stringify(m.head));
 
-    // Not zero, and not smaller than the rate control beside it is allowed to be: the man
-    // is who the row is about.
+    // Not zero: the man is who the row is about. (Until v167 this was measured against the
+    // rate select beside it; the select left the row, and the name is the way in.)
     check(`${label}: and the worker's name still has a box to be read in`,
-        m.name !== null && m.name >= 60, JSON.stringify({ name: m.name, rate: m.rate }));
+        m.name !== null && m.name >= 60, JSON.stringify({ name: m.name, target: m.target }));
+    check(`${label}: and the name, the row's way in, is still a 44px target`,
+        m.target !== null && m.target[0] >= 44 && m.target[1] >= 44, JSON.stringify(m.target));
 
     await page.context().close();
 }
@@ -4360,6 +4365,12 @@ for (const scheme of ['light', 'dark']) {
 
 // A stale viewport report is not evidence that a fixed bar moved. Unlike the old
 // raised-bar simulation, these assertions use actual DOM rectangles with no subtraction.
+//
+// v167: the RECTANGLE raise below is v116's model, and it is not what a stuck iPhone does
+// (a WebKit fixed bar's rectangle is always at innerHeight; the raise is offsetTop - see
+// js/ui/bars.js and tests/bars.stale.test.mjs). It is kept because the rule still honours
+// it - the larger of the rectangle's gap and offsetTop, never both - and these four claims
+// are unchanged. What moved is the phone they are asked of: see the setup.
 {
     suite('raised bars: measured displacement, not viewport arithmetic alone');
     const page = await open({ width: 390, height: 844 });
@@ -4368,12 +4379,20 @@ for (const scheme of ['light', 'dark']) {
         height: innerHeight,
         lowered: document.body.classList.contains('bars-lowered')
     }));
+    // v167 MOVES THIS SETUP, not the four claims below. The rule acts only on an iPhone's
+    // home screen (navigator.standalone), reads the WHOLE visual viewport - a stub with no
+    // width or offsetLeft reads as a pinch and is left alone - and corrects a short frame
+    // only once it has stood still for STALE_SETTLE_MS. Chromium has no standalone, so the
+    // test says it is one.
     await page.evaluate(() => {
+        Object.defineProperty(Navigator.prototype, 'standalone', { configurable: true, get: () => true });
         Object.defineProperty(window, 'visualViewport', { configurable: true, value: {
-            height: innerHeight - 387, offsetTop: 0, scale: 1, addEventListener() {}
+            height: innerHeight - 387, width: innerWidth, offsetTop: 0, offsetLeft: 0, pageTop: 0,
+            scale: 1, addEventListener() {}
         } });
-        correctRaisedBars();
     });
+    await page.waitForTimeout(700);
+    await page.evaluate(() => correctRaisedBars());
     let r = await read();
     check('a short report leaves correctly placed bars on screen',
         !r.lowered && Math.abs(r.bottom - r.height) < 2, JSON.stringify(r));

@@ -119,7 +119,11 @@ function sharedStrings(xml) {
 function sheetOf(xml, strings) {
     const values = [];
     const types = [];
+    // The row NUMBER as the file says it (r="5"): an empty row writes no <row> at all, so
+    // a gap between two rows is only visible here.
+    const numbers = [];
     (xml.match(/<row[\s\S]*?<\/row>|<row[^>]*\/>/g) || []).forEach(rowXml => {
+        numbers.push(Number(attr(/^<row[^>]*>/.exec(rowXml)[0], 'r')));
         const row = [];
         const rowTypes = [];
         (rowXml.match(/<c[\s\S]*?<\/c>|<c[^>]*\/>/g) || []).forEach(cellXml => {
@@ -156,7 +160,7 @@ function sheetOf(xml, strings) {
         values.push(row);
         types.push(rowTypes);
     });
-    return { values, types };
+    return { values, types, numbers };
 }
 
 // The part each sheet name points at, resolved through the workbook's own relationships -
@@ -811,6 +815,9 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
         note.indexOf(`400 ₪ ${'תיקון-היפוך'}`) !== -1, note);
 }
 
+// The workbook's note under the Rima table (v167), pinned word for word - law 6.
+const RIMA_SHEET_NOTE = 'עובדי רימא בלבד. אינם נכללים בשכר. בגיליון החיוב כל אחד מהם נספר כיום עובד־אתר אחד.';
+
 // ---------------------------------------------------------------- the רימא sheet (v166)
 //
 // The other company's men, counted per site per day - see the רימא section of
@@ -829,19 +836,25 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
     `;
     const withRima = phone(FORTNIGHT + RIMA);
     const workbook = await withRima.exportOnce();
-    same('the workbook is the three sheets it always was, then רימא', workbook.names,
-        ['שכר', 'חיוב', 'פירוט', 'רימא']);
+    // v167 MOVED: «בלי עובדי רימא» right after the billing grid, whenever there is Rima.
+    same('the workbook: שכר, חיוב, בלי עובדי רימא right after it, פירוט, then רימא last', workbook.names,
+        ['שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא']);
     const sheet = workbook.sheets['רימא'];
     same('header: the date, the two sites that had Rima, the total', sheet.values[0],
         ['תאריך', 'הרצליה', 'תל אביב', 'סה״כ']);
     same('a day with Rima and none of the owner\'s men is a row of its own',
         sheet.values.find(cells => cells[0] === '2026-08-15'), ['2026-08-15', 0, 6, 6]);
-    const last = sheet.values[sheet.values.length - 1];
-    same('the last row is the pinned total line', last, ['סה״כ עובדי רימא', 4, 10, 14]);
+    // v167 MOVED: the total line is the last row of numbers; the note follows it, one empty
+    // row further down, in the first column alone.
+    const last = sheet.values[sheet.values.length - 2];
+    same('the last row of numbers is the pinned total line', last, ['סה״כ עובדי רימא', 4, 10, 14]);
+    same('then the note, word for word, alone in its row', sheet.values[sheet.values.length - 1], [RIMA_SHEET_NOTE]);
+    same('one empty row between them, in the file itself',
+        sheet.numbers[sheet.numbers.length - 1] - sheet.numbers[sheet.numbers.length - 2], 2);
     check('every count in the file is a NUMBER cell - a SUM over it works',
         sheet.types.slice(1).every(types => types.slice(1).every(type => type === 'number' || type === 'n')),
         JSON.stringify(sheet.types));
-    const body = sheet.values.slice(1, -1);
+    const body = sheet.values.slice(1, -2);
     same('summed in the file, the date rows give the total row', [1, 2, 3].map(col =>
         body.reduce((sum, cells) => sum + cells[col], 0)), [4, 10, 14]);
     check('right to left, like every other sheet',
@@ -859,10 +872,32 @@ check('a day the pay sheet pays for is a day the billing sheet bills for',
     same('no worker\'s name is on the רימא sheet', ['דוד', 'שרה'].filter(name =>
         JSON.stringify(sheet.values).includes(name)), []);
 
+    // בלי עובדי רימא (v167): the billing grid's own dates and sites, his men only, as numbers
+    // - and, read back out of the file, it plus the רימא sheet is the חיוב sheet.
+    const own = workbook.sheets['בלי עובדי רימא'] || { values: [[]], types: [[]] };
+    same('the sheet without Rima: the billing grid\'s header', own.values[0], ['תאריך', 'הרצליה', 'תל אביב', 'סה״כ']);
+    same('his men only, on every billed day - the Rima-only day at nothing', own.values.slice(1), [
+        ['2026-08-10', 1, 1, 2], ['2026-08-11', 1, 1, 2], ['2026-08-13', 1, 0, 1], ['2026-08-15', 0, 0, 0],
+        ['סה״כ ימי עובד־אתר', 3, 2, 5]]);
+    check('every count in it is a NUMBER cell',
+        own.types.slice(1).every(types => types.slice(1).every(type => type === 'number' || type === 'n')),
+        JSON.stringify(own.types));
+    const rimaAt = (date, col) => { const row = sheet.values.find(cells => cells[0] === date);
+        const at = sheet.values[0].indexOf(own.values[0][col]); return row && at > 0 ? row[at] : 0; };
+    same('in the file: without Rima plus the רימא sheet is the חיוב sheet, cell by cell',
+        own.values.slice(1, -1).flatMap(cells => [1, 2].map(col => {
+            const billed = invoice.find(row => row[0] === cells[0]);
+            return [cells[0], col, cells[col] + rimaAt(cells[0], col) - (billed ? billed[col] : NaN)];
+        })).filter(([, , diff]) => diff !== 0), []);
+
     suite('the client\'s file: the billing grid and that site\'s Rima, nobody\'s name');
     const scoped = phone(FORTNIGHT + RIMA + `REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
     const file = await scoped.exportOnce();
-    same('two sheets, the billing grid then רימא', file.names, ['חיוב', 'רימא']);
+    // v167 MOVED: the client's file gains the billing grid without Rima, right after it.
+    same('three sheets: the billing grid, it without Rima, then רימא', file.names, ['חיוב', 'בלי עובדי רימא', 'רימא']);
+    same('the sheet without Rima is narrowed to the client\'s site too', (file.sheets['בלי עובדי רימא'] || { values: [] }).values,
+        [['תאריך', 'הרצליה', 'סה״כ'], ['2026-08-10', 1, 1], ['2026-08-11', 1, 1], ['2026-08-13', 1, 1],
+            ['סה״כ ימי עובד־אתר', 3, 3]]);
     same('the Rima sheet is narrowed to the client\'s site', file.sheets['רימא'].values[0],
         ['תאריך', 'הרצליה', 'סה״כ']);
     same('no worker\'s name anywhere in the data parts of the file',

@@ -494,7 +494,9 @@ const toldText = device => {
     // A client whose site had Rima's men gets the billing file AND the Rima table - two
     // files - and was told about one: «קובץ החיוב יוצא כ-CSV». The sentence is the one the
     // other exports already say when more than one file falls back.
-    suite('a client whose site had Rima: two files fall back, and the person is told files');
+    // v167 MOVED: a third file, the billing grid without Rima's men, rides beside them -
+    // as the workbook's sheet does - and the person is still told "the files".
+    suite('a client whose site had Rima: three files fall back, and the person is told files');
 
     const device = phone();
     seed(device);
@@ -504,8 +506,9 @@ const toldText = device => {
     run(device, `REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';`);
     await run(device, 'exportReports()');
 
-    same('the billing file and the Rima table go out',
-        device.downloads.map(item => item.name), [`farkad-invoice_${STAMP}.csv`, `farkad-rima_${STAMP}.csv`]);
+    same('the billing file, it without Rima, and the Rima table go out',
+        device.downloads.map(item => item.name), [`farkad-invoice_${STAMP}.csv`,
+            `farkad-invoice-without-rima_${STAMP}.csv`, `farkad-rima_${STAMP}.csv`]);
     same('and the person is told it was the files that fell back',
         device.ctx.told, 'חלק מהאפליקציה חסר במכשיר, ולכן הקבצים יוצאו כ-CSV במקום Excel. '
         + 'המספרים זהים. רענן את הדף כדי להשלים את ההתקנה.');
@@ -517,12 +520,23 @@ const toldText = device => {
          ['2026-08-12', '4', '4'],
          ['2026-08-13', '1', '1'],
          ['סה״כ', '9', '9']]);
-    same('and the Rima table is his site\'s Rima alone, with its own total',
+    // v167 MOVED: the workbook's note, after an empty line, word for word.
+    same('and the Rima table is his site\'s Rima alone, with its own total, then the note',
         csvRows(fileNamed(device, `farkad-rima_${STAMP}.csv`)),
         [['תאריך', 'הרצליה', 'סה״כ'],
          ['2026-08-10', '2', '2'],
          ['2026-08-12', '4', '4'],
-         ['סה״כ עובדי רימא', '6', '6']]);
+         ['סה״כ עובדי רימא', '6', '6'],
+         [''],
+         ['עובדי רימא בלבד. אינם נכללים בשכר. בגיליון החיוב כל אחד מהם נספר כיום עובד־אתר אחד.']]);
+    same('and the billing file without Rima is his men alone at his site, on the same days',
+        csvRows(fileNamed(device, `farkad-invoice-without-rima_${STAMP}.csv`) || ''),
+        [['תאריך', 'הרצליה', 'סה״כ'],
+         ['2026-08-10', '1', '1'],
+         ['2026-08-11', '1', '1'],
+         ['2026-08-12', '0', '0'],
+         ['2026-08-13', '1', '1'],
+         ['סה״כ ימי עובד־אתר', '3', '3']]);
 }
 
 // ---------------------------------------------------------------- the handover file

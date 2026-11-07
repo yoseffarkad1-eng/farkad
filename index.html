@@ -17,7 +17,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v166">
+<meta name="farkad-build" content="v167">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -519,11 +519,34 @@
         <div class="share-warning" id="shareWarning" style="display:none"></div>
         <label class="field-label" for="shareText">תצוגה מקדימה של ההודעה</label>
         <textarea id="shareText" rows="10" readonly></textarea>
+        <!-- js/ui/seder.js adds one more row here, under the green button: the seder to
+             each worker. Its label is one of that file's words, so it is built there. -->
         <div class="modal-actions">
             <button type="button" class="btn-success" onclick="sendDayMessage()">💬 שלח בוואטסאפ</button>
             <button type="button" class="btn-secondary" onclick="copyDayMessage()">העתק</button>
             <button type="button" class="btn-secondary" onclick="closeShareModal()">סגור</button>
             <span class="share-status" id="shareStatus"></span>
+        </div>
+    </div>
+</div>
+
+<!-- THE SEDER TO EACH WORKER (v167): one WhatsApp message per man with a site that day,
+     each with his own site and who is with him, opened one tap at a time. Entered from the
+     dialog above. Every word on it - and in the messages - is in js/ui/seder.js, in one
+     block, for the owner to approve; this is only the frame it is drawn into. The status
+     line lives outside the rows on purpose: the rows are rebuilt on every tap, and a live
+     region that is rebuilt is a live region that announces nothing. -->
+<div class="modal" id="sederModal">
+    <div class="modal-content">
+        <h3 id="sederTitle" tabindex="-1"></h3>
+        <p id="sederContext" class="picker-context"></p>
+        <p id="sederLead" class="hint"></p>
+        <p id="sederNote" class="seder-note" role="status" hidden></p>
+        <div id="sederList" class="seder-list"></div>
+        <div class="seder-foot">
+            <p id="sederStatus" class="seder-status" role="status" aria-live="polite"></p>
+            <div id="sederGo" class="seder-go-slot"></div>
+            <button type="button" class="btn-secondary" id="sederClose" onclick="closeSederList()"></button>
         </div>
     </div>
 </div>
@@ -641,6 +664,9 @@
 <script src="js/ui/roster.js"></script>
 <script src="js/ui/reports.js"></script>
 <script src="js/ui/share.js"></script>
+<!-- After share.js (its dialog is the way in) and day.js (its drawn speech bubble);
+     everything else it reads is above both. -->
+<script src="js/ui/seder.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

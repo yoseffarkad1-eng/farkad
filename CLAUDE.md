@@ -93,7 +93,7 @@ different from what was done.
 No build, no install: `python3 -m http.server` serves the app. For the tests:
 
     npm ci
-    npm test                # the forty-three node suites; no browser, runs in a few minutes
+    npm test                # the node suites; no browser, runs in a few minutes
     npm run test:all        # adds smoke, print, mobile, update, forms, recovery-browser,
                             #   handover, swrestart, swidentity
     npm run test:release    # the gate: test:all plus sendclaim and the emulator suites
@@ -120,7 +120,7 @@ downloading anything. The emulator suites need Java and run through
 Financial suites cover both enabled operation and explicit legacy-client fixtures
 with both financial gates closed. The v116 release candidate enables the financial
 pair by owner request; deployment remains held until cloud rules and device readiness
-are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. Test-only overrides are
+are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. v167 adds the seder to each worker (js/ui/seder.js), entered from the WhatsApp dialog and from nowhere on the day screen: the men with a site that day, each opened in WhatsApp with his own message by the person's own tap - never sent by the app, and never marked "sent". It writes nothing to the record; its progress is a per-date preference in Store. Its Hebrew words are the owner's, approved 2026-11-07 and pinned word for word in tests/seder.test.mjs (docs/releases.md, v167). Test-only overrides are
 provided before scripts load, never defined by the production shell.
 
 ## The culture
@@ -154,7 +154,8 @@ written down so it cannot happen twice.
     js/sync/firebase-adapter.js  the only file that knows Firebase exists; the one ES module
     js/sync/firebase-config.js   project config; empty means local-only
     js/ui/dom.js               el()/clear()/button(); textContent only — names are never markup; todayStr
-    js/ui/bars.js              measures the fixed bars and the keyboard; publishes --nav-h, --day-actions-h, --topbar-h, --kb-h
+    js/ui/bars.js              measures the fixed bars and the keyboard; publishes --nav-h, --day-actions-h, --topbar-h, --kb-h;
+                               the stuck iPhone frame (v167): --bar-drop, --frame-drop, --header-drop
     js/ui/ask.js               askText/askConfirm/askTell/askChoice — the app's own dialogs
     js/ui/undo.js              one step back; the undo button holds the last step until the day is left
     js/ui/modal.js             keyboard behavior for every dialog: Escape, focus trap, focus return
@@ -166,6 +167,11 @@ written down so it cannot happen twice.
     js/ui/roster.js            workers and sites; archive vs delete; the reorder mode
     js/ui/reports.js           pay and invoice reports; the advance form
     js/ui/share.js             the WhatsApp message and the CSV
+    js/ui/seder.js             the seder to each worker (v167): the men with a site that day, each one's own
+                               message, opened in WhatsApp one tap at a time; what was opened is kept per
+                               date in Store (farkadSederProgress) - never the record, never synced, never in
+                               a backup; every Hebrew word of it in one block, approved by the owner
+                               on 2026-11-07 and pinned word for word in tests/seder.test.mjs
     js/ui/backup.js            snapshots, the backup file, the four restore doors, the rescue file
     js/ui/printout.js          the table as a PNG, read off the DOM, for the phone where window.print()
                                opens nothing: the 1.5s heuristic, the share sheet, the download
@@ -225,12 +231,26 @@ written down so it cannot happen twice.
     tests/bootstrap.rules.test.mjs the server's own answer to a bootstrap carrying business data
     tests/rima.test.mjs        v166 Rima count: one path, no shekel of pay moves, the client invoice counts
                                each one, the Rima table and sheet, no Rima in the WhatsApp message, held rows,
-                               and v145/v165 (their real bytes, out of Git) not wiping it off the cloud
+                               and v145/v165 (their real bytes, out of Git) not wiping it off the cloud;
+                               v167: the sheet's note, and «בלי עובדי רימא» plus Rima = the invoice, cell by cell
     tests/rima.browser.mjs     the רימא field on every site card, the רישום לרימא section on screen,
-                               on paper and in the picture, ten sites on a 320px phone
+                               on paper and in the picture, ten sites on a 320px phone; v167: «בלי עובדי רימא»
+                               on the screen and in the workbook, never on paper or in the picture
     tests/scroll.browser.mjs   the day keeps its place: every commit and every adopted snapshot leaves the
                                rows on screen where they were; a new date still opens at its top;
                                a double tap on a ✕ or a picker row is one tap
+    tests/seder.test.mjs       v167: who is on the list and who is not, each man's message, the phone numbers,
+                               and the progress - per date, and never in the record, the outbox, the cloud,
+                               a backup or the rescue file
+    tests/seder.browser.mjs    v167 in Chromium: the entry in the WhatsApp dialog, a man left out, the run
+                               through wa.me one tap at a time, the marks, a reload mid-run, the rectangles
+    tests/bars.stale.test.mjs  v167: the stuck iPhone frame decided in Node - the rule, the page's writes,
+                               a whole stuck scroll under both readings of WebKit's rectangles
+    tests/bars.stale.browser.mjs v167 in Chromium, visual viewport faked: bars, sheets, dialogs, the date
+                               header on the glass, and every fixed layer of the page counted
+    tests/declutter.browser.mjs v167 in Chromium: a site's row is the name, the ✕ and a tag only for a day
+                               that is not regular; the name opens his sheet, which stays on him; a double
+                               tap on a name is one tap; the compact header is one row
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe

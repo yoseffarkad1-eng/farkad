@@ -227,8 +227,18 @@ async function seedRoster(page) {
   });
   await page.waitForTimeout(200);
 
-  // "on Tel Aviv only" - the rate belongs to the site, not to the person's whole day
-  await page.locator('.site-card').nth(1).locator('.rate-select').selectOption('double');
+  // "on Tel Aviv only" - the rate belongs to the site, not to the person's whole day.
+  //
+  // v167 MOVED HOW THIS CHOOSES THE RATE, not what it asks: the rate <select> left the
+  // site's rows (the declutter), and the rate is chosen in the assign sheet that the man's
+  // name opens - one row of chips per site he is on. The sheet takes no pointer for
+  // DOUBLE_TAP_GUARD_MS after a row opens it (js/ui/sheet.js), hence the wait.
+  const rateChip = (site, word) => page.locator('#assignSheet .sheet-rate-row')
+    .filter({ has: page.locator('.sheet-rate-name', { hasText: site }) })
+    .getByRole('button', { name: word, exact: true });
+  await page.locator('.site-card').nth(1).locator('.assign-main').click();
+  await page.waitForTimeout(800);
+  await rateChip('תל אביב', 'יום כפול').click();
   await page.waitForTimeout(300);
 
   const rates = await page.evaluate(() =>
@@ -237,7 +247,7 @@ async function seedRoster(page) {
   check('a rate set on one site leaves the other alone',
     JSON.stringify(rates) === '["p_01:normal","p_02:double"]', JSON.stringify(rates));
 
-  await page.locator('.site-card').first().locator('.rate-select').selectOption('extra');
+  await rateChip('הרצליה', 'שעות נוספות').click();
   await page.waitForTimeout(300);
   check('choosing extra hours reveals the hours field',
     (await page.locator('.rate-hours').count()) === 1);
@@ -9121,8 +9131,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   // And the name is the one the buttons around it use: the man, and the site, both
   // bidi-isolated the way js/ui/dom.js requires of every name in every label.
+  //
+  // v167 MOVED THIS from the rate <select> to the man's name: the select left the row (the
+  // declutter), and the name is now the control that opens his rate - the assign sheet -
+  // and says, to a screen reader, whose day at which site it opens, and at what rate.
   const rate = await page.evaluate(() => {
-    const node = document.querySelector('.site-card .rate-select');
+    const node = document.querySelector('.site-card .assign-main');
     if (!node) return null;
     const label = node.getAttribute('aria-label') || '';
     // FSI…PDI, U+2068 and U+2069 - what js/ui/dom.js's isolate() emits around a NAME.
@@ -9135,7 +9149,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
         && (label.match(/\u2069/g) || []).length === 2
     };
   });
-  check('the rate control names the man whose day it prices',
+  check('the name that opens a man\'s rate names the man whose day it prices',
     rate !== null && rate.plain.includes('דוד'), JSON.stringify(rate));
   check('and the site it is priced at, because four of them are on the screen at once',
     rate !== null && rate.plain.includes('הרצליה'), JSON.stringify(rate));

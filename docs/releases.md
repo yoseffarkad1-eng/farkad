@@ -1,9 +1,243 @@
-## v166 — רישום לרימא: the other company's men, counted per site (candidate, not served)
+## v167 — the seder to each worker, the bars on a stuck iPhone, the day screen decluttered, and two Rima additions (candidate, not served)
 
-**Not served. Not merged. On no phone.** One commit on v165 (`e34fb66`), the build on the
-owner's phones, on a local branch with no remote. Owner-approved spec, 2026-11-01. No gate
-result is written here: validation is recorded against the exact clean commit in the
-release PR, and no count is carried over from another commit.
+**Not served. Not merged. On no phone.** Four commits on v166 (`71d918c`, served on
+2026-11-07 and merged into main as `2931841`), on a local branch with no remote: the seder (the owner's request of 2026-11-02),
+on it the bar fix, then the day screen's declutter, then two Rima additions on the billing
+page - the last three at the end of this entry. The first two were written on `81ecb2d`, the v166 before its review (as
+`38c34ce` and `b9ed104`), and cherry-picked. No gate result is
+written here: validation is recorded against the exact clean commit in the release PR, and
+no count is carried over from another commit.
+
+**THE HEBREW WORDS ARE THE OWNER'S.** Every string the feature shows or sends - the message
+template, the list's title, the button labels, the marks, the no-number note, the
+shared-number note - is in one block, `SEDER_TEXT` at the top of `js/ui/seder.js`. The
+owner approved them on 2026-11-07, shown the list and a man's message, and in the same
+answer took out one line: a man who is the only one of the owner's men on a site used to
+be told «👷 איתך: אין עובדים נוספים», and Rima's men can be on that site, so that site now
+has its line and nothing under it. Every string is pinned word for word in
+`tests/seder.test.mjs`, and the block's keys with them; changing one moves its pinned line
+in the same commit.
+
+What it is: in the WhatsApp dialog, under its green button, one more entry - nothing new
+on the day screen. It opens a list of the men with a site on the day being viewed, in the
+layer the group message reads: nobody marked נעדר, nobody on a הכל חופש day, nobody with
+no site, never Rima, and a man on two sites once with both. Everyone starts ticked; any
+man can be left out. One button walks the run: each tap opens `wa.me/<number>?text=` for
+the next ticked man with his own message - the day and date, his site or sites, and who
+else of the owner's men is on each by name (no line under a site where nobody is) - and the
+person presses send inside WhatsApp. Each row also has
+its own door to WhatsApp. A man is marked «נפתח בוואטסאפ», never "sent": the app cannot
+see the send. A mark stops being believed once the seder it was opened for changes (he
+was moved, a man joined his site, his number was corrected), and he is back in the run.
+
+One tap, one man (found by review, measured in Chromium and WebKit before the fix): a
+second tap while the phone is still on its way to WhatsApp used to land on the run's button
+already redrawn for the next man, opening two chats and marking both, so the man whose
+chat ended up behind the other got nothing while his row said ✓. Now, for 1.5 s after any
+door on the list is used, every door does nothing - no navigation, no mark - and the run's
+button keeps the man it just opened, whatever redraws the list meanwhile; it names the next
+man once that moment is over. Two men on the list with one number (052-884-1930 and
++972 52 884 1930 are one) are each told so on their rows, «⚠️ מספר משותף עם …», naming the
+other; both stay ticked, because two men really can share a phone and who is sent is the
+owner's call. A number shared with a man who is not working that night gets no note: one
+message goes to it, and the roster already badges it «מספר משותף».
+
+Numbers: digits only; `05XXXXXXXX` becomes `9725XXXXXXXX`; `+972`, `972` and `00972`,
+with or without the trunk zero, are kept as `9725XXXXXXXX`. Anything else - a landline,
+`+970`, another country, two numbers in one field - is «אין מספר טלפון תקין» on the row
+and cannot be sent to.
+
+Kept: who was opened and who was left out, per date, on this phone only, in Store under
+`farkadSederProgress` - fourteen evenings at most, written as an optional write so a full
+disk never spends a restore point on it. Not in the record, not in the outbox, not in the
+cloud, not in a backup, not in the rescue file, and it does not move the write fence. If
+iOS kills the home-screen app while WhatsApp is in front, the next open within twenty
+minutes brings the list back on the evening it was sending, with the next man ready.
+
+No data model change, no rules change, nothing to coordinate between phones: an older
+phone simply does not have the entry, and the progress is each phone's own.
+
+What it does NOT cover: the hand-off from an installed iPhone app to the WhatsApp app is
+the platform's (a real `<a target="_blank">` tapped by a person) and was measured in
+Chromium only, never on a phone. A man taken OFF the seder after his message was opened
+leaves the list, and nothing tells him. The entry always opens the whole day, even when
+the WhatsApp dialog was opened for one site. The 1.5 s after a tap is a judgement of how
+long a phone takes to leave for WhatsApp, not a measurement on one: a phone slower than
+that can still take a second tap for the next man. A tap that marks a man while opening
+nothing (the platform refusing the link) still marks him; his own door on the row opens
+him again.
+
+### The bottom bars on a stuck iPhone (the second commit)
+
+What it fixes. The owner's iPhone 16 Pro Max, home-screen app, 2 November 2026, 20:37: the
+tab bar and the copy/WhatsApp dock drawn about a third of the way up the screen with the day
+list running on underneath them, the date header missing from the top, until the app was
+closed. The ⋯ report read `visual=440x549` against `window=440x894` with nothing focused and
+both bars' rectangles at the bottom (y 894), so v116's correction never fired: it looked for
+the raise in the bars' rectangles, and it is not there. The reading this build acts on: iOS
+keeps the visual viewport keyboard-short after the keyboard, WebKit draws every fixed layer
+at its rectangle minus `visualViewport.offsetTop`, and offsetTop climbs to the shortfall over
+the first 345px of every scroll down - which is why the report, copied at the top of the
+page, shows the bars where they belong. While the frame is stuck the page now moves them
+back: the bars by offsetTop (or by their own rectangle's gap, if that says more - never both,
+never more than the shortfall), and by the same offsetTop every other fixed layer - every
+dialog and sheet (the seder list among them), the ⋯ panel, the days drawer, the reorder
+panel, the reminder banner - and the pinned date header by as much as it is pinned. "Stuck"
+is narrow: `navigator.standalone === true` (an iPhone's home screen only), no pinch zoom, the
+visual viewport between 150px and 70% of the screen short, nothing focused that raises keys
+or a picker when it arms, and the frame still for 600 ms. It comes off in the same frame the
+viewport is whole again. A field tapped inside a dialog the drop is holding (the picker's
+search box) does not take it away: the keys hide the bars as they always have, and the dialog
+stays where it is under the finger. No data, no rules, nothing to coordinate between phones;
+no Hebrew string is new or changed. Android, a Safari tab and a wide screen are untouched.
+
+What it does NOT cover. **It has never run on a real iPhone.** Everything above is measured
+in Node (`tests/bars.stale.test.mjs`) and in Chromium with the visual viewport faked before
+the app loads (`tests/bars.stale.browser.mjs`); no engine here can be made to push a layout
+viewport, so where a layer lands on the glass is WebKit's rule written into the tests, taken
+from public WebKit sources and one screenshot. **The trigger is unknown** - what leaves the
+visual viewport short - and nothing here prevents it; whether it also happens at the very top
+of the page was never answered. If offsetTop does not move on his phone while the bars are
+up, the drop has nothing to follow and the bars stay where v165 left them: the new ⋯ lines are
+there to say which. Sticky layers that are not fixed and not the date header (the week grid's
+header row and name column) are not moved. A field tapped while the frame is already being
+held keeps it where a whole viewport would put it, which may leave a field low in a dialog
+under the keys. Landscape on that phone is wider than 700px and is not covered.
+
+How to read the new ⋯ lines. Copy the report after the bars have been up, before closing the
+app; it is opened at the top of the page, where the drop is 0 even when it has been working,
+so most of what matters is what it did this session.
+- `body.bars-lowered` - whether a drop stands right now.
+- `bar.drop=now=… max=… stale=… times=… why=… frame=… header=…` - the drop now, the most it
+  moved the bars this session, whether the frame counts as stuck right now, how many times it
+  was found stuck, why the rule is off (`-` when on; `whole`, `settling`, `input-view`,
+  `not-home-screen`, `zoomed`, `implausible`, `no-floating-bar`), and the overlay and header
+  drops now. The `bar.*` rectangles above it include the drop: subtract `now`.
+- `bar.trigger=<what stirred the viewport> after <the last field that raised keys>` - frozen
+  each time the frame is found stuck, by the field's shape (tag, type, id, class), never its
+  value. The trigger question.
+- `bar.seen=short=… offsetTop=… pageTop=… rectGap=…` - the largest shortfall, offsetTop,
+  scroll and rectangle gap seen while the frame stood short and still, whether or not the rule
+  acted. `short≈345 offsetTop≈345`: the model holds and the drop had something to follow.
+  `short≈345 offsetTop=0` with a large `pageTop`: the model is wrong for this phone and the fix
+  did nothing - say so. `rectGap=0`: rectangles are measured from the layout viewport;
+  `rectGap≈offsetTop`: from the visual one (both are handled; it says which this phone is).
+- `ios.standalone` - the raw flag the rule reads; it must be `true` on the home-screen app.
+  (`standalone` above it is `isStandalone()`, which an installed Android app also says yes to.)
+
+The stamps stay v167 for all three commits; none has been served. The build-stamp checks
+(`tests/build.test.mjs`, `tests/gate.integrity.test.mjs`) ask that no cached file change after
+the commit that wrote the stamps, so before release the three land as one build commit or the
+stamps move. The v116 block of `tests/mobile.test.mjs` moved deliberately: its four claims are
+unchanged, the phone they are asked of is now a home-screen one with a whole visual viewport
+reading that has stood still.
+
+### The day screen, decluttered (the third commit)
+
+The owner approved the mockup on 2026-11-04 («إيه، هيك منيح»): the v167 judge's option 1, A
+and B1, with A amended so the sheet stays on the man it was opened for.
+
+What moved where.
+- **The rate select left every row of every site card**, and the overtime hours box beside it
+  with it. A row is now the man's name, the ✕, and a tag only when his day on that site is
+  not regular - «יום כפול» or «שעות נוספות», the rate's own label (`RATE_LABELS`) word for
+  word, in the colours a double day already had. «2 אתרים» stays, a little larger (14px).
+- **The man's name is the way in.** It is a target at least 44px each way and opens the
+  assign sheet for him, whose rate chips «רגיל» / «שעות נוספות» / «יום כפול» and hours box
+  were already there, each step undoable. That is where the kind, and the overtime hours, are
+  chosen now.
+- **Opened from a row, the sheet stays on him.** «נעדר», or taking him off his site and
+  putting him on another, leaves the sheet on him, and it has no forward button. Opened from
+  «נרשמו X מתוך Y» or from a row of the by-worker list, it walks the evening exactly as
+  before. (A name in the tray opens the place picker, as it always did, not the sheet.)
+- **B1: scrolled, the compact header is one row again.** v116 had put «הכל חופש» on the
+  switch's line, and the compact header hid the switch but left the line: a header 104px tall
+  around a 44px row at 440, 390 and 320 wide. Now 57.
+- **One thing the mockup did not show: a double tap on a name is one tap.** The sheet opens
+  over the row at once, and a second tap 120 ms later landed on whatever the sheet put under
+  the finger - a site's tile (a second site for him) or, where the sheet opens below the
+  finger, the backdrop (closing it). For 700 ms after a row opens it - the ✕'s own
+  `DOUBLE_TAP_GUARD_MS` - a finger on the sheet does nothing; a keyboard still acts at once.
+
+What did not change. No Hebrew string is new or changed. The record, the rates, the money
+arithmetic and every report are untouched: a rate chosen in the sheet is the same one-path
+`setRate` commit the select made, now through the sheet's undo. The by-worker list is its own
+row and is unchanged. The Rima box stays on each site card exactly as v166 drew it (whether it
+moves to the site's header line is the owner's open question, not part of this). Each row
+keeps its place key (`row:<site>:<man>`, the v166 scroll fix) and the ✕ its double-tap guard.
+The name button's screen-reader name is built from the pieces already in use - the man, ב and
+the site, the rate's label («מוחמד עודה ברחובות - הדר · יום כפול») - and takes the place of
+the select's «תעריף של … ב…».
+
+What it does NOT cover. Measured in Chromium with touch emulation at 3x
+(`tests/declutter.browser.mjs`), never on an iPhone. The row no longer says how many overtime
+hours a man has, only «שעות נוספות»: the number is in his sheet (and on the by-worker list's
+tag). Choosing a rate is now a tap on the name, a chip and «סגור» where it was one select. The
+700 ms is a judgement, as the ✕'s is: a tap on the sheet sooner than that after opening it from
+a row does nothing and has to be made again.
+
+Tests moved with it, deliberately, each for the same reason - the control it drove left the
+row: `tests/smoke.mjs` chooses the per-site rate with the sheet's chips (its arithmetic
+unchanged) and asks the man's name, not the select, to say whose day at which site it opens;
+`tests/scroll.browser.mjs` chooses «יום כפול» in the sheet and closes it, and asks its
+focused-box question of the hours box in the sheet (the focused select case is gone with the
+select); `tests/rima.browser.mjs` asks its half-typed-hours question of the sheet's box;
+`tests/mobile.test.mjs` measures the name's target at 200% text where it measured the select,
+and its comment no longer says the day has a select; `tests/bars.stale.browser.mjs` names its
+probe select for what it is.
+
+### Two Rima additions on the billing page (the fourth commit)
+
+Both approved by the owner on 2026-11-07. Nothing a man is paid from moves: pay, advances,
+pay cycles, closures and «לפי עובד» read only `plan`/`actual` by worker, as before
+(`tests/rima.test.mjs` compares every money surface byte for byte).
+
+**The workbook's `רימא` sheet carries the paper's note** («ممكن تضيفها نعم»). Under the total
+line, one empty row, then in the first column alone: «עובדי רימא בלבד. אינם נכללים בשכר. בגיליון
+החיוב כל אחד מהם נספר כיום עובד־אתר אחד.» - the paper's line with «בחיוב שלמעלה» made «בגיליון
+החיוב», because in a workbook the billing grid is another sheet. Every count above it stays a
+number a SUM reads. The CSV fallback's Rima file is written from the same rows, so it carries
+the line too. Pinned word for word.
+
+**«בלי עובדי רימא»: the invoice without Rima's men, on the same page** ("a list without
+Rima's men on the same page"). The invoice's own grid - its dates and its sites, in its order -
+with each cell counting only his men (`workersAtPlace`) and no Rima count added; its total line
+is the invoice's own «סה״כ ימי עובד־אתר». One function builds it (`invoiceWithoutRima`,
+js/model/money.js, read off the invoice itself), for the screen and the sheet alike, and with
+the Rima table it IS the invoice: every site, every day, every day's total, every site's total
+and the grand total, measured. A day billed only for Rima's men is a row of it at nothing.
+- On the page: the invoice, then «בלי עובדי רימא», then «רישום לרימא».
+- Only when the range in scope has a Rima count (otherwise it would be the invoice again), with
+  the Rima table's scope rules: one client's site chosen, it narrows to that site and the
+  dates it was billed; a client whose site had no Rima gets neither table.
+- **Screen and workbook only** («شاشة وإكسل بس»): the print stylesheet hides it and
+  `readReportPrintout` (js/ui/printout.js) leaves it out by name, so the paper and the picture
+  are what they were. In the workbook it is a sheet named `בלי עובדי רימא`, right after `חיוב`,
+  under the same condition - in the bookkeeper's file and in the client's alike, since the
+  workbook is his to hand over or not. The CSV fallback writes it as one more file,
+  `farkad-invoice-without-rima_<from>_<to>.csv`, beside the billing and Rima files, and says
+  "the files" as it already did for two.
+- No new Hebrew words but the title.
+
+What it does NOT cover: the client's workbook (one site chosen) carries the new sheet too,
+under the Rima sheet's own condition; if the owner wants a client's file to stay the billing
+grid and Rima alone, that is one condition to change. The picture and the paper were checked
+in Chromium, not on a phone's print sheet.
+
+Tests moved with it, deliberately: the sheet lists in `tests/rima.test.mjs`,
+`tests/xlsx.test.mjs` and `tests/rima.browser.mjs` gain «בלי עובדי רימא» right after `חיוב`;
+the `רימא` sheet's "last row is the total line" became "the last row of numbers is the total
+line", with the empty row and the note after it, and its column sums read the date rows only;
+the client's CSV fallback in `tests/exports.test.mjs` is three files, and its Rima file ends
+with the empty line and the note. Their arithmetic checks are unchanged.
+
+## v166 — רישום לרימא: the other company's men, counted per site (served 2026-11-07)
+
+**Served on 2026-11-07.** PR yoseffarkad1-eng/farkad#53: commit `71d918c`, merged into main
+as `2931841` (the same tree). One commit on v165 (`e34fb66`), which is what a phone that has
+not updated still runs. Owner-approved spec, 2026-11-01. No gate result is written here:
+validation is recorded against the exact clean commit in the release PR, and no count is
+carried over from another commit.
 
 Workers from another company, Rima (רימא), work on the owner's sites. Each site card on
 the day screen gains a small number field labelled `רימא`: how many of Rima's men were on

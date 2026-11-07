@@ -1667,6 +1667,10 @@ function renderInvoiceTable() {
     section.appendChild(el('p', 'hint',
         'עובד בשני אתרים נספר פעם אחת בכל אתר; ימי עובד־אתר אינם ימי נוכחות ואינם ' +
         'ימי שכר — אין לצפות שהסכומים יתאימו.'));
+    // The invoice, then the same grid without Rima's men (v167, the owner's own table -
+    // screen and workbook only), then the Rima table.
+    const withoutRima = renderWithoutRimaSection();
+    if (withoutRima) section.appendChild(withoutRima);
     const rima = renderRimaSection();
     if (rima) section.appendChild(rima);
     return section;
@@ -1693,6 +1697,10 @@ const RIMA_TITLE = 'רישום לרימא';
 const RIMA_NOTE = 'עובדי רימא בלבד. אינם נכללים בשכר. בחיוב שלמעלה כל אחד מהם נספר כיום עובד־אתר אחד.';
 const RIMA_TOTAL = 'סה״כ עובדי רימא';
 const RIMA_SHEET = 'רימא';
+// The paper's line, on the workbook's רימא sheet (v167). The owner saw it and said «ممكن
+// تضيفها نعم», 2026-11-07. One word changed for the file: in a workbook the billing grid is
+// another sheet, not the table above, so «בחיוב שלמעלה» is «בגיליון החיוב» here.
+const RIMA_SHEET_NOTE = 'עובדי רימא בלבד. אינם נכללים בשכר. בגיליון החיוב כל אחד מהם נספר כיום עובד־אתר אחד.';
 
 // The table in scope: the report's range, narrowed to the one client's site when one is
 // chosen for printing - the same narrowing the invoice above takes, by the same
@@ -1734,6 +1742,59 @@ function renderRimaSection() {
     // NOT .hint: .hint is hidden on paper, and this line is the one that says the Rima
     // total is already inside the invoice above and is nobody's pay.
     wrap.appendChild(el('p', 'report-rima-note', RIMA_NOTE));
+    return wrap;
+}
+
+// ---------------------------------------------------------------- בלי עובדי רימא (v167)
+//
+// The owner, 2026-11-07: "a list without Rima's men on the same page". The invoice's own
+// grid - its dates, its sites - counting only his men (invoiceWithoutRima, js/model/money.js).
+// With the Rima table under it, it adds up to the invoice above, cell by cell.
+//
+// SCREEN AND WORKBOOK ONLY - his choice, «شاشة وإكسل بس». The paper and the picture are what
+// the client is handed, and this is his: css/app.css hides .report-norima in print, and
+// readReportPrintout (js/ui/printout.js) leaves its table out by name. Drawn only when the
+// range in scope has a Rima count - without one it is the invoice again - and narrowed to
+// the chosen client's site by the predicate the Rima table uses, so the two agree.
+//
+// Its words are the page's own: a new title, and the invoice's total line for its total.
+const NO_RIMA_TITLE = 'בלי עובדי רימא';
+const NO_RIMA_TOTAL = 'סה״כ ימי עובד־אתר';
+
+// The table in scope, or null when there is no Rima in it. ONE function for the screen and
+// the sheet, so they cannot disagree about a number.
+function withoutRimaInScope() {
+    if (rimaInScope().places.length === 0) return null;
+    const client = scopedExportPlace();
+    return invoiceWithoutRima(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to,
+        client ? client.placeId : null);
+}
+
+function renderWithoutRimaSection() {
+    const own = withoutRimaInScope();
+    if (!own) return null;
+
+    const wrap = el('div', 'report-norima');
+    wrap.appendChild(el('h3', 'report-group report-norima-title', NO_RIMA_TITLE));
+
+    const headers = ['תאריך'].concat(own.places.map(place => place.name)).concat(['סה״כ']);
+    // The invoice grid's own date cell: weekday and dd/mm, the year on the period line.
+    const body = own.dates.map(date => {
+        const parsed = parseLocalDate(date);
+        return [`${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`]
+            .concat(own.places.map(place => own.countAt(place.placeId, date)))
+            .concat([own.dayTotal(date)]);
+    });
+    const table = buildTable(headers, body);
+    table.classList.add('norima-table');
+    table.appendChild(totalRow(
+        [NO_RIMA_TOTAL].concat(own.places.map(place => place.workerDays)).concat([own.total]),
+        headers
+    ));
+
+    const group = el('div', 'report-norima-group');
+    group.appendChild(scrollWrap(table));
+    wrap.appendChild(group);
     return wrap;
 }
 
@@ -3716,6 +3777,26 @@ function rimaSheetRows() {
             .concat([rima.dayTotal(date)]));
     });
     rows.push([RIMA_TOTAL].concat(rima.places.map(place => place.total)).concat([rima.total]));
+    // The note (v167): after the numbers and one empty row, in the first column alone, so
+    // every count above it stays a number a SUM reads. The CSV fallback's Rima file is
+    // written from these same rows, so it carries the line too.
+    rows.push([]);
+    rows.push([RIMA_SHEET_NOTE]);
+    return rows;
+}
+
+// THE «בלי עובדי רימא» SHEET (v167): the חיוב sheet's own dates and sites, his men only, every
+// count a real number, zeros included. Full dates, like every exported sheet. Null - and no
+// sheet - when the range in scope has no Rima. See withoutRimaInScope.
+function withoutRimaSheetRows() {
+    const own = withoutRimaInScope();
+    if (!own) return null;
+    const rows = [['תאריך'].concat(own.places.map(place => place.name)).concat(['סה״כ'])];
+    own.dates.forEach(date => {
+        rows.push([date].concat(own.places.map(place => own.countAt(place.placeId, date)))
+            .concat([own.dayTotal(date)]));
+    });
+    rows.push([NO_RIMA_TOTAL].concat(own.places.map(place => place.workerDays)).concat([own.total]));
     return rows;
 }
 
@@ -3729,13 +3810,21 @@ function rimaSheetRows() {
 // The רימא sheet rides with the billing grid wherever the billing grid goes - the
 // bookkeeper's file, and the client's narrowed to the client's site - and nowhere else:
 // a selected-worker export is about those men's pay, and Rima's men are not his. It is
-// added only when there is a count in scope, and LAST, so no sheet that was already in
-// the file moves.
+// added only when there is a count in scope, and LAST.
+//
+// «בלי עובדי רימא» (v167) goes with it, under the same condition, and RIGHT AFTER the
+// billing grid it is read against - the owner's order. The keys are in the file's order.
 function reportSheets() {
     const rima = rimaSheetRows();
+    const withoutRima = withoutRimaSheetRows();
     const withRima = sheets => {
-        if (rima) sheets.rima = rima;
-        return sheets;
+        const out = {};
+        Object.keys(sheets).forEach(key => {
+            out[key] = sheets[key];
+            if (key === 'invoice' && withoutRima) out.withoutRima = withoutRima;
+        });
+        if (rima) out.rima = rima;
+        return out;
     };
     if (scopedExportPlace()) return withRima({ invoice: invoiceSheetRows() });
     // A selected-worker export must not attach an unfiltered client invoice behind it.
@@ -3885,7 +3974,8 @@ async function exportReports() {
     // person needs to know the workbook is not coming back on its own.
     //
     // The client-scoped export stays scoped: the billing sheet, and the Rima table when that
-    // client's site had Rima's men (v166) - which is two files, and said as files.
+    // client's site had Rima's men (v166) - which is two files, and said as files. With Rima
+    // in scope the billing grid without Rima's men goes too (v167): three files, still files.
     if (typeof XLSX === 'undefined') {
         // WHICH OF THEM THE BROWSER ACTUALLY TOOK.
         //
@@ -3910,6 +4000,8 @@ async function exportReports() {
         // days never followed and nothing was said (since v117).
         if (sheets.payroll) hand(sheets.payroll, `farkad-payroll_${stamp}.csv`);
         if (sheets.invoice) hand(sheets.invoice, `farkad-invoice_${stamp}.csv`);
+        // Latin-first and Latin to the end, like every other file (see the workbook's name).
+        if (sheets.withoutRima) hand(sheets.withoutRima, `farkad-invoice-without-rima_${stamp}.csv`);
         if (sheets.detail) hand(sheets.detail, `farkad-detail_${stamp}.csv`);
         if (sheets.rima) hand(sheets.rima, `farkad-rima_${stamp}.csv`);
 
@@ -3949,6 +4041,9 @@ async function exportReports() {
         // client invoice, and the workbook for one ended in «היצוא נכשל».
         if (sheets.invoice) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.invoice), 'חיוב');
+        }
+        if (sheets.withoutRima) {
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.withoutRima), NO_RIMA_TITLE);
         }
         if (sheets.detail) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');

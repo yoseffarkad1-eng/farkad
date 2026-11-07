@@ -11,10 +11,53 @@ let pickerPlaceId = null;
 // one turns one tap per worker into three.
 let sheetWorkerId = null;
 
-function openAssignSheet(workerId) {
+// OPENED FROM A MAN'S ROW ON A SITE, THE SHEET IS ABOUT HIM (v167).
+//
+// The walk above is the evening's run down the roster, and the tally «נרשמו X מתוך Y» and
+// the by-worker list still open the sheet for it. A man's NAME on a site's row (js/ui/day.js,
+// renderAssignmentRow) is tapped to change HIS day - his rate, an absence, a site - and
+// walking on to somebody else after «נעדר», or after he is put back on a site, leaves the
+// person looking at a man he never asked about. So opened that way the sheet stays on him
+// (advanceSheet) and has no forward button. The owner's amendment to the declutter,
+// 2026-11-04.
+let sheetStays = false;
+
+// A DOUBLE TAP ON A NAME IS ONE TAP (v167). The sheet opens over the row the moment the name
+// is tapped, so the second tap of a double tap - or a bounce - lands on whatever the sheet
+// has put under the finger: a site's tile (a second site for him, or his own site taken
+// off), a rate, or - where the sheet opens below the finger - the backdrop above it, which
+// closes it (js/ui/modal.js). It is the ✕'s trap one layer up (secondTapTooSoon,
+// js/ui/day.js), and it gets the same answer: for DOUBLE_TAP_GUARD_MS after the sheet is
+// opened from a row, a finger on the sheet does nothing - its press, its release and its
+// click stop at the sheet. A keyboard's click (detail 0) is never a bounce, so a digit or
+// Enter still acts at once. Measured in tests/declutter.browser.mjs, both ways.
+let sheetGuardUntil = 0;
+let sheetGuardWatching = false;
+
+function sheetClock() {
+    return typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
+        ? performance.now() : Date.now();
+}
+
+function guardSheetTap(event) {
+    if (event.detail > 0 && sheetClock() < sheetGuardUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+}
+
+function openAssignSheet(workerId, options) {
     sheetWorkerId = workerId;
+    sheetStays = Boolean(options && options.stay);
     renderAssignSheet();
     const sheet = document.getElementById('assignSheet');
+    if (!sheetGuardWatching) {
+        // Capture, on the sheet itself: it runs before any tile, chip or button inside it,
+        // and stops the press before it reaches the backdrop's closer on the document.
+        ['mousedown', 'mouseup', 'click'].forEach(type => sheet.addEventListener(type, guardSheetTap, true));
+        sheetGuardWatching = true;
+    }
+    sheetGuardUntil = sheetStays ? sheetClock() + DOUBLE_TAP_GUARD_MS : 0;
     // Opening is calm; only an ADVANCE animates. A leftover swap class from the last
     // run would replay the slide on open and dilute what it signals.
     sheet.querySelector('.sheet-content').classList.remove('sheet-swap');
@@ -26,6 +69,8 @@ function closeAssignSheet() {
     document.removeEventListener('keydown', sheetKeydown);
     document.getElementById('assignSheet').style.display = 'none';
     sheetWorkerId = null;
+    sheetStays = false;
+    sheetGuardUntil = 0;
     render();
 }
 
@@ -65,6 +110,11 @@ function nextUnfilledAfter(workerId) {
 }
 
 function advanceSheet() {
+    // Opened from his row: there is no next man, only this one again (sheetStays).
+    if (sheetStays) {
+        renderAssignSheet();
+        return;
+    }
     const next = nextUnfilledAfter(sheetWorkerId);
     if (!next) {
         closeAssignSheet();
@@ -248,9 +298,12 @@ function renderAssignSheet() {
     const forwardLabel = entries.length === 0 && !absent ? 'דלג'
         : next ? `המשך אל ${isolate(next.name)}`
             : 'סיום הרשימה';
-    const forward = button(forwardLabel, 'btn-secondary sheet-fwd', advanceSheet);
-    forward.appendChild(forwardChevron());
-    actions.appendChild(forward);
+    // Not on a sheet opened from a man's row: it is about him, and goes nowhere (sheetStays).
+    if (!sheetStays) {
+        const forward = button(forwardLabel, 'btn-secondary sheet-fwd', advanceSheet);
+        forward.appendChild(forwardChevron());
+        actions.appendChild(forward);
+    }
     // "סגור", not "סיום" and certainly not "שמור". Every tap on this sheet has already
     // been written and sent by the time the finger leaves the glass - there is nothing
     // here to save, and a button that says there is teaches somebody that closing without

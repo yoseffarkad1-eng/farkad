@@ -230,7 +230,20 @@ function bottomCoverage(node) {
     // Against innerHeight, which is the layout viewport a fixed element is placed in.
     // visualViewport.height is what the keyboard and a pinch leave visible, and reading it
     // here would make the room the page reserves swing with a gesture - the v99 fault.
-    return Math.max(0, Math.round(window.innerHeight - box.top));
+    //
+    // Where the stylesheet put the bar, NOT where a drop moved it (correctRaisedBars
+    // below). The drop puts a bar back where the frame says it is; read with the drop in
+    // it, a lowered tab bar covered nothing, the crowded day lost its collapse and the
+    // undo bar its room - on the one phone that was already in trouble.
+    return Math.max(0, Math.round(window.innerHeight - (box.top - translatedBy(node, style))));
+}
+
+// How far a transform has moved this element down the screen, or 0. The bars carry no
+// transform of their own; the only one they ever get is the drop below.
+function translatedBy(node, style) {
+    const value = (style || getComputedStyle(node)).transform;
+    if (!value || value === 'none' || typeof DOMMatrixReadOnly !== 'function') return 0;
+    try { return new DOMMatrixReadOnly(value).m42 || 0; } catch (error) { return 0; }
 }
 
 // The input types a phone opens a keyboard for. Everything else an <input> can be - a
@@ -283,28 +296,353 @@ function keyboardHeight() {
     return covered > 150 ? Math.round(covered) : 0;
 }
 
-// A short visual viewport alone does not prove that fixed bars moved. Only correct
-// a measured, matching displacement; otherwise translating pushes healthy bars off
-// screen. Reset before reading so yesterday's correction cannot become today's input.
+// ---------------------------------------------------------------- the frame iOS pushed up
+//
+// THE OWNER'S PHONE, 2 November 2026, 20:37: iPhone 16 Pro Max, home screen, v165. The tab
+// bar and the dock drawn a third of the way up the screen with the day list running on
+// underneath them, and the ⋯ report copied in the same state:
+//     window=440x894  visual=440x549 scale=1.00 offsetTop=0 pageTop=0  focus=body
+//     bar.tabs=fixed top=789 bottom=894
+// Nothing focused, nothing zoomed, and a visual viewport 345px short - a keyboard's height
+// - with no keyboard under it. It lasts until the app is closed.
+//
+// WHAT iOS DOES WITH THAT. A fixed bar is laid out in the LAYOUT viewport (innerHeight)
+// and reports its rectangle there, which is why the report has it at the bottom. WebKit
+// moves the layout viewport only when the visual viewport runs into one of its edges (it
+// is PUSHED - r208213). With the visual viewport stuck at keyboard height, the first 345px
+// of every scroll down slide the visual viewport down inside a layout viewport that stays
+// put - offsetTop goes 0 to 345 - and only then does it push the layout viewport along.
+// Everything fixed is drawn at its rectangle MINUS offsetTop: at the top of the page,
+// where the ⋯ report is copied, the bars are at the real bottom; scrolled, they ride 345px
+// up, which is the screenshot. The sticky date header is missing from the top of that
+// screenshot for the same reason.
+//
+// WHY v116 NEVER FIRED. It looked for the raise in the bar's rectangle (innerHeight minus
+// rect.bottom). WebKit never puts it there - and v116's other guard subtracted offsetTop,
+// so where the bars WERE raised it found no gap at all. Its test raised the bars with a
+// stylesheet rule, the one shape a phone never produces.
+//
+// THE CORRECTION IS offsetTop: moved down by it, a bar drawn at rect - offsetTop lands on
+// the glass's own bottom. The bar's own rectangle still counts when it says more (a bar
+// whose rectangle is raised is raised - v116's case), never the two added together. It is
+// taken only while staleInset below says the frame is stuck, and it comes off, with no
+// settling, the moment that stops being true - above all when the visual viewport is
+// whole again, which arrives as a visualViewport 'resize'.
+//
+// IT CANNOT PUSH A HEALTHY BAR OFF THE GLASS. The amount is never more than the shortfall
+// and never more than offsetTop (or the rectangle's own gap). Drawn at rect - offsetTop
+// (WebKit), the bar lands exactly on the bottom; drawn at the visual viewport's bottom
+// (what features/bars-raised assumed), it lands at most on it. With a whole viewport, or
+// at the top of the page, the amount is 0.
+const STALE_FLOOR = 150;        // the keyboard floor keyboardHeight uses
+const STALE_CEILING = 0.7;      // of innerHeight - more is a launch or resume glitch
+const STALE_SETTLE_MS = 600;    // longer than a keyboard takes to go down and say so
+
+// Everything an <input> can be that iOS raises NOTHING over the page for. The rest - the
+// keys, the wheels, the date picker - shorten the visual viewport for a real reason.
+const NO_INPUT_VIEW = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range',
+    'image', 'hidden']);
+
+// Whether what has focus raises an input view. WIDER than keyboardTarget(), on purpose:
+// that one decides HIDING the bars and leaves a select out so the bars ride above its
+// wheel; this one decides whether a short viewport may be called stale, and under a
+// wheel it is not.
+function inputViewTarget() {
+    if (typeof document === 'undefined') return false;
+    const node = document.activeElement;
+    if (!node || node === document.body || node === document.documentElement) return false;
+    if (node.isContentEditable) return true;
+    if (node.tagName === 'TEXTAREA' || node.tagName === 'SELECT') return true;
+    if (node.tagName === 'INPUT') return !NO_INPUT_VIEW.has(String(node.type || 'text').toLowerCase());
+    return false;
+}
+
+// THE DECISION, as a function of one frame's readings and nothing else. Every number here
+// is one the page reads; the tests hand it the readings no headless browser produces.
+//   r.ih, r.iw          innerHeight / innerWidth - the layout viewport
+//   r.vh, r.vw, r.scale visualViewport height / width / scale
+//   r.ot, r.ol          visualViewport offsetTop / offsetLeft
+//   r.standalone        navigator.standalone - true only on an iPhone's home screen
+//   r.inputView         inputViewTarget()
+//   r.settled           nothing has stirred the viewport for STALE_SETTLE_MS
+//   r.armed             what the last decision was: settling and a focused input view
+//                       hold a stale frame back from being corrected, neither takes a
+//                       correction away
+//   r.rectGap           innerHeight minus the tab bar's bottom, the drop taken back out
+function staleInset(r) {
+    const short = r.ih - r.vh;
+    const why = [];
+    // display-mode is not enough: an installed Android app shares it, and Chrome draws a
+    // fixed bar where its rectangle says.
+    if (r.standalone !== true) why.push('not-home-screen');
+    // A pinch shortens the visual viewport exactly like a keyboard, and moves offsetTop
+    // while it pans. A near-1 scale still gives itself away in the width.
+    if (!(Math.abs(r.scale - 1) <= 0.01 && Math.abs(r.iw - r.vw) <= 1 && Math.abs(r.ol) <= 1)) {
+        why.push('zoomed');
+    }
+    if (!(short >= STALE_FLOOR)) why.push('whole');
+    else if (!(short <= STALE_CEILING * r.ih)) why.push('implausible');
+    // A field focused is a reason for the visual viewport to be short, so it blocks the
+    // ARMING. It does not take an arming away (the v167 judge's second amendment): the
+    // field is inside the frame the arming holds on the glass - the picker's search box,
+    // a dialog's name field - and taking the drop off when it is tapped lifts that dialog
+    // offsetTop up the glass under the person's finger, and holds it there until the keys
+    // have gone and the settling time has passed (r2/focus.armed.mjs: 12, -333, -333, 12).
+    if (r.inputView && !r.armed) why.push('input-view');
+    if (why.length) return { armed: false, drop: 0, why: why.join(',') };
+    if (!r.armed && !r.settled) return { armed: false, drop: 0, why: 'settling' };
+    const amount = Math.max(Number(r.ot) || 0, Number(r.rectGap) || 0);
+    return { armed: true, drop: Math.round(Math.max(0, Math.min(short, amount))), why: '-' };
+}
+
+let staleArmed = false;
+let staleWhy = 'not-measured';
+let staleArmings = 0;
+let viewportStirredAt = 0;
+let viewportStirredBy = 'boot';
+let staleTimer = 0;
+let barDropNow = 0;
+let barDropMax = 0;
+// WHAT PUT THE PHONE IN THIS STATE is the one question the 2 November report could not
+// answer. So the last thing that raised an input view and let go of it is kept - by its
+// SHAPE, tag and type and id and class, never its value - and frozen beside whatever last
+// stirred the viewport at each moment the frame is found stuck; the last of them stands.
+// In memory only.
+let inputViewLeft = '';
+let inputViewLeftAt = 0;
+let staleTrigger = '-';
+// WHETHER THE MODEL ABOVE IS THE PHONE'S. The drop is offsetTop, and offsetTop is the one
+// number nobody has yet seen move on the owner's phone: every ⋯ report is copied at the
+// top of the page, where it is 0 under this model and under the other. So the largest
+// shortfall, the largest offsetTop and the furthest scroll seen while the frame stood
+// short and still - nothing focused that raises an input view - are kept for the session,
+// whether or not the rule armed. A report after a stuck evening that says the page
+// scrolled 2000px while offsetTop never left 0 says the drop has nothing to follow, and
+// that the fix is the wrong one; offsetTop at the shortfall says it is the right one.
+//
+// And beside them the largest gap between the tab bar's rectangle and the bottom of the
+// layout viewport, the drop taken back out (the judge's fourth amendment). It says where
+// this phone measures a rectangle FROM, which nobody has seen either: 0 is the layout
+// viewport, the size of offsetTop is the visual viewport. The header's amount turns on it
+// (headerDropFor, below), and so does the reading of every bar.* line in the report.
+let seenShort = 0;
+let seenOffsetTop = 0;
+let seenPageTop = 0;
+let seenRectGap = 0;
+
+function noteShortFrame(short, offsetTop, pageTop, rectGap) {
+    if (short > seenShort) seenShort = Math.round(short);
+    if (offsetTop > seenOffsetTop) seenOffsetTop = Math.round(offsetTop);
+    if (pageTop > seenPageTop) seenPageTop = Math.round(pageTop);
+    if (rectGap > seenRectGap) seenRectGap = Math.round(rectGap);
+}
+
+// Two reads and no layout: whether the visual viewport is short of the layout viewport by
+// a keyboard's height right now. For the failsafe below, which must stay cheap.
+function viewportShortNow() {
+    const viewport = typeof window !== 'undefined' ? window.visualViewport : null;
+    return Boolean(viewport) && window.innerHeight - viewport.height >= STALE_FLOOR;
+}
+
+// Something that can move the visual viewport, or raise or lower an input view, just
+// happened. A stuck phone sends nothing afterwards, so the question is asked again from
+// here when the settling time is up, not left to an event that will never come.
+function stirViewport(kind) {
+    viewportStirredAt = Date.now();
+    viewportStirredBy = kind || 'other';
+    if (typeof setTimeout !== 'function') return;
+    if (staleTimer) clearTimeout(staleTimer);
+    staleTimer = setTimeout(() => {
+        staleTimer = 0;
+        scheduleBarMeasure();
+    }, STALE_SETTLE_MS + 40);
+}
+
+function noteInputViewLeft(event) {
+    const node = event && event.target;
+    if (!node || !node.tagName) return;
+    const tag = node.tagName;
+    const type = tag === 'INPUT' ? String(node.type || 'text').toLowerCase() : '';
+    const raises = node.isContentEditable || tag === 'TEXTAREA' || tag === 'SELECT'
+        || (tag === 'INPUT' && !NO_INPUT_VIEW.has(type));
+    if (!raises) return;
+    inputViewLeft = tag + (type ? `[${type}]` : '') + (node.id ? `#${node.id}` : '')
+        + (node.className ? '.' + String(node.className).trim().split(/\s+/).join('.') : '');
+    inputViewLeftAt = Date.now();
+}
+
 function applyBarDrop(pixels) {
     const root = document.documentElement;
-    const value = Math.max(0, Math.round(pixels)) + 'px';
+    const drop = Math.max(0, Math.round(pixels) || 0);
+    const value = drop + 'px';
     if (root.style.getPropertyValue('--bar-drop') !== value) {
         root.style.setProperty('--bar-drop', value);
     }
-    document.body.classList.toggle('bars-lowered', pixels > 0);
+    document.body.classList.toggle('bars-lowered', drop > 0);
+    barDropNow = drop;
+    if (drop > barDropMax) barDropMax = drop;
 }
 
 function correctRaisedBars() {
-    applyBarDrop(0);
+    if (typeof window === 'undefined' || !document.body) return;
+    // A hidden page is not on the glass; what iOS lays it out at for the app switcher is
+    // nobody's screen. Whatever stands, stands until the page is visible again.
+    if (document.visibilityState === 'hidden') return;
     const viewport = window.visualViewport;
-    if (!viewport || viewport.scale > 1.01 || keyboardTarget()) return;
-    const gap = window.innerHeight - viewport.height - (viewport.offsetTop || 0);
-    if (gap <= 150) return;
+    const settled = Date.now() - viewportStirredAt >= STALE_SETTLE_MS;
+    const inputView = inputViewTarget();
+    const offsetTop = viewport ? Number(viewport.offsetTop) || 0 : 0;
     const tabs = document.querySelector('.tabs');
-    if (!tabs || getComputedStyle(tabs).position !== 'fixed' || !barHeight(tabs)) return;
-    const missing = window.innerHeight - tabs.getBoundingClientRect().bottom;
-    if (missing > 150 && Math.abs(missing - gap) <= 2) applyBarDrop(missing);
+    // Only a bar that floats over the bottom is in the frame; on a wide screen the tabs
+    // sit in the header and there is nothing to lower.
+    const fixedBar = Boolean(viewport && tabs && getComputedStyle(tabs).position === 'fixed');
+    const drawn = fixedBar && barHeight(tabs) > 0;
+    // A bar the keys are hiding is still in the frame - body.kbd-open hides both bars (the
+    // stylesheet) - it only has no rectangle to read. Called "not floating" for that, the
+    // arming went the moment a field was tapped, and with it the drop holding the dialog
+    // the field is in on the glass: the half of the second amendment the rule alone
+    // cannot see, because the rule is never told the bars are hidden.
+    const underKeys = fixedBar && !drawn && document.body.classList.contains('kbd-open');
+    // innerHeight minus the tab bar's bottom, the drop taken back out: 0 where rectangles
+    // are measured from the layout viewport, offsetTop where they are measured from the
+    // visual one, the raise itself in v116's model. Nothing at all without a box.
+    const rectGap = drawn
+        ? window.innerHeight - (tabs.getBoundingClientRect().bottom - translatedBy(tabs))
+        : null;
+    if (rectGap !== null && offsetTop >= 1) rectsFromGlass = Math.abs(rectGap - offsetTop) <= 1;
+    if (viewport && settled && !inputView
+        && window.innerHeight - viewport.height >= STALE_FLOOR) {
+        noteShortFrame(window.innerHeight - viewport.height, offsetTop,
+            Number(viewport.pageTop) || 0, rectGap === null ? 0 : rectGap);
+    }
+    if (!drawn && !underKeys) {
+        staleArmed = false;
+        staleWhy = viewport ? 'no-floating-bar' : 'no-visual-viewport';
+        applyBarDrop(0);
+        applyFrameDrop(0, 0);
+        return;
+    }
+    const verdict = staleInset({
+        ih: window.innerHeight, iw: window.innerWidth,
+        vh: viewport.height, vw: viewport.width, scale: viewport.scale,
+        ot: viewport.offsetTop, ol: viewport.offsetLeft,
+        standalone: typeof navigator !== 'undefined' ? navigator.standalone : undefined,
+        inputView,
+        settled,
+        armed: staleArmed,
+        rectGap: rectGap === null ? 0 : rectGap
+    });
+    if (verdict.armed && !staleArmed) {
+        staleArmings += 1;
+        const recent = inputViewLeft && Date.now() - inputViewLeftAt < 30000;
+        staleTrigger = viewportStirredBy + (recent ? ' after ' + inputViewLeft : '');
+    }
+    staleArmed = verdict.armed;
+    staleWhy = verdict.why;
+    applyBarDrop(verdict.drop);
+    // The rest of the frame moves by offsetTop alone - no rectangle term: v116's case is a
+    // raised BAR, and nothing says a dialog was raised with it.
+    const frame = verdict.armed
+        ? Math.max(0, Math.min(offsetTop, window.innerHeight - viewport.height))
+        : 0;
+    applyFrameDrop(frame, frame ? headerDropFor(frame, rectGap) : 0);
+}
+
+// ---------------------------------------------------------------- the rest of the frame
+//
+// THE BARS ARE NOT THE ONLY THING iOS PUSHED. Every layer fixed to the layout viewport is
+// drawn offsetTop above where it belongs: the assign sheet, opened from a row half way
+// down the list, ends a third of the way up the glass with the list live underneath it -
+// a tap below the sheet lands on a row's ✕, not on the backdrop; a dialog anchored to the
+// top of a phone starts above the glass with its title; the ⋯ panel, the drawer of days
+// and the reorder panel the same. They are moved by the same offsetTop as the bars, by
+// the same rule and at the same moment (the stylesheet: body.frame-lowered).
+//
+// THE DATE HEADER IS STICKY, NOT FIXED, so it is pinned only once the page has scrolled
+// past it - and then it is pinned to the top of a layout viewport that is offsetTop above
+// the glass, which is why it is missing from the top of the 20:37 screenshot. Where it
+// would be with a whole viewport is max(where it is drawn, its pin); the difference is the
+// amount, and it is between 0 (not pinned yet: it scrolls with the page, as it should)
+// and offsetTop (pinned).
+let frameDropNow = 0;
+let headerDropNow = 0;
+// Whether this phone measures rectangles from the VISUAL viewport, as the tab bar last said
+// while it had a box and offsetTop was not 0 (at 0 the two readings agree). For the one
+// moment the tab bar cannot say: the keys are up and it is hidden.
+let rectsFromGlass = false;
+
+function headerDropFor(offsetTop, tabsGap) {
+    const header = document.querySelector('#dayView .day-header');
+    if (!header || typeof getComputedStyle !== 'function') return 0;
+    const style = getComputedStyle(header);
+    if (style.position !== 'sticky' || style.display === 'none') return 0;
+    // Another screen is up: the day's header has no box, and nothing to move.
+    if (!header.getClientRects().length) return 0;
+    const pin = parseFloat(style.top) || 0;
+    const top = header.getBoundingClientRect().top - translatePropertyY(style);
+    // WHERE IT IS DRAWN, whichever viewport the rectangle is measured from (the v167
+    // judge's first amendment). The header's rectangle is in the tab bar's coordinates and
+    // the tab bar's gap says which they are: none, and the rectangle is the layout
+    // viewport's, so the header is drawn offsetTop above it; offsetTop, and it is the visual
+    // viewport's, so the header is drawn where it says. Read as if it were always the first,
+    // the header ended up its own distance down the page off the glass under the second
+    // (r2/header.world.mjs: 60px or 120px). tests/bars.stale.test.mjs walks both.
+    const gap = tabsGap === null || tabsGap === undefined ? (rectsFromGlass ? offsetTop : 0) : tabsGap;
+    const shift = Math.max(0, Math.min(offsetTop, gap));
+    const glassTop = top - offsetTop + shift;
+    return Math.max(0, Math.min(offsetTop, pin - glassTop));
+}
+
+// The `translate` property's vertical part. It is a separate property from transform -
+// the stylesheet below uses it so as not to replace the drawer's or a sheet's own
+// transform - and getComputedStyle reports it separately.
+function translatePropertyY(style) {
+    const value = style && style.translate;
+    if (!value || value === 'none') return 0;
+    const parts = String(value).trim().split(/\s+/);
+    return parts.length > 1 ? (parseFloat(parts[1]) || 0) : 0;
+}
+
+function applyFrameDrop(frame, header) {
+    const root = document.documentElement;
+    const f = Math.max(0, Math.round(frame) || 0);
+    const h = Math.max(0, Math.round(header) || 0);
+    if (root.style.getPropertyValue('--frame-drop') !== f + 'px') root.style.setProperty('--frame-drop', f + 'px');
+    if (root.style.getPropertyValue('--header-drop') !== h + 'px') root.style.setProperty('--header-drop', h + 'px');
+    document.body.classList.toggle('frame-lowered', f > 0 || h > 0);
+    frameDropNow = f;
+    headerDropNow = h;
+}
+
+// For the ⋯ report, which can only be copied at the top of the page - where the drop is
+// 0 whether or not it has been working. So it says what it has DONE this session as well.
+function barDropReport() {
+    return `now=${barDropNow}px max=${barDropMax}px stale=${staleArmed ? 'yes' : 'no'}`
+        + ` times=${staleArmings} why=${staleWhy} frame=${frameDropNow}px header=${headerDropNow}px`;
+}
+
+function barTriggerReport() {
+    return staleTrigger;
+}
+
+function barSeenReport() {
+    return `short=${seenShort} offsetTop=${seenOffsetTop} pageTop=${seenPageTop} rectGap=${seenRectGap}`;
+}
+
+// Only the drop, without measuring the bars again. For the moments that move offsetTop
+// and nothing else - the visual viewport sliding inside the layout viewport, a scroll of
+// the page while the bars are lowered - where a whole measurement every frame is style
+// work the list does not need.
+let dropQueued = false;
+function scheduleBarDrop() {
+    if (dropQueued || barsQueued) return;
+    dropQueued = true;
+    const run = () => {
+        dropQueued = false;
+        correctRaisedBars();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 0);
 }
 
 // Publishes the keyboard's height as --kb-h and marks the page while one is open.
@@ -363,39 +701,60 @@ function scheduleBarMeasureAfterFrame() {
 function watchBottomBars() {
     if (typeof window === 'undefined' || !window.addEventListener) return;
 
-    window.addEventListener('resize', scheduleBarMeasure);
-    window.addEventListener('orientationchange', scheduleBarMeasure);
+    // Every event below that can change what the viewport is doing also STIRS it
+    // (stirViewport, above): a frame found short is not called stuck until nothing has
+    // stirred it for STALE_SETTLE_MS, and the re-ask at the end of that time is booked
+    // by the stir itself - a stuck phone sends no event to ask it.
+    const stirred = (kind, then) => () => { stirViewport(kind); then(); };
+    window.addEventListener('resize', stirred('resize', scheduleBarMeasure));
+    window.addEventListener('orientationchange', stirred('orientation', scheduleBarMeasure));
     if (window.visualViewport && window.visualViewport.addEventListener) {
-        window.visualViewport.addEventListener('resize', scheduleBarMeasure);
+        window.visualViewport.addEventListener('resize', stirred('viewport', scheduleBarMeasure));
     }
     // keyboardHeight reads what has focus, so a focus change is a measurement too - and
     // it is the one that brings the bars back when the keyboard leaves WITHOUT a resize
     // event, which on a home-screen iPhone is most of the ways it leaves. focusin and
     // focusout bubble; focus and blur do not, and a listener here would never hear them.
-    document.addEventListener('focusin', scheduleBarMeasure);
-    document.addEventListener('focusout', scheduleBarMeasureAfterFrame);
+    document.addEventListener('focusin', stirred('focusin', scheduleBarMeasure));
+    document.addEventListener('focusout', event => {
+        noteInputViewLeft(event);
+        stirViewport('focusout');
+        scheduleBarMeasureAfterFrame();
+    });
     // Backgrounded with the keyboard up and brought back without it; restored from the
     // back-forward cache. Neither sends a resize, and both once left the class standing.
-    document.addEventListener('visibilitychange', scheduleBarMeasure);
-    window.addEventListener('pageshow', scheduleBarMeasure);
+    document.addEventListener('visibilitychange', stirred('resume', scheduleBarMeasure));
+    window.addEventListener('pageshow', stirred('pageshow', scheduleBarMeasure));
     // The failsafe. If kbd-open is standing when the person next touches or scrolls the
     // page, the measurement is asked again; a class the viewport still justifies costs
     // one re-measure, a stale one comes off at the first touch instead of at the next
-    // launch. When the class is not standing this is one classList read and nothing else.
+    // launch. When no class stands, nothing is armed and the viewport is whole, this is
+    // two classList reads, one flag and two numbers, and nothing else - no layout is read.
+    // A standing DROP is asked about too, but only the drop: on the stuck phone it stands
+    // for the whole of every scroll, and a whole measurement per frame of it is jank. So
+    // is an ARMED rule with nothing lowered yet - the top of the page, where offsetTop is
+    // 0 - because the scroll that starts the drop may be the only event that ever comes;
+    // and so is a short viewport the rule has not armed for, so that what the frame did
+    // while it stood is in the ⋯ report (noteShortFrame) whichever way the rule decided.
     const recheck = () => {
-        if (document.body && (document.body.classList.contains('kbd-open')
-            || document.body.classList.contains('bars-lowered'))) scheduleBarMeasure();
+        if (!document.body) return;
+        if (document.body.classList.contains('kbd-open')) scheduleBarMeasure();
+        else if (document.body.classList.contains('bars-lowered') || staleArmed
+            || viewportShortNow()) scheduleBarDrop();
     };
     window.addEventListener('touchstart', recheck, { capture: true, passive: true });
     window.addEventListener('scroll', recheck, { capture: true, passive: true });
-    // The VISUAL viewport moving on its own, which the listener above cannot see. On a
-    // home-screen iPhone the visual viewport slides inside a layout viewport that has not
-    // moved - the keyboard going down with the page scrolled, a zoomed page panned - and
-    // that motion fires 'scroll' HERE and nothing on window. Same failsafe shape as the
-    // pair above and for the same reason: when the class is not standing this listener
-    // reads one classList entry and returns.
+    // The VISUAL viewport moving inside the layout viewport, which the listener above
+    // cannot see: offsetTop changing, and nothing on window. On the stuck phone that is
+    // EXACTLY the motion the drop has to follow - the first 345px of every scroll - so
+    // the drop is asked on every one of these, unconditionally. Gating it on a class, as
+    // this comment once said it was, would leave the drop nothing to arm it. A standing
+    // keyboard is measured whole, as before.
     if (window.visualViewport && window.visualViewport.addEventListener) {
-        window.visualViewport.addEventListener('scroll', scheduleBarMeasure);
+        window.visualViewport.addEventListener('scroll', () => {
+            if (document.body && document.body.classList.contains('kbd-open')) scheduleBarMeasure();
+            else scheduleBarDrop();
+        });
     }
     // The undo bar is shown, refilled and hidden by js/ui/undo.js without any of the
     // events above: offerUndo writes a label into it and clears style.display, and twelve
@@ -414,5 +773,9 @@ function watchBottomBars() {
     if (document.fonts && document.fonts.ready && document.fonts.ready.then) {
         document.fonts.ready.then(scheduleBarMeasure).catch(() => {});
     }
+    // The page can START inside a stuck frame: the update reload (js/ui/offline.js) runs
+    // in the same web view, and a reload does not clear what iOS is holding. Nothing will
+    // stir a page that boots into it, so boot stirs it once.
+    stirViewport('boot');
     measureBottomBars();
 }
