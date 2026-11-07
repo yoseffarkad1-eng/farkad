@@ -1,5 +1,15 @@
 # Findings — the bottom bars drawn in the wrong place, from a real iPhone
 
+> **Premise retired, v167 (2026-11-07).** This file's premise - that on iOS a `position: fixed`
+> element is anchored to the VISUAL viewport - is not WebKit's model. WebKit lays fixed and
+> sticky layers out in the LAYOUT viewport and moves that viewport only when the visual
+> viewport pushes it at one of its edges (r208213; CSSWG 7475). With the visual viewport stuck
+> short, the push draws every fixed layer `visualViewport.offsetTop` above where it belongs,
+> which can look like anchoring to the visual viewport. v116's correction was built on the
+> premise below and never fired on the owner's phone (2 November 2026); v167 replaces it -
+> `js/ui/bars.js`, "the frame iOS pushed up", and `docs/releases.md`, v167. Neither reading
+> has been measured on a phone. The evidence below stands; the inference from it does not.
+
 **The first physical-device evidence this repository has had.** One screenshot, sent by the
 owner on 3 September 2026 at 06:11 local. Nothing here was run on a phone by anybody but him;
 everything below is measured off that image and off the code.

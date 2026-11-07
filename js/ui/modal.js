@@ -21,6 +21,8 @@ const MODAL_CLOSERS = {
     workerFormModal: () => closeWorkerForm(),
     workerDaysModal: () => closeWorkerDays(),
     shareModal: () => closeShareModal(),
+    // Closing it on purpose is what stops a reload bringing it back (js/ui/seder.js).
+    sederModal: () => closeSederList(),
     migrationModal: () => closeMigrationModal(),
     // The one .modal that had no entry here, so Escape fell through to the bare
     // `display = 'none'` below and never reached closeSignInModal - which exists, and

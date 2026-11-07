@@ -513,6 +513,51 @@ function invoiceReport(schedule, fromDate, toDate) {
     });
 }
 
+// THE INVOICE WITHOUT RIMA'S MEN (v167) - «בלי עובדי רימא», on the billing page and as its
+// own sheet. The owner, 2026-11-07: "a list without Rima's men on the same page". It is the
+// invoice's own grid - its dates and its sites, in its order - with each cell counting only
+// his men, the workerIds invoiceReport put on that site that day, and no Rima count added.
+//
+// Read off invoiceByDate rather than counted a second time, so it cannot drift from the
+// invoice: for every site and day, this plus rimaReport's count IS the invoice's count, and
+// the totals add the same way (tests/rima.test.mjs holds it to that, cell by cell). A day
+// the invoice bills only for Rima's men is a row here too, at nothing - the same grid, so the
+// three tables can be read across one another.
+//
+// `onlyPlaceId` narrows it the way the billing page narrows the invoice for one client's
+// site: that site's column, and the dates that site was billed.
+//
+// Counts of people, like the invoice: nothing a man is paid from reads this.
+function invoiceWithoutRima(schedule, fromDate, toDate, onlyPlaceId) {
+    const invoice = invoiceByDate(schedule, fromDate, toDate);
+    const only = onlyPlaceId === undefined || onlyPlaceId === null ? null : String(onlyPlaceId);
+    const billed = only === null ? invoice.places
+        : invoice.places.filter(row => String(row.placeId) === only);
+
+    const places = billed.map(row => {
+        const byDate = {};
+        let workerDays = 0;
+        row.days.forEach(day => {
+            byDate[day.date] = day.workerIds.length;
+            workerDays += day.workerIds.length;
+        });
+        return { placeId: row.placeId, name: row.name, workerDays, byDate };
+    });
+
+    return {
+        dates: only === null ? invoice.dates : (billed[0] ? billed[0].days.map(day => day.date) : []),
+        places,
+        countAt(placeId, date) {
+            const row = places.find(item => String(item.placeId) === String(placeId));
+            return (row && row.byDate[date]) || 0;
+        },
+        dayTotal(date) {
+            return places.reduce((sum, row) => sum + (row.byDate[date] || 0), 0);
+        },
+        total: places.reduce((sum, row) => sum + row.workerDays, 0)
+    };
+}
+
 // Every date in the range that had any work, with each site's count. This is the shape
 // the printed invoice reads down: one row per day, one column per site.
 function invoiceByDate(schedule, fromDate, toDate) {

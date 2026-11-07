@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v166';
+const APP_VERSION = 'v167';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -142,6 +142,9 @@ function render() {
     // Only if it is open. Everything on it - the backup age, the restore points, the
     // cloud copies - is answered by state that changes while it is on screen.
     if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
+    // The same for the seder to each worker: every link on it carries a man's message,
+    // and a snapshot from another phone that moved him must move his link with it.
+    if (typeof renderSederIfOpen === 'function') renderSederIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
@@ -506,6 +509,9 @@ function bootOnce() {
     if (booted) return;
     booted = true;
     boot();
+    // A seder run the phone killed the app in the middle of - see js/ui/seder.js. Before
+    // the reminder link is read, because it stands aside for one.
+    if (typeof resumeSederRun === 'function') resumeSederRun();
     FarkadReminders.openPending();
 }
 

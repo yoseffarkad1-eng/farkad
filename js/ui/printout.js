@@ -359,7 +359,10 @@ function readReportPrintout() {
     const kind = section.classList.contains('report-invoice') ? 'חיוב' : 'שכר';
     const heading = printoutText(section.querySelector('h2'));
     const period = printoutText(section.querySelector('.report-period'));
-    const tables = [...section.querySelectorAll('table.report-table')];
+    // NOT «בלי עובדי רימא» (v167): the owner's own table, screen and workbook only - the
+    // picture goes to the client like the paper does, and the print stylesheet hides it.
+    const tables = [...section.querySelectorAll('table.report-table')]
+        .filter(table => !table.closest('.report-norima'));
     const cellsOf = tr => [...tr.children].map(printoutText);
     // Weekly and fortnightly payroll have separate tables, often with different
     // columns. Reading only the first silently omitted the whole second crew.

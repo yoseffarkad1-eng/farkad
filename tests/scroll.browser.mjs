@@ -458,17 +458,27 @@ try {
             same(`${tag}: after the place picker every count is the record's`, await screenAgrees(page), []);
         });
 
-        // 6. A rate chosen on a row - the select still focused when the redraw takes it away.
+        // 6. A rate chosen for a man on a row. v167 MOVED HOW: the rate select left the row
+        //    (the declutter), and the rate is chosen in the assign sheet his name opens - so
+        //    the name, «יום כפול» in the sheet, and «סגור». The sheet takes no finger for
+        //    DOUBLE_TAP_GUARD_MS after a row opens it (js/ui/sheet.js), hence the wait.
         await scenario(browser, tag, 'a rate', size, async page => {
             await bring(page, `() => __row('תל אביב', 'רון ביטון')`, 0.45);
             const before = await view(page);
-            await page.evaluate(() => {
-                const select = __row('תל אביב', 'רון ביטון').querySelector('select');
-                select.focus({ preventScroll: true });
-                select.value = 'double';
-                select.dispatchEvent(new Event('input', { bubbles: true }));
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-            });
+            await tap(page, `() => __row('תל אביב', 'רון ביטון').querySelector('.assign-main')`);
+            await settle(page);
+            check(`${tag}: his name opened his sheet`, await page.evaluate(() =>
+                document.getElementById('assignSheet').style.display === 'flex' && sheetWorkerId === __idOf('רון ביטון')));
+            await page.waitForTimeout(750);
+            const inSheet = word => `() => { const node = [...document.querySelectorAll('#assignSheet button')]
+                .find(one => one.textContent.trim() === '${word}');
+                if (node) { const body = node.closest('.sheet-body');
+                    if (body) body.scrollTop += node.getBoundingClientRect().top - body.getBoundingClientRect().top - 12; }
+                return node || null; }`;
+            await tap(page, inSheet('יום כפול'));
+            await settle(page);
+            same(`${tag}: behind the sheet the list has not moved`, await scrolled(page), before.y);
+            await tap(page, inSheet('סגור'));
             await settle(page);
             const after = await view(page);
             same(`${tag}: the rate is on the record`, await page.evaluate(() =>
@@ -739,22 +749,26 @@ try {
                 await page.keyboard.press('End');
                 await page.keyboard.press('Backspace');
                 await page.keyboard.type('7');
-            }],
-            ['the hours box beside a rate, holding typed hours', async (page, finger) => {
+            }, []],
+            // v167 MOVED THIS ONE: the hours box left the row with the rate select (the
+            // declutter) and lives in the assign sheet his name opens - which no render of
+            // the day takes down. The claim is the same: a render arriving while it holds
+            // typed hours records nothing. The focused rate select had no successor - the
+            // day has no select now (tests/declutter.browser.mjs) - and is gone from here.
+            ['the hours box in his sheet, holding typed hours', async (page, finger) => {
                 await page.evaluate(() => {
                     State.commit(setRate(State.schedule, State.date, __idOf('אורי עמר'), 'actual', 'p4', RATE_EXTRA, 2));
                 });
                 await settle(page);
                 await bring(page, `() => __row('חולון', 'אורי עמר')`, 0.4);
-                await reach(page, `() => __row('חולון', 'אורי עמר').querySelector('.rate-hours')`, finger);
+                await tap(page, `() => __row('חולון', 'אורי עמר').querySelector('.assign-main')`);
+                await settle(page);
+                await page.waitForTimeout(750);
+                await reach(page, `() => document.querySelector('#assignSheet .rate-hours')`, finger);
                 await page.keyboard.press('End');
                 await page.keyboard.press('Backspace');
                 await page.keyboard.type('5');
-            }],
-            ['a focused rate select', async (page, finger) => {
-                await bring(page, `() => __row('חולון', 'אורי עמר')`, 0.4);
-                await page.evaluate(() => __row('חולון', 'אורי עמר').querySelector('select').focus({ preventScroll: true }));
-            }]];
+            }, ['the assign sheet closing']]];
         // [what arrives, the commits it makes itself, the change it brings, before, what]
         const ARRIVING = [
             ['a commit elsewhere', 1, [SPARE], null,
@@ -765,8 +779,12 @@ try {
             // tests/smoke.mjs's own steps, where the first draft threw: the sheet open, the
             // day's box behind it holding digits, the sheet closed - a render and no commit.
             ['the assign sheet closing', 0, [], `spare => openAssignSheet(__idOf(spare))`, `spare => closeAssignSheet()`]];
-        for (const [focused, focus] of FOCUSED) {
+        // The third field of a FOCUSED entry names the arrivals it is not asked about: closing
+        // the sheet that holds the focused box is the person leaving that box, which records
+        // what was typed, as leaving it always has - not a render taking it away.
+        for (const [focused, focus, notAsked] of FOCUSED) {
             for (const [arriving, commits, brings, prepare, act] of ARRIVING) {
+                if (notAsked.includes(arriving)) continue;
                 await scenario(browser, tag, `${arriving} under ${focused}`, size, async page => {
                     if (prepare) {
                         await page.evaluate(([prepare, spare]) => (0, eval)(prepare)(spare), [prepare, SPARE]);
@@ -774,7 +792,7 @@ try {
                     }
                     await focus(page, !prepare);
                     const before = await page.evaluate(() => ({ day: JSON.stringify(State.schedule.days[State.date]),
-                        focused: Boolean(document.activeElement && document.activeElement.closest('#dayView')),
+                        focused: Boolean(document.activeElement && document.activeElement.closest('#dayView, #assignSheet')),
                         rima: rimaCount(State.schedule, State.date, 'p4'),
                         hours: entryExtraHours(entriesFor(State.schedule, State.date, __idOf('אורי עמר'), 'actual')[0]) }));
                     given(`${tag}: ${focused} has the focus`, before.focused, JSON.stringify(before.focused));

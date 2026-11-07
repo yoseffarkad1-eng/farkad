@@ -1063,6 +1063,23 @@ function diagnosticText(extra) {
             + ` kb=${css('--kb-h')} safe=${css('--safe-bottom')}`);
         put('body.kbd-open', document.body && document.body.classList.contains('kbd-open') ? 'yes' : 'no');
         put('body.day-compact', document.body && document.body.classList.contains('day-compact') ? 'yes' : 'no');
+        // THE DROP (js/ui/bars.js, correctRaisedBars). This report can only be opened at
+        // the top of the page, where the drop is 0 whether or not it has been working - so
+        // besides what stands now it says the most it has moved the bars this session, how
+        // many times it found the frame stuck, why it is off if it is, and what last let go
+        // of an input view before the last of those times. The bar.* rectangles above
+        // include the drop: subtract `now` to get where the stylesheet put them.
+        put('body.bars-lowered', document.body && document.body.classList.contains('bars-lowered') ? 'yes' : 'no');
+        put('bar.drop', typeof barDropReport === 'function' ? barDropReport() : 'unknown');
+        put('bar.trigger', typeof barTriggerReport === 'function' ? barTriggerReport() : 'unknown');
+        // What the frame did while it stood short, armed or not - the question the drop
+        // rests on (bars.js, noteShortFrame): the shortfall, how far offsetTop went, how
+        // far the page scrolled, and the tab bar's rectangle's own gap, which says where
+        // this phone measures rectangles from - and the raw flag the rule reads.
+        // `standalone` above is isStandalone(), which an installed Android app also
+        // answers yes to.
+        put('bar.seen', typeof barSeenReport === 'function' ? barSeenReport() : 'unknown');
+        put('ios.standalone', typeof navigator !== 'undefined' ? String(navigator.standalone) : 'unknown');
     }
 
     // THE QUEUE, and why it is not moving.

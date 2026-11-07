@@ -105,8 +105,9 @@ function secondTapTooSoon(key) {
 
 // TRUE WHILE THE DAY IS BEING TAKEN DOWN TO BE DRAWN AGAIN (v166).
 //
-// The two boxes on this screen that are saved on `change` - a site's Rima count and the
-// extra hours beside a rate - are saved when the person LEAVES them: "1" on its way to
+// The boxes on this screen that are saved on `change` - a site's Rima count, and until
+// v167 the extra hours beside a rate (they live in the assign sheet now, which no render of
+// the day takes down) - are saved when the person LEAVES them: "1" on its way to
 // "12" is nothing anybody recorded. But Chromium (the Galaxy) fires `change` on a focused,
 // edited box when the box is taken out of the page, and every render takes the whole day
 // out: a snapshot from the other phone, a late echo of this phone's own count. Whatever
@@ -135,8 +136,8 @@ let dayTearingDown = false;
 //   5. readDayScroll runs LAST, on the page the person will see.
 //
 // A new date is not kept: renderProgress sends it to the top on purpose, and dayAnchor
-// sees the date change and keeps nothing. Not kept either, still: a rate select or a Rima
-// box that has the focus is a new element after any render, like everything else here.
+// sees the date change and keeps nothing. Not kept either, still: a Rima box that has the
+// focus is a new element after any render, like everything else here.
 function renderDay() {
     const root = document.getElementById('dayView');
     if (!root) return;
@@ -1142,7 +1143,7 @@ function renderSiteCard(place) {
 // cap (RIMA_MAX) is what refuses a three-digit typo. An empty field or 0 clears the count.
 //
 // Saved on `change` - when the field is left or Enter is pressed - not on every key, the
-// same as the extra-hours box beside the rates: "1" on its way to "12" is not a count
+// same as the extra-hours box in the assign sheet: "1" on its way to "12" is not a count
 // anybody recorded.
 function renderRimaField(place) {
     const date = State.date;
@@ -1219,10 +1220,25 @@ function renderRimaField(place) {
     return row;
 }
 
+// A MAN'S ROW ON A SITE (v167): his name, the ✕, and a word only when his day there is not
+// regular.
+//
+// It used to carry the rate <select> as well, «רגיל» on every row of every card - a column
+// of the same word read thirty times an evening to find the one day that was not - and the
+// hours box beside it for overtime. The owner approved this shape on 2026-11-04 («إيه، هيك
+// منيح»), and with it where the kind is chosen now: the NAME opens the assign sheet for
+// that man (openAssignSheet with stay - it stays on him, js/ui/sheet.js), whose chips
+// «רגיל» / «שעות נוספות» / «יום כפול» and hours box were there already, each step undoable.
+//
+// The tag is the rate's own label (RATE_LABELS, js/model/schema.js), word for word: no new
+// word was made for it. The row keeps its place key (row:<site>:<man>, see renderDay) and
+// the ✕ its double-tap guard. The by-worker list is a row of its own
+// (renderDayWorkerList) and is not touched.
 function renderAssignmentRow(place, workerId) {
     const worker = State.worker(workerId);
     const entries = entriesFor(State.schedule, State.date, workerId, State.layer);
     const entry = entries.find(e => e.placeId === place.id);
+    const rate = entryRate(entry);
 
     const row = el('div', 'assign-row');
     row.dataset.anchor = 'row:' + place.id + ':' + workerId;
@@ -1237,15 +1253,22 @@ function renderAssignmentRow(place, workerId) {
         if (otherPlace) badge.title = `גם: ${otherPlace.name}`;
         name.appendChild(badge);
     }
-    row.appendChild(name);
+    // Only a day that is not regular is worded. A tag on every row would be the column of
+    // «רגיל» this replaced.
+    if (rate !== RATE_NORMAL) name.appendChild(el('span', 'assign-rate', RATE_LABELS[rate]));
 
-    // The record is what pay is calculated from, so the rate sits on the row itself
-    // rather than behind a dialog nobody will open thirty times an evening.
-    //
-    // The whole place, not its id: the control needs the site's NAME for its own label,
-    // and this is the one caller, which already holds a roster entry rather than a key
-    // off a day record.
-    row.appendChild(renderRateControl(place, workerId, entry));
+    // The whole name is the target, 44px tall at the least (css/app.css) and as wide as the
+    // row leaves it, the tag inside it. Its accessible name says the man, the site and the
+    // rate, regular or not: an eye is told a regular day by the missing tag, a screen reader
+    // is not. Shaped like the ✕ beside it (הסר את <X> מ<Y>), both names isolated.
+    if (worker) {
+        const main = button('', 'assign-main', () => openAssignSheet(workerId, { stay: true }),
+            `${isolate(worker.name)} ב${isolate(place.name)} · ${RATE_LABELS[rate]}`);
+        main.appendChild(name);
+        row.appendChild(main);
+    } else {
+        row.appendChild(name);
+    }
 
     row.appendChild(button('✕', 'btn-icon', () => {
         // The man below slides up into this row; a second tap inside DOUBLE_TAP_GUARD_MS
@@ -1256,61 +1279,6 @@ function renderAssignmentRow(place, workerId) {
     }, `הסר את ${isolate(worker ? worker.name : '')} מ${isolate(place.name)}`));
 
     return row;
-}
-
-function renderRateControl(place, workerId, entry) {
-    const placeId = place.id;
-    const wrap = el('span', 'rate-control');
-
-    const select = document.createElement('select');
-    select.className = 'rate-select';
-    // THE ONE CONTROL IN THE APP THAT HAD NO NAME. Every ＋, 💬, ☰, ⋯, ✕, ✏️, ⤒, ▲, ▼,
-    // ⤓, ₪, 🗄️ and ↩️ carries a Hebrew name, most of them with the worker's or the site's
-    // folded in. This one announced as "רגיל, תיבה משולבת" and nothing else - on a screen
-    // where four of them are visible at once, one per recorded man, and where what it
-    // sets is what the day is PRICED at.
-    //
-    // Shaped like its neighbours: the ✕ beside it says הסר את <X> מ<Y>, and the hours box
-    // in the assign sheet says שעות נוספות ב<Y>, so a site is named with ב and a man with
-    // his name. תעריף is the app's own word for the thing this picks - js/model/schema.js
-    // says תעריף שאינו מוכר when a day arrives with a rate it does not recognise - rather
-    // than a new one invented at the point of labelling. Both names are bidi-isolated,
-    // like every other name in every other label (js/ui/dom.js).
-    const worker = State.worker(workerId);
-    select.setAttribute('aria-label',
-        `תעריף של ${isolate(worker ? worker.name : workerId)} ב${isolate(place.name)}`);
-    RATES.forEach(rate => {
-        const option = document.createElement('option');
-        option.value = rate;
-        option.textContent = RATE_LABELS[rate];
-        select.appendChild(option);
-    });
-    select.value = entryRate(entry);
-    select.addEventListener('change', () => {
-        const hours = select.value === RATE_EXTRA ? entryExtraHours(entry) : 0;
-        State.commit(setRate(State.schedule, State.date, workerId, State.layer, placeId, select.value, hours));
-    });
-    wrap.appendChild(select);
-
-    if (entryRate(entry) === RATE_EXTRA) {
-        const hours = document.createElement('input');
-        hours.type = 'number';
-        hours.className = 'rate-hours';
-        hours.min = '0';
-        hours.step = '0.5';
-        hours.dir = 'ltr';
-        hours.value = entryExtraHours(entry) || '';
-        hours.placeholder = 'ש׳';
-        hours.setAttribute('aria-label', 'שעות נוספות');
-        hours.addEventListener('change', () => {
-            // Taken away by a redraw, not left by the person - see dayTearingDown.
-            if (dayTearingDown) return;
-            State.commit(setRate(State.schedule, State.date, workerId, State.layer, placeId, RATE_EXTRA, hours.value));
-        });
-        wrap.appendChild(hours);
-    }
-
-    return wrap;
 }
 
 // Everyone with nothing recorded today, as tappable chips. This tray is the safety net

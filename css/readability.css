@@ -89,7 +89,7 @@
     .site-name { font-weight: 700; }
     .site-head .site-name { font-size: 18px; white-space: normal; overflow-wrap: anywhere; }
     .wrow-name { font-size: 19px; font-weight: 750; }
-    .tag, .rate-select, .rate-hours { font-size: 16px; }
+    .tag, .rate-hours { font-size: 16px; }
     .topbar .settings-open { min-width: 44px; min-height: 44px; }
     /* The daily toolbar keeps its compact auxiliary controls. Names and amounts get
        the larger type; inflating this whole toolbar hid the first worker at 200%. */

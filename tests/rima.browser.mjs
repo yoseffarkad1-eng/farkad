@@ -26,6 +26,11 @@ const TITLE = 'רישום לרימא';
 const NOTE = 'עובדי רימא בלבד. אינם נכללים בשכר. בחיוב שלמעלה כל אחד מהם נספר כיום עובד־אתר אחד.';
 const TOTAL = 'סה״כ עובדי רימא';
 const REFUSED = 'אפשר לרשום לרימא רק מספר שלם בין 0 ל-99.';
+// v167, both pinned word for word (law 6): the invoice without Rima's men, titled and
+// totalled in words the page already had, and the workbook's note under the Rima sheet.
+const NO_RIMA = 'בלי עובדי רימא';
+const NO_RIMA_TOTAL = 'סה״כ ימי עובד־אתר';
+const SHEET_NOTE = 'עובדי רימא בלבד. אינם נכללים בשכר. בגיליון החיוב כל אחד מהם נספר כיום עובד־אתר אחד.';
 const TEN = Array.from({ length: 10 }, (_, i) => ({
     id: `p_${i}`, name: `Site ${String.fromCharCode(65 + i)}`, active: true }));
 const NAMES = ['Dan Levi', 'Omar Saad'];
@@ -461,14 +466,6 @@ async function open(width, height = 844) {
     await page.waitForTimeout(150);
     same('emptied to be typed again, it is not cleared by the redraw', await stored(), before);
 
-    const hours = page.locator('.site-grid > .site-card').filter({ hasText: 'Site C' }).locator('.rate-hours');
-    await hours.click();
-    await page.keyboard.press('End');
-    await page.keyboard.type('5');
-    await redraw();
-    await page.waitForTimeout(150);
-    same('nor are extra hours half-typed beside a rate - the pay record is as it was', await stored(), before);
-
     // And the box is a box: typed and left, it records.
     await box('Site E').click();
     await page.keyboard.type('4');
@@ -476,6 +473,21 @@ async function open(width, height = 844) {
     await page.waitForTimeout(200);
     const after = await stored();
     same('a count typed and left is recorded as ever', [after.e, after.owed], [4, ['days.2026-10-14.rima.p_4']]);
+
+    // v167 MOVED THIS ONE, and to the end of the block: the hours box left the row with the
+    // rate select (the declutter) and lives in the assign sheet Dan's name opens. A redraw of
+    // the day while it holds half-typed hours still records nothing. Last, because the sheet
+    // is left open on the box: closing it would be leaving the box, which records.
+    await page.locator('.site-grid > .site-card').filter({ hasText: 'Site C' }).locator('.assign-row')
+        .filter({ hasText: 'Dan Levi' }).locator('.assign-main').click();
+    await page.waitForTimeout(800);
+    const hours = page.locator('#assignSheet .rate-hours');
+    await hours.click();
+    await page.keyboard.press('End');
+    await page.keyboard.type('5');
+    await redraw();
+    await page.waitForTimeout(150);
+    same('nor are extra hours half-typed in his sheet - the pay record is as it was', await stored(), after);
     same('no page error on the way', errors, []);
     await context.close();
 }
@@ -825,8 +837,9 @@ async function open(width, height = 844) {
             heading: document.querySelector('.report-invoice h2').textContent,
             sheets: Object.keys(reportSheets()) };
     });
+    // v167 MOVED: the client's file gains the billing grid without Rima, right after it.
     same('a site billed only for Rima\'s men can be chosen and printed for its client',
-        rimaOnly, { client: 'Site H', heading: 'חיוב - Site H', sheets: ['invoice', 'rima'] });
+        rimaOnly, { client: 'Site H', heading: 'חיוב - Site H', sheets: ['invoice', 'withoutRima', 'rima'] });
     // On that client's paper too. Back to the printer's own media first: the screen
     // emulated above would print the screen, where the grid is hidden and the table shown.
     await page.emulateMedia({ media: null });
@@ -834,6 +847,133 @@ async function open(width, height = 844) {
     paperCarriesRimaTable(clientText, 'the Rima-only client',
         { sites: ['Site H'], dates: ['13/10'], total: ['5', '5'], rows: [['13/10', '55']] });
     await page.evaluate(() => { INVOICE_PLACE = null; render(); });
+    same('no page error on the way', errors, []);
+    await context.close();
+}
+
+// ---------------------------------------------------------------- בלי עובדי רימא (v167)
+//
+// The owner, 2026-11-07: "a list without Rima's men on the same page" - the invoice's own
+// grid, his men only. Screen and workbook only («شاشة وإكسل بس»): not on the paper and not
+// in the picture, which are the client's. Only when the range in scope has Rima.
+{
+    suite('בלי עובדי רימא on the screen: the invoice, then it, then רישום לרימא');
+
+    const { page, errors, context } = await open(1100);
+    await page.evaluate(() => { showView('reports'); REPORT_SECTION = 'sites'; INVOICE_PLACE = null; render(); });
+    const table = () => page.evaluate(() => {
+        const node = document.querySelector('.report-invoice .report-norima');
+        if (!node) return null;
+        const precedes = (a, b) => Boolean(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+        return {
+            visible: node.offsetParent !== null && node.getBoundingClientRect().height > 0,
+            title: (node.querySelector('h3') || {}).textContent,
+            headers: [...node.querySelectorAll('thead th')].map(th => th.textContent),
+            rows: [...node.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent)),
+            total: [...node.querySelectorAll('tfoot td')].map(td => td.textContent),
+            order: [precedes(document.querySelector('.report-invoice .invoice-grid'), node),
+                precedes(node, document.querySelector('.report-invoice .report-rima'))]
+        };
+    });
+    const shown = await table();
+    check('it is drawn and on the screen', Boolean(shown && shown.visible), JSON.stringify(shown));
+    same('under the invoice and above רישום לרימא', shown && shown.order, [true, true]);
+    same('titled in the pinned words', shown && shown.title, NO_RIMA);
+    same('the invoice\'s own columns', shown && shown.headers, ['תאריך', 'Site A', 'Site B', 'Site C', 'Site H', 'סה״כ']);
+    same('his men only, on the invoice\'s own days - the Rima-only day empty', shown && shown.rows, [
+        ['שני 12/10', '1', '1', '', '', '2'],
+        ['שלישי 13/10', '', '', '', '', ''],
+        ['רביעי 14/10', '', '', '1', '', '1']]);
+    same('its total line, in the invoice\'s words', shown && shown.total, [NO_RIMA_TOTAL, '1', '1', '1', '', '3']);
+    same('on the screen, cell by cell: it plus רישום לרימא is the invoice', await page.evaluate(() => {
+        const read = selector => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const heads = [...node.querySelectorAll('thead th')].map(th => th.textContent);
+            const out = {};
+            [...node.querySelectorAll('tbody tr')].forEach(tr => [...tr.children].forEach((td, i) => {
+                if (i === 0 || i === heads.length - 1) return;
+                out[`${tr.children[0].textContent}|${heads[i]}`] = Number(td.textContent || 0);
+            }));
+            return out;
+        };
+        const bill = read('.report-invoice .invoice-grid table');
+        const own = read('.report-invoice .report-norima table');
+        const rima = read('.report-invoice .report-rima table');
+        if (!bill || !own || !rima) return 'missing';
+        return Object.keys(bill).filter(key => (own[key] || 0) + (rima[key] || 0) !== bill[key]);
+    }), []);
+    same('it names nobody', await page.evaluate(names => {
+        const node = document.querySelector('.report-norima');
+        return node ? names.filter(name => node.textContent.includes(name)) : null;
+    }, NAMES), []);
+
+    suite('בלי עובדי רימא is not in the picture');
+    const picture = await page.evaluate(() => readReportPrintout());
+    same('the picture is still the invoice grid and the Rima table, nothing between',
+        picture.groups.map(group => group.groupTitle), ['', TITLE]);
+    same('no group in it carries the table\'s title or a second worker-site-day total line',
+        picture.groups.filter(group => group.groupTitle === NO_RIMA
+            || (group.totals[0] || [])[0] === NO_RIMA_TOTAL).length, 1);
+
+    suite('בלי עובדי רימא is not on paper');
+    await page.emulateMedia({ media: 'print' });
+    const onPaper = await page.evaluate(() => ({
+        own: (n => (n ? getComputedStyle(n).display : 'absent'))(document.querySelector('.report-norima')),
+        rima: getComputedStyle(document.querySelector('.report-rima')).display,
+        grid: getComputedStyle(document.querySelector('.report-invoice .invoice-grid')).display
+    }));
+    same('the print stylesheet hides it, and leaves the invoice grid and the Rima table',
+        [onPaper.own, onPaper.rima !== 'none', onPaper.grid !== 'none'], ['none', true, true]);
+    await page.emulateMedia({ media: null });
+    const text = readPdf(await page.pdf({ format: 'A4', printBackground: true })).pages.map(pageText).join('\n');
+    check('a real printout does not carry its title', says(text, 'לרימא') && !says(text, NO_RIMA), text.slice(0, 160));
+    same('and carries the worker-site-day total line once - the invoice\'s own',
+        times(text, NO_RIMA_TOTAL) + times(text, reversed(NO_RIMA_TOTAL)), 1);
+    paperCarriesRimaTable(text, 'with the table hidden, the paper as it was');
+
+    suite('בלי עובדי רימא follows the client\'s site, and is not there without Rima');
+    const narrowed = await page.evaluate(() => { INVOICE_PLACE = 'p_1'; render(); return true; }) && await table();
+    same('one client\'s site: that column and the days it was billed',
+        narrowed && [narrowed.headers, narrowed.rows, narrowed.total],
+        [['תאריך', 'Site B', 'סה״כ'], [['שני 12/10', '1', '1']], [NO_RIMA_TOTAL, '1', '1']]);
+    const rimaOnly = await page.evaluate(() => { INVOICE_PLACE = 'p_7'; render(); return true; }) && await table();
+    same('a site billed only for Rima\'s men: its column, empty', rimaOnly && [rimaOnly.headers, rimaOnly.rows],
+        [['תאריך', 'Site H', 'סה״כ'], [['שלישי 13/10', '', '']]]);
+    same('a client whose site had no Rima: no such table, and no Rima table',
+        await page.evaluate(() => { INVOICE_PLACE = 'p_0'; render();
+            return [Boolean(document.querySelector('.report-norima')), Boolean(document.querySelector('.report-rima'))]; }),
+        [false, false]);
+    same('a range with no Rima in it: the invoice alone',
+        await page.evaluate(() => { INVOICE_PLACE = null; REPORT_RANGE.from = '2026-10-14'; REPORT_RANGE.to = '2026-10-15'; render();
+            return [Boolean(document.querySelector('.report-invoice .invoice-grid')),
+                Boolean(document.querySelector('.report-norima')), Boolean(document.querySelector('.report-rima'))]; }),
+        [true, false, false]);
+
+    suite('the workbook, written by the shipped library and read back');
+    const book = await page.evaluate(async () => {
+        REPORT_RANGE.from = '2026-10-02'; REPORT_RANGE.to = '2026-10-15'; INVOICE_PLACE = null; render();
+        if (!(await loadXlsx())) return null;
+        let captured = null;
+        const write = XLSX.writeFile;
+        XLSX.writeFile = (wb, name) => { captured = { bytes: XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), name }; };
+        try { await exportReports(); } finally { XLSX.writeFile = write; }
+        if (!captured) return null;
+        const back = XLSX.read(captured.bytes, { type: 'array' });
+        const rows = name => (back.Sheets[name]
+            ? JSON.parse(JSON.stringify(XLSX.utils.sheet_to_json(back.Sheets[name], { header: 1, blankrows: true }))) : null);
+        return { names: back.SheetNames, own: rows('בלי עובדי רימא'), rima: rows('רימא') };
+    });
+    // The hand-over dialog that follows the file; closed, it writes nothing (askChoice).
+    await page.keyboard.press('Escape');
+    same('its sheets: בלי עובדי רימא right after חיוב, רימא last', book && book.names,
+        ['שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא']);
+    same('the sheet without Rima: the billing grid\'s days and sites, his men only, as numbers', book && book.own, [
+        ['תאריך', 'Site A', 'Site B', 'Site C', 'Site H', 'סה״כ'],
+        ['2026-10-12', 1, 1, 0, 0, 2], ['2026-10-13', 0, 0, 0, 0, 0], ['2026-10-14', 0, 0, 1, 0, 1],
+        [NO_RIMA_TOTAL, 1, 1, 1, 0, 3]]);
+    same('the רימא sheet: its total line, an empty row, then the note word for word', book && book.rima && book.rima.slice(-3),
+        [[TOTAL, 3, 5, 8], [], [SHEET_NOTE]]);
     same('no page error on the way', errors, []);
     await context.close();
 }
@@ -869,6 +1009,12 @@ for (const [width, everywhere] of [[320, false], [390, false], [320, true]]) {
         };
     });
     check('the page does not run off the side', m.page && m.inside, JSON.stringify(m));
+    same('the table without Rima is drawn, and inside the screen', await page.evaluate(() => {
+        const node = document.querySelector('.report-norima');
+        if (!node) return null;
+        const box = node.getBoundingClientRect();
+        return box.left >= -1 && box.right <= innerWidth + 1;
+    }), true);
     same('columns: the date, the sites that had Rima, the total', m.columns, everywhere ? 12 : 4);
     check('a day card lists only the sites that had Rima that day',
         everywhere ? m.cards[1].length === 12 : JSON.stringify(m.cards[1]) === JSON.stringify(['שלישי 13/10', 'Site H', 'סה״כ']),

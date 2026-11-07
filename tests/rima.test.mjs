@@ -39,6 +39,13 @@ const TITLE = 'רישום לרימא';
 const NOTE = 'עובדי רימא בלבד. אינם נכללים בשכר. בחיוב שלמעלה כל אחד מהם נספר כיום עובד־אתר אחד.';
 const TOTAL = 'סה״כ עובדי רימא';
 const SHEET = 'רימא';
+// v167, the owner's yes to both (2026-11-07, «ممكن تضيفها نعم»): the paper's line under the
+// Rima table, on the workbook's רימא sheet with «בחיוב שלמעלה» made «בגיליון החיוב»; and the
+// invoice without Rima's men, on the billing page and as a sheet, titled and totalled in
+// words the page already had.
+const SHEET_NOTE = 'עובדי רימא בלבד. אינם נכללים בשכר. בגיליון החיוב כל אחד מהם נספר כיום עובד־אתר אחד.';
+const NO_RIMA = 'בלי עובדי רימא';
+const NO_RIMA_TOTAL = 'סה״כ ימי עובד־אתר';
 const REFUSED = 'אפשר לרשום לרימא רק מספר שלם בין 0 ל-99.';
 
 const WORKERS = () => [
@@ -540,25 +547,33 @@ function heldCards(box) {
 
     suite('the workbook: a last sheet of real numbers, and the first sheet untouched');
     const sheets = run(d, 'reportSheets()');
-    same('the sheets are the three there were, then רימא', Object.keys(sheets), ['payroll', 'invoice', 'detail', 'rima']);
+    // v167 MOVED: «בלי עובדי רימא» rides right after the billing grid whenever there is Rima.
+    same('the sheets: pay, billing, the billing without Rima, detail, then רימא', Object.keys(sheets),
+        ['payroll', 'invoice', 'withoutRima', 'detail', 'rima']);
     const sheet = sheets.rima;
     same('header: date, the Rima sites, total', sheet[0], ['תאריך', 'הרצליה', 'תל אביב', 'פרדסיה', 'סה״כ']);
     same('a Rima-only day is a row, with its full date', sheet.find(r => r[0] === '2026-10-09'), ['2026-10-09', 0, 5, 0, 5]);
-    same('the last row is the pinned total line', sheet[sheet.length - 1], [TOTAL, 14, 5, 19, 38]);
-    check('every count is a number, so a SUM works', sheet.slice(1).every(r => r.slice(1).every(cell => typeof cell === 'number')),
+    // v167 MOVED: the total line is the last row of NUMBERS; an empty row and the note follow.
+    same('the last row of numbers is the pinned total line', sheet[sheet.length - 3], [TOTAL, 14, 5, 19, 38]);
+    same('then an empty row, then the note in the first column', sheet.slice(-2), [[], [SHEET_NOTE]]);
+    check('every count is a number, so a SUM works', sheet.slice(1, -2).every(r => r.slice(1).every(cell => typeof cell === 'number')),
         JSON.stringify(sheet));
-    const body = sheet.slice(1, -1);
+    const body = sheet.slice(1, -3);
     same('the date rows add up to the total row, column by column',
         [1, 2, 3, 4].map(col => body.reduce((sum, r) => sum + r[col], 0)), [14, 5, 19, 38]);
     same('and each row\'s own total is its sites added', body.map(r => r[1] + r[2] + r[3] === r[4]), body.map(() => true));
     same('the pay sheet\'s header did not gain a column', sheets.payroll[0], JSON.parse(before).sheet[0]);
     same('the pinned words are the ones reports.js says', [d.global('RIMA_TITLE'), d.global('RIMA_NOTE'),
         d.global('RIMA_TOTAL'), d.global('RIMA_SHEET')], [TITLE, NOTE, TOTAL, SHEET]);
+    same('and the sheet\'s note is the paper\'s line, «בחיוב שלמעלה» made «בגיליון החיוב», word for word',
+        [(() => { try { return d.global('RIMA_SHEET_NOTE'); } catch (error) { return null; } })(),
+            NOTE.replace('בחיוב שלמעלה', 'בגיליון החיוב')], [SHEET_NOTE, SHEET_NOTE]);
 
     suite('the company file names nobody');
     run(d, "REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';");
     const client = run(d, 'reportSheets()');
-    same('one client\'s file is the billing grid and that site\'s Rima, nothing else', Object.keys(client), ['invoice', 'rima']);
+    same('one client\'s file is the billing grid, it without Rima, and that site\'s Rima, nothing else', Object.keys(client),
+        ['invoice', 'withoutRima', 'rima']);
     same('narrowed to that client\'s site', client.rima[0], ['תאריך', 'הרצליה', 'סה״כ']);
     const text = JSON.stringify(client);
     const names = WORKERS().map(w => w.name).concat(['דוד', 'סמיר']);
@@ -571,6 +586,64 @@ function heldCards(box) {
     same('a selected-worker export is about those men\'s pay and carries no Rima sheet',
         Object.keys(run(d, 'reportSheets()')), ['payroll', 'detail']);
     run(d, 'REPORT_WORKERS = null;');
+
+    // ------------------------------------------------------------ בלי עובדי רימא (v167)
+    //
+    // The owner, 2026-11-07: "a list without Rima's men on the same page". The invoice's
+    // own grid - its dates, its sites - counting only his men. ONE function builds it for
+    // the screen and the sheet; here it is held against the invoice and the Rima table, cell
+    // by cell: his men plus Rima's IS the invoice, everywhere, and nothing else is in it.
+    suite('בלי עובדי רימא: the invoice\'s grid with his men only - and with the Rima table, the invoice');
+    const tryRun = code => { try { return run(d, code); } catch (error) { return { threw: String(error && error.message) }; } };
+    check('one model function builds it', tryRun("typeof invoiceWithoutRima") === 'function');
+    const own = tryRun(`invoiceWithoutRima(State.schedule, '${FROM}', '${TO}')`) || {};
+    const bill = d.call('invoiceByDate', d.State.schedule, FROM, TO);
+    const counted = d.call('rimaReport', d.State.schedule, FROM, TO);
+    same('the invoice\'s own dates', own.dates, bill.dates);
+    same('the invoice\'s own sites, in its order', (own.places || []).map(p => [p.placeId, p.name]),
+        bill.places.map(p => [p.placeId, p.name]));
+    const cellsOf = fn => bill.dates.flatMap(date => bill.places.map(p => [date, p.placeId, fn(p.placeId, date)]));
+    const ownAt = (placeId, date) => (typeof own.countAt === 'function' ? own.countAt(placeId, date) : NaN);
+    same('every site, every day: his men only - the men the record puts on that site',
+        cellsOf(ownAt).filter(([date, placeId, got]) =>
+            got !== d.call('workersAtPlace', d.State.schedule, date, placeId, 'actual').length), []);
+    same('every site, every day: this plus the Rima count is the invoice\'s count',
+        cellsOf((placeId, date) => ownAt(placeId, date) + counted.countAt(placeId, date) - bill.countAt(placeId, date))
+            .filter(([, , diff]) => diff !== 0), []);
+    same('every day: its total plus that day\'s Rima is the invoice\'s day',
+        bill.dates.filter(date => (typeof own.dayTotal === 'function' ? own.dayTotal(date) : NaN) + counted.dayTotal(date)
+            !== bill.places.reduce((sum, p) => sum + bill.countAt(p.placeId, date), 0)), []);
+    same('every site: its worker-site days plus its Rima total is the invoice\'s',
+        bill.places.filter(p => (((own.places || []).find(o => o.placeId === p.placeId) || {}).workerDays)
+            + ((counted.places.find(r => r.placeId === p.placeId) || { total: 0 }).total) !== p.workerDays).map(p => p.placeId), []);
+    same('and the totals: his 5 and Rima\'s 38 are the invoice\'s 43', [own.total, counted.total, bill.total], [5, 38, 43]);
+    same('one client\'s site narrows it to that site and the dates it was billed',
+        (o => o && o.places ? { columns: o.places.map(p => p.placeId), dates: o.dates, total: o.total } : o)(
+            tryRun(`invoiceWithoutRima(State.schedule, '${FROM}', '${TO}', 'p_01')`)),
+        { columns: ['p_01'], dates: ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07'], total: 3 });
+
+    suite('בלי עובדי רימא in the workbook: right after חיוב, numbers, the same as the screen');
+    const own2 = run(d, 'reportSheets()').withoutRima || null;
+    same('header: the date, the invoice\'s sites, the total', own2 && own2[0], ['תאריך', 'הרצליה', 'תל אביב', 'פרדסיה', 'סה״כ']);
+    same('a row per invoice date, full dates, every count a number - Rima-only days included, at nothing',
+        own2 && own2.slice(1, -1), [
+            ['2026-10-04', 1, 1, 0, 2], ['2026-10-05', 1, 1, 0, 2], ['2026-10-06', 1, 0, 0, 1],
+            ['2026-10-07', 0, 0, 0, 0], ['2026-10-09', 0, 0, 0, 0], ['2026-10-12', 0, 0, 0, 0]]);
+    same('its total line, in the invoice\'s own words', own2 && own2[own2.length - 1], [NO_RIMA_TOTAL, 3, 2, 0, 5]);
+    same('the sheet is the model\'s table, cell for cell', own2 && own2.slice(1, -1).map(r => r.slice(1, -1)),
+        bill.dates.map(date => bill.places.map(p => ownAt(p.placeId, date))));
+    same('the pinned words are the ones reports.js says', [tryRun('NO_RIMA_TITLE'), tryRun('NO_RIMA_TOTAL')], [NO_RIMA, NO_RIMA_TOTAL]);
+    check('it names nobody and pays nobody', own2 !== null && !names.some(name => JSON.stringify(own2).includes(name))
+        && !/400|350|500/.test(JSON.stringify(own2)), JSON.stringify(own2));
+    run(d, "REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';");
+    const scopedOwn = run(d, 'reportSheets()').withoutRima || null;
+    same('one client\'s site: narrowed to it', scopedOwn, [['תאריך', 'הרצליה', 'סה״כ'],
+        ['2026-10-04', 1, 1], ['2026-10-05', 1, 1], ['2026-10-06', 1, 1], ['2026-10-07', 0, 0], [NO_RIMA_TOTAL, 3, 3]]);
+    run(d, `REPORT_SECTION = 'workers'; INVOICE_PLACE = null; REPORT_RANGE.from = '2026-09-01'; REPORT_RANGE.to = '2026-09-30';`);
+    same('a range with no Rima: no such sheet - it would be the invoice again', Object.keys(run(d, 'reportSheets()')),
+        ['payroll', 'invoice', 'detail']);
+    run(d, `REPORT_RANGE.from = '${FROM}'; REPORT_RANGE.to = '${TO}';`);
+    same('and building it moved no shekel', money(), after);
 }
 
 // ---------------------------------------------------------------- ten sites
