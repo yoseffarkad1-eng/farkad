@@ -1,0 +1,161 @@
+/* ================================================================ G1 — the foundations
+   A CSS-only MOCKUP, injected after css/app.css and css/readability.css. Nothing here
+   changes what is recorded, priced, synced or printed: screen only, by media query.
+
+   One direction: quiet surfaces, one strong primary per screen, fewer boxes.
+     - three radii (6 / 8 / 12, and 20 for sheets and dialogs), one spacing rhythm
+     - FOUR button looks: filled primary, tonal secondary, ghost, and the WhatsApp green
+     - borders stop carrying the layout: tonal fills and soft dividers do, so the dark
+       scheme is no longer a lattice of light-grey boxes
+     - two weights (500 / 700) and 800 only for the hero numbers
+   Text sizes are NOT reduced anywhere: v140's reading preferences hold. */
+@media screen {
+
+/* ---------------------------------------------------------------- tokens */
+:root {
+    --r-xs: 6px;
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 20px;
+    --radius: var(--r-md);
+    --radius-sm: var(--r-sm);
+    /* The fill a primary button is painted with, apart from --accent (which is also the
+       colour of accent TEXT and must stay pale in the dark scheme to be readable). */
+    --accent-fill: #1f4b7a;
+    --on-fill: #ffffff;
+    /* WhatsApp's button, the one pressed every evening: a real green, white on it 5.2:1. */
+    --ok-fill: #0f7a6d;
+    /* The one border that still has a job: around a field somebody types into. */
+    --line-ctl: #8a98aa;
+    --line: #c1ccd8;
+    --line-soft: #dde4ec;
+    --shadow: 0 1px 2px rgb(20 32 46 / 6%);
+}
+:root[data-theme="dark"] {
+    --line: #2a3746;
+    --line-soft: #223040;
+    --line-ctl: #5b6f85;
+    --accent-fill: #2f6fc9;
+    --on-fill: #ffffff;
+    --ok-fill: #0f7a6d;
+    --accent-soft: #223a56;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --line: #2a3746;
+        --line-soft: #223040;
+        --line-ctl: #5b6f85;
+        --accent-fill: #2f6fc9;
+        --on-fill: #ffffff;
+        --ok-fill: #0f7a6d;
+        --accent-soft: #223a56;
+    }
+}
+
+/* ---------------------------------------------------------------- type */
+button, h1, h2, h3, strong, .field-label, .wrow-name, .report-tile-name, .seder-name,
+.advance-worker-card strong, #rosterView .roster-details > strong { font-weight: 700; }
+.report-tile-value, .advance-balance > strong, .invoice-bars-total strong,
+#reportsView .report-payroll tfoot td:last-child,
+.report-payroll .report-table tbody td.cell-net { font-weight: 800; }
+.settings-head h2, .crew-header h1, .reports-toolbar .reports-heading { font-size: 26px; }
+.modal-content h3 { font-size: 21px; }
+.sheet-head h3 { font-size: 27px; }
+
+/* ---------------------------------------------------------------- the four buttons */
+button {
+    border-radius: var(--r-md);
+    border: 1px solid transparent;
+    background: var(--accent-fill);
+    color: var(--on-fill);
+    font-weight: 700;
+}
+button:hover { filter: none; }
+button:active { filter: brightness(.92); }
+
+/* Tonal: a soft fill of the surface two steps up, no outline. */
+.btn-secondary, .place-btn, .settings-nav button, .chip-off, .report-browse-tools .report-cycle-nav button {
+    background: var(--surface-2);
+    color: var(--ink);
+    border-color: transparent;
+    box-shadow: none;
+}
+.chip-off { color: var(--ink-2); }
+/* Ghost: text or glyph alone. The ✕, the ⋯, "אחר כך", undo and redo. */
+.btn-icon, .topbar .settings-open, #settingsBtn, .day-steps .step-btn, .banner .btn-icon {
+    background: transparent;
+    border-color: transparent;
+    color: var(--ink-2);
+    box-shadow: none;
+}
+.btn-icon:hover, .topbar .settings-open:hover, .day-steps .step-btn:hover { background: var(--surface-2); color: var(--ink); }
+.btn-success, .seder-go { background: var(--ok-fill); color: #fff; border-color: transparent; }
+.btn-add { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.btn-danger { background: var(--danger-bg); color: var(--danger); border-color: transparent; }
+.chip-on { background: var(--accent-fill); color: var(--on-fill); border-color: transparent; }
+.report-output-actions > summary { background: var(--accent-fill); color: var(--on-fill); border-radius: var(--r-md); }
+.week-phone-date[aria-pressed="true"], .dd-today { background: var(--accent-fill); color: var(--on-fill); border-color: transparent; }
+
+/* The segmented switch: one tonal track, the chosen half filled. */
+.layer-toggle, .day-tools .mode-toggle, .reports-controls .report-section-toggle {
+    background: var(--surface-2);
+    border-radius: var(--r-md);
+    padding: 3px;
+    gap: 3px;
+}
+.layer-toggle button { border-radius: 9px; }
+.layer-on, .mode-quiet .layer-on, .day-tools .mode-quiet .layer-on,
+.reports-controls .report-section-toggle .layer-on {
+    background: var(--accent-fill);
+    color: var(--on-fill);
+    box-shadow: none;
+}
+.layer-off, .mode-quiet .layer-off { background: transparent; color: var(--ink-2); }
+.layer-off:hover { background: transparent; }
+
+/* ---------------------------------------------------------------- surfaces */
+.site-card, .tray, .worker-list, .roster-panel, #rosterView .roster-panel, .settings-group,
+.reports-controls, .range-bar, .advance-card, .advance-balance, #reportsView .report-worker-tile,
+.report-worker-picker, .invoice-bars, #reportsView .invoice-bars, .week-phone-panel, .bulk-row,
+.held-row, .issue, .setup-card, .reorder-row, #rosterView .roster-row, .day-header, .progress,
+#reportsView .report-payroll tbody tr, #reportsView .report-payroll tfoot tr, .report-table tr,
+.undo-bar, .banner, .drawer-day {
+    border-radius: var(--r-md);
+    border-color: var(--line-soft);
+}
+.modal-content { border-radius: var(--r-lg); border: 1px solid var(--line-soft); }
+.sheet-content { border-radius: var(--r-lg) var(--r-lg) 0 0; }
+@media (min-width: 641px) { .sheet-content { border-radius: var(--r-lg); } }
+.settings-card-icon { border-radius: var(--r-md); }
+.site-head-color { border-radius: var(--r-sm); }
+.site-head-btn { border-radius: var(--r-sm); }
+.tag-place, .sheet-status, .site-count, .wday-chip { border-radius: var(--r-sm); }
+.badge, .assign-rate, .tag-rate, .tag, .crew-cycle { border-radius: var(--r-xs); }
+.tabs { border-top-color: var(--line-soft); box-shadow: none; }
+.day-actions { border-top-color: var(--line-soft); box-shadow: none; }
+.topbar { border-bottom-color: var(--line-soft); }
+.wrow { border-bottom-color: var(--line-soft); }
+.site-head, .picker-row, .seder-row, .roster-row, .report-table th, .report-table td { border-color: var(--line-soft); }
+#rosterView .roster-row { border-color: var(--line-soft); }
+
+/* Fields keep a border a finger can find; everything else lets go of its outline. */
+.modal-content input, .modal-content textarea, .modal-content select, select,
+.crew-search-field input, .picker-search, .rima-input, .rate-hours, .advance-form input,
+.range-bar input, #advancesView > input, .period-closure input, #reportWorkerSearch,
+.day-tools input[type="date"], .diagnostic-text {
+    border: 1px solid var(--line-ctl);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+}
+.picker-search, .crew-search-field input, #reportWorkerSearch { background: var(--surface-2); border-color: transparent; }
+
+/* The update banner: one line again - the span no longer insists on 200px beside two
+   buttons, and "אחר כך" is a ghost beside "רענן עכשיו" instead of a row of its own. */
+.banner span { min-width: 0; flex: 1 1 160px; }
+.banner button { flex: 0 0 auto; }
+.banner-info .btn-secondary { background: var(--surface); color: var(--accent); }
+
+/* The sync chip and the brand: the strip above the day stays quiet. */
+.topbar .brand strong { color: var(--ink-3); font-weight: 700; }
+
+}

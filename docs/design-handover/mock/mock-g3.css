@@ -1,0 +1,380 @@
+/* ================================================================ G3 — every other screen
+   CSS-only MOCKUP (mock-g3.js moves a few nodes and builds the bands), injected after
+   app.css, readability.css, mock-g1.css and mock-g2.css. Screen only.
+
+   The language, carried from the day screen the owner approved (2026-11-08):
+     - every screen opens with the same blue band: its title, its one or two tools, and ⋯
+     - one filled primary per screen; secondaries tonal; glyph buttons ghost
+     - lists are rows with dividers, not twelve boxes; cards keep a soft edge only
+     - the WhatsApp green is the only green button, everywhere
+     - dialogs: 20px corners, 21px title, filled primary + tonal cancel, stacked choices
+   No text size is reduced. 44px targets and 16px inputs hold. */
+@media screen {
+
+/* ---------------------------------------------------------------- the strip above every screen */
+@media (max-width: 700px) {
+    .topbar .brand, .topbar .topbar-actions, .topbar .sync-chip { display: none; }
+    .topbar { padding: 0; margin: 0; gap: 0; border: 0; }
+}
+
+/* ---------------------------------------------------------------- the band (built by mock-g3.js) */
+.view-band {
+    background: var(--band);
+    color: var(--band-ink);
+    margin: 0 calc(-1 * var(--page-pad, 12px)) 10px;
+    padding: 4px 10px 8px;
+    padding-top: max(4px, env(safe-area-inset-top));
+    box-shadow: 0 2px 10px rgb(0 0 0 / 25%);
+}
+@media (min-width: 701px) { .view-band { margin: 0 0 12px; border-radius: 12px; } }
+.band-row { display: flex; align-items: center; gap: 6px; min-height: 44px; }
+.band-row + .band-row { margin-top: 6px; gap: 8px; }
+.band-title { flex: 1 1 auto; min-width: 0; text-align: center; line-height: 1.15; }
+.band-title strong { display: block; font-size: 19px; color: var(--band-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.band-title .band-sub { display: block; color: rgb(255 255 255 / 82%); font-size: 14px; font-variant-numeric: tabular-nums; }
+.band-row-1.band-start .band-title { text-align: start; padding-inline-start: 6px; }
+.band-row-1.band-start .band-title strong { font-size: 22px; }
+.view-band .btn-icon, .view-band .btn-nav, .view-band .band-back {
+    min-width: 44px; min-height: 44px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border-color: transparent; color: var(--band-ink); box-shadow: none; border-radius: 12px;
+}
+.view-band .btn-icon:hover, .view-band .btn-nav:hover, .view-band .band-back:hover { background: var(--band-soft); color: var(--band-ink); }
+.view-band .btn-nav .nav-word { display: none; }
+.view-band .btn-nav svg { width: 16px; height: 16px; }
+.view-band .band-back svg { width: 22px; height: 22px; }
+.view-band .day-more svg { width: 26px; height: 26px; display: block; }
+.view-band .day-more { position: relative; }
+.view-band .day-more::after {
+    content: ''; position: absolute; top: 5px; inset-inline-end: 5px; width: 11px; height: 11px;
+    border-radius: 50%; border: 2px solid var(--band); display: none;
+}
+.view-band .day-more.sync-warn::after { display: block; background: #fbbf24; }
+.view-band .day-more.sync-danger::after { display: block; background: #f87171; }
+/* Tonal-on-band: the chips and secondary buttons that live inside the band. */
+.view-band .band-chip, .view-band .crew-shortcuts button, .view-band .week-today-action {
+    min-height: 44px; padding: 0 14px;
+    background: var(--band-soft); color: var(--band-ink); border: 0; border-radius: 12px;
+    font-size: 15px; font-weight: 700; white-space: nowrap; box-shadow: none;
+}
+.view-band .crew-shortcuts { display: flex; gap: 8px; }
+/* The segmented switch inside a band: white half = chosen. */
+.view-band .layer-toggle, .view-band .mode-toggle, .view-band .mode-toggle.mode-quiet, .view-band .band-seg {
+    display: flex; flex: 0 1 auto; margin: 0; padding: 3px; gap: 2px;
+    background: var(--band-soft); border-radius: 12px;
+}
+.view-band .layer-toggle button, .view-band .mode-quiet .layer-off, .view-band .mode-quiet .layer-on, .view-band .band-seg button {
+    min-height: 40px; padding: 0 14px; font-size: 16px; font-weight: 700; border-radius: 9px; white-space: nowrap; box-shadow: none; border: 0;
+}
+.view-band .layer-off, .view-band .mode-quiet .layer-off, .view-band .band-seg button { background: transparent; color: rgb(255 255 255 / 88%); }
+.view-band .layer-on, .view-band .mode-quiet .layer-on, .view-band .band-seg button[aria-pressed="true"] { background: #fff; color: var(--band); }
+/* «הפקת דוח» in the reports band: the white primary chip, its menu unchanged. */
+.view-band .report-output-actions > summary { background: #fff; color: var(--band); border-radius: 12px; min-height: 44px; font-size: 16px; }
+
+/* ---------------------------------------------------------------- crew (צוות) */
+#rosterView .crew-header { display: none; }
+#rosterView .roster-panel { padding: 0; border: 0; background: transparent; margin-bottom: 18px; }
+#rosterView .panel-head { margin: 0 0 8px; padding: 0 4px 0 0; border: 0; min-height: 44px; }
+#rosterView .panel-head h2 { font-size: 17px; color: var(--ink-2); font-weight: 700; }
+#rosterView .panel-head .btn-add { background: var(--accent-fill); color: #fff; border: 0; border-radius: 12px; min-height: 44px; padding: 0 16px; font-size: 16px; font-weight: 700; }
+#rosterView .crew-search { margin-bottom: 8px; }
+#rosterView .crew-search > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+#rosterView .crew-search-field input { background: var(--surface-2); border: 0; border-radius: 12px; min-height: 48px; font-size: 16px; }
+#rosterView .crew-tools { display: none; }                 /* behind ⋯ */
+#rosterView #workerList, #rosterView #placeList, #rosterView #vehicleList {
+    background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden;
+}
+#rosterView .roster-row { padding: 8px 6px 8px 2px; margin: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; background: transparent; gap: 6px; min-height: 60px; }
+#rosterView .roster-row:last-child { border-bottom: 0; }
+#rosterView .roster-details { padding-inline-start: 10px; }
+#rosterView .roster-details > strong { font-size: 19px; display: block; line-height: 1.3; }
+#rosterView .roster-details > .tag, #rosterView .crew-cycle { display: inline; background: transparent; padding: 0; color: var(--ink-3); font-size: 14px; font-weight: 600; margin: 0; }
+#rosterView .roster-details > .tag::after { content: ' · '; }
+#rosterView .roster-details p, #rosterView .roster-details .roster-meta, #rosterView .roster-details > span:not(.tag) { display: inline; color: var(--ink-3); font-size: 14px; margin: 0; }
+/* The status: a word with a dot, not a green block. */
+#rosterView .worker-active-toggle, .worker-active-toggle.is-active, .worker-active-toggle {
+    background: transparent !important; border: 0 !important; color: var(--ink-3) !important;
+    font-size: 14px; font-weight: 700; min-height: 44px; min-width: 44px; padding: 0 8px; box-shadow: none !important;
+}
+#rosterView .worker-active-toggle.is-active { color: var(--ok) !important; }
+#rosterView .worker-active-toggle::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; margin-inline-end: 6px; vertical-align: 1px; }
+/* «עוד ···» → a ghost ⋯ */
+#rosterView .crew-edit { background: transparent; border: 0; color: var(--ink-2); font-size: 0; min-width: 44px; min-height: 44px; border-radius: 12px; }
+#rosterView .crew-edit::before { content: '•••'; font-size: 14px; letter-spacing: 1px; font-weight: 800; }
+#rosterView .roster-row .tag-place { border-radius: 8px; }
+
+/* The empty crew: no search, no tools, one sentence and the one button that fixes it. */
+body.mock-empty .crew-search, body.mock-empty .crew-tools { display: none !important; }
+body.mock-empty #rosterView #workerList, body.mock-empty #rosterView #placeList { border: 0; background: transparent; }
+body.mock-empty #rosterView #workerList .hint, body.mock-empty #rosterView #placeList .hint { text-align: center; padding: 18px 12px; font-size: 16px; color: var(--ink-2); }
+
+/* ---------------------------------------------------------------- the reorder panel */
+.reorder-head { background: var(--band); color: #fff; border: 0; padding-top: max(6px, env(safe-area-inset-top)); }
+.reorder-head h2, .reorder-head .reorder-sub { color: #fff; }
+.reorder-head .reorder-sub { color: rgb(255 255 255 / 80%); }
+.reorder-head .btn-icon { color: #fff; }
+.reorder-row { border-radius: 12px; border-color: var(--line-soft); }
+.reorder-row button { background: transparent; border: 0; color: var(--ink-2); }
+.reorder-row .btn-secondary { background: var(--surface-2); color: var(--ink); border-radius: 10px; }
+.reorder-foot .btn-add { background: var(--accent-fill); color: #fff; }
+
+/* ---------------------------------------------------------------- week */
+#weekView .week-header { display: none; }
+#weekView .week-print-title { display: none; }
+#weekView .week-phone-back { display: none; }                /* the band's switch does this */
+#weekView .week-phone-dates { gap: 6px; }
+#weekView .week-phone-date { background: var(--surface-2); border: 0; border-radius: 12px; min-height: 52px; color: var(--ink); }
+#weekView .week-phone-date[aria-pressed="true"] { background: var(--accent-fill); color: #fff; }
+#weekView .week-phone-panel { border: 1px solid var(--line-soft); border-radius: 12px; }
+#weekView .week-phone-panel h2 { font-size: 19px; }
+#weekView .week-phone-open { background: var(--accent-fill); color: #fff; border: 0; border-radius: 12px; min-height: 48px; font-size: 16px; font-weight: 700; }
+#weekView .week-phone-worker { border-bottom: 1px solid var(--line-soft); min-height: 52px; }
+#weekView .week-table th { background: var(--surface-2); color: var(--ink-2); font-weight: 700; border-color: var(--line-soft); }
+#weekView .week-table td { border-color: var(--line-soft); }
+#weekView .week-table tfoot td { background: var(--surface-2); font-weight: 800; }
+#weekView .week-strip, #weekView .table-scroll { border-radius: 12px; }
+#weekView .week-legend { margin-top: 10px; }
+#weekView .week-grid-hint, #weekView .week-phone-grid-hint { color: var(--ink-3); }
+
+/* ---------------------------------------------------------------- reports */
+#reportsView .reports-toolbar { display: none; }
+#reportsView .reports-controls { background: transparent; border: 0; padding: 0; margin-bottom: 8px; }
+#reportsView .reports-controls > details { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; margin-bottom: 8px; }
+#reportsView .reports-controls > details > summary { min-height: 52px; padding: 0 14px; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+#reportsView .report-range-heading span { color: var(--ink-3); font-weight: 600; font-size: 15px; }
+#reportsView .range-chips { padding: 4px 12px 12px; }
+#reportsView .range-chips .chip-off { background: var(--surface-2); color: var(--ink); border: 0; border-radius: 10px; }
+#reportsView .range-chips .chip-on { background: var(--accent-fill); color: #fff; border: 0; border-radius: 10px; }
+#reportsView .range-bar { margin: 0 12px 12px; background: transparent; border: 0; padding: 0; }
+#reportsView .report-search-tools, #reportsView .finance-actions, #reportsView .report-search-count, #reportsView .report-worker-list { margin-inline: 12px; }
+#reportsView .report-worker-list { margin-bottom: 12px; }
+#reportsView .report-worker-choice { min-height: 48px; border-radius: 10px; }
+#reportsView .report-worker-choice input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent-fill); }
+#reportsView .report h2 { font-size: 20px; }
+#reportsView .report-period { color: var(--ink-3); }
+#reportsView .report-browse-tools .btn-secondary { background: var(--surface-2); border: 0; border-radius: 10px; }
+#reportsView .report-group { font-size: 17px; color: var(--ink-2); }
+#reportsView .report-worker-tile { border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); }
+#reportsView .report-tile-value { font-weight: 800; }
+#reportsView .report-tile-open { color: var(--accent); }
+#reportsView .report-table th { background: var(--surface-2); border-color: var(--line-soft); }
+#reportsView .report-table td { border-color: var(--line-soft); }
+#reportsView .table-scroll { border-radius: 12px; }
+#reportsView .invoice-picker .chip-on { background: var(--accent-fill); color: #fff; border: 0; }
+#reportsView .invoice-picker .chip-off { background: var(--surface-2); border-width: 0 0 0 4px; border-radius: 10px; }
+#reportsView .invoice-bars { border: 1px solid var(--line-soft); border-radius: 12px; }
+#reportsView .invoice-bars-total { background: var(--accent-soft); border-radius: 10px; }
+#reportsView .report-explanation summary { color: var(--accent); }
+body.mock-empty #reportsView .reports-controls { display: none; }
+body.mock-empty #reportsView .report .hint { text-align: center; padding: 24px 12px; font-size: 16px; color: var(--ink-2); }
+
+/* the worker's days (the modal) */
+#workerDaysModal .worker-detail-back { background: transparent; border: 0; color: var(--accent); padding-inline: 0; }
+#workerDaysModal .wday { border-color: var(--line-soft); min-height: 52px; }
+#workerDaysModal .wday-chip { background: var(--surface-2); border-radius: 8px; }
+#workerDaysModal .wday-total { background: var(--surface-2); border-radius: 10px; }
+#workerDaysModal .wday-actions .btn-success { background: var(--wa-fill); color: var(--wa-ink); }
+
+/* ---------------------------------------------------------------- advances (מקדמות) */
+#advancesView > h2 { display: none; }
+#advancesView > .btn-secondary:first-child, #advancesView > h2 + .btn-secondary { display: none; }   /* back / סידור live in the band */
+#advancesView > p.hint { color: var(--ink-3); font-size: 15px; margin: 0 2px 8px; }
+#advancesView > input { background: var(--surface-2); border: 0; border-radius: 12px; min-height: 48px; font-size: 16px; margin-bottom: 8px; }
+#advancesView .advance-workers { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden; display: block; }
+#advancesView .advance-worker-card { background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: 0 14px; min-height: 60px; align-items: center; width: 100%; }
+#advancesView .advance-worker-card:last-child { border-bottom: 0; }
+#advancesView .advance-worker-card strong { font-size: 19px; }
+#advancesView .advance-worker-card span { font-size: 19px; font-weight: 750; color: var(--accent); }
+#advancesView .advance-worker-card.is-zero span, #advancesView .advance-worker-card span.is-zero { color: var(--ink-3); font-weight: 600; font-size: 16px; }
+#advancesView .advance-balance { border-radius: 16px; padding: 18px 20px; }
+#advancesView .advance-balance > span { color: var(--ink-2); font-size: 15px; font-weight: 700; }
+#advancesView .advance-balance > strong { font-size: 36px; font-weight: 800; color: var(--accent); }
+#advancesView .finance-actions button:first-child:not(.btn-secondary) { background: var(--accent-fill); color: #fff; border: 0; }
+#advancesView .finance-actions .btn-secondary { background: var(--surface-2); color: var(--ink); border: 0; }
+#advancesView > .btn-secondary { background: var(--surface-2); border: 0; }
+#advancesView h3 { font-size: 17px; color: var(--ink-2); margin: 16px 2px 8px; }
+#advancesView .advance-card { border-color: var(--line-soft); border-radius: 12px; }
+#advancesView .wday-ledger summary { color: var(--accent); }
+
+/* ---------------------------------------------------------------- pay day (the main session's feature, in this language) */
+.payday-door {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--accent-soft); border: 0; border-radius: 16px; padding: 14px 16px; margin: 0 0 12px;
+}
+.payday-door-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--accent-fill); color: #fff; display: grid; place-items: center; flex: 0 0 auto; }
+.payday-door-icon svg { width: 26px; height: 26px; }
+.payday-door-text { flex: 1 1 auto; min-width: 0; }
+.payday-door-text strong { display: block; font-size: 18px; }
+.payday-door-text span { color: var(--ink-2); font-size: 15px; }
+.payday-door-go { min-height: 44px; min-width: 104px; flex-shrink: 0; background: var(--accent-fill); color: #fff; border: 0; border-radius: 12px; font-size: 16px; font-weight: 700; }
+.payday-period { color: var(--ink-3); font-size: 15px; margin: 0 2px 4px; }
+.payday-lead { color: var(--ink-2); margin: 0 2px 12px; font-size: 15px; }
+.payday-row { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; padding: 12px 14px; margin: 0 0 10px; }
+.payday-row-error { border-color: var(--danger); }
+.payday-paid { border-color: var(--line-soft); }
+.payday-row-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.payday-row-top strong { font-size: 19px; overflow-wrap: anywhere; }
+.payday-earned { color: var(--ink-2); font-size: 15px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.payday-mid { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; min-height: 44px; }
+.payday-owed { font-size: 15px; line-height: 1.4; color: var(--ink-2); }
+.payday-owed strong { color: var(--ink); font-size: 17px; }
+.payday-owed small { display: block; color: var(--ink-3); font-size: 14px; }
+.payday-none { color: var(--ink-3); }
+.payday-ded { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--ink-2); font-weight: 700; }
+.payday-ded input { font: inherit; font-size: 18px; font-weight: 700; width: 104px; min-height: 48px; padding: 8px 10px; border: 1px solid var(--line-ctl); border-radius: 10px; background: var(--surface-2); color: var(--ink); text-align: center; font-variant-numeric: tabular-nums; }
+.payday-row-error .payday-ded input { border-color: var(--danger); }
+.payday-result { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 16px; }
+.payday-net { font-weight: 800; font-size: 18px; }
+.payday-after { color: var(--ink-3); }
+.payday-total { background: var(--accent-soft); border-radius: 16px; padding: 18px 20px; margin: 14px 0 12px; }
+.payday-total > span { color: var(--ink-2); font-size: 15px; font-weight: 700; }
+.payday-total > strong { display: block; font-size: 38px; font-weight: 800; color: var(--accent); margin: 6px 0; }
+.payday-total p { margin: 0; color: var(--ink-2); }
+.payday-go { width: 100%; min-height: 54px; font-size: 17px; font-weight: 700; background: var(--accent-fill); color: #fff; border: 0; border-radius: 14px; margin-top: 4px; }
+.payday-chip { padding: 4px 10px; border-radius: 999px; font-size: 14px; font-weight: 700; flex-shrink: 0; background: var(--ok-bg); color: var(--ok); }
+.payday-paid-line { margin: 6px 0 0; font-size: 17px; font-weight: 700; }
+.payday-left { margin-top: 2px; color: var(--ink-3); }
+.payday-fix { margin: 8px 0 0; }
+.payday-fix .btn-secondary { background: var(--surface-2); border: 0; }
+.payday-done { background: var(--ok-bg); border-radius: 16px; padding: 18px 20px; margin: 0 0 12px; }
+.payday-done > span { color: var(--ok); font-weight: 700; }
+.payday-done > strong { display: block; font-size: 38px; font-weight: 800; color: var(--ink); margin: 6px 0; }
+.payday-done p { margin: 0; color: var(--ink-2); }
+.payday-hint { color: var(--ink-3); font-size: 14px; margin: 8px 2px 0; }
+
+/* ---------------------------------------------------------------- settings (behind ⋯) */
+.settings-head { background: var(--band); color: #fff; border: 0; padding-top: max(8px, env(safe-area-inset-top)); }
+.settings-head .settings-eyebrow { color: rgb(255 255 255 / 80%); }
+.settings-head h2 { color: #fff; font-size: 26px; }
+.settings-head .settings-close { background: transparent; border: 0; color: #fff; }
+.settings-nav { background: var(--band); border: 0; padding: 0 12px 10px; gap: 8px; box-shadow: 0 2px 10px rgb(0 0 0 / 25%); }
+.settings-nav button { background: var(--band-soft); color: #fff; border: 0; border-radius: 12px; font-weight: 700; }
+.settings-nav button:hover { background: rgb(255 255 255 / 24%); color: #fff; }
+.settings-section-title h3 { font-size: 20px; }
+.settings-group { border-color: var(--line-soft); border-radius: 12px; }
+.settings-card-icon { background: var(--accent-soft); color: var(--accent); border-radius: 12px; }
+.settings-group .btn-secondary { background: var(--surface-2); border: 0; border-radius: 12px; color: var(--ink); }
+.settings-group .settings-status { background: transparent; border: 0; padding: 0; }
+.settings-group .push-reminder-enable { background: var(--accent-fill) !important; color: #fff !important; border: 0 !important; }
+.settings-group .backup-primary { background: var(--accent-fill); color: #fff; border: 0; border-radius: 12px; }
+.settings-group-backup { border-color: var(--line-soft); }
+.settings-panel .app-version span { background: var(--surface-2); }
+.push-reminder-times > div { background: var(--accent-soft); border-radius: 12px; }
+
+/* ---------------------------------------------------------------- dialogs */
+.modal-content { border-radius: 20px; border: 0; padding: 20px 18px 18px; box-shadow: 0 20px 60px rgb(0 0 0 / 45%); }
+.modal-content h3 { font-size: 21px; margin: 0 0 6px; }
+.modal-content .picker-context, .modal-content > .hint:first-of-type { color: var(--ink-3); }
+.modal-content input[type="text"], .modal-content input[type="email"], .modal-content input[type="password"],
+.modal-content input[type="tel"], .modal-content input[type="number"], .modal-content input[type="date"],
+.modal-content textarea, .modal-content select, #askInput {
+    background: var(--surface-2); border: 1px solid transparent; border-radius: 12px; min-height: 48px; font-size: 16px;
+}
+.modal-content input:focus-visible, .modal-content textarea:focus-visible, .modal-content select:focus-visible { border-color: var(--accent-fill); }
+.modal-actions { gap: 8px; margin-top: 14px; }
+.modal-actions button { min-height: 48px; border-radius: 12px; font-size: 16px; font-weight: 700; flex: 1 1 0; }
+.modal-actions button:not(.btn-secondary):not(.btn-icon):not(.btn-success):not(.btn-danger) { background: var(--accent-fill); color: #fff; border: 0; }
+.modal-actions .btn-secondary { background: var(--surface-2); color: var(--ink); border: 0; }
+.modal-actions .btn-success { background: var(--wa-fill); color: var(--wa-ink); border: 0; }
+.ask-choices button { background: var(--surface-2) !important; color: var(--ink) !important; border: 0 !important; }
+.ask-choices button:first-child { background: var(--accent-fill) !important; color: #fff !important; }
+.form-more { background: transparent; border: 0; padding: 0; }
+.form-more > summary { color: var(--accent); font-weight: 700; min-height: 44px; display: flex; align-items: center; }
+.worker-info { border-color: var(--line-soft); }
+.worker-history { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; }
+.worker-danger { border-top-color: var(--line-soft); }
+.worker-danger .btn-danger { background: var(--danger-bg); color: var(--danger); border: 0; }
+
+/* pickers */
+.picker-search, .picker-search-tools input { background: var(--surface-2); border: 0; border-radius: 12px; min-height: 48px; }
+.picker-row { min-height: 56px; border-color: var(--line-soft); padding: 4px 2px; }
+.picker-row .btn-add { background: var(--accent-fill); color: #fff; border: 0; border-radius: 10px; min-height: 44px; padding: 0 14px; font-weight: 700; }
+.picker-row .btn-on { background: var(--ok-bg); color: var(--ok); border: 0; border-radius: 10px; min-height: 44px; font-weight: 700; }
+.picker-row-on { background: transparent; }
+.picker-name { font-size: 18px; font-weight: 700; }
+.picker-actions .btn-secondary { background: var(--surface-2); border: 0; border-radius: 12px; min-height: 48px; }
+.place-choice { gap: 8px; }
+.place-btn { background: var(--surface-2); border: 0; border-radius: 12px; min-height: 56px; font-size: 17px; font-weight: 700; }
+.place-choice-dot { width: 14px; height: 14px; border-radius: 50%; }
+
+/* the assign sheet */
+.sheet-content { border-radius: 20px 20px 0 0; border: 0; box-shadow: 0 -10px 40px rgb(0 0 0 / 45%); }
+.sheet-head { border-bottom: 1px solid var(--line-soft); }
+.sheet-head h3 { font-size: 24px; }
+.sheet-meta { color: var(--ink-3); }
+.sheet-status { border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
+.sheet-status-recorded { background: var(--ok-bg); color: var(--ok); }
+.sheet-place { border-radius: 12px; min-height: 56px; border: 2px solid transparent; }
+.sheet-place-on { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px #fff; }
+.sheet-note { color: var(--ink-3); }
+.sheet-rates .layer-toggle, .sheet-rate-row .layer-toggle { background: var(--surface-2); border-radius: 12px; padding: 3px; }
+.sheet-rate-row .layer-on { background: var(--accent-fill); color: #fff; }
+.sheet-rate-row .layer-off { color: var(--ink-2); }
+.rate-hours { background: var(--surface-2); border: 1px solid var(--line-ctl); border-radius: 10px; min-height: 44px; }
+.sheet-actions { gap: 8px; }
+.sheet-actions button { min-height: 48px; border-radius: 12px; font-weight: 700; font-size: 16px; }
+.sheet-actions .btn-secondary { background: var(--surface-2); color: var(--ink); border: 0; }
+.sheet-actions .sheet-fwd { background: var(--accent-fill); color: #fff; border: 0; flex: 1 1 auto; white-space: nowrap; }
+.sheet-actions .btn-secondary:last-child { background: transparent; color: var(--ink-2); }
+
+/* the day drawer */
+.day-drawer { border-radius: 0 20px 20px 0; }
+@media (max-width: 700px) { .day-drawer { border-radius: 20px 0 0 20px; } }
+.drawer-head { background: var(--band); color: #fff; border: 0; }
+.drawer-head h3 { color: #fff; }
+.drawer-head .btn-icon { color: #fff; }
+.drawer-today { background: var(--accent-fill); color: #fff; border: 0; border-radius: 12px; min-height: 48px; font-weight: 700; }
+.drawer-week-title { color: var(--ink-3); }
+.drawer-day { border-radius: 10px; min-height: 48px; }
+.drawer-day.dd-on { background: var(--accent-soft); }
+.dd-today { background: var(--accent-fill); color: #fff; border-radius: 6px; }
+
+/* WhatsApp and the seder */
+#shareModal .share-styles .chip-on { background: var(--accent-fill); color: #fff; border: 0; border-radius: 10px; }
+#shareModal .share-styles .chip-off { background: var(--surface-2); color: var(--ink); border: 0; border-radius: 10px; }
+#shareModal .share-warning { background: var(--warn-bg); color: var(--warn); border: 0; border-radius: 12px; }
+#shareModal textarea { background: var(--surface-2); border: 0; border-radius: 12px; font-size: 16px; }
+#shareModal .modal-actions { flex-wrap: wrap; }
+#shareModal .modal-actions .btn-success { flex: 1 1 100%; min-height: 52px; font-size: 17px; }
+#shareModal .modal-actions .seder-entry { flex: 1 1 100%; }
+#shareModal .modal-actions .btn-secondary:not(.seder-entry) { background: transparent; color: var(--ink-2); flex: 1 1 40%; }
+#sederModal .seder-row { border-color: var(--line-soft); min-height: 56px; }
+#sederModal .seder-go { background: var(--wa-fill); color: var(--wa-ink); border: 0; border-radius: 12px; min-height: 52px; font-size: 17px; font-weight: 700; }
+#sederModal .seder-note { background: var(--warn-bg); color: var(--warn); border: 0; border-radius: 12px; }
+#sederModal .seder-foot .btn-secondary { background: transparent; color: var(--ink-2); border: 0; }
+
+/* ---------------------------------------------------------------- banners and the undo bar */
+/* One line: the sentence wraps inside its own box, the buttons never drop under it. */
+.banner { border-radius: 12px; border-inline-start: 0; padding: 8px 10px 8px 12px; gap: 10px; align-items: center; flex-wrap: nowrap; }
+.banner span { flex: 1 1 0; min-width: 0; white-space: normal; }
+.banner::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.banner-warn { background: var(--warn-bg); }
+.banner-danger { background: var(--danger-bg); }
+.banner-info { background: var(--accent-soft); }
+.banner span { min-width: 0; flex: 1 1 160px; font-weight: 600; }
+.banner .btn-secondary { background: var(--accent-fill); color: #fff; border: 0; border-radius: 10px; min-height: 44px; font-weight: 700; }
+.banner-warn .btn-secondary, .banner-danger .btn-secondary { background: rgb(255 255 255 / 14%); color: inherit; }
+.banner .btn-icon { min-width: 44px; min-height: 44px; }
+.banner-fold .banner-sum { min-height: 44px; }
+.banner-fold .banner-go { border: 0; background: rgb(255 255 255 / 14%); border-radius: 10px; }
+.undo-bar { border-radius: 14px; padding: 8px 10px 8px 14px; font-size: 15px; }
+.undo-bar .btn-secondary { background: var(--accent-fill); color: #fff; border: 0; border-radius: 10px; min-height: 44px; }
+
+/* A heading that takes focus when its dialog opens keeps a ring a keyboard user can see,
+   drawn off the text rather than as a box around it. */
+h2:focus-visible, h3:focus-visible, .settings-head h2:focus-visible, .modal-content h3:focus-visible, .reorder-head h2:focus-visible {
+    outline: 2px solid var(--accent-fill); outline-offset: 6px; border-radius: 8px;
+}
+.settings-head h2:focus-visible, .reorder-head h2:focus-visible { outline-color: rgb(255 255 255 / 55%); }
+/* A node the mock moved into a band, or replaced by one. */
+.band-moved { display: none !important; }
+#rosterView .crew-cycle::after { content: ' · '; }
+body.mock-empty #advancesView > input { display: none; }
+body.mock-empty #advancesView .advance-workers { background: transparent; border: 0; text-align: center; color: var(--ink-2); padding: 18px 12px; }
+
+/* ---------------------------------------------------------------- the first evening (setup card) */
+.setup-card { border: 0; background: var(--surface); border-radius: 16px; padding: 24px 18px; text-align: center; }
+.setup-card button:not(.btn-secondary) { background: var(--accent-fill); color: #fff; border: 0; border-radius: 12px; min-height: 48px; font-size: 16px; font-weight: 700; }
+.setup-card .btn-secondary, .setup-alt { background: var(--surface-2); color: var(--ink); border: 0; border-radius: 12px; }
+
+}
