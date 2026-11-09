@@ -9,6 +9,8 @@
 <title>פרקד - רישום עבודה</title>
 <link rel="stylesheet" href="css/app.css" onerror="this.dataset.loadFailed='true'">
 <link rel="stylesheet" href="css/readability.css" onerror="this.dataset.loadFailed='true'">
+<!-- v169: the one look. Last, because it is a layer over the two above - see its header. -->
+<link rel="stylesheet" href="css/design.css" onerror="this.dataset.loadFailed='true'">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1f4b7a">
 <!-- Which build this PAGE belongs to. app.js carries the same string, and the two are
@@ -17,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v167">
+<meta name="farkad-build" content="v169">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -652,6 +654,10 @@
 <script src="js/sync/boot.js"></script>
 <script src="js/state.js"></script>
 <script src="js/ui/dom.js"></script>
+<!-- v169: after dom.js and before every file that draws a button. It starts watching
+     the document the moment it loads, so the buttons already in this page are dressed
+     before the first render and every one drawn later as it appears. -->
+<script src="js/ui/icons.js"></script>
 <script src="js/ui/bars.js"></script>
 <script src="js/ui/ask.js"></script>
 <script src="js/ui/undo.js"></script>

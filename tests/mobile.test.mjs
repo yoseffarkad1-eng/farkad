@@ -669,8 +669,16 @@ for (const [width, height, atLeast] of [[430, 932, 6], [390, 844, 5], [320, 667,
     check(`${label}: the switcher is inside the header and 44-48px tall`,
         m.mode === null && m.switcher >= 44 && m.switcher <= 48,
         `${m.switcher}px, own row ${m.mode}`);
-    check(`${label}: every worker row is 64-72px`,
-        m.rows.length > 0 && m.rows.every(h => h >= 64 && h <= 72), JSON.stringify(m.rows.slice(0, 8)));
+    // v169 MOVED THIS BAND, and it is the point of that release rather than a casualty of
+    // it. The row was 69px: a 44px target inside 25px of air, on a screen that showed
+    // eight of a fourteen-man crew. It is 56 - the same 44px target, six above and six
+    // below - and that alone is three more names on the big phone. The floor that matters
+    // is not this one: nothing in the row a finger lands on is under 44px in either
+    // dimension, and that is measured separately, on every control, further down this
+    // file and again in tests/design.browser.mjs. The band is kept as a band so the row
+    // cannot drift back up a pixel at a time either.
+    check(`${label}: every worker row is 52-60px`,
+        m.rows.length > 0 && m.rows.every(h => h >= 52 && h <= 60), JSON.stringify(m.rows.slice(0, 8)));
     check(`${label}: at least ${atLeast} whole names above the dock, unscrolled`,
         m.complete >= atLeast, `${m.complete} whole rows`);
 

@@ -1,0 +1,273 @@
+/* v169: ONE LOOK FOR EVERY SCREEN. Loaded last, after app.css and readability.css, and
+   it is a layer over both rather than an edit of either: the two sheets under it carry
+   four documented places where cascade order is the mechanism, and a redesign written
+   INTO them would have had to win every one of those arguments again.
+
+   What it is for. Measured on v167 at 440x956: the day screen spent 212px of chrome above
+   the first name and 148px under the last (38% of the glass, eight names of fourteen in
+   view), drew fourteen different button looks and thirty-three outlined boxes, and no
+   screen had one button that read as THE button. Nothing was unreadable - every target
+   was 44px, every field 16px, every text pair 4.5:1 - it was crowded, and a crowded
+   screen in the sun with one dirty hand is where the wrong row gets tapped.
+
+   What it does NOT do. It moves no button into a menu, renames nothing, and changes no
+   handler: three people use this from memory, and a control that is where it was is
+   worth more than a tidier header. The one control that changes place is the settings
+   button, which leaves its own strip and sits at the end of each screen's first row.
+
+   The rules it keeps, because every one of them was a phone that went wrong:
+     - nothing a finger lands on is under 44px in EITHER dimension, no field under 16px;
+     - no bar height is written here - js/ui/bars.js measures them;
+     - a site's colour is the site's and no button borrows it;
+     - `!important` is used freely and on purpose: this sheet has to beat two others whose
+       selectors were sharpened against each other, and a look that wins on nine screens
+       and loses on the tenth is the inconsistency this file exists to remove.
+
+   SCREEN ONLY. Paper keeps the columns it has (tests/print.test.mjs reads a real PDF),
+   so every rule is inside `@media screen`. */
+
+@media screen {
+
+/* ---- TOKENS -------------------------------------------------------------------------
+   Sunlight is the reading condition, so the pairs are chosen well above the 4.5:1 floor:
+   dark  - ink 21:1 on paper, 18:1 on surface; ink-2 11.6; ink-3 7.2 on surface-2;
+   light - ink 17.5:1; ink-2 10.2; ink-3 7.7 on surface-2; the accent 8.1 on a surface.
+   SEVEN TO ONE IS A FLOOR HERE, NOT A TASTE: tests/navigation.browser.mjs holds every one
+   of the three inks to it on every one of the three grounds, in both schemes, and the
+   accent on a surface with them. The first light palette written for this file had ink-3
+   at 6.45 and the accent at 6.70 - both comfortably over the 4.5 everybody quotes, and
+   both under what v140 promised the people who read this outdoors. The gate caught it.
+   The site colours are NOT here. They stay exactly as readability.css left them. */
+:root {
+    --paper: #f2f3f5;
+    --surface: #ffffff;
+    --surface-2: #e7eaee;
+    --ink: #0b0d10;
+    --ink-2: #39424e;
+    --ink-3: #3f4854;
+    --line: #c9cfd7;
+    --line-soft: #e1e5ea;
+    --accent: #1a43bf;
+    --accent-soft: #dce6fd;
+    --on-accent: #ffffff;
+    --ok: #136b3f;
+    --ok-bg: #ddf3e6;
+    --warn: #8a4b00;
+    --warn-bg: #fcefd6;
+    --danger: #b3261e;
+    --danger-bg: #fbe4e1;
+    /* WhatsApp's own green, with ink dark enough to read on it (8.6:1). The only green
+       button in the app, so "green" means one thing. */
+    --wa: #25d366;
+    --on-wa: #04210f;
+    --radius: 12px;
+    --radius-sm: 12px;
+    --shadow: none;
+    --shadow-lift: 0 12px 40px -12px rgba(0, 0, 0, .35);
+}
+:root[data-theme="dark"] {
+    --paper: #000000;
+    --surface: #14171c;
+    --surface-2: #22262e;
+    --ink: #ffffff;
+    --ink-2: #c9d0da;
+    --ink-3: #aab3bf;
+    --line: #3a404a;
+    --line-soft: #262b33;
+    --accent: #7db2ff;
+    --accent-soft: #16294a;
+    --on-accent: #04122b;
+    --ok: #5bd893;
+    --ok-bg: #0f2a1b;
+    --warn: #ffc25c;
+    --warn-bg: #2e2208;
+    --danger: #ff8a80;
+    --danger-bg: #3a1513;
+    --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --paper: #000000;
+        --surface: #14171c;
+        --surface-2: #22262e;
+        --ink: #ffffff;
+        --ink-2: #c9d0da;
+        --ink-3: #aab3bf;
+        --line: #3a404a;
+        --line-soft: #262b33;
+        --accent: #7db2ff;
+        --accent-soft: #16294a;
+        --on-accent: #04122b;
+        --ok: #5bd893;
+        --ok-bg: #0f2a1b;
+        --warn: #ffc25c;
+        --warn-bg: #2e2208;
+        --danger: #ff8a80;
+        --danger-bg: #3a1513;
+        --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
+    }
+}
+
+body { background: var(--paper); }
+
+/* ---- BUTTONS: FOUR LOOKS ------------------------------------------------------------
+   filled (the one thing this screen is for), tonal (everything else), ghost (an icon or
+   a quiet word), and WhatsApp's green. An outlined box is none of them: v140's stronger
+   --line made every outline glow, and a screen of glowing boxes has no first button. */
+button { border-radius: 12px; box-shadow: none; }
+.btn-secondary,
+.chip-off,
+.report-layout-toggle {
+    background: var(--surface-2) !important;
+    color: var(--ink) !important;
+    border-color: transparent !important;
+}
+.btn-icon { background: transparent !important; border-color: transparent !important; color: var(--ink-2) !important; }
+.btn-add { background: var(--accent-soft) !important; color: var(--accent) !important; border-color: transparent !important; }
+.panel-head .btn-add,
+#signInModal .btn-add,
+.backup-primary,
+.report-output-actions > summary,
+.chip-on {
+    background: var(--accent) !important;
+    color: var(--on-accent) !important;
+    border-color: transparent !important;
+}
+.btn-success { background: var(--wa) !important; color: var(--on-wa) !important; border-color: transparent !important; }
+/* Printing is not WhatsApp. These two were green only because .btn-success was the one
+   filled class there was. */
+.week-print-action,
+.range-actions .btn-success { background: var(--surface-2) !important; color: var(--ink) !important; }
+button:disabled { opacity: .4; }
+/* The emoji a label was written with stays in the label AND in the button's accessible
+   name (js/ui/icons.js says why), so it is clipped to a pixel rather than removed; the
+   stroke glyph beside it takes the button's own colour. */
+.btn-emoji {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+.btn-ico { width: 20px; height: 20px; flex: none; vertical-align: -4px; margin-inline-end: 2px; }
+input, select, textarea { border-radius: 12px; }
+
+/* ---- THE TOP STRIP ------------------------------------------------------------------
+   One quiet line: the sync chip when there is one to read, and the settings button. The
+   app's name leaves it on every screen - it is the settings panel's title and the name
+   under the home-screen icon, and here it was a word nobody needed between a person and
+   the date.
+
+   What does NOT change, and both were tried. The button keeps its WORD: v122 put «הגדרות»
+   beside the cog because a bare icon was "an unexplained icon" to the people who use this
+   (tests/settings.browser.mjs pins it), and a tidier corner is not worth undoing that.
+   And the strip keeps its PLACE: folding it into the day's own header row buys one more
+   name on the screen, but only by positioning something against the top edge of an
+   installed iPhone app, which is the edge js/ui/bars.js exists to repair. So it stays
+   static, in flow, 52px, exactly as the phone block of app.css left it.
+   .topbar itself is never hidden: the tab bar is its child. */
+.topbar { border-bottom: 0 !important; }
+.topbar .brand { display: none !important; }
+.topbar .settings-open { background: transparent !important; color: var(--ink) !important; }
+.topbar .sync-chip { font-weight: 700; }
+
+/* ---- THE TAB BAR -------------------------------------------------------------------- */
+.tabs { background: var(--surface) !important; border-top: 1px solid var(--line-soft) !important; box-shadow: none !important; }
+.tab { background: transparent !important; color: var(--ink-3) !important; }
+/* 79px of tab bar is fifteen more than five 44px targets with a label need, and on the
+   day those fifteen are the difference between eleven names and twelve. The inset under
+   the home indicator is the bar's own (app.css) and is not touched. */
+@media (max-width: 700px) {
+    .tabs { padding-top: 2px !important; }
+    .tabs .tab { padding-block: 3px !important; gap: 1px !important; min-height: 48px; }
+    .day-actions { min-height: 64px !important; padding-block: 8px !important; }
+}
+.tab.tab-on { color: var(--accent) !important; }
+
+/* ---- THE DAY ------------------------------------------------------------------------
+   Rows are 56px (they were 69): a 44px target with six above and six below, and four
+   more names on a 6.9" phone. The name is never the thing that is cut - a long site
+   gives way first, because two men can share the start of a name and no two sites do. */
+.day-header { background: var(--paper) !important; border: 0 !important; box-shadow: none !important; }
+@media (max-width: 700px) { .day-header { padding-bottom: 3px !important; } }
+.day-nav .btn-nav { background: transparent !important; }
+.day-label { background: transparent !important; border-color: transparent !important; }
+.day-label strong { font-size: 20px; font-weight: 800; }
+.mode-toggle { background: var(--surface-2) !important; border-color: transparent !important; }
+.mode-toggle button { background: transparent !important; color: var(--ink-2) !important; border-color: transparent !important; box-shadow: none !important; }
+.mode-toggle button.layer-on { background: var(--surface) !important; color: var(--ink) !important; font-weight: 800; box-shadow: 0 1px 3px rgba(0, 0, 0, .25) !important; }
+:root[data-theme="dark"] .mode-toggle button.layer-on { background: var(--line) !important; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .mode-toggle button.layer-on { background: var(--line) !important; }
+}
+.now-count { background: transparent !important; color: var(--ink) !important; border-color: transparent !important; font-weight: 800; font-variant-numeric: tabular-nums; }
+.day-steps .step-btn { background: transparent !important; }
+.progress-bar { background: var(--surface-2) !important; }
+.progress-fill { background: var(--ok) !important; }
+
+.worker-list { border: 0 !important; background: transparent !important; }
+.wrow { border-inline: 0 !important; border-top: 0 !important; border-bottom: 1px solid var(--line-soft) !important; background: transparent !important; }
+.wrow-main { background: transparent !important; border-color: transparent !important; min-height: 55px !important; padding-block: 0 !important; }
+/* The name's SIZE and the badge's WEIGHT are app.css's and are left alone: the row holds a
+   name and a site on one line by seven pixels («תל אביב - רוטשילד 12» beside a 190px
+   name at 440), and a bolder badge measured 194px against the 177 it has - which put
+   every man on that site on a 64px row and took the twelfth name off the screen. */
+.wrow-name { color: var(--ink); }
+.wrow .btn-icon, .assign-row .btn-icon { color: var(--ink-3) !important; }
+
+.site-card { border: 0 !important; background: var(--surface) !important; border-radius: 14px !important; box-shadow: none !important; overflow: hidden; }
+.site-head-btn { background: rgba(255, 255, 255, .16) !important; border-color: transparent !important; color: #fff !important; }
+.assign-row { border-color: var(--line-soft) !important; }
+.assign-main { background: transparent !important; border-color: transparent !important; color: var(--ink) !important; }
+.assign-name { font-size: 20px; font-weight: 700; }
+.rima-label { color: var(--ink-2); font-weight: 600; }
+.tray { border: 0 !important; background: var(--surface) !important; border-radius: 14px !important; }
+.tray .chip { border-color: transparent !important; background: var(--surface-2) !important; }
+.tray .chip button { background: transparent !important; border-color: transparent !important; color: var(--ink) !important; }
+
+/* The dock stays where the thumb is - both of its buttons are things somebody does every
+   evening - and loses the box drawn round it. */
+.day-actions { background: var(--surface) !important; border-top: 1px solid var(--line-soft) !important; box-shadow: none !important; }
+.day-actions .btn-success { font-weight: 800; }
+
+/* ---- THE WEEK ----------------------------------------------------------------------- */
+.week-range { font-weight: 800; }
+.week-table, .week-table th, .week-table td { border-color: var(--line-soft) !important; }
+.week-table thead th { background: var(--surface) !important; color: var(--ink-2) !important; }
+.week-table .name-cell { background: var(--paper) !important; color: var(--ink) !important; font-weight: 700; }
+
+/* ---- THE CREW -----------------------------------------------------------------------
+   A man was a 116px card with a green block on it that said the same word fourteen
+   times. He is a row: his name, what is known about him, and the two things to tap. */
+.roster-panel { border: 0 !important; background: transparent !important; box-shadow: none !important; padding-inline: 0 !important; }
+.panel-head { border-color: transparent !important; }
+.roster-row { border: 0 !important; border-bottom: 1px solid var(--line-soft) !important; border-radius: 0 !important; background: transparent !important; }
+.crew-cycle { background: transparent !important; color: var(--ink-2) !important; padding-inline: 0 !important; font-weight: 500 !important; }
+.roster-meta { color: var(--ink-2) !important; }
+.worker-active-toggle.is-active { background: var(--ok-bg) !important; color: var(--ok) !important; border-color: transparent !important; border-radius: 999px !important; }
+.crew-edit { background: transparent !important; border-color: transparent !important; color: var(--ink-2) !important; }
+
+/* ---- ADVANCES -----------------------------------------------------------------------
+   One list, not fourteen boxes. */
+.advance-workers { gap: 0 !important; background: var(--surface); border-radius: 14px; overflow: hidden; }
+.advance-worker-card { background: transparent !important; border: 0 !important; border-bottom: 1px solid var(--line-soft) !important; border-radius: 0 !important; }
+.advance-worker-card span { color: var(--ink) !important; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ---- REPORTS, SETTINGS -------------------------------------------------------------- */
+.reports-controls,
+.report-worker-tile,
+.settings-card { border-color: transparent !important; background: var(--surface) !important; border-radius: 14px !important; box-shadow: none !important; }
+.report-tile-value { color: var(--ink) !important; font-variant-numeric: tabular-nums; }
+.report-tile-open { color: var(--accent) !important; }
+.settings-panel { background: var(--paper) !important; }
+.settings-status { background: var(--surface-2) !important; border-color: transparent !important; }
+
+/* ---- DIALOGS ------------------------------------------------------------------------
+   The filled button is the way forward and there is one of it. */
+.modal-content { border-color: transparent !important; border-radius: 20px !important; background: var(--surface) !important; }
+.modal.sheet .modal-content { border-radius: 20px 20px 0 0 !important; }
+.sheet-actions .sheet-fwd { background: var(--accent) !important; color: var(--on-accent) !important; border-color: transparent !important; }
+.sheet-actions .sheet-fwd * { color: inherit !important; }
+
+}

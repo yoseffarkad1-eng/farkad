@@ -34,6 +34,11 @@ different from what was done.
   fetched at all any more: `vendor/xlsx-0.18.5.min.js` is in the service worker's shell,
   so the export works in a tunnel. Reaching the CSV fallback now means the build on that
   phone is incomplete, not that the signal is weak, and it says so.
+- **Three stylesheets, and the order is the mechanism.** `css/app.css`, then
+  `css/readability.css` (the owner's reading sizes, v140), then `css/design.css` (v169: the
+  palette, the four button looks, rows instead of boxes). The last is a layer over the first
+  two and every rule in it is `@media screen` - paper is not its business. A new look goes in
+  the layer; a new mechanism goes where the mechanism lives.
 - **The service worker (`sw.js`) serves everything cache-first**, the page included:
   a session runs one build, end to end. Data lives in `localStorage`, always through
   `Store`; sync is optional and off until `js/sync/firebase-config.js` is filled in.
@@ -120,7 +125,7 @@ downloading anything. The emulator suites need Java and run through
 Financial suites cover both enabled operation and explicit legacy-client fixtures
 with both financial gates closed. The v116 release candidate enables the financial
 pair by owner request; deployment remains held until cloud rules and device readiness
-are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. v167 adds the seder to each worker (js/ui/seder.js), entered from the WhatsApp dialog and from nowhere on the day screen: the men with a site that day, each opened in WhatsApp with his own message by the person's own tap - never sent by the app, and never marked "sent". It writes nothing to the record; its progress is a per-date preference in Store. Its Hebrew words are the owner's, approved 2026-11-07 and pinned word for word in tests/seder.test.mjs (docs/releases.md, v167). Test-only overrides are
+are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. v167 adds the seder to each worker (js/ui/seder.js), entered from the WhatsApp dialog and from nowhere on the day screen: the men with a site that day, each opened in WhatsApp with his own message by the person's own tap - never sent by the app, and never marked "sent". It writes nothing to the record; its progress is a per-date preference in Store. Its Hebrew words are the owner's, approved 2026-11-07 and pinned word for word in tests/seder.test.mjs (docs/releases.md, v167). v169 is the one look (css/design.css, js/ui/icons.js): a restyle that moves no control, changes no label and touches no data path (docs/releases.md, v169). Test-only overrides are
 provided before scripts load, never defined by the production shell.
 
 ## The culture
@@ -154,6 +159,8 @@ written down so it cannot happen twice.
     js/sync/firebase-adapter.js  the only file that knows Firebase exists; the one ES module
     js/sync/firebase-config.js   project config; empty means local-only
     js/ui/dom.js               el()/clear()/button(); textContent only — names are never markup; todayStr
+    js/ui/icons.js             v169: the stroke glyph beside a button whose label starts with an emoji; the emoji
+                               stays in the label and in the accessible name, clipped - no string changes
     js/ui/bars.js              measures the fixed bars and the keyboard; publishes --nav-h, --day-actions-h, --topbar-h, --kb-h;
                                the stuck iPhone frame (v167): --bar-drop, --frame-drop, --header-drop
     js/ui/ask.js               askText/askConfirm/askTell/askChoice — the app's own dialogs
@@ -251,6 +258,10 @@ written down so it cannot happen twice.
     tests/declutter.browser.mjs v167 in Chromium: a site's row is the name, the ✕ and a tag only for a day
                                that is not regular; the name opens his sheet, which stays on him; a double
                                tap on a name is one tap; the compact header is one row
+    tests/design.browser.mjs   v169 in Chromium: eleven names on the big phone, the strip and its worded button,
+                               every button's words unchanged beside its glyph, a relabel dressed again, the
+                               message textarea untouched, both palettes' contrast, no site colour moved,
+                               44px and 16px on five screens in both schemes
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe

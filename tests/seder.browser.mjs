@@ -121,6 +121,16 @@ const guardOf = page => page.evaluate(() => (typeof SEDER_TAP_GUARD_MS === 'numb
 async function tapToWhatsApp(page, context, locator) {
     const [popup] = await Promise.all([context.waitForEvent('page'), locator.click()]);
     await popup.waitForLoadState('domcontentloaded').catch(() => {});
+    // v169 MOVED HOW THIS WAITS, not what it asks. A window opened by a link that says
+    // `noreferrer` is born on an empty document, and that document is already "loaded": the
+    // line above returns at once and url() read '' - measured in a cloud container, on the
+    // pinned Chromium and on a newer one, on untouched v167, with the address arriving a
+    // few hundred milliseconds later. On a faster or a slower machine the race falls the
+    // other way and nothing shows. So the address is waited for, for as long as a refused
+    // navigation takes to say so; what comes back is still compared, character for
+    // character, by every caller - and a window that never navigates still returns '' and
+    // still fails them.
+    await popup.waitForURL(address => !['', 'about:blank'].includes(address.href), { timeout: 5000 }).catch(() => {});
     const url = popup.url();
     await popup.close();
     await page.bringToFront();
