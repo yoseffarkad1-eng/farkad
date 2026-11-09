@@ -270,4 +270,167 @@ input, select, textarea { border-radius: 12px; }
 .sheet-actions .sheet-fwd { background: var(--accent) !important; color: var(--on-accent) !important; border-color: transparent !important; }
 .sheet-actions .sheet-fwd * { color: inherit !important; }
 
+/* ---- הסעות (v171), js/ui/transport.js -------------------------------------------------
+   The transport planner: a panel over the whole screen, on a phone that turned it on.
+   Its element also carries .settings-panel (index.html says why), so being fixed, being
+   absent on paper and coming down with a stuck iPhone frame are app.css's rules and are
+   not repeated here; this block is only what the panel looks like.
+
+   The same four button looks as every other screen: ONE filled button per view (the
+   bare <button>, .transport-primary), tonal for everything else, and WhatsApp's green
+   for the link that opens WhatsApp and for nothing else. A site is drawn in the site's
+   own colour and no control borrows it. Every target is 44px both ways and every field
+   17px; the edges the panel meets are padded by env(), never by a number. */
+.transport-panel { color: var(--ink); }
+.transport-panel.open { inset: 0 !important; width: auto !important; max-height: none !important; margin: 0 !important; }
+.transport-panel button,
+.transport-panel summary,
+.transport-wa { min-height: 44px; min-width: 44px; font-size: 16px; font-weight: 700; touch-action: manipulation; }
+.transport-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-left, 0px)) 8px calc(16px + env(safe-area-inset-right, 0px));
+    background: var(--paper);
+}
+.transport-titles { min-width: 0; }
+.transport-head h2 { margin: 0; font-size: 26px; line-height: 1.2; font-weight: 800; }
+.transport-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.transport-context { margin: 2px 0 0; color: var(--ink-2); font-size: 16px; font-weight: 600; }
+.transport-close { flex: none; }
+.transport-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 4px calc(16px + env(safe-area-inset-left, 0px)) 8px calc(16px + env(safe-area-inset-right, 0px));
+}
+.transport-tabs .transport-tab { padding: 8px 2px; min-width: 0; text-align: center; }
+.transport-tab[aria-selected="true"] { background: var(--accent-soft) !important; color: var(--accent) !important; box-shadow: inset 0 -3px 0 var(--accent); }
+.transport-note {
+    margin: 0 16px 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    font-size: 16px;
+    font-weight: 700;
+}
+.transport-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 0 calc(16px + env(safe-area-inset-left, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-right, 0px));
+}
+.transport-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.transport-view { display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin: 0 auto; font-size: 17px; line-height: 1.45; overflow-wrap: anywhere; }
+.transport-view h3, .transport-view h4, .transport-view p, .transport-view ul { margin: 0; padding: 0; }
+.transport-view ul { list-style: none; }
+.transport-view h3 { font-size: 18px; line-height: 1.3; }
+.transport-view h4 { font-size: 17px; }
+.transport-lead { color: var(--ink-2); font-size: 16px; }
+.transport-card { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border-radius: 14px; padding: 12px; }
+.transport-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.transport-wrap { flex-wrap: wrap; }
+.transport-grow { flex: 1 1 auto; min-width: 0; }
+.transport-wide { width: 100%; }
+.transport-name { font-weight: 700; }
+.transport-sub { color: var(--ink-2); font-size: 15px; }
+.transport-warn-text { color: var(--warn); font-size: 15px; font-weight: 700; }
+.transport-error { color: var(--danger); font-weight: 700; }
+.transport-status strong { display: block; font-size: 18px; }
+.transport-status[data-state="accepted"] strong { color: var(--ok); }
+.transport-status[data-state="changed"] strong { color: var(--warn); }
+.transport-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.transport-primary { background: var(--accent) !important; color: var(--on-accent) !important; border-color: transparent !important; }
+.transport-box { border-radius: 14px; padding: 12px; }
+.transport-box h3 { margin-bottom: 6px; }
+.transport-box li { padding: 3px 0; }
+.transport-box-err { background: var(--danger-bg); }
+.transport-box-err h3 { color: var(--danger); }
+.transport-box-warn { background: var(--warn-bg); }
+.transport-box-warn h3 { color: var(--warn); }
+.transport-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 8px; background: var(--surface-2); color: var(--ink); font-size: 15px; font-weight: 700; }
+.transport-card > .transport-badge { align-self: flex-start; }
+.transport-badge-bad { background: var(--danger-bg); color: var(--danger); }
+.transport-badge-ok { background: var(--ok-bg); color: var(--ok); }
+.transport-badge-lock { background: var(--warn-bg); color: var(--warn); }
+.transport-site { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 9px; border-radius: 8px; font-size: 14px; font-weight: 700; line-height: 1.5; }
+.transport-site .site-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transport-person { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; width: 100%; text-align: start; padding: 8px 12px; }
+.transport-person .transport-name { flex: 1 1 auto; min-width: 0; }
+.transport-tags { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.transport-person[aria-pressed="true"] { background: var(--accent-soft) !important; box-shadow: inset 0 0 0 3px var(--accent); }
+.transport-missing { background: var(--danger-bg) !important; color: var(--danger) !important; }
+.transport-toggle { flex: none; }
+.transport-toggle[aria-pressed="true"] { background: var(--warn-bg) !important; color: var(--warn) !important; }
+.transport-toggle-ok[aria-pressed="true"] { background: var(--ok-bg) !important; color: var(--ok) !important; }
+.transport-drives .transport-toggle[aria-pressed="true"] { background: var(--ok-bg) !important; color: var(--ok) !important; }
+.transport-move-here { width: 100%; background: var(--accent-soft) !important; color: var(--accent) !important; }
+.transport-picker { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; background: var(--paper); }
+.transport-select {
+    width: 100%;
+    min-height: 48px;
+    font-size: 17px;
+    font-family: inherit;
+    color: var(--ink);
+    background-color: var(--surface-2);
+    border: 0;
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+.transport-more > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--ink-2); padding: 0 4px; list-style: none; }
+.transport-more > summary::-webkit-details-marker { display: none; }
+/* The row's own mark, drawn: display:flex takes the browser's triangle away, and a row
+   with no mark is a sentence, not something to tap. A drawn corner has no bidi class to
+   mirror (js/ui/dom.js, chevronIcon, says what the typed ones cost). */
+.transport-more > summary::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-inline-start: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg);
+    margin-block-end: 4px;
+}
+.transport-more[open] > summary::before { transform: rotate(135deg); margin-block-end: -4px; }
+.transport-more[open] > summary { margin-bottom: 8px; }
+.transport-card.transport-more > * + * { margin-top: 10px; }
+.transport-area { min-height: 44px; }
+.transport-version + .transport-version { border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.transport-version { display: flex; flex-direction: column; gap: 4px; }
+.transport-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 12px; padding: 12px; font: inherit; font-size: 16px; }
+.transport-wa {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    padding: 9px 16px;
+    border-radius: 12px;
+    background: var(--wa);
+    color: var(--on-wa);
+    text-decoration: none;
+}
+/* The man being moved: named at the bottom of the list, where the thumb is, with what
+   can be done to him. Sticky inside the panel's own scroller - not fixed, so it is no
+   new layer for a stuck iPhone frame to leave behind. */
+.transport-movebar {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-inline: -8px;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface-2);
+    border-radius: 16px 16px 0 0;
+    box-shadow: var(--shadow-lift);
+}
+.transport-movebar button, .transport-movebar .transport-select { background-color: var(--surface) !important; }
+#shareModal .modal-actions .transport-entry { grid-column: 1 / -1; }
+.transport-switch .btn-secondary { align-self: flex-start; }
+
 }

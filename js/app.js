@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v169';
+const APP_VERSION = 'v171';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -145,6 +145,9 @@ function render() {
     // The same for the seder to each worker: every link on it carries a man's message,
     // and a snapshot from another phone that moved him must move his link with it.
     if (typeof renderSederIfOpen === 'function') renderSederIfOpen();
+    // And for the transport plan (v171), on a phone that has it on: it reads who is on
+    // which site from this same record, and a man moved under it must show as moved.
+    if (typeof renderTransportIfOpen === 'function') renderTransportIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
