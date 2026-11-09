@@ -152,6 +152,12 @@ written down so it cannot happen twice.
                                no clock - the same day gives the same plan. NOT the retired vehicles model
     js/model/ledger.js         the v80 advances ledger: entries, fold, closed gate, mirror migration, parity check;
                                the repayment and period-closure kinds, both behind the writer gate
+    js/model/payroll.js        NOT SHIPPED - not in index.html, not in the shell, no stamp moved for it. Worker
+                               accounts as a pure model: the `pay.<id>` records (statement, extra deduction,
+                               payment, void, adjustment, opening, legacy), their folds, and the dry-run
+                               planners for closing, paying and correcting. No DOM, no Store, no clock; loaded
+                               only by tests/payroll.test.mjs. What it still needs before it may reach a phone,
+                               and the owner's open decisions, are in docs/payroll-closure.md
     js/sync/sync.js            the durable queue: outbox, journal, replay, receipts, provenance; the one accessor pair
     js/sync/restore.js         the whole-document restore, the ONE place allowed to write the whole document
     js/sync/receive.js         snapshot adoption, merge, the ordering protocol's client half, the poison doors
@@ -276,6 +282,13 @@ written down so it cannot happen twice.
     tests/transport.browser.mjs v171 in Chromium: off by default, the switch in ⋯, the one entry, the whole
                                evening at 440x956 and 375x667 in both schemes, the driver's link read and not
                                followed, the marks, the record byte for byte, 44px and 16px
+    tests/payroll.test.mjs     the un-shipped accounts model: Phase 0 pins what the app does TODAY (3,800 on the
+                               fortnight row for a weekly man whose week 1 is closed; the same-Friday closure
+                               hole; an advance from a never-closed period read two ways; a partial deduction
+                               shutting the gate on an unapproved record); then the weekly and biweekly
+                               accounts, the per-advance split, extra deductions, payment, group closure, two
+                               devices, purity, every refusal code, each of the eight defaults flipped, the
+                               migration report that writes nothing, and agreement with the old model on old data
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe
