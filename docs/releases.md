@@ -269,12 +269,17 @@ From the second accepted version on, «עדכון מספר N לתוכנית.» f
 The seven vehicle names are data, seeded once and then the owner's to edit: טויוטה קורולה 2013,
 טויוטה קורולה 2016, BYD סיל U 2025, BYD אטו 3 2025, פולקסווגן 2018, סוואנה 2010, ליפמוטור C10 2026.
 
-## v169 — one look for every screen (candidate, not served)
+## v169 — one look for every screen (served 2026-11-09)
 
-**Not served. Not merged. On no phone.** One commit on `ac9c013` (v167, the build that is live).
-v168 is reserved for the sync fix being built elsewhere; this candidate is rebased onto it
-before its gate, and the number is confirmed at integration. No gate result is written here:
-validation is recorded against the exact clean commit, and no count is carried over.
+**Served.** Merged into `main` as `bd59a68` (PR #55, the tree of `e87fc62`) on 2026-11-09 and
+deployed by GitHub Pages run 42709326296, which concluded `success` at 22:10 UTC. The owner
+asked the same day for each safe change to be published on its own, and this one touches no
+data path. The gates were run on `e87fc62` from a clean detached worktree with Playwright
+1.56.1's own pinned Chromium and are recorded on the PR, where a count belongs. **What was
+NOT verified:** the served page itself - the container that published it cannot reach
+`github.io` - so "served" here means Pages reported the deployment of that commit, not that
+anybody read the stamp off a phone. v168 was reserved for a sync fix built elsewhere and had
+not landed; whatever it becomes is built on this.
 
 The owner's request (2026-11-09): the app made professional and calm, readable in the sun,
 nothing surplus on the screen, with authority to choose the look. What was measured first, on
