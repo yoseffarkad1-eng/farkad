@@ -109,12 +109,15 @@ Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`
 - **Old builds.** A phone still on v171 or earlier shows the old sheet until it updates; nothing
   in the record or the store differs between them, so the three phones need not move together.
 
-## v171 — הסעות, on one phone (candidate, not served)
+## v171 — הסעות, on one phone (served 2026-11-09)
 
-**Not served. Not merged. On no phone.** One commit of shipped files on the v169 candidate
-(`b157744`); v170 is reserved for another feature being built elsewhere, and the number is
-confirmed at integration. No gate result is written here: validation is recorded against the
-exact clean commit, and no count is carried over.
+**Served.** Merged into `main` as `0acaceb` (PR #56, the tree of `b640c5a`) on 2026-11-09 and
+deployed by GitHub Pages run 42716182858, which concluded `success` at 22:56 UTC. The gates
+were run on `b640c5a` from a clean detached worktree with the pinned Chromium and are recorded
+on the PR. As with v169, the served page itself could not be read from the container that
+published it: "served" means Pages reported the deployment of that commit. It is off on every
+phone until somebody turns it on in ⋯ on that phone. v170 stays reserved for another feature
+being built elsewhere.
 
 The owner's request, and his answers of 2026-11-09: a planner for the morning ride - which of
 his seven vehicles go out, who drives, who sits where - and a message to each driver. Seven
