@@ -1,3 +1,114 @@
+## v172 — the settings sheet in strict order (candidate, not served)
+
+**Not served. Not merged. On no phone.** One commit of shipped files on `b640c5a` (v171 on
+v169). No gate result is written here: validation is recorded against the exact clean commit,
+and no count is carried over.
+
+The owner's request of 2026-11-09, in his words: the settings page is a mess, not only in
+looks but in ORDER - strict, firm, serious order; shake it out and re-arrange it. He liked the
+v169 look and gave standing approval for structure decisions. So this is a STRUCTURE release:
+the same controls, the same words, the same handlers, in a fixed order and one shape.
+
+**What it was.** A head, three jump buttons, and one scroll of nine open cards: sync, the
+version, the reminders (two screens on their own), the backup, the restore doors with their
+lists of dates, the device, the rescue export, the transport switch, the technical report.
+«שמור קובץ גיבוי» - the one filled button on the sheet - was three screens down.
+
+**What moved where.** Three sections, three cards each, under the same three headings, ids and
+jump buttons as before:
+
+| section | card | was | now |
+|---|---|---|---|
+| «כללי» | ענן וסנכרון | 1st, open card | 1st, **still a plain open card** - not a row, cannot be shut |
+| | (העברת מקדמות, when there is one) | under it | under it, unchanged |
+| | תזכורות בטלפון | 3rd, open | 2nd, a row, shut |
+| | הסעות | 8th, under «מכשיר ועזרה» | 3rd, a row, shut - **moved here** |
+| «גיבוי ושחזור» | גיבוי | 4th, open | 1st, a row, **open each time the sheet opens** |
+| | ייבוא ושחזור | 5th, open | 2nd, a row, shut |
+| | שחזור חירום | 7th, under «מכשיר ועזרה» | 3rd, a row, shut - **moved here**: it is a way to get a record back |
+| «מכשיר ועזרה» | עדכון וגרסה | 2nd, under «כללי» | 1st, a row, shut - **moved here** |
+| | מצב המכשיר | 6th, open | 2nd, a row, shut |
+| | מידע טכני | 9th, open | 3rd, a row, shut |
+
+**The shape.** Every card but the first is the same thing: a native `<details>` whose
+`<summary>` is the card's old head - picture, title, its existing one line, and a drawn corner -
+56px at least, the whole row the target, opening in place. The contents sit one box in
+(`.settings-fold-body`). The two cards a script builds (הסעות, מידע טכני) got a picture; מידע
+טכני has a title and no line under it, because its sentence is two lines long and a shorter one
+would have been a new Hebrew string. The look is `css/design.css`: tonal rows, no outlines, one
+filled button on the whole sheet.
+
+**What is open, and why.** Not remembered: the sheet opens the same way every time, so a thing
+is where it was yesterday.
+
+- **ענן וסנכרון is not a row.** The sync sentence, a refused sync's reason, the records held
+  for a decision, the sign-in button and the advances review under it are never behind anything
+  that shuts. A row that pretended it could close and did not would be a control that lies.
+- **גיבוי is open** - the filled button and the age of the last copy.
+- **Everything else is shut**, and opens by itself for exactly these reasons
+  (`settingsFoldReasons`, `js/ui/settings.js`):
+
+| row | opens by itself when |
+|---|---|
+| שחזור חירום | `Recovery` holds a problem, or writing is blocked. The banner over every screen keeps its own export button, as before. |
+| ייבוא ושחזור | a whole-document restore is unfinished, held or unreadable (`replacementOutstanding`, `replaceDamaged` - the sentence for that one ends «טען קובץ גיבוי דרך ⋯ ← שחזור»); a record would not read (the boot dialog says «בדוק… מול נקודות השחזור»); a restore has just answered (`tellRestoreResult`); **the crew is empty and the row holds a date to go back to**, on this phone or in the cloud (the cloud's arrive on a promise and are asked about when they do) - a restore point is never taken of an empty crew, so that is a phone that lost its record. |
+| תזכורות בטלפון | this phone holds a subscription and the server answers that it is not registered, or the phone now blocks notifications (`FarkadReminders.needsAttention`). |
+| עדכון וגרסה | a new build is installed and waiting (`updateWaiting`, `js/ui/offline.js`), also when it arrives under the open sheet; and once after `checkForUpdate` is called with the sheet shut. |
+| מצב המכשיר | the storage line or the ledger-parity line is a warning. |
+| הסעות, מידע טכני | never. |
+
+  A reason opens its row **once**, when it becomes true. The sheet is redrawn on every
+  `render()` while it is open - a snapshot from another phone, a save, the connection changing -
+  and a redraw neither opens nor shuts anything: a row a person shut stays shut while the reason
+  stands, until the sheet is next opened.
+
+**Two things found on the way, both fixed here.**
+
+- **A button inside a shut `<details>` still has an `offsetParent` and a box in Chromium**
+  (measured: 374x44, `checkVisibility()` false - the browser skips painting it, not laying it
+  out). The sheet's Tab trap decided what was focusable by `offsetParent`, so it took an
+  unreachable button for the last control and Tab from the last row left the sheet for the page
+  behind it. The trap now asks the tree (`shutBySettingsFold`) and counts `<summary>`.
+- **The smoke suite already held that a restore point is visible "without anybody opening a
+  fold first"** to somebody who has just lost the record, and reaches for the cloud's copy the
+  same way. A shut ייבוא ושחזור would have broken both. That scenario - the crew gone, a date to
+  go back to in the row - is now a reason the row opens, and both of the suite's scenarios pass
+  unchanged.
+
+**Decided differently from the request, and why.** The request listed "opened from a reminder"
+as a reason to open תזכורות בטלפון. It is not one. The reminder is tapped every evening and
+sends a person to the day; the next thing they come to this sheet for is the backup, and an open
+reminders row above it would put the backup button two screens down - the mess this release
+removes. `tests/settings-order.browser.mjs` pins that it does not open.
+
+**What did not change.** Every control, every sentence and every inline handler that was on the
+v171 sheet is on this one - `tests/settings-order.browser.mjs` holds the list, captured from
+`b640c5a` and compared. No Hebrew string was added, removed or altered, aria-labels included.
+Nothing here reads or writes the record, a data key in `Store`, the outbox or the cloud; which
+row is open is not stored anywhere. Paper is untouched (`css/design.css` is `@media screen`).
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js` or
+`firestore.rules` changed.
+
+**What this build is known NOT to cover.**
+
+- **It is on no phone, and has never run on an iPhone.** Every measurement is Chromium, at
+  440x956, 375x667 and 320x568, dark and light, and at doubled text. A `<details>` row in a
+  home-screen WebKit - the tap, the drawn corner, the scroll after a tall row opens above the
+  finger - is for the owner's phone to say.
+- **A screen reader was not listened to.** The title is still an `<h3>`, now inside a
+  `<summary>`; some readers announce a summary as a button and drop the heading inside it from
+  heading navigation. The three section headings are untouched and are where the jump buttons
+  land.
+- **A loss that leaves the crew standing does not open ייבוא ושחזור.** Days deleted, a wrong
+  restore: the app cannot tell that from an ordinary day. The way back is one tap on a row that
+  says «פתיחת גיבוי או חזרה למצב קודם», with the dates open inside it - one tap more than v171.
+- **«כללי» still says «חיבור ועדכונים» beside it**, and עדכון וגרסה is no longer in that
+  section. The words are the owner's to change (law 6); nothing was reworded to fit the move.
+- **The reminder rule waits for an answer.** With no account, no signal, or a check still
+  running, the row stays shut whatever state the reminders are in: the app does not know.
+- **Old builds.** A phone still on v171 or earlier shows the old sheet until it updates; nothing
+  in the record or the store differs between them, so the three phones need not move together.
+
 ## v171 — הסעות, on one phone (candidate, not served)
 
 **Not served. Not merged. On no phone.** One commit of shipped files on the v169 candidate

@@ -59,7 +59,12 @@ const FarkadIcons = (function () {
         people: { d: ['M9 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z', 'M2.5 20a6.5 6.5 0 0 1 13 0', 'M16 5a3.5 3.5 0 0 1 0 6.5', 'M18 14.5a6 6 0 0 1 3.5 5.5'] },
         calendar: { d: ['M6 5h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3z', 'M3 10h18', 'M8 3v4', 'M16 3v4'] },
         site: { d: ['M4 21V8l8-5 8 5v13', 'M9 21v-6h6v6'] },
-        phone: { d: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2'] }
+        phone: { d: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2'] },
+        // v172: the two rows of the settings sheet that are built by script and so had no
+        // picture, in a sheet where every other row has one (see card() below). No label
+        // spells either of them, so neither is in MARKS.
+        van: { d: ['M3 16V8a2 2 0 0 1 2-2h9v10', 'M14 9h4l3 3v4h-7', 'M7.5 18.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4z', 'M17.5 18.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'] },
+        tool: { d: ['M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'm7 10 3 2.5-3 2.5', 'M13 15h4'] }
     };
 
     // The emoji as the labels spell them, with and without the variation selector some
@@ -100,6 +105,25 @@ const FarkadIcons = (function () {
             svg.appendChild(path);
         });
         return svg;
+    }
+
+    // v172: the picture at the head of a settings row, for the two rows a script builds
+    // (הסעות in js/ui/transport.js, מידע טכני in js/ui/settings.js). The seven rows written
+    // into index.html carry theirs as markup; these two had none, and a row with no picture
+    // in a list of rows with one reads as a different kind of thing. Same box, same class,
+    // same stroke as the markup ones, so the stylesheet cannot tell them apart.
+    function card(name) {
+        const box = document.createElement('span');
+        box.className = 'settings-card-icon';
+        box.setAttribute('aria-hidden', 'true');
+        const svg = glyph(name);
+        svg.setAttribute('width', '24');
+        svg.setAttribute('height', '24');
+        svg.setAttribute('stroke-width', '1.8');
+        // Not .btn-ico: that class is a button's glyph, with a button's margins.
+        svg.removeAttribute('class');
+        box.appendChild(svg);
+        return box;
     }
 
     function dress(node) {
@@ -150,7 +174,7 @@ const FarkadIcons = (function () {
         }).observe(document.body, { childList: true, subtree: true, characterData: true });
     }
 
-    return { start, sweep, glyph };
+    return { start, sweep, glyph, card };
 })();
 
 FarkadIcons.start();

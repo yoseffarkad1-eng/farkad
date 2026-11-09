@@ -6,6 +6,11 @@
 //
 // A named header button opens one sheet. Jump buttons make backup and help reachable
 // without scrolling past every card; held records remain visible in the first section.
+//
+// v172: the sheet is three sections of rows that open in place (index.html says what is
+// where and why the first card is not a row). The block under closeSettings is the whole
+// of the mechanism: where every row stands when the sheet opens, and what may open one
+// without a tap.
 
 let settingsOpen = false;
 
@@ -15,6 +20,9 @@ function openSettings() {
     settingsOpen = true;
     panel.classList.add('open');
     panel.setAttribute('aria-hidden', 'false');
+    // Every row back where it always is, BEFORE anything is drawn into them: the draw
+    // ends by opening the rows that have something to show (revealSettingsFolds).
+    resetSettingsFolds();
     // What is on it depends on the device: the restore points, the backup age, the
     // version, and whether there is a cloud account at all.
     renderSettings();
@@ -48,6 +56,151 @@ function closeSettings() {
     if (opener && opener.focus) opener.focus();
 }
 
+// ---------------------------------------------------------------- the rows (v172)
+//
+// WHERE EVERY ROW STANDS WHEN THE SHEET OPENS, and it is the same every time: גיבוי open,
+// everything else shut. Not remembered between openings, on purpose - three people use
+// this from memory, and a sheet that opens the way the last person left it is a sheet
+// where the backup button is in a different place on Tuesday. The first card (ענן
+// וסנכרון) and the advances review under it are not rows at all and cannot be shut.
+const SETTINGS_FOLD_OPEN = ['settingsFoldBackup'];
+
+// What was true at the last look, per reason - so a reason opens its row ONCE, when it
+// becomes true, and never again while it stays true. This sheet is redrawn on every
+// render() while it is open (a snapshot from another phone, a save, the connection
+// changing); a rule that re-opened its row on each of those would take the row back out
+// of the hand of whoever had just shut it, and one that re-shut rows would shut the one
+// being read. Rows are opened here and are never shut by anything but a tap or the next
+// opening of the sheet.
+let settingsFoldSeen = {};
+// A row somebody was sent to while the sheet was shut; opened when it next opens.
+let settingsFoldSent = {};
+
+function settingsFolds() {
+    const panel = document.getElementById('settingsPanel');
+    return panel && panel.querySelectorAll
+        ? [...panel.querySelectorAll('details.settings-fold')] : [];
+}
+
+function resetSettingsFolds() {
+    settingsFolds().forEach(fold => { fold.open = SETTINGS_FOLD_OPEN.includes(fold.id); });
+    settingsFoldSeen = {};
+    const sent = Object.keys(settingsFoldSent);
+    settingsFoldSent = {};
+    sent.forEach(openSettingsFold);
+}
+
+// Opens one row of the open sheet. Does nothing to a shut sheet, and nothing to anything
+// that is not a row - an id from elsewhere must not become a way to open things.
+function openSettingsFold(id) {
+    if (!settingsOpen) return;
+    const fold = document.getElementById(id);
+    if (fold && fold.classList && fold.classList.contains('settings-fold')) fold.open = true;
+}
+
+// For a control OUTSIDE a row that sends a person to it (checkForUpdate, js/ui/offline.js):
+// open now if the sheet is, or the next time it opens if it is not.
+function settingsSendTo(id) {
+    if (settingsOpen) openSettingsFold(id);
+    else settingsFoldSent[id] = true;
+}
+
+// EVERY REASON A ROW OPENS BY ITSELF. Each one is something a person must not have to go
+// looking for, and each is asked of the thing that knows rather than remembered here:
+//
+//   שחזור חירום    - a record on this phone would not read, or writing is blocked
+//                    (Recovery). The banner at the top of every screen keeps its own
+//                    export button; this is the same door, found open, for whoever came
+//                    here instead.
+//   ייבוא ושחזור   - a whole-document restore is unfinished, held, or unreadable
+//                    (FarkadSync). SYNC_REASON_BLIND below sends the person here in so
+//                    many words - «טען קובץ גיבוי דרך ⋯ ← שחזור» - and must not send them
+//                    to a shut row. A restore's own answer opens it too (tellRestoreResult,
+//                    js/ui/backup.js).
+//                  - a record would not read: the dialog at that boot says «בדוק את הימים
+//                    האחרונים מול נקודות השחזור», and the restore points are in this row.
+//                  - THE CREW IS EMPTY AND THE ROW HOLDS A DATE TO GO BACK TO, on this
+//                    phone or in the cloud. A restore point is never taken of an empty
+//                    crew (takeDailySnapshot), so that pair means a phone that held a
+//                    record and now shows none - somebody who has just lost a fortnight
+//                    and is not in a mood to go looking (js/ui/backup.js, over
+//                    renderRestorePoints, and the smoke suite's two restore scenarios,
+//                    which is how a shut door in front of the way back was caught the
+//                    first time). Read off the buttons the row has actually drawn; the
+//                    cloud's arrive on a promise, and renderCloudRestorePoints asks again
+//                    when they do. A loss that leaves the crew standing cannot be told
+//                    from an ordinary day and does not open the row: it is one tap on a
+//                    row that says «חזרה למצב קודם», with the dates open inside it.
+//   תזכורות בטלפון - the server says this subscribed phone is not registered, or the
+//                    phone blocks notifications (FarkadReminders.needsAttention): the
+//                    reminders somebody is counting on will not come.
+//   עדכון וגרסה    - a new build is installed and waiting (updateWaiting, js/ui/offline.js).
+//   מצב המכשיר     - the storage line or the ledger-parity line is a WARNING. Read off the
+//                    lines themselves, after they are drawn, so this cannot disagree with
+//                    what the row says when it opens.
+//
+// הסעות and מידע טכני have no reason: nothing on them is ever urgent. And arriving from a
+// reminder notification is deliberately NOT one - it sends a person to the day, every
+// evening, and a reminders row standing open each time they then come here for the
+// backup would push the backup button two screens down the sheet.
+function settingsFoldReasons() {
+    const reasons = [];
+    const ask = (id, reason, question) => {
+        let on = false;
+        // A question that throws has no answer, and no answer opens nothing: the row is
+        // still there to be tapped, and the sheet must draw.
+        try { on = Boolean(question()); } catch (error) { on = false; }
+        reasons.push([id, reason, on]);
+    };
+    ask('settingsFoldRescue', 'recovery', () => (typeof Recovery !== 'undefined'
+        && Recovery.problems && Recovery.problems.length > 0)
+        || (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()));
+    ask('settingsFoldRestore', 'restore', () => typeof FarkadSync !== 'undefined'
+        && (FarkadSync.replaceDamaged === true
+            || (typeof FarkadSync.replacementOutstanding === 'function'
+                && FarkadSync.replacementOutstanding())));
+    ask('settingsFoldRestore', 'unreadable', () => typeof Recovery !== 'undefined'
+        && Recovery.problems && Recovery.problems.length > 0);
+    ask('settingsFoldRestore', 'emptied', () => typeof State !== 'undefined' && State.schedule
+        && Array.isArray(State.schedule.workers) && State.schedule.workers.length === 0
+        && document.querySelector('#restorePoints button, #cloudRestorePoints button'));
+    ask('settingsFoldReminders', 'reminders', () => typeof FarkadReminders !== 'undefined'
+        && typeof FarkadReminders.needsAttention === 'function'
+        && FarkadReminders.needsAttention());
+    ask('settingsFoldUpdate', 'update', () => typeof updateWaiting === 'function'
+        && updateWaiting());
+    ask('settingsFoldDevice', 'device', () => ['storageRoom', 'ledgerParity'].some(id => {
+        const line = document.getElementById(id);
+        return Boolean(line && line.classList && line.classList.contains('hint-warn')
+            && line.style.display !== 'none');
+    }));
+    return reasons;
+}
+
+// Is this node inside a <details> that is shut - anywhere above it, and not as that
+// <details>' own <summary>, which is the one part of a shut row that is on the glass?
+// Asked of the tree because no measurement answers it the same way in every browser
+// (settingsKeydown says what Chromium measures).
+function shutBySettingsFold(node) {
+    let inner = node;
+    for (let outer = node.parentElement; outer; inner = outer, outer = outer.parentElement) {
+        if (outer.tagName !== 'DETAILS' || outer.open) continue;
+        if (!(inner.tagName === 'SUMMARY' && inner === outer.querySelector('summary'))) return true;
+    }
+    return false;
+}
+
+// Run at the end of every draw of the open sheet, and by the two things whose news does
+// not come through a draw (a reminder check finishing, an update arriving).
+function revealSettingsFolds() {
+    if (!settingsOpen) return;
+    settingsFoldReasons().forEach(([id, reason, on]) => {
+        const key = `${id}:${reason}`;
+        if (on && !settingsFoldSeen[key]) openSettingsFold(id);
+        settingsFoldSeen[key] = on;
+    });
+}
+
 function settingsKeydown(event) {
     if (event.key === 'Escape') { closeSettings(); return; }
     if (event.key !== 'Tab') return;
@@ -55,9 +208,20 @@ function settingsKeydown(event) {
     // Focus stays inside the sheet while it is open. Without this, tabbing walks out into
     // the day list behind it - which is still on screen, still tappable, and about to be
     // covered by whatever the sheet does next.
+    //
+    // `summary` is in the list since v172: the rows are focusable, the last thing on the
+    // sheet is now usually a shut row, and a trap that did not count it let Tab walk off
+    // the end of the sheet from there.
+    //
+    // And what is inside a shut row is asked for BY NAME (shutBySettingsFold). The
+    // offsetParent test that has always dropped hidden things here does not drop these:
+    // measured in Chromium, a button inside a shut <details> still has an offsetParent
+    // and a 374x44 box - the browser skips painting it, not laying it out - so the trap
+    // took a button nobody can reach for the last control on the sheet, and Tab from the
+    // real last row left the sheet for the page behind it.
     const panel = document.getElementById('settingsPanel');
-    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
-        .filter(node => node.offsetParent !== null && !node.disabled);
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href], summary')]
+        .filter(node => node.offsetParent !== null && !node.disabled && !shutBySettingsFold(node));
     if (focusable.length === 0) return;
 
     const first = focusable[0];
@@ -93,6 +257,8 @@ function renderSettings() {
     // the block at the foot of this file for what it may and may not carry.
     renderDiagnostic();
     renderCarryMigration();
+    // Last, over what was just drawn: a row with something to show is opened, once.
+    revealSettingsFolds();
 }
 
 // THE MIGRATION REVIEW, and the only screen in this app built to be READ before a button
@@ -1146,10 +1312,21 @@ function renderDiagnostic() {
 
     let group = document.getElementById('diagnosticGroup');
     if (!group) {
-        group = el('section', 'settings-group');
+        // The last row of the sheet (v172), built like the ones in index.html: a <details>
+        // whose <summary> is the card head. It has a title and no line under it - the
+        // sentence it always carried is two lines long and is the first thing inside, and
+        // a shorter one would have been a new Hebrew string nobody approved.
+        group = el('details', 'settings-group settings-fold');
         group.id = 'diagnosticGroup';
-        group.appendChild(el('h3', null, 'מידע טכני'));
-        group.appendChild(el('p', 'hint',
+        const head = el('summary', 'settings-card-head');
+        if (typeof FarkadIcons !== 'undefined' && FarkadIcons.card) head.appendChild(FarkadIcons.card('tool'));
+        const titles = el('div');
+        titles.appendChild(el('h3', null, 'מידע טכני'));
+        head.appendChild(titles);
+        group.appendChild(head);
+        const inside = el('div', 'settings-fold-body');
+        group.appendChild(inside);
+        inside.appendChild(el('p', 'hint',
             'שורות טכניות לצילום או להעתקה, כשמשהו נראה לא במקום על המסך. '
             + 'אין בהן שמות של עובדים או אתרים, אין סכומים ואין סיסמאות.'));
         const toggle = button('', 'btn-secondary', () => {
@@ -1168,7 +1345,7 @@ function renderDiagnostic() {
         });
         toggle.id = 'diagnosticToggle';
         toggle.setAttribute('aria-controls', 'diagnosticBox');
-        group.appendChild(toggle);
+        inside.appendChild(toggle);
 
         const box = el('div', 'diagnostic-box');
         box.id = 'diagnosticBox';
@@ -1186,7 +1363,7 @@ function renderDiagnostic() {
         const copy = button('העתק', 'btn-secondary', copyDiagnostic, 'העתק את המידע הטכני');
         copy.id = 'diagnosticCopy';
         box.appendChild(copy);
-        group.appendChild(box);
+        inside.appendChild(box);
 
         body.appendChild(group);
     }

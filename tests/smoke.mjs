@@ -5073,8 +5073,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // Tab does not walk out of the sheet into the list behind it.
   const trapped = await page.evaluate(async () => {
     const panel = document.getElementById('settingsPanel');
-    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href]')]
-      .filter(node => node.offsetParent !== null);
+    // v172: the sheet is rows that open in place, so the last thing on it is a <summary>
+    // and what is inside a shut row is not reachable. Chromium still gives such a node an
+    // offsetParent (it is laid out and not painted), so this asks checkVisibility as well;
+    // the same list the app's own trap builds (settingsKeydown, js/ui/settings.js).
+    const focusable = [...panel.querySelectorAll('button, input, select, textarea, a[href], summary')]
+      .filter(node => node.offsetParent !== null && node.checkVisibility());
     focusable[focusable.length - 1].focus();
     return { count: focusable.length, last: document.activeElement === focusable[focusable.length - 1] };
   });
@@ -5120,10 +5124,16 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // owner asked to have under «מכשיר ועזרה» (js/ui/transport.js). It is the behaviour
   // change itself, so the list moves with it: after the emergency exit, before the
   // technical lines, and the eight that were here are in the order they were.
+  // v172: THE ORDER IS THE RELEASE. The owner asked for the sheet in strict order
+  // (2026-11-09) and this list moves because that is the behaviour change: three sections
+  // of three - connection, reminders, transport; backup, restore, the rescue export
+  // (a way to get a record back, so it left the device section); version, device,
+  // technical. The same nine titles, none added, none dropped, none reworded.
+  // tests/settings-order.browser.mjs holds the sections, what is open, and the inventory.
   check('the sheet has the nine groups, including the phone reminders and the transport switch, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'עדכון וגרסה', 'תזכורות בטלפון', 'גיבוי', 'ייבוא ושחזור', 'מצב המכשיר', 'שחזור חירום',
-                'הסעות', 'מידע טכני']),
+      ['ענן וסנכרון', 'תזכורות בטלפון', 'הסעות', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום',
+                'עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']),
     JSON.stringify(heads));
 
   // One primary action: the export. Everything else is quieted with btn-secondary or

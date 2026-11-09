@@ -3377,6 +3377,10 @@ for (const width of [320, 390]) {
         State.save();
         render();
         openSettings();
+        // v172: מידע טכני is a row that is shut when the sheet opens. The row is tapped
+        // first, as a person taps it - the field measured below has to be ON THE GLASS,
+        // and Chromium gives a box to what is inside a shut <details> without painting it.
+        document.querySelector('#diagnosticGroup > summary').click();
         document.getElementById('diagnosticToggle').click();
         await new Promise(done => setTimeout(done, 1100));
     }, SECRETS);

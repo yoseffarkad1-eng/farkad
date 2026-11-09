@@ -480,15 +480,22 @@ async function importThrough(page, name, text) {
   // THE REAL BUTTON, in the settings panel, by the onclick the page carries - not the
   // function name typed into evaluate. The panel has to be open for the button to be
   // there at all, which is also how a person reaches it.
+  // v172: the button is in the שחזור חירום row, which is shut on a healthy phone and opens by
+  // itself only while Recovery holds a problem (tests/settings-order.browser.mjs). This
+  // disk has no such problem, so the row is tapped open first - and the button has to be
+  // on the glass before it is pressed, which a bare .click() on a hidden node would not say.
   const pressed = await page.evaluate(() => {
     openSettings();
+    const row = document.getElementById('settingsFoldRescue');
+    if (row && !row.open) row.querySelector('summary').click();
     const button = document.querySelector('button[onclick="exportRecoveryData()"]');
     if (!button) return null;
+    const shown = button.checkVisibility();
     button.click();
-    return button.textContent;
+    return shown ? button.textContent : 'NOT VISIBLE';
   });
-  check('the rescue export has a button on the settings panel, and it was pressed',
-    typeof pressed === 'string' && pressed.length > 0, String(pressed));
+  check('the rescue export has a button on the settings panel, on the glass, and it was pressed',
+    typeof pressed === 'string' && pressed.length > 0 && pressed !== 'NOT VISIBLE', String(pressed));
   await page.waitForTimeout(500);
 
   const text = await page.evaluate(() => window.__blobs.length

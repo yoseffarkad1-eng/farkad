@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v171">
+<meta name="farkad-build" content="v172">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -193,7 +193,22 @@
 </div>
 
 <!-- Settings has a visible name in the header. Jump buttons move within this one
-     sheet; no account warnings or restore controls are hidden in another tab. -->
+     sheet; no account warnings or restore controls are hidden in another tab.
+
+     v172, STRICT ORDER. Three sections, three cards each, and every card but the first is
+     the same thing: a row - picture, title, one line under it, a drawn corner - that opens
+     in place (a native <details>, so it opens with no script at all). Before this the sheet
+     was nine open cards in one scroll, the reminders alone two screens long, and "where is
+     the backup" was answered by scrolling until it went past.
+
+     What a closed row may never hide is the reason the first card is NOT one: the sync
+     sentence, a refused sync's reason, a record held for a decision, the sign-in button and
+     the advances review under it stay a plain open card with nothing to close. Everything
+     else is closed when the sheet opens except גיבוי, which holds the one filled button on
+     the sheet; js/ui/settings.js opens a row by itself when it holds something a person
+     must see, and puts every row back each time the sheet opens. No control, no word and
+     no handler changed in the move - tests/settings-order.browser.mjs holds the inventory
+     against the v171 sheet. -->
 <div class="settings-panel" id="settingsPanel" role="dialog" aria-modal="true"
      aria-labelledby="settingsTitle" aria-hidden="true">
     <div class="settings-head">
@@ -207,8 +222,11 @@
         <button type="button" class="btn-secondary" onclick="settingsJump('settingsHelp')">מכשיר ועזרה</button>
     </nav>
     <div class="settings-body">
-        <section class="settings-section" aria-labelledby="settingsDaily">
+        <section class="settings-section" id="settingsDailySection" aria-labelledby="settingsDaily">
             <div class="settings-section-title"><h3 id="settingsDaily" tabindex="-1">כללי</h3><span>חיבור ועדכונים</span></div>
+            <!-- ALWAYS OPEN, and a plain card rather than a row that pretends it could close:
+                 a held record, a refused sync or a sign-in that lapsed behind a closed row
+                 is a phone that says nothing while it sends nothing. -->
             <section class="settings-group settings-group-sync">
                 <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a5 5 0 1 1 .6-10A7 7 0 0 1 21 11a3.5 3.5 0 0 1-1 7H7Z"/><path d="m9 13 2 2 4-4"/></svg></span><div><h3>ענן וסנכרון</h3><p class="hint">מצב החיבור של המכשיר הזה</p></div></div>
                 <p class="hint settings-status" id="settingsSyncStatus"></p>
@@ -224,72 +242,90 @@
                 <div id="carryMigrationRows"></div>
                 <div id="carryMigrationActions"></div>
             </section>
-            <section class="settings-group settings-update">
-                <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M18 18a8 8 0 0 1-13-2"/></svg></span><div><h3>עדכון וגרסה</h3><p class="hint">בדיקה אם יש גרסה חדשה לאפליקציה</p></div></div>
-                <div class="app-version"><span id="appVersion"></span>
-                    <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button></div>
-            </section>
-            <section class="settings-group push-reminder" aria-labelledby="pushReminderTitle">
-                <div class="settings-card-head"><span class="settings-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span><div><h3 id="pushReminderTitle">תזכורות בטלפון</h3><p class="hint">התראה מפרקד גם כשהמסך נעול</p></div></div>
-                <div class="push-reminder-times">
-                    <div><strong dir="ltr">18:00</strong><span>בערב · רישום עובדים</span></div>
-                    <div><strong dir="ltr">10:00</strong><span>למחרת בבוקר · בדיקה ועדכון</span></div>
+            <details class="settings-group push-reminder settings-fold" id="settingsFoldReminders" aria-labelledby="pushReminderTitle">
+                <summary class="settings-card-head"><span class="settings-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span><div><h3 id="pushReminderTitle">תזכורות בטלפון</h3><p class="hint">התראה מפרקד גם כשהמסך נעול</p></div></summary>
+                <div class="settings-fold-body">
+                    <div class="push-reminder-times">
+                        <div><strong dir="ltr">18:00</strong><span>בערב · רישום עובדים</span></div>
+                        <div><strong dir="ltr">10:00</strong><span>למחרת בבוקר · בדיקה ועדכון</span></div>
+                    </div>
+                    <p class="hint">לפי שעון ישראל · בכל מכשיר מפעילים בנפרד</p>
+                    <label class="field-label" for="pushReminderDays">באילו ערבים להזכיר?</label>
+                    <select id="pushReminderDays" onchange="FarkadReminders.daysChanged()"><option value="workdays">ראשון עד חמישי</option><option value="friday">ראשון עד שישי</option><option value="everyday">כל יום</option></select>
+                    <p class="hint">תזכורת הבוקר תגיע למחרת כל ערב שנבחר.</p>
+                    <p id="pushReminderStatus" class="push-reminder-status" role="status" aria-live="polite">התזכורות עדיין לא הופעלו במכשיר הזה.</p>
+                    <button type="button" class="btn-secondary push-reminder-enable" id="pushReminderEnable" onclick="FarkadReminders.enable()" disabled>הפעלת התראות במכשיר הזה</button>
+                    <button type="button" class="btn-secondary" id="pushReminderTest" onclick="FarkadReminders.test()" hidden>שליחת התראת ניסיון</button>
+                    <button type="button" class="btn-secondary" id="pushReminderDisable" onclick="FarkadReminders.disable()" hidden>כיבוי ההתראות במכשיר הזה</button>
+                    <button type="button" class="btn-secondary" id="pushReminderRefresh" onclick="FarkadReminders.refresh()">בדיקה מחדש</button>
+                    <details class="push-reminder-help"><summary>מידע על ההתראות <span aria-hidden="true">ⓘ</span></summary>
+                        <p class="hint"><strong>iPhone:</strong> פתח את פרקד מהסמל במסך הבית, לחץ על הפעלה ואשר התראות. נדרש iOS 16.4 ומעלה.</p>
+                        <p class="hint"><strong>Galaxy / Android:</strong> פתח ב־Chrome או Samsung Internet, לחץ על הפעלה ואשר התראות במכשיר.</p>
+                        <p class="hint">ההתראות אינן כוללות שמות עובדים או סכומי כסף. לחיצה פותחת את רישום היום; הרישום לא משתנה מעצמו.</p>
+                        <p class="hint">כדי לראות התראה במסך הנעילה, אפשר התראות לפרקד בהגדרות הטלפון. מצב שקט, מיקוד וחיבור לרשת עשויים להשפיע על ההצגה.</p>
+                        <p class="hint">אם כבר הוספת תזכורת ליומן, הסר את יומן פרקד ב־iPhone או את סדרת האירועים ב־Galaxy כדי למנוע תזכורת כפולה.</p>
+                    </details>
                 </div>
-                <p class="hint">לפי שעון ישראל · בכל מכשיר מפעילים בנפרד</p>
-                <label class="field-label" for="pushReminderDays">באילו ערבים להזכיר?</label>
-                <select id="pushReminderDays" onchange="FarkadReminders.daysChanged()"><option value="workdays">ראשון עד חמישי</option><option value="friday">ראשון עד שישי</option><option value="everyday">כל יום</option></select>
-                <p class="hint">תזכורת הבוקר תגיע למחרת כל ערב שנבחר.</p>
-                <p id="pushReminderStatus" class="push-reminder-status" role="status" aria-live="polite">התזכורות עדיין לא הופעלו במכשיר הזה.</p>
-                <button type="button" class="btn-secondary push-reminder-enable" id="pushReminderEnable" onclick="FarkadReminders.enable()" disabled>הפעלת התראות במכשיר הזה</button>
-                <button type="button" class="btn-secondary" id="pushReminderTest" onclick="FarkadReminders.test()" hidden>שליחת התראת ניסיון</button>
-                <button type="button" class="btn-secondary" id="pushReminderDisable" onclick="FarkadReminders.disable()" hidden>כיבוי ההתראות במכשיר הזה</button>
-                <button type="button" class="btn-secondary" id="pushReminderRefresh" onclick="FarkadReminders.refresh()">בדיקה מחדש</button>
-                <details class="push-reminder-help"><summary>מידע על ההתראות <span aria-hidden="true">ⓘ</span></summary>
-                    <p class="hint"><strong>iPhone:</strong> פתח את פרקד מהסמל במסך הבית, לחץ על הפעלה ואשר התראות. נדרש iOS 16.4 ומעלה.</p>
-                    <p class="hint"><strong>Galaxy / Android:</strong> פתח ב־Chrome או Samsung Internet, לחץ על הפעלה ואשר התראות במכשיר.</p>
-                    <p class="hint">ההתראות אינן כוללות שמות עובדים או סכומי כסף. לחיצה פותחת את רישום היום; הרישום לא משתנה מעצמו.</p>
-                    <p class="hint">כדי לראות התראה במסך הנעילה, אפשר התראות לפרקד בהגדרות הטלפון. מצב שקט, מיקוד וחיבור לרשת עשויים להשפיע על ההצגה.</p>
-                    <p class="hint">אם כבר הוספת תזכורת ליומן, הסר את יומן פרקד ב־iPhone או את סדרת האירועים ב־Galaxy כדי למנוע תזכורת כפולה.</p>
-                </details>
-            </section>
+            </details>
+            <!-- הסעות is appended here by js/ui/transport.js, as the same kind of row. -->
         </section>
 
         <section class="settings-section" aria-labelledby="settingsBackups">
             <div class="settings-section-title"><h3 id="settingsBackups" tabindex="-1">גיבוי ושחזור</h3><span>עותק נוסף של העבודה</span></div>
-            <section class="settings-group settings-group-backup">
-                <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 14v6h14v-6"/></svg></span><div><h3>גיבוי</h3><p class="hint">שמירת עותק של הנתונים בקובץ</p></div></div>
-                <p class="hint" id="backupAge"></p>
-                <button type="button" class="backup-primary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
-                <p class="hint">בדוק שהקובץ נשמר ב״קבצים״ או ב״הורדות״ ושמור עותק נוסף במקום אחר. סנכרון פעיל אינו אישור שהקובץ נשמר.</p>
-            </section>
-            <!-- Replacement doors have their own card and guard sentence. -->
-            <section class="settings-group settings-group-restore">
-                <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4v6h6M4 9a8 8 0 1 1 1 9M12 8v5l3 2"/></svg></span><div><h3>ייבוא ושחזור</h3><p class="hint">פתיחת גיבוי או חזרה למצב קודם</p></div></div>
-                <p class="hint settings-restore-warning">שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר כגיבוי מקומי לפני כן.</p>
-                <div class="backup-actions">
-                    <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
-                    <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
-                    <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
+            <!-- Open each time the sheet opens (js/ui/settings.js puts it back): the one
+                 filled button on the sheet, and how old the last copy is. The attribute is
+                 here as well so the page with no script still shows it. -->
+            <details class="settings-group settings-group-backup settings-fold" id="settingsFoldBackup" open>
+                <summary class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 14v6h14v-6"/></svg></span><div><h3>גיבוי</h3><p class="hint">שמירת עותק של הנתונים בקובץ</p></div></summary>
+                <div class="settings-fold-body">
+                    <p class="hint" id="backupAge"></p>
+                    <button type="button" class="backup-primary" onclick="exportBackup()">💾 שמור קובץ גיבוי</button>
+                    <p class="hint">בדוק שהקובץ נשמר ב״קבצים״ או ב״הורדות״ ושמור עותק נוסף במקום אחר. סנכרון פעיל אינו אישור שהקובץ נשמר.</p>
                 </div>
-                <div class="restore-points" id="restorePoints"></div>
-                <div class="restore-points" id="cloudRestorePoints"></div>
-            </section>
+            </details>
+            <!-- Replacement doors have their own card and guard sentence. -->
+            <details class="settings-group settings-group-restore settings-fold" id="settingsFoldRestore">
+                <summary class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4v6h6M4 9a8 8 0 1 1 1 9M12 8v5l3 2"/></svg></span><div><h3>ייבוא ושחזור</h3><p class="hint">פתיחת גיבוי או חזרה למצב קודם</p></div></summary>
+                <div class="settings-fold-body">
+                    <p class="hint settings-restore-warning">שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר כגיבוי מקומי לפני כן.</p>
+                    <div class="backup-actions">
+                        <input accept=".json" id="importInput" onchange="importBackup(event)" style="display:none" type="file"/>
+                        <button type="button" class="btn-secondary" onclick="document.getElementById('importInput').click()">📂 טען קובץ גיבוי</button>
+                        <button type="button" class="btn-secondary" onclick="restoreLocalBackup()">↩️ שחזר מצב קודם</button>
+                    </div>
+                    <div class="restore-points" id="restorePoints"></div>
+                    <div class="restore-points" id="cloudRestorePoints"></div>
+                </div>
+            </details>
+            <!-- The rescue export is a way to get a record back, so it lives with the other
+                 two. The banner over a damaged record keeps its own button for it. -->
+            <details class="settings-group settings-fold" id="settingsFoldRescue">
+                <summary class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1 .7-1.5 1-1.5 3M12 17h.01"/></svg></span><div><h3>שחזור חירום</h3><p class="hint">כלי עזר לטיפול בתקלה</p></div></summary>
+                <div class="settings-fold-body">
+                    <p class="hint">לשחזור חירום בלבד.</p>
+                    <button type="button" class="btn-secondary" onclick="exportRecoveryData()">💾 ייצא נתונים גולמיים</button>
+                </div>
+            </details>
         </section>
 
         <section class="settings-section" aria-labelledby="settingsHelp">
             <div class="settings-section-title"><h3 id="settingsHelp" tabindex="-1">מכשיר ועזרה</h3><span>כשצריך לבדוק משהו</span></div>
             <div class="settings-help-grid" id="settingsHelpCards">
-                <section class="settings-group">
-                    <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4M11 19h2"/></svg></span><div><h3>מצב המכשיר</h3><p class="hint">אחסון והתקנה</p></div></div>
-                    <p class="hint" id="storageRoom"></p>
-                    <p class="hint" id="installState"></p>
-                    <p class="hint" id="ledgerParity" style="display:none"></p>
-                </section>
-                <section class="settings-group">
-                    <div class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1 .7-1.5 1-1.5 3M12 17h.01"/></svg></span><div><h3>שחזור חירום</h3><p class="hint">כלי עזר לטיפול בתקלה</p></div></div>
-                    <p class="hint">לשחזור חירום בלבד.</p>
-                    <button type="button" class="btn-secondary" onclick="exportRecoveryData()">💾 ייצא נתונים גולמיים</button>
-                </section>
+                <details class="settings-group settings-update settings-fold" id="settingsFoldUpdate">
+                    <summary class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M18 18a8 8 0 0 1-13-2"/></svg></span><div><h3>עדכון וגרסה</h3><p class="hint">בדיקה אם יש גרסה חדשה לאפליקציה</p></div></summary>
+                    <div class="settings-fold-body">
+                        <div class="app-version"><span id="appVersion"></span>
+                            <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button></div>
+                    </div>
+                </details>
+                <details class="settings-group settings-fold" id="settingsFoldDevice">
+                    <summary class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4M11 19h2"/></svg></span><div><h3>מצב המכשיר</h3><p class="hint">אחסון והתקנה</p></div></summary>
+                    <div class="settings-fold-body">
+                        <p class="hint" id="storageRoom"></p>
+                        <p class="hint" id="installState"></p>
+                        <p class="hint" id="ledgerParity" style="display:none"></p>
+                    </div>
+                </details>
                 <!-- The privacy-preserving technical report is inserted here by settings.js. -->
             </div>
         </section>

@@ -7,6 +7,12 @@ const FarkadReminders = (() => {
     try { workerContainer = navigator.serviceWorker; } catch { workerContainer = null; }
     let transport = null, registration = null, subscription = null, config = null;
     let device = null, busy = false, generation = 0;
+    // v172: this phone holds a browser subscription and the SERVER has answered that it is
+    // not registered (or the phone has since blocked notifications). The person believes
+    // the reminders are on and none will come. The settings sheet keeps this card shut
+    // until asked, so this is the one state that opens it by itself (js/ui/settings.js).
+    // Only ever true on an answer: no account, no signal and "still checking" are not it.
+    let attention = false;
     const node = id => document.getElementById(id);
     const supported = () => !!workerContainer && 'PushManager' in window && 'Notification' in window;
     const installed = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
@@ -51,7 +57,7 @@ const FarkadReminders = (() => {
     async function refresh() {
         if (busy) return;
         const turn = ++generation;
-        config = null; device = null;
+        config = null; device = null; attention = false;
         if (iPhone() && !installed()) {
             paint('ב־iPhone: הוסף את פרקד למסך הבית ופתח מהסמל שלו כדי לאפשר התראות.'); return;
         }
@@ -73,12 +79,18 @@ const FarkadReminders = (() => {
                 device = nextDevice;
                 if (device.enabled) node('pushReminderDays').value = device.days;
             }
+            attention = !!subscription && (Notification.permission === 'denied' || !device?.enabled);
             if (Notification.permission === 'denied') { device = null; paint(explain({code: 'denied'})); }
             else paint(device?.enabled ? 'התזכורות מופעלות במכשיר הזה: 18:00 ו־10:00 למחרת, לפי הימים שבחרת.'
                 : 'התזכורות כבויות במכשיר הזה. לחץ על הפעלה ואשר קבלת התראות.');
         } catch (error) {
             if (turn === generation) { config = null; device = null; paint(explain(error)); }
-        } finally { if (turn === generation) { busy = false; paint(); } }
+        } finally {
+            if (turn === generation) {
+                busy = false; paint();
+                if (typeof revealSettingsFolds === 'function') revealSettingsFolds();
+            }
+        }
     }
     async function enable() {
         if (busy || !config || !registration || !transport) return;
@@ -95,7 +107,7 @@ const FarkadReminders = (() => {
             const enabled = await call({action: 'enable', subscription: subscription.toJSON(), days: node('pushReminderDays').value});
             if (turn !== generation) return;
             if (!enabled?.enabled) throw new Error('not acknowledged');
-            device = enabled;
+            device = enabled; attention = false;
             paint('התזכורות מופעלות במכשיר הזה. לחץ על שליחת התראת ניסיון ובדוק גם במסך הנעילה.');
         } catch (error) { if (turn === generation) { device = null; paint(explain(error)); } }
         finally { if (turn === generation) { busy = false; paint(); } }
@@ -124,14 +136,14 @@ const FarkadReminders = (() => {
             const id = await idFor(old);
             if (!(await old.unsubscribe()) && await registration.pushManager.getSubscription()) throw new Error('still subscribed');
             if (turn !== generation) return;
-            subscription = null; device = null;
+            subscription = null; device = null; attention = false;
             if (call) { try { await call({action: 'disable', id}); } catch { /* A dead endpoint is pruned on the next send. */ } }
             if (turn === generation) paint('התזכורות כבויות במכשיר הזה. ההגדרות במכשירים האחרים לא השתנו.');
         } catch (error) { if (turn === generation) paint('הכיבוי לא הושלם. נסה שוב או חסום התראות בהגדרות המכשיר.'); }
         finally { if (turn === generation) { busy = false; paint(); } }
     }
     function setTransport(value) {
-        generation++; busy = false; transport = value; config = null; device = null;
+        generation++; busy = false; transport = value; config = null; device = null; attention = false;
         paint(value ? 'לחץ על בדיקה מחדש כדי לבדוק את ההתראות.' : 'יש להתחבר לענן לפני הפעלת ההתראות.');
         if (typeof settingsOpen !== 'undefined' && settingsOpen) void refresh();
     }
@@ -160,6 +172,7 @@ const FarkadReminders = (() => {
     if (workerContainer) workerContainer.addEventListener('message', event => {
         if (event.data?.type === 'FARKAD_REMINDER_OPEN') openToday();
     });
-    return {refresh, enable, test, disable, setTransport, daysChanged, openPending, openToday};
+    return {refresh, enable, test, disable, setTransport, daysChanged, openPending, openToday,
+        needsAttention: () => attention};
 })();
 window.FarkadReminders = FarkadReminders;

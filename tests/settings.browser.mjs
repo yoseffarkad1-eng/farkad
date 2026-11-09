@@ -34,6 +34,10 @@ try {
         }));
     }
     await page.locator('.settings-nav').getByRole('button', {name: 'מכשיר ועזרה', exact: true}).click();
+    // v172: מידע טכני is a row that is shut when the sheet opens; a person taps the row
+    // and then the button, and so does this. The order of the sheet, what is open, and
+    // every reason a row opens by itself are held in tests/settings-order.browser.mjs.
+    await page.locator('#diagnosticGroup > summary').click();
     await page.locator('#diagnosticToggle').click();
     check('technical details remain available in help', await page.locator('#diagnosticText').isVisible());
     await page.evaluate(() => renderSettingsIfOpen());
@@ -45,6 +49,8 @@ try {
     same('reopening begins with current sync information', await page.locator('.settings-body').evaluate(node => node.scrollTop), 0);
 
     suite('phone reminders replace the Calendar handoff');
+    // v172: the reminders are a shut row; opened here the way a person opens it.
+    await page.locator('#settingsFoldReminders > summary').click();
     same('both reminder times are readable', await page.locator('.push-reminder-times strong').allTextContents().then(values => values.join(',')), '18:00,10:00');
     check('no calendar handoff remains', await page.locator('a[href^="webcal:"]').count() === 0);
     check('no enabled claim without a server', !(await page.locator('#pushReminderTest').isVisible()));
@@ -81,7 +87,9 @@ try {
             check(`${status}/${name}: presentation preserves schedule, storage and outbox`, unchanged);
         }
     }
-    const help = await page.locator('.settings-group-backup > p').last().textContent();
+    // v172: the card's contents moved one box in (.settings-fold-body) when the card became
+    // a row; the same two paragraphs are asked about, by where they now are.
+    const help = await page.locator('.settings-group-backup .settings-fold-body > p').last().textContent();
     check('helper asks to check Files or Downloads and retain another copy',
         help.includes('קבצים') && help.includes('הורדות') && help.includes('עותק נוסף')
         && help.includes('סנכרון פעיל אינו אישור שהקובץ נשמר'));
@@ -120,7 +128,9 @@ try {
                 if (date === null) Store.remove('scheduleData:lastBackup');
                 else Store.set('scheduleData:lastBackup', date);
                 renderBackupAge();
-                return [...document.querySelectorAll('.settings-group-backup > p')].every(n =>
+                const lines = [...document.querySelectorAll('.settings-group-backup .settings-fold-body > p')];
+                // Both of them, by count: a selector that found nothing would pass `every`.
+                return lines.length === 2 && lines.every(n =>
                     n.scrollWidth <= n.clientWidth + 1 && n.scrollHeight <= n.clientHeight + 1);
             }, date));
         }
