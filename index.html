@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v169">
+<meta name="farkad-build" content="v171">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -325,6 +325,31 @@
         <div id="reorderList"></div>
     </div>
     <div class="reorder-foot" id="reorderFoot"></div>
+</div>
+
+<!-- v171, הסעות: the vehicle-dispatch planner, on a phone that turned it on in ⋯ and on no
+     other. A panel over the whole screen, on the settings sheet's tier and ABOVE the ask
+     dialog in this file, so the app's own questions open over it. It carries the
+     settings-panel class on purpose: that class is what makes a layer fixed, what hides
+     it on paper, and what brings it down with the rest of the frame on a stuck iPhone
+     (css/app.css, body.frame-lowered) - a second fixed layer with rules of its own would
+     be one more thing for that list to forget. Every word in it is written by
+     js/ui/transport.js, from the one block that holds them. -->
+<div class="settings-panel transport-panel" id="transportPanel" role="dialog" aria-modal="true"
+     aria-labelledby="transportTitle" aria-hidden="true">
+    <div class="transport-head">
+        <div class="transport-titles">
+            <h2 id="transportTitle" tabindex="-1"></h2>
+            <p id="transportContext" class="transport-context"></p>
+        </div>
+        <button type="button" class="btn-secondary transport-close" id="transportClose" onclick="closeTransport()"></button>
+    </div>
+    <div class="transport-tabs" id="transportTabs" role="tablist"></div>
+    <p class="transport-note" id="transportNote" role="status" hidden></p>
+    <div class="transport-body" id="transportBody"></div>
+    <!-- Outside the body, which is rebuilt on every change: a live region that is
+         destroyed and rebuilt announces nothing. -->
+    <div class="transport-live" id="transportLive" role="status" aria-live="polite"></div>
 </div>
 
 <div class="modal sheet" id="assignSheet">
@@ -673,6 +698,12 @@
 <!-- After share.js (its dialog is the way in) and day.js (its drawn speech bubble);
      everything else it reads is above both. -->
 <script src="js/ui/seder.js"></script>
+<!-- v171, הסעות. After seder.js: it reads the day through sederCrew and takes the seder's
+     own rule for a phone number, and its row in the WhatsApp dialog goes under the seder's.
+     The engine first - the screen calls it. Neither is part of the sync group, and neither
+     reads or writes anything at load but one per-phone preference (js/ui/transport.js). -->
+<script src="js/model/transport.js"></script>
+<script src="js/ui/transport.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

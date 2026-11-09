@@ -1,9 +1,285 @@
-## v169 — one look for every screen (candidate, not served)
+## v171 — הסעות, on one phone (candidate, not served)
 
-**Not served. Not merged. On no phone.** One commit on `ac9c013` (v167, the build that is live).
-v168 is reserved for the sync fix being built elsewhere; this candidate is rebased onto it
-before its gate, and the number is confirmed at integration. No gate result is written here:
-validation is recorded against the exact clean commit, and no count is carried over.
+**Not served. Not merged. On no phone.** One commit of shipped files on the v169 candidate
+(`b157744`); v170 is reserved for another feature being built elsewhere, and the number is
+confirmed at integration. No gate result is written here: validation is recorded against the
+exact clean commit, and no count is carried over.
+
+The owner's request, and his answers of 2026-11-09: a planner for the morning ride - which of
+his seven vehicles go out, who drives, who sits where - and a message to each driver. Seven
+vehicles as he names them, the 9-seater a Volkswagen laid out 2-2-2-3 with the driver one of
+the front two. He decides per worker who may drive, and which vehicles. Each worker has one
+fixed pickup area; a driver is a worker and leaves from his own home, so a trip's pickup area
+starts as its driver's. The morning ride only. No «ממתין» status. And **first on his phone
+only, with no cloud**; the other two phones are a later step with its own approval.
+
+**What it is.** A panel over the whole screen with four parts:
+
+- **שיבוץ** - the plan. «הצעת שיבוץ» proposes one (deterministic: the same day gives the same
+  plan; pickup area first, then destination site, then who may drive, then seats - it does not
+  try to use fewer vehicles). A man is moved by tapping him and then «העברה לכאן» on a car. A
+  driver is chosen from a list that offers ONLY the men who may drive that car and are riding
+  that day. A vehicle or a man can be locked, and a suggestion leaves a locked vehicle byte for
+  byte. What is wrong with the plan is listed live. «אישור התוכנית» makes a numbered version; a
+  plan with anything open is accepted only with a typed reason. Versions are never edited.
+- **רכבים** - which vehicles go out today, one tap each; and the list itself: add, rename,
+  change seats, retire. Seeded once with the seven.
+- **עובדים** - the men with a site that day: how each gets there (בהסעה שלנו / רכב פרטי / נוסע
+  עם קבלן אחר / אחר), his pickup area, whether he may drive and which vehicles; and the list of
+  pickup areas, which starts EMPTY - the owner types his own.
+- **הודעות** - one card per driver of the last ACCEPTED version, never of a draft: the message,
+  a real `<a href="https://wa.me/<number>?text=…" target="_blank">` tapped by the person (the
+  seder's own rule for what is a usable number), «נפתח בוואטסאפ» on the tap, and a manual
+  «סימנתי שנשלח». A mark is tied to the message's fingerprint: a later version, a corrected
+  number or a renamed passenger and it is no longer believed.
+
+**The switch.** Off on every phone until that phone turns it on: a card in ⋯ under «מכשיר
+ועזרה», saying it is this phone only. One preference, `farkadTransport:enabled`. While it is
+off no entry is drawn, nothing is computed, and no transport key but that one is read. On, there
+is ONE entry: a row in the WhatsApp dialog under the seder's. Nothing new on the day screen.
+There is no `FARKAD_FLAGS` entry - a flag is the same on all three phones, and this gate must
+not be.
+
+**What it reads.** Who works where on the day being viewed, through `sederCrew`
+(`js/ui/seder.js`) in the layer the day's group message reads - so a man is in a plan exactly
+when he is under a site in that message. A man on two sites rides to the FIRST site his day
+holds; the other is said on his card and not routed.
+
+**What it writes, and where.** Three kinds of key, through `Store`, optional and verified:
+
+| key | holds |
+|---|---|
+| `farkadTransport:enabled` | the switch |
+| `farkadTransport:settings` | the vehicles, the pickup areas, and per worker (by roster id, nothing copied) his area and what he may drive |
+| `farkadTransport:day:<date>` | that day's draft, its accepted versions, and the marks on the drivers' messages |
+
+Day records older than 35 days are removed when the panel is opened. A record that will not
+read is copied to `<key>:unreadable` before anything is saved over it, the screen says so, and
+the day goes on being recorded: `Recovery` is not involved and writes are never blocked from
+here. If the copy cannot be kept, nothing is written over the unreadable bytes.
+
+**What it does NOT write.** Nothing in the schedule document, the journal, the outbox or the
+cloud; nothing in a backup file, a restore point or the rescue file; the write fence does not
+move. `tests/transport.test.mjs` measures each. Nothing in `js/sync`, `js/model/schema.js`,
+`js/model/money.js`, `js/model/ledger.js`, `js/state.js`, `js/store.js`, `js/recovery.js` or
+`firestore.rules` changed. The retired «רכבים» feature (vehicle-owner pay, the `vehicles`
+flag) is not touched and shares no name, id or panel with this: transport vehicles are `tv_…`.
+
+**What this build is known NOT to cover.**
+
+- **It is on no phone, and has never run on an iPhone.** Every measurement is Chromium at
+  440x956 and 375x667. The hand-off from the home-screen app to WhatsApp, the keyboard over the
+  reason field, and the panel on a stuck iPhone frame (it carries the settings sheet's class,
+  so it takes that fix - untested on glass) are for the owner's phone to say.
+- **Local to one phone.** The other two phones do not have the plan, the vehicles, the areas
+  or who may drive. A phone that turns the switch on starts with the seven vehicles and
+  nothing else.
+- **Not in any backup.** A lost, replaced or wiped phone loses every plan and every per-worker
+  transport setting. There is no export. Restoring the schedule does not touch them, in either
+  direction.
+- No return ride. No distances: areas have no order of closeness, and the suggestion is
+  greedy, not optimal. A locked vehicle with empty seats is not filled by a suggestion.
+- Only a man who is working that day can be chosen to drive.
+- Per-worker settings are edited from the card of a man who has a site that day; a man who is
+  off is set the first evening he works.
+- An update that reloads the page while the panel is open closes it; the draft is on the disk,
+  the man being moved is not. Unlike the seder's list, the panel does not reopen by itself
+  after iOS kills the app behind WhatsApp - the tap's «נפתח בוואטסאפ» mark is kept.
+- The driver's message has no emoji (the seder's has two). The seat a passenger was given is
+  shown on the plan and is not in the message.
+- Deleting a worker or a site is never blocked by a plan that names him; an old version then
+  shows «עובד שנמחק».
+- Text at 200%, a 320px phone, a screen reader and paper were not measured for this panel.
+
+**Every Hebrew string - PROPOSED, the owner corrects on sight.** He gave blanket approval of
+professional wording on 2026-11-09 and asked not to be consulted string by string. All of
+them are in one block at the top of `js/ui/transport.js` and pinned word for word in
+`tests/transport.test.mjs`; a correction moves both, in one commit. The message a driver
+receives:
+
+```
+שלום סמיר,
+הסעה ליום שלישי 10/11/2026:
+רכב: BYD סיל U 2025
+איסוף: כפר קרע
+נוסעים (2):
+- אחמד – הרצליה
+- יוסי – חיפה
+יעדים: הרצליה, חיפה
+```
+
+From the second accepted version on, «עדכון מספר N לתוכנית.» follows the heading.
+
+| key | proposed Hebrew | note |
+|---|---|---|
+| `switchTitle` | הסעות | |
+| `switchSub` | שיבוץ עובדים לרכבים | |
+| `switchLead` | שיבוץ העובדים לרכבים והודעה לכל נהג. פועל במכשיר הזה בלבד: לא מסונכרן, לא משותף עם הטלפונים האחרים, ולא נכלל בגיבוי. | |
+| `switchStateOn` | מופעל במכשיר הזה | |
+| `switchStateOff` | כבוי | |
+| `switchOn` | הפעלת הסעות במכשיר הזה | |
+| `switchOff` | כיבוי הסעות במכשיר הזה | |
+| `entry` | הסעות – שיבוץ לרכבים | |
+| `title` | הסעות | |
+| `back` | חזרה | |
+| `tabPlan` | שיבוץ | |
+| `tabVehicles` | רכבים | |
+| `tabWorkers` | עובדים | |
+| `tabMessages` | הודעות | |
+| `notKept` | השינוי לא נשמר במכשיר. אם האפליקציה תיסגר, הוא יאבד. | |
+| `unreadable` | נתוני הסעות שנשמרו במכשיר לא נקראו. מתחילים מרשימה ריקה, והעותק שלא נקרא נשמר בצד. | |
+| `nobody` | אין ביום הזה עובדים עם אתר עבודה. | |
+| `vehiclesLead` | אילו רכבים יוצאים היום? | |
+| `vehiclesSummary` | זמינים 2 מתוך 7 · 34 מושבים | template; sample values |
+| `seats` | 2 מושבים | template; sample values |
+| `available` | זמין היום | |
+| `unavailable` | לא זמין היום | |
+| `noVehicles` | אין רכבים ברשימה. | |
+| `editVehicle` | עריכת הרכב | |
+| `addVehicle` | הוספת רכב | |
+| `renameVehicle` | שינוי שם | |
+| `changeSeats` | שינוי מושבים | |
+| `retireVehicle` | הוצאה מהרשימה | |
+| `vehicleNameTitle` | שם הרכב | |
+| `nameNeeded` | צריך לכתוב שם | |
+| `vehicleNameTaken` | כבר יש רכב בשם הזה | |
+| `seatsTitle` | כמה מושבים יש באחמד? כולל הנהג. | template; sample values |
+| `seatsBad` | מספר בין 2 ל-20 | |
+| `retireTitle` | להוציא את אחמד מהרשימה? | template; sample values |
+| `retireLead` | הרכב לא יוצע עוד לשיבוץ. גרסאות שכבר אושרו אינן משתנות. | |
+| `save` | שמירה | |
+| `workersLead` | מי צריך הסעה היום? הרשימה נקראת מרישום היום ואינה משנה אותו. | |
+| `statusLabel` | איך אחמד מגיע | template; sample values |
+| `statusRide` | בהסעה שלנו | |
+| `statusPrivate` | רכב פרטי | |
+| `statusContractor` | נוסע עם קבלן אחר | |
+| `statusOther` | אחר | |
+| `areaLabel` | אזור האיסוף של אחמד | template; sample values |
+| `noArea` | בלי אזור | |
+| `alsoAt` | רשום היום גם בחיפה, חדרה. ההסעה לאתר הראשון. | template; sample values |
+| `canDrive` | רשאי לנהוג | |
+| `cannotDrive` | לא נוהג | |
+| `drivesAll` | כל הרכבים | |
+| `drivesSome` | 2 רכבים | template; sample values |
+| `drivesNone` | לא נבחר רכב | |
+| `drivesLabel` | באילו רכבים אחמד רשאי לנהוג | template; sample values |
+| `notWorkingToday` | 2 עובדים בלי אתר היום – אינם בהסעות | template; sample values |
+| `areasTitle` | אזורי איסוף (2) | template; sample values |
+| `areasLead` | האזורים שמהם אוספים עובדים. לכל עובד אזור אחד קבוע. | |
+| `noAreas` | עדיין אין אזורים. מוסיפים אזור, ואז בוחרים אזור לכל עובד. | |
+| `addArea` | הוספת אזור | |
+| `renameArea` | שינוי שם | |
+| `removeArea` | מחיקה | |
+| `areaNameTitle` | שם האזור | |
+| `areaNameTaken` | כבר יש אזור בשם הזה | |
+| `removeAreaTitle` | למחוק את האזור אחמד? | template; sample values |
+| `removeAreaLead` | עובדים ששויכו לאזור הזה יישארו בלי אזור. | |
+| `suggest` | הצעת שיבוץ | |
+| `accept` | אישור התוכנית | |
+| `draft` | טיוטה – עדיין לא אושרה | |
+| `acceptedVersion` | גרסה 2 מאושרת | template; sample values |
+| `changedSince` | יש שינויים שלא אושרו מאז גרסה 2 | template; sample values |
+| `recordChanged` | רישום היום השתנה מאז שאושרה הגרסה | |
+| `seatedCount` | משובצים 3 מתוך 5 | template; sample values |
+| `planOk` | התוכנית מלאה | |
+| `errorsTitle` | 2 דברים לתיקון | template; sample values |
+| `warnTitle` | לתשומת לב | |
+| `unseatedTitle` | בלי מקום ברכב (2) | template; sample values |
+| `suggestDone` | הוצע שיבוץ. 2 נשארו בלי מקום | template; sample values |
+| `noDriver` | קורולה 2016: אין נהג | template; sample values |
+| `driverNotEligible` | קורולה 2016: אחמד אינו רשאי לנהוג ברכב הזה | template; sample values |
+| `overCapacity` | קורולה 2016: 2 יותר ממספר המושבים | template; sample values |
+| `twice` | אחמד משובץ בשני רכבים | template; sample values |
+| `hasStatus` | אחמד משובץ ברכב אבל מסומן «רכב פרטי» | template; sample values |
+| `notWorking` | אחמד משובץ ברכב אבל אין לו אתר ברישום היום | template; sample values |
+| `vehicleUnavailable` | קורולה 2016 מסומן לא זמין היום ויש בו נוסעים | template; sample values |
+| `unknownVehicle` | רכב שהוצא מהרשימה ויש בו נוסעים | |
+| `noSeat` | אחמד בלי מקום ברכב | template; sample values |
+| `badSeat` | קורולה 2016: המושב של אחמד אינו תקין | template; sample values |
+| `otherArea` | אחמד נאסף מאזור אחר מזה של קורולה 2016 | template; sample values |
+| `deletedWorker` | עובד שנמחק | |
+| `deletedVehicle` | רכב שהוצא מהרשימה | |
+| `occupancy` | 3 מתוך 5 | template; sample values |
+| `notUsed` | לא בשימוש | |
+| `lockVehicle` | נעילת הרכב | |
+| `unlockVehicle` | שחרור הרכב | |
+| `vehicleLocked` | הרכב נעול | |
+| `pickup` | אזור איסוף | |
+| `destinations` | יעדים | |
+| `driver` | נהג: אחמד | template; sample values |
+| `chooseDriver` | בחירת נהג | |
+| `driverDialogTitle` | מי נוהג בקורולה 2016? | template; sample values |
+| `driverDialogLead` | מוצגים רק עובדים שרשאים לנהוג ברכב הזה. | |
+| `driverNone` | בלי נהג | |
+| `noEligible` | אין היום עובד שרשאי לנהוג ברכב הזה | |
+| `lockWorker` | נעילת השיבוץ של אחמד | template; sample values |
+| `unlockWorker` | שחרור השיבוץ של אחמד | template; sample values |
+| `lock` | נעילה | |
+| `locked` | נעול | |
+| `moveHere` | העברה לכאן | |
+| `full` | הרכב מלא | |
+| `moving` | מעבירים את אחמד – בוחרים רכב | template; sample values |
+| `workerLockedNote` | אחמד נעול – משחררים כדי להעביר | template; sample values |
+| `cancel` | ביטול | |
+| `removeFromVehicle` | הוצאה מהרכב | |
+| `seat` | מושב | |
+| `seatNone` | בלי מושב קבוע | |
+| `seatFront` | קדמי, ליד הנהג | |
+| `seatRearRight` | אחורי ימין | |
+| `seatRearMiddle` | אחורי אמצע | |
+| `seatRearLeft` | אחורי שמאל | |
+| `seatRow` | שורה 4, מושב 3 | template; sample values |
+| `seatNumber` | מושב 2 | template; sample values |
+| `acceptTitle` | אישור התוכנית | |
+| `acceptComplete` | התוכנית מלאה. לאשר אותה? | |
+| `acceptIncomplete` | התוכנית חלקית: 2 דברים לא סגורים. אפשר לאשר רק עם סיבה. | template; sample values |
+| `reasonLabel` | למה מאשרים תוכנית חלקית? | |
+| `reasonNeeded` | צריך לכתוב סיבה | |
+| `acceptYes` | אישור | |
+| `acceptPartial` | אישור כתוכנית חלקית | |
+| `nothingToAccept` | אין שינויים לאשר | |
+| `historyTitle` | היסטוריית גרסאות | |
+| `noVersions` | עדיין אין גרסה מאושרת | |
+| `versionLine` | גרסה 2 · 21:40 | template; sample values |
+| `complete` | מלאה | |
+| `partial` | חלקית – חסר נהג | template; sample values |
+| `moved` | 2 עובדים שונו לעומת גרסה 1 | template; sample values |
+| `tripLine` | קורולה 2016: אחמד + 2 נוסעים | template; sample values |
+| `messagesLead` | הודעה לכל נהג. וואטסאפ נפתח עם ההודעה מוכנה, ושם לוחצים על שליחה. | |
+| `noAccepted` | אין תוכנית מאושרת. מאשרים את השיבוץ, ואז שולחים לנהגים. | |
+| `draftDiffers` | ההודעות לפי גרסה 2. יש שינויים שלא אושרו. | template; sample values |
+| `openWhatsapp` | פתיחה בוואטסאפ | |
+| `notOpened` | עדיין לא נפתח | |
+| `opened` | נפתח בוואטסאפ | |
+| `confirmSent` | סימנתי שנשלח | |
+| `sentMarked` | סומן כנשלח ב-21:40 | template; sample values |
+| `unmarkSent` | ביטול הסימון | |
+| `changedSinceMark` | ההודעה השתנתה מאז שסומנה – כדאי לשלוח שוב | |
+| `noPhone` | אין מספר טלפון תקין | |
+| `mHello` | שלום אחמד, | template; sample values |
+| `mHeading` | הסעה ליום שלישי 10/11/2026: | template; sample values |
+| `mUpdate` | עדכון מספר 1 לתוכנית. | template; sample values |
+| `mVehicle` | רכב: קורולה 2016 | template; sample values |
+| `mPickup` | איסוף: 3 | template; sample values |
+| `mPassengers` | נוסעים (2): | template; sample values |
+| `mPassenger` | - אחמד – חדרה | template; sample values |
+| `mAlone` | בלי נוסעים. | |
+| `mDestinations` | יעדים: חיפה, חדרה | template; sample values |
+
+The seven vehicle names are data, seeded once and then the owner's to edit: טויוטה קורולה 2013,
+טויוטה קורולה 2016, BYD סיל U 2025, BYD אטו 3 2025, פולקסווגן 2018, סוואנה 2010, ליפמוטור C10 2026.
+
+## v169 — one look for every screen (served 2026-11-09)
+
+**Served.** Merged into `main` as `bd59a68` (PR #55, the tree of `e87fc62`) on 2026-11-09 and
+deployed by GitHub Pages run 42709326296, which concluded `success` at 22:10 UTC. The owner
+asked the same day for each safe change to be published on its own, and this one touches no
+data path. The gates were run on `e87fc62` from a clean detached worktree with Playwright
+1.56.1's own pinned Chromium and are recorded on the PR, where a count belongs. **What was
+NOT verified:** the served page itself - the container that published it cannot reach
+`github.io` - so "served" here means Pages reported the deployment of that commit, not that
+anybody read the stamp off a phone. v168 was reserved for a sync fix built elsewhere and had
+not landed; whatever it becomes is built on this.
 
 The owner's request (2026-11-09): the app made professional and calm, readable in the sun,
 nothing surplus on the screen, with authority to choose the look. What was measured first, on

@@ -5116,10 +5116,14 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // v122: connection and update first, backup and replacement together but in
   // separate cards, device and recovery help last. v141 adds the chosen Calendar
   // reminder after updates, before backup. Labels and action guards remain.
-  check('the sheet has the eight groups, including the phone reminders, in the board order',
+  // v171: a ninth, «הסעות» - the per-phone switch for the transport planner, which the
+  // owner asked to have under «מכשיר ועזרה» (js/ui/transport.js). It is the behaviour
+  // change itself, so the list moves with it: after the emergency exit, before the
+  // technical lines, and the eight that were here are in the order they were.
+  check('the sheet has the nine groups, including the phone reminders and the transport switch, in the board order',
     JSON.stringify(heads) === JSON.stringify(
       ['ענן וסנכרון', 'עדכון וגרסה', 'תזכורות בטלפון', 'גיבוי', 'ייבוא ושחזור', 'מצב המכשיר', 'שחזור חירום',
-                'מידע טכני']),
+                'הסעות', 'מידע טכני']),
     JSON.stringify(heads));
 
   // One primary action: the export. Everything else is quieted with btn-secondary or
