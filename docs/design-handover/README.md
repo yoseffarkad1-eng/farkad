@@ -53,6 +53,7 @@ better, side by side.
   `git apply` it onto `ac9c013`. It covers `css/design.css`, `js/ui/band.js`, `js/ui/more.js`, the
   bands in day/week/reports/roster, the ⋯ sheet and provisional v169 stamps. It has **no tests and
   was never run**. Use it as a head start or ignore it; it is not reviewed.
+- `impl-plan.md`: the earlier session's file-by-file plan and order of work for the implementation.
 - `pictures/g2/`: the approved day-screen pairs (G2).
 - `pictures/g3-*.jpg`: 45 before/after pairs at 440×956, 37 dark and 8 light.
   **قبل (before) is on the RIGHT, بعد (after) on the LEFT.** Fixture data only. Every name in them
