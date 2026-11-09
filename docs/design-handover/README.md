@@ -28,7 +28,7 @@ phones). Written 2026-11-09.
 |---|---|---|
 | G1 | foundations only: colours, 4 button looks, radii | «مش حاسسها قويه» (too weak). **Rejected.** «بدي تغيير جذري» (wants a radical change) |
 | G2 | day screen: 4 header rows → a 2-row blue band; one bottom bar; WhatsApp as a round green floating button; הגדרות / הכל חופש / copy-a-day behind ⋯; 12 of 12 rows visible instead of 8 | «إيه، كمّل هيك» (**approved**). The floating button hides while scrolling down and returns on a scroll up |
-| G3 | every other screen in the same language, sent as one set | «كمّل الكل وفرجيني» (design everything, show once, stop asking screen by screen). Verdict on G3 itself: **not yet given** |
+| G3 | every other screen in the same language, sent as one set | «كمّل الكل وفرجيني» (design everything, show once, stop asking screen by screen), then «ايه» to the whole set on 2026-11-09. **Approved.** Re-confirm the Hebrew-string list (handover.md §7) explicitly: he answered «مش فاهم» to the detailed message that carried it |
 | now | this cloud session | «بدي اياها تقلبلي التطبيق تعملي اشي احترافي جدا» (turn the app over, make it very professional) |
 
 So treat **G3 as the floor, not the ceiling**. Keep what he approved, unless you show him something
@@ -40,7 +40,20 @@ better, side by side.
   the change groups, then the G2 and G3 notes. It includes the list of **new or changed Hebrew
   strings**, which all need the owner's yes (law 6), and the implementation notes for whoever
   builds it. Paths in it that start with `~/` or `C:\` are on the owner's PC and are not here.
-- `handover.md`, if present: the earlier session's own closing summary.
+- `handover.md`: **the earlier session's complete closing summary. Read this one first.** It is
+  written for a session that sees only GitHub. It covers:
+  - the exact G2 and G3 specification with measurements;
+  - the behaviour changes;
+  - the new Hebrew strings;
+  - the tests to add and move;
+  - how the mock-ups were made;
+  - the mock files verbatim;
+  - §12, the implementation it had started.
+- `design-v169-wip.patch`: that started implementation, about two hours of work, uncommitted.
+  `git apply` it onto `ac9c013`. It covers `css/design.css`, `js/ui/band.js`, `js/ui/more.js`, the
+  bands in day/week/reports/roster, the ⋯ sheet and provisional v169 stamps. It has **no tests and
+  was never run**. Use it as a head start or ignore it; it is not reviewed.
+- `pictures/g2/`: the approved day-screen pairs (G2).
 - `pictures/g3-*.jpg`: 45 before/after pairs at 440×956, 37 dark and 8 light.
   **قبل (before) is on the RIGHT, بعد (after) on the LEFT.** Fixture data only. Every name in them
   is a test persona already in `tests/` since 2026-08.

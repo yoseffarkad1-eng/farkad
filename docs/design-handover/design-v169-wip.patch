@@ -1,0 +1,1161 @@
+diff --git a/index.html b/index.html
+index c0608b5..67571f0 100644
+--- a/index.html
++++ b/index.html
+@@ -9,6 +9,7 @@
+ <title>פרקד - רישום עבודה</title>
+ <link rel="stylesheet" href="css/app.css" onerror="this.dataset.loadFailed='true'">
+ <link rel="stylesheet" href="css/readability.css" onerror="this.dataset.loadFailed='true'">
++<link rel="stylesheet" href="css/design.css" onerror="this.dataset.loadFailed='true'">
+ <link rel="manifest" href="manifest.webmanifest">
+ <meta name="theme-color" content="#1f4b7a">
+ <!-- Which build this PAGE belongs to. app.js carries the same string, and the two are
+@@ -17,7 +18,7 @@
+      does not read. The service worker is what stops that happening; this is what
+      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
+      three agree. -->
+-<meta name="farkad-build" content="v167">
++<meta name="farkad-build" content="v169">
+ <link rel="icon" href="icons/icon-192.png">
+ <link rel="apple-touch-icon" href="icons/icon-192.png">
+ </head>
+@@ -341,6 +342,18 @@
+     </div>
+ </div>
+ 
++<!-- The ⋯ sheet (v169): where the buttons the bands no longer show went. Filled by
++     openMoreSheet (js/ui/more.js) from the screen's own rows; the first line is the
++     sync sentence. A .modal.sheet like the one above, so modal.js owns its keys. -->
++<div class="modal sheet" id="moreSheet" role="dialog" aria-modal="true" aria-label="עוד">
++    <div class="modal-content sheet-content more-content">
++        <div class="more-grip" aria-hidden="true"></div>
++        <p class="more-sync" id="moreSync" role="status"></p>
++        <div class="more-rows" id="moreRows"></div>
++        <button type="button" class="more-close" id="moreClose" onclick="closeMoreSheet()">סגור</button>
++    </div>
++</div>
++
+ <!-- Sign-in. Email and password because it is the only route that stays INSIDE an
+      installed app on an iPhone: a home-screen web app has its own storage, and any
+      Google flow completes over in Safari, in a different store, leaving this one exactly
+@@ -657,6 +670,8 @@
+ <script src="js/ui/undo.js"></script>
+ <script src="js/ui/modal.js"></script>
+ <script src="js/ui/sitecolor.js"></script>
++<script src="js/ui/band.js"></script>
++<script src="js/ui/more.js"></script>
+ <script src="js/ui/day.js"></script>
+ <script src="js/ui/sheet.js"></script>
+ <script src="js/ui/quickstart.js"></script>
+diff --git a/js/app.js b/js/app.js
+index 86b604e..2b379a8 100644
+--- a/js/app.js
++++ b/js/app.js
+@@ -4,7 +4,7 @@
+ // the version actually RUNNING on this phone - which is the question that cannot
+ // otherwise be answered from inside an installed app, and the one that matters when a
+ // fix is not showing up.
+-const APP_VERSION = 'v167';
++const APP_VERSION = 'v169';
+ 
+ // Is the page in front of us from the same build as these scripts?
+ //
+diff --git a/js/ui/day.js b/js/ui/day.js
+index aa54d04..61af1c9 100644
+--- a/js/ui/day.js
++++ b/js/ui/day.js
+@@ -58,6 +58,57 @@ function readDayScroll() {
+     // frame is style work the list does not need. Only a crossing changes anything.
+     if (!compact && y > COMPACT_ON) body.classList.add('day-compact');
+     else if (compact && y < COMPACT_OFF) body.classList.remove('day-compact');
++    // The floating WhatsApp button (v169) hides on the way down and comes back on a small
++    // scroll up - the owner's choice («يختفي وقت التمرير»). A class on the dock, from
++    // scrollY alone, like the compact header above; the dock's box does not move, so
++    // what bars.js measures does not change.
++    const dock = document.querySelector('.day-actions');
++    if (dock) {
++        if (y > fabLastY + 6 && y > 40) dock.classList.add('fab-hidden');
++        else if (y < fabLastY - 6 || y <= 40) dock.classList.remove('fab-hidden');
++    }
++    fabLastY = y;
++}
++let fabLastY = 0;
++
++// The rows of the day's ⋯ sheet. Built when the sheet opens, so the bulk count and the
++// copy label are the moment's, not the render's.
++function dayMoreRows() {
++    const rows = [settingsMoreRow()];
++    rows.push(moreRow(bandIcon('holiday'), 'הכל חופש', markAllHoliday, null, 'day-holiday-action'));
++    const remaining = State.unrecorded().length;
++    const count = el('span', 'more-count', String(remaining));
++    rows.push(moreRow(bandIcon('bulk'), 'פעולות מרוכזות', () => {
++        bulkOpen = true;
++        render();
++    }, count, 'bulk-toggle'));
++    const source = copySourceLabel();
++    if (source) rows.push(moreRow(bandIcon('copy'), source, copyPreviousDay, null, 'copy-day-action'));
++    return rows;
++}
++
++// The copy button's own words - «מיום רביעי 04/11» - computed the way renderCopyButton
++// (js/ui/sheet.js) computes them, or null when there is nothing to copy from or the
++// record is held.
++function copySourceLabel() {
++    if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return null;
++    if (State.schedule.workers.length === 0) return null;
++    const from = lastRecordedDayBefore(State.schedule, State.date, State.layer);
++    if (!from) return null;
++    const parsed = parseLocalDate(from);
++    return `${'מ' + hebrewDayName(parsed)} ${formatShortDate(parsed)}`;
++}
++
++// The strip under the band on a day with no record at all: nobody placed, nobody absent.
++function renderCopyStrip() {
++    const workers = State.workersForDay(State.date, State.layer);
++    if (workers.length === 0 || State.unrecorded().length !== workers.length) return null;
++    const label = copySourceLabel();
++    if (!label) return null;
++    const strip = el('div', 'day-copy-strip');
++    strip.appendChild(el('span', null, 'עוד אין רישום ליום הזה'));
++    strip.appendChild(button(`↧ ${label}`, 'copy-day-action', copyPreviousDay));
++    return strip;
+ }
+ 
+ let dayScrollWatched = false;
+@@ -294,6 +345,11 @@ function buildDay(root) {
+     if (typeof appendModeSwitch === 'function') appendModeSwitch(tools, bulk);
+     tools.appendChild(renderProgress());
+     root.appendChild(bulk);
++    // A day with nothing on it yet (v169): the copy button's own words, under the band,
++    // where the dock used to show them on every day. On any other day they are a row of
++    // the ⋯. The sentence is the one new string of this screen.
++    const copyStrip = renderCopyStrip();
++    if (copyStrip) root.appendChild(copyStrip);
+ 
+     if (dayMode === 'workers') {
+         root.appendChild(renderDayWorkerList());
+@@ -894,6 +950,11 @@ function renderDayHeader() {
+     fwd.appendChild(el('span', 'nav-word', 'הבא'));
+     fwd.appendChild(chevronIcon('fwd'));
+     nav.appendChild(fwd);
++    // The ⋯ (v169): הגדרות, הכל חופש, the bulk fold and the copy button, under their own
++    // names, in a sheet. They were four controls on two rows above the list; the owner's
++    // words were «شايف البار كيف طالع لفوق». End of the row, so it holds the end corner on
++    // every screen (the week's and the crew's ⋯ sit in the same place).
++    nav.appendChild(moreButton(dayMoreRows));
+     header.appendChild(nav);
+ 
+     const picker = document.createElement('input');
+diff --git a/js/ui/modal.js b/js/ui/modal.js
+index 354c40a..f879fd5 100644
+--- a/js/ui/modal.js
++++ b/js/ui/modal.js
+@@ -16,6 +16,7 @@ const MODAL_CLOSERS = {
+     askModal: () => askCancel(),
+     quickModal: () => closeQuickStart(),
+     assignSheet: () => closeAssignSheet(),
++    moreSheet: () => closeMoreSheet(),
+     workerPickerModal: () => closeWorkerPicker(),
+     placePickerModal: () => closePlacePicker(),
+     workerFormModal: () => closeWorkerForm(),
+diff --git a/js/ui/reports.js b/js/ui/reports.js
+index 42f24ff..f5ae4b4 100644
+--- a/js/ui/reports.js
++++ b/js/ui/reports.js
+@@ -159,8 +159,13 @@ function renderAdvances() {
+     if (ADVANCE_ORDER_DRAFT) { renderAdvanceOrder(root); return; }
+     const worker = ADVANCE_WORKER && State.worker(ADVANCE_WORKER);
+     if (worker) {
+-        root.appendChild(button('חזרה לכל העובדים', 'btn-secondary', () => showWorkerAdvances(null)));
+-        root.appendChild(el('h2', null, `מקדמות · ${worker.name}`));
++        // The band (v169): the way back is its chevron, the man's name is its title.
++        root.appendChild(renderBand({
++            title: worker.name,
++            sub: 'מקדמות',
++            back: { label: 'חזרה לכל העובדים', onTap: () => showWorkerAdvances(null) },
++            more: [settingsMoreRow()]
++        }));
+         const summary = workerAdvanceSummary(worker.id);
+         const balance = el('div', 'advance-balance');
+         balance.appendChild(el('span', null, summary.overpaid > 0 ? 'החשבון דורש בדיקה' : 'נשאר להחזיר'));
+@@ -200,10 +205,17 @@ function renderAdvances() {
+         if (history) root.appendChild(history);
+         return;
+     }
+-    root.appendChild(el('h2', null, 'מקדמות'));
+-    if (State.schedule.workers.length > 1) {
+-        root.appendChild(button('סידור', 'btn-secondary', openAdvanceOrder, 'סידור עמוד המקדמות'));
+-    }
++    // The band (v169); «סידור» is a row of its ⋯ when there is more than one man to order.
++    root.appendChild(renderBand({
++        title: 'מקדמות',
++        start: true,
++        more: [
++            settingsMoreRow(),
++            State.schedule.workers.length > 1
++                ? moreRow(bandIcon('list'), 'סידור', openAdvanceOrder, null, 'advance-order-action')
++                : null
++        ]
++    }));
+     root.appendChild(el('p', 'hint', 'בחר עובד כדי להוסיף מקדמה, לרשום החזר או לבדוק כמה נשאר.'));
+     const search = document.createElement('input');
+     search.type = 'search'; search.placeholder = 'חיפוש עובד'; search.value = ADVANCE_SEARCH;
+@@ -216,7 +228,10 @@ function renderAdvances() {
+             const summary = workerAdvanceSummary(w.id);
+             const card = button('', 'advance-worker-card btn-secondary', () => showWorkerAdvances(w.id));
+             card.appendChild(el('strong', null, w.name + (w.active === false ? ' · כבוי' : '')));
+-            card.appendChild(el('span', null, summary.overpaid > 0 ? 'דורש בדיקה'
++            // A settled account is quiet (v169): the figure that matters on this list is
++            // the one that is not zero, and nine of twelve usually are.
++            const settled = summary.overpaid === 0 && summary.left === 0;
++            card.appendChild(el('span', settled ? 'is-zero' : null, summary.overpaid > 0 ? 'דורש בדיקה'
+                 : `${moneyText(summary.left)} ₪ נשארו`));
+             list.appendChild(card);
+         });
+@@ -367,12 +382,16 @@ function renderReports() {
+     const oldWorkerList = root.querySelector('.report-worker-list');
+     const workerScroll = oldWorkerList ? oldWorkerList.scrollTop : 0;
+     clear(root);
+-    const head = el('div', 'reports-toolbar');
+-    head.appendChild(el('h2', 'reports-heading', 'דוחות'));
+-    head.appendChild(renderReportActions());
+-    root.appendChild(head);
++    // The band (v169): the name, «הפקת דוח» as its white chip, the ⋯, and the section
++    // switch on its second row - it was the first row of the controls card below.
++    root.appendChild(renderBand({
++        title: 'דוחות',
++        start: true,
++        tools: [renderReportActions()],
++        row2: [renderSectionToggle()],
++        more: [settingsMoreRow()]
++    }));
+     const controls = el('div', 'reports-controls');
+-    controls.appendChild(renderSectionToggle());
+     controls.appendChild(renderRangePicker());
+     if (REPORT_SECTION === 'workers') controls.appendChild(renderReportWorkerPicker());
+     root.appendChild(controls);
+diff --git a/js/ui/roster.js b/js/ui/roster.js
+index fc2cf9a..d64ae39 100644
+--- a/js/ui/roster.js
++++ b/js/ui/roster.js
+@@ -26,6 +26,7 @@
+ // flow as the button inside the form, clashes asked and all.
+ 
+ function renderRoster() {
++    renderRosterBand();
+     renderWorkerList();
+     renderPlaceList();
+     renderVehicleList();
+@@ -39,6 +40,28 @@ function renderRoster() {
+     renderReorderPanel();
+ }
+ 
++// The crew's band (v169, js/ui/band.js). The screen's header is static markup in
++// index.html - a title and two jump buttons - so the band is built once and the jump
++// buttons move into its second row; הדבק רשימה and סדר מחדש keep their buttons (hidden
++// by the stylesheet, found by their tests) and are reached from the ⋯ under their own
++// names. Idempotent: renderRoster runs on every render and the markup persists.
++function renderRosterBand() {
++    const view = document.getElementById('rosterView');
++    if (!view || view.querySelector(':scope > .view-band')) return;
++    const shortcuts = view.querySelector('.crew-shortcuts');
++    const band = renderBand({
++        title: 'צוות',
++        start: true,
++        row2: shortcuts ? [shortcuts] : [],
++        more: () => [
++            settingsMoreRow(),
++            moreRow(bandIcon('paste'), 'הדבק רשימה', () => openQuickStart(), null, 'crew-paste-action'),
++            moreRow(bandIcon('sort'), 'סדר מחדש', () => openReorder(), null, 'crew-reorder-action')
++        ]
++    });
++    view.prepend(band);
++}
++
+ function renderAppVersion() {
+     const node = document.getElementById('appVersion');
+     if (node) node.textContent = `גרסה ${APP_VERSION}`;
+diff --git a/js/ui/week.js b/js/ui/week.js
+index d3812b7..70b6fab 100644
+--- a/js/ui/week.js
++++ b/js/ui/week.js
+@@ -156,9 +156,7 @@ function renderWeek() {
+ function renderWeekPhone(dates, workers) {
+     const phone = el('div', 'week-phone');
+     if (weekPhoneMode === 'grid') return phone;
+-    const back = button('חזרה לטבלת השבוע', 'btn-secondary week-phone-back', () => setWeekPhoneMode('grid'));
+-    back.dataset.weekMode = 'grid';
+-    phone.appendChild(back);
++    // The way back to the table is the band's switch (renderWeekHeader) since v169.
+     if (!dates.includes(weekPhoneDate)) weekPhoneDate = dates.includes(State.date) ? State.date : dates[0];
+     const chosen = weekPhoneDate;
+     const picker = el('div', 'week-phone-dates');
+@@ -361,12 +359,16 @@ function renderWeekCell(worker, date) {
+     return cell;
+ }
+ 
++// The week's band (v169, js/ui/band.js). Six buttons in two rows became: the two arrows
++// beside the name and the range, a switch between the table and the day-by-day view, the
++// «השבוע» chip, and a ⋯ holding הדפסה and שיתוף כתמונה under their own names.
+ function renderWeekHeader() {
+-    const header = el('div', 'week-header');
+-
+-    const back = button('שבוע קודם', 'btn-secondary btn-nav nav-back', () => stepWeek(-7));
+-    back.insertBefore(chevronIcon('back'), back.firstChild);
+-    header.appendChild(back);
++    // Back points RIGHT and forward LEFT: time flows right-to-left here (the day screen's
++    // comment on chevronIcon). The words move into a span the band hides; the aria-label
++    // is the full sentence either way.
++    const back = button('', 'btn-secondary btn-nav nav-back', () => stepWeek(-7), 'שבוע קודם');
++    back.appendChild(chevronIcon('back'));
++    back.appendChild(el('span', 'nav-word', 'שבוע קודם'));
+ 
+     const dates = weekDates();
+     const first = parseLocalDate(dates[0]);
+@@ -376,24 +378,41 @@ function renderWeekHeader() {
+     // its end first. Isolating EACH date (FSI/PDI around each, which is what this did)
+     // does not change that - two isolates are still two runs, ordered by the paragraph.
+     // dateRange (js/ui/dom.js) wraps the pair as ONE left-to-right run.
+-    header.appendChild(el('strong', 'week-range',
+-        dateRange(formatFullDate(first), formatFullDate(last))));
++    const range = dateRange(formatFullDate(first), formatFullDate(last));
+ 
+-    const fwd = button('שבוע הבא', 'btn-secondary btn-nav nav-fwd', () => stepWeek(7));
++    const fwd = button('', 'btn-secondary btn-nav nav-fwd', () => stepWeek(7), 'שבוע הבא');
++    fwd.appendChild(el('span', 'nav-word', 'שבוע הבא'));
+     fwd.appendChild(chevronIcon('fwd'));
+-    header.appendChild(fwd);
+-    header.appendChild(button('השבוע', 'btn-secondary week-today-action', () => { weekPhoneDate = todayStr(); setWeekFromDate(todayStr()); render(); }));
+-
+-    // Not window.print() bare. On the home-screen app on an iPhone that call opens
+-    // nothing and says nothing; printWithFallback (js/ui/printout.js) still makes it,
+-    // listens for the sheet, and offers the grid as a picture when no sheet came.
+-    header.appendChild(button('🖨️ הדפסה', 'btn-success week-print-action', () => printWithFallback('week')));
+-    // And the picture on its own button, always. The person on a site sends pictures on
+-    // WhatsApp, not PDFs, and the print button's offer arrives a second and a half after
+-    // a tap that did nothing - this is the door for somebody who already knows that.
+-    header.appendChild(button('🖼️ שיתוף כתמונה', 'btn-secondary week-share-action', () => sharePrintout('week')));
+-
+-    return header;
++
++    // The table or the day-by-day view. This pair replaces the «חזרה לטבלת השבוע» button
++    // that stood above the day view: a way of looking is a switch, not a way back.
++    const seg = el('div', 'band-seg week-mode-switch');
++    [['grid', 'טבלה'], ['days', 'ימים']].forEach(([mode, text]) => {
++        const option = button(text, 'week-mode-option', () => setWeekPhoneMode(mode));
++        option.setAttribute('aria-pressed', weekPhoneMode === mode ? 'true' : 'false');
++        option.dataset.weekMode = mode;
++        seg.appendChild(option);
++    });
++    const today = button('השבוע', 'btn-secondary week-today-action', () => { weekPhoneDate = todayStr(); setWeekFromDate(todayStr()); render(); });
++
++    return renderBand({
++        title: 'שבוע',
++        sub: range,
++        lead: [back],
++        tools: [fwd],
++        row2: [seg, today],
++        more: [
++            settingsMoreRow(),
++            // Not window.print() bare. On the home-screen app on an iPhone that call opens
++            // nothing and says nothing; printWithFallback (js/ui/printout.js) still makes
++            // it, listens for the sheet, and offers the grid as a picture when no sheet came.
++            moreRow(bandIcon('print'), 'הדפסה', () => printWithFallback('week'), null, 'week-print-action'),
++            // And the picture on its own row, always. The person on a site sends pictures
++            // on WhatsApp, not PDFs, and the print row's offer arrives a second and a half
++            // after a tap that did nothing - this is the door for somebody who knows that.
++            moreRow(bandIcon('image'), 'שיתוף כתמונה', () => sharePrintout('week'), null, 'week-share-action')
++        ]
++    });
+ }
+ 
+ function stepWeek(days) {
+diff --git a/sw.js b/sw.js
+index f0a8124..3721e62 100644
+--- a/sw.js
++++ b/sw.js
+@@ -21,7 +21,7 @@
+ // The version string below is the whole update mechanism. Bump it in the same commit as
+ // any change to a cached file, or returning visitors keep running the old build.
+ 
+-const VERSION = 'farkad-v167';
++const VERSION = 'farkad-v169';
+ 
+ // A scheduled server push wakes this worker even with every app window closed.
+ // Always display a visible notification; neither iOS nor Android needs a page timer.
+@@ -65,6 +65,7 @@ const SHELL = [
+     './index.html',
+     './css/app.css',
+     './css/readability.css',
++    './css/design.css',
+     './calendars/daily-workdays-1800.ics',
+     './calendars/daily-friday-1800.ics',
+     './calendars/daily-everyday-1800.ics',
+@@ -97,6 +98,8 @@ const SHELL = [
+     './js/ui/share.js',
+     './js/ui/seder.js',
+     './js/ui/backup.js',
++    './js/ui/band.js',
++    './js/ui/more.js',
+     './js/ui/printout.js',
+     './js/ui/migration.js',
+     './js/ui/offline.js',
+diff --git a/css/design.css b/css/design.css
+new file mode 100644
+index 0000000..8dce759
+--- /dev/null
++++ b/css/design.css
+@@ -0,0 +1,565 @@
++/* ================================================================ design.css (v169)
++   The visual language the owner approved on 2026-11-08/09, on top of app.css and
++   readability.css. Loaded after both and, like readability.css (v140), written as a
++   layer: it does not restate the layout rules, it corrects what they paint.
++
++   One direction, from the day screen outward:
++     - every screen opens with the same blue BAND: its name, one or two tools, and a ⋯
++       (js/ui/band.js, js/ui/more.js); the brand strip above every screen is gone
++     - ONE filled primary per screen; secondaries tonal; glyph buttons ghost; the
++       WhatsApp green is the only green button anywhere
++     - lists are rows with dividers, not a box per man; cards keep a soft edge only
++     - the day: two rows above the list, the tab bar alone below it, the WhatsApp
++       button a round green one floating at the start corner - and twelve names on a
++       440x956 screen where there were eight
++   NOTHING on paper or in the picture changes: every rule here is `@media screen`.
++   No text size is reduced anywhere (v140's reading preferences hold). 44px targets and
++   16px inputs hold (CLAUDE.md, law 9); the bars stay measured (law 8): the dock is
++   still a fixed box bars.js reads, it is simply the size of the one button in it. */
++@media screen {
++
++/* ---------------------------------------------------------------- tokens */
++:root {
++    --r-xs: 6px;
++    --r-sm: 8px;
++    --r-md: 12px;
++    --r-lg: 20px;
++    --radius: var(--r-md);
++    --radius-sm: var(--r-sm);
++    /* The fill a primary button is painted with - apart from --accent, which is also the
++       colour of accent TEXT and has to stay pale in the dark scheme to be readable. */
++    --accent-fill: #1f4b7a;
++    --on-fill: #ffffff;
++    /* The band and what sits on it. White on #1e4e8a is 8.4:1. */
++    --band: #1e4e8a;
++    --band-ink: #ffffff;
++    --band-soft: rgb(255 255 255 / 16%);
++    --band-line: rgb(255 255 255 / 28%);
++    /* WhatsApp's own green, white on it 5.0:1 - the one green button in the app. */
++    --wa-fill: #15803d;
++    --wa-ink: #ffffff;
++    /* The one border that still has a job: around a field somebody types into. */
++    --line-ctl: #8a98aa;
++    --line: #c1ccd8;
++    --line-soft: #dde4ec;
++    --shadow: 0 1px 2px rgb(20 32 46 / 6%);
++}
++:root[data-theme="dark"] {
++    --line: #2a3746;
++    --line-soft: #223040;
++    --line-ctl: #5b6f85;
++    --accent-fill: #2f6fc9;
++    --accent-soft: #223a56;
++    --band: #1b4476;
++    /* The brightest thing on a dark page, with a dark glyph on it (9:1). */
++    --wa-fill: #22c55e;
++    --wa-ink: #052e16;
++}
++@media (prefers-color-scheme: dark) {
++    :root:not([data-theme="light"]) {
++        --line: #2a3746;
++        --line-soft: #223040;
++        --line-ctl: #5b6f85;
++        --accent-fill: #2f6fc9;
++        --accent-soft: #223a56;
++        --band: #1b4476;
++        --wa-fill: #22c55e;
++        --wa-ink: #052e16;
++    }
++}
++
++/* ---------------------------------------------------------------- type */
++button, h1, h2, h3, strong, .field-label, .wrow-name, .report-tile-name, .seder-name,
++.advance-worker-card strong, #rosterView .roster-details > strong { font-weight: 700; }
++.report-tile-value, .advance-balance > strong, .invoice-bars-total strong,
++#reportsView .report-payroll tfoot td:last-child,
++.report-payroll .report-table tbody td.cell-net { font-weight: 800; }
++.modal-content h3 { font-size: 21px; }
++/* A heading that takes focus when its dialog opens keeps a ring a keyboard user can
++   see, drawn off the text rather than as a box around it. */
++h2:focus-visible, h3:focus-visible, .modal-content h3:focus-visible, .reorder-head h2:focus-visible {
++    outline: 2px solid var(--accent-fill); outline-offset: 6px; border-radius: 8px;
++}
++.settings-head h2:focus-visible, .reorder-head h2:focus-visible { outline-color: rgb(255 255 255 / 55%); }
++
++/* ---------------------------------------------------------------- the four buttons */
++button {
++    border-radius: var(--r-md);
++    border: 1px solid transparent;
++    background: var(--accent-fill);
++    color: var(--on-fill);
++    font-weight: 700;
++}
++button:hover { filter: none; }
++button:active { filter: brightness(.92); }
++/* Tonal: a soft fill two steps up, no outline. */
++.btn-secondary, .place-btn, .settings-nav button, .chip-off, .report-browse-tools .report-cycle-nav button {
++    background: var(--surface-2);
++    color: var(--ink);
++    border-color: transparent;
++    box-shadow: none;
++}
++.chip-off { color: var(--ink-2); }
++/* Ghost: a glyph or a word alone. */
++.btn-icon, .topbar .settings-open, #settingsBtn, .day-steps .step-btn, .banner .btn-icon {
++    background: transparent;
++    border-color: transparent;
++    color: var(--ink-2);
++    box-shadow: none;
++}
++.btn-icon:hover, .day-steps .step-btn:hover { background: var(--surface-2); color: var(--ink); }
++/* The WhatsApp green, and only it. */
++.btn-success, .seder-go { background: var(--wa-fill); color: var(--wa-ink); border-color: transparent; }
++.btn-add { background: var(--accent-fill); color: var(--on-fill); border-color: transparent; }
++.btn-danger { background: var(--danger-bg); color: var(--danger); border-color: transparent; }
++.chip-on { background: var(--accent-fill); color: var(--on-fill); border-color: transparent; }
++.week-phone-date[aria-pressed="true"], .dd-today { background: var(--accent-fill); color: var(--on-fill); border-color: transparent; }
++/* The segmented switch: one tonal track, the chosen half filled. */
++.layer-toggle, .reports-controls .report-section-toggle {
++    background: var(--surface-2);
++    border-radius: var(--r-md);
++    padding: 3px;
++    gap: 3px;
++}
++.layer-toggle button { border-radius: 9px; }
++.layer-on, .mode-quiet .layer-on { background: var(--accent-fill); color: var(--on-fill); box-shadow: none; }
++.layer-off, .mode-quiet .layer-off { background: transparent; color: var(--ink-2); }
++.layer-off:hover { background: transparent; }
++
++/* ---------------------------------------------------------------- surfaces */
++.site-card, .tray, .worker-list, .roster-panel, .settings-group, .range-bar, .advance-card, .advance-balance,
++#reportsView .report-worker-tile, .report-worker-picker, .invoice-bars, .week-phone-panel, .bulk-row,
++.held-row, .issue, .setup-card, .reorder-row, .progress,
++#reportsView .report-payroll tbody tr, #reportsView .report-payroll tfoot tr, .report-table tr,
++.undo-bar, .banner, .drawer-day {
++    border-radius: var(--r-md);
++    border-color: var(--line-soft);
++}
++.modal-content { border-radius: var(--r-lg); border: 0; padding: 20px 18px 18px; box-shadow: 0 20px 60px rgb(0 0 0 / 45%); }
++.sheet-content { border-radius: var(--r-lg) var(--r-lg) 0 0; border: 0; box-shadow: 0 -10px 40px rgb(0 0 0 / 45%); }
++@media (min-width: 641px) { .sheet-content { border-radius: var(--r-lg); } }
++.settings-card-icon { border-radius: var(--r-md); }
++.site-head-color, .site-head-btn, .tag-place, .sheet-status, .site-count, .wday-chip { border-radius: var(--r-sm); }
++.badge, .assign-rate, .tag-rate, .tag, .crew-cycle { border-radius: var(--r-xs); }
++.tabs { border-top-color: var(--line-soft); box-shadow: 0 -6px 24px -18px rgb(0 0 0 / 50%); }
++.wrow { border-bottom-color: var(--line-soft); }
++.site-head, .picker-row, .seder-row, .roster-row, .report-table th, .report-table td { border-color: var(--line-soft); }
++/* Fields keep a border a finger can find; everything else lets go of its outline. */
++.modal-content input, .modal-content textarea, .modal-content select, select,
++.crew-search-field input, .picker-search, .rima-input, .rate-hours, .advance-form input,
++.range-bar input, #advancesView > input, .period-closure input, #reportWorkerSearch,
++.day-tools input[type="date"], .diagnostic-text, #askInput {
++    border: 1px solid var(--line-ctl);
++    border-radius: var(--r-sm);
++    background: var(--surface);
++}
++.modal-content input[type="text"], .modal-content input[type="email"], .modal-content input[type="password"],
++.modal-content input[type="tel"], .modal-content input[type="number"], .modal-content input[type="date"],
++.modal-content textarea, .modal-content select, #askInput {
++    background: var(--surface-2); border-color: transparent; border-radius: var(--r-md); min-height: 48px; font-size: 16px;
++}
++.modal-content input:focus-visible, .modal-content textarea:focus-visible, .modal-content select:focus-visible { border-color: var(--accent-fill); }
++.picker-search, .crew-search-field input, #reportWorkerSearch, #advancesView > input {
++    background: var(--surface-2); border-color: transparent; border-radius: var(--r-md); min-height: 48px; font-size: 16px;
++}
++
++/* ---------------------------------------------------------------- the strip above every screen */
++/* The app's own name and the named settings button come off the top of every screen:
++   the person knows which app they opened, and הגדרות is the first row of every ⋯. The
++   strip itself stays - the tab bar is its child, fixed to the bottom by app.css, and
++   hiding the parent would take the tab bar with it. The elements stay in the document
++   (a screen reader and the tests still find #settingsBtn); they are not drawn. */
++.topbar .brand, .topbar .topbar-actions, .topbar .sync-chip { display: none; }
++.topbar { padding: 0; margin: 0; gap: 0; border: 0; background: transparent; }
++
++/* ---------------------------------------------------------------- the band */
++.view-band, .day-header {
++    background: var(--band);
++    color: var(--band-ink);
++    border: 0;
++    /* Full-bleed by exactly the page's own side padding (--page-pad, 12px on a phone):
++       one pixel more and the page scrolls sideways - measured, a 448px band on a 440px
++       screen zoomed the whole page out to fit. */
++    margin: 0 calc(-1 * var(--page-pad, 16px)) 10px;
++    padding: 4px 10px 8px;
++    padding-top: max(4px, env(safe-area-inset-top));
++    border-radius: 0;
++    box-shadow: 0 2px 10px rgb(0 0 0 / 25%);
++}
++@media (min-width: 701px) { .view-band, .day-header { margin: 0 0 12px; border-radius: var(--r-md); } }
++.band-row { display: flex; align-items: center; gap: 6px; min-height: 44px; }
++.band-row + .band-row { margin-top: 6px; gap: 8px; }
++.band-title { flex: 1 1 auto; min-width: 0; text-align: center; line-height: 1.15; }
++.band-title strong { display: block; font-size: 19px; color: var(--band-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++.band-title .band-sub { display: block; color: rgb(255 255 255 / 82%); font-size: 14px; font-variant-numeric: tabular-nums; }
++.band-start .band-title { text-align: start; padding-inline-start: 6px; }
++.band-start .band-title strong { font-size: 22px; }
++/* Everything that is a glyph on the band: 44px, ghost, white. */
++.view-band .btn-icon, .view-band .btn-nav, .view-band .band-back, .view-band .band-more,
++.day-nav .btn-nav, .day-nav .drawer-btn, .day-nav .band-more {
++    min-width: 44px; min-height: 44px; padding: 0;
++    display: inline-flex; align-items: center; justify-content: center;
++    background: transparent; border-color: transparent; color: var(--band-ink); box-shadow: none; border-radius: var(--r-md);
++}
++.view-band .btn-icon:hover, .view-band .btn-nav:hover, .view-band .band-back:hover, .view-band .band-more:hover,
++.day-nav .btn-nav:hover, .day-nav .drawer-btn:hover, .day-nav .band-more:hover { background: var(--band-soft); color: var(--band-ink); }
++/* The arrows alone. Their words stay in the aria-labels (and in .nav-word, hidden). */
++.view-band .btn-nav .nav-word, .day-nav .btn-nav .nav-word { display: none; }
++.view-band .btn-nav svg, .day-nav .btn-nav svg { width: 16px; height: 16px; }
++.view-band .band-back svg { width: 22px; height: 22px; }
++.band-more svg { width: 26px; height: 26px; display: block; }
++.band-more { position: relative; }
++/* The sync state, as a dot on the ⋯. */
++.band-more::after {
++    content: ''; position: absolute; top: 5px; inset-inline-end: 5px; width: 11px; height: 11px;
++    border-radius: 50%; border: 2px solid var(--band); display: none;
++}
++.band-more.sync-warn::after { display: block; background: #fbbf24; }
++.band-more.sync-danger::after { display: block; background: #f87171; }
++/* Tonal-on-band: the chips and secondary buttons that live inside a band. */
++.view-band .band-chip, .view-band .crew-shortcuts button, .view-band .week-today-action, .day-tools .btn-today {
++    min-height: 44px; padding: 0 14px;
++    background: var(--band-soft); color: var(--band-ink); border: 0; border-radius: var(--r-md);
++    font-size: 15px; font-weight: 700; white-space: nowrap; box-shadow: none;
++}
++.view-band .crew-shortcuts { display: flex; gap: 8px; }
++/* The segmented switch inside a band: the chosen half is white. */
++.view-band .layer-toggle, .view-band .mode-toggle, .view-band .mode-toggle.mode-quiet, .view-band .band-seg,
++.day-tools .mode-toggle, .day-tools .mode-toggle.mode-quiet {
++    display: flex; flex: 0 1 auto; margin: 0; padding: 3px; gap: 2px;
++    background: var(--band-soft); border-radius: var(--r-md);
++}
++.view-band .layer-toggle button, .view-band .mode-quiet .layer-off, .view-band .mode-quiet .layer-on, .view-band .band-seg button,
++.day-tools .mode-toggle button, .day-tools .mode-quiet .layer-off, .day-tools .mode-quiet .layer-on {
++    min-height: 40px; padding: 0 14px; font-size: 16px; font-weight: 700; border-radius: 9px; white-space: nowrap; box-shadow: none; border: 0;
++}
++.view-band .layer-off, .view-band .mode-quiet .layer-off, .view-band .band-seg button,
++.day-tools .mode-quiet .layer-off { background: transparent; color: rgb(255 255 255 / 88%); }
++.view-band .layer-on, .view-band .mode-quiet .layer-on, .view-band .band-seg button[aria-pressed="true"],
++.day-tools .mode-quiet .layer-on { background: #fff; color: var(--band); }
++/* «הפקת דוח» in the reports band: the white primary chip, its menu unchanged. */
++.view-band .report-output-actions > summary { background: #fff; color: var(--band); border-radius: var(--r-md); min-height: 44px; font-size: 16px; }
++
++/* ---------------------------------------------------------------- the ⋯ sheet */
++.more-content { padding: 8px 12px calc(12px + var(--safe-bottom)); }
++.more-grip { width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 2px auto 10px; }
++.more-sync {
++    display: flex; align-items: center; gap: 10px;
++    padding: 10px 12px; margin-bottom: 6px;
++    border-radius: var(--r-md); font-size: 16px; font-weight: 700;
++    background: var(--surface-2); color: var(--ink-2);
++}
++.more-sync::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
++.more-sync.chip-ok { background: var(--ok-bg); color: var(--ok); }
++.more-sync.chip-warn { background: var(--warn-bg); color: var(--warn); }
++.more-sync.chip-danger { background: var(--danger-bg); color: var(--danger); }
++.more-rows { display: flex; flex-direction: column; }
++.more-row {
++    display: flex; align-items: center; gap: 14px;
++    width: 100%; min-height: 56px; padding: 0 12px;
++    background: transparent; border: 0; border-radius: var(--r-md);
++    color: var(--ink); font-size: 18px; font-weight: 700; text-align: start;
++}
++.more-row + .more-row { border-top: 1px solid var(--line-soft); border-radius: 0; }
++.more-row:hover { background: var(--surface-2); }
++.more-row svg { width: 24px; height: 24px; flex: 0 0 auto; color: var(--ink-2); }
++.more-row .more-label { flex: 1 1 auto; }
++.more-row .more-count {
++    min-width: 28px; height: 28px; padding: 0 9px;
++    border-radius: 14px; background: var(--warn-bg); color: var(--warn);
++    display: inline-flex; align-items: center; justify-content: center; font-size: 15px;
++}
++.more-close {
++    width: 100%; min-height: 48px; margin-top: 8px;
++    background: var(--surface-2); color: var(--ink); border: 0; border-radius: var(--r-md);
++    font-size: 17px; font-weight: 700;
++}
++
++/* ---------------------------------------------------------------- the day: two rows */
++body.day-tight .day-header { padding: 2px 8px 6px; }
++.day-nav { gap: 2px; }
++.day-nav .drawer-btn { font-size: 22px; }
++.day-label { color: var(--band-ink); padding: 0 4px; }
++.day-label:hover { background: var(--band-soft); }
++.day-label strong { font-size: 19px; line-height: 1.15; color: var(--band-ink); }
++.day-label .day-date { color: rgb(255 255 255 / 82%); font-size: 14px; line-height: 1.15; }
++.day-tools { margin-top: 6px; flex-wrap: nowrap; gap: 8px; align-items: center; }
++/* Undo and redo show only once there is something to undo: a disabled pair is two
++   empty boxes on every evening's first screen. */
++.day-tools .day-steps .step-btn:disabled, .day-tools .day-steps .bar-div { display: none; }
++.day-tools .day-steps:empty { display: none; }
++.day-tools .day-steps .step-btn { color: var(--band-ink); border: 1px solid var(--band-line); border-radius: var(--r-md); min-height: 44px; padding: 0 12px; opacity: 1; }
++.day-tools .day-switch { flex: 0 1 auto; order: 0; gap: 0; min-width: 0; }
++/* הכל חופש and the bulk fold's button live behind the ⋯ (renderDayHeader). */
++.day-tools .day-switch .day-holiday-action, .day-tools .day-switch .bulk-toggle { display: none; }
++.day-header .progress { flex: 1 1 auto; justify-content: flex-end; }
++.day-header .progress .progress-line { justify-content: flex-end; }
++.day-header .progress button.now-count, .day-header .progress .now-count { color: var(--band-ink); font-size: 16px; font-weight: 700; padding: 0 8px; }
++.day-header .progress button.now-count:hover { background: var(--band-soft); }
++.day-header .progress-done .now-count { color: #86efac; }
++.day-header .progress-bar { background: rgb(255 255 255 / 18%); height: 4px; }
++.day-header .progress-fill { background: #fff; }
++.day-header .progress-done .progress-fill { background: #4ade80; }
++body.day-compact .day-header .progress-line .now-count { color: var(--band-ink); }
++
++/* the list: twelve rows on a 956px screen */
++.worker-list { margin-top: 0; }
++.wrow-main { padding: 7px 14px; min-height: 58px; gap: 10px; }
++.wrow .btn-icon { min-width: 44px; color: var(--ink-3); }
++.site-grid { gap: 8px; }
++.site-card { padding: 6px; gap: 2px; }
++.site-list .assign-row { padding: 2px 6px; }
++
++/* A day with nothing on it yet: the copy button's words, under the band (buildDay). */
++.day-copy-strip {
++    display: flex; align-items: center; justify-content: space-between; gap: 10px;
++    margin: 0 0 8px; padding: 6px 8px 6px 12px;
++    background: var(--accent-soft); border-radius: var(--r-md);
++}
++.day-copy-strip span { color: var(--ink-2); font-size: 15px; font-weight: 600; }
++.day-copy-strip button { min-height: 44px; padding: 0 16px; border-radius: 10px; font-size: 16px; white-space: nowrap; }
++
++/* ---------------------------------------------------------------- the bottom: one bar and a floating button */
++/* The dock is now the size of the one button left in it: a fixed 62px box at the start
++   corner, 16px above the tab bar - bars.js measures it as before (78px of coverage) and
++   the page reserves that much, so the last row and its × scroll clear of the button. The
++   copy button stays in the document for its handler and its tests, hidden; its words are
++   a row of the ⋯ and, on an empty day, the strip under the band. */
++.day-actions {
++    inset-inline: auto;
++    inset-inline-start: 16px;
++    width: 62px;
++    height: 78px;
++    min-height: 0;
++    padding: 0 0 16px;
++    background: transparent;
++    border: 0;
++    box-shadow: none;
++    display: block;
++    overflow: visible;
++}
++.day-actions #copyDayBtn { display: none; }
++.day-actions .btn-success {
++    position: absolute;
++    inset: 0 0 16px 0;
++    width: 62px;
++    height: 62px;
++    min-height: 62px;
++    max-width: none;
++    padding: 0;
++    border-radius: 50%;
++    border: 0;
++    font-size: 0;
++    color: var(--wa-ink);
++    background-color: var(--wa-fill);
++    background-repeat: no-repeat;
++    background-position: center;
++    background-size: 34px 34px;
++    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z'/><path d='M8.7 9.2c.2-.6.5-.6.8-.6h.6c.2 0 .4.1.5.4l.7 1.6c.1.2 0 .4-.1.6l-.5.6c-.1.1-.2.3 0 .5a7 7 0 0 0 3.3 3c.2.1.4.1.5-.1l.7-.8c.2-.2.4-.2.6-.1l1.6.8c.3.1.4.3.4.5 0 .8-.5 1.6-1.3 1.9-1 .4-2.3.1-4.2-1.1a10 10 0 0 1-3.3-3.6c-.6-1.2-.6-2.3-.3-3.1Z'/></svg>");
++    box-shadow: 0 8px 22px rgb(0 0 0 / 35%), 0 0 0 4px rgb(255 255 255 / 10%);
++    transition: transform .22s ease, opacity .22s ease;
++}
++:root[data-theme="dark"] .day-actions .btn-success {
++    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23052e16' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z'/><path d='M8.7 9.2c.2-.6.5-.6.8-.6h.6c.2 0 .4.1.5.4l.7 1.6c.1.2 0 .4-.1.6l-.5.6c-.1.1-.2.3 0 .5a7 7 0 0 0 3.3 3c.2.1.4.1.5-.1l.7-.8c.2-.2.4-.2.6-.1l1.6.8c.3.1.4.3.4.5 0 .8-.5 1.6-1.3 1.9-1 .4-2.3.1-4.2-1.1a10 10 0 0 1-3.3-3.6c-.6-1.2-.6-2.3-.3-3.1Z'/></svg>");
++}
++@media (prefers-color-scheme: dark) {
++    :root:not([data-theme="light"]) .day-actions .btn-success {
++        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23052e16' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z'/><path d='M8.7 9.2c.2-.6.5-.6.8-.6h.6c.2 0 .4.1.5.4l.7 1.6c.1.2 0 .4-.1.6l-.5.6c-.1.1-.2.3 0 .5a7 7 0 0 0 3.3 3c.2.1.4.1.5-.1l.7-.8c.2-.2.4-.2.6-.1l1.6.8c.3.1.4.3.4.5 0 .8-.5 1.6-1.3 1.9-1 .4-2.3.1-4.2-1.1a10 10 0 0 1-3.3-3.6c-.6-1.2-.6-2.3-.3-3.1Z'/></svg>");
++    }
++}
++.day-actions .btn-success:active { filter: brightness(.9); }
++/* Hidden while the list scrolls down (readDayScroll, js/ui/day.js), back on a scroll up.
++   The box stays where it is, so what bars.js measures does not move. */
++.day-actions.fab-hidden .btn-success { transform: translateY(120px) scale(.8); opacity: 0; pointer-events: none; }
++/* The tab bar: the chosen tab is unmistakable. */
++.tabs .tab { color: var(--ink-2); font-weight: 600; }
++.tabs .tab-on { color: var(--accent); }
++.tabs .tab-on .tab-icon { color: #fff; }
++.tabs .tab-on .tab-icon::before { background: var(--accent-fill); inset: -3px -10px; }
++
++/* ---------------------------------------------------------------- crew (צוות) */
++#rosterView .crew-header { display: none; }
++#rosterView .roster-panel { padding: 0; border: 0; background: transparent; margin-bottom: 18px; }
++#rosterView .panel-head { margin: 0 0 8px; padding: 0 4px 0 0; border: 0; min-height: 44px; }
++#rosterView .panel-head h2 { font-size: 17px; color: var(--ink-2); font-weight: 700; }
++#rosterView .panel-head .btn-add { min-height: 44px; padding: 0 16px; font-size: 16px; }
++#rosterView .crew-search { margin-bottom: 8px; }
++#rosterView .crew-tools { display: none; }                 /* behind the ⋯ */
++#rosterView #workerList, #rosterView #placeList, #rosterView #vehicleList {
++    background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-md); overflow: hidden;
++}
++#rosterView .roster-row { padding: 8px 6px 8px 2px; margin: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; background: transparent; gap: 6px; min-height: 60px; }
++#rosterView .roster-row:last-child { border-bottom: 0; }
++#rosterView .roster-details { padding-inline-start: 10px; }
++#rosterView .roster-details > strong { font-size: 19px; display: block; line-height: 1.3; }
++#rosterView .roster-details > .tag, #rosterView .crew-cycle { display: inline; background: transparent; padding: 0; color: var(--ink-3); font-size: 14px; font-weight: 600; margin: 0; }
++#rosterView .roster-details > .tag::after, #rosterView .crew-cycle::after { content: ' · '; }
++#rosterView .roster-details p, #rosterView .roster-details > span:not(.tag) { display: inline; color: var(--ink-3); font-size: 14px; margin: 0; }
++/* The status: a word with a dot, not a green block. */
++#rosterView .worker-active-toggle {
++    background: transparent; border: 0; color: var(--ink-3);
++    font-size: 14px; font-weight: 700; min-height: 44px; min-width: 44px; padding: 0 8px; box-shadow: none;
++}
++#rosterView .worker-active-toggle.is-active { color: var(--ok); }
++#rosterView .worker-active-toggle::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; margin-inline-end: 6px; vertical-align: 1px; }
++/* «עוד ···» → a ghost ⋯ (the words stay the button's accessible name). */
++#rosterView .crew-edit { background: transparent; border: 0; color: var(--ink-2); font-size: 0; min-width: 44px; min-height: 44px; border-radius: var(--r-md); }
++#rosterView .crew-edit::before { content: '•••'; font-size: 14px; letter-spacing: 1px; font-weight: 800; }
++/* The reorder panel */
++.reorder-head { background: var(--band); color: #fff; border: 0; padding-top: max(6px, env(safe-area-inset-top)); }
++.reorder-head h2, .reorder-head .reorder-sub { color: #fff; }
++.reorder-head .reorder-sub { color: rgb(255 255 255 / 80%); }
++.reorder-head .btn-icon { color: #fff; }
++.reorder-row button { background: transparent; border: 0; color: var(--ink-2); }
++.reorder-row .btn-secondary { background: var(--surface-2); color: var(--ink); border-radius: 10px; }
++
++/* ---------------------------------------------------------------- week */
++#weekView .week-print-title { display: none; }
++#weekView .week-phone-dates { gap: 6px; }
++#weekView .week-phone-date { background: var(--surface-2); border: 0; border-radius: var(--r-md); min-height: 52px; color: var(--ink); }
++#weekView .week-phone-date[aria-pressed="true"] { background: var(--accent-fill); color: #fff; }
++#weekView .week-phone-panel { border: 1px solid var(--line-soft); border-radius: var(--r-md); }
++#weekView .week-phone-panel h2 { font-size: 19px; }
++#weekView .week-phone-open { min-height: 48px; font-size: 16px; }
++#weekView .week-phone-worker { border-bottom: 1px solid var(--line-soft); min-height: 52px; }
++#weekView .week-table th { background: var(--surface-2); color: var(--ink-2); font-weight: 700; border-color: var(--line-soft); }
++#weekView .week-table td { border-color: var(--line-soft); }
++#weekView .week-table tfoot td { background: var(--surface-2); font-weight: 800; }
++#weekView .week-strip, #weekView .table-scroll { border-radius: var(--r-md); }
++#weekView .week-grid-hint, #weekView .week-phone-grid-hint { color: var(--ink-3); }
++
++/* ---------------------------------------------------------------- reports */
++#reportsView .reports-controls { background: transparent; border: 0; padding: 0; margin-bottom: 8px; }
++#reportsView .reports-controls > details { background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-md); margin-bottom: 8px; }
++#reportsView .reports-controls > details > summary { min-height: 52px; padding: 0 14px; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
++#reportsView .report-range-heading span { color: var(--ink-3); font-weight: 600; font-size: 15px; }
++#reportsView .range-chips { padding: 4px 12px 12px; }
++#reportsView .range-chips .chip-off, #reportsView .range-chips .chip-on { border-radius: 10px; }
++#reportsView .range-bar { margin: 0 12px 12px; background: transparent; border: 0; padding: 0; }
++#reportsView .report-search-tools, #reportsView .finance-actions, #reportsView .report-search-count, #reportsView .report-worker-list { margin-inline: 12px; }
++#reportsView .report-worker-list { margin-bottom: 12px; }
++#reportsView .report-worker-choice { min-height: 48px; border-radius: 10px; }
++#reportsView .report-worker-choice input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent-fill); }
++#reportsView .report h2 { font-size: 20px; }
++#reportsView .report-period { color: var(--ink-3); }
++#reportsView .report-group { font-size: 17px; color: var(--ink-2); }
++#reportsView .report-tile-open { color: var(--accent); }
++#reportsView .report-table th { background: var(--surface-2); }
++#reportsView .table-scroll { border-radius: var(--r-md); }
++#reportsView .invoice-picker .chip-off { border-width: 0 0 0 4px; border-radius: 10px; }
++#reportsView .invoice-bars-total { background: var(--accent-soft); border-radius: 10px; }
++#reportsView .report-explanation summary { color: var(--accent); }
++#workerDaysModal .worker-detail-back { background: transparent; border: 0; color: var(--accent); padding-inline: 0; }
++#workerDaysModal .wday { border-color: var(--line-soft); min-height: 52px; }
++#workerDaysModal .wday-chip { background: var(--surface-2); }
++#workerDaysModal .wday-total { background: var(--surface-2); border-radius: 10px; }
++
++/* ---------------------------------------------------------------- advances (מקדמות) */
++#advancesView > p.hint { color: var(--ink-3); font-size: 15px; margin: 0 2px 8px; }
++#advancesView > input { margin-bottom: 8px; }
++#advancesView .advance-workers { background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-md); overflow: hidden; display: block; }
++#advancesView .advance-worker-card { background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: 0 14px; min-height: 60px; align-items: center; width: 100%; }
++#advancesView .advance-worker-card:last-child { border-bottom: 0; }
++#advancesView .advance-worker-card strong { font-size: 19px; }
++#advancesView .advance-worker-card span { font-size: 19px; font-weight: 750; color: var(--accent); }
++#advancesView .advance-worker-card span.is-zero { color: var(--ink-3); font-weight: 600; font-size: 16px; }
++#advancesView .advance-balance { border-radius: 16px; padding: 18px 20px; }
++#advancesView .advance-balance > span { color: var(--ink-2); font-size: 15px; font-weight: 700; }
++#advancesView .advance-balance > strong { font-size: 36px; font-weight: 800; color: var(--accent); }
++#advancesView h3 { font-size: 17px; color: var(--ink-2); margin: 16px 2px 8px; }
++#advancesView .wday-ledger summary { color: var(--accent); }
++
++/* ---------------------------------------------------------------- settings (behind the ⋯) */
++.settings-head { background: var(--band); color: #fff; border: 0; padding-top: max(8px, env(safe-area-inset-top)); }
++.settings-head .settings-eyebrow { color: rgb(255 255 255 / 80%); }
++.settings-head h2 { color: #fff; font-size: 26px; }
++.settings-head .settings-close { background: transparent; border: 0; color: #fff; }
++.settings-nav { background: var(--band); border: 0; padding: 0 12px 10px; gap: 8px; box-shadow: 0 2px 10px rgb(0 0 0 / 25%); }
++.settings-nav button { background: var(--band-soft); color: #fff; border: 0; border-radius: var(--r-md); font-weight: 700; }
++.settings-nav button:hover { background: rgb(255 255 255 / 24%); color: #fff; }
++.settings-section-title h3 { font-size: 20px; }
++.settings-card-icon { background: var(--accent-soft); color: var(--accent); }
++.settings-group .btn-secondary { background: var(--surface-2); border: 0; border-radius: var(--r-md); color: var(--ink); }
++.settings-group .settings-status { background: transparent; border: 0; padding: 0; }
++.settings-group .push-reminder-enable { background: var(--accent-fill); color: #fff; border: 0; }
++.settings-group .backup-primary { background: var(--accent-fill); color: #fff; border: 0; border-radius: var(--r-md); }
++.settings-group-backup { border-color: var(--line-soft); }
++.settings-panel .app-version span { background: var(--surface-2); }
++.push-reminder-times > div { background: var(--accent-soft); border-radius: var(--r-md); }
++
++/* ---------------------------------------------------------------- dialogs */
++.modal-content .picker-context { color: var(--ink-3); }
++.modal-actions { gap: 8px; margin-top: 14px; }
++.modal-actions button { min-height: 48px; border-radius: var(--r-md); font-size: 16px; font-weight: 700; flex: 1 1 0; }
++.modal-actions .btn-secondary { background: var(--surface-2); color: var(--ink); border: 0; }
++.ask-choices button { background: var(--surface-2); color: var(--ink); border: 0; }
++.ask-choices button:first-child { background: var(--accent-fill); color: #fff; }
++.form-more { background: transparent; border: 0; padding: 0; }
++.form-more > summary { color: var(--accent); font-weight: 700; min-height: 44px; display: flex; align-items: center; }
++.worker-history { background: var(--surface-2); border-radius: var(--r-md); padding: 12px 14px; }
++.worker-danger .btn-danger { background: var(--danger-bg); color: var(--danger); border: 0; }
++/* pickers */
++.picker-row { min-height: 56px; padding: 4px 2px; }
++.picker-row .btn-add { min-height: 44px; padding: 0 14px; border-radius: 10px; }
++.picker-row .btn-on { background: var(--ok-bg); color: var(--ok); border: 0; border-radius: 10px; min-height: 44px; font-weight: 700; }
++.picker-row-on { background: transparent; }
++.picker-name { font-size: 18px; font-weight: 700; }
++.picker-actions .btn-secondary { min-height: 48px; }
++.place-choice { gap: 8px; }
++.place-btn { min-height: 56px; font-size: 17px; font-weight: 700; border-radius: var(--r-md); }
++.place-choice-dot { width: 14px; height: 14px; border-radius: 50%; }
++/* the assign sheet */
++.sheet-head { border-bottom: 1px solid var(--line-soft); }
++.sheet-head h3 { font-size: 24px; }
++.sheet-meta { color: var(--ink-3); }
++.sheet-status { background: var(--surface-2); color: var(--ink-2); }
++.sheet-status-recorded { background: var(--ok-bg); color: var(--ok); }
++.sheet-place { border-radius: var(--r-md); min-height: 56px; border: 2px solid transparent; }
++.sheet-place-on { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px #fff; }
++.sheet-rate-row .layer-on { background: var(--accent-fill); color: #fff; }
++.sheet-rate-row .layer-off { color: var(--ink-2); }
++.rate-hours { background: var(--surface-2); border-radius: 10px; min-height: 44px; }
++.sheet-actions { gap: 8px; }
++.sheet-actions button { min-height: 48px; border-radius: var(--r-md); font-weight: 700; font-size: 16px; }
++.sheet-actions .btn-secondary { background: var(--surface-2); color: var(--ink); border: 0; }
++.sheet-actions .sheet-fwd { background: var(--accent-fill); color: #fff; border: 0; flex: 1 1 auto; white-space: nowrap; }
++.sheet-actions .btn-secondary:last-child { background: transparent; color: var(--ink-2); }
++/* the day drawer */
++.drawer-head { background: var(--band); color: #fff; border: 0; }
++.drawer-head h3, .drawer-head .btn-icon { color: #fff; }
++.drawer-today { background: var(--accent-fill); color: #fff; border: 0; border-radius: var(--r-md); min-height: 48px; font-weight: 700; }
++.drawer-week-title { color: var(--ink-3); }
++.drawer-day { min-height: 48px; }
++.drawer-day.dd-on { background: var(--accent-soft); }
++/* WhatsApp and the seder */
++#shareModal .share-styles .chip-on, #shareModal .share-styles .chip-off { border-radius: 10px; }
++#shareModal .share-warning { background: var(--warn-bg); color: var(--warn); border: 0; border-radius: var(--r-md); }
++#shareModal textarea { background: var(--surface-2); border-color: transparent; border-radius: var(--r-md); font-size: 16px; }
++#shareModal .modal-actions { flex-wrap: wrap; }
++#shareModal .modal-actions .btn-success { flex: 1 1 100%; min-height: 52px; font-size: 17px; }
++#shareModal .modal-actions .seder-entry { flex: 1 1 100%; }
++#shareModal .modal-actions .btn-secondary:not(.seder-entry) { background: transparent; color: var(--ink-2); flex: 1 1 40%; }
++#sederModal .seder-row { border-color: var(--line-soft); min-height: 56px; }
++#sederModal .seder-go { border: 0; border-radius: var(--r-md); min-height: 52px; font-size: 17px; font-weight: 700; }
++#sederModal .seder-note { background: var(--warn-bg); color: var(--warn); border: 0; border-radius: var(--r-md); }
++#sederModal .seder-foot .btn-secondary { background: transparent; color: var(--ink-2); border: 0; }
++
++/* ---------------------------------------------------------------- banners and the undo bar */
++/* One line: the sentence wraps inside its own box, the buttons never drop under it. */
++.banner { border-radius: var(--r-md); border-inline-start: 0; padding: 8px 10px 8px 12px; gap: 10px; align-items: center; flex-wrap: nowrap; }
++.banner::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
++.banner span { min-width: 0; flex: 1 1 0; white-space: normal; font-weight: 600; }
++.banner .btn-secondary { background: var(--accent-fill); color: #fff; border: 0; border-radius: 10px; min-height: 44px; font-weight: 700; }
++.banner-warn .btn-secondary, .banner-danger .btn-secondary { background: rgb(255 255 255 / 14%); color: inherit; }
++.banner .btn-icon { min-width: 44px; min-height: 44px; }
++.banner-fold .banner-sum { min-height: 44px; }
++.banner-fold .banner-go { border: 0; background: rgb(255 255 255 / 14%); border-radius: 10px; }
++.banner-fold { flex-wrap: wrap; }
++.undo-bar { border-radius: 14px; padding: 8px 10px 8px 14px; font-size: 15px; }
++.undo-bar .btn-secondary { background: var(--accent-fill); color: #fff; border: 0; border-radius: 10px; min-height: 44px; }
++
++/* ---------------------------------------------------------------- the first evening */
++.setup-card { border: 0; background: var(--surface); border-radius: 16px; padding: 24px 18px; text-align: center; }
++.setup-card .btn-secondary, .setup-alt { background: var(--surface-2); color: var(--ink); border: 0; }
++
++}
+diff --git a/js/ui/band.js b/js/ui/band.js
+new file mode 100644
+index 0000000..de3b1d3
+--- /dev/null
++++ b/js/ui/band.js
+@@ -0,0 +1,119 @@
++// ---------------------------------------------------------------- the band (v169)
++//
++// Every screen opens the same way: one blue strip at the top carrying the screen's name,
++// its one or two tools, and a ⋯ that holds everything else. Before v169 each screen had a
++// header of its own shape - the day's three rows, the crew's title and two jump buttons,
++// the week's six buttons in two rows, the reports' toolbar and a card of controls - and
++// the owner's words on the result were «شايف البار كيف طالع لفوق»: the chrome ate a third
++// of the screen. The band is the one shape, built here, so the five screens cannot drift
++// apart again.
++//
++// Drawn with el()/button() from js/ui/dom.js: textContent only, names are never markup.
++// Everything a band holds already existed somewhere on its screen; this file moves, it
++// does not invent. The handlers behind the ⋯ rows are the screens' own functions.
++
++// The stroke glyphs the bands and the ⋯ sheet use. Drawn, not emoji: an emoji is painted
++// by the platform in its own colours, and three phones in one crew showed three glyphs.
++const BAND_ICONS = {
++    gear: 'm9 3-.6 2.2-2 .9-2-.6-2 3.4 1.5 1.7v2.3L2.4 15l2 3.4 2-.6 2 .9L9 21h4l.6-2.3 2-.9 2 .6 2-3.4-1.5-1.8V11l1.5-1.7-2-3.4-2 .6-2-.9L13 3Z M14 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
++    holiday: 'M3 12h18M12 3v18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4',
++    bulk: 'M4 6l1.5 1.5L8 5M11 6.5h9M4 12l1.5 1.5L8 11M11 12.5h9M4 18l1.5 1.5L8 17M11 18.5h9',
++    copy: 'M12 4v12m0 0 4-4m-4 4-4-4M4 20h16',
++    paste: 'M9 4h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2V5a1 1 0 0 1 1-1Zm0 7h6m-6 4h4',
++    sort: 'M8 5v14m0 0-3-3m3 3 3-3M16 19V5m0 0-3 3m3-3 3 3',
++    print: 'M6 9V4h12v5M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v6H6z',
++    image: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm4 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm-5 8 5-5 4 4 3-3 5 5',
++    list: 'M4 6h16M4 12h16M4 18h10',
++    back: 'm9 6 6 6-6 6'
++};
++
++function bandIcon(name, strokeWidth) {
++    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++    svg.setAttribute('viewBox', '0 0 24 24');
++    svg.setAttribute('fill', 'none');
++    svg.setAttribute('stroke', 'currentColor');
++    svg.setAttribute('stroke-width', strokeWidth || '1.8');
++    svg.setAttribute('stroke-linecap', 'round');
++    svg.setAttribute('stroke-linejoin', 'round');
++    svg.setAttribute('aria-hidden', 'true');
++    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
++    path.setAttribute('d', BAND_ICONS[name] || '');
++    svg.appendChild(path);
++    return svg;
++}
++
++// The ⋯: three drawn circles (the character sits on the baseline in this font and reads
++// as three specks). The sync state rides on it as a dot - amber while something waits to
++// be sent, red when something is wrong, nothing when all is well - mirroring the chip
++// renderSyncChip (js/app.js) keeps up to date; the sentence itself is the sheet's first
++// line, one tap away. aria-label «עוד» and aria-haspopup: a glyph alone is a guess.
++function moreButton(rows) {
++    const more = document.createElement('button');
++    more.type = 'button';
++    more.className = 'btn-icon band-more';
++    more.setAttribute('aria-label', 'עוד');
++    more.setAttribute('aria-haspopup', 'dialog');
++    const dots = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++    dots.setAttribute('viewBox', '0 0 24 24');
++    dots.setAttribute('fill', 'currentColor');
++    dots.setAttribute('aria-hidden', 'true');
++    [5, 12, 19].forEach(cx => {
++        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
++        circle.setAttribute('cx', String(cx));
++        circle.setAttribute('cy', '12');
++        circle.setAttribute('r', '2.4');
++        dots.appendChild(circle);
++    });
++    more.appendChild(dots);
++    const chip = document.getElementById('syncChip');
++    if (chip && !chip.hidden) {
++        if (/\bchip-warn\b/.test(chip.className)) more.classList.add('sync-warn');
++        if (/\bchip-danger\b/.test(chip.className)) more.classList.add('sync-danger');
++    }
++    more.addEventListener('click', () => openMoreSheet(typeof rows === 'function' ? rows() : rows));
++    return more;
++}
++
++// A row of the ⋯ sheet: { icon, label, onTap, extra?, className? }. The label is the
++// button's own words - the sheet lists the buttons it replaced, under their own names.
++function moreRow(icon, label, onTap, extra, className) {
++    return { icon, label, onTap, extra: extra || null, className: className || '' };
++}
++
++// The band itself.
++//   title   the screen's name (or the day's name); sub an optional second, smaller line
++//   start   title at the start edge (screens) rather than centred (the day, the week)
++//   back    { label, onTap } - a chevron at the start corner
++//   tools   nodes for row 1, after the title (before the ⋯)
++//   row2    nodes for a second row (a segmented switch, chips)
++//   more    rows for the ⋯ sheet; no ⋯ when empty
++function renderBand(spec) {
++    const band = el('div', 'view-band');
++    const row1 = el('div', 'band-row band-row-1' + (spec.start ? ' band-start' : ''));
++    if (spec.back) {
++        const back = button('', 'btn-icon band-back', spec.back.onTap, spec.back.label || 'חזרה');
++        back.appendChild(bandIcon('back', '2'));
++        row1.appendChild(back);
++    }
++    (spec.lead || []).forEach(node => { if (node) row1.appendChild(node); });
++    const title = el('div', 'band-title');
++    title.appendChild(el('strong', null, spec.title || ''));
++    if (spec.sub) title.appendChild(el('span', 'band-sub', spec.sub));
++    row1.appendChild(title);
++    (spec.tools || []).forEach(node => { if (node) row1.appendChild(node); });
++    if (spec.more && (typeof spec.more === 'function' || spec.more.length)) row1.appendChild(moreButton(spec.more));
++    band.appendChild(row1);
++    if (spec.row2 && spec.row2.some(Boolean)) {
++        const row2 = el('div', 'band-row band-row-2');
++        spec.row2.forEach(node => { if (node) row2.appendChild(node); });
++        band.appendChild(row2);
++    }
++    return band;
++}
++
++// The row every ⋯ sheet starts with: settings. The named button in the top strip was the
++// door until v169; it is still in the document (tests and screen readers find it), and
++// this row calls the same function.
++function settingsMoreRow() {
++    return moreRow(bandIcon('gear'), 'הגדרות', () => openSettings());
++}
+diff --git a/js/ui/more.js b/js/ui/more.js
+new file mode 100644
+index 0000000..53b6139
+--- /dev/null
++++ b/js/ui/more.js
+@@ -0,0 +1,57 @@
++// ---------------------------------------------------------------- the ⋯ sheet (v169)
++//
++// Where the buttons went. Every screen's band ends in a ⋯, and this is what it opens: a
++// sheet from the bottom, under the thumb, listing under their own names the controls the
++// band no longer shows - הגדרות on every screen, and the screen's own extras (הכל חופש
++// and the bulk fold on the day, הדבק רשימה and סדר מחדש on the crew, הדפסה and שיתוף on
++// the week, סידור on the advances). Its first line is the sync sentence, the full one
++// from #storageNotice: the chip that abbreviated it in the top strip is now a dot on the
++// ⋯, and the words have to live somewhere a person can read them.
++//
++// It is a .modal.sheet like the assign sheet, so js/ui/modal.js owns Escape, the focus
++// trap, the backdrop tap and the focus return. Nothing here is a new dialog family.
++
++function moreSheetParts() {
++    return {
++        modal: document.getElementById('moreSheet'),
++        sync: document.getElementById('moreSync'),
++        rows: document.getElementById('moreRows'),
++        close: document.getElementById('moreClose')
++    };
++}
++
++function openMoreSheet(rows) {
++    const parts = moreSheetParts();
++    if (!parts.modal || !parts.rows) return;
++
++    // The sentence the top strip used to abbreviate: the live region's own words, so the
++    // sheet never says something different from the foot of the screen.
++    if (parts.sync) {
++        const notice = document.getElementById('storageNotice');
++        const chip = document.getElementById('syncChip');
++        const kind = chip && !chip.hidden ? (chip.className.match(/\bchip-(ok|warn|danger)\b/) || [])[1] : null;
++        parts.sync.className = 'more-sync' + (kind ? ' chip-' + kind : '');
++        parts.sync.textContent = notice ? notice.textContent.trim() : '';
++        parts.sync.style.display = parts.sync.textContent ? '' : 'none';
++    }
++
++    clear(parts.rows);
++    (rows || []).filter(Boolean).forEach(row => {
++        const btn = button('', 'more-row' + (row.className ? ' ' + row.className : ''), () => {
++            closeMoreSheet();
++            row.onTap();
++        });
++        if (row.icon) btn.appendChild(row.icon);
++        btn.appendChild(el('span', 'more-label', row.label));
++        if (row.extra) btn.appendChild(row.extra);
++        parts.rows.appendChild(btn);
++    });
++
++    parts.modal.style.display = 'flex';
++    if (typeof focusFirst === 'function') focusFirst(parts.modal);
++}
++
++function closeMoreSheet() {
++    const parts = moreSheetParts();
++    if (parts.modal) parts.modal.style.display = 'none';
++}
