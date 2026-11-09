@@ -63,7 +63,8 @@ better, side by side.
     at screenshot time on top of the real app, in that order.
   - `shots.mjs` is the Playwright driver: its `seed()` is the fixture, `MOCK=` / `MOCKJS=` inject
     the files.
-  - `compose.mjs` draws the before/after pairs.
+  - `compose.mjs` draws the before/after pairs; `sheet.mjs` makes contact sheets; `dom.mjs`
+    prints a DOM outline of each screen to write CSS against.
   This is reference code, not production code. Port the intent into `css/` and `js/ui/`, with the
   laws below.
 
