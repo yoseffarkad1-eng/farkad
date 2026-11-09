@@ -150,6 +150,12 @@ written down so it cannot happen twice.
     js/model/migrate.js        v1→v2; never guesses; ambiguous cells become decisions, not data
     js/model/ledger.js         the v80 advances ledger: entries, fold, closed gate, mirror migration, parity check;
                                the repayment and period-closure kinds, both behind the writer gate
+    js/model/payroll.js        NOT SHIPPED - not in index.html, not in the shell, no stamp moved for it. Worker
+                               accounts as a pure model: the `pay.<id>` records (statement, extra deduction,
+                               payment, void, adjustment, opening, legacy), their folds, and the dry-run
+                               planners for closing, paying and correcting. No DOM, no Store, no clock; loaded
+                               only by tests/payroll.test.mjs. What it still needs before it may reach a phone,
+                               and the owner's open decisions, are in docs/payroll-closure.md
     js/sync/sync.js            the durable queue: outbox, journal, replay, receipts, provenance; the one accessor pair
     js/sync/restore.js         the whole-document restore, the ONE place allowed to write the whole document
     js/sync/receive.js         snapshot adoption, merge, the ordering protocol's client half, the poison doors
@@ -262,6 +268,13 @@ written down so it cannot happen twice.
                                every button's words unchanged beside its glyph, a relabel dressed again, the
                                message textarea untouched, both palettes' contrast, no site colour moved,
                                44px and 16px on five screens in both schemes
+    tests/payroll.test.mjs     the un-shipped accounts model: Phase 0 pins what the app does TODAY (3,800 on the
+                               fortnight row for a weekly man whose week 1 is closed; the same-Friday closure
+                               hole; an advance from a never-closed period read two ways; a partial deduction
+                               shutting the gate on an unapproved record); then the weekly and biweekly
+                               accounts, the per-advance split, extra deductions, payment, group closure, two
+                               devices, purity, every refusal code, each of the eight defaults flipped, the
+                               migration report that writes nothing, and agreement with the old model on old data
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe
