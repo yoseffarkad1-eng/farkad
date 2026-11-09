@@ -1,3 +1,73 @@
+## v169 — one look for every screen (candidate, not served)
+
+**Not served. Not merged. On no phone.** One commit on `ac9c013` (v167, the build that is live).
+v168 is reserved for the sync fix being built elsewhere; this candidate is rebased onto it
+before its gate, and the number is confirmed at integration. No gate result is written here:
+validation is recorded against the exact clean commit, and no count is carried over.
+
+The owner's request (2026-11-09): the app made professional and calm, readable in the sun,
+nothing surplus on the screen, with authority to choose the look. What was measured first, on
+v167 at 440x956 with a fourteen-man crew: the day spent 212px of chrome above the first name
+and 148px under the last, eight names of fourteen in view; fourteen different button looks and
+thirty-three outlined boxes on that one screen; emoji and stroke icons side by side. Nothing
+was under a floor - every target 44px, every field 16px, every text pair 4.5:1. It was
+crowded, not broken.
+
+**What changed, and it is two files.**
+
+- `css/design.css`, loaded last. One palette for both schemes, chosen well above the contrast
+  floor (dark: ink 21:1 on paper, 18:1 on a surface, the quietest text 7.2:1; light: 17.5,
+  10.2, 7.7 - every ink at 7:1 or better on every ground, which `tests/navigation.browser.mjs`
+  holds it to). Four button looks - filled, tonal, ghost, and WhatsApp's green, which is now the
+  only green button in the app (print was green only because `.btn-success` was the one filled
+  class there was). Outlines stop carrying the layout: a card is a surface, a list is rows with
+  a hairline between them. The crew is rows instead of 116px cards, advances are one list
+  instead of fourteen boxes. Every rule is inside `@media screen`.
+- `js/ui/icons.js`. A button whose label begins with an emoji keeps that emoji in its text -
+  clipped to a pixel, still in `textContent`, still in the accessible name - and is given a
+  drawn stroke glyph beside it. **No label changed**: every string is character for character
+  what it was, which is why not one pinned expectation about a button's words moved. A
+  textarea is never touched, so the WhatsApp message and the seder's messages show every emoji
+  they will arrive with.
+
+**The day: eleven names where there were eight** (440x956). The worker row is 56px (it was
+69): the same 44px target, six above and six below. The tab bar and the dock lose fifteen
+pixels of padding between them. `tests/mobile.test.mjs`'s band for the row moved from 64-72
+to 52-60, deliberately, with the reason beside it.
+
+**What did NOT change, on purpose.** No control moved, no handler changed, nothing went behind
+a menu: three people use this from memory. The settings button keeps its word (v122 put
+«הגדרות» beside the cog because a bare icon was unexplained). The strip above the day keeps
+its place - folding it into the day's header buys a twelfth name, but only by positioning
+something against the top edge of an installed iPhone app, and that was built, measured and
+taken back out. The site colours are exactly as v140 left them. The header's internals
+(day-tight, day-compact, the measured bars) are untouched. Paper and the shared picture are
+untouched. Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js` or
+`firestore.rules` - no data model change, no rules change, nothing to coordinate between
+phones beyond the ordinary update.
+
+**What this build is known NOT to cover.**
+
+- **Nothing here has run on an iPhone or a Galaxy.** Every measurement is Chromium. The
+  palette's contrast is arithmetic; whether pure black reads better in the sun than v140's
+  navy is a thing only the three phones can say.
+- A man on a site with a long name still takes a taller row: the row gives the name half its
+  width and wraps the badge under it when the badge needs more («תל אביב - רוטשילד 12» at
+  440). That is v167's rule and is not changed here; the eleven-row figure is for rows of one
+  line.
+- The week's colour squares on the dark ground measure 2.1-2.9:1 against it. They carry no
+  text, and the site colours are not this release's to move; a letter inside each square is
+  the fix, and it is a product decision that has not been taken.
+- The emoji inside banners and warnings that are not buttons (⚠️ in a sentence) are still
+  emoji. Only buttons, `<summary>` rows and the handset on the crew page are dressed.
+- Zero balances on the advances list are as strong as real ones. Quietening them needs the
+  renderer to say which rows are zero; this release did not touch a renderer.
+- Empty screens still show their tools above their one sentence.
+- In the container this was built in, `tests/seder.browser.mjs` stops at «the tap went to
+  wa.me» on untouched v167 as well: the installed Chromium is newer than the one Playwright
+  1.56.1 pins and reports an empty URL for the refused popup. It is an environment fault, not
+  this build's - and it is also why no run from that container can be called the release gate.
+
 ## v167 — the seder to each worker, the bars on a stuck iPhone, the day screen decluttered, and two Rima additions (candidate, not served)
 
 **Not served. Not merged. On no phone.** Four commits on v166 (`71d918c`, served on
