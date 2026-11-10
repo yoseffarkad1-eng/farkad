@@ -206,6 +206,27 @@ ships. `tests/build.test.mjs` fails if any shipped file mentions
 `FARKAD_FLAG_OVERRIDES`, the page included — a browser cannot reach it and neither
 can a phone. That is a stronger gate than a bare const, which nothing enforces.
 
+
+### One debt, and where closed history goes (v175, behind the pay book's gate)
+
+Two things about money and the single document are decided and built SHUT; neither is what
+a phone runs today.
+
+- **One debt.** An advance from a period nobody closed stays a full debt until a person
+  deducts it (the owner, 2026-11-10). `advanceDebtStays()` in `js/model/schema.js` is the
+  one place the rule is read, and it is `FARKAD_FLAGS.paybook`: with the gate shut the
+  account walk settles such a period by itself, as it always has. `planDebtRuling` reports
+  what the rule would move on a record and writes nothing.
+- **The schedule is one document, and it is on a clock.** Firestore refuses a document over
+  1 MiB; about 20 men's days alone fill it in about two years from today's 185 KB, and
+  closures written into it fill it in months. A pay book operation is therefore ONE server
+  transaction of its own (`js/sync/transact.js`) that also creates a create-once document
+  under `schedules/{doc}/closed/{id}` holding what it adds - never through the queue.
+  Dropping the live copy, and moving the days of closed months out, are not built.
+
+`docs/payroll-closure.md` has all of it, with the measured capacity curve and the order in
+which the rules and the phones change.
+
 ## Sync
 
 Sync was one 6,194-line file until v102, and nearly all of it is the residue of a
@@ -220,6 +241,7 @@ carry it:
 | `js/sync/receive.js` | a document arriving from the server: adoption, merge, the client half of the ordering protocol, and every door a poisoned or unreadable record can arrive by. |
 | `js/sync/send.js` | getting this device's work out: the flush, the send claim, the pre-send hold, the create race, the retry ladder. |
 | `js/sync/status.js` | being connected and saying so truthfully; the sentence in the ⋯ panel and the banner above the board. |
+| `js/sync/transact.js` | the pay book's server-first door (v175, shipped shut): one closure, payment or void as one transaction with its create-once closed document; the durable intent; settling a lost answer by reading the receipt, never by sending again. |
 | `js/sync/boot.js` | two lines that RUN at load time. Loaded last, and every later split of the group goes above it — that is the file's whole job. |
 
 The later five extend the object with `Object.assign(FarkadSync, { … })`, because a

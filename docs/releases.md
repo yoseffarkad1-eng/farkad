@@ -1,3 +1,92 @@
+## v175 — one debt, the server-first closure and the rules for it, shipped shut (development branch, NOT served)
+
+**Not served. Not merged. On no phone. No real record was read, migrated or written, and
+no rules were published.** Built on Phase 2 (`8c7f0d4`, v173) merged with main at v172
+(`8c943fa`); v174 is another branch's number. No gate result is written here: validation is
+recorded against the exact clean commit, and no count is carried over.
+
+**What it is.** Phase 3 of the worker-accounts work (`docs/payroll-closure.md` has all of
+it, the owner's decisions of 2026-11-10 included). **The gate is still shut** -
+`FARKAD_FLAGS.paybook` is `false` - and after this phase it still may not be opened.
+
+- **One debt** (the owner's ruling). An advance from a period nobody closed stays a full
+  debt until a person deducts it. Behind the pay book's gate: `advanceDebtStays()` is the
+  flag, read in one place, so a build as shipped computes exactly what it did.
+  `planDebtRuling` reports what the ruling would move on a record and writes nothing.
+- **The server-first closure.** `FarkadSync.transactPaybook` (`js/sync/transact.js`): a
+  closure, a payment or a void as one transaction of its own, with a durable intent, a
+  read-back before «closed» is said, and a lost answer settled by reading the receipt.
+  The ordinary queue no longer carries a pay path at all (`paybookQueue: false`).
+- **The split, first half.** Every such operation also creates a create-once document
+  under `schedules/{doc}/closed/{id}` holding what it adds. The model of the rest - what
+  would leave the live document, the index that would stay, and the proof that the folds
+  from the index equal the folds from the whole history - is in `js/model/payroll.js`.
+- **The rules, as a file.** `firestore.rules` on this branch: the pay map append-only on
+  the server and writable only at protocol 2 with its closed copy in the same commit;
+  `closed/` create-once. `docs/firestore.rules.before-paybook` is the rollback artifact.
+  The order in which rules and phones change is measured against v167, v171 and v172.
+
+**What changed, file by file.**
+
+- `js/model/schema.js` - the `paybookQueue` flag (shut); `advanceDebtStays`,
+  `advanceCarryIntoUnder`, `advanceLiveRoom`; `advanceWalk` takes the rule it is computed
+  under; `planDebtRuling`; `planAdvanceCarry` stops at the last day the record is dated.
+- `js/model/ledger.js` - `planPeriodClosure`, under the ruling only: an advance dated after
+  the period is not touched, a closure never takes more than is left on an advance today,
+  and a deduction the advances cannot absorb is refused.
+- `js/model/payroll.js` - `carry-approval-needed`, `paybookCarryApproval`,
+  `planCarryApproval`, a closure refused before it would lock the record; `server-first`
+  from `paybookCommitPlan`; `paybookOperation`, `paybookClosedDocument`,
+  `paybookClosedProblems`, `paybookDetail`, `planHistoryMove`, `paybookIndexFrom`,
+  `paybookIndexFolds`.
+- `js/sync/transact.js` - new; in `index.html`, the service worker's shell and the harness.
+- `js/sync/firebase-adapter.js` - `transact`, `readClosed`, `readReceipt`; `withReceipt`
+  takes the operation's other reads.
+- `js/sync/receive.js` - `PROTOCOL` is 2; the first word from the cloud settles an intent
+  left in doubt.
+- `js/sync/sync.js` - the queue's minting path refuses a `pay.` path while the old door is shut.
+- `firestore.rules`, `docs/firestore.rules.before-paybook` - above.
+- `index.html`, `js/app.js`, `sw.js` - the three stamps, v175.
+
+**Expectations that moved, each in the commit that moved it and each with its reason
+beside it:** seven in `tests/payroll.test.mjs` (the ruling; the old values still asserted
+on a device built as shipped - listed in `docs/payroll-closure.md`, section A); the flag
+list in `tests/gate.integrity.test.mjs` (four flags became five); two `protocol === 1`
+pins in `tests/bootstrap.emulator.test.mjs` (now 2); `tests/paybook.emulator.test.mjs`
+loads the published rules by name; the older builds' file lists in
+`tests/paybook.oldbuilds.test.mjs` and `tests/rima.test.mjs` (a file they never had).
+
+**Known NOT covered.**
+
+- **Nothing leaves the live document.** A closure written through the new door is in the
+  closed collection and still in the schedule; the folds do not read the index; the index
+  is not stored. The capacity clock is therefore not stopped: for 20 men closing every
+  fortnight the document fills about seven months after the gate opens.
+- **The split does not bound the document even when finished as designed** (measured):
+  the days stay in it and the index grows a row per closure.
+- **Backups and the rescue file carry no closed documents and a restore creates none.**
+  Under the new rules a whole-document write that would ADD pay entries is refused; a pay
+  book cannot be restored into a new project yet.
+- **No existing history was moved, and nothing can move it.** `planHistoryMove` reports.
+- **The ruling's effect on the screens was not looked at in a browser.** With the gate
+  open, eight checks in `repayment`, `ledger.truth` and `paycycle.completion` move
+  (measured in a scratch copy); the browser suites were not run that way. A closed row
+  with a never-closed advance behind it will show the «late since close» note for a reason
+  that is not the note's.
+- **No screen.** Nothing calls `transactPaybook`; the Hebrew for its refusals is not written.
+- **`transactPaybook` was never run against the real project**, only the fake cloud and
+  the local emulator. The emulator's behaviour for a lost revision race
+  (`permission-denied`) and for a read a moment behind its commit is what the code was
+  fitted to; production may differ in timing.
+- **An intent is per device, not per window.** Two windows of one app on one disk were not
+  measured against the door.
+- **The fake cloud does not enforce the new rules' pay guard** on `update` and `save`;
+  only the emulator suite does.
+- **The stamp check is red on this branch's commits** (`tests/build.test.mjs`,
+  `tests/gate.integrity.test.mjs`: shipped files changed in commits after the one that
+  moved the stamps). The work was committed in steps on purpose; it is one commit at
+  integration.
+
 ## v173 — the pay book's storage, shipped shut (development branch, NOT served)
 
 **Not served. Not merged. On no phone. No real record was read, migrated or written.** One

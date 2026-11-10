@@ -56,11 +56,20 @@ different from what was done.
    never rewritten, never removed, merged by union; a null or a changed body at
    `pay.<id>` is refused by the commit, by the queue and by the queue's reader, and two
    different bodies under one id are BOTH kept - the cloud's standing, the other under
-   `payConflicted` - never chosen between. `State.commitPaybook` is the one door that
-   writes one, and it is shut: `paybook: false` in `js/model/schema.js` opens on the
-   owner's word, after every phone is on v173 or later (docs/payroll-closure.md, THE
-   ROLLOUT RULE) and after closed history has somewhere to go that is not the one
-   document.
+   `payConflicted` - never chosen between. Since v175 a pay entry is written by ONE
+   door, `FarkadSync.transactPaybook` (js/sync/transact.js): a server transaction of its
+   own that also creates a create-once document under `closed/`, and «closed» means it
+   committed and was read back. The ordinary queue never carries a pay path
+   (`paybookQueue: false`; `State.commitPaybook` answers `server-first`). All of it is
+   shut: `paybook: false` in `js/model/schema.js` opens on the owner's word, after the
+   rules of this branch are published and every phone is on v175 or later
+   (docs/payroll-closure.md, «The rollout order, measured») and after closed history
+   has actually LEFT the one document - which v175 does not yet do.
+   **And the one-debt ruling moves with that gate (v175).** An advance from a period
+   nobody closed stays a full debt until a person deducts it (the owner, 2026-11-10):
+   `advanceDebtStays()` in `js/model/schema.js` is `FARKAD_FLAGS.paybook`, read in one
+   place. With the gate shut the account walk is byte for byte what it was. A closed
+   account's frozen figures are never recomputed under either rule.
 2. **Days keep the rate they were worked at.** Rates are stamped onto the day record
    at first write and survive every later edit; reports price each day at its stamp.
    Never restate a stamped day, and never stamp old days retroactively —
@@ -134,7 +143,7 @@ downloading anything. The emulator suites need Java and run through
 Financial suites cover both enabled operation and explicit legacy-client fixtures
 with both financial gates closed. The v116 release candidate enables the financial
 pair by owner request; deployment remains held until cloud rules and device readiness
-are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. v167 adds the seder to each worker (js/ui/seder.js), entered from the WhatsApp dialog and from nowhere on the day screen: the men with a site that day, each opened in WhatsApp with his own message by the person's own tap - never sent by the app, and never marked "sent". It writes nothing to the record; its progress is a per-date preference in Store. Its Hebrew words are the owner's, approved 2026-11-07 and pinned word for word in tests/seder.test.mjs (docs/releases.md, v167). v169 is the one look (css/design.css, js/ui/icons.js): a restyle that moves no control, changes no label and touches no data path (docs/releases.md, v169). v171 adds הסעות (js/model/transport.js, js/ui/transport.js): who rides to work in which vehicle and a message to each driver, on a phone that turned it on in ⋯ and on no other - its own Store keys (farkadTransport:…), never the record, the outbox, the cloud, a backup or the rescue file, so a lost phone loses the plans; it reads the day through the seder's own list and never writes it; its Hebrew is proposed, not approved word by word, and pinned in tests/transport.test.mjs (docs/releases.md, v171; docs/transport-spec.md). It is not the retired vehicles feature and shares nothing with it. v172 puts the ⋯ sheet in strict order: three sections of three cards, every card but ענן וסנכרון a row (`<details>`) that opens in place, גיבוי open and the rest shut at every opening, a row opening by itself only for the reasons listed in settingsFoldReasons (js/ui/settings.js) and never shut or opened by a redraw; no control, word or handler changed, and nothing about it is stored (docs/releases.md, v172). v173 (development branch, not served) stores and syncs the pay book - `schedule.pay`, js/model/payroll.js - and ships its writer shut (`paybook: false`): a phone keeps, merges, backs up and re-sends a pay entry it is handed and creates none; the gate stays shut until every phone is on v173, the server-first closure exists and closed history has left the one document, which a year of closures does not fit in (docs/releases.md, v173; docs/payroll-closure.md). Test-only overrides are
+are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. v167 adds the seder to each worker (js/ui/seder.js), entered from the WhatsApp dialog and from nowhere on the day screen: the men with a site that day, each opened in WhatsApp with his own message by the person's own tap - never sent by the app, and never marked "sent". It writes nothing to the record; its progress is a per-date preference in Store. Its Hebrew words are the owner's, approved 2026-11-07 and pinned word for word in tests/seder.test.mjs (docs/releases.md, v167). v169 is the one look (css/design.css, js/ui/icons.js): a restyle that moves no control, changes no label and touches no data path (docs/releases.md, v169). v171 adds הסעות (js/model/transport.js, js/ui/transport.js): who rides to work in which vehicle and a message to each driver, on a phone that turned it on in ⋯ and on no other - its own Store keys (farkadTransport:…), never the record, the outbox, the cloud, a backup or the rescue file, so a lost phone loses the plans; it reads the day through the seder's own list and never writes it; its Hebrew is proposed, not approved word by word, and pinned in tests/transport.test.mjs (docs/releases.md, v171; docs/transport-spec.md). It is not the retired vehicles feature and shares nothing with it. v172 puts the ⋯ sheet in strict order: three sections of three cards, every card but ענן וסנכרון a row (`<details>`) that opens in place, גיבוי open and the rest shut at every opening, a row opening by itself only for the reasons listed in settingsFoldReasons (js/ui/settings.js) and never shut or opened by a redraw; no control, word or handler changed, and nothing about it is stored (docs/releases.md, v172). v173 (development branch, not served) stores and syncs the pay book - `schedule.pay`, js/model/payroll.js - and ships its writer shut (`paybook: false`): a phone keeps, merges, backs up and re-sends a pay entry it is handed and creates none; the gate stays shut until every phone is on v173, the server-first closure exists and closed history has left the one document, which a year of closures does not fit in (docs/releases.md, v173; docs/payroll-closure.md). v175 (development branch, not served; v174 is another branch's number) is Phase 3 of the same work, still shut: the owner's one-debt ruling behind the gate with `planDebtRuling` to read first; the server-first door (js/sync/transact.js) and the durable intent; protocol 2; and `firestore.rules` changed ON THE BRANCH ONLY - the pay map append-only on the server and `closed/` create-once, with docs/firestore.rules.before-paybook as the rollback artifact and nothing published. What is NOT built, and so why the gate still may not open: nothing leaves the live document yet, the days are still in it, and backups do not carry closed documents (docs/releases.md, v175; docs/payroll-closure.md). Test-only overrides are
 provided before scripts load, never defined by the production shell.
 
 ## The culture
@@ -166,14 +175,20 @@ written down so it cannot happen twice.
                                model: the `pay.<id>` records (statement, extra deduction, payment, void,
                                adjustment, opening, legacy), their folds, the dry-run planners, and what the
                                storage calls - paybookUnion (who stands when two documents disagree),
-                               layPaybookEntry, paybookCommitPlan. No DOM, no Store, no clock. What it still
-                               needs before the gate may open, and the owner's open decisions, are in
-                               docs/payroll-closure.md
+                               layPaybookEntry, paybookCommitPlan. No DOM, no Store, no clock. v175: the
+                               operation the server-first door sends and its closed document, the carry
+                               approval as a code and a plan, and the split as a model - planHistoryMove (a
+                               dry run), the index and its folds. What it still needs before the gate may
+                               open, and the owner's open decisions, are in docs/payroll-closure.md
     js/sync/sync.js            the durable queue: outbox, journal, replay, receipts, provenance; the one accessor pair
     js/sync/restore.js         the whole-document restore, the ONE place allowed to write the whole document
     js/sync/receive.js         snapshot adoption, merge, the ordering protocol's client half, the poison doors
     js/sync/send.js            the flush, the send claim, the pre-send hold, the create race, the retry ladder
     js/sync/status.js          connect and listen; the one sentence the person reads; the banner
+    js/sync/transact.js        v175, SHIPPED SHUT with the pay book: a closure, a payment or a void as ONE
+                               server transaction with its create-once closed document - never the queue;
+                               the durable intent (farkad:payIntent); a lost answer settled by reading the
+                               receipt, never by sending again
     js/sync/boot.js            two lines that RUN at load; loaded last, and every later split goes above it
     js/sync/firebase-adapter.js  the only file that knows Firebase exists; the one ES module
     js/sync/firebase-config.js   project config; empty means local-only
@@ -313,8 +328,20 @@ written down so it cannot happen twice.
                                measured NOT all-or-nothing on the wire
     tests/paybook.oldbuilds.test.mjs v167, v169 and v171 out of Git beside this build: what each does with `pay`,
                                and the rollout rule those measurements give
-    tests/paybook.emulator.test.mjs the UNCHANGED rules against pay writes (and what they do not refuse), and
-                               the production adapter with two phones closing one account at once
+    tests/paybook.emulator.test.mjs the PUBLISHED rules (docs/firestore.rules.before-paybook, by name since
+                               v175) against pay writes through the old queue door, and what they do not refuse
+    tests/debt.ruling.test.mjs v175: the one-debt ruling on a build with the gate open beside one as shipped -
+                               history, one answer on random records, an account closed out of order, frozen
+                               closures untouched, and planDebtRuling writing nothing
+    tests/paybook.transact.test.mjs v175, the server-first door on the fake cloud: one write with its closed
+                               document, offline refused, stale, a double tap, a lost answer, a reload
+                               mid-flight three ways, the queue never carrying a pay path, the carry approval
+    tests/paybook.split.test.mjs v175, the split as a model: the closed document, lossless, the index folds
+                               equal to the full folds on random records, planHistoryMove, and capacity for
+                               20 men over 5 years with and without it
+    tests/paybook.split.emulator.test.mjs the NEW rules and the production adapter: create-once, the pay map
+                               that only grows, each half of the pair failing, two phones closing one account
+                               at once, and v167/v171/v172 out of Git - the rollout order, derived
     tests/payroll.test.mjs     the accounts model, writer on through the test seam: Phase 0 pins what the app does TODAY (3,800 on the
                                fortnight row for a weekly man whose week 1 is closed; the same-Friday closure
                                hole; an advance from a never-closed period read two ways; a partial deduction

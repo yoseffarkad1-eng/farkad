@@ -67,6 +67,34 @@ const MAIN = '8c943fa';
 const OLDER = [['v167', 'a25566f'], ['v171', '0acaceb'], ['v172', MAIN]];
 const NEW_HERE = ['js/model/payroll.js', 'js/sync/transact.js'];
 
+// The older builds, built out of Git: their own files, in this build's load order less
+// what they never had. Used by section O.
+const found = {};
+function sourcesOf(name, sha) {
+    const order = loadOrder().filter(file => NEW_HERE.indexOf(file) === -1);
+    const files = order.filter(file => {
+        try { git(['cat-file', '-e', `${sha}:${file}`]); return true; } catch (error) { return false; }
+    });
+    given(`${name} has every file this build loads that it could have had`, files.length === order.length,
+        `${files.length} of ${order.length}`);
+    const said = (/const APP_VERSION = '([^']+)'/.exec(git(['show', `${sha}:js/app.js`]).toString('utf8')) || [])[1];
+    given(`the older build names itself ${name}`, said === name, String(said));
+    return files.map(file => ({ file, code: git(['show', `${sha}:${file}`]).toString('utf8') }));
+}
+function oldPhone(name, sources, id, env) {
+    const device = makeDevice({ sources, appVersion: name, deviceId: id, storage: { [SCHEDULE]: JSON.stringify(BASE.bare) } });
+    device.setToday(TODAY);
+    device.ctx.askTell = () => Promise.resolve();
+    device.ctx.askConfirm = () => Promise.resolve(true);
+    device.Sync.pushDelayMs = 5;
+    device.State.load();
+    device.Sync.connect(adapterFor(as(env, SECOND), opsOf[name]));
+    return device;
+}
+const dayOn = raw => Boolean(raw && raw.days && raw.days['2026-10-18'] && raw.days['2026-10-18'].actual
+    && raw.days['2026-10-18'].actual.w_nasser);
+
+
 {
     suite('what is under test: the shipped adapter, the rules of this branch, and the rules as published today');
     check('the adapter differs from the shipped file in exactly four import specifiers', fourLines(source, rewrite(source)));
@@ -431,31 +459,6 @@ function pairWrite(db, options = {}) {
 }
 
 // ================================================================ O
-const found = {};
-function sourcesOf(name, sha) {
-    const order = loadOrder().filter(file => NEW_HERE.indexOf(file) === -1);
-    const files = order.filter(file => {
-        try { git(['cat-file', '-e', `${sha}:${file}`]); return true; } catch (error) { return false; }
-    });
-    given(`${name} has every file this build loads that it could have had`, files.length === order.length,
-        `${files.length} of ${order.length}`);
-    const said = (/const APP_VERSION = '([^']+)'/.exec(git(['show', `${sha}:js/app.js`]).toString('utf8')) || [])[1];
-    given(`the older build names itself ${name}`, said === name, String(said));
-    return files.map(file => ({ file, code: git(['show', `${sha}:${file}`]).toString('utf8') }));
-}
-function oldPhone(name, sources, id, env) {
-    const device = makeDevice({ sources, appVersion: name, deviceId: id, storage: { [SCHEDULE]: JSON.stringify(BASE.bare) } });
-    device.setToday(TODAY);
-    device.ctx.askTell = () => Promise.resolve();
-    device.ctx.askConfirm = () => Promise.resolve(true);
-    device.Sync.pushDelayMs = 5;
-    device.State.load();
-    device.Sync.connect(adapterFor(as(env, SECOND), opsOf[name]));
-    return device;
-}
-const dayOn = raw => Boolean(raw && raw.days && raw.days['2026-10-18'] && raw.days['2026-10-18'].actual
-    && raw.days['2026-10-18'].actual.w_nasser);
-
 for (const [name, sha] of OLDER) {
     const sources = sourcesOf(name, sha);
     const cell = found[name] = {};
@@ -494,9 +497,9 @@ for (const [name, sha] of OLDER) {
         const later = await server(envNew);
         cell.oldRecordsAfterRefusedRestore = Boolean(later.days['2026-10-19'] && later.days['2026-10-19'].actual
             && later.days['2026-10-19'].actual.w_salim);
-        check(`MEASURED: after its refused restore, a day it records ${cell.oldRecordsAfterRefusedRestore ? 'still reaches' : 'does NOT reach'} the server`
-            + ' - it waits on that phone, behind the restore, until the phone is updated', true);
-        same('whichever it is, that day is on the old phone\'s own disk and nothing of the pay book moved',
+        same('MEASURED: after its refused restore, a day it records does NOT reach the server - it waits on that phone, behind the restore, until the phone is updated',
+            cell.oldRecordsAfterRefusedRestore, false);
+        same('that day is on the old phone\'s own disk, and nothing of the pay book moved',
             [Boolean(old.State.schedule.days['2026-10-19'].actual.w_salim), canonical(later.pay) === before], [true, true]);
     }
 

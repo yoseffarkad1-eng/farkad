@@ -1,25 +1,441 @@
-# Worker accounts, closure and payment — the design as built (Phases 0, 1 and 2)
+# Worker accounts, closure and payment — the design as built (Phases 0 to 3)
 
-Status: **the model, and its storage and sync — shipped shut, on a development branch.**
-Since v173 `js/model/payroll.js` is loaded, and the record it describes (`schedule.pay`) is
-stored, journalled, merged, backed up, restored and sent like the advances ledger. The
-WRITER is off: `FARKAD_FLAGS.paybook` is `false`, every planner refuses with `gate`, and
-`State.commitPaybook` refuses whatever reaches it. A phone on this build keeps a pay book
-it is handed and never starts one. There is still no screen and no rule. **v173 is not
-served and not merged; nothing here has touched a real record.** Phase 2 as built is in
-[Phase 2](#phase-2--storage-and-sync-as-built-v173); what is still missing is in [What
-later phases must add](#what-later-phases-must-add).
+Status: **the model, its storage and sync, the server-first closure and the rules for it —
+shipped shut, on a development branch.** `FARKAD_FLAGS.paybook` is `false`: every planner
+refuses with `gate`, nothing in the app creates a pay entry, and the one-debt ruling the
+owner approved is behind the same gate. There is still no screen. **v175 is not served and
+not merged; nothing here has touched a real record, and no rules were published.** Phase 3
+as built comes first below; **the gate may still not be opened**, and
+[What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut) says exactly why.
 
-Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171). The
-specification was the audit and design written against `b640c5a`; where the code disagreed
-with either, the code won, and every such place is in [Where the audit and the design were
+Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
+Phase 2 merged with main at v172 (`8c943fa`). The specification was the audit and design
+written against `b640c5a`; where the code disagreed with either, the code won, and every
+such place is in [Where the audit and the design were
 wrong](#where-the-audit-and-the-design-were-wrong).
 
     node tests/payroll.test.mjs             # the model, writer on through the test seam
     node tests/paybook.store.test.mjs       # one phone: the gate, the commit, the disk, the files, capacity
-    node tests/paybook.sync.test.mjs        # two and three phones on the fake cloud
+    node tests/paybook.sync.test.mjs        # two and three phones on the fake cloud (the old queue door, opened by name)
     node tests/paybook.oldbuilds.test.mjs   # v167, v169 and v171, out of Git, beside this build
-    npm run -s test:paybook-emulator        # the unchanged rules and the production adapter (needs Java)
+    npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
+
+## Phase 3 — one debt, the server-first closure, and the split (v175)
+
+**Development branch. Not served, not merged, on no phone; no real record was read. The
+gate (`paybook`) is still `false`, and after this phase it still may not be opened** — see
+[What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut).
+
+    node tests/debt.ruling.test.mjs            # A: the ruling, both builds side by side
+    node tests/paybook.transact.test.mjs       # C: the server-first door, on the fake cloud
+    node tests/paybook.split.test.mjs          # B: the model of the split, and capacity for 20 men
+    npm run -s test:paybook-split-emulator     # the NEW rules, the production adapter, three older builds (needs Java)
+
+### What the owner decided (2026-11-10)
+
+His own answers; requirements from here on. The "defaults" of Phase 1 that he answered
+are no longer defaults.
+
+| question | decided |
+|---|---|
+| the live data today | the backup file is about 185 KB, about 20 active men |
+| closed accounts leave the single document | **approved**, including a rules change he publishes by hand |
+| the other team's «יום תשלום» screen | dropped; the pay book is the one system |
+| a weekly man in the NEW list | his open week only (rule 1, as built) |
+| the old «לפי עובד» report | not restructured; closed weeks are marked «נסגר» — a marking, Phase 4 |
+| an earlier unclosed period | apart, as «ממתין לסגירה», never summed (rule 2, as built) |
+| closing with nothing paid | yes (rule 3, as built) |
+| closing before the period's last day | no (rule 4, as built) |
+| deductions above the wage | no — capped, the debt carries (rule 5, as built) |
+| an advance dated after the period's end | not offered in that closure (rule 6, as built; and since v175 the existing dialog obeys it too under the ruling) |
+| an advance from a period nobody closed | **stays a full debt until somebody deducts it** — CHANGES EXISTING BEHAVIOUR; [section A](#a--one-debt) |
+| an advance with no amount entered at closure | a missing answer, not a zero (as built: `allocation-missing`) |
+| who may close and pay | all three accounts (rule 8, as built) |
+| closures from before the pay book | a «payment unknown» list; he answers each (`planLegacy`, as built) |
+| payment methods / deduction categories | cash, transfer / agreed, settlement, other (as built) |
+| «העברת מקדמות לחשבון נמשך» (`cm_carry`) | "do what is best": the flow must never leave financial controls silently locked — [`carry-approval-needed`](#the-carry-approval) |
+
+### A — one debt
+
+**The rule.** An advance from a period that was never closed stays a full debt until a
+person deducts it at a closure or the man hands it back. Before: the account walk settled
+such a period by itself — `min(what he owed, what he earned)` came off inside the walk,
+recorded nowhere — while `advanceOutstanding`, the per-advance fold every card and every
+closure is judged by, had never heard of that deduction. One record, two answers, and the
+later closure refused to deduct the very advance the card said was owed (Phase 1,
+finding 1).
+
+**Where.** `js/model/schema.js`: `advanceDebtStays()`, `advanceCarryInto` →
+`advanceCarryIntoUnder(schedule, worker, from, stays)`, `advanceWalk(..., stays)`,
+`advanceLiveRoom`. `js/model/ledger.js`: `planPeriodClosure` (the cap and the date filter).
+A closed period is untouched: it reports its record. So the carry into any account is the
+sum of what `advanceOutstanding` says was left on each advance the day before it opens —
+checked on 60 seeded random records, 630 accounts and 284 closures, in `tests/debt.ruling.test.mjs`.
+
+**It is behind the pay book's gate, and that is why there are not two calculators.**
+`advanceDebtStays()` is `FARKAD_FLAGS.paybook === true`, read in one place; every reader —
+the sheet, the statement, the existing dialog, the new planner — comes through
+`advanceCarryInto`, so a build answers one way everywhere. **It ships with the gate's
+opening and not before**: a build with the gate shut computes the old walk byte for byte
+(asserted on a shut-gate device in every section of the suite), which is every build a
+person has installed and this one as committed.
+
+**Two things found while building it, both fixed and pinned.**
+
+- *Closing out of order would have taken an advance twice.* Under the ruling a debt
+  travels, so an EARLIER account can be closed after a later closure (or a later
+  repayment) already settled the advance its balance is made of. Measured: 500 given in
+  August and never closed, 300 of it deducted at September's closure, and August's own
+  closure then offered the whole 500 again. `advanceLiveRoom` caps what an unclosed account
+  may deduct by what is left on its advances TODAY; the entry's `balanceAfter` stays the
+  figure the judge recomputes (as of that account's last day), so every phone accepts it.
+- *The gate every financial control asks took over a second.* `planAdvanceCarry` walked on
+  through four thousand empty fortnights while a debt stood — free while the old walk
+  settled every debt out of the next wage, 1,415 ms a call (against 4) once a debt stands
+  until somebody deducts it. It now stops at the last day anything on the record is dated;
+  the rows are the same.
+
+**A settled account never changes.** A closure's frozen figures — `carriedIn`, `gross`,
+`deducted`, `carriedOut`, `net` — are the same bytes and the same numbers under both rules,
+whenever it was closed. What moves on a CLOSED row is only what was never frozen: the money
+the next account opens owing (`carriedForward`) — and with it `lateSinceClose`, which the
+sheet words as «הגיעה תנועה אחרי סגירת התקופה». Under the ruling that note appears on an
+old closure that has a never-closed advance behind it, and its sentence is then not true
+(nothing arrived late; the rule moved). The figure beside it («חוב פתוח») is true. Pinned
+as KNOWN; the wording is Phase 4's and the owner's.
+
+**The dry run: `planDebtRuling(schedule, today?)`.** Writes nothing, returns
+`changes: []`, says the same thing on either build. Per man: `advances` — one row per
+(advance, never-closed period) with `assumed`, what the old walk silently took; `figures`
+— every account figure that moves, old and new; `debt` — what the walk says he owes going
+into his open account, old and new, beside `recorded`, the advances' own sum. On the
+suite's fixture (Khaled: 500 in a fortnight he earned 700 in, 300 in one he earned 1,400
+in, neither closed; the third closed by the old build with nothing deducted; today in the
+fourth):
+
+    advances   500 given 08-10, 500 left, assumed taken 500 in 08-07..08-20
+               300 given 08-24, 300 left, assumed taken 300 in 08-21..09-03
+    figures    08-07  deducted 500 → 0 · net 200 → 700 · carried forward 0 → 500
+               08-21  carried in 0 → 500 · deducted 300 → 0 · net 1,100 → 1,400 · carried forward 0 → 800
+               09-04  (closed) late-since-close 0 → 800 · carried forward 0 → 800
+               09-18  carried in 0 → 800 · deducted 0 → 700 · net 700 → 0
+    debt       as of 09-18: old 0, new 800, recorded 800
+
+**The owner reads this report on his real record before the gate opens.** It is the list
+of men whose open accounts will say they owe more than the sheet says today, and it is his
+to say which of those fortnights were in fact settled by hand.
+
+**Every expectation that moved, in the commit that moved it** (`tests/payroll.test.mjs`;
+each carries the ruling and its date, and the old value is still asserted on a device
+built as shipped):
+
+| check (before) | was | is |
+|---|---|---|
+| Phase 0: «500 from a fortnight nobody closed is "500 left" to one fold and "nothing carried" to the other» | `[500, 0]` | HISTORY on a shut-gate device: `[500, 0]`; THE RULING: `[500, 500]` |
+| Phase 0: «and the existing closure refuses to deduct it from a later wage» | refused, `deduction` | HISTORY: refused; THE RULING: closes, 300 off, 200 left |
+| advances: «an advance from a fortnight nobody closed: 500 left on it, nothing the account walk will let come off» | `[false, ['deduction'], 500, 0]` | `[true, [], 500, 500]`, then 200 left / 200 carried / net 4,100 |
+| advances: «the migration report names the disagreement instead of settling it» | one row, 500 against 0 | `[]` |
+| refusal codes: «the account walk allowing less than was chosen» (150.01 of 500) | refused, `deduction` | HISTORY on a shut-gate device: refused, walk room 150; THE RULING: allowed, walk room 500 |
+| refusal codes: «and exactly what the walk carries is allowed» | `[true, 150, 500]` | replaced by the line above |
+| refusal codes: the vocabulary list | includes `deduction` | `deduction` joins `rejected`: produced by no input with the gate open |
+
+Nothing else moved in A. **What moves when the gate opens** — measured by forcing the
+ruling on in a scratch copy and running every node suite: `tests/repayment.test.mjs` 6
+checks (an account that inherits what the one before could not cover: 1,800 → 5,000 where
+the earlier account was never closed), `tests/ledger.truth.test.mjs` 1,
+`tests/paycycle.completion.test.mjs` 1. Those are Phase 5's to move, with the gate, in one
+commit. The browser suites were not run that way.
+
+### The carry approval
+
+`paybookGateReasons` answers three ways now: `gate` (this build does not write the pay
+book, the ledger or the carry — nothing a person can do), `carry-approval-needed` (the
+record's carry is needed and unapproved — the one shut gate a person can open), and
+nothing. A refusal carrying the code also carries `carryApproval: { id, needed, approved,
+rows }` (`paybookCarryApproval`), the rows being `planCarryMigration`'s own.
+
+And a closure **may not lock the record behind itself**: `planClosure` builds the closure
+on a copy, asks whether that copy would be locked (`paybookWouldLock`), and if so refuses
+BEFORE anything is written, with the same code. `planCarryApproval(schedule, stamp)` is
+the approval as a plan — one path, `ledger.migrations.cm_carry`, the record the existing
+dialog writes; it is not a pay entry and goes by the ordinary path, after being laid into
+the schedule. Phase 4 says one sentence and offers it there. **Recommended for Phase 5:**
+approve the carry in the same step as the opening day, so the first partial deduction
+never meets the question.
+
+### C — the server-first closure
+
+`js/sync/transact.js`: `FarkadSync.transactPaybook(plan)`. A closure, a payment, a void,
+an adjustment, a legacy answer, the opening — each is ONE transaction of its own through
+the production adapter (`transact` in `js/sync/firebase-adapter.js`), outside the ordinary
+flush, and it writes the schedule's field paths, the operation's receipt and a create-once
+closed document together or not at all.
+
+| state | means |
+|---|---|
+| `closed` | the transaction committed, the closed document was read back from the server and is what was sent, the server's schedule carries every path, and this phone's own record has adopted them. The only state that means done. |
+| `done` | the same fact was already on the server (a payment pressed twice). Nothing written. |
+| `refused` | nothing was sent, or the server refused it whole: `offline`, `unsupported`, `restoring`, `unsent-work`, `pending`, `busy`, `plan`, `storage`, `server`. |
+| `stale` | the account changed. The fresh document is adopted, nothing was written, `fresh` is the plan as it now stands (with its reasons — `closed`, `statement`, …). |
+| `unknown` | it was sent and its fate is not known and cannot be asked right now. The intent stays; everything else is refused (`pending`) until it is settled. |
+
+**The intent.** Before anything leaves, the operation is written to this phone's disk
+under one key (`farkad:payIntent`): its name, its exact bytes, the revision it was aimed
+at. It is not a queue — nothing ever sends it again. Its name is the idempotency key
+(this device, the closed document's id, the exact entries), so a retry finds its own
+receipt.
+
+**Measured outcomes** (`tests/paybook.transact.test.mjs`, fake cloud; the emulator suite
+repeats the ones marked E):
+
+| case | what happens |
+|---|---|
+| the ordinary closure (E) | one write, one revision, one receipt, one closed document named for the statement holding exactly the plan's entries; no journal batch, nothing pending; the other phones — one with the writer off — hold the same book |
+| no signal / no cloud / the server's document not heard yet | `refused: offline`; the disk is byte for byte what it was; nothing is sent when the signal returns |
+| this phone holds unsent work | `refused: unsent-work` (and the queue is asked to drain); goes through once it has |
+| the other phone closed it first, different choices (E, truly concurrent) | exactly one closed document, one statement, one receipt; the loser is `stale` with `closed`/`statement`, holds the winner's closure afterwards, no intent, nothing queued, nothing beside, not stopped; each advance reduced once |
+| the same choices on both | the second is told it is already closed; one closure stands, the first signer's |
+| the document moved for somebody else's reason | the same operation under the same name, re-aimed (up to three times) after the plan is judged again; a day recorded INSIDE the account is `stale`, with the fresh wage |
+| a double tap | one operation; the second is `refused: busy` |
+| the write landed and the answer was lost | settled by reading the receipt; `closed`; one write, never a second |
+| the answer was lost and the server cannot be asked | `unknown`; another closure is `refused: pending`; at the next signal: `committed`, by looking |
+| reloaded mid-flight, it had reached the server | found by its receipt at the next open, adopted, outcome `committed` |
+| reloaded mid-flight, it died and the document moved | its revision is spent: outcome `nothing`, and the phone says so |
+| reloaded mid-flight, still on the way | the revision it was aimed at is spent on purpose by one write that changes no business field; when the old request arrives it is refused; outcome `nothing`, and it stays true |
+| a later payment; a void from the other phone | each one write and one closed document of its own |
+| an intent that cannot be read | everything is `refused: pending`; the bytes are not deleted; resolving answers `unknown` |
+
+Three things the emulator found that the fake cloud could not, all fixed: a lost revision
+race arrives as `permission-denied` (the rules judge the loser's commit against a document
+that already moved) and was answered «server» — it is now answered by looking; a read can
+be a moment behind the commit it follows and was answered «unverified» — it is read again,
+a bounded number of times, when it looks merely early; and adoption can trail the read by
+a moment — the record is looked at again before anything is said.
+
+**The ordinary queue never carries a pay path.** `FARKAD_FLAGS.paybookQueue` is `false` in
+every build: `State.commitPaybook` answers `server-first`, and the queue's one minting
+path refuses a `pay.` path whoever asks (asserted, with the cloud's whole write log
+searched). The flag exists so that the Phase 2 suites — whose subject is two phones holding
+different pay entries — can still produce that state; they open it by name
+(`WRITER_ON` in `tests/paybook.world.mjs`).
+
+**Protocol 2.** This build writes `protocol: 2` on every write. Nothing in the envelope
+changed shape; the number is what the rules read.
+
+### B — the split
+
+**The design.**
+
+- **Where:** `schedules/{doc}/closed/{id}`, one document per server-first OPERATION: a
+  closure under its statement's id (`ps_<worker>_<from>`), a later payment, a void, an
+  adjustment, a legacy answer or the opening under its own entry's id.
+- **Why per operation, not per man per year:** a closed document is create-once — that is
+  the server-side append-only the pay book has never had — and a per-year document would
+  have to be updated. Two phones closing one man's one period aim at ONE document. A phone
+  opening the app reads one document, as today; a closed document is read only when
+  somebody opens that closure's detail, and never changes afterwards, so it can be kept.
+- **What it holds:** `{ v: 1, id, kind, workerId, opId, revision, entries }`, `entries`
+  being the operation's field paths and values VERBATIM — the frozen payslip with its day
+  list, each `deducted` entry, the extras, the statement, the payment. No second
+  description of a closure exists to drift from the first, and the closed documents laid
+  back over a record that has dropped them rebuild it byte for byte (asserted on the
+  fixture and on 30 random records).
+- **When:** at the closure, in the same commit — never a later move. So for everything
+  written through the new door there is no copy-verify-drop to interrupt: the copy exists
+  from birth, bound to its schedule write by the rules from both sides.
+- **The index** (`paybookIndexFrom`): one row per closed period per man, keyed by the
+  closed document's id — whose and which period, the moment of closing, the wage it was
+  closed on, the balance it opened and closed on, `[advance, amount, balance after]` per
+  advance deducted, and where a statement stands the extras, the net, what is owed and
+  what was paid. **It is enough** — on 30 seeded random records (360 statements, 90 old
+  closures, 268 payments, 49 voids, 60 adjustments, 526 advances) the folds from the index
+  (`paybookIndexFolds`) equal the folds from the whole history: every closed period's
+  frozen figures (`closedPeriods`), what was deducted from every advance
+  (`advanceOutstanding().deductedGross`), and every man's «יתרת שכר לתשלום», what is
+  overpaid, each statement still owing and each closure with payment unknown
+  (`accountFor`). It is derived, so it can be rebuilt from the closed documents.
+- **Offline:** balances come from the index and never from the detail.
+  `paybookDetail(schedule, closed, id)` answers `record` / `fetched` / `absent`; on
+  `absent` the screen says the detail is not on this phone yet and shows NO day list
+  rather than a live one.
+- **Existing closures** (the ledger's `closed`/`deducted` entries written since v116) are
+  bundles of the same shape: `planHistoryMove(schedule)` reports each — its paths, its
+  bytes, whether it is SETTLED (a statement that still owes, an unanswered older closure
+  and a disputed id are not, and nothing unsettled moves) — and the totals: bytes moving,
+  the index's bytes, bytes freed, the document before and after. It writes nothing and
+  nothing applies it.
+
+**What is built of it.** The closed collection, its rules, the atomic copy at every
+server-first operation, the read-back, the reader that judges a closed document
+(`paybookClosedProblems`), `paybookDetail`, `planHistoryMove`, the index and its folds
+with their proof.
+
+### What is NOT built, and why the gate stays shut
+
+1. **Nothing leaves the live document yet.** A closure written through the new door is in
+   the closed collection AND still in the schedule. Dropping the live copy needs the folds
+   to read the index — and every reader of the ledger (`closedPeriods`,
+   `advanceOutstanding`, `advanceHistory`, the judge, the reports) reads the entry map
+   directly. Teaching them is a change to the most protected arithmetic in the app and is
+   a phase of its own; a version of it squeezed into this one would have been the weaker
+   version. **So the capacity clock is not stopped**, and opening the gate today would
+   fill the document in about seven months (below).
+2. **The index is not stored.** It is derivable from the entries for as long as they are
+   in the schedule, which is always, today. It must be written by the same transaction
+   that drops an entry, never before.
+3. **The index as designed is itself not bounded** — measured, below. Rows of settled
+   closures older than some horizon have to fold into one per-man checkpoint.
+4. **The days are still in the document, and they are the larger half.** See Capacity.
+5. **Backups and the rescue file do not carry closed documents, and a restore does not
+   re-create them.** While nothing has left the schedule a backup is complete without
+   them, by construction. Decided, not built: the backup file gains `closed: { id: doc }`
+   for every closed document the phone can fetch (and says how many it could not); a
+   restore never deletes or rewrites a closed document (the rules make that impossible)
+   and unions; a restore into an EMPTY project re-creates them in the restore's own commit.
+   **Under the new rules a whole-document write that would ADD pay entries is refused
+   unless it creates a closed document in the same commit** — so until that is built, a
+   pay book cannot be restored into a new project. With the gate shut there is none.
+6. **Moving existing history** — Phase 5, after every phone reads the index.
+7. **No screen.** Phase 4.
+
+### The rules, as a file
+
+`firestore.rules` ON THIS BRANCH is the tested artifact; nothing was published and nothing
+here can publish. `docs/firestore.rules.before-paybook` is the rules as main carries them,
+byte for byte (asserted against `git show 8c943fa:firestore.rules`) — **the rollback
+artifact.**
+
+The difference, in words:
+
+- **A write that changes the `pay` map** must speak protocol 2, may only ADD entries
+  (none removed, none changed), and must create in the same commit the closed document it
+  names in `closedId`, which must name this operation and this revision. An absent map
+  and an empty one are the same thing. A write that does not change the map is judged
+  exactly as before — which is every write of a phone that has not updated.
+- **`closed/{id}`**: readable and creatable only by the allowlist; created only in the
+  commit that takes the schedule to the revision it names, pointing at the operation it
+  names, at protocol 2; never updated, never deleted, by anyone.
+- Everything else is untouched: `tests/rules.test.mjs`, `rollout*`, `bootstrap*`,
+  `cas.emulator`, `money.concurrency` are green unchanged, except two pins in
+  `tests/bootstrap.emulator.test.mjs` that read `protocol === 1` and now read 2.
+
+**Server-enforced:** the three above. **Not server-enforced** (the rules cannot loop):
+that the closed document's `entries` are exactly the paths the schedule gained; that a
+whole-document write adding several entries has a closed copy for each. Those are the
+client's, and pinned in the suites.
+
+`tests/paybook.emulator.test.mjs` (Phase 2) now loads `docs/firestore.rules.before-paybook`
+by name: its subject is what the ordinary queue does to a closure under the PUBLISHED
+rules, and the new rules refuse that path outright.
+
+### The rollout order, measured
+
+`tests/paybook.split.emulator.test.mjs`: v167 (`a25566f`), v171 (`0acaceb`) and v172
+(`8c943fa`) — their own files and their own adapter, out of Git — and this build, under
+the rules of today and the new ones, with and without a pay book on the document. All
+three older builds answer every question the same way.
+
+| client | rules | document | records a day | restores | closes an account |
+|---|---|---|---|---|---|
+| older | new | no pay book (today's) | **yes** | **yes** | — |
+| older | new | with a pay book | **yes**, pay book unchanged | **REFUSED** — pay book and revision exactly where they were; the phone says `error`, not synced; days it records afterwards wait on that phone behind the refused restore until it is updated | — |
+| older | today's | with a pay book | yes | **accepted, and the pay book is GONE** | — |
+| this build | today's | either | **yes** (protocol 2 is accepted) | yes | **REFUSED whole** — no `closed/` in those rules; nothing queued, nothing in doubt |
+| this build | new | no pay book | **yes** | **yes** | — |
+| this build | new | with a pay book | yes | yes | **yes** — one commit, three documents |
+
+So the order that never leaves a working phone refused or a pay book erasable:
+
+1. **Save the published rules.** Firebase console → Firestore Database → Rules: copy what
+   is there into a file and compare it with `docs/firestore.rules.before-paybook`. If they
+   differ, stop — the artifact in this repository is not what is live.
+2. **Publish the new rules** (paste `firestore.rules` → Publish). No phone needs to update
+   first and none is refused: an older build records and restores exactly as before, and
+   there is no pay book for it to touch.
+3. **Update the phones**, in any order. This build records and restores under either
+   rules.
+4. **Check each phone in ⋯** — not assumed. A phone still on an older build keeps working.
+5. **Only then open the gate** (a later build, Phase 5). From the first pay entry on, an
+   older build's restore is refused by the server instead of erasing; that phone shows an
+   error and must be updated before it is used again.
+
+**The wrong order is the one that loses money, and it is measured too:** a pay book on the
+server under the rules of today is erased by any older build's restore. And a closure
+cannot land before step 2 — the rules of today refuse it whole — so the gate cannot be
+opened early by accident.
+
+**Rolling back** (republishing `docs/firestore.rules.before-paybook`): safe while no pay
+entry exists. After the first one it reopens the door above; closed documents stay where
+they are but become unreadable to the app (no rule matches them) until the new rules
+return.
+
+### Capacity, for 20 men
+
+`tests/paybook.split.test.mjs`, the method of Phase 2: every entry produced by the shipped
+writers, a year built from them, and the DOCUMENT weighed by Firestore's count. Six days a
+week; one man in four takes an advance each fortnight; every closure has a statement and
+one payment. Entry sizes (JSON bytes): a worker-day 65; an advance 105 and its ledger
+origin 198; a closed week's payslip 929, its deduction entry 975; a fortnight's 1,413 and
+1,459; a statement about 490, a payment 189; **an index row 176**.
+
+| 20 men | year 1 | year 2 | year 3 | year 4 | year 5 | a week | full, from today's 185 KB |
+|---|---|---|---|---|---|---|---|
+| days and advances only, nobody closes | 415 KB (41%) | 825 KB (81%) | 1,235 KB | 1,645 KB | 2,055 KB | 8,073 B | **2.0 years** |
+| closed every fortnight, IN the live document | 1,468 KB (143%) | 2,931 KB | 4,394 KB | 5,858 KB | 7,321 KB | 28,811 B | **0.6 years** |
+| closed every week, IN the live document | 1,945 KB (190%) | 3,883 KB | 5,822 KB | 7,760 KB | 9,699 KB | 38,176 B | **0.4 years** |
+| closed every fortnight, WITH THE SPLIT | 502 KB (49%) | 999 KB (98%) | 1,496 KB | 1,993 KB | 2,490 KB | 9,786 B | **1.7 years** |
+| closed every week, WITH THE SPLIT | 586 KB (57%) | 1,166 KB | 1,747 KB | 2,327 KB | 2,907 KB | 11,426 B | **1.4 years** |
+
+Read it this way:
+
+- **The split works for what it was approved for.** A week of closing weighs under a third
+  of what it weighs in the live document; closing every fortnight then costs under a
+  quarter more than never closing at all.
+- **It does not bound the document, and nothing here says it does.** With the split the
+  document still fills in about a year and a half — because the DAYS are in it (1,863 KB
+  after five years, by themselves) and because the index, one row per closure, is itself
+  435 KB after five years closed fortnightly and 851 KB closed weekly.
+- **So two more things have to leave before "bounded" is true**, and both are the same
+  mechanism (create-once documents, an index of what left, copy at birth or verified
+  copy-then-drop): settled index rows older than a horizon folded into a per-man
+  checkpoint, and the days of months that are closed for everybody and older than a
+  horizon moved to a document per month. With both, the live document is the open items
+  and the recent months. Neither is designed in detail and neither is built.
+- **The owner's document is about a fifth full today and nobody is closing with the pay
+  book.** On days alone it has about two years.
+
+### What Phase 4 (the UI) must do
+
+- Call `FarkadSync.transactPaybook(plan)` and nothing else for a pay entry; show `closed`
+  only on `state: 'closed'`; on `stale` redraw from `fresh`; on `unknown` say that the
+  closure is waiting to be confirmed and block; on open, read `FarkadSync.payOutcome()` and
+  say what became of an interrupted closure, then `acknowledgePayOutcome()`.
+- On `carry-approval-needed`: one plain sentence, the rows, and the approval right there
+  (`planCarryApproval`, laid into the schedule and committed by `State.commitMany`).
+- On `paybookDetail(...).state === 'absent'`: say the detail is not on this phone; fetch it
+  with the adapter's `readClosed` when there is signal; never show a live day list in its
+  place.
+- Word the closed row's «late since close» note for the ruling (see A), and every refusal
+  of `payTransactRefusal` (`offline`, `unsent-work`, `pending`, `busy`, `restoring`).
+- Mark closed weeks «נסגר» on «לפי עובד»; retire or keep the old «סגור את החשבון» dialog —
+  it works under the ruling, but it writes no statement and goes through the queue.
+- A way to see and settle a pay-book disagreement (unchanged from Phase 2's list).
+
+### What Phase 5 (activation) must do
+
+1. Build what is listed under [What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut),
+   items 1–5, and re-measure Capacity.
+2. The owner reads `planDebtRuling` on his real record, and `planPayMigration` and
+   `planHistoryMove` beside it.
+3. The rollout order above, steps 1–4.
+4. One commit: `paybook: true`, with the eight expectations the ruling moves in
+   `repayment`, `ledger.truth` and `paycycle.completion`, and the browser suites re-run.
+5. The opening day (`planOpening`) and the carry approval in one step; then the «payment
+   unknown» list, one answer at a time (`planLegacy`).
+6. Moving existing history, bundle by bundle, settled ones only: create the closed
+   document, read it back, compare byte for byte, and only then — in a transaction that
+   also writes the index row — drop the live entries. Every step re-runnable; an
+   interrupted move leaves a copy and never a hole.
 
 ## Phase 2 — storage and sync, as built (v173)
 
@@ -272,7 +688,12 @@ Read it this way:
 - **Not known from here: how big the real document is today, and the real crew.** Both are
   the owner's to say; the first is one read of the live document's size.
 
-**The split, proposed and NOT built.** Closed history leaves the live document: one
+(Superseded by Phase 3: the owner answered both - about 185 KB, about 20 men - and the
+figures for that crew, with and without the split, are in [Capacity, for 20
+men](#capacity-for-20-men). The split below is now designed and partly built; see
+[B — the split](#b--the-split).)
+
+**The split, as it was proposed at Phase 2.** Closed history leaves the live document: one
 document per closed period (or per man per year) in a subcollection —
 `schedules/current/closed/<worker>_<from>` — holding the frozen payslip, its `deducted`
 entries, the statement and its payments, created once and never updated (the `history`
@@ -561,7 +982,14 @@ only the new planner refuses to write one), and both findings 1 and 2 above.
 
 ## What later phases must add
 
-Persistence is built (Phase 2, above). Nothing below exists. Each names the file it lives in.
+**Brought up to date at Phase 3.** Built since this list was written: the server-first
+transaction (as `FarkadSync.transactPaybook`, in `js/sync/transact.js`), the rules
+(`protocol >= 2`, the pay map append-only on the server, `closed/`), finding 1 in
+`js/model/schema.js` (behind the gate), and the split's first half (the copy at birth).
+Still missing: everything in [What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut),
+a way to settle a disagreement, the stale status line, the same-Friday hole in
+`js/model/ledger.js`, and the UI. "Healing a cloud that lost the pay book" is answered by
+the rules: under them it cannot lose one. The list below is as Phase 2 left it.
 
 **The document's size, before anything else.** See [Capacity](#capacity): closed history
 has to leave the live document before the writer opens. A phase of its own.
@@ -667,6 +1095,32 @@ Every other string is **proposed** and needs his word before it is pinned (iron 
 | שולם / נשאר חוב של X ₪ | proposed | the two legacy answers |
 
 ## Still the owner's to decide
+
+**Answered on 2026-11-10** - see [What the owner decided](#what-the-owner-decided-2026-11-10):
+defaults 1 to 8, and items 9, 10 (the debt stays; built behind the gate), 11 (the carry:
+never silently locked - `carry-approval-needed`), 17, 20, 21. What follows is the list as
+it stood, kept for the items that are still open: 12 to 16, 18, 19 and 22 to 25.
+
+**New, from Phase 3** - each answerable in one line; the default built or recommended is
+said:
+
+26. A closed row whose «late since close» note now appears because of the ruling, not
+    because anything arrived late: what should it say? Recommended: no note, only «חוב
+    פתוח X ₪».
+27. May a closure be attempted while this phone still holds unsent days? Built: no -
+    refused (`unsent-work`) until the queue has drained.
+28. The carry approval: asked on the spot when first needed (built), or given once
+    together with the opening day? Recommended: with the opening day.
+29. After the pay book opens, does the old «סגור את החשבון» dialog stay? Recommended: no -
+    it writes no statement and goes through the queue.
+30. An older phone whose restore the server refuses shows an error and holds later days
+    behind it until it is updated (measured). Acceptable? Recommended: yes - the rollout
+    order forbids that restore anyway.
+31. When do the DAYS of closed months leave the live document, and how far back must the
+    invoice reports reach without signal? Recommended: a document per month, after the
+    month is closed for everybody and six months old.
+32. How long does an index row stay before it folds into a per-man checkpoint?
+    Recommended: one year after it is settled.
 
 The eight defaults above, and:
 
