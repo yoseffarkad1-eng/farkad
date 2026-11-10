@@ -392,6 +392,27 @@ input, select, textarea { border-radius: 12px; }
     font-size: 16px;
     font-weight: 700;
 }
+/* The shared plan's line and notices (js/ui/transport-share.js). Quiet when all is
+   well, the note's own colours when this phone's copy was put aside. */
+.transport-share { margin: 0 calc(16px + env(safe-area-inset-left, 0px)) 8px calc(16px + env(safe-area-inset-right, 0px)); }
+.transport-share[hidden] { display: none; }
+.transport-share p { margin: 0; font-size: 16px; line-height: 1.4; overflow-wrap: anywhere; }
+.transport-share-line { color: var(--ink-2); font-weight: 600; }
+.transport-share-line[data-state="notShared"],
+.transport-share-line[data-state="noRoom"],
+.transport-share-line[data-state="unchecked"],
+.transport-share-line[data-state="waiting"] { color: var(--ink); font-weight: 700; }
+.transport-share-notice {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    font-weight: 700;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
 .transport-body {
     flex: 1;
     min-height: 0;

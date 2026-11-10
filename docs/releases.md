@@ -1,6 +1,171 @@
-## v184 — «בניית סידור»: the seder as one journey; «כרטיס עובד»; a vehicle turned off and on again (candidate, not served)
+## v185 — הסעות, one shared plan: the code, shipped SHUT (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `990f5b4` (v184). **Nothing a person can see or do changes in this build.** The shared
+plan is here to be merged, tested and reviewed; its gate is shut (`TRANSPORT_SHARE = false`,
+`js/ui/transport-share.js`) and the rules that allow its documents are NOT published. Nothing in
+`js/sync/sync.js`, `send.js`, `receive.js`, `restore.js`, `status.js`, `boot.js`, `js/model`,
+`js/state.js`, `js/store.js` or `js/recovery.js`.
+
+### What the owner chose
+
+2026-11-10, having tried the screen on his own phone: "add the feature to the other accounts."
+Offered two meanings - (a) each phone its own plans, (b) one shared plan - he answered «ب»:
+ONE SHARED PLAN. He seats the men; the other two phones see the same cars and the same riders,
+and may change them.
+
+### The design, in short (`docs/transport-spec.md`, "Phase 3: shared", 3.1-3.13)
+
+- **Documents of their own, beside the record and never in it:**
+  `schedules/<doc>/transport/settings` (the list of vehicles, a vehicle's lasting `off` with it)
+  and `schedules/<doc>/transport/day_<YYYY-MM-DD>` (who sits where, which vehicles stay, who gets
+  there another way). Not a byte in the schedule document; none of the record's outbox, journal,
+  receipts, fingerprints or status sentence. A transport write that is refused, lost or late is
+  not an error of the record and holds none of its writes.
+- **The day is the unit, and the server is the judge.** A write is a whole document that says
+  which revision it was built on; the adapter checks it in a transaction and the rules check it
+  again. Of two phones that built on the same revision one lands. Not a merge of seats: "a man is
+  in one seat" is a rule about the whole day, and a merge of fields cannot see it.
+- **The loser is shown the plan that won and told in one sentence**, his own copy put aside on
+  his own disk first, with «להשתמש בשיבוץ שלי» (an ordinary change through the same check - there
+  is no force-write) and «להשאיר את המשותף».
+- **Offline first.** A change is on the phone at once, as today; one line under the head says
+  whether what is drawn is shared and current, not up yet, could not be checked, or not shared.
+- **The first meeting:** the cloud's wins if there is one; a phone that held something different
+  keeps its copy aside and is told once. An untouched list of seven is not uploaded.
+- **The switch stays per phone.** Off: nothing is read, heard or written. On with no cloud
+  account: exactly today.
+- **A driver's «נפתח בוואטסאפ» mark is not shared**: it is that phone's own tap.
+- **The backup, the restore points and the rescue file carry none of it**, as before. With
+  sharing ON a lost phone no longer loses the plans or the list; with it off (this build) it
+  still does.
+- **The seder's journey** (v184) reads the rides at its third and fourth stations; a plan
+  adopted from another phone redraws its bar and its last look.
+
+### The rules addition - NOT PUBLISHED
+
+One block, nested in `match /schedules/{docId}` after the receipts. No existing line of
+`firestore.rules` changes: with the block removed the file is `origin/main`'s byte for byte
+(`tests/transport.emulator.test.mjs`).
+
+```
+      function transportStamped() {
+        return request.resource.data.v == 1
+          && request.resource.data.revision is int
+          && request.resource.data.updatedAt is string
+          && request.resource.data.updatedAt.size() < 64
+          && request.resource.data.updatedBy is string
+          && request.resource.data.updatedBy.size() < 128;
+      }
+
+      function transportSettingsOk() {
+        return request.resource.data.keys().hasOnly(['v', 'revision', 'updatedAt', 'updatedBy', 'vehicles'])
+          && request.resource.data.vehicles is list
+          && request.resource.data.vehicles.size() <= 60;
+      }
+
+      function transportDayOk(name) {
+        return name.matches('^day_[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.keys().hasOnly(
+               ['v', 'revision', 'updatedAt', 'updatedBy', 'date', 'unavailable', 'status', 'trips'])
+          && request.resource.data.date is string
+          && name == 'day_' + request.resource.data.date
+          && request.resource.data.unavailable is map
+          && request.resource.data.unavailable.size() <= 60
+          && request.resource.data.status is map
+          && request.resource.data.status.size() <= 300
+          && request.resource.data.trips is map
+          && request.resource.data.trips.size() <= 60;
+      }
+
+      function transportOk(name) {
+        return transportStamped()
+          && (name == 'settings' ? transportSettingsOk() : transportDayOk(name));
+      }
+
+      match /transport/{name} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && transportOk(name)
+          && request.resource.data.revision == 1;
+        allow update: if allowed()
+          && transportOk(name)
+          && request.resource.data.revision == resource.data.revision + 1;
+        allow delete: if false;
+      }
+```
+
+The three addresses of `allowed()` may read; create at revision 1; update at exactly the next
+revision; never delete. Rules cannot walk the inside of a trip or a vehicle, nor tell a real
+calendar date from `day_2026-13-45`; every client does both as it reads.
+
+### THE ROLLOUT ORDER, measured
+
+`tests/transport.emulator.test.mjs` on the Firestore emulator: the rules as they would be pasted
+and the rules in the field today (`origin/main:firestore.rules`); this build's client and the
+production adapter; v180 and v182 with their own files and their own adapter, out of Git; and
+every emulator suite that existed before, unchanged, under the new file.
+
+| client | rules | records a day | the shared plans | what הסעות says |
+|---|---|---|---|---|
+| older (v180, v182) | new | yes, synced | never touched: its adapter has no call to them | nothing - its own plans, on its own phone |
+| this build, gate shut (v185 as shipped) | either | yes | never called (counted, in Node and in Chromium) | today's screen |
+| gate open | today's | yes, at its own revision, no error on the record's line | cannot be created: `permission-denied`, nothing under the path | «השיבוץ עדיין לא משותף: הענן אינו מאפשר זאת כרגע. הוא שמור במכשיר הזה בלבד.» |
+| gate open | new | yes; the schedule document, its revision and its receipts do not move | shared | «השיבוץ משותף עם הטלפונים האחרים ומעודכן.» |
+
+Every cell is safe in any order. The order, for the one thing that is not symmetric (step 5):
+
+1. **Save what is live**: Firebase console → Firestore Database → Rules; compare with
+   `origin/main:firestore.rules`. If they differ, stop.
+2. **Publish the new rules.** No phone needs to update first and none is refused anything.
+3. **Serve this build** (gate shut). Steps 2 and 3 can be done in either order.
+4. **Update all three phones**, and check each in ⋯.
+5. **Only then open the gate**, in a later build - and **the owner's phone takes that build
+   first**, opened, signed in, with a signal. Sharing begins when the app opens signed in with
+   the switch on, not when the הסעות screen is opened, and the first phone with an edited list or
+   a planned day becomes the author of the shared one. If another phone gets there first nothing
+   is lost - he is told once and «להשתמש ברשימה שלי» puts his back.
+
+AND ONE RULE FOR THE DAY THE GATE OPENS, because of v184's `off` field: **no window of v183 or
+older may run on a phone that shares.** Such a build drops `off` from the list at its next change
+to it; this build cannot tell that from a person turning the vehicle on, sends it as this
+phone's change, and the vehicle is on again on all three phones (measured with v180's real
+bytes, `tests/transport.share.test.mjs`). Nothing else is lost by it.
+
+Gate opened before the rules are published: every phone says «עדיין לא משותף», keeps its plans,
+and finds out by itself when the rules arrive. Rules rolled back: the shared documents stay,
+unreachable; phones go on from their own copies; the record is not affected.
+
+### Hebrew - PROPOSED, not read by the owner, and shown nowhere in this build
+
+Eighteen strings in the transport words block, pinned word for word in
+`tests/transport.test.mjs`: `switchLeadShared`, the six lines of the status (`shareChecking`,
+`shareShared`, `shareWaiting`, `shareUnchecked`, `shareNotShared`, `shareNoRoom`), the four
+notices (`shareChangedDay`, `shareChangedList`, `shareFirstDay`, `shareFirstList`) and the seven
+words of their buttons and question. None says «נשלח», «מסונכרן» or «ממתין». No existing string
+changed.
+
+### Moved expectations
+
+`tests/transport.test.mjs`: the block that said none of it leaves the phone - "no cloud" - now
+says never the RECORD's cloud, and, the gate shut, not the transport documents either (counted);
+the words block gains the eighteen keys; every block runs with the share file loaded and shut.
+
+### Known not covered
+
+Not tried on a real phone. The Firebase SDK was never run in a page: the adapter's `transportOps`
+is run by Node against the emulator, and the browser suite bridges pages to a fake cloud. The
+real project was never touched and the live rules were not re-read. The `storage` event between
+two real windows is tested by its handler only. One copy aside per document: a second loss
+before the first notice is answered replaces the first copy. A write whose answer was lost,
+followed by another phone's change, is told as a loss though it may be inside the plan that won.
+Three phones with three edited lists: the last «להשתמש ברשימה שלי» wins. A later build that adds
+a field to a shared vehicle or day needs every sharing phone updated first (the rule above, in
+general).
+
+## v184 — «בניית סידור»: the seder as one journey; «כרטיס עובד»; a vehicle turned off and on again (served 2026-11-10)
+
+**Served.** Merged as `a2cf33c` (PR #66) on 2026-11-10 after both gates exited 0 on `990f5b4`; the Pages deployment succeeded at 20:07 UTC.
 Built on `1af6729` (v183). Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
 `js/recovery.js` or the rules. Nothing here writes the record by any new code.
 
