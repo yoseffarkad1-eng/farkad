@@ -154,6 +154,42 @@ Object.assign(FarkadSync, {
         }).catch(error => fail(error && error.code === 'permission-denied' ? 'server' : 'offline'));
     },
 
+    // AN EDIT HELD BECAUSE ITS MONTH HAS LEFT IS RETIRED BY A PERSON, and only that way.
+    //
+    // The edit was typed on a phone that had not heard; it was never sent and never will
+    // be (the pre-send pass holds it, the server would refuse it). Here the person, having
+    // been shown both values in ⋯, lets it go: the decision is written down first
+    // (answerHold retires the operation before anything is unbarred), and then this
+    // phone's record is given the archive's own value back at that path - from the last
+    // server document it was shown, which the gate made whole. False, with nothing
+    // changed, when the operation is not such a hold or the decision could not be kept.
+    retireArchivedHold(opId) {
+        this.loadOutbox();
+        const op = this.physicalOperations().find(item => String(item.opId) === String(opId));
+        if (!op || !this._baseDoc || typeof monthArchivedPath !== 'function'
+            || !monthArchivedPath(this._baseDoc, op.path)) return false;
+        if (!this.answerHold(opId, 'cloud')) return false;
+        const parts = String(op.path).split('.');
+        const theirs = readPath(this._baseDoc, op.path);
+        let node = State.schedule;
+        for (let i = 0; i < parts.length - 1 && node; i += 1) {
+            if (theirs !== undefined && (node[parts[i]] === undefined || node[parts[i]] === null)) node[parts[i]] = {};
+            node = node[parts[i]];
+        }
+        if (node && typeof node === 'object') {
+            if (theirs === undefined) delete node[parts[parts.length - 1]];
+            else node[parts[parts.length - 1]] = JSON.parse(JSON.stringify(theirs));
+        }
+        this.loadOutbox();
+        State.persist();
+        if (typeof render === 'function') render();
+        // The line said «contested» over this hold; ask again now that it is answered.
+        // setStatus works the whole chain out afresh - another hold, unsent work, a
+        // restore that is owed - so this cannot say more than is true.
+        if (this.status === 'contested') this.setStatus('synced');
+        return true;
+    },
+
     // THE COPY: the month document, created once, in a commit that moves the schedule's
     // revision and changes no business field.
     monthCopy(month, docId, days, revision) {

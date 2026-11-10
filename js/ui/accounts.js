@@ -659,8 +659,12 @@ function accPaintBanner(box) {
     // adopted, so every figure here is from the record this phone already had.
     const lacking = sync && typeof sync.closedWaiting === 'function' ? sync.closedWaiting() : null;
     if (lacking) {
+        // Only a month's days are missing (Phase 6): said in its own words.
+        const monthsOnly = lacking.broken.length === 0 && lacking.missing.length === 0
+            && Array.isArray(lacking.months) && lacking.months.length > 0 && typeof MONTH_TEXT !== 'undefined';
         box.appendChild(el('p', 'acc-note acc-note-warn acc-closed-waiting',
-            lacking.broken.length > 0 ? ACC_TEXT.closedBroken : ACC_TEXT.closedWaiting));
+            monthsOnly ? MONTH_TEXT.waitingForMonths
+                : (lacking.broken.length > 0 ? ACC_TEXT.closedBroken : ACC_TEXT.closedWaiting)));
     }
     if (ACC.flash) box.appendChild(el('p', 'acc-note acc-note-ok', ACC.flash));
 }

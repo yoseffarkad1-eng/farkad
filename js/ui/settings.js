@@ -987,6 +987,20 @@ function renderHeldRecords() {
             card.appendChild(block);
         });
         if (said.note) card.appendChild(el('p', 'hint', said.note));
+        // A DAY OF A MONTH THAT HAS LEFT THE LIVE DOCUMENT (Phase 6): this edit can never
+        // be sent, so «להשאיר את שלי» is not offered - one sentence says why, and the one
+        // button lets it go (FarkadSync.retireArchivedHold).
+        if (row.archived === true && typeof MONTH_TEXT !== 'undefined') {
+            card.appendChild(el('p', 'hint hint-warn', MONTH_TEXT.heldArchived));
+            const only = el('div', 'held-actions');
+            only.appendChild(button(HELD_TAKE, 'btn-secondary', () => {
+                FarkadSync.retireArchivedHold(row.opId);
+                if (typeof renderSettingsIfOpen === 'function') renderSettingsIfOpen();
+            }));
+            card.appendChild(only);
+            list.appendChild(card);
+            return;
+        }
         if (said.decidable) {
             const actions = el('div', 'held-actions');
             actions.appendChild(button(HELD_KEEP, 'btn-secondary',

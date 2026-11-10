@@ -506,6 +506,17 @@ const WANT = {
     same('after a reopen it is still held and still unsent', [reopened.Sync.heldRecords().map(row => row.path), cloud.attempts.slice(sentBefore).filter(attempt => attempt.payload
         && Object.keys(attempt.payload).some(key => key.indexOf('days.2026-10') === 0)).length], [['days.2026-10-05.rima.p_a'], 0]);
     same('the server\'s archive was never touched', cloud.months.get(cloud.doc.monthIndex.rows[OCT].d).days['2026-10-05'].rima.p_a, 3);
+    same('before a person lets it go, the phone shows what was typed on it', reopened.State.schedule.days['2026-10-05'].rima.p_a, 8);
+    same('an operation that is not such a hold is not retired by this door', reopened.Sync.retireArchivedHold('op_nothing'), false);
+    const held = reopened.Sync.heldRecords()[0];
+    same('A PERSON LETS IT GO: the decision is kept, the edit is retired, and the phone holds the archive\'s value again',
+        [reopened.Sync.retireArchivedHold(held.opId), reopened.Sync.heldRecords().length, reopened.State.schedule.days['2026-10-05'].rima.p_a,
+            (reopened.Sync.holdAnswer(held.opId) || {}).choice], [true, 0, 3, 'cloud']);
+    await settled([reopened]);
+    same('and says synced, with every figure the archive\'s', [reopened.Sync.status, canonical(reopened.call('monthDaysOf', reopened.State.schedule, OCT))
+        === canonical(a.call('monthDaysOf', a.State.schedule, OCT))], ['synced', true]);
+    same('after one more reopen: still retired, still the archive\'s value, nothing sent', (last => [last.Sync.heldRecords().length, last.Sync.pendingCount(),
+        last.State.schedule.days['2026-10-05'].rima.p_a])(again(reopened, null)), [0, 0, 3]);
 }
 
 // ------------------------------------------------------------------------------------
