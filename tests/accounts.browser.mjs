@@ -79,8 +79,13 @@ const advInput = (page, n) => page.locator(`${V} .acc-adv input`).nth(n);
 const screen = page => page.evaluate(() => ACC.screen);
 const writes = (net, kind) => net.cloud.writes.filter(write => write.kind === kind && !write.replayed);
 const pay = net => (net.cloud.doc && net.cloud.doc.pay) || {};
-const disk = page => page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort()
-    .filter(key => key !== 'farkad:lastSeen' && !/heartbeat|claim|tick/i.test(key)).map(key => [key, localStorage.getItem(key)])));
+// The disk, without the one key a review may write while somebody types: the draft
+// (Phase 5), which is asked about by name wherever it matters.
+const DRAFT = 'farkadPayDraft';
+const disk = page => page.evaluate(draft => JSON.stringify(Object.keys(localStorage).sort()
+    .filter(key => key !== 'farkad:lastSeen' && key !== draft && !/heartbeat|claim|tick/i.test(key))
+    .map(key => [key, localStorage.getItem(key)])), DRAFT);
+const draftOf = page => page.evaluate(draft => JSON.parse(localStorage.getItem(draft) || 'null'), DRAFT);
 const shot = async (page, name) => {
     if (!SHOTS) return;
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -302,7 +307,13 @@ given('the crew is on the cloud and Khaled has three advances', Boolean(K1 && K2
     await shot(a.page, 'review-paid-440-dark.jpg');
     await geometry(a.page, 'review with a partial payment', 1);
     await doubled(a.page, 'review 440 dark');
-    same('all of that typing wrote nothing', [await disk(a.page) === before, net.cloud.writes.length], [true, sent]);
+    // MOVED AT PHASE 5, on purpose: «all of that typing wrote nothing» was true while a
+    // draft lived in memory. It is now kept across a reload - so typing writes ONE key,
+    // the draft, and still nothing of the record and nothing to the cloud.
+    same('all of that typing wrote nothing of the record and nothing to the cloud', [await disk(a.page) === before, net.cloud.writes.length], [true, sent]);
+    same('it wrote the draft, under its own key: who, which period, and what was typed',
+        (draft => [draft.workerId, draft.from, draft.to, draft.paidMode, draft.paidText, draft.day])(await draftOf(a.page)),
+        ['w_khaled', FORTNIGHT.from, FORTNIGHT.to, 'partial', '2000', TODAY]);
 }
 
 {
