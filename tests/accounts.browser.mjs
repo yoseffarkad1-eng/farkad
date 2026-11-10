@@ -36,7 +36,11 @@ check('the origin served this commit, byte for byte', served.ok,
     `${served.checked} assets; ${(served.wrong || []).slice(0, 3).join(' | ')}`);
 const browser = await launch(chromium);
 const SHOTS = process.env.ACCOUNTS_SHOTS || '';
-const OPEN = { paybook: true };
+// (Phase 8: a record can turn the pay book on by itself - its opening. So that this suite
+// goes on measuring a BUILD with the flag it names, its pages do not honour the record's
+// switch: `paybookActivation: false`, the rule tests/paybook.world.mjs keeps for the node
+// suites. tests/activation.browser.mjs is where the build as it ships meets such a record.)
+const OPEN = { paybook: true, paybookActivation: false };
 
 // The pinned words this file reads off the glass (all pinned in tests/accounts.test.mjs).
 const T = {

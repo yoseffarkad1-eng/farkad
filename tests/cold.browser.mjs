@@ -40,8 +40,13 @@ const browser = await launchLocalBrowser(chromium, { executablePath: process.env
 
 const WORLD = await archivedPhone();
 const OCT = '2026-10';
-const ON = { paybook: true, paybookQueue: false, months: true, cold: true };
-const OFF = { paybook: true, paybookQueue: false, months: true };
+// (Phase 8: a record can turn the pay book on by itself - its opening. So that this suite
+// goes on measuring a BUILD with the flags it names, on whatever record, its pages do not
+// honour the record's switch: `paybookActivation: false`, the rule tests/paybook.world.mjs
+// keeps for the node suites. tests/activation.browser.mjs is where the build as it ships
+// meets a record that is turned on.)
+const ON = { paybook: true, paybookQueue: false, months: true, cold: true, paybookActivation: false };
+const OFF = { paybook: true, paybookQueue: false, months: true, paybookActivation: false };
 const MISSING = 'חלק מהרישום הישן שהועבר לארכיון לא נמצא כרגע במכשיר הזה. הדוחות, החשבונות והגיבוי לא יוצגו עד שהוא יושלם מהשרת, כדי שלא יוצג סכום חסר. רישום הימים ממשיך כרגיל.';
 const MISSING_DAY = 'היום הזה שייך לחודש שהועבר לארכיון, והעותק שלו לא נמצא כרגע במכשיר. הוא לא ריק - הוא חסר.';
 

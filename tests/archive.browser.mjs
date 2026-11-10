@@ -29,7 +29,12 @@ const served = await verifyServedAssets(server.url, root, expectedShaFor(root));
 check('the origin served this commit, byte for byte', served.ok,
     `${served.checked} assets; ${(served.wrong || []).slice(0, 3).join(' | ')}`);
 const browser = await launch(chromium);
-const OPEN = { paybook: true };
+// (Phase 8: a record can turn the pay book on by itself - its opening. So that this suite
+// goes on measuring a BUILD with the flags it names, on whatever record, its pages do not
+// honour the record's switch: `paybookActivation: false`, the rule tests/paybook.world.mjs
+// keeps for the node suites. tests/activation.browser.mjs is where the build as it ships
+// meets a record that is turned on.)
+const OPEN = { paybook: true, paybookActivation: false };
 const DRAFT = 'farkadPayDraft';
 
 const T = {
@@ -412,11 +417,15 @@ await a.page.waitForTimeout(200);
 {
     suite('with the gate shut none of it exists: no mark, no archive, no draft');
 
-    const d = await openPhone(browser, server.url, { cloud: net });
+    // MOVED AT PHASE 8, in its fixture and not in what it asks: this record holds an
+    // opening, and the build AS IT SHIPS now reads an opening as "the pay book is on".
+    // «The gate shut» on such a record is the build that does not honour it - the three
+    // flags false and `paybookActivation` false, which is also this build's way back.
+    const d = await openPhone(browser, server.url, { cloud: net, flags: { paybookActivation: false } });
     await d.page.waitForFunction(() => State.schedule.workers.length === 5 && FarkadSync.status === 'synced', null, { timeout: 20000 });
-    same('the shipped build reads the same record whole - the closures that moved are in it',
-        await d.page.evaluate(() => [FARKAD_FLAGS.paybook, Object.keys(closedPeriods(State.schedule, 'w_ahmad')).length,
-            Object.keys((State.schedule.payIndex || {}).rows || {}).length]), [false, 1, 2]);
+    same('the build with the pay book shut reads the same record whole - the closures that moved are in it',
+        await d.page.evaluate(() => [FARKAD_FLAGS.paybook, paybookOn(State.schedule), Object.keys(closedPeriods(State.schedule, 'w_ahmad')).length,
+            Object.keys((State.schedule.payIndex || {}).rows || {}).length]), [false, false, 1, 2]);
     await d.page.evaluate(() => { REPORT_RANGE.from = '2026-10-02'; REPORT_RANGE.to = '2026-10-15'; showView('reports'); });
     await d.page.waitForTimeout(200);
     await d.page.locator('#reportsView button', { hasText: 'לפי עובד' }).first().click();
@@ -429,8 +438,18 @@ await a.page.waitForTimeout(200);
     same('its «מקדמות» tab has nothing of the accounts screens, and it moves nothing by itself',
         await d.page.evaluate(async () => [document.querySelectorAll('[class*="acc-"]').length, FarkadSync.archiveRefusal(),
             await FarkadSync.archiveDue('2026-12-01'), localStorage.getItem('farkadPayDraft')]), [0, 'gate', null, null]);
-    same('the shipped phone: no page error', d.errors, []);
+    same('that phone: no page error', d.errors, []);
     await d.context.close();
+
+    // And the build exactly as it ships, on the same record: it is ON - the record says so.
+    const e = await openPhone(browser, server.url, { cloud: net });
+    await e.page.waitForFunction(() => State.schedule.workers.length === 5 && FarkadSync.status === 'synced', null, { timeout: 20000 });
+    await showAccounts(e.page);
+    same('PHASE 8: the build AS IT SHIPS, on this record, is on - no flag named: the tab is the accounts home and the closures that moved are in its history',
+        await e.page.evaluate(() => [FARKAD_FLAGS.paybook, paybookOn(State.schedule), Boolean(document.querySelector('#advancesView .acc-screen')),
+            closureHistory(State.schedule, {}).length > 0]), [false, true, true, true]);
+    same('the phone as it ships: no page error', e.errors, []);
+    await e.context.close();
 }
 
 await a.context.close();

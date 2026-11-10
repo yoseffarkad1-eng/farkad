@@ -352,6 +352,9 @@ check.
 | `tests/paybook.world.mjs` | `payDevice()`: the flags named; `shipped: true`: no flags | the same, **and the record's switch not honoured** unless `activation: true` | nearly every record in those suites holds an opening, which now turns a build on. The suites go on measuring a BUILD with the flags named |
 | `tests/payroll.test.mjs` | «HISTORY (the gate shut)» on an opened record, asked of a device with no flags | asked of a build that does not honour the opening; the build as it ships is asserted beside it (on) | the same |
 | `tests/paybook.split.emulator.test.mjs` | an older build beside a pay book «STILL RECORDS A DAY» | «ITS DAY IS REFUSED» | `activatedNeedsPaybook` - see The rules |
+| `tests/accounts.browser.mjs`, `tests/archive.browser.mjs`, `tests/cold.browser.mjs` | the flags each names through the seam | the same flags **and** `paybookActivation: false` | the same rule for pages as for devices: the flags named decide, on whatever record |
+| `tests/archive.browser.mjs` | «with the gate shut none of it exists», asked of a phone with no flags on a record that holds an opening | asked of the build with the pay book shut (`paybookActivation: false`); the build as it ships is asserted beside it: on, the tab the accounts home | an opening now turns the build as it ships on |
+| `tests/settings-order.browser.mjs` | «every control» and «every sentence» of the sheet equal the v171 lists | the v171 lists, untouched, **plus `ADDED_SINCE`** - one sentence and one button, named apart | the pay book's row: the one thing a person sees of it in the build as it ships |
 | `tests/yosefgeves.test.mjs` | an older tree is asked for every file this build loads | less the six only this branch has (`NOT_ON_MAIN`, named) | the merge |
 | `css/design.css` | - | the accounts styles are again the LAST block of the screen-only layer | main appended blocks after them; no rule changed |
 
