@@ -152,6 +152,10 @@ function refreshWorkerFinance(workerId) {
 function renderAdvances() {
     const root = document.getElementById('advancesView');
     if (!root) return;
+    // v176, SHUT: with the pay book's gate open this tab is the accounts home
+    // (js/ui/accounts.js). With it shut - every build a person has - this line is false
+    // and everything below is what it was.
+    if (typeof accountsTakesTab === 'function' && accountsTakesTab()) { renderAccounts(root); return; }
     // A cloud update may redraw totals, but never discards an amount being typed.
     // Save handlers validate against the current schedule, not these drawn balances.
     if (root.querySelector('.advance-form')) return;
@@ -171,6 +175,8 @@ function renderAdvances() {
         const actions = el('div', 'finance-actions');
         actions.appendChild(button('+ מקדמה חדשה', null, () => openAdvanceForm(worker, actions)));
         actions.appendChild(button('קיזוז מהשכר', 'btn-secondary', () => {
+            // v176, SHUT: one way to close an account once the pay book is open.
+            if (typeof accountsRoutesClosure === 'function' && accountsRoutesClosure(worker.id, null)) return;
             const period = periodRangeFor(worker, todayStr());
             REPORT_RANGE.from = period.from; REPORT_RANGE.to = period.to;
             REPORT_WORKERS = new Set([String(worker.id)]); REPORT_SECTION = 'workers'; REPORT_PRESET = 'custom';
@@ -1928,6 +1934,9 @@ function openWorkerDays(workerId) {
 function openWorkerSettlement(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
+    // v176, SHUT: with the pay book open the old dialog is not a second way to close.
+    if (typeof accountsRoutesClosure === 'function' && accountsRoutesClosure(worker.id,
+        { from: REPORT_RANGE.from, to: REPORT_RANGE.to })) return;
     let period = wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)
         ? { from: REPORT_RANGE.from, to: REPORT_RANGE.to } : periodRangeFor(worker, todayStr());
     REPORT_RANGE.from = period.from; REPORT_RANGE.to = period.to;
@@ -1971,6 +1980,8 @@ function openWorkerSettlement(workerId) {
 // Behind both gates, like every other writer here: a closure the other two phones cannot
 // read is money off a wage they will go on deducting.
 function renderPeriodClosure(worker) {
+    // v176, SHUT: with the pay book open this block is one button to the review page.
+    if (typeof accountsClosureDoor === 'function' && accountsOpen()) return accountsClosureDoor(worker);
     if (typeof planPeriodClosure !== 'function') return null;
     if (!financialWritingEnabled(State.schedule)) return null;
     // HIS period, not the sheet's. A man settled every Thursday is closable on his week;

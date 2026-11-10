@@ -2841,3 +2841,40 @@ function paybookIndexFolds(index) {
     });
     return { closed, deducted, wage };
 }
+
+// =====================================================================================
+// PHASE 4 (v176): the one answer the review page needs that no planner gave
+// =====================================================================================
+//
+// paybookSuggestAllocations(review) -> { advanceId: amount }
+//
+// What the review page PRE-FILLS for each open advance, before a person has typed
+// anything: all of it, oldest first, for as long as the wage allows - and 0 for the rest.
+// It is a suggestion and nothing else. Every field stays the person's to change, the
+// plan is drawn again from what they typed, and nothing here is ever written.
+//
+// It lives in the model and not in the screen for one reason: a screen that worked out
+// "how much of this advance fits in what is left of the wage" would be a second place
+// that subtracts money, and the first one (planClosure) would not know when it was wrong.
+// This reads only what planClosure's own review says - each row's `left`, the period's
+// `gross`, and `walkRoom`, the most the account walk lets this closure take altogether -
+// in agorot, so that 0.1 + 0.2 cannot suggest a sum the planner then refuses.
+//
+// EVERY offered advance gets an answer, a 0 included: a blank is a missing answer
+// (`allocation-missing`), and a suggestion that left one blank would hand the person a
+// page that refuses on the first tap.
+function paybookSuggestAllocations(review) {
+    const out = {};
+    if (!isPlainObject(review) || !Array.isArray(review.advances)) return out;
+    const gross = paybookMoneyProblem(review.gross, true) === '' ? review.gross : 0;
+    const walk = paybookMoneyProblem(review.walkRoom, true) === '' ? review.walkRoom : 0;
+    let room = Math.min(paybookAgorot(gross), paybookAgorot(walk));
+    review.advances.forEach(row => {
+        if (!isPlainObject(row) || row.offered !== true || typeof row.advanceId !== 'string') return;
+        const left = paybookMoneyProblem(row.left, true) === '' ? paybookAgorot(row.left) : 0;
+        const take = Math.max(0, Math.min(left, room));
+        room -= take;
+        putKey(out, row.advanceId, take / 100);
+    });
+    return out;
+}
