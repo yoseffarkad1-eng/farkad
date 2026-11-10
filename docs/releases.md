@@ -1,4 +1,80 @@
-## v183 — עובדי יוסף גבס: a second count per site, in no account at all (approved by the owner 2026-11-10 - not yet served)
+## v184 — «בניית סידור»: the seder as one journey; «כרטיס עובד»; a vehicle turned off and on again (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `1af6729` (v183). Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
+`js/recovery.js` or the rules. Nothing here writes the record by any new code.
+
+### «בניית סידור» — the seder as one journey (`js/ui/journey.js`)
+
+The owner, 2026-11-10: one complete loop from distributing the workers to the cars, "nothing left
+to chance"; he builds in the evening for tomorrow and chooses what is sent, mostly only the
+drivers. The journey is a frame around the screens that exist and builds no second editor:
+(1) the day screen on tomorrow's date, with the journey's row inside the day's own dock - a
+counter of who is placed and who is not; (2) a check that never blocks - the day's check (v182) drawn by `renderDayCheckInto`, and above
+it the journey's own lines for what that check cannot know (a man not recorded who did not work
+the previous working day; a man on an archived site), each man named once; a name tapped there
+goes back to the day screen, where it opens the sheet it always opens; (3) the הסעות screen with the journey's bar
+inside its panel, SKIPPED with one sentence on a phone that did not turn הסעות on, and never
+turned on by the journey; (4) a read-only last look drawn by `dayMessage` and
+`transportSummaryBlocks`; (5) sending - a door per driver first, then the seder to each worker,
+the day's message and the rides' summary, each by his own tap, nothing preselected, and «סיום»
+whether or not anything went. Where he is (date, station) is this phone's preference under
+`farkadSederJourney`: never in the record, the outbox, the cloud, a backup or the rescue file; a
+value that will not read is no journey. A journey left is continued for three hours and then
+forgotten; what was built is kept by the screens that built it. A man moved or taken off his site
+after he was seated is counted, marked and named, never repaired. ONE entry, a row in the
+WhatsApp dialog: the day's dock and header are measured by `tests/mobile.test.mjs` and
+`tests/design.browser.mjs` and have no free place; a place on the day screen is the owner's call.
+Hooks: `render()` and `bootOnce()` in `js/app.js`, the last line of `renderTransport` and of
+`closeTransport`. On Friday evening "tomorrow" is Sunday, as the day's arrows step.
+
+### «כרטיס עובד» — one man on one screen (`js/ui/workercard.js`)
+
+One worded button on every crew row. Who he is; his open period in his own cycle EXACTLY as the
+pay sheet has it (the card reads the cells `payrollGroupTable` builds for his row - it computes
+no money of its own); what he owes and his credit (`openAdvanceBalance`, `workerAccountFor`); his
+last five advance movements; the last fourteen days site by site; this month's days per site. Two
+buttons leave it, to his sheet and to his advances. It writes no key. Each figure carries its own
+`carryReportingEnabled` gate, so an unapproved record reads the old way here as everywhere.
+THE GATE IS ASKED ONCE PER READING: `carryReportingEnabled` re-walks up to 4000 fortnights per
+call for a man whose balance never clears (100-1000 ms), so for the length of one synchronous
+reading the card answers repeat questions about `State.schedule` from the first answer and puts
+the function back in a `finally`; `tests/workercard.test.mjs` pins that it is asked exactly once,
+asked again next time, restored after a throw, and never answers for another schedule. The cost
+itself is in `js/model` and is not changed here.
+
+### הסעות — a vehicle turned off, and on again
+
+The owner, having tried the screen: "sometimes cars break down... like workers whom I turn off and
+turn back on in the צוות page - because sometimes the car sits for more than a day." In «רכבים»
+every vehicle has the roster's own switch («פעיל» / «כבוי»). Off, it is not one of the day's
+vehicles FROM THE DAY THAT WAS ON THE SCREEN ONWARD: not drawn, not in the day's summary, no
+driver's message, not counted by the report; a day before it reads as stored. One field,
+`off: '<date>'`, in `farkadTransport:settings` - this phone's own. TURNING IT OFF OR ON WRITES
+THE LIST AND NO DAY: the men a stored plan seats in it are waiting by a reading, he is told how
+many, and turned on again a day nobody changed shows them in their seats byte for byte. ROLLOUT:
+v183 and older do not know the field; an older window shows the vehicle on and drops the field at
+its next change to the list - the off state is forgotten, nothing else.
+
+### Hebrew - PROPOSED, not read by the owner
+
+Pinned word for word in `tests/journey.test.mjs`, `tests/workercard.test.mjs` and
+`tests/transport.test.mjs`. The switch's four words are the roster's own. No existing string
+changed. Nothing says «נשלח».
+
+### Known not covered
+
+Not tried on a real phone - emulated touch in Chromium only; real drags inside the journey, iOS
+standalone and the stuck-frame path with the journey's row in the dock are unmeasured. On a
+375x667 phone the first station's dock takes about 198px. A driver is also on the
+seder-to-each-worker list and can get two messages if both groups are used. On an unapproved
+record the card («מקדמות רשומות», gated) and the advances screen («נשאר להחזיר», ungated) can show
+different figures for one man. The card's month count gives a day at two sites to each. There is
+no history of a vehicle's off periods; the day it is off from is the day on screen, not today.
+
+## v183 — עובדי יוסף גבס: a second count per site, in no account at all (served 2026-11-10, on the owner's approval)
+
+**Served.** Merged as `1af6729` (PR #65) on 2026-11-10 after both gates exited 0 on `ab364ae`. What follows is the entry as written before it was served.
 
 **Not served yet: the merge and the Pages deployment are recorded here by whoever
 publishes it.** A change to what the record holds ships alone: one commit of shipped files
@@ -256,9 +332,9 @@ note).
 4. **The rollout.** Every phone on v183 before the first count. v182, a candidate, is
    ahead of this one in the queue. Which builds are published, in what order, is his.
 
-## v182 — «בדיקת היום», and the vehicles' report of a period (candidate, not served)
+## v182 — «בדיקת היום», and the vehicles' report of a period (served 2026-11-10)
 
-**Not served until the merge and the Pages deployment are recorded here by the next release.**
+**Served.** Merged as `4ad33cb` (PR #64) on 2026-11-10 after both gates exited 0 on `61d9416`.
 Built on `90ac0e8` (v181). Two readings; neither writes a key anywhere. Nothing in `js/sync`,
 `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js` or the rules. The owner asked
 (2026-11-10) to be surprised with things that ease the evening, and for the seder to become one

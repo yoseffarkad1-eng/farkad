@@ -149,6 +149,21 @@ function workerRow(worker, archiveAdvances) {
     row.dataset.workerId = worker.id;
 
     const details = el('div', 'roster-details');
+    // כרטיס עובד: the one way into his card (js/ui/workercard.js), worded. It is the FIRST
+    // thing in his details and floats at their far end, beside his name and his cycle -
+    // the two short lines - so it takes no width from the line with his phone and rates,
+    // adds no height to the row (tests/roster.browser.mjs holds a row to 125px, and the
+    // first place this was put broke that), and leaves the switch and «עוד ⋯» exactly
+    // where three people's thumbs already know them. On an archived row too: the money a
+    // man left with is the usual reason to look him up. Feature-detected like the ledger
+    // readers are: a build where that file did not load still has a crew screen.
+    if (typeof openWorkerCard === 'function') {
+        const card = button(WORKER_CARD_TEXT.title, 'btn-secondary worker-card-open',
+            () => openWorkerCard(worker.id),
+            `${WORKER_CARD_TEXT.openFor} ${isolate(worker.name)}`);
+        card.setAttribute('aria-haspopup', 'dialog');
+        details.appendChild(card);
+    }
     details.appendChild(el('strong', null, worker.name));
     const cycle = payCycleAt(worker, todayStr());
     details.appendChild(el('span', 'crew-cycle', cycle === 'weekly' ? 'תשלום שבועי' : 'תשלום כל שבועיים'));

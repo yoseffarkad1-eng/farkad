@@ -613,6 +613,19 @@ input, select, textarea { border-radius: 12px; }
 .transport-more[open] > summary::before { transform: rotate(135deg); margin-block-end: -4px; }
 .transport-more[open] > summary { margin-bottom: 8px; }
 .transport-fleet-item { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+/* A VEHICLE'S LASTING SWITCH, beside its name: the name and the seats keep the first
+   column, the switch stands in the second, and the row of tools (and, for a vehicle that
+   is off, the day it is off from) runs under both. On is the tint «זמין היום» has; off is
+   the plain quiet button, and its name steps back - the roster's two states, in this
+   screen's own colours. */
+.transport-fleet-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 10px; row-gap: 4px; }
+.transport-fleet-item > .transport-more,
+.transport-fleet-item > .transport-off-from { grid-column: 1 / -1; }
+.transport-onoff { min-height: 44px; }
+.transport-onoff[aria-checked="true"] { background: var(--ok-bg) !important; color: var(--ok) !important; }
+.transport-fleet-off { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.transport-fleet-off > h4 { font-size: 16px; font-weight: 700; padding: 0 4px; }
+.transport-fleet-item-off .transport-name { color: var(--ink-2); font-weight: 600; }
 #shareModal .modal-actions .transport-entry { grid-column: 1 / -1; }
 .transport-switch .btn-secondary { align-self: flex-start; }
 
@@ -739,5 +752,187 @@ input, select, textarea { border-radius: 12px; }
 #transportReportModal .modal-actions button { min-height: 44px; min-width: 44px; font-size: 16px; }
 #transportReportSend, #transportReportClose, #transportReportStatus { grid-column: 1 / -1; }
 #transportReportStatus:empty { display: none; }
+/* ---- בניית סידור, js/ui/journey.js -----------------------------------------------------
+   The seder's journey has NO BAR OF ITS OWN. Its row on the first station is a child of
+   the day's dock (.day-actions), its bar on the third a child of the הסעות panel, and the
+   other three stations are a panel that also carries .settings-panel. So every height
+   here is the height of words: js/ui/bars.js measures the dock as it stands with the row
+   in it, the two panels are columns whose list takes what the rest leaves, and no number
+   in this block is a bar's height. The edges a panel meets are padded by env().
+
+   ONE FILLED BUTTON PER STATION - the way onward - and it is the only thing painted in
+   the accent. Everything else is tonal; WhatsApp's green is the link that opens WhatsApp
+   (.transport-wa, borrowed whole). A warning is --warn on --warn-bg, the pair the rest
+   of the app says "look at this" with. */
+.journey-next { background: var(--accent) !important; color: var(--on-accent) !important; border-color: transparent !important; }
+.journey-panel button,
+.journey-dock button,
+.journey-ride button { min-height: 44px; min-width: 44px; font-size: 16px; font-weight: 700; touch-action: manipulation; }
+
+/* The strip: five marks, and the name of the station he is on. */
+.journey-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; min-width: 0; }
+.journey-pip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.journey-pip-mark {
+    display: inline-grid;
+    place-items: center;
+    inline-size: 26px;
+    block-size: 26px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+}
+.journey-pip-now .journey-pip-mark { background: var(--accent); color: var(--on-accent); }
+.journey-pip-done .journey-pip-mark { background: var(--ok-bg); color: var(--ok); }
+.journey-pip-open .journey-pip-mark { background: var(--warn-bg); color: var(--warn); }
+.journey-pip-skipped .journey-pip-mark { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink-3); }
+.journey-pip-name { color: var(--ink); font-size: 16px; font-weight: 800; overflow-wrap: anywhere; }
+
+/* 1: the row in the day's dock. The dock wraps only while the row is in it; its own two
+   buttons keep their line under it. */
+body.journey-day .day-actions { flex-wrap: wrap; }
+.journey-dock { flex: 0 0 100%; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.journey-dock-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.journey-count { color: var(--ink); font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+/* With men still waiting the counter is a button that names them: its own width, not a
+   share of the row the dock's buttons take, and its words wrap rather than run off. */
+.journey-dock-top button.journey-count { flex: 0 1 auto !important; max-width: 100% !important; min-width: 0; min-height: 44px !important; padding: 6px 12px !important; font-size: 16px !important; white-space: normal !important; text-align: start; }
+.journey-dock-row { display: flex; gap: 8px; min-width: 0; }
+.journey-dock-row button { flex: 1 1 0 !important; max-width: none !important; min-width: 0; min-height: 44px !important; font-size: 16px !important; padding: 8px 10px !important; }
+.journey-dock-row .journey-next { flex: 2 1 0 !important; }
+.journey-dock .journey-note { margin: 0; }
+
+/* 3: the bar inside the הסעות panel. */
+.journey-ride {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 calc(16px + env(safe-area-inset-left, 0px)) 8px calc(16px + env(safe-area-inset-right, 0px));
+}
+.journey-ride-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.journey-ride-status { flex: 1 1 auto; min-width: 0; color: var(--ink); font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.journey-ride-left { color: var(--warn); }
+.journey-ride-row .journey-next { flex: none; max-width: 60%; padding: 8px 14px; }
+
+/* 2, 4, 5: the panel. */
+.journey-panel { color: var(--ink); }
+.journey-panel.open { inset: 0 !important; width: auto !important; max-height: none !important; margin: 0 !important; }
+.journey-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-left, 0px)) 8px calc(16px + env(safe-area-inset-right, 0px));
+}
+.journey-titles { min-width: 0; }
+.journey-head h2 { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 800; overflow-wrap: anywhere; }
+.journey-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.journey-context { margin: 2px 0 0; color: var(--ink-2); font-size: 16px; font-weight: 600; }
+.journey-leave { flex: none; }
+.journey-strip-slot { padding: 0 calc(16px + env(safe-area-inset-left, 0px)) 8px calc(16px + env(safe-area-inset-right, 0px)); }
+.journey-note {
+    margin: 0 16px 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    font-size: 16px;
+    font-weight: 700;
+}
+.journey-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 4px calc(16px + env(safe-area-inset-left, 0px)) 16px calc(16px + env(safe-area-inset-right, 0px));
+}
+.journey-view { display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin: 0 auto; font-size: 17px; line-height: 1.45; overflow-wrap: anywhere; }
+.journey-view h3, .journey-view h4, .journey-view p { margin: 0; padding: 0; }
+.journey-view h3 { font-size: 22px; line-height: 1.25; font-weight: 800; }
+.journey-view h4 { font-size: 18px; line-height: 1.3; color: var(--ink); }
+.journey-lead { color: var(--ink-2); font-size: 16px; }
+.journey-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; background: var(--surface); }
+.journey-block { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.journey-block-head { font-weight: 800; }
+.journey-warn { padding: 9px 12px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); font-size: 16px; font-weight: 700; }
+.journey-ok { padding: 9px 12px; border-radius: 12px; background: var(--ok-bg); color: var(--ok); font-size: 16px; font-weight: 700; }
+.journey-wide { width: 100%; }
+.journey-send-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.journey-send-who { flex: 1 1 150px; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.journey-send-sub { color: var(--ink-2); font-size: 16px; }
+.journey-send-row .transport-wa { flex: 1 1 150px; }
+.journey-share-status:empty { display: none; }
+.journey-foot {
+    flex: none;
+    display: flex;
+    gap: 10px;
+    padding: 10px calc(16px + env(safe-area-inset-left, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-right, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--line-soft);
+}
+.journey-foot button { flex: 1 1 0; min-width: 0; min-height: 48px; }
+.journey-foot .journey-next { flex: 2 1 0; }
+.journey-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The way in, a whole row of the WhatsApp dialog like the two above it. And the two
+   dialogs the last station opens: the panel is on the settings sheet's tier (60) and an
+   ordinary .modal on 50, which would open them BEHIND the station that asked - the fault
+   the rides' summary has its own line for. Raised only while a journey is on the screen;
+   both sit later in the document than the panel, so on one tier they are in front. */
+#shareModal .modal-actions .journey-entry { grid-column: 1 / -1; }
+body.journey-on #shareModal,
+body.journey-on #sederModal { z-index: 60; }
+/* כרטיס עובד (js/ui/workercard.js): one man on one screen, and nothing on it to edit.
+   THE WAY IN is one worded button on the crew row. It floats at the far end of the man's
+   details (left: the page is right-to-left, always), beside his name and his cycle, and
+   is as wide as its longer word, so the two words stack and it stays inside the height
+   those two lines already have. The line with his phone and his rates clears it and keeps
+   the whole width. So the row is no taller, the switch and «עוד ⋯» do not move, and at
+   doubled text the button grows with its words instead of spilling out of a fixed box.
+   THE CARD is an ordinary dialog, so the height it may take, the safe area under it and
+   the scroll inside it are .modal-content's (css/app.css) and are not said again here.
+   Figures are tiles because they are read one at a time; the fourteen days are a grid
+   that falls to one column when the text is large; a site keeps its own colour through
+   paintSite and nothing else on the card borrows it. Nothing here is a tap target but
+   the three buttons of the frame, and those are held to 44px both ways. */
+.worker-card-open { float: left; inline-size: min-content; min-inline-size: 64px; min-height: 44px !important; margin: 0 8px 2px 0 !important; padding: 6px 8px !important; font-size: 15px !important; line-height: 1.25 !important; white-space: normal !important; }
+#rosterView .roster-details > .roster-meta { clear: left; }
+#workerCardModal .modal-content > h3 { line-height: 1.3; margin: 0 0 8px; overflow-wrap: anywhere; }
+.wcard-who { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--ink-2); font-size: 16px; }
+.wcard-line { min-width: 0; overflow-wrap: anywhere; }
+.wcard-block { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.wcard-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; margin: 0 0 10px; font-size: 17px; }
+.wcard-aside { color: var(--ink-2); font-size: 15px; font-weight: 500; }
+.wcard-figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.wcard-pair { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.wcard-label { color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.wcard-value { font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wcard-owed { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; margin-bottom: 6px; }
+.wcard-owed .wcard-label { font-size: 16px; }
+.wcard-note, .wcard-finance { margin: 8px 0 0 !important; overflow-wrap: anywhere; }
+.wcard-sub { margin: 12px 0 2px; color: var(--ink-2); font-size: 15px; }
+.wcard-move { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.wcard-move:last-child { border-bottom: 0; }
+.wcard-move-what { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.wcard-move-date { color: var(--ink-2); font-size: 14px; }
+.wcard-move-amount { flex: 0 0 auto; font-weight: 650; font-variant-numeric: tabular-nums; }
+.wcard-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 12px; }
+.wcard-day { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; }
+.wcard-day-when { flex: 0 0 auto; color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.wcard-day-where { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.wcard-site { display: inline-flex; gap: 4px; max-width: 100%; padding: 2px 8px; border: 1px solid; border-radius: 8px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.wcard-day-none { color: var(--ink-3); }
+.wcard-day-absent { color: var(--warn); font-size: 14px; font-weight: 600; }
+.wcard-month { display: flex; flex-direction: column; gap: 6px; }
+.wcard-month-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.wcard-month-days { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+#workerCardModal .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+#workerCardModal .modal-actions button { min-height: 44px; min-width: 44px; font-size: 16px; overflow-wrap: anywhere; }
+#workerCardModal .modal-actions button:last-child { grid-column: 1 / -1; }
 
 }

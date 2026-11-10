@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v183">
+<meta name="farkad-build" content="v184">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -363,6 +363,31 @@
     <div class="reorder-foot" id="reorderFoot"></div>
 </div>
 
+<!-- בניית סידור (js/ui/journey.js): the frame of the seder's journey for the stations that
+     are not an existing screen - the check, the last look and the sending. The first
+     station is the day screen itself and the third the הסעות panel below, each with the
+     journey's row inside it. .settings-panel for the reasons the הסעות panel gives: being
+     fixed, being absent on paper, and coming down with a stuck iPhone frame are app.css's
+     rules for that class. BEFORE the הסעות panel and every dialog that opens over it: the
+     later of two layers on one tier is the one in front. Every word is written by
+     js/ui/journey.js; the strip, the body and the foot are rebuilt on every draw, the live
+     region is not. -->
+<div class="settings-panel journey-panel" id="journeyPanel" role="dialog" aria-modal="true"
+     aria-labelledby="journeyTitle" aria-hidden="true">
+    <div class="journey-head">
+        <div class="journey-titles">
+            <h2 id="journeyTitle" tabindex="-1"></h2>
+            <p id="journeyContext" class="journey-context"></p>
+        </div>
+        <button type="button" class="btn-secondary journey-leave" id="journeyLeave" onclick="journeyLeave()"></button>
+    </div>
+    <div class="journey-strip-slot" id="journeyStripSlot"></div>
+    <p class="journey-note" id="journeyNote" role="status" hidden></p>
+    <div class="journey-body" id="journeyBody"></div>
+    <div class="journey-foot" id="journeyFoot"></div>
+    <div class="journey-live" id="journeyLive" role="status" aria-live="polite"></div>
+</div>
+
 <!-- הסעות (v171; one screen since v174 - the cars drawn from above, no tabs): on a phone
      that turned it on in ⋯ and on no other. A panel over the whole screen, on the settings sheet's tier and ABOVE the ask
      dialog in this file, so the app's own questions open over it. It carries the
@@ -620,6 +645,23 @@
     </div>
 </div>
 
+<!-- כרטיס עובד: one man on one screen, opened from his row on the crew screen. A READING -
+     there is no field on it, and the first two buttons below only go to the screens where
+     a change is made. Drawn by js/ui/workercard.js, which also words those two buttons
+     after the screens they open; the three buttons are in the frame and not in the body
+     so that a redraw under an open card leaves the focus where it was. -->
+<div class="modal" id="workerCardModal">
+    <div class="modal-content modal-wide">
+        <h3 id="workerCardTitle" tabindex="-1"></h3>
+        <div id="workerCardBody"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="workerCardReport" onclick="workerCardGo('report')"></button>
+            <button type="button" class="btn-secondary" id="workerCardAdvances" onclick="workerCardGo('advances')"></button>
+            <button type="button" class="btn-secondary" onclick="closeWorkerCard()">סגור</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="shareModal">
     <div class="modal-content">
         <h3 id="shareTitle" tabindex="-1">הודעה לוואטסאפ</h3>
@@ -796,6 +838,9 @@
 <script src="js/ui/week.js"></script>
 <script src="js/ui/roster.js"></script>
 <script src="js/ui/reports.js"></script>
+<!-- After reports.js and roster.js: the card asks the pay sheet's own functions and
+     draws with the crew row's helpers, and declares nothing either of them reads. -->
+<script src="js/ui/workercard.js"></script>
 <script src="js/ui/share.js"></script>
 <!-- After share.js (its dialog is the way in) and day.js (its drawn speech bubble);
      everything else it reads is above both. -->
@@ -810,6 +855,10 @@
      reads or writes anything at load but one per-phone preference (js/ui/transport.js). -->
 <script src="js/model/transport.js"></script>
 <script src="js/ui/transport.js"></script>
+<!-- The seder's journey: after everything it frames - the day, the sheet, the WhatsApp
+     dialog, the seder and הסעות - because its entry is put AFTER theirs in that dialog. It
+     calls them only when it is used, and each of them asks for it through typeof. -->
+<script src="js/ui/journey.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

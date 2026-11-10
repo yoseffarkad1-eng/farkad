@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v183';
+const VERSION = 'farkad-v184';
 
 // A scheduled server push wakes this worker even with every app window closed.
 // Always display a visible notification; neither iOS nor Android needs a page timer.
@@ -96,11 +96,13 @@ const SHELL = [
     './js/ui/week.js',
     './js/ui/roster.js',
     './js/ui/reports.js',
+    './js/ui/workercard.js',
     './js/ui/share.js',
     './js/ui/seder.js',
     './js/ui/daycheck.js',
     './js/model/transport.js',
     './js/ui/transport.js',
+    './js/ui/journey.js',
     './js/ui/backup.js',
     './js/ui/printout.js',
     './js/ui/migration.js',

@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v183';
+const APP_VERSION = 'v184';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -148,6 +148,12 @@ function render() {
     // And for the transport plan (v171), on a phone that has it on: it reads who is on
     // which site from this same record, and a man moved under it must show as moved.
     if (typeof renderTransportIfOpen === 'function') renderTransportIfOpen();
+    // And for the seder's journey (js/ui/journey.js), while one is being walked: its counter,
+    // its strip and its last look are all read from this record, and say what it says now.
+    if (typeof renderJourneyIfOpen === 'function') renderJourneyIfOpen();
+    // And for a worker's card (js/ui/workercard.js): every figure on it is read off this
+    // record, and a card left showing what the record said a minute ago is a wrong number.
+    if (typeof renderWorkerCardIfOpen === 'function') renderWorkerCardIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
@@ -512,6 +518,9 @@ function bootOnce() {
     if (booted) return;
     booted = true;
     boot();
+    // The seder's journey the app went away in the middle of - see js/ui/journey.js. Before
+    // the seder's own list, which opens over its last station.
+    if (typeof journeyResume === 'function') journeyResume();
     // A seder run the phone killed the app in the middle of - see js/ui/seder.js. Before
     // the reminder link is read, because it stands aside for one.
     if (typeof resumeSederRun === 'function') resumeSederRun();

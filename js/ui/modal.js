@@ -20,6 +20,8 @@ const MODAL_CLOSERS = {
     placePickerModal: () => closePlacePicker(),
     workerFormModal: () => closeWorkerForm(),
     workerDaysModal: () => closeWorkerDays(),
+    // The worker's card (js/ui/workercard.js): closing it forgets whose it was.
+    workerCardModal: () => closeWorkerCard(),
     shareModal: () => closeShareModal(),
     // Closing it on purpose is what stops a reload bringing it back (js/ui/seder.js).
     sederModal: () => closeSederList(),

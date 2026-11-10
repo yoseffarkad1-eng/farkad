@@ -38,10 +38,16 @@
 // the picture, the rectangles at both sizes and at 200% text, and that none of it moves a
 // key on the disk.
 //
+// A VEHICLE TURNED OFF (the lasting switch) is measured here too, in an evening of its own:
+// men carried into a car by a finger, its switch in the list tapped, what is said, the car
+// gone from the day's cars and from the summary and the report, a reload, tomorrow's plan,
+// the day before, the switch tapped again - and the two days' plans byte for byte what
+// they were before it was ever turned off.
+//
 // TRANSPORT_SHOTS=<directory> also writes JPEGs (main-440-dark, summary-440-dark,
 // report-440-dark, report-month-440-dark, dragging-440-dark, small-375-dark, main-440-light,
-// nine-375-dark, report-375-light) and the two pictures (summary-picture.png,
-// report-picture.png). Synthetic names only - it is this file's own fixture.
+// nine-375-dark, report-375-light, vehicle-off-list-440-dark, vehicle-off-cars-440-dark) and
+// the two pictures (summary-picture.png, report-picture.png). Synthetic names only - it is this file's own fixture.
 
 import { chromium } from 'playwright';
 import { join } from 'node:path';
@@ -1524,6 +1530,248 @@ async function evening(width, height, scheme) {
     await context.close();
 }
 
+// ------------------------------------------------------------------ a vehicle turned off
+//
+// The owner, 2026-11-10: "sometimes cars break down... like I have workers whom I turn off
+// from the list and turn back on in the צוות page". The switch is the roster's, word for
+// word, beside each vehicle in «רכבים». Tomorrow's plan is put on the disk by the functions
+// a drag calls (it is not the day on the screen); everything done to the day on the screen
+// is a finger.
+const NEXT = '2026-11-11';
+const PREV = '2026-11-09';
+const NEXT_KEY = `farkadTransport:day:${NEXT}`;
+const SETTINGS_KEY = 'farkadTransport:settings';
+const SWITCH_IS_ON = 'פעיל';
+const SWITCH_IS_OFF = 'כבוי';
+const onoff = id => `#transportFleet [data-onoff="${id}"]`;
+
+async function openOn(page, date) {
+    if (await visible(page, '#transportPanel')) await page.locator('#transportClose').tap();
+    await page.evaluate(day => { State.date = day; render(); }, date);
+    await page.locator(WA_BUTTON).click();
+    await page.locator('#transportEntry').click();
+    await page.locator('#transportPanel.open').waitFor({ state: 'visible' });
+    await page.waitForTimeout(80);
+}
+async function openFleet(page) {
+    if (await page.evaluate(() => document.getElementById('transportFleet').open)) return;
+    await page.locator('#transportFleet > summary').scrollIntoViewIfNeeded();
+    await page.locator('#transportFleet > summary').tap();
+}
+async function summaryWords(page) {
+    await page.evaluate(() => { document.getElementById('transportBody').scrollTop = 0; });
+    await page.locator('#transportSummaryOpen').tap();
+    await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+    const words = await page.locator('#transportSummaryText').inputValue();
+    await page.locator('#transportSummaryClose').tap();
+    return words;
+}
+async function reportWords(page) {
+    await page.locator('#transportReportOpen').scrollIntoViewIfNeeded();
+    await page.locator('#transportReportOpen').tap();
+    await page.locator('#transportReportModal').waitFor({ state: 'visible' });
+    const words = await page.locator('#transportReportText').inputValue();
+    await page.locator('#transportReportClose').tap();
+    return words;
+}
+
+async function vehicleOff(width, height, scheme) {
+    const where = `${width}x${height} ${scheme}`;
+    const seatFloor = width <= 375 ? 56 : 44;
+    const { page, context, cdp, errors, away } = await open(width, height, scheme);
+    const others = ALL.filter(id => id !== 'w_03' && id !== 'w_04');
+
+    suite(`${where}: a vehicle turned off - men in it tonight and in tomorrow's plan`);
+    await page.evaluate(([ids, places, next]) => {
+        ids.forEach((id, i) => assignPlace(State.schedule, next, id, 'actual', places[i % places.length].id));
+        State.save();
+        transportSetEnabled(true);
+        transportPlace(next, 'w_05', 'tv_02', 1);
+        transportPlace(next, 'w_06', 'tv_02', 3);
+        transportPlace(next, 'w_07', 'tv_01', 1);
+    }, [ALL, PLACES, NEXT]);
+    const before = await recordBytes(page);
+    await page.evaluate(() => {
+        window.__pointers = { touch: 0, mouse: 0 };
+        // On the panel: the way in to it is the day screen's own buttons, which are not this suite's.
+        document.getElementById('transportPanel').addEventListener('pointerdown', event => {
+            window.__pointers[event.pointerType] = (window.__pointers[event.pointerType] || 0) + 1;
+        }, true);
+    });
+    await openOn(page, DAY);
+    // BY A FINGER: two men into קורולה 2016, one into קורולה 2013.
+    await drag(cdp, page, chip('w_01'), seat('tv_02', 1));
+    await drag(cdp, page, chip('w_02'), seat('tv_02', 4));
+    await drag(cdp, page, chip('w_03'), seat('tv_01', 1));
+    // THE FINGER COMES TO REST BEFORE THE NEXT TAP. `drag` lifts the finger while it is
+    // still moving, and this Chromium takes that for a fling: the next touch is then the
+    // touch that stops the fling, and is NOT turned into a click (measured here - the
+    // touchstart and touchend arrive, the click does not; with a rest before the lift it
+    // does). So one more man is carried and put DOWN before he is let go. Whether a real
+    // phone eats a tap that follows a flicked release is not known from this machine.
+    {
+        await show(page, seat('tv_01', 2), chip('w_04'));
+        const from = await centre(page, chip('w_04'));
+        const to = await centre(page, seat('tv_01', 2));
+        await down(cdp, from);
+        await glide(cdp, page, from, to);
+        await page.waitForTimeout(250);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(to.x, to.y) });
+        await page.waitForTimeout(100);
+        await up(cdp);
+        await page.waitForTimeout(80);
+    }
+    given('the evening is staged by real touches: two men in the car that will be turned off, two in another',
+        (await drawn(page, 'tv_02')) === 'w_01 - - w_02 -' && (await drawn(page, 'tv_01')) === 'w_03 w_04 - - -'
+        && await page.evaluate(() => window.__pointers.touch >= 4 && window.__pointers.mouse === 0),
+        `${await drawn(page, 'tv_02')} | ${await drawn(page, 'tv_01')}`);
+    const dayBytes = () => page.evaluate(keys => keys.map(key => localStorage.getItem(key)), [DAY_KEY, NEXT_KEY]);
+    const days = await dayBytes();
+    given('both days are on the disk, each with men in that car, and the list has not been written yet',
+        days.every(raw => raw && /"tv_02"/.test(raw)) && await page.evaluate(key => localStorage.getItem(key) === null, SETTINGS_KEY));
+
+    await openFleet(page);
+    same('every vehicle in «רכבים» has its switch beside its name, and it says «פעיל»',
+        (await page.locator('#transportFleet .transport-onoff').allTextContents()).map(bare), VEHICLES.map(() => SWITCH_IS_ON));
+    same('it is a switch to a screen reader, on, said with the roster\'s own words for a worker',
+        await page.evaluate(selector => { const node = document.querySelector(selector); return [node.getAttribute('role'), node.getAttribute('aria-checked'), node.getAttribute('aria-label')]; }, onoff('tv_02')),
+        ['switch', 'true', `הסתר זמנית את ${car('טויוטה קורולה 2016')}`]);
+    same('the rows of the list still read as they did: the name and the seats', (await page.locator('#transportFleet .transport-fleet-item > .transport-row').allTextContents()).map(bare),
+        VEHICLES.map((name, i) => `${name}${i === 4 ? 9 : 5} מושבים`));
+    await floors(page, 'the list of vehicles, each with its switch', seatFloor);
+
+    // ONE TAP.
+    await page.locator(onoff('tv_02')).scrollIntoViewIfNeeded();
+    await page.locator(onoff('tv_02')).tap();
+    await page.locator('#askModal').waitFor({ state: 'visible' });
+    same('HE IS TOLD, in the app\'s own dialog: which vehicle, and how many men went back to wait',
+        [await text(page, '#askTitle'), await text(page, '#askMessage')],
+        ['הרכב כבוי: טויוטה קורולה 2016', '2 עובדים שישבו בו חזרו לממתינים.']);
+    check('it only says: there is one button on it, and nothing to decide', !(await visible(page, '#askCancel')));
+    await page.locator('#askOk').tap();
+    await page.waitForTimeout(120);
+    same('the car is not among the day\'s cars any more: six are drawn', [await page.locator('#transportBody [data-car]').count(),
+        await page.locator('#transportBody [data-car="tv_02"]').count()], [6, 0]);
+    same('and its two men are back in the tray, with everybody who was waiting', await tray(page), others);
+    same('the other car is as it was', await drawn(page, 'tv_01'), 'w_03 w_04 - - -');
+    same('NO DAY WAS REWRITTEN: tonight\'s plan and tomorrow\'s are byte for byte what they were', await dayBytes(), days);
+    same('what was written is the list: that vehicle, off from the day on the screen',
+        await page.evaluate(key => JSON.parse(localStorage.getItem(key)).vehicles.map(v => ('off' in v ? v.off : 'on')), SETTINGS_KEY),
+        ['on', DAY, 'on', 'on', 'on', 'on', 'on']);
+
+    same('IN THE LIST it has left the six and stands in a group of its own, under everything else, saying since when', [
+        await page.locator('#transportFleet > .transport-fleet-item').count(),
+        await text(page, '#transportFleetOff > h4'),
+        await text(page, '#transportFleetOff [data-vehicle="tv_02"] > .transport-row'),
+        await text(page, '#transportFleetOff .transport-off-from'),
+        await page.evaluate(() => { const fleet = document.getElementById('transportFleet'); return fleet.lastElementChild.id === 'transportFleetOff' && fleet.open; })],
+    [6, 'רכבים כבויים (1)', 'טויוטה קורולה 20165 מושבים', 'כבוי החל מ-10/11/2026', true]);
+    same('its switch says «כבוי», is off to a screen reader, and offers to turn it on - in the roster\'s words',
+        await page.evaluate(selector => { const node = document.querySelector(selector); return [node.textContent, node.getAttribute('aria-checked'), node.getAttribute('aria-label')]; }, onoff('tv_02')),
+        [SWITCH_IS_OFF, 'false', `הפעל את ${car('טויוטה קורולה 2016')}`]);
+    check('the keyboard is on that switch, where it now stands', await page.evaluate(() =>
+        Boolean(document.activeElement && document.activeElement.dataset.tk === 'onoff:tv_02')));
+    await floors(page, 'the list with a vehicle off', seatFloor);
+    same('nothing runs off the side of the off group', await page.evaluate(() => {
+        const group = document.getElementById('transportFleetOff').getBoundingClientRect();
+        return group.left >= 0 && group.right <= window.innerWidth;
+    }), true);
+    if (SHOTS && width === 440 && scheme === 'dark') {
+        await page.locator('#transportFleetOff').scrollIntoViewIfNeeded();
+        await page.waitForTimeout(100);
+        await shot(page, 'vehicle-off-list-440-dark');
+        await page.evaluate(() => { document.getElementById('transportBody').scrollTop = 0; });
+        await page.waitForTimeout(100);
+        await shot(page, 'vehicle-off-cars-440-dark');
+    }
+
+    // The summary of the day and the report of a period: the words in the field.
+    const told = await summaryWords(page);
+    check('the summary of the day does not name it at all - it is not a car today, not empty, and not «kept home today»',
+        !told.includes('קורולה 2016') && !told.split('\n').some(line => line.startsWith('רכבים שלא זמינים היום')));
+    check('and counts its men among the waiting', told.includes('ממתינים לשיבוץ (10):')
+        && told.includes(`- ${named('אחמד')} – ${named('הרצליה')}`) && told.includes(`- ${named('מוחמד')} – ${named('חיפה')}`), told);
+    check('no driver is offered a message for it', (await page.locator('#transportBody [data-wa="tv_02"]').count()) === 0);
+    const period = await reportWords(page);
+    check('the report of this week does not count it on either day: both are from the day it is off from',
+        !period.includes('קורולה 2016') && period.includes(`רכב: ${car('טויוטה קורולה 2013')} – יצא ב-2 ימים`), period);
+    same('and reading those two changed no day', await dayBytes(), days);
+
+    // A reload.
+    suite(`${where}: a vehicle turned off - after a reload, tomorrow, the day before, and on again`);
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(400);
+    await page.evaluate(day => { todayStr = () => day; }, DAY);
+    await openOn(page, DAY);
+    same('after a reload it is still off: six cars, its men waiting', [await page.locator('#transportBody [data-car]').count(),
+        await page.locator('#transportBody [data-car="tv_02"]').count(), await tray(page)], [6, 0, others]);
+
+    // Tomorrow's plan, which had men in it.
+    await openOn(page, NEXT);
+    same('TOMORROW: the car is not drawn, and the two men its plan seats are waiting', [
+        await page.locator('#transportBody [data-car="tv_02"]').count(), await drawn(page, 'tv_01'),
+        (await tray(page)).filter(id => id === 'w_05' || id === 'w_06')], [0, 'w_07 - - - -', ['w_05', 'w_06']]);
+    same('and opening tomorrow rewrote neither day', await dayBytes(), days);
+
+    // The day before the day it is off from: history.
+    await openOn(page, PREV);
+    same('THE DAY BEFORE it was turned off still draws it, with the other six', [await page.locator('#transportBody [data-car]').count(),
+        await page.locator('#transportBody [data-car="tv_02"]').count()], [7, 1]);
+    await openFleet(page);
+    same('while the list, on that day too, says it is off and since when',
+        [await text(page, onoff('tv_02')), await text(page, '#transportFleetOff .transport-off-from')], [SWITCH_IS_OFF, 'כבוי החל מ-10/11/2026']);
+
+    // ON AGAIN, from tomorrow's screen: one tap, and nothing is asked or said.
+    await openOn(page, NEXT);
+    await openFleet(page);
+    await page.locator(onoff('tv_02')).scrollIntoViewIfNeeded();
+    await page.locator(onoff('tv_02')).tap();
+    await page.waitForTimeout(150);
+    check('one tap turns it on again, with no question', !(await visible(page, '#askModal'))
+        && (await text(page, onoff('tv_02'))) === SWITCH_IS_ON && (await page.locator('#transportFleetOff').count()) === 0);
+    same('the list on the disk has no trace of the switch', await page.evaluate(key => /"off"/.test(localStorage.getItem(key)), SETTINGS_KEY), false);
+    same('tomorrow\'s men are in their seats again', [await drawn(page, 'tv_02'),
+        (await tray(page)).filter(id => id === 'w_05' || id === 'w_06')], ['w_05 - w_06 - -', []]);
+    await openOn(page, DAY);
+    same('and so are tonight\'s - the driver at the wheel, the other behind him', [await drawn(page, 'tv_02'), await tray(page)],
+        ['w_01 - - w_02 -', others.filter(id => id !== 'w_01' && id !== 'w_02')]);
+    same('THE ROUND TRIP: both days are byte for byte what they were before it was ever turned off', await dayBytes(), days);
+    const toldAgain = await summaryWords(page);
+    check('the summary has the car back, with its driver and its man',
+        toldAgain.includes(`רכב: ${car('טויוטה קורולה 2016')} – 2 מתוך 5`) && toldAgain.includes(`נהג: ${named('אחמד')} – ${named('הרצליה')}`), toldAgain);
+    const periodAgain = await reportWords(page);
+    check('and the report counts it on both days', periodAgain.includes(`רכב: ${car('טויוטה קורולה 2016')} – יצא ב-2 ימים`), periodAgain);
+
+    // A vehicle with nobody in it: off in one tap and nothing to tell.
+    await openFleet(page);
+    await page.locator(onoff('tv_06')).scrollIntoViewIfNeeded();
+    await page.locator(onoff('tv_06')).tap();
+    await page.waitForTimeout(150);
+    check('a vehicle with nobody in it is turned off by one tap and nothing is said', !(await visible(page, '#askModal'))
+        && (await page.locator('#transportBody [data-car="tv_06"]').count()) === 0 && (await text(page, onoff('tv_06'))) === SWITCH_IS_OFF);
+    // «זמין היום» is what it was for a vehicle that is on.
+    await page.locator('#transportBody [data-avail="tv_07"]').scrollIntoViewIfNeeded();
+    await page.locator('#transportBody [data-avail="tv_07"]').tap();
+    same('«לא זמין היום» still folds a vehicle that is on, for that day, and the summary\'s line is that vehicle alone',
+        [await text(page, '#transportBody [data-avail="tv_07"]'),
+            (await summaryWords(page)).split('\n').filter(line => line.startsWith('רכבים שלא זמינים היום'))],
+        ['לא זמין היום', [`רכבים שלא זמינים היום: ${car('ליפמוטור C10 2026')}`]]);
+    // Every one of them off: the screen says so, and where they are turned on.
+    await page.evaluate(day => { transportSettings().vehicles.forEach(v => transportSetVehicleOff(v.id, day)); renderTransport(); }, DAY);
+    same('with every vehicle off the screen says so, in the roster\'s sentence, on the day and in the list',
+        (await page.locator('#transportBody .empty-hint').allTextContents()).map(bare),
+        ['כל הרכבים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.', 'כל הרכבים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.']);
+
+    suite(`${where}: a vehicle turned off - the record, and what was written`);
+    same('the day record and everything queued for the cloud are byte for byte what they were', await recordBytes(page), before);
+    same('everything written is under this feature\'s own names: the switch, the list and the two days',
+        await page.evaluate(() => Object.keys(localStorage).filter(key => /transport/i.test(key)).sort()),
+        ['farkadTransport:day:2026-11-10', 'farkadTransport:day:2026-11-11', 'farkadTransport:enabled', 'farkadTransport:settings']);
+    same('no page error and no console error', errors, []);
+    same('and no request off this machine', away, []);
+    await context.close();
+}
+
 // The pictures, when asked for: an evening half done, put there by the functions the drags
 // call (the drags themselves are measured above; this only poses for the camera). Three
 // vehicles kept home so that a five-seater and the nine-seater are on one screen.
@@ -1589,6 +1837,9 @@ async function pictures() {
 
 for (const [width, height] of [[440, 956], [375, 667]]) {
     for (const scheme of ['dark', 'light']) await evening(width, height, scheme);
+}
+for (const [width, height] of [[440, 956], [375, 667]]) {
+    for (const scheme of ['dark', 'light']) await vehicleOff(width, height, scheme);
 }
 if (SHOTS) await pictures();
 
