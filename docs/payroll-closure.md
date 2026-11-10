@@ -23,6 +23,166 @@ wrong](#where-the-audit-and-the-design-were-wrong).
     node tests/paybook.oldbuilds.test.mjs   # v167, v169 and v171, out of Git, beside this build
     npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
 
+## Phase 6 — closed months of days leave the live document (design, then as built)
+
+**Development branch. Not served, not merged, on no phone; no real record was read and no
+rules were published. `FARKAD_FLAGS.months` is `false` and `paybook` is still `false` in
+everything committed.** The owner approved BUILDING AND TESTING this on 2026-11-10 (his
+word: «موافق»), not publishing it. This section was written before the code and corrected
+after it; [Phase 6 as built](#phase-6-as-built) at its end says what exists, what was
+measured, and where the work stopped.
+
+### The problem
+
+The record is one Firestore document and Firestore refuses one over 1 MiB. Phase 5 moves
+settled closures out of it; the DAYS are the larger half and stay. Measured at Phase 3 for
+20 men from today's 185 KB: the days alone fill it in about two years, and then every write
+on all three phones is refused.
+
+### The decision, in one table
+
+Phase 5's invariant is kept and extended, not replaced: **a phone's record never has a
+hole.**
+
+| | holds |
+|---|---|
+| the server's live document | the days of every month that has NOT left, and `monthIndex` - one row per month that has, and the list of that month's calendar dates |
+| the server's month documents | `schedules/{doc}/months/{YYYY-MM}_{digest}` - the days of one month, verbatim, create-once |
+| **a phone's own record** | **every day, at the field path it was written at, exactly as before anything left** - and the index, as the server holds it |
+
+So no report, no fold, no export and no screen reads the index: `payrollReport`,
+`invoiceReport`, the week grid, the xlsx and CSV, the pay sheet read `days` as they always
+have, because on a phone the days are still there. The index is used at the boundary, in
+the same two places as Phase 5 and through the same functions (`closedGate`,
+`closedAware`), which now make whole and strip both things.
+
+### Eligibility (the default the owner was told)
+
+`planMonths(schedule, today, { afterMonths })` - the dry run, and the list the move works
+from. It writes nothing. One row per calendar month that holds at least one day:
+
+| state | means |
+|---|---|
+| `archived` | already out of the live document |
+| `ready` | every man's every day in it is inside a closed, settled account, and at least six calendar months have passed since the later of its last such closure and its last day |
+| `waiting` | the same, and younger than that |
+| `held` | it stays - `why`: `current` (the month is not over), `open` (some man has a day in it that no closed account covers - named), `unsettled` (a covering closure is owed, unanswered, disputed, overpaid, corrected or irregular - named), `unreadable` (a day this build cannot read: law 10, it stays where a person can see it), `too-large` (over 900 KB: one document could not hold it) |
+
+"Settled" is Phase 5's word and Phase 5's function: a closure `planArchive` would call
+`ready`, `waiting` or `archived`. A month with a Rima count and no worker-day is settled by
+definition (nobody's account covers a Rima count) and waits six months from its last day.
+**Everything in a day moves with the day, byte for byte** - `plan`, `actual`, the rate
+stamps inside each entry, `rima`, `vehicleRuns` and any layer this build has never heard
+of: the month document holds `days[date]` as the server holds it, and nothing is rebuilt.
+
+### The move: copy, read back, compare, and only then drop
+
+`FarkadSync.archiveMonths({ today, limit, only })` in `js/sync/months.js`, one month at a
+time, Phase 5's loop: nothing about a move in progress is written on the phone; each step
+begins by READING the server and does the next thing it calls for.
+
+1. Read the live document. The row is there and no day of that month is: done.
+2. The live document's days of the month must be this phone's, byte for byte (`differs`).
+3. The month document is named by its content: `{YYYY-MM}_{digest of the canonical days}`.
+   **This is the one place the pattern differs from Phase 5, and it is forced.** A closure
+   is frozen; a day of a month that has not left yet is not (a Rima count, a late day for
+   a new man). With one fixed name a copy made before such an edit could never agree
+   again and the month could never leave. Named by content, a stale copy is simply a
+   document nothing points at.
+4. **THE COPY**, if no document of that name exists: created once, in a commit that moves
+   the revision and changes no business field (`adapter.copyMonth`).
+5. **THE DROP** (`adapter.archiveMonth`): the days leave, the row and the month's calendar
+   dates arrive, in one commit. Inside that transaction the adapter reads the month
+   document and the schedule and confirms the document holds exactly the days being
+   removed, each equal (`month-unconfirmed`, nothing written). Back to step 1, which is how
+   success is confirmed - by reading, at a revision at least that new.
+
+Refused with nothing attempted: `gate` (either flag), `busy`, `waiting`, `unsupported`, and
+everything `payTransactRefusal` refuses a closure for (`offline`, `unsent-work`, `pending`,
+`restoring`). **Never by itself**: unlike a closure, a month moves only when somebody asks
+(decision 57).
+
+### The rules (extended on this branch; nothing published)
+
+One file for the pay book and this together. Added:
+
+- **The month index only grows** - no row removed or changed, no date removed
+  (`monthGuard`).
+- **A row arrives one at a time**, in a protocol-2 write that names it (`archivedMonth`)
+  and its document (`monthDoc`); that document must ALREADY EXIST, be of that month and
+  that digest; the dates added must be exactly the document's; and **the days that leave
+  must be exactly the days the document holds - by key, checked by the server**
+  (`archivesMonth`). That the VALUES are equal is the adapter's, inside the transaction:
+  the rules cannot loop.
+- **No write, by anybody, of any shape, may add, change or remove a day whose date is in
+  the index** (`daysGuard`). This is what refuses a whole document that would resurrect
+  archived days, and a stale queued edit from a phone that had not heard. It is why the
+  index carries the calendar dates as a flat list: the rules have no loops and no string
+  functions over a set, but they can ask whether two sets meet.
+- **Once a month has left, a writer that does not speak protocol 2 may not write at all**
+  (`monthsNeedPaybook`), for Phase 5's reason: an older build installed afresh would read
+  those months as empty.
+- **A project may not begin with a month index.**
+- `months/{id}`: create-once, never updated or deleted, creatable only in the commit that
+  takes the schedule to the revision it names (the rule a closed document already has),
+  and only under the name its own month and digest give it.
+
+With no month index on the document every one of these is vacuous, which is what makes
+publishing the rules before any phone updates safe - to be MEASURED, not argued (see the
+rollout table).
+
+### On the way in: whole, or not adopted
+
+`closedGate` (top of `receive()`) now also calls `monthsWhole`. For each row: the days are
+laid back from this phone's own record when its days of that month have the row's digest;
+else from the last server document this phone adopted; else from the month document, which
+is fetched. A document that cannot be made whole is NOT adopted: the phone keeps the
+record it has, leaves «מסונכרן», and tries again on Phase 5's ladder. A row this build
+cannot read, or a live document that holds a day of an indexed month, cannot be made
+whole by anything and is held as `broken` - loudly, never papered over.
+
+### On the way out
+
+`closedAware` strips the days of indexed months from the three whole-document writes
+(`save`, `create`, the daily cloud copy). A field-path edit is untouched - and one that
+names an archived day never leaves the phone (next section).
+
+### The six hard questions
+
+**1. Does the phone keep the archived days?** Yes - only the server shrinks, as Phase 5
+chose for closures, and for the same reason: every reader of `days` stays untouched. **It
+moves the wall and does not remove it**; the phone's own storage becomes the bound. Both
+bounds are measured in [Capacity](#capacity-for-20-men-with-months-leaving); the next step
+is proposed there, not built.
+
+**2. An edit of an archived day.** Refused, in a sentence, before anything is written:
+`State.commit` and `State.commitMany` ask `monthArchivedPath` first, put memory back
+(`rollback`), and say why and what to do. Nothing is journalled, so nothing is owed and
+nothing can be reported as saved (law 3). An edit that was ALREADY queued when the month
+left (made offline on another phone) is not sent - the pre-send pass holds it with the
+contested writes, durably, and it is listed in ⋯ with both sides, where a person retires
+it; the server would refuse it in any case. It is never dropped silently (law 10).
+Bringing a month back was considered and rejected for this phase: a month document is
+create-once and the index only grows, so "back" needs a second generation of both - a
+larger mechanism than the one it corrects. The correction of a wage that is already
+closed has a door already: an adjustment on the man's statement (Phase 2). Decision 54.
+
+**3. Reports and exports over a range that includes archived months.** The same figures,
+by construction (the phone's days are whole) and by proof: one string of every report over
+the whole range, compared before and after, on the phone that moved, a phone that watched,
+a phone that was away, and a phone installed afterwards.
+
+**4. Backups, the rescue file, the four restore doors, the daily copy.** The backup and
+the rescue file are the phone's record, so they carry every day, archived or not, and say
+so in the file. A restore never changes an archived month: `layMonthsKept` puts the
+phone's index and the archived months' own days over whatever the file held, before the
+document is built; the write is stripped; and the server refuses any whole document that
+touches an archived date or drops a row. Older builds are measured out of Git.
+
+**5. Rules.** Above; the rollout table is re-measured below.
+
+**6. Capacity.** Re-measured below, with what still grows.
+
 ## Phase 5 — what leaves the live document, and the screens Phase 4 left (v176)
 
 **Development branch. Not served, not merged, on no phone; no real record was read and no
