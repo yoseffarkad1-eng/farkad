@@ -139,8 +139,60 @@ and deducts from the wage only what is left — never more than the man earned. 
 order is load-bearing: repayments come off before the wage is asked to cover the
 rest, or a man who settled in cash is deducted for it a second time out of his pay.
 A man with no rate is owed an unknown amount, not zero, so the balance passes
-through him untouched. An overpayment does not become a negative balance, which
-would quietly add itself to his next wage as though the firm owed him for it.
+through him untouched.
+
+**The wage of an account is the sum of its days rounded to the agora once, half up**
+(`agoraRound`, the same rounding every sheet prints with; v180). `payrollReport` rounds
+nothing - half an hour at 41.25 is 20.625 - so the walk rounds the total where it reads
+it, and that one figure is what the deduction is measured against, what a closure
+records as `gross`, and the most a person may choose to take off. Up to v179 the walk
+compared the unrounded sum and deducted the rounded one: 630.63 off a recorded 630.625,
+which `closureProblems` then refused, on the phone that wrote it. A closure written
+that way is never rewritten; the judge reads its wage to the agora, which accepts a
+deduction equal to the wage as printed and nothing above it. (A half is told apart as
+far as binary floating point can: 16.665 is held as 16.66499..., and is printed, paid
+and deducted as 16.66 on every surface alike.)
+
+### The credit
+
+**Money a man gave back beyond what he owed stays his credit until it is used.** It
+comes off whatever advance he takes next, however many periods later, and is never
+dropped at a boundary. It is never a negative debt and never wages: a period carries
+forward what he owes, zero or more (`carriedForward`), and beside it what he is in
+credit, zero or more (`creditForward`; `creditIn` on the way in). The two are never
+both above zero, no surface prints a balance below zero, and `net` is still the wage
+less what came off it - a credit raises no wage, and handing it back to him in cash is
+a conversation this app does not have on anybody's behalf. Between periods the walk
+hands on one signed figure (`position`); nothing prints it and nothing records it.
+
+This is the owner's ruling as recommended to him on 2026-11-10 and built in v180 (a
+candidate, shown to him before it is served). Up to v179 there was no rule, only an
+accident: an open period floored the balance at zero and dropped the excess, while a
+CLOSED period - whose deduction is a record, so that a repayment arriving late can take
+the sum below it - handed the negative figure to the next period, where it was netted
+against a new advance if one fell there and dropped if it fell a period later. The same
+1,500 was 1,000 owed or 1,500 owed depending on the week, and a close in between froze
+`carriedIn: -500` onto a payslip. Such a payslip is not restated; it is read as what it
+was, an opening credit of 500. A closure written from v180 records `carriedIn` zero or
+more, and `creditIn` beside it only when there was one.
+
+The fold agrees with the walk: what one advance was over-settled by (`overpaid`) comes
+off what his other advances have left in `openAdvanceBalance` and in the summary over
+his advances. `advanceOutstanding` itself is per advance and unchanged - it is what a
+closure is judged against. The two can still differ for a reason that is older than
+the credit and is not touched by it: the walk takes an OPEN past period to have
+deducted what it could, and the fold counts only deductions a close wrote down.
+
+**What the credit does not change** is the over-settled state (below, `overpaidAdvances`,
+`tests/wording.test.mjs`): while one of a man's advances has had more settled against
+it than was handed over, his account says it needs looking at, the automatic deduction
+stops on every open period and a close is refused. The credit is in the figures; the
+deduction waits for a person. Whether using up the credit should lift that by itself
+is the owner's to decide and has not been decided.
+
+The other ruling - no credit at all, the excess only flagged - is one line,
+`OVERPAYMENT_STAYS_CREDIT` in `js/model/schema.js`, and `tests/overpayment.test.mjs`
+runs the app that way too.
 
 Every figure is a function of what is dated on or before its own account's last day,
 and of nothing else. That is the whole shape, and it comes from one rule the owner
@@ -161,7 +213,8 @@ a back-dated repayment of 400 moved a closed period's closing balance from 1,950
 So `advanceWalk` returns **two balances**, and the difference between them is the point.
 `carriedOut` is what the payslip says and says forever — read from the closure record.
 `carriedForward` is what the next period opens owing, and includes anything dated into
-this period after it shut. Each single-number answer fails in a different direction:
+this period after it shut (and where that takes the sum below zero, the rest is
+`creditForward` - see «The credit»). Each single-number answer fails in a different direction:
 recompute both and a paid payslip is rewritten; freeze both and a repayment a man
 actually made reduces nothing anywhere, which is money out of the sum. `lateSinceClose`
 names the gap so a screen can say a transaction arrived after the close rather than

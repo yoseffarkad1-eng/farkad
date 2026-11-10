@@ -1180,7 +1180,29 @@ function paybookAccount(schedule, man, today, fold, cache) {
 
     const advances = paybookAdvances(schedule, workerId);
     const open = advances.filter(row => row.left > 0);
-    const debt = paybookSum(open.map(row => row.left));
+    // WHAT HE OWES IS ONE FIGURE IN THIS APP, and since v180 it is net of his credit.
+    //
+    // The owner's ruling there (OVERPAYMENT_STAYS_CREDIT, js/model/schema.js): money a
+    // man gave back beyond what he owed stays his credit and comes off whatever advance he
+    // takes next. The account walk carries it (`creditForward`), and openAdvanceBalance -
+    // the sum over his advances every older screen prints - nets it the same way. This
+    // fold used to add up `left` alone: a man over-settled by 500 on one advance who then
+    // took 1,500 read «חוב מקדמות 1,500» on the accounts page and «חוב פתוח: 1000» on his
+    // statement, the same evening, on the same phone (measured at the merge of v180 into
+    // this branch; tests/overpayment.test.mjs, «the pay book and the credit»).
+    //
+    // So: the sum of what is left, less what was over-settled, never below zero - and
+    // what is over beyond that is `credit`, its own figure, zero for almost everybody.
+    // Neither is ever added to or taken from the wage he is owed; that has not changed.
+    // The ROWS are not netted: each advance still says what its own record says (`left`,
+    // `overpaid`), a closure is still refused while one of them is over-settled
+    // (`overpaid`), and his status is still «לבדיקה» - the credit is a figure, not a way
+    // past the person who has to look.
+    const owedOnAdvances = paybookSum(open.map(row => row.left));
+    const overSettled = (typeof overpaymentStaysCredit === 'function' && overpaymentStaysCredit())
+        ? paybookSum(advances.map(row => row.overpaid)) : 0;
+    const debt = agoraRound(Math.max(0, owedOnAdvances - overSettled));
+    const credit = agoraRound(Math.max(0, overSettled - owedOnAdvances));
 
     const mine = Object.keys(fold.statements).map(id => fold.statements[id])
         .filter(of => of.workerId === workerId)
@@ -1261,6 +1283,8 @@ function paybookAccount(schedule, man, today, fold, cache) {
         beforeTracking,
         advances: open,
         debt,
+        // His credit on advances beyond everything he owes (v180's ruling). Never wages.
+        credit,
         unpaid,
         wageDue,
         wageOverpaid,
@@ -1696,8 +1720,10 @@ function planClosure(schedule, worker, period, choices, stamp) {
 
     // --- build it, on a copy, with the ledger's own writers.
     const draft = paybookClone(schedule);
+    // The SIGNED position (v180), as the old dialog's closePeriodChanges passes it: a
+    // payslip of a man who opened in credit records the credit beside a debt of zero.
     const facts = closureFacts(draft, workerId, from, to,
-        advanceCarryInto(draft, workerId, from), advanceDeducted);
+        advancePositionInto(draft, workerId, from), advanceDeducted);
     const walked = advanceAccount(draft, workerId, from, to, advanceDeducted);
     if (!facts || walked.invalidDeduction) {
         return { kind: 'closure', ok: false, canClose: false, reasons: ['deduction'],
@@ -2401,10 +2427,19 @@ function planPayMigration(schedule, today) {
             // are printed, because which of them is his debt is exactly the kind of
             // history this app was never told and may not assume.
             const walk = advanceAccount(schedule, workerId, account.current.from, account.current.to);
-            const walked = walk.closed ? walk.carriedForward
-                : agoraRound(walk.carriedForward + walk.deducted);
-            const folded = paybookSum(account.advances
-                .filter(row => row.date <= account.current.to).map(row => row.left));
+            // (Since v180 both are read NET OF HIS CREDIT when the credit ruling is in
+            // force: the walk's signed position, and the advances' left less what was
+            // over-settled. Otherwise an over-settled advance - which is already its own
+            // line in this report - would also be listed here as a disagreement between
+            // two folds that in fact agree.)
+            const keeps = typeof overpaymentStaysCredit === 'function' && overpaymentStaysCredit();
+            const walked = !keeps
+                ? (walk.closed ? walk.carriedForward : agoraRound(walk.carriedForward + walk.deducted))
+                : (walk.closed ? walk.position : agoraRound(walk.position + walk.deducted));
+            const mine = paybookAdvances(schedule, workerId).filter(row => row.date <= account.current.to);
+            const folded = !keeps
+                ? paybookSum(mine.filter(row => row.left > 0).map(row => row.left))
+                : agoraRound(paybookSum(mine.map(row => row.left)) - paybookSum(mine.map(row => row.overpaid)));
             if (paybookAgorot(walked) !== paybookAgorot(folded)) {
                 debtDisagreements.push({ workerId, name: String(man.name || ''),
                     byAdvance: folded, byAccountWalk: walked });

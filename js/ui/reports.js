@@ -106,13 +106,22 @@ function workerAdvanceItems(workerId) {
 }
 
 function workerAdvanceSummary(workerId) {
-    return workerAdvanceItems(workerId).reduce((sum, item) => {
+    const summary = workerAdvanceItems(workerId).reduce((sum, item) => {
         const state = advanceOutstanding(State.schedule, item.id);
         ['given', 'repaid', 'deducted', 'left', 'overpaid'].forEach(key => {
             sum[key] = agoraRound(sum[key] + state[key]);
         });
         return sum;
     }, { given: 0, repaid: 0, deducted: 0, left: 0, overpaid: 0 });
+    // WHAT IS LEFT FOR THE MAN, less what he is in credit - the same netting as
+    // openAdvanceBalance and the account walk (the ruling over OVERPAYMENT_STAYS_CREDIT
+    // in js/model/schema.js), so the figure at the top of his advances and the figure on
+    // the sheet are one figure. `overpaid` stays what it was: each advance still says
+    // what it was over-settled by, and the screen still asks for it to be looked at.
+    if (typeof overpaymentStaysCredit === 'function' && overpaymentStaysCredit()) {
+        summary.left = agoraRound(Math.max(0, summary.left - summary.overpaid));
+    }
+    return summary;
 }
 
 function showWorkerAdvances(id) {
@@ -2806,6 +2815,20 @@ const CLOSURE_CLOCK_BEHIND = 'השעון של הטלפון הזה מפגר אח�
     + 'סגירה מהטלפון הזה תעביר את התנועה הזאת לתקופה הבאה - לכן היא חסומה עכשיו. '
     + 'נסה שוב בעוד כמה דקות, או סגור מטלפון אחר.';
 
+// WHAT A MAN HANDED BACK BEYOND WHAT HE OWED, named (v180).
+//
+// By the ruling over OVERPAYMENT_STAYS_CREDIT in js/model/schema.js that money stays his
+// credit and comes off the next advance he takes. Without a name for it the account
+// stops adding up on the page: 1,500 handed over, 1,000 off the wage, nothing left
+// owing, and no line anywhere saying where the other 500 went. So the statement and
+// the sheet's note say it, in these words and no others, wherever there is one - and
+// say nothing for everybody else, which is nearly everybody.
+//
+// PROPOSED, not approved: the owner has not read these two phrases. They are pinned in
+// tests/overpayment.test.mjs so that changing them is a decision and not an accident.
+const ADVANCE_CREDIT_LABEL = 'יתרת זכות';
+const ADVANCE_CREDIT_FROM_BEFORE = `${ADVANCE_CREDIT_LABEL} מחשבון קודם`;
+
 const LEDGER_KIND_LABELS = {
     given: 'ניתנה מקדמה',
     repaid: 'הוחזר במזומן',
@@ -3082,6 +3105,13 @@ function workerStatementText(workerId) {
         // hands on a date it did not, in the document the man checks his own pay against.
         lines.push(`יתרת פתיחה: ${moneyText(account.carriedIn)}`);
     }
+    // OR WHAT HE WAS IN CREDIT. Never both: he opened owing, or in credit, or neither.
+    // Without this line the deduction below is smaller than the advances above it and
+    // nothing on his own copy says why.
+    if (account && account.creditIn > 0) {
+        lines.push('');
+        lines.push(`${ADVANCE_CREDIT_FROM_BEFORE}: ${moneyText(account.creditIn)}`);
+    }
 
     if (advances.length > 0) {
         lines.push('');
@@ -3174,6 +3204,12 @@ function workerStatementText(workerId) {
             }
         } else if (account && account.carriedForward > 0) {
             lines.push(`חוב פתוח: ${moneyText(account.carriedForward)}`);
+        }
+        // What he goes into the next account IN CREDIT, when it is anything. It can
+        // stand under a closing balance: the payslip said what he owed when it shut,
+        // and money he handed back afterwards is his.
+        if (account && account.creditForward > 0) {
+            lines.push(`${ADVANCE_CREDIT_LABEL}: ${moneyText(account.creditForward)}`);
         }
     }
 
@@ -3529,8 +3565,17 @@ function moneyText(value) {
 // person, by how much, and that the payment is not to be finalised on this. Written once
 // here so a surface cannot say two of them.
 function overpaymentWarning(account) {
-    if (!account || !account.review || !(account.overpaid > 0)) return null;
-    return `⚠️ החשבון דורש בדיקה · ההחזרים עולים על החוב הפתוח ב-${moneyText(account.overpaid)} ₪`
+    if (!account || !account.review) return null;
+    // By how much. With the credit kept (the ruling in force, OVERPAYMENT_STAYS_CREDIT in
+    // js/model/schema.js) that is what his advances were over-settled by, as it always
+    // was. Under the OTHER ruling an excess is dropped at the end of the period it arose
+    // in, and this sentence is the only thing that says so - so there it also speaks for
+    // an excess no single advance shows.
+    const dropped = (typeof overpaymentStaysCredit === 'function' && !overpaymentStaysCredit())
+        ? (Number(account.excess) || 0) : 0;
+    const by = Math.max(Number(account.overpaid) || 0, dropped);
+    if (!(by > 0)) return null;
+    return `⚠️ החשבון דורש בדיקה · ההחזרים עולים על החוב הפתוח ב-${moneyText(by)} ₪`
         + ' · אין לאשר את התשלום אוטומטית';
 }
 
@@ -3691,6 +3736,11 @@ function moneyNotes(row) {
     if (row.carry && row.carry.carriedIn > 0) {
         notes.push(`${moneyText(row.carry.carriedIn)} ₪ מקדמה מחשבון קודם`);
     }
+    // His credit from before, which is why the deduction on this row can be smaller
+    // than what he was handed in it - see ADVANCE_CREDIT_LABEL.
+    if (row.carry && row.carry.creditIn > 0) {
+        notes.push(`${moneyText(row.carry.creditIn)} ₪ ${ADVANCE_CREDIT_FROM_BEFORE}`);
+    }
     // THE MONEY HANDED OVER IN THIS PERIOD, as its own figure and under its own name.
     //
     // Only while the account is being read, and that is the whole point: then the third
@@ -3720,6 +3770,11 @@ function moneyNotes(row) {
     if (row.carry && row.carry.closed && row.carry.lateSinceClose !== 0) {
         notes.push('הגיעה תנועה אחרי סגירת התקופה · '
             + `חוב פתוח ${moneyText(row.carry.carriedForward)} ₪`);
+    }
+    // And what he takes into the next account in credit. Not on an unpriced row, for
+    // the reason the carried balance is not: that row shows the whole amount itself.
+    if (row.carry && row.carry.gross !== null && row.carry.creditForward > 0) {
+        notes.push(`${ADVANCE_CREDIT_LABEL} ${moneyText(row.carry.creditForward)} ₪`);
     }
     if (row.carry && row.carry.repaid > 0) {
         notes.push(`${moneyText(row.carry.repaid)} ₪ ${LEDGER_KIND_LABELS.repaid}`);

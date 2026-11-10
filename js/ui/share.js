@@ -186,11 +186,16 @@ function renderMessageStyles() {
 // deeper. Where it does not exist, wa.me opens WhatsApp itself with the message already
 // written. Both leave the app, so the modal closes behind them.
 function sendDayMessage() {
-    const text = document.getElementById('shareText').value;
-    const status = document.getElementById('shareStatus');
+    shareTextOut(document.getElementById('shareText').value, document.getElementById('shareStatus'), closeShareModal);
+}
 
+// The same two doors for ANY text the app has composed, written once: the day's message
+// above, and the summary of the day's rides (v179, js/ui/transport.js). `status` is the
+// line the outcome is said on; `done` closes the dialog the text was shown in - the
+// caller's own, because both doors leave the app.
+function shareTextOut(text, status, done) {
     if (navigator.share) {
-        navigator.share({ text }).then(closeShareModal, error => {
+        navigator.share({ text }).then(done, error => {
             // A cancelled sheet is not a failure and must not be reported as one.
             if (error && error.name === 'AbortError') return;
             // By the time this rejection lands, the user gesture is over - window.open
@@ -207,7 +212,7 @@ function sendDayMessage() {
     // where the browser still allows it.
     status.textContent = 'פותח וואטסאפ…';
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-    closeShareModal();
+    done();
 }
 
 // Kept for the machine with a keyboard and for pasting somewhere that is not WhatsApp.
@@ -215,9 +220,12 @@ function sendDayMessage() {
 // so on a browser that refused the clipboard the person switched apps, pasted whatever
 // was there from before, and sent that.
 function copyDayMessage() {
-    const box = document.getElementById('shareText');
-    const status = document.getElementById('shareStatus');
+    copyTextOut(document.getElementById('shareText'), document.getElementById('shareStatus'));
+}
 
+// `box` is the read-only field the text is shown in, `status` the line that says what
+// happened. Shared with the summary of the day's rides (v179), like shareTextOut.
+function copyTextOut(box, status) {
     const said = ok => {
         status.textContent = ok ? '✔️ הועתק' : '⚠️ ההעתקה נחסמה - סמן את הטקסט והעתק ידנית';
         setTimeout(() => { status.textContent = ''; }, ok ? 2000 : 6000);

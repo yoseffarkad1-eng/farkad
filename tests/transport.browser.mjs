@@ -27,12 +27,18 @@
 // what is measured is the app's own handler. Every request the page makes is recorded,
 // and none may be for WhatsApp or for anywhere else off this machine.
 //
-// TRANSPORT_SHOTS=<directory> also writes five JPEGs (main-440-dark, dragging-440-dark,
-// small-375-dark, main-440-light, nine-375-dark). Synthetic names only - it is this file's
-// own fixture.
+// THE SUMMARY OF THE DAY (v179) is measured here too: its one button on the screen, its
+// dialog over the panel, the words in it against the cars AS THEY ARE DRAWN, the three
+// ways out (the share sheet and wa.me are replaced by recorders - nothing is shared and
+// nothing is opened), the picture, and that none of it moves a key on the disk.
+//
+// TRANSPORT_SHOTS=<directory> also writes six JPEGs (main-440-dark, summary-440-dark,
+// dragging-440-dark, small-375-dark, main-440-light, nine-375-dark) and the summary's own
+// picture (summary-picture.png). Synthetic names only - it is this file's own fixture.
 
 import { chromium } from 'playwright';
 import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
 import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
@@ -67,6 +73,7 @@ const DRIVER = 'נהג';
 const OUT_OF_CAR = 'הוצאה מהרכב';
 const CANCEL = 'ביטול';
 const ALL_SEATED = 'כל העובדים משובצים';
+const SUMMARY = 'סיכום הסעות ליום';
 const VEHICLES = ['טויוטה קורולה 2013', 'טויוטה קורולה 2016', 'BYD סיל U 2025', 'BYD אטו 3 2025', 'פולקסווגן 2018',
     'סוואנה 2010', 'ליפמוטור C10 2026'];
 
@@ -295,6 +302,223 @@ async function floors(page, label, seatFloor) {
     return found;
 }
 
+// ------------------------------------------------------------------ the summary of the day
+
+// What the summary must say, WORKED OUT FROM THE GLASS and not from the plan: the cards
+// in the order they are drawn, each car's tiles by seat number, a man's name and site off
+// his tile's own label, the chips of the tray, the folded cards. The pinned words of
+// tests/transport.test.mjs, put together by this file's own hand.
+const summaryFromScreen = page => page.evaluate(() => {
+    const strip = value => String(value || '').replace(/[\u2066-\u2069\u200e\u200f]/g, '');
+    const who = node => {
+        const [name, site] = strip(node.getAttribute('aria-label')).replace(/^נהג: /, '').split(' · ');
+        return site ? `${name} – ${site}` : name;
+    };
+    const blocks = [[`סיכום הסעות ל${strip(document.getElementById('transportContext').textContent)}:`]];
+    const empty = [];
+    const home = [];
+    let cars = 0;
+    [...document.querySelectorAll('#transportBody [data-car]')].forEach(card => {
+        const name = strip(card.querySelector('.transport-vehicle-name').textContent);
+        const tiles = [...card.querySelectorAll('.transport-seat')].sort((a, b) => Number(a.dataset.seat) - Number(b.dataset.seat));
+        if (tiles.length === 0) { home.push(name); return; }
+        const taken = tiles.filter(tile => tile.dataset.worker);
+        if (taken.length === 0) { empty.push(name); return; }
+        cars += 1;
+        const lines = [`רכב: ${name} – ${taken.length} מתוך ${tiles.length}`];
+        lines.push(tiles[0].dataset.worker ? `נהג: ${who(tiles[0])}` : 'בלי נהג');
+        const passengers = tiles.slice(1).filter(tile => tile.dataset.worker);
+        if (passengers.length === 0) lines.push('בלי נוסעים.');
+        else passengers.forEach(tile => lines.push(`- ${who(tile)}`));
+        blocks.push(lines);
+    });
+    if (cars === 0) blocks.push(['אף עובד לא שובץ לרכב.']);
+    const chips = [...document.querySelectorAll('#transportChips .transport-chip')];
+    if (chips.length) blocks.push([`ממתינים לשיבוץ (${chips.length}):`].concat(chips.map(chip => `- ${who(chip)}`)));
+    if (cars > 0 && empty.length) blocks.push([`רכבים ריקים: ${empty.join(', ')}`]);
+    if (home.length) blocks.push([`רכבים שלא זמינים היום: ${home.join(', ')}`]);
+    return blocks.map(block => block.join('\n')).join('\n\n');
+});
+const summaryField = page => page.evaluate(() => document.getElementById('transportSummaryText').value);
+const summaryOpen = page => visible(page, '#transportSummaryModal');
+// Every key on the disk by name, and the bytes of everything this feature keeps.
+const diskOf = page => page.evaluate(() => JSON.stringify([Object.keys(localStorage).sort(),
+    Object.keys(localStorage).filter(key => /transport/i.test(key)).sort().map(key => [key, localStorage.getItem(key)])]));
+
+async function summary(page, where) {
+    suite(`${where}: the summary of the day - one button, the app's own dialog, three ways out, nothing written`);
+    const record = await recordBytes(page);
+    const disk = await diskOf(page);
+    const marks = await page.evaluate(() => [...document.querySelectorAll('#transportBody [data-car]')].map(card => card.dataset.mark || '-').join());
+
+    same('one button on the screen, by its words', await page.locator('#transportPanel button', { hasText: SUMMARY }).evaluateAll(nodes => nodes.map(node => node.id)),
+        ['transportSummaryOpen']);
+    check('it is above the first car, under the tray', await page.evaluate(() => {
+        const node = document.getElementById('transportSummaryOpen');
+        const first = document.querySelector('#transportBody [data-car]');
+        return Boolean(node.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
+            && Boolean(document.getElementById('transportTray').compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }));
+    same('and nowhere else in the app is there a way to it', await page.evaluate(word =>
+        [...document.querySelectorAll('button, a, summary')].filter(node => node.textContent.includes(word) || /transportSummary|openTransportSummary/.test(node.getAttribute('onclick') || ''))
+            .filter(node => !node.closest('#transportPanel') && !node.closest('#transportSummaryModal')).length, 'סיכום הסעות'), 0);
+    await page.evaluate(() => { document.getElementById('transportBody').scrollTop = 0; });
+    const size = await page.locator('#transportSummaryOpen').boundingBox();
+    check('44px at least, both ways, and the width of the list', size.height >= 43.5 && size.width >= 200, JSON.stringify(size));
+
+    await page.locator('#transportSummaryOpen').tap();
+    await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+    same('it opens the app\'s own dialog: its title, the day, the label, and four worded buttons',
+        [await text(page, '#transportSummaryTitle'), await text(page, '#transportSummaryContext'), await text(page, '#transportSummaryLabel'),
+            (await page.locator('#transportSummaryModal .modal-actions button').allTextContents()).map(bare)],
+        ['סיכום הסעות', 'יום שלישי 10/11/2026', 'תצוגה מקדימה של הסיכום', ['שליחה בוואטסאפ', 'העתקה', 'שיתוף כתמונה', 'סגירה']]);
+    const shape = await page.evaluate(() => {
+        const modal = document.getElementById('transportSummaryModal');
+        const field = document.getElementById('transportSummaryText');
+        const box = field.getBoundingClientRect();
+        const content = modal.querySelector('.modal-content').getBoundingClientRect();
+        const small = [...modal.querySelectorAll('button')].map(node => node.getBoundingClientRect())
+            .filter(one => one.width < 43.5 || one.height < 43.5).length;
+        return { onTop: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === field,
+            panelOpen: document.getElementById('transportPanel').classList.contains('open'),
+            readOnly: field.readOnly, font: parseFloat(getComputedStyle(field).fontSize), small,
+            inside: content.left >= -0.5 && content.right <= window.innerWidth + 0.5 && content.top >= -0.5 && content.bottom <= window.innerHeight + 0.5,
+            pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+            native: [...modal.querySelectorAll('[onclick]')].map(node => node.getAttribute('onclick')).join() };
+    });
+    check('the dialog is OVER the panel, which stays open behind it', shape.onTop && shape.panelOpen, JSON.stringify(shape));
+    check('the text is in a field nobody types in, at 16px or more', shape.readOnly && shape.font >= 16, JSON.stringify(shape));
+    same('no button of it is under 44px either way', shape.small, 0);
+    check('it is whole on the glass and the page does not scroll sideways', shape.inside && shape.pageFits, JSON.stringify(shape));
+
+    const field = await summaryField(page);
+    same('THE WORDS ARE THE PLAN ON THE SCREEN: every car as it is drawn, driver first, the men by their seats, who waits, what is empty, what stays home',
+        bare(field).split('\n'), (await summaryFromScreen(page)).split('\n'));
+    check('a vehicle\'s name is held right-to-left in it and a man\'s is isolated', field.includes(`${RLI}`) && field.includes(`${FSI}`)
+        && field.split('\n').every(line => !line.startsWith(RLI)));
+
+    // --- WhatsApp, by the day message's own door. The share sheet and window.open are
+    // recorders here: nothing is shared and nothing is opened.
+    await page.evaluate(() => {
+        window.__shared = null;
+        window.__opened = null;
+        window.__realOpen = window.open;
+        window.open = url => { window.__opened = url; return null; };
+        navigator.share = data => { window.__shared = data; return Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' })); };
+    });
+    await page.locator('#transportSummarySend').tap();
+    await page.waitForTimeout(150);
+    same('«שליחה בוואטסאפ» hands the share sheet the text and nothing else', await page.evaluate(() => window.__shared), { text: field });
+    check('a share sheet backed out of is not a failure: the dialog stays, says nothing, and opens nothing',
+        (await summaryOpen(page)) && (await text(page, '#transportSummaryStatus')) === '' && (await page.evaluate(() => window.__opened)) === null);
+    await page.evaluate(() => { navigator.share = () => Promise.reject(new Error('boom')); });
+    await page.locator('#transportSummarySend').tap();
+    await page.waitForTimeout(150);
+    check('a share sheet that fails keeps the summary on the glass and says to copy it',
+        (await summaryOpen(page)) && (await text(page, '#transportSummaryStatus')).includes('העתק'), await text(page, '#transportSummaryStatus'));
+    await page.evaluate(() => { navigator.share = data => { window.__shared = data; return Promise.resolve(); }; });
+    await page.locator('#transportSummarySend').tap();
+    await page.waitForTimeout(150);
+    check('shared, the dialog steps aside and the screen is still there', !(await summaryOpen(page)) && (await visible(page, '#transportPanel')));
+
+    await page.locator('#transportSummaryOpen').tap();
+    await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+    same('opened again it starts with nothing said', await text(page, '#transportSummaryStatus'), '');
+    await page.evaluate(() => { delete navigator.share; });
+    await page.locator('#transportSummarySend').tap();
+    await page.waitForTimeout(150);
+    same('with no share sheet it is wa.me with the text and NO NUMBER - the person picks the chat',
+        await page.evaluate(() => window.__opened), `https://wa.me/?text=${encodeURIComponent(field)}`);
+    check('and the dialog steps aside', !(await summaryOpen(page)));
+
+    // --- copy
+    await page.locator('#transportSummaryOpen').tap();
+    await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+    await page.evaluate(() => { window.__copied = null; navigator.clipboard.writeText = value => { window.__copied = value; return Promise.resolve(); }; });
+    await page.locator('#transportSummaryCopy').tap();
+    await page.waitForTimeout(150);
+    same('«העתקה» puts the same text on the clipboard, and says it did', [await page.evaluate(() => window.__copied), await text(page, '#transportSummaryStatus')],
+        [field, '✔️ הועתק']);
+    await page.evaluate(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('blocked')); document.__exec = document.execCommand; document.execCommand = () => false; });
+    await page.locator('#transportSummaryCopy').tap();
+    await page.waitForTimeout(150);
+    check('a copy the browser refused is said to have been refused', (await text(page, '#transportSummaryStatus')).includes('נחסמה'), await text(page, '#transportSummaryStatus'));
+    await page.evaluate(() => { document.execCommand = document.__exec; });
+
+    // --- the picture: read off this dialog, drawn by the printout's own machinery.
+    const picture = await page.evaluate(() => {
+        const seen = [];
+        const proto = CanvasRenderingContext2D.prototype;
+        const real = proto.fillText;
+        proto.fillText = function (value, ...rest) { seen.push(String(value)); return real.call(this, value, ...rest); };
+        let out = null;
+        try { out = printoutImage('transport'); } finally { proto.fillText = real; }
+        if (!out) return null;
+        return { name: out.name, type: out.blob.type, size: out.blob.size, width: out.width, height: out.height,
+            rows: out.layout.rows.length, title: Boolean(out.layout.title), seen };
+    });
+    given('the picture was drawn', Boolean(picture));
+    if (picture) {
+        same('the picture is a PNG named for the day', [picture.name, picture.type, picture.size > 2000], ['farkad-הסעות-2026-11-10.png', 'image/png', true]);
+        same('it has a title and one box for every block under it', [picture.title, picture.rows], [true, field.split('\n\n').length - 1]);
+        same('and every word drawn in it is a word of the dialog, in the dialog\'s order - nothing added, nothing left out',
+            bare(picture.seen.join(' ')), bare(field.split('\n').filter(Boolean).join(' ')));
+    }
+    await page.evaluate(() => {
+        window.__file = null;
+        navigator.canShare = () => true;
+        navigator.share = data => { const file = data.files && data.files[0]; window.__file = file ? { name: file.name, type: file.type, size: file.size, text: data.text || null } : 'no file'; return Promise.resolve(); };
+    });
+    await page.locator('#transportSummaryPicture').tap();
+    await page.waitForTimeout(150);
+    const file = await page.evaluate(() => window.__file);
+    check('«שיתוף כתמונה» hands the share sheet that file, inside the tap', Boolean(file) && file.name === 'farkad-הסעות-2026-11-10.png'
+        && file.type === 'image/png' && file.size > 2000 && file.text === null, JSON.stringify(file));
+    check('and the dialog stays for the next thing', await summaryOpen(page));
+    await page.evaluate(() => { delete navigator.share; delete navigator.canShare; window.open = window.__realOpen; });
+
+    // --- the way out, and what it all cost: nothing.
+    await page.keyboard.press('Escape');
+    check('Escape closes the dialog and NOT the screen behind it', !(await summaryOpen(page)) && (await visible(page, '#transportPanel')));
+    same('with the dialog shut there is no picture to draw', await page.evaluate(() => printoutImage('transport')), null);
+    await page.locator('#transportSummaryOpen').tap();
+    await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+    await page.locator('#transportSummaryClose').tap();
+    check('«סגירה» closes it too', !(await summaryOpen(page)) && (await visible(page, '#transportPanel')));
+
+    same('NOTHING WAS WRITTEN: the same keys on the disk, and every transport key byte for byte', await diskOf(page), disk);
+    same('the record and the queue are byte for byte what they were', await recordBytes(page), record);
+    same('no car was marked «נפתח בוואטסאפ» by it, and nothing says «נשלח»', [await page.evaluate(() =>
+        [...document.querySelectorAll('#transportBody [data-car]')].map(card => card.dataset.mark || '-').join()),
+    /נשלח/.test(field + await page.locator('#transportSummaryModal').textContent())], [marks, false]);
+
+    // --- a plan that changes while the dialog is open (another phone's snapshot redraws
+    // the screen): the words follow the screen. Put back afterwards, seat for seat.
+    await page.locator('#transportSummaryOpen').tap();
+    await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+    const moved = await page.evaluate(day => {
+        // A passenger, never the driver: a driver out of his seat takes his car's mark off
+        // the disk with him, and putting him back would not put the mark back.
+        const tile = [...document.querySelectorAll('#transportBody .transport-seat[data-worker]')].filter(one => one.dataset.seat !== '1').pop();
+        const was = { id: tile.dataset.worker, vehicle: tile.dataset.vehicle, n: Number(tile.dataset.seat) };
+        const home = [...document.querySelectorAll('#transportBody [data-car]')].find(card => !card.querySelector('.transport-seat[data-worker]') && card.querySelector('.transport-seat'));
+        transportUnseat(day, was.id);
+        if (home) transportSetAvailable(day, home.dataset.car, false);
+        renderTransportIfOpen();
+        return { was, home: home ? home.dataset.car : null };
+    }, DAY);
+    const after = await summaryField(page);
+    check('the open dialog was brought up to date', after !== field && after.includes('ממתינים לשיבוץ (1):'), after.split('\n').slice(-4).join(' | '));
+    same('and is again exactly what the screen shows', bare(after).split('\n'), (await summaryFromScreen(page)).split('\n'));
+    await page.evaluate(([day, was, home]) => {
+        if (home) transportSetAvailable(day, home, true);
+        transportPlace(day, was.id, was.vehicle, was.n);
+        renderTransportIfOpen();
+    }, [DAY, moved.was, moved.home]);
+    same('put back, it says what it said', await summaryField(page), field);
+    await page.locator('#transportSummaryClose').tap();
+}
+
 async function shot(page, name) {
     if (!SHOTS) return;
     await page.screenshot({ path: join(SHOTS, `${name}.jpg`), type: 'jpeg', quality: 80 });
@@ -317,6 +541,8 @@ async function evening(width, height, scheme) {
         Object.keys(localStorage).filter(key => /transport/i.test(key))), []);
     same('and the day screen has no control of it',
         await page.locator('#dayView [id^="transport"], #dayView [class*="transport"]').count(), 0);
+    same('nor is there a summary button, or a summary, anywhere', [await page.locator('#transportSummaryOpen').count(),
+        await page.evaluate(() => openTransportSummary()), await visible(page, '#transportSummaryModal')], [0, false, false]);
 
     // ------------------------------------------------------------ the switch, in ⋯
     suite(`${where}: the switch in ⋯`);
@@ -917,6 +1143,9 @@ async function evening(width, height, scheme) {
     await answer(page);
     same('and retired: it leaves the screen', await page.locator('#transportBody [data-car]').count(), 7);
 
+    // ------------------------------------------------------------ the summary of the day
+    await summary(page, where);
+
     // ------------------------------------------------------------ the record, and the way out
     suite(`${where}: the record is untouched, and the way out`);
     same('the day record and everything queued for the cloud are byte for byte what they were',
@@ -949,6 +1178,8 @@ async function evening(width, height, scheme) {
     await page.locator('#transportSwitch').click();
     await page.evaluate(() => closeSettings());
     same('turned off in ⋯, the entry is gone from the WhatsApp dialog', await page.locator('#transportEntry').count(), 0);
+    same('and the summary cannot be opened by any road', [await page.evaluate(() => openTransportSummary()),
+        await page.evaluate(() => transportSummaryText('2026-11-10')), await visible(page, '#transportSummaryModal')], [false, '', false]);
     check('and the plans stay on the disk for when it is turned on again', await page.evaluate(() =>
         localStorage.getItem('farkadTransport:enabled') === null && localStorage.getItem('farkadTransport:day:2026-11-10') !== null));
     same('the record is still what it was', await recordBytes(page), before);
@@ -978,6 +1209,18 @@ async function pictures() {
         await page.waitForTimeout(150);
         if (full) await show(page, seat('tv_05', 5));
         await shot(page, name);
+        // The summary's dialog and its picture, once: over the first of these screens.
+        if (name === 'main-440-dark') {
+            await page.locator('#transportSummaryOpen').tap();
+            await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+            await page.waitForTimeout(400);     // the dialog's 220ms way in
+            await shot(page, 'summary-440-dark');
+            const png = await page.evaluate(async () => {
+                const out = printoutImage('transport');
+                return new Promise(done => { const reader = new FileReader(); reader.onload = () => done(reader.result.split(',')[1]); reader.readAsDataURL(out.blob); });
+            });
+            writeFileSync(join(SHOTS, 'summary-picture.png'), Buffer.from(png, 'base64'));
+        }
         await context.close();
     }
 }

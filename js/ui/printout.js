@@ -21,7 +21,8 @@
 //     toBlob callback would have been cleaner and would have lost the gesture.
 //
 // Classic script on the global scope, like every other UI file. It is called from the
-// print buttons in js/ui/week.js and js/ui/reports.js and touches nothing at load.
+// print buttons in js/ui/week.js and js/ui/reports.js - and, for the picture only, from
+// the summary of the day's rides in js/ui/transport.js (v179) - and touches nothing at load.
 
 // How long the page waits for the browser to say the print sheet opened. Chrome and
 // Firefox fire beforeprint synchronously inside window.print(); Safari fires it when
@@ -179,14 +180,19 @@ function downloadPrintout(out) {
 // colour - so a test can sample the PNG at the place the drawing claims a thing is and
 // see whether it is there. Synchronous throughout: see the top of the file.
 function printoutImage(kind) {
-    const spec = kind === 'week' ? readWeekPrintout() : readReportPrintout();
+    // 'transport' (v179) is the summary of the day's rides, read and planned by
+    // js/ui/transport.js; 'week' is the week; anything else is the report, as it always was.
+    const spec = kind === 'week' ? readWeekPrintout()
+        : kind === 'transport' ? readTransportPrintout() : readReportPrintout();
     if (!spec) return null;
 
     const canvas = document.createElement('canvas');
     const probe = canvas.getContext('2d');
     if (!probe) return null;
     const family = printoutFontFamily();
-    const plan = kind === 'week' ? planWeekPrintout(spec, probe, family) : planReportPrintout(spec, probe, family);
+    const plan = kind === 'week' ? planWeekPrintout(spec, probe, family)
+        : kind === 'transport' ? planTransportPrintout(spec, probe, family)
+        : planReportPrintout(spec, probe, family);
 
     // Device pixels, capped: a crisp picture on a 3x phone, and never a canvas the
     // phone refuses to allocate.

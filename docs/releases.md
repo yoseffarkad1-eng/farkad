@@ -1,3 +1,32 @@
+## v181 — main at v180 merged into the pay book's branch; the phone's cold store, shipped shut (development branch, NOT served)
+
+**Not served. Not merged. On no phone. No real record was read and no rules were
+published.** `paybook`, `months` and `cold` are `false`. No gate result is written here:
+validation is recorded against the exact clean commit, and no count is carried over.
+
+**The merge.** `origin/main` (`d3103d6`, v180: the credit, the wage rounded once, the
+second calculator, the rides' summary) was merged into this branch as a merge commit. The
+one place both sides had rewritten is the account walk in `js/model/schema.js`: this
+branch's one-debt ruling (`advanceDebtStays`) and main's credit ruling
+(`OVERPAYMENT_STAYS_CREDIT`). They are now ONE signed walk (`advancePositionIntoUnder`):
+a closed period hands on its position; an unclosed one, under the one-debt ruling, hands
+on its position with the proposed deduction put back. With the pay book's gate shut it is
+v180's walk to the letter (`tests/overpayment.test.mjs`, `tests/oracle.test.mjs`).
+
+**The pay book now keeps v180's ruling too.** Its own fold added up what is left on each
+advance and never heard of a credit: a man over-settled by 500 who then took 1,500 read
+1,500 owed on the accounts page and 1,000 on his statement. `accountFor().debt` is now net
+of what was over-settled, never below zero, with `credit` beside it; the rows are not
+netted, a closure is still refused while an advance is over-settled, and his status is
+still «לבדיקה». Proved with the gate open in `tests/overpayment.test.mjs`, suite 4. **Not
+drawn:** the accounts page has no line naming the credit yet (decision 67), and the second
+calculator (`tests/oracle.mjs`) does not model the one-debt ruling - the gate-open reading
+is covered by fixtures, not by the oracle.
+
+**The cold store** is Phase 7 of `docs/payroll-closure.md`: what has left the server's
+live document is kept on the phone in IndexedDB instead of in the localStorage record.
+Behind `cold`, shipped `false`; with it shut no database is opened.
+
 ## v176 — worker accounts: the screens, shipped shut (development branch, NOT served)
 
 **Not served. Not merged. On no phone. No real record was read, migrated or written, and
@@ -326,11 +355,383 @@ one document.
 - **The capacity figures are for assumed crews** (14 and 30 men, six days a week). The
   real document's size and the real crew are not known from here.
 
-## v174 — הסעות as a picture: the cars drawn from above, men dragged to their seats (candidate, not served)
+## v180 — the credit, and the wage rounded once (CANDIDATE - NOT SERVED - AWAITING THE OWNER'S APPROVAL)
 
-**Not served. Not merged. On no phone.** Built on `8c943fa` (v172). No gate result is written
-here: validation is recorded against the exact clean commit, and no count is carried over.
-v173 is the number of another branch that has not been published.
+**Not served, and not to be served until the owner has seen it.** On 2026-11-10 he approved
+repairing both faults below ON A SEPARATE BRANCH, to be shown to him before anything is
+published. This is that branch: one commit of shipped files on top of `622d80a`. Its gate
+results belong to that commit and no count is carried here. Every phone is on v179 or older.
+
+**Who found it.** Not a person on a site: the second calculator (`tests/oracle.mjs`, merged
+as tests only in `622d80a`), which works every figure out a second way from the written
+rules. It disagreed with the app on two things, and both were left red and unrepaired in
+`tests/oracle.findings.mjs` until the owner was asked. In its words:
+
+> «A CLOSED PERIOD CAN CARRY FORWARD LESS THAN NOTHING, and what happens to that credit
+> depends on which fortnight the man's next advance falls in. [...] The same cash, handed
+> over to the same man, is a different debt depending on the week.»
+
+> «A CLOSE CAN TAKE HALF AN AGORA MORE THAN THE MAN EARNED, AND THE APP THEN CALLS ITS OWN
+> CLOSURE IMPOSSIBLE AND STOPS WRITING.»
+
+### 1. The credit
+
+**What was wrong.** A man takes 2,000, his fortnight is closed and 2,000 comes off his
+wage; a repayment of 500 he made to the foreman, whose phone was offline, arrives
+afterwards dated inside that fortnight. He has paid 2,500 against 2,000. v179 handed the
+next fortnight a balance of **minus 500** and kept it for exactly one boundary: 1,500 taken
+in the very next fortnight read as 1,000 owed, the same 1,500 taken a fortnight later read
+as 1,500. The account and the sum of his advances disagreed (1,000 against 1,500), the
+sheet's note read «חוב פתוח -500 ₪», and a fortnight closed in between froze
+`carriedIn: -500` onto a payslip.
+
+**The ruling this is built to** - recommended to the owner on 2026-11-10; he has NOT yet
+confirmed it word for word, which is why the other ruling is one line away:
+
+> Money a man gave back beyond what he owed stays his credit until it is used. It comes
+> off whatever advance he takes next, however many periods later, and is never dropped at
+> a boundary.
+
+**What changes on a phone.**
+
+- The same 1,500 is 1,000 owed whichever fortnight it is taken in, on the sheet, on the
+  man's statement, in the sum at the top of his advances and in the sentence shown before
+  he is put away.
+- The credit is its own figure, zero or more, beside a debt that is zero or more. No
+  balance is printed below zero anywhere. **It is never wages**: a credit with nothing to
+  come off changes no wage and no «לתשלום»; paying it back to him in cash is still a
+  conversation the app does not have.
+- Where there is a credit it is NAMED - on the statement («יתרת זכות מחשבון קודם: 500»,
+  «יתרת זכות: 500») and in the sheet's note, which is also the screen's, the paper's, the
+  CSV's and the workbook's («500 ₪ יתרת זכות מחשבון קודם», «יתרת זכות 500 ₪»). A man with
+  no credit sees neither phrase.
+- A fortnight closed on a credit records it: `carriedIn: 0` and `creditIn: 500`, so the
+  payslip adds up - 1,500 handed over, 500 of it already his, 1,000 off the wage. A
+  payslip with no credit is byte for byte what v179 wrote.
+- **IT ALSO APPLIES TO AN OPEN FORTNIGHT, and this is the widest change.** v179 dropped an
+  excess at the end of an OPEN period in silence (it only ever carried one out of a closed
+  period). Under the ruling it is carried from either. The case to know about: the pay
+  sheet takes a past fortnight that was never closed to have deducted what it could, while
+  the advances screen counts only deductions a close wrote down and so still shows that
+  advance as open and offers «העובד החזיר כסף». Money recorded there is, to the sheet,
+  money beyond what he owed - and from v180 it becomes a credit that comes off his next
+  advance, with the note saying so, where v179 let it vanish. If the wage really was
+  docked that fortnight, that is right. If the sheet's deduction was only ever a preview,
+  the fortnight should be closed with the amount that really came off.
+
+**What it does NOT change, and what the owner has to decide.** While one of a man's
+advances has had more settled against it than was handed over (the offline-phone case
+above is one), the account says «החשבון דורש בדיקה», the automatic deduction stops on every
+open fortnight and a close is refused - the older rule, pinned in `tests/wording.test.mjs`,
+and left exactly as it is. So in that case v180 shows the right DEBT (1,000) in every fortnight
+alike, and takes none of it off his wage until a person has looked. The ruling says the
+credit «comes off whatever advance he takes next»; the older rule says an over-settled
+advance is «a conversation, not an arithmetic result». Both cannot be finished by
+arithmetic alone. **Not decided, and not built:** whether a credit that has been used up
+against a later advance should lift «דורש בדיקה» by itself. Until it is decided the way out
+is the one that exists: «תיקון טעות» on that advance, if the repayment was entered twice.
+
+**The other ruling** - no credit at all; the excess is dropped at the end of the period it
+arrived in and that period is marked for review - is `OVERPAYMENT_STAYS_CREDIT = false` in
+`js/model/schema.js`, one line. `tests/overpayment.test.mjs` runs the app that way through
+the test seam: 1,500 owed in whichever fortnight, by the account and by the advances. The
+two phrases and the note lines then never appear, and the second calculator's rule
+(`tests/oracle.mjs`: `walked`, `openBalance`) and its fixtures move back with it.
+
+### 2. The wage rounded once
+
+**What was wrong.** 610 a day and half an extra hour at 41.25 is a wage of 630.625. Every
+sheet prints 630.63. Closed against a debt at least that large, v179 took 630.63 off and
+recorded it beside a wage of 630.625 - and its own check («a closure deducting more than
+the wage it came off») then refused the closure it had just written: at the next open the
+deduction was held aside as unreadable and the phone stopped writing, over a fortnight
+nobody disagreed about. It needs an hourly rate with an odd number of agorot, a half hour,
+and a debt at least as large as the wage.
+
+**The repair, and why there.** The wage of an ACCOUNT is rounded to the agora once, where
+the account reads it (`advanceWalk`), by the same rounding every surface prints with. That
+one figure is what the deduction is measured against, what a closure records, and the most
+a person may choose to take off: 630.63 earned, 630.63 off, 0 to pay, 4,369.37 carried, on
+the sheet and on the statement, open, closed and reopened. Flooring the deduction to
+630.62 instead would have left the closure recording a wage no payslip prints, a net of
+half an agora and one agora of debt carried for ever. `payrollReport` is not touched: days
+and their sum are unrounded as before, and are printed as before.
+
+**A phone that already holds such a closure.** Nothing is rewritten. The judge now reads a
+closure's recorded wage to the agora, which accepts a deduction EQUAL to the wage as
+printed and nothing above it: 630.64 off 630.625, and 630.63 off a wage of 630.62, are
+refused as before. A copy the phone had already put under `ledger.unreadable` is taken
+back - that exact shape only, only if this build reads it whole, only if the record does
+not hold different bytes under the same id, and only if taking it back makes no OTHER
+closure impossible. Measured on v179's own bytes in three states (closed and never
+reopened; held aside, acknowledged and saved; held aside with the held copy the only
+copy): v180 opens unblocked, the entry is exactly as v179 wrote it, 630.63 counts as
+deducted and 4,369.37 is carried.
+
+### What existing records will show
+
+- **A payslip v179 froze with `carriedIn: -500`** opens, is not held aside, and is not
+  changed by one byte. It is read as what it was: «יתרת זכות מחשבון קודם: 500», 1,500 given,
+  1,000 off, the money columns as they were closed. Nothing prints «-500».
+- **A closed fortnight that v179 carried forward as minus 500** now hands on 0 owed and 500
+  in credit. Its own payslip - what it opened on, what came off, what it closed on - is the
+  record and does not move; its note reads «חוב פתוח 0 ₪ · יתרת זכות 500 ₪» where v179
+  printed «חוב פתוח -500 ₪».
+- **The figure that moves:** an advance taken TWO OR MORE periods after such a credit
+  arose. v179 showed the whole advance as owed; v180 shows it less the credit. An advance
+  taken in the very next period shows what it showed. And an excess from an OPEN period,
+  which v179 dropped, is now a credit (above).
+- **A closure of 630.63 against a recorded 630.625** counts, and the phone holding it
+  writes again.
+
+### The rollout rule
+
+**Every phone on v180 before the next account is closed.** A closure's id is its period, so
+two phones closing the same account write the same field - and where the man is in credit
+or his wage is finer than an agora, a v179 phone and a v180 phone write DIFFERENT bytes
+there (`carriedIn: -500` against `carriedIn: 0, creditIn: 500`; `gross: 630.625` against
+`630.63`), which is two bodies under one id - measured for the half agora, v179's own
+bytes against this build's - and that is a disagreement the app holds and asks a person
+about. An ordinary account closed by the two builds is the same bytes, entry for entry. A
+v179 phone that only READS what v180 wrote is not blocked by it and keeps the new field to
+the byte (measured, both cases). Until every phone is updated the two builds also SHOW
+different debts in exactly the cases above.
+
+### Hebrew - PROPOSED, the owner has not read them
+
+Two phrases, in one place (`ADVANCE_CREDIT_LABEL`, `js/ui/reports.js`), pinned in
+`tests/overpayment.test.mjs`. No existing string was changed.
+
+| where | proposed Hebrew |
+|---|---|
+| statement, opening | יתרת זכות מחשבון קודם: 500 |
+| statement, closing | יתרת זכות: 500 |
+| sheet note (screen, paper, CSV, workbook), opening | 500 ₪ יתרת זכות מחשבון קודם |
+| sheet note, closing | יתרת זכות 500 ₪ |
+
+### What it touches
+
+`js/model/schema.js` (`advanceWalk`, `advanceAccount`, `advanceCarryInto` and the two new
+readers beside it, `openAdvanceBalance`, `planAdvanceCarry`'s stop, the closure validator's
+list of figures), `js/model/ledger.js` (`closureProblems`, `closureWithinRoundedWage`,
+`closureFacts`, the two closure writers, `closedPeriods`), `js/state.js` (the one re-admission
+in `normaliseSchedule`), `js/ui/reports.js` (the two phrases, the statement, the note, the
+summary over a man's advances), and the three stamps. Nothing in `js/sync`, the rules, the
+functions, the service worker's logic or any stylesheet. No migration, no entry edited or
+deleted, no stamped day restated.
+
+### Tests
+
+`tests/overpayment.test.mjs` is new and in `npm test`. `tests/oracle.findings.mjs` is gone:
+its fixtures are in the new suite, green. `tests/oracle.mjs` was changed to the ruling and
+`tests/oracle.test.mjs` no longer excludes anything - the `KNOWN` list and `floorBit` are
+removed, and the accounts and closes that used to be left out are compared and counted; two
+mutants were added (the credit dropped at a boundary; a debt below zero carried forward).
+No pinned expectation in any other suite moved.
+
+### Known not covered
+
+- **Not tried on a phone.** Node, real Chromium for the suites named in the commit, and the
+  emulator for the two named there.
+- **The second calculator is not independent evidence for the credit.** It was changed to
+  the new rule in the same commit, by the same hand. What a person can check is the
+  fixtures.
+- **The account and the advances screen can still differ** where a past fortnight was never
+  closed (the sheet assumes its deduction, the advances count only recorded ones). Older
+  than v180, not changed by it, and the reason for the open-fortnight paragraph above.
+- **Each advance's own card** still shows what THAT advance has left and what it was
+  over-settled by; only the sum at the top is net of the credit.
+- **A correction dated into a closed fortnight** reaches the credit by the same arithmetic
+  as a late repayment; only the repayment is on a hand fixture (the generated records have
+  both).
+- **A half the app cannot hold exactly.** Half an hour at 33.33 is 16.665 on paper and
+  16.66499... in binary; the app prints, pays and deducts 16.66, consistently. Not new.
+- **A held closure that has been built on** - the phone carried on without it and closed a
+  later fortnight - stays held, and the phone stays blocked until a person looks.
+- **What the cloud holds under `ledger.unreadable`**, and a v179 and a v180 phone on one
+  cloud, were not run.
+- `corrected` and `cancelled` entries, as before (`tests/README.md`).
+
+## v179 — הסעות: the summary of the day (served 2026-11-10)
+
+**Served.** Merged to `main` as `17788f8` (PR #60) on 2026-11-10; the Pages deployment for that
+commit succeeded at 09:54 UTC. As with the builds before it, "served" means Pages reported the
+deployment of that commit; the served page itself was not read from the container that built
+it. Built on `e4070e5` (v178). One commit of shipped files; its gate results belong to that
+commit and no count is carried here. `622d80a` (PR #61), merged after it, is tests only - the
+second calculator, `tests/oracle.mjs`, its suite and its two findings - changes no shipped
+file, moved no stamp, and serves the same v179.
+
+**The owner asked** (2026-11-10, in Arabic): *"is there a report for the cars?"* There was
+none. The הסעות screen offered a message to each driver, one car at a time, and nothing that
+showed the whole day.
+
+**What it is.** One worded button on the הסעות screen, «סיכום הסעות ליום», under the tray and
+above the first car. It opens one of the app's own dialogs with the summary of that day's
+plan in a field nobody types in:
+
+```
+סיכום הסעות ליום שלישי 10/11/2026:
+
+רכב: טויוטה קורולה 2013 – 3 מתוך 5
+נהג: אחמד – הרצליה
+- מוחמד – חיפה
+- עלי – הרצליה
+
+רכב: פולקסווגן 2018 – 1 מתוך 9
+בלי נהג
+- סמיר – נתניה
+
+ממתינים לשיבוץ (2):
+- יוסי – פרדסיה
+- ראמי – פרדסיה
+
+רכבים ריקים: סוואנה 2010, ליפמוטור C10 2026
+
+רכבים שלא זמינים היום: טויוטה קורולה 2016, BYD סיל U 2025
+```
+
+- **Every vehicle that goes out with somebody in it**, in the order of the list: its name and
+  how full it is, its driver (whoever is in seat 1) with his site, then the men in the order
+  of their SEATS, each with his site. Nobody at the wheel: «בלי נהג». A driver alone:
+  «בלי נוסעים.».
+- **Then the men still waiting**, in roster order - only if there are any.
+- **Then the vehicles that go out with nobody in them**, on one line, and **the vehicles kept
+  home**, on one line - each only if there are any.
+- Nobody seated at all: «אף עובד לא שובץ לרכב.», the men waiting, and NOT a line of seven
+  empty vehicles. Nobody on a site that day: «אין ביום הזה עובדים עם אתר עבודה.» and nothing
+  more.
+- A seated man who has no site in today's record is named in his seat with no site made up,
+  as in his driver's message.
+
+**Three ways out, none of them new.**
+
+- **«שליחה בוואטסאפ»** - the day message's own door (`shareTextOut`, `js/ui/share.js`): the
+  phone's share sheet, or where there is none `https://wa.me/?text=…` with NO number. The
+  person picks the chat and presses send.
+- **«העתקה»** - the day message's own copy (`copyTextOut`), which says whether the copy
+  happened.
+- **«שיתוף כתמונה»** - the printout's own door (`sharePrintout('transport')`,
+  `js/ui/printout.js`): a PNG, `farkad-הסעות-<date>.png`, to the share sheet or a download.
+  The picture is READ OFF THE DIALOG'S FIELD, so it carries the words that are on the glass
+  and cannot disagree with them; with the dialog shut there is nothing to draw. Black on
+  white whatever the scheme, like the other printouts; plain lines of text, the first line of
+  each block as its heading - it is not a drawing of the cars.
+
+**The app sends nothing and marks nothing.** It cannot see whether send was pressed, so
+nothing says «נשלח», and no car's «נפתח בוואטסאפ» mark is made or moved by the summary.
+
+**What it does not touch.** Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
+`js/recovery.js`, the rules or the functions. **It writes nothing**: no new Store key, nothing
+to a transport key, the record, the outbox, the cloud, a backup or the rescue file - the
+builder (`transportSummaryBlocks`, `js/ui/transport.js`) is a pure reading of the same picture
+the screen draws (`TransportEngine.layout`), and a day written by v171 is read and not
+rewritten. `tests/transport.test.mjs` compares every key on the disk before and after;
+`tests/transport.browser.mjs` does the same through the real buttons. It exists only on a
+phone that turned הסעות on, and only on that screen: no entry on the day screen, in ⋯ or in
+the WhatsApp dialog.
+
+**What changed outside `js/ui/transport.js`, and why it changes nothing for anybody else.**
+
+- `js/ui/share.js`: `sendDayMessage` and `copyDayMessage` were each split in two - the same
+  lines, now taking the text, the status line and the dialog to close as arguments
+  (`shareTextOut`, `copyTextOut`) - so the summary goes out by the very code the day's message
+  does. The day's message calls them with what it used before; its sentences are unchanged.
+- `js/ui/printout.js`: `printoutImage` knows a third kind, `'transport'`, read and planned by
+  `js/ui/transport.js`. `'week'` is the week and anything else is the report, as before.
+- `js/ui/modal.js`: one row in the table of closers.
+- `index.html`: the dialog's frame (`#transportSummaryModal`, no words in it), and the build
+  meta. `css/design.css`: the dialog's look, under `@media screen` - and its tier: the panel
+  it opens over is on the settings sheet's z-index, an ordinary dialog is under that.
+
+**Every new Hebrew string - PROPOSED, the owner corrects on sight.** All in the one block at
+the top of `js/ui/transport.js`, pinned word for word in `tests/transport.test.mjs`. No
+existing string was changed. The summary also reuses, unchanged, `driver` («נהג: אחמד», for a
+driver with no site today), `driverNone`, `mPassenger`, `mPassengerOnly`, `mAlone` and
+`nobody`; and the three status sentences of the day's message (`js/ui/share.js`: «✔️ הועתק»,
+«⚠️ ההעתקה נחסמה - סמן את הטקסט והעתק ידנית», «⚠️ השיתוף לא נפתח - השתמש בהעתק ושלח ידנית»,
+«פותח וואטסאפ…») and the printout's two (`js/ui/printout.js`) appear as they are.
+
+| key | proposed Hebrew | note |
+|---|---|---|
+| `summaryButton` | סיכום הסעות ליום | the button on the screen |
+| `summaryTitle` | סיכום הסעות | the dialog's title |
+| `summaryLabel` | תצוגה מקדימה של הסיכום | above the field |
+| `summarySend` | שליחה בוואטסאפ |  |
+| `summaryCopy` | העתקה |  |
+| `summaryPicture` | שיתוף כתמונה |  |
+| `summaryClose` | סגירה |  |
+| `summaryFile` | farkad-הסעות-2026-11-10.png | the picture's file name; template; sample values |
+| `sHeading` | סיכום הסעות ליום שלישי 10/11/2026: | template; sample values |
+| `sVehicle` | רכב: קורולה 2016 – 3 מתוך 5 | template; sample values |
+| `sDriver` | נהג: אחמד – חדרה | template; sample values |
+| `sNoneSeated` | אף עובד לא שובץ לרכב. |  |
+| `sWaiting` | ממתינים לשיבוץ (2): | template; sample values |
+| `sEmpty` | רכבים ריקים: סוואנה 2010, קורולה 2016 | template; sample values |
+| `sHome` | רכבים שלא זמינים היום: סוואנה 2010, קורולה 2016 | template; sample values |
+
+**Bidi.** A vehicle is always named after a Hebrew word and inside the same right-to-left
+isolate the driver's message uses (`transportRli`): «BYD סיל U 2025» begins with a Latin
+letter and would otherwise turn its line left-to-right. That is why the empty and kept-home
+vehicles are one Hebrew-led line each and not a bulleted list. A man's name and a site are
+isolated as everywhere else.
+
+**Known not covered.**
+
+- **NOT TRIED ON A REAL PHONE.** Everything was measured in desktop Chromium with emulated
+  touch, at 440x956 and 375x667, in both schemes. In the browser suite the share sheet,
+  `window.open` and the clipboard are replaced by recorders: what is proved is what the app
+  hands them, not what WhatsApp, iOS or Android then do with it.
+- **How the text reads inside WhatsApp was not seen** - its line direction and its handling
+  of the isolates around a vehicle's name are WhatsApp's. The lines follow the pattern of the
+  driver's message, which is in use.
+- **On a home-screen iPhone the share sheet for a FILE** is the same call the week's and the
+  reports' pictures make; it was not tried from this dialog on a phone.
+- **The men marked «לא בהסעה שלנו» are not in the summary.** They are in no car and wait for
+  none; the owner asked about the cars. If he wants them listed, that is a line and a string.
+- **No destinations line per car and no totals line.** Every man has his site beside his
+  name; a count of cars and men is not written.
+- **A man on two sites** is named with the first his day holds, as on the screen.
+- **A very long day** scrolls inside the field; the picture grows downward and is not paged.
+  A line too long for the picture wraps and is not cut; a wrapped line of vehicle names can
+  break between two words of one name.
+- The picture's pixels were not compared with anything: the suite checks the words drawn, in
+  order, the file's name and type, and one box per block.
+- Text at 200%, a 320px phone, landscape and a screen reader were not measured for this
+  dialog. The dialog is not on paper (dialogs never are).
+- An update that reloads the page while the dialog is open closes it; nothing is lost,
+  because nothing was kept.
+
+## v178 — one sub-title in ⋯ says what its section holds (served 2026-11-10)
+
+**Served.** Merged to `main` as `e4070e5` (PR #59) on 2026-11-10; the Pages deployment for that
+commit succeeded at 08:16 UTC. As with the builds before it, "served" means Pages reported the
+deployment of that commit; the served page itself was not read from the container that built
+it. Built on `893def8` (v174). v175 and v176 are numbers of an unpublished development branch.
+v177 was never served: `tests/mobile.test.mjs` proves the diagnostic block carries no amount
+out of the record by looking for the seeded rates as digits, one of them 77, and the build
+stamp `v177` in that block reads as a leak. The check is right to be that blunt, so the
+number was skipped and the check was left alone.
+
+**What changed: two words.** In ⋯ the first section, «כללי», carried the sub-title
+«חיבור ועדכונים». Since v172 the update card lives in «מכשיר ועזרה», and «כללי» holds the cloud
+connection, the advances carry and the phone reminders. The sub-title is now
+«חיבור ותזכורות». The owner asked for the sheet to be put in strict order (2026-11-09) and
+approved professional wording in general; this string is PROPOSED, not approved word by word,
+and he corrects it on sight. It is pinned in `tests/settings-order.browser.mjs`.
+
+**What did not change.** No control, handler, order, stored key or data path. Nothing in
+`js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js` or the rules. The three
+stamps moved because `index.html` is a cached file.
+
+**Known not covered.** Not looked at on a real phone.
+
+## v174 — הסעות as a picture: the cars drawn from above, men dragged to their seats (served 2026-11-10)
+
+**Served.** Merged to `main` as `893def8` (PR #58) on 2026-11-10; the Pages deployment for that
+commit succeeded at 04:44 UTC. Built on `8c943fa` (v172). Both gates exited 0 on the exact
+commit that was merged; no count is carried here. v173 is the number of another branch that
+has not been published. THE DRAG HAS STILL NOT BEEN CONFIRMED ON A REAL PHONE.
 
 **The owner tried v171 on his phone and sent the screen back** (2026-11-10, his words,
 translated): *"Very hard and complicated and it will take us a lot of time. I want the CAR

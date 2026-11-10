@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v176">
+<meta name="farkad-build" content="v181">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -223,7 +223,7 @@
     </nav>
     <div class="settings-body">
         <section class="settings-section" id="settingsDailySection" aria-labelledby="settingsDaily">
-            <div class="settings-section-title"><h3 id="settingsDaily" tabindex="-1">כללי</h3><span>חיבור ועדכונים</span></div>
+            <div class="settings-section-title"><h3 id="settingsDaily" tabindex="-1">כללי</h3><span>חיבור ותזכורות</span></div>
             <!-- ALWAYS OPEN, and a plain card rather than a row that pretends it could close:
                  a held record, a refused sync or a sign-in that lapsed behind a closed row
                  is a phone that says nothing while it sends nothing. -->
@@ -385,6 +385,29 @@
     <!-- Outside the body, which is rebuilt on every change: a live region that is
          destroyed and rebuilt announces nothing. -->
     <div class="transport-live" id="transportLive" role="status" aria-live="polite"></div>
+</div>
+
+<!-- THE SUMMARY OF THE DAY'S RIDES (v179): every vehicle that goes out, its driver and the
+     men in it, the men still waiting and the vehicles kept home - as text for WhatsApp or
+     the clipboard, or as a picture. Opened only by the one button on the panel above, so
+     only on a phone that turned הסעות on. A `.modal` after that panel and before the ask
+     dialog: over the first, under the second (css/design.css gives it the panel's tier).
+     It writes nothing anywhere, and every word on it is set by js/ui/transport.js from
+     that file's one block; the two status sentences are js/ui/share.js's own. -->
+<div class="modal" id="transportSummaryModal">
+    <div class="modal-content">
+        <h3 id="transportSummaryTitle" tabindex="-1"></h3>
+        <p id="transportSummaryContext" class="picker-context"></p>
+        <label class="field-label" for="transportSummaryText" id="transportSummaryLabel"></label>
+        <textarea id="transportSummaryText" rows="12" readonly></textarea>
+        <div class="modal-actions">
+            <button type="button" class="btn-success" id="transportSummarySend" onclick="transportSummarySend()"></button>
+            <button type="button" class="btn-secondary" id="transportSummaryCopy" onclick="transportSummaryCopy()"></button>
+            <button type="button" class="btn-secondary" id="transportSummaryPicture" onclick="transportSummaryPicture()"></button>
+            <button type="button" class="btn-secondary" id="transportSummaryClose" onclick="closeTransportSummary()"></button>
+            <span class="share-status" id="transportSummaryStatus" role="status" aria-live="polite"></span>
+        </div>
+    </div>
 </div>
 
 <div class="modal sheet" id="assignSheet">
