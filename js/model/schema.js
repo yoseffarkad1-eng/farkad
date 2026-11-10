@@ -60,7 +60,27 @@ const FARKAD_SHIPPED_FLAGS = {
     // same direction. The repayment control needs both gates: with the carry shut nothing
     // reads a repayment, and a man who hands back 200 is still deducted 500. A build that
     // opened one without the other would ship that, so tests/data.test.mjs pins the pair.
-    carryAdvances: true
+    carryAdvances: true,
+
+    // THE PAY BOOK'S WRITER (v173): statements, extra deductions, payments, voids,
+    // adjustments, the opening and the legacy answers - `pay.<id>`, js/model/payroll.js.
+    //
+    // OFF, and what that means is narrower than it sounds. A phone with this off does not
+    // CREATE a pay entry: every planner refuses with `gate` and State.commitPaybook
+    // refuses whatever reaches it. It still READS, KEEPS, MERGES, BACKS UP and RE-SENDS
+    // every pay entry that arrives from somewhere else - a gate that made a phone drop
+    // what it does not write would be the Rima exposure again (docs/releases.md, v166),
+    // on a record that says whether a man was paid.
+    //
+    // It is not `ledgerWrites`: the closure's own ledger entries are written today, by
+    // every phone, through the existing dialog. This gates only the new map, so opening
+    // it is a decision about a feature and not about the advances record.
+    //
+    // It opens when the owner says so and not before - and only after every phone is on
+    // a build that keeps `pay` (v173 or later): see THE ROLLOUT RULE in
+    // docs/payroll-closure.md, which is derived from what v167, v169 and v171 were
+    // measured doing with a document that carries one.
+    paybook: false
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set
@@ -133,6 +153,13 @@ function emptySchedule() {
         // Before it, normaliseSchedule left such an entry out of the object it built,
         // save() serialised that object over the record, and the only copy was gone.
         ledger: { advances: {}, unreadable: {} },
+        // THE PAY BOOK (v173) - see js/model/payroll.js. One entry per id, created once,
+        // never rewritten, never removed, merged by union: the ledger's laws on a map of
+        // its own. Named here because normaliseSchedule starts from this object and
+        // copies across what it recognises - a map it did not name is a map that leaves
+        // at the next save, which is what every build before v173 does with this one
+        // (measured in tests/paybook.oldbuilds.test.mjs).
+        pay: {},
         updatedAt: null,
         updatedBy: null
     };
@@ -431,7 +458,30 @@ function poisonedContainers(raw) {
         ['advances', 'migrations', 'unreadable', 'unreadableMigrations'].forEach(family =>
             look(ledger[family], `ledger.${family}`));
     }
+    // The pay book (v173) and the map that keeps the other side of a disagreement about
+    // one of its entries. Both are read by id, so both can be reparented by a name.
+    look(raw && raw.pay, 'pay');
+    look(raw && raw.payConflicted, 'payConflicted');
     return out;
+}
+
+// THE PAY BOOK'S CONTAINER, asked the question ledgerContainerProblem asks of the ledger's
+// and for the same reason: every check on an ENTRY needs a map to be an entry of. A `pay`
+// that arrived as a string or a list read as "no entries" - and the next whole-record
+// write would have put an empty pay book over whatever those bytes were.
+//
+// Absent and null are not malformed: every record written before v173 has neither.
+// Returns a reason in English, or null.
+function payContainerProblem(raw) {
+    const pay = raw && raw.pay;
+    if (pay !== undefined && pay !== null && !isPlainObject(pay)) {
+        return 'the pay book is not a record';
+    }
+    const beside = raw && raw.payConflicted;
+    if (beside !== undefined && beside !== null && !isPlainObject(beside)) {
+        return 'the held-aside part of the pay book is not a record';
+    }
+    return null;
 }
 
 // EVERY DAY UNDER A NAME THIS APP CANNOT READ AS A DATE - the rest of the same question.
@@ -554,6 +604,14 @@ function fullScheduleProblems(raw) {
     // container has nothing to hold entries in, and the honest answer at this door is no.
     if (typeof ledgerContainerProblem === 'function' && ledgerContainerProblem(raw) !== null) {
         problems.push('היסטוריית המקדמות בקובץ אינה בצורה שאפשר לקרוא.');
+    }
+    // AND THE PAY BOOK'S CONTAINER, on the same terms (v173). A replacement whose `pay`
+    // is a string or a list has nothing its entries could be read out of, and accepting
+    // it would send that to all three phones from a button that promises the opposite.
+    // An unreadable ENTRY is not asked here: it is carried where it lies and held by the
+    // fold - see normaliseSchedule - so the rescue door can still open the file.
+    if (payContainerProblem(raw) !== null) {
+        problems.push('רישום סגירות החשבון בקובץ אינו בצורה שאפשר לקרוא.');
     }
     // A NAME NOBODY CAN USE AS A KEY is deliberately NOT asked here.
     //
@@ -1221,6 +1279,25 @@ function journalEntryProblems(path, value) {
         return ['a ledger path nobody wrote'];
     }
 
+    // pay.<entry id> (v173) - one entry of the pay book. Append-only on the wire as on
+    // the disk, exactly as a ledger entry is: an entry may be CREATED and nothing else,
+    // so a null - a deletion in flight - is refused by payEntryProblems rather than
+    // applied, and so is anything this build could not itself have written. Whether the
+    // id already holds a DIFFERENT entry is not a question a path and a value can
+    // answer; the one minting path asks it of the disk (queueOperations in
+    // js/sync/sync.js), and the merge asks it of the other side (paybookUnion).
+    //
+    // Accepted whatever the `paybook` gate says. The gate decides whether this phone
+    // WRITES one; the queue of a phone that was handed one - by a restore, by a build
+    // with the gate open sharing its disk - still has to be readable, or the queue is
+    // quarantined and recording stops over a record this build understands perfectly.
+    if (parts[0] === 'pay') {
+        if (parts.length !== 2) return ['a pay path with the wrong number of segments'];
+        if (!isSafeSegment(parts[1])) return ['a pay path with an unusable id'];
+        if (typeof payEntryProblems !== 'function') return ['a pay path this build cannot read'];
+        return payEntryProblems(parts[1], value);
+    }
+
     // advances.<id> - or a deletion of one, which travels as null.
     if (parts[0] === 'advances') {
         if (parts.length !== 2) return ['an advance path with the wrong number of segments'];
@@ -1405,6 +1482,15 @@ function workerFootprint(schedule, workerId) {
     // Those immutable entries, and zero-advance period closures, are still history.
     const ledger = Object.keys((schedule && schedule.ledger && schedule.ledger.advances) || {})
         .filter(key => String(schedule.ledger.advances[key]?.workerId) === id);
+    // AND THE PAY BOOK (v173): a statement, a payment or a deduction naming him is his
+    // financial history exactly as a closure is, and it can be here without one - the
+    // wire does not promise order, so a payment may arrive before the closure it settles.
+    // Counted with the ledger's entries because the sentence the delete dialog already
+    // says about those - saved payment history or accounts - is the true one for these.
+    const payBook = (schedule && isPlainObject(schedule.pay)) ? schedule.pay : {};
+    Object.keys(payBook).forEach(key => {
+        if (isPlainObject(payBook[key]) && String(payBook[key].workerId) === id) ledger.push(key);
+    });
     const vehicles = ((schedule && schedule.vehicles) || [])
         .filter(vehicle => String(vehicle.ownerId) === id).map(vehicle => vehicle.id);
     Object.keys(allDays).forEach(date => {
@@ -1647,6 +1733,13 @@ function referencedEntityIds(schedule) {
     Object.values((schedule && schedule.ledger && schedule.ledger.advances) || {})
         .forEach(entry => {
             if (entry && isSafeId(String(entry.workerId || ''))) workers.add(String(entry.workerId));
+        });
+    // And the pay book's (v173), for the same reason: a payment recorded for a man who
+    // was deleted on another phone is still a payment, and it needs somebody to be to.
+    Object.values((schedule && isPlainObject(schedule.pay)) ? schedule.pay : {})
+        .forEach(entry => {
+            if (isPlainObject(entry) && typeof entry.workerId === 'string'
+                && isSafeId(entry.workerId)) workers.add(entry.workerId);
         });
     ((schedule && schedule.vehicles) || []).forEach(vehicle => {
         if (isSafeId(String(vehicle.ownerId || ''))) workers.add(String(vehicle.ownerId));

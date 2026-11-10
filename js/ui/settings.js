@@ -701,7 +701,12 @@ function describeHeldRecord(row, schedule) {
                 ? ` · ${typeof moneyText === 'function' ? moneyText(Number(record.amount)) : Number(record.amount)} ₪`
                 : '';
             title = `מקדמה: ${isolate(who)}${when}${sum}`;
-        } else if (parts[0] === 'ledger') {
+        // AND A PAY BOOK ENTRY (v173), in the ledger's words because they are the true
+        // ones for it: `pay.<id>` is append-only with deterministic ids, the cloud holds
+        // a different body under this one, this phone's is kept and not sent, and no
+        // button here could honestly offer to settle it. Without this arm the row fell
+        // through to «edit it again from its own screen», and there is no such screen.
+        } else if (parts[0] === 'ledger' || parts[0] === 'pay') {
             return { kind: 'other', title: 'רישום כספי', mine: '', cloud: '', note: HELD_LEDGER,
                 decidable: false, takeable: false };
         }

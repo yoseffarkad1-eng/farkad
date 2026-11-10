@@ -34,7 +34,10 @@ const corpus = readdirSync(HERE).filter(name => name.endsWith('.mjs')).sort();
 // "not a suite" from the filename - would let a real suite named without .test. slip out
 // of the gate unnoticed, which is exactly the failure this file exists for.
 const HELPERS = ['network-guard.mjs', 'emulator-host.mjs', 'exports-proof.lib.mjs', 'harness.mjs', 'moneydom.mjs', 'nodes.mjs',
-    'pdf.mjs', 'runner.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs'];
+    'pdf.mjs', 'runner.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs',
+    // v173: the one crew the four pay book suites share. It asserts nothing and is
+    // imported by every one of them, each of which IS in the gate.
+    'paybook.world.mjs'];
 
 // This file. The auditor who wrote it may not edit package.json, so it cannot yet be
 // named by a script; the exemption is ONE file and the check below pins that it is one,
@@ -327,9 +330,15 @@ function commitSubject(git, sha) {
 
     const open = declared.filter(one => one.value !== 'false').map(one => one.flag);
     same('carry and deletion are authorized', open, ['permanentDeletion', 'carryAdvances']);
-    same('and the shipped flags are the three that were argued over',
+    // MOVED AT v173, deliberately: three flags became four. `paybook` is the pay book's
+    // writer, and it arrives the way this section asks a flag to arrive - with a decision
+    // about its default, which is SHUT. The line above did not move: what is open in the
+    // shipped build is still exactly carry and deletion.
+    same('and the shipped flags are the four that were argued over',
         declared.map(one => one.flag).sort(),
-        ['carryAdvances', 'permanentDeletion', 'vehicles']);
+        ['carryAdvances', 'paybook', 'permanentDeletion', 'vehicles']);
+    same('the pay book\'s writer ships shut',
+        declared.filter(one => one.flag === 'paybook').map(one => one.value), ['false']);
 
     const ledger = readFileSync(join(ROOT, 'js/model/ledger.js'), 'utf8');
     check('the paired ledger writer is enabled in the same build',

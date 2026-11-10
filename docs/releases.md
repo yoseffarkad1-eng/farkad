@@ -1,3 +1,104 @@
+## v173 — the pay book's storage, shipped shut (development branch, NOT served)
+
+**Not served. Not merged. On no phone. No real record was read, migrated or written.** One
+commit of shipped files on main at v171 (`0acaceb`) with Phase 1's model merged in
+(`3176ad9`). v172 is another branch's number. No gate result is written here: validation
+is recorded against the exact clean commit, and no count is carried over.
+
+**What it is.** Phase 2 of the worker-accounts work (`docs/payroll-closure.md` has all of
+it): the append-only map `schedule.pay` - statements, extra deductions, payments, voids,
+adjustments, the opening, the legacy answers - gets a disk, a journal, a place in every
+snapshot merge and every restore, and a place in every file that leaves the phone. **The
+writer is off.** `FARKAD_FLAGS.paybook` is `false`; no screen, no button and no code path
+in this build creates a pay entry. What changes for a phone is that it now KEEPS one it is
+handed.
+
+**What changed, file by file.**
+
+- `js/model/schema.js` - the `paybook` flag; `emptySchedule` names `pay`;
+  `payContainerProblem`; `poisonedContainers` looks under `pay` and `payConflicted`;
+  `fullScheduleProblems` refuses a replacement whose pay container is not a record;
+  `journalEntryProblems` accepts `pay.<id>` (never a null); `workerFootprint` and
+  `referencedEntityIds` count a pay entry as a man's financial history.
+- `js/model/payroll.js` - now loaded. `paybookWritesEnabled`, `paybookUnion` /
+  `layPaybookUnion`, `layPaybookEntry`, `paybookHoldsEntry`, `paybookCovers`,
+  `paybookUnreadable`, `paybookCommitPlan`; `paybookGateReasons` reads the new flag.
+- `js/model/ledger.js` - `ledgerPathSupersededBy` answers for `pay.<id>` by
+  `paybookSameFact`. Nothing else in the file.
+- `js/state.js` - `normaliseSchedule` carries `pay`, `payConflicted` and the bytes of an
+  unreadable container, and tells Recovery about what cannot be read;
+  `State.commitPaybook`.
+- `js/sync/sync.js` - `replacesWhole` includes `pay.`; `queueOperations` refuses a batch
+  that would rewrite or delete a pay entry; `replacementContent` compares the pay book;
+  `queueNamesWorker` reads a queued pay entry's man.
+- `js/sync/receive.js` - `receive()` unions the pay book and no longer mistakes a snapshot
+  carrying pay entries this copy lacks for its own echo; `applyJournalEntry` and
+  `scheduleHoldsEntry` learn the path.
+- `js/sync/restore.js` - `prepareReplace` and `absorbCloudLedger` union the pay book.
+- `js/ui/backup.js` - `recoveryFacts` and the rescue rebuild's lost-money check know the
+  pay book; `payKeptOnRestoreNotice` on the four restore confirmations.
+- `js/recovery.js` - the two pay quarantine keys in `FARKAD_RECORD_KEYS`.
+- `js/ui/settings.js` - a held `pay.` write is described in the ledger's existing words.
+- `index.html`, `sw.js`, `js/app.js`, `tests/harness.mjs` - the script tag (after
+  `model/ledger.js`, above the sync group), the shell entry, the three stamps, the load
+  order.
+
+`firestore.rules`, `js/sync/send.js`, `js/sync/firebase-adapter.js`, `js/model/money.js`,
+`js/store.js`, `.github/` and `functions/` are untouched.
+
+**What a phone on this build does differently from v171, with the writer shut.** Three
+things, none of them visible until a pay entry exists somewhere: a document that carries
+`pay` keeps it across this phone's own saves; a restore from this phone no longer erases
+it from the cloud; and an unreadable pay entry stops writing until acknowledged (law 10).
+Every saved record now carries `"pay":{}`.
+
+**The measurements this phase was for** (all in `docs/payroll-closure.md`, each pinned by
+a suite): a closure is NOT all-or-nothing on the wire once more than 296 paths are queued
+ahead of it; v167, v169 and v171 each drop `pay` from their own copy, never remove it with
+an ordinary write, and DO erase it from the cloud with any restore and from a disk they
+share with a newer window; the unchanged rules accept pay writes from the allowlist and
+would equally accept a rewrite or a deletion; and a year of closures does not fit in the
+one document.
+
+**Existing expectations moved, each in this commit, each with its reason beside it.**
+
+- `tests/payroll.test.mjs` - devices are built with the writer on through the test seam
+  and no longer load the model a second time; two Phase 0 pins that read
+  `S.pay === undefined` now read "the map is empty", because the record carries the map.
+- `tests/gate.integrity.test.mjs` - the shipped flags are four, `paybook` shut;
+  `paybook.world.mjs` is a named helper.
+- `tests/rima.test.mjs` - v145 and v165 are built from the files they had, not from this
+  build's load order, which now holds a file neither of them ever did.
+- `tests/poison.test.mjs` - extended to the pay book; nothing in it moved.
+
+**What this build is known NOT to cover.**
+
+- **It must not be opened as it is.** Fourteen men closed every fortnight fill the one
+  Firestore document in about a year with the pay book on; a full document refuses every
+  write on every phone. Where closed history goes is undecided and unbuilt.
+- **"Closed" still means "closed on this phone".** `State.commitPaybook` accepts a closure
+  offline and sends it like any batch. The server-first transaction is Phase 3.
+- **The server does not keep the pay book append-only.** Today's rules accept a rewrite, a
+  deletion, and a whole document without `pay`. This build's client refuses to send any of
+  them; an older build is not bound by that.
+- **An older build can erase it.** A restore from a phone on v171 or earlier removes `pay`
+  from the cloud, and updated phones do not put it back by themselves. The rollout rule
+  forbids it; nothing enforces it yet.
+- **A disagreement can be kept but not settled.** Both bodies are on the record; no screen
+  shows them and no button resolves the held write.
+- **No screen at all.** Nothing a person can tap writes or shows a pay entry.
+- **The stale status line.** A phone that settles a whole batch against the server's copy
+  keeps showing «שולח» (or the failure) over an empty queue until the next snapshot.
+  Pre-existing in v171 for the ledger-only closure; measured here, not fixed.
+- **The two folds still disagree** about an advance from a period nobody closed (Phase 1,
+  finding 1), the weekly man's fortnight report still shows 3,800, and the same-Friday hole
+  in `planPeriodClosure` is still open.
+- **Five Hebrew strings are proposed, not approved.**
+- **Never run in a browser with a pay entry on the record**, and never on an iPhone. The
+  browser suites cover this build with an empty pay book.
+- **The capacity figures are for assumed crews** (14 and 30 men, six days a week). The
+  real document's size and the real crew are not known from here.
+
 ## v172 — the settings sheet in strict order (candidate, not served)
 
 **Not served. Not merged. On no phone.** One commit of shipped files on `b640c5a` (v171 on

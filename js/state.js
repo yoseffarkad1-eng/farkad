@@ -1181,6 +1181,77 @@ const State = {
         return true;
     },
 
+    // ------------------------------------------------------------ the pay book (v173)
+    //
+    // THE ONE DOOR BY WHICH A PAY ENTRY IS WRITTEN ON THIS PHONE: a plan's `changes`
+    // (planClosure, planPayment and the rest of js/model/payroll.js) - the closure's
+    // artifact, its `deducted` entries and the new `pay.<id>` entries - as ONE journal
+    // batch, journal first, exactly as a copied day is.
+    //
+    // SHUT in the shipped build: paybookCommitPlan answers `gate` while
+    // FARKAD_FLAGS.paybook is false, and nothing below it runs. No screen calls this yet.
+    //
+    // What it adds to commitMany is the question commitMany cannot ask. Every other
+    // caller mutates the schedule and then hands over the path, and the journal takes
+    // any (path, value): for a record that is never rewritten that is the wrong order
+    // and the wrong trust. So here the record AS IT IS NOW is asked first
+    // (paybookCommitPlan): a null, a path that is not an entry, or an id that already
+    // says something different refuses the WHOLE batch before one byte of memory moves;
+    // an id that already says the same thing is the same fact and is simply not written
+    // again. Only then are the entries laid into memory - as own properties, never by a
+    // bare assignment, see putKey - and committed.
+    //
+    // Returns { ok, reasons, written, same, kept }:
+    //   ok       every entry of the batch is durable on this device (or was already)
+    //   reasons  paybookCommitPlan's codes, or 'unwritten' when commitMany answered false
+    //   kept     with 'unwritten': the journal HOLDS the batch and only the schedule
+    //            write failed - commitMany has said so in its own words, the entries are
+    //            on the screen and owed to the cloud, and the caller must not treat the
+    //            closure as not having happened. See refuseEdit.
+    //
+    // A refused journal write rolls memory back and says so, through commitMany's own
+    // refuseEdit - the entries laid in above are then gone from the screen, because
+    // rollback() rebuilds the schedule from the disk and the journal.
+    //
+    // NOT YET WHAT A CLOSURE NEEDS ON THE WIRE. This makes the batch one fact on THIS
+    // device. It is sent like any batch, and tests/paybook.sync.test.mjs measures what
+    // that does and does not guarantee; "closed only if the server's transaction
+    // committed" is the next phase's, and until it exists the gate stays shut.
+    commitPaybook(changes) {
+        const plan = paybookCommitPlan(this.schedule, changes);
+        if (!plan.ok) {
+            return { ok: false, reasons: plan.reasons, written: [], same: plan.same, kept: false };
+        }
+        if (plan.write.length === 0) {
+            return { ok: true, reasons: [], written: [], same: plan.same, kept: false };
+        }
+        const own = (map, id, value) => Object.defineProperty(map, id, {
+            value, writable: true, enumerable: true, configurable: true
+        });
+        // A copy per entry: the plan belongs to whoever drew it, and the record must not
+        // share an object with something a caller may still be holding.
+        const batch = plan.write.map(change => ({
+            path: change.path, value: JSON.parse(JSON.stringify(change.value))
+        }));
+        batch.forEach(change => {
+            const parts = change.path.split('.');
+            if (parts[0] === 'pay') {
+                if (!isPlainObject(this.schedule.pay)) this.schedule.pay = {};
+                own(this.schedule.pay, parts[1], change.value);
+                return;
+            }
+            this.schedule.ledger = this.schedule.ledger || { advances: {} };
+            this.schedule.ledger.advances = this.schedule.ledger.advances || {};
+            own(this.schedule.ledger.advances, parts[2], change.value);
+        });
+        const written = batch.map(change => change.path);
+        if (this.commitMany(batch)) {
+            return { ok: true, reasons: [], written, same: plan.same, kept: false };
+        }
+        return { ok: false, reasons: ['unwritten'], written: this.lastCommitKept ? written : [],
+            same: plan.same, kept: this.lastCommitKept === true };
+    },
+
     worker(id) {
         return this.schedule.workers.find(w => w.id === id) || null;
     },
@@ -1699,6 +1770,58 @@ function normaliseSchedule(raw, hints) {
         if (schedule.ledger[key] === undefined) schedule.ledger[key] = ledger[key];
     });
 
+    // THE PAY BOOK (v173), CARRIED WHERE IT LIES - every entry, readable or not.
+    //
+    // This function starts from an empty schedule and copies across what it names, so a
+    // map it does not name leaves at the next save: that is what v167, v169 and v171 do
+    // with `pay` on their own copy (measured, tests/paybook.oldbuilds.test.mjs), and it
+    // is the whole of why this block exists.
+    //
+    // NOT SORTED INTO READABLE AND UNREADABLE, which is where this differs from the
+    // ledger above, on purpose. The ledger moves an entry it cannot fold into
+    // `ledger.unreadable`; a whole-document write from that phone then carries the entry
+    // under a different name than the one every other phone reads it by. Here an entry
+    // stays at `pay.<id>` whatever it is: the disk, the cloud path and the next build
+    // all find it in the one place it was written, and nothing has to be moved back.
+    // What keeps an unreadable one out of the arithmetic is the fold, which holds it by
+    // id (paybookFold) - and what keeps this device from writing on top of money it
+    // cannot read is Recovery, told further down, exactly as for the ledger.
+    //
+    // A poison name is the exception everywhere in this function: assigning it reparents
+    // the map. It was reported by poisonedContainers above and is simply not written.
+    // A CONTAINER THAT IS NOT A RECORD has nothing entries can be taken out of. Its bytes
+    // are carried under a name nothing folds, so the hold outlives the session that
+    // found it, and the book itself reads as empty rather than as those bytes.
+    const payHeld = {};
+    if (isPlainObject(raw.payUnreadableContainer)) {
+        Object.keys(raw.payUnreadableContainer).forEach(key => {
+            if (POISON_SEGMENTS.indexOf(key) === -1) payHeld[key] = raw.payUnreadableContainer[key];
+        });
+    }
+    if (raw.pay !== undefined && raw.pay !== null && !isPlainObject(raw.pay)) {
+        payHeld.pay = raw.pay;
+    } else if (isPlainObject(raw.pay)) {
+        Object.keys(raw.pay).forEach(id => {
+            if (POISON_SEGMENTS.indexOf(id) !== -1) return;
+            keepUnder(schedule.pay, id, raw.pay[id]);
+        });
+    }
+    // The other side of a disagreement about an entry, kept beside it by paybookUnion.
+    // Round-tripped verbatim: dropping it here would settle the disagreement in favour
+    // of whichever copy happened to be standing, by a read, with nobody asked.
+    if (raw.payConflicted !== undefined && raw.payConflicted !== null
+        && !isPlainObject(raw.payConflicted)) {
+        payHeld.payConflicted = raw.payConflicted;
+    } else if (isPlainObject(raw.payConflicted)) {
+        const beside = {};
+        Object.keys(raw.payConflicted).forEach(id => {
+            if (POISON_SEGMENTS.indexOf(id) !== -1) return;
+            keepUnder(beside, id, raw.payConflicted[id]);
+        });
+        if (Object.keys(beside).length > 0) schedule.payConflicted = beside;
+    }
+    if (Object.keys(payHeld).length > 0) schedule.payUnreadableContainer = payHeld;
+
     // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.
     //
     // A schedule reaches this function from boot, from a cloud snapshot, from a restore,
@@ -1748,6 +1871,42 @@ function normaliseSchedule(raw, hints) {
             }),
             'חלק מהיסטוריית המקדמות לא נקרא. הנתונים נשמרו כמו שהם ולא נמחק דבר, '
             + 'אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום שלא הצלחנו לקרוא.');
+    }
+
+    // THE PAY BOOK, on the same terms (v173) - what cannot be READ. Iron law 10.
+    //
+    // Two troubles, two keys, as the ledger has: a container that is not a record, and
+    // an entry inside a readable one that this build could not have written. Either is
+    // somebody's closure or somebody's payment that no fold on this phone can count, so
+    // the bytes are quarantined - the rescue file carries them under their own name even
+    // if the record is later damaged - and writing stops until a person has been told.
+    //
+    // Through Recovery.evidence for the entries, where the BYTES are the sighting: the
+    // entry stays on the record for ever by design, so the same bytes at the next
+    // snapshot are the same trouble and say nothing, and a different unreadable entry
+    // arriving after the person acknowledged the first is a new one and is told.
+    //
+    // A DISAGREEMENT IS NOT HERE, deliberately. `payConflicted` is two READABLE bodies
+    // under one id; both are on the record, the fold counts the one the cloud holds and
+    // names the other, and every pay planner refuses that man until a person has looked.
+    // Stopping the whole phone for it - which is what a ledger disagreement does - would
+    // stop somebody recording tonight's days over a question about last week's envelope.
+    // The reasoning, and what it does not weaken, is in docs/payroll-closure.md.
+    if (typeof Recovery !== 'undefined' && schedule.payUnreadableContainer !== undefined) {
+        Recovery.damaged('scheduleData:v2:pay:container',
+            JSON.stringify(schedule.payUnreadableContainer),
+            'רישום סגירות החשבון אינו בצורה שאפשר לקרוא. שום דבר לא נמחק - '
+            + 'הנתונים נשמרו כמו שהם - אבל אי אפשר לרשום עוד עד שתייצא גיבוי, '
+            + 'כדי שלא ייכתב רישום ריק מעליו.');
+    }
+    if (typeof Recovery !== 'undefined' && typeof paybookUnreadable === 'function') {
+        const unreadablePay = paybookUnreadable(schedule);
+        if (Object.keys(unreadablePay).length > 0) {
+            Recovery.evidence('scheduleData:v2:pay', JSON.stringify(unreadablePay),
+                'חלק מרישום סגירות החשבון והתשלומים לא נקרא. הנתונים נשמרו כמו שהם ולא '
+                + 'נמחק דבר, אבל אי אפשר לרשום עוד עד שתייצא גיבוי - כדי שלא ייחשב סכום '
+                + 'שלא הצלחנו לקרוא.');
+        }
     }
 
     // The invariant, enforced here because here is where every route in meets: a
