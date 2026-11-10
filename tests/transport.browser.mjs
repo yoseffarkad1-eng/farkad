@@ -80,7 +80,10 @@ const ENTRY = 'הסעות – שיבוץ לרכבים';
 const TITLE = 'הסעות';
 const SWITCH_ON = 'הפעלת הסעות במכשיר הזה';
 const SWITCH_OFF = 'כיבוי הסעות במכשיר הזה';
-const THIS_PHONE = 'פועל במכשיר הזה בלבד: לא מסונכרן, לא משותף עם הטלפונים האחרים, ולא נכלל בגיבוי.';
+// MOVED in v186 (the gate of js/ui/transport-share.js opened): the switch's card said
+// «פועל במכשיר הזה בלבד: לא מסונכרן, לא משותף עם הטלפונים האחרים, ולא נכלל בגיבוי.» That is
+// no longer true of a signed-in phone, so the card says the sentence below on every phone.
+const THIS_PHONE = 'מופעל בכל מכשיר בנפרד. במכשיר שמחובר לענן, השיבוץ ורשימת הרכבים משותפים עם הטלפונים האחרים שהפעילו הסעות. לא נכלל בגיבוי.';
 const ADD = 'הוספת עובד';
 const DRIVER = 'נהג';
 const OUT_OF_CAR = 'הוצאה מהרכב';
@@ -892,7 +895,7 @@ async function evening(width, height, scheme) {
     }));
     same('shut until it is tapped', await page.evaluate(() => document.getElementById('transportSwitchCard').open), false);
     await page.locator('#transportSwitchCard > summary').click();
-    check('it says this phone only, not shared, not in a backup',
+    check('it says each phone turns it on for itself, shared where signed in, not in a backup',
         (await text(page, '#transportSwitchCard')).includes(THIS_PHONE));
     same('its button offers to turn it on', await text(page, '#transportSwitch'), SWITCH_ON);
     const switchBox = await page.locator('#transportSwitch').boundingBox();

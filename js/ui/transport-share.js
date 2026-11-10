@@ -32,13 +32,15 @@
 // is an ordinary change that goes up through the same check; nothing here can force a
 // write over a revision it has not seen.
 
-// THE GATE. Shut in this build: the code is here to be merged, tested and reviewed, and
-// the rules that allow its documents are not published - the owner pastes rules by hand.
-// Opened by editing this line, in a commit, after the rules are live (the rollout order is
-// measured in docs/transport-spec.md, 3.9). The suites open it through the one test seam
-// the app has, FARKAD_FLAG_OVERRIDES (js/model/schema.js) - the way LEDGER_WRITES is
-// gated in js/model/ledger.js - which no shipped file defines.
-const TRANSPORT_SHARE = false;
+// THE GATE. OPEN since v186 (it shipped shut in v185, which every phone was to take
+// first). Open does not mean the cloud allows it: the rules that allow these documents
+// are pasted by the owner by hand, and a phone that meets the rules of before says «עדיין
+// לא משותף», keeps its plans on itself, and asks again by itself (docs/releases.md, v186).
+// Shut again by editing this line, in a commit: every phone then keeps the plans it
+// holds, and the documents stay in the cloud. The suites still measure the SHUT path,
+// through the one test seam the app has, FARKAD_FLAG_OVERRIDES (js/model/schema.js) - the
+// way LEDGER_WRITES is gated in js/model/ledger.js - which no shipped file defines.
+const TRANSPORT_SHARE = true;
 
 function transportShareOn() {
     return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS

@@ -5,7 +5,8 @@
 // The logic is tests/transport.share.test.mjs (Node, the fake cloud) and
 // tests/transport.emulator.test.mjs (a real Firestore). This file is what a person SEES:
 //
-//   - the gate as shipped (shut): the screen of today, with not one new thing on it;
+//   - the gate shut again (the test seam; it ships OPEN since v186): the screen of before,
+//     with not one new thing on it;
 //   - the gate open, two phones on one cloud: the line under the head and what it says,
 //     a man seated on one phone appearing in his seat on the other with nobody touching
 //     it, the loser of a same-seat race shown the plan that won with ONE sentence and
@@ -17,8 +18,9 @@
 // THE CLOUD is the harness's fake (makeTransportCloud), living in THIS process and bridged
 // into each page: a page's adapter calls out through an exposed function, and the cloud's
 // answers come back by page.evaluate. Two pages are two phones with two disks. The gate is
-// opened the only way it can be, by defining the test seam before the app's scripts run -
-// which no shipped file does (tests/build.test.mjs).
+// as this build ships it (open, since v186); the one block about the SHUT path shuts it the
+// only way it can be shut without a commit, by defining the test seam before the app's
+// scripts run - which no shipped file does (tests/build.test.mjs).
 //
 // NOT a real phone, and not the real Firebase SDK in a page: the SDK is not loaded here at
 // all (the network guard refuses it, as in every browser suite).
@@ -53,6 +55,10 @@ const W = {
     unchecked: 'אין חיבור: לא ניתן לבדוק אם השיבוץ מעודכן. מוצג מה ששמור במכשיר הזה.',
     notShared: 'השיבוץ עדיין לא משותף: הענן אינו מאפשר זאת כרגע. הוא שמור במכשיר הזה בלבד.',
     changedDay: 'השיבוץ של היום הזה שונה בטלפון אחר. מוצג השיבוץ המשותף, והשיבוץ שלך נשמר בצד.',
+    firstDay: 'במכשיר הזה היה ליום הזה שיבוץ שונה מהמשותף. מוצג השיבוץ המשותף, והשיבוץ של המכשיר נשמר בצד.',
+    firstList: 'במכשיר הזה הייתה רשימת רכבים שונה מהמשותפת. מוצגת הרשימה המשותפת, והרשימה של המכשיר נשמרה בצד.',
+    useMineList: 'להשתמש ברשימה שלי',
+    useMineListTitle: 'להחליף את רשימת הרכבים המשותפת ברשימה שלך?',
     useMine: 'להשתמש בשיבוץ שלי',
     keep: 'להשאיר את המשותף',
     useMineTitle: 'להחליף את השיבוץ המשותף בשיבוץ שלך?',
@@ -87,7 +93,9 @@ async function phone(options) {
         if (/ERR_BLOCKED_BY_CLIENT/.test(said) || /^Sync error: .*firebase-adapter\.js/.test(said)) return;
         errors.push(`console: ${said}`);
     });
-    if (gate) await context.addInitScript(() => { window.FARKAD_FLAG_OVERRIDES = { transportShare: true }; });
+    // As shipped the gate is open (v186). `gate: false` shuts it through the test seam,
+    // defined before any script of the app runs - the build a rollback would be.
+    if (!gate) await context.addInitScript(() => { window.FARKAD_FLAG_OVERRIDES = { transportShare: false }; });
     const line = cloud ? cloud.phone() : null;
     if (line) {
         // The page's write, answered by the cloud in this process. An Error does not
@@ -203,12 +211,13 @@ const contrast = page => page.evaluate(() => {
     });
 });
 
-// ================================================================== the gate as shipped
+// ================================================================== the gate, shut
 
-await block('the gate as shipped: the screen of today, with nothing added to it', async () => {
+// MOVED in v186: this was 'the gate as shipped'. The gate now ships open; shut is the seam.
+await block('the gate shut again (the seam): the screen of before, with nothing added to it', async () => {
     const cloud = makeTransportCloud();
     const one = await phone({ width: 440, height: 956, scheme: 'dark', gate: false, cloud });
-    same('the build\'s gate is shut', await one.page.evaluate(() => TransportShare.on()), false);
+    same('the gate reads shut', await one.page.evaluate(() => TransportShare.on()), false);
     same('handed a cloud, it declines it', await one.connect(), false);
     await one.openPanel();
     await seatByTaps(one.page, 'w_01', 'tv_01', 1);
@@ -348,6 +357,74 @@ await block('under the rules in the field today: not shared yet, said in one lin
     same('nothing was written to the cloud', cloud.writes.length, 0);
     same('no error, no dialog', [one.errors, one.dialogs], [[], []]);
     await one.context.close();
+});
+
+// THE FIRST TIME A PHONE MEETS THE SHARED PLAN (v186: the gate is open, and the three
+// phones do not update together). The owner's phone got there first; this is what the
+// SECOND phone's person sees if that phone had a list and a plan of its own: the shared
+// ones drawn, and for each of the two one sentence that says where his went and two
+// buttons. And a phone that had touched nothing sees nothing but the shared plan.
+await block('the first meeting, on the glass: a phone with its own list and plan, and a phone with neither', async () => {
+    const cloud = makeTransportCloud();
+    const owner = await phone({ width: 375, height: 667, scheme: 'dark', gate: true, cloud });
+    await owner.page.evaluate(day => { transportRenameVehicle('tv_02', 'קורולה לבנה'); transportPlace(day, 'w_01', 'tv_01', 1); }, DAY);
+    await owner.openPanel();
+    await owner.connect();
+    given('the owner\'s phone made the shared list and day', await waitLine(owner.page, W.shared)
+        && cloud.docs.has('settings') && cloud.docs.has(DOC), [...cloud.docs.keys()].join(','));
+    same('and is told nothing', await owner.page.locator('#transportShare .transport-share-notice').count(), 0);
+
+    const second = await phone({ width: 375, height: 667, scheme: 'dark', gate: true, cloud });
+    await second.page.evaluate(day => { transportRenameVehicle('tv_03', 'ביוואידי אפור'); transportPlace(day, 'w_04', 'tv_03', 1); }, DAY);
+    await second.openPanel();
+    same('before it is signed in, its own plan is on the glass', await drawn(second.page, 'tv_03'), 'w_04 - - - -');
+    await second.connect();
+    check('signed in, the shared day is drawn', await waitDrawn(second.page, 'tv_01', 'w_01 - - - -'), await drawn(second.page, 'tv_01'));
+    same('and its own man is waiting again', await second.page.locator('#transportChips .transport-chip[data-worker="w_04"]').count(), 1);
+    const notices = second.page.locator('#transportShare .transport-share-notice');
+    same('two notices: the list, then the day', (await notices.locator('p').allTextContents()).map(bare), [W.firstList, W.firstDay]);
+    same('each with its two buttons', (await notices.locator('button').allTextContents()).map(bare), [W.useMineList, W.keep, W.useMine, W.keep]);
+    const told = await floors(second.page);
+    check('all four buttons are 44px both ways and 16px, inside a 375px phone',
+        told.controls.length === 4 && told.controls.every(one => one.w >= 44 && one.h >= 44 && one.size >= 16 && one.inside), JSON.stringify(told.controls));
+    check('the words are 16px, inside the phone, nothing scrolls sideways',
+        told.words.every(word => word.size >= 16 && word.inside) && !told.sideways, JSON.stringify(told.words));
+    check('and with both notices up the cars still have room on a 667px phone', await second.page.evaluate(() => {
+        const body = document.getElementById('transportBody').getBoundingClientRect();
+        return body.height >= 240 && body.bottom <= window.innerHeight + 1;
+    }), JSON.stringify(await second.page.evaluate(() => Math.round(document.getElementById('transportBody').getBoundingClientRect().height))));
+    same('nothing of the owner\'s was written over', [cloud.docs.get('settings').revision, cloud.docs.get(DOC).revision], [1, 1]);
+    // His list back, through the app's own question.
+    await notices.first().locator('button').first().tap();
+    await second.page.locator('#askModal').waitFor({ state: 'visible' });
+    same('use my list asks first', bare(await second.page.locator('#askTitle').textContent()), W.useMineListTitle);
+    await second.page.locator('#askOk').tap();
+    const gone = await second.page.waitForFunction(() => document.querySelectorAll('#transportShare .transport-share-notice').length === 1, null, { timeout: 8000 })
+        .then(() => true, () => false);
+    // The notice goes at the tap; the list goes up a moment after, as any change does.
+    let up = false;
+    for (let waited = 0; waited < 8000 && !up; waited += 50) {
+        up = cloud.docs.get('settings').revision === 2;
+        if (!up) await second.page.waitForTimeout(50);
+    }
+    check('that notice is gone, and his list is the shared list now, as the next revision', gone && up
+        && cloud.docs.get('settings').vehicles[2].name === 'ביוואידי אפור', JSON.stringify(cloud.docs.get('settings').vehicles[2]));
+    check('the owner\'s phone draws the name, with no notice: it had nothing unsent', await owner.page.waitForFunction(() =>
+        [...document.querySelectorAll('#transportBody .transport-vehicle-name')].some(node => node.textContent === 'ביוואידי אפור'), null, { timeout: 8000 })
+        .then(() => true, () => false) && (await owner.page.locator('#transportShare .transport-share-notice').count()) === 0);
+
+    // A phone that never touched the list or a plan.
+    const third = await phone({ width: 375, height: 667, scheme: 'dark', gate: true, cloud });
+    const writes = cloud.writes.length;
+    await third.openPanel();
+    await third.connect();
+    check('a phone with neither draws the shared day', await waitDrawn(third.page, 'tv_01', 'w_01 - - - -'), await drawn(third.page, 'tv_01'));
+    same('says shared, with no notice', [await waitLine(third.page, W.shared), await third.page.locator('#transportShare .transport-share-notice').count()], [true, 0]);
+    same('and wrote nothing to the cloud: an untouched list of seven is not uploaded', cloud.writes.length, writes);
+    same('no error, no dialog', [owner.errors, owner.dialogs, second.errors, second.dialogs, third.errors, third.dialogs], [[], [], [], [], [], []]);
+    await owner.context.close();
+    await second.context.close();
+    await third.context.close();
 });
 
 // THE SEDER'S JOURNEY (js/ui/journey.js) reads the rides at two of its stations: the bar

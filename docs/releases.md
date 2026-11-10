@@ -1,6 +1,143 @@
-## v185 — הסעות, one shared plan: the code, shipped SHUT (candidate, not served)
+## v186 — הסעות, one shared plan: the gate opens (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `0b754a6` (v185). ONE line of code changes (and one CSS rule, below): `TRANSPORT_SHARE = true` in
+`js/ui/transport-share.js` (with the comment above it, and one comment in `js/ui/transport.js`). `firestore.rules`,
+`firebase.json` and `.github/workflows/rules.yml` are NOT changed by this build. Nothing in
+`js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`, and nothing else in
+`js/ui`. Everything it turns on was shipped, shut, in v185, and is described there and in
+`docs/transport-spec.md` ("Phase 3: shared").
+
+### What opens, and for whom
+
+A phone shares the rides when ALL of these are true, and only then: this build; הסעות turned
+on on that phone in ⋯; signed in to the cloud. Then its list of vehicles and each day's plan
+are also kept in documents of their own (`schedules/<doc>/transport/settings`,
+`…/day_<date>`), and it draws what the other phones seat.
+
+- A phone whose switch is off makes NO call to those documents and reads no key of them
+  (counted, `tests/transport.share.test.mjs`).
+- A phone that is not signed in works as before, on itself.
+- The record - its document, outbox, journal, receipts, status sentence - the backup, the
+  restore points and the rescue file still carry not one byte of it (measured again with
+  the gate open: `tests/transport.test.mjs`, `tests/transport.share.test.mjs`, and on the
+  emulator the schedule document byte for byte).
+
+### Preconditions
+
+1. **v185 on all three phones** - checked in ⋯ on each, not assumed. (v185 shipped the code
+   shut so that this build changes one line.)
+2. **The new rules pasted** in the Firebase console (the block quoted under v185; the whole
+   file was sent to the owner). Since v185 was merged, `main`'s `firestore.rules` already HAS
+   the block - merging published nothing - so "the rules of before" are
+   `d3103d6:firestore.rules`, not main's. **The live rules change ONLY when the owner pastes them.**
+   There is a workflow, `.github/workflows/rules.yml`, that tries to publish
+   `firestore.rules` when that file changes on main, with the secret
+   `FIREBASE_SERVICE_ACCOUNT`; the secret is not set, its run for v185 went red at the key
+   step and published nothing, and this build does not touch the file, so no run starts.
+   If that secret is ever set, a later change to `firestore.rules` on main WOULD publish
+   by itself.
+3. **No window of v183 or older on a phone that shares** (v185's rule about a vehicle's
+   `off`).
+
+**If precondition 2 is not met when this build reaches a phone**, nothing breaks, and it is
+measured on this exact commit against the rules of today
+(`tests/transport.emulator.test.mjs`): the record syncs at its own revision with no error;
+the rides screen says «השיבוץ עדיין לא משותף: הענן אינו מאפשר זאת כרגע. הוא שמור במכשיר הזה
+בלבד.»; the plan works on the phone as before; nothing is created in the cloud. The phone
+asks again by itself (after 30 seconds, then doubling, never slower than every five
+minutes; at once when the screen is opened or the signal returns), and when the rules
+appear - the same signed-in session, no reload, nobody touching the phone - it says
+«השיבוץ משותף עם הטלפונים האחרים ומעודכן.» and the plan made meanwhile goes up.
+
+### What each of the three will see the first time
+
+Sharing begins when the app is opened signed in with the switch on - not when the rides
+screen is opened.
+
+- **The first phone that has an edited list or a planned day** (it should be the owner's:
+  he takes this build first, opened, signed in, with a signal). Nothing new but one line
+  under the head of the rides screen: «בודק את השיבוץ המשותף…», then «השיבוץ משותף עם
+  הטלפונים האחרים ומעודכן.» Its list and its days of the last five weeks go up as they are.
+- **A phone that never changed the list and has no plan.** The shared list and days appear;
+  the same line; nothing else. It uploads nothing - an untouched list of seven is never
+  uploaded, so such a phone cannot become the author by being first (measured in Node, in
+  Chromium and on the emulator).
+- **A phone that had its own list or its own plan for a day.** The shared one is drawn, and
+  for each of the two that differed, one sentence and two buttons on the rides screen:
+  «במכשיר הזה הייתה רשימת רכבים שונה מהמשותפת. מוצגת הרשימה המשותפת, והרשימה של המכשיר
+  נשמרה בצד.» [להשתמש ברשימה שלי] [להשאיר את המשותף], and for a day «במכשיר הזה היה ליום הזה
+  שיבוץ שונה מהמשותף. מוצג השיבוץ המשותף, והשיבוץ של המכשיר נשמר בצד.» [להשתמש בשיבוץ שלי]
+  [להשאיר את המשותף]. The notice for a day is on that day's screen. Both at once took the
+  cars down to 156px on a 375x667 phone, so the notices now take at most two fifths of the
+  screen and scroll inside themselves (`css/design.css`; 314px left for the cars, measured). «להשתמש…» asks once and
+  then replaces the shared one for everybody; «להשאיר…» drops the copy. Until one is
+  pressed the copy stays on that phone.
+- **If the owner's phone is NOT first** and another phone's list became the shared one: he
+  is the one shown the sentence, and «להשתמש ברשימה שלי» puts his back. Nothing is lost.
+- **The switch's card in ⋯** now says, on every phone: «שיבוץ העובדים לרכבים והודעה לכל נהג.
+  מופעל בכל מכשיר בנפרד. במכשיר שמחובר לענן, השיבוץ ורשימת הרכבים משותפים עם הטלפונים
+  האחרים שהפעילו הסעות. לא נכלל בגיבוי.»
+- **Afterwards, when two people change the same day at the same moment:** one lands; the
+  other is shown it with «השיבוץ של היום הזה שונה בטלפון אחר. מוצג השיבוץ המשותף, והשיבוץ
+  שלך נשמר בצד.» and the same two buttons.
+
+### Rollback
+
+A later build with the line put back to `false`. Each phone keeps the plans and the list it
+holds at that moment and goes on from them, on itself; its notes of the shared documents
+and any copy aside stay on its disk, unread; the documents stay in the cloud, untouched,
+and are met again by the ordinary rule if the gate is reopened. The record is not involved
+in either direction. Republishing the old rules instead has the same effect on the phones
+(«עדיין לא משותף») without a build. The shut path is still measured in this build, through
+the test seam.
+
+### Moved expectations (the gate was pinned shut; each moved on purpose)
+
+- `tests/transport.share.test.mjs`: 'the gate is shut in this build, and shut it is today's
+  app byte for byte' → 'the gate is open in this build - and shut again (the seam) it is the
+  app of before, byte for byte'. «the shipped constant says false» → «…says true»; added: a
+  phone as shipped reads the gate open. Its other eight checks are unchanged and still about
+  the shut path, now reached through `FARKAD_FLAG_OVERRIDES.transportShare = false`. Every
+  other block runs with NO flag - the build as shipped - where it used to open the seam.
+- `tests/transport.test.mjs`: the block 'none of it is in the record's cloud … - and, the
+  gate shut, none of it leaves the phone' → '… - it leaves the phone only as transport
+  documents of its own'. «its gate is shut» → «open»; «the transport documents were not
+  asked for, read or written» (0 calls) → the plan and the list went up under their own two
+  names, every call was a listen or a write of one of those two, nothing personal in them;
+  «the phone holds no key of a shared plan» → its only new keys are its notes of those two.
+  The checks about the record's cloud, the backup, the restore points and the rescue file
+  are unchanged.
+- `tests/transport.browser.mjs` and `tests/settings-order.browser.mjs`: the sentence on the
+  switch's card - «פועל במכשיר הזה בלבד: לא מסונכרן, לא משותף עם הטלפונים האחרים, ולא נכלל
+  בגיבוי.» → the sentence quoted above.
+- `tests/transport.share.browser.mjs`: 'the gate as shipped' → 'the gate shut again (the
+  seam)'; the two-phone blocks run the build as shipped.
+- `tests/transport.emulator.test.mjs`: its devices run with no flag; the block about the
+  rules of today now goes on to publish the new rules under the open session.
+
+### Hebrew - PROPOSED, NOT READ BY THE OWNER, AND NOW ON THE GLASS
+
+v185's eighteen strings were shown nowhere. From this build a signed-in phone with the
+switch on shows them. They are pinned word for word in `tests/transport.test.mjs`; the owner
+corrects on sight. None says «נשלח», «מסונכרן» or «ממתין».
+
+### Known not covered
+
+Everything under v185's heading, and the first of them matters more now: **the Firebase SDK
+has never run this code in a page.** `transportOps` - the transaction, the query by document
+name, the listener with its cache flag - is run by Node against the emulator; the browser
+suite bridges to a fake cloud; no suite loads the SDK from its URL. The first real run is the
+first phone that opens this build signed in. If the listener or a write throws there, the
+record is not affected (the hand-over is in a `try`, after the record is connected) and the
+rides screen says it cannot check or is not shared - but that is reasoning from the code and
+the emulator, not a measurement on a phone. Not tried on a real phone. The live rules were
+not read by this work. A phone that has shared and is then signed OUT says «אין חיבור: לא ניתן
+לבדוק…», which is true of the plan and not exact about the reason.
+
+## v185 — הסעות, one shared plan: the code, shipped SHUT (served 2026-11-10)
+
+**Served, shut.** Merged as `0b754a6` (PR #67) on 2026-11-10; the Pages deployment succeeded at 21:09 UTC. The rules block was not published by it: the rules workflow ran, went red at the key step and published nothing.
 Built on `990f5b4` (v184). **Nothing a person can see or do changes in this build.** The shared
 plan is here to be merged, tested and reviewed; its gate is shut (`TRANSPORT_SHARE = false`,
 `js/ui/transport-share.js`) and the rules that allow its documents are NOT published. Nothing in

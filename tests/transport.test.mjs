@@ -26,11 +26,13 @@
 //     the journal, the write fence, a backup, a restore point or the rescue file, and
 //     never the RECORD's document in the cloud. MOVED with the shared plan
 //     (js/ui/transport-share.js): this used to end "or the cloud". The cloud is now
-//     reached ONLY under the transport paths, ONLY where that file's gate is open and
-//     ONLY on a phone whose switch is on - and in this build the gate is shut, so here
-//     the transport cloud is counted too and the count is nought. What the open gate
-//     does is tests/transport.share.test.mjs. A record of it that will not read is
-//     copied aside and cannot block the day, and old days are pruned;
+//     reached ONLY under the transport paths and ONLY on a phone whose switch is on
+//     and that is signed in. MOVED AGAIN in v186, when the gate opened: the count of
+//     calls to the transport documents here is no longer nought on such a phone - it is
+//     the plan and the list, under their own names, and nothing else - and it is still
+//     nought on a phone whose switch is off. What sharing does is
+//     tests/transport.share.test.mjs. A record of it that will not read is copied aside
+//     and cannot block the day, and old days are pruned;
 //   a vehicle turned OFF (the lasting switch) is not one of the day's vehicles from the day
 //     it is off from: the list is written and NO day is - the men its stored plans seat are
 //     waiting by a reading, and are in their seats again, byte for byte, when it is turned
@@ -983,15 +985,19 @@ await block('none of it is the record: not the schedule, not the outbox, not the
             && device.call('isFarkadRecordKey', key) === false));
 });
 
-// MOVED (the shared plan). Was: 'none of it leaves the phone: no cloud, no backup, no
-// restore point, no rescue file'. The four things it says about the RECORD's cloud are
-// unchanged and still measured; added: with the gate as shipped, the transport documents
-// are not reached either, though the adapter hands the share file a way to them.
-await block('none of it is in the record\'s cloud, a backup, a restore point or the rescue file - and, the gate shut, none of it leaves the phone', async () => {
+// MOVED TWICE. v185 (the shared plan, shipped shut): was 'none of it leaves the phone: no
+// cloud, no backup, no restore point, no rescue file'; became never the RECORD's cloud,
+// and - the gate shut - not the transport documents either. v186 (the gate opens): the
+// last clause is now the opposite, on purpose - a signed-in phone with the switch on DOES
+// write its plan and its list, to documents of their own - and what is measured is that
+// they go there and NOWHERE ELSE. The four things about the record's cloud, the backup,
+// the restore points and the rescue file are unchanged since v171.
+await block('none of it is in the record\'s cloud, a backup, a restore point or the rescue file - it leaves the phone only as transport documents of its own', async () => {
     const cloud = makeCloud();
     const device = crewPhone('d_cloud');
     device.Sync.connect(cloud.adapter);
-    same('the share file is there, and its gate is shut', device.global('TransportShare').on(), false);
+    same('the share file is there, and its gate is open', device.global('TransportShare').on(), true);
+    device.global('TransportShare').flushDelayMs = TICK;
     device.global('TransportShare').connect(cloud.transport.adapter);
     const synced = await settleUntil(() => device.Sync.status === 'synced' && device.Sync.pendingCount() === 0, 5000);
     given('the phone is connected and has sent its record', synced, device.Sync.status);
@@ -1005,9 +1011,16 @@ await block('none of it is in the record\'s cloud, a backup, a restore point or 
     await settle(TICK * 20);
     same('the record\'s cloud was not written to', cloud.attempts.length, attempts);
     same('and holds the document it held', JSON.stringify(cloud.doc), doc);
-    same('the transport documents were not asked for, read or written', cloud.transport.attempts.length, 0);
-    same('and the phone holds no key of a shared plan',
-        Object.keys(device.dump()).filter(key => /:shared:|:aside:/.test(key)), []);
+    same('the plan and the list went up as documents of their own, by their own names',
+        [...cloud.transport.docs.keys()].sort(), [`day_${DAY}`, 'settings']);
+    same('every call the phone made to them was a listen or a write of one of those two',
+        [...new Set(cloud.transport.attempts.map(one => (one.kind === 'subscribe' ? 'subscribe' : `write:${one.name}`)))].sort(),
+        ['subscribe', `write:day_${DAY}`, 'write:settings']);
+    check('what went up has no man\'s name, phone or site, and no mark of an opened chat',
+        !/אחמד|מוחמד|יוסי|סמיר|Ali|052|054|הרצליה|חיפה|marks|openedAt/.test(JSON.stringify([...cloud.transport.docs.values()])));
+    same('and the phone\'s only new keys are its own notes of those two documents',
+        Object.keys(device.dump()).filter(key => /:shared:|:aside:/.test(key)).sort(),
+        [`farkadTransport:shared:day_${DAY}`, 'farkadTransport:shared:settings']);
     check('which has no word of transport in it', !/transport|tv_0|ta_/i.test(JSON.stringify(cloud.doc)));
 
     // The control, so the silence above is about this feature and not a dead connection.

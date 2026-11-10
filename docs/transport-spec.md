@@ -84,7 +84,7 @@ list opening cleanly, the message, the words, the store's isolation) and
 
 ---
 
-## Phase 3: shared (designed 2026-11-10; behind a shut gate, rules NOT published)
+## Phase 3: shared (designed 2026-11-10; shipped shut in v185; THE GATE OPENS IN v186 - `docs/releases.md`)
 
 The owner, 2026-11-10, having tried the picture on his own phone: *"add the feature to the
 other accounts."* Offered two meanings, he chose **one shared plan**: he seats the men, the
