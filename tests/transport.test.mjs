@@ -26,6 +26,12 @@
 //     the write fence, a backup, a restore point, the rescue file or the cloud - a record
 //     of it that will not read is copied aside and cannot block the day, and old days are
 //     pruned;
+//   a vehicle turned OFF (the lasting switch) is not one of the day's vehicles from the day
+//     it is off from: the list is written and NO day is - the men its stored plans seat are
+//     waiting by a reading, and are in their seats again, byte for byte, when it is turned
+//     on; a day changed in between has let go of it; a day before it is history; and v180,
+//     run on its own bytes out of Git, does not know the field and drops it at its next
+//     write of the list;
 //   and with the switch off there is no entry, and no transport key but the switch is read.
 //
 // The screen itself - the drawing, the drags, the taps, the rectangles - is
@@ -33,6 +39,7 @@
 
 import vm from 'node:vm';
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { makeDevice, makeCloud, settle, settleUntil } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
@@ -1217,6 +1224,301 @@ await block('the retired «רכבים» feature is not touched, and nothing here
 // wording on 2026-11-09 and corrects on sight - and a correction moves the line here, in
 // the same commit (CLAUDE.md, law 6).
 //
+// ================================================================== a vehicle turned off
+//
+// The owner, 2026-11-10: "sometimes cars break down, or I don't want them to show in the
+// list. Like I have workers whom I turn off from the list and turn back on in the צוות
+// page - because sometimes the car sits for more than a day." The lasting switch: one
+// field on the vehicle (`off`, the day it is off from) in this phone's own list.
+const PREV = '2026-11-09';
+const NEXT = '2026-11-11';
+const dayKeyOf = date => `farkadTransport:day:${date}`;
+const carOn = (device, date, vehicleId) => {
+    const seats = Core.layout(plain(device.call('transportContext', date)), plain(device.call('transportDayOf', date))).cars[vehicleId];
+    return seats ? seats.slice(1).map(id => id || '-').join(' ') : null;
+};
+const waitingOn = (device, date) => plain(Core.waiting(plain(device.call('transportContext', date)),
+    plain(device.call('transportDayOf', date)))).join(' ');
+const threeDays = device => [PREV, DAY, NEXT].map(date => device.raw(dayKeyOf(date)));
+
+// Three days of plans with קורולה 2016 (tv_02) in each:
+//   Mon 09  tv_02: אחמד drives מוחמד
+//   Tue 10  tv_02: אחמד drives, מוחמד behind him (seat 4) - and its message opened;
+//           tv_01: סמיר alone
+//   Wed 11  tv_02: יוסי drives, סמיר on seat 3
+function threeDayPhone(id) {
+    const device = crewPhone(id);
+    [PREV, NEXT].forEach(date => ['w_01', 'w_02', 'w_03', 'w_04', 'w_06'].forEach(worker =>
+        device.State.commit(device.call('assignPlace', device.State.schedule, date, worker, 'actual', 'p_01'))));
+    device.call('transportPlace', PREV, 'w_01', 'tv_02', 1);
+    device.call('transportPlace', PREV, 'w_02', 'tv_02', 2);
+    device.call('transportPlace', DAY, 'w_01', 'tv_02', 1);
+    device.call('transportPlace', DAY, 'w_02', 'tv_02', 4);
+    device.call('transportPlace', DAY, 'w_04', 'tv_01', 1);
+    device.call('transportMarkOpened', DAY, 'tv_02');
+    device.call('transportPlace', NEXT, 'w_03', 'tv_02', 1);
+    device.call('transportPlace', NEXT, 'w_04', 'tv_02', 3);
+    return device;
+}
+
+await block('a vehicle turned off: gone from its day on, the list written and no day rewritten - and back, byte for byte', async () => {
+    const device = threeDayPhone('d_vehicle_off');
+    const days = threeDays(device);
+    const schedule = JSON.stringify(device.State.schedule);
+    const record = device.raw('scheduleData:v2');
+    const queued = JSON.stringify(device.Sync.pendingPaths());
+    const fence = device.Store.fenceState();
+    given('the three days are on the disk, each with men in that car, and the list has never been written',
+        days.every(raw => raw !== null && /"tv_02"/.test(raw)) && device.raw(SETTINGS) === null);
+    given('as staged: the car on each day, and its message on the day on the screen marked opened',
+        [carOn(device, PREV, 'tv_02'), carOn(device, DAY, 'tv_02'), carOn(device, NEXT, 'tv_02'),
+            device.call('transportMarkState', DAY, 'tv_02')].join(' | ')
+        === 'w_01 w_02 - - - | w_01 - - w_02 - | w_03 - w_04 - - | opened');
+    const message = device.call('transportDriverMessage', DAY, 'tv_02');
+
+    same('refused, with nothing changed: a vehicle that is not on the list, a day that is not one, turning on what is on, a retired vehicle',
+        [device.call('transportSetVehicleOff', 'tv_99', DAY), device.call('transportSetVehicleOff', 'tv_02', 'tomorrow'),
+            device.call('transportSetVehicleOff', 'tv_02', true), device.call('transportSetVehicleOff', 'tv_02', null),
+            (device.call('transportSettings').vehicles[6].active = false, device.call('transportSetVehicleOff', 'tv_07', DAY)),
+            device.raw(SETTINGS)],
+        [false, false, false, false, false, null]);
+    device.call('transportSettings').vehicles[6].active = true;
+    same('what he is told: how many men are drawn in it on the day on the screen', device.call('transportSeatedIn', DAY, 'tv_02'), 2);
+
+    check('turned off from the day on the screen', device.call('transportSetVehicleOff', 'tv_02', DAY) === true);
+    const list = JSON.parse(device.raw(SETTINGS));
+    same('THE LIST IS WRITTEN: that one vehicle carries the day it is off from, and no other vehicle carries the field at all',
+        list.vehicles.map(v => `${v.id}:${'off' in v ? v.off : 'on'}`),
+        ['tv_01:on', `tv_02:${DAY}`, 'tv_03:on', 'tv_04:on', 'tv_05:on', 'tv_06:on', 'tv_07:on']);
+    check('it is still on the list - off, not retired', list.vehicles[1].active === true);
+    same('NO DAY IS REWRITTEN: the day on the screen, the day before and tomorrow\'s plan are byte for byte what they were',
+        threeDays(device), days);
+    same('from that day on it is not one of the day\'s vehicles; the day before, it still is',
+        [PREV, DAY, NEXT, '2026-12-25'].map(date => device.call('transportContext', date).vehicles.some(v => v.id === 'tv_02')),
+        [true, false, false, false]);
+    same('its men are waiting, on the day on the screen and in tomorrow\'s plan - a reading',
+        [carOn(device, DAY, 'tv_02'), waitingOn(device, DAY), carOn(device, NEXT, 'tv_02'), waitingOn(device, NEXT)],
+        [null, 'w_01 w_02 w_03 w_06', null, 'w_01 w_02 w_03 w_04 w_06']);
+    same('the other car of that day is as it was', carOn(device, DAY, 'tv_01'), 'w_04 - - - -');
+    same('the day before is history and is drawn as it was stored', carOn(device, PREV, 'tv_02'), 'w_01 w_02 - - -');
+    same('there is no driver\'s message for it, no mark, and no man can be put in it',
+        [device.call('transportDriverMessage', DAY, 'tv_02'), device.call('transportMarkState', DAY, 'tv_02'),
+            device.call('transportMarkOpened', DAY, 'tv_02'), device.call('transportPlace', DAY, 'w_03', 'tv_02', 2)],
+        ['', 'nodriver', false, false]);
+    check('while the day before still has its message', device.call('transportDriverMessage', PREV, 'tv_02') !== '');
+    same('turned off again from another day is refused: it keeps the day it has been off from',
+        [device.call('transportSetVehicleOff', 'tv_02', PREV), device.call('transportSettings').vehicles[1].off], [false, DAY]);
+
+    // THE SUMMARY OF THE DAY. An off vehicle is not today's choice, so it is not in
+    // «רכבים שלא זמינים היום» - and it is in no other line either: the summary is sent to
+    // people about one morning, and a car that has stood for a week is not that morning's
+    // news. Its men are in it, where they are: waiting.
+    const summary = device.call('transportSummaryText', DAY).split('\n');
+    check('the summary of the day does not name it anywhere - not as a car, not as empty, not as kept home',
+        !summary.some(line => line.includes('קורולה 2016')));
+    same('and says its men are waiting', summary.slice(summary.indexOf('ממתינים לשיבוץ (4):')).slice(0, 5),
+        ['ממתינים לשיבוץ (4):', `- ${named('אחמד')} – ${named('הרצליה')}`, `- ${named('מוחמד')} – ${named('הרצליה')}`,
+            `- ${named('יוסי')} – ${named('חיפה')}`, `- ${named('Ali Hassan')} – ${named('פרדסיה')}`]);
+    check('the day before, its summary still has the car', device.call('transportSummaryText', PREV)
+        .includes(`רכב: ${car('טויוטה קורולה 2016')} – 2 מתוך 5`));
+
+    // THE REPORT OF A PERIOD: the day before it was turned off counts as it was stored;
+    // the two days from then on, whose stored plans still seat men in it, do not.
+    const week = device.call('transportReportText', 'thisWeek', DAY).split('\n');
+    same('the report counts it on the day before it was turned off, and on no day since',
+        week.slice(week.indexOf(`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`)).slice(0, 3),
+        [`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`, `נהג: ${named('אחמד')} – יום אחד`, 'מושבים תפוסים: 2 בסך הכול, 2 בממוצע ליום']);
+    same('the days with a plan are still the days somebody is DRAWN in a car: tomorrow, where only that car was filled, is not one',
+        week[2], 'ימים עם שיבוץ שמור במכשיר הזה: 3 מתוך 7');
+
+    same('and all of that reading moved no day', threeDays(device), days);
+
+    same('and the schedule in memory is byte for byte what it was', JSON.stringify(device.State.schedule), schedule);
+
+    // The app closed and opened: off is kept.
+    const again = reopen(device);
+    const reopened = JSON.stringify(again.State.schedule);
+    same('it is still off after the app is closed and opened, from the same day',
+        [again.call('transportSettings').vehicles[1].off, carOn(again, DAY, 'tv_02'), carOn(again, PREV, 'tv_02')],
+        [DAY, null, 'w_01 w_02 - - -']);
+    again.call('transportPrune', DAY);
+    again.call('transportSummaryText', NEXT);
+    same('and opening those days there rewrote none of them', threeDays(again), days);
+
+    // ON AGAIN. Nobody changed a day in between, so every man is where he sat.
+    check('turned on again', again.call('transportSetVehicleOff', 'tv_02', null) === true);
+    check('the field is gone from the list, not set to something', !/"off"/.test(again.raw(SETTINGS))
+        && JSON.parse(again.raw(SETTINGS)).vehicles.length === 7);
+    same('THE ROUND TRIP: the three days are byte for byte what they were before it was ever turned off', threeDays(again), days);
+    same('and each man is in his seat again, on the day on the screen and in tomorrow\'s plan',
+        [carOn(again, DAY, 'tv_02'), waitingOn(again, DAY), carOn(again, NEXT, 'tv_02'), waitingOn(again, NEXT)],
+        ['w_01 - - w_02 -', 'w_03 w_06', 'w_03 - w_04 - -', 'w_01 w_02 w_06']);
+    same('the driver\'s message is the one it was, and the mark made on it is believed again',
+        [again.call('transportDriverMessage', DAY, 'tv_02'), again.call('transportMarkState', DAY, 'tv_02')], [message, 'opened']);
+    const weekAfter = again.call('transportReportText', 'thisWeek', DAY).split('\n');
+    check('and the report counts it on all three days again', weekAfter.includes(`רכב: ${car('טויוטה קורולה 2016')} – יצא ב-3 ימים`));
+
+    // None of it is the record.
+    same('the schedule in memory is byte for byte what it was when the app was opened', JSON.stringify(again.State.schedule), reopened);
+    same('the record on the disk is what it was before any of this', again.raw('scheduleData:v2'), record);
+    same('nothing was queued for the cloud', JSON.stringify(again.Sync.pendingPaths()), queued);
+    same('the write counter did not move', again.Store.fenceState(), fence);
+    same('every key it wrote is under its own name', Object.keys(again.dump()).filter(key => /transport/i.test(key)).sort(),
+        [dayKeyOf(PREV), DAY_KEY, dayKeyOf(NEXT), ENABLED, SETTINGS].sort());
+});
+
+await block('a day changed while its vehicle was off has let go of it; a day nobody touched has not', async () => {
+    const device = threeDayPhone('d_vehicle_off_changed');
+    const next = device.raw(dayKeyOf(NEXT));
+    device.call('transportSetVehicleOff', 'tv_02', DAY);
+    // He gives one of the two waiting men another seat. That is a change to the day, and
+    // the day is written as the picture then reads - which has no such car (v174's rule).
+    check('a man who was in the off car is seated elsewhere', device.call('transportPlace', DAY, 'w_01', 'tv_01', 2) === true);
+    same('THAT day is rewritten by its own change, without the car', plain(keptDay(device).trips),
+        { tv_01: { driver: 'w_04', passengers: ['w_01'], seats: { w_01: 2 } } });
+    same('tomorrow\'s plan, which nobody changed, is byte for byte what it was', device.raw(dayKeyOf(NEXT)), next);
+    device.call('transportSetVehicleOff', 'tv_02', null);
+    same('turned on again: on the changed day the car is empty and the man who was given another seat has NOT jumped back; the other waits',
+        [carOn(device, DAY, 'tv_02'), carOn(device, DAY, 'tv_01'), waitingOn(device, DAY)],
+        ['- - - - -', 'w_04 w_01 - - -', 'w_02 w_03 w_06']);
+    same('and the day nobody touched has its men in their seats', carOn(device, NEXT, 'tv_02'), 'w_03 - w_04 - -');
+
+    // «לא זמין היום» is untouched for a vehicle that is on.
+    const other = crewPhone('d_vehicle_off_perday');
+    other.call('transportSetVehicleOff', 'tv_03', DAY);
+    check('the per-day answer still works for a vehicle that is on, and is kept in that day',
+        other.call('transportSetAvailable', DAY, 'tv_01', false) === true && keptDay(other).unavailable.tv_01 === true
+        && !('tv_03' in keptDay(other).unavailable));
+    const told = other.call('transportSummaryText', DAY).split('\n');
+    same('the summary\'s «kept home» line is the vehicle kept home TODAY and not the one that is off',
+        told.filter(line => line.startsWith('רכבים שלא זמינים היום')), [`רכבים שלא זמינים היום: ${car('טויוטה קורולה 2013')}`]);
+    check('the off one is nowhere in it', !told.join('\n').includes('BYD סיל'));
+    same('a vehicle can be retired while it is off, and is then on neither list',
+        [other.call('transportRetireVehicle', 'tv_03'), other.call('transportSetVehicleOff', 'tv_03', null),
+            other.call('transportContext', PREV).vehicles.some(v => v.id === 'tv_03')], [true, false, false]);
+});
+
+await block('the field, read: a list without it is all on, a value that is not a day is on, and it leaves the phone by no road', async () => {
+    const old = crewPhone('d_vehicle_off_old_list');
+    old.putRaw(SETTINGS, V171_SETTINGS);
+    const elder = reopen(old);
+    check('A LIST WRITTEN BY v171-v180 HAS NO SUCH FIELD AND READS AS ALL ON',
+        elder.call('transportSettings').vehicles.every(v => !('off' in v))
+        && elder.call('transportContext', DAY).vehicles.map(v => v.id).join() === 'tv_01,tv_03,tv_05');
+    same('and reading it rewrote nothing', elder.raw(SETTINGS), V171_SETTINGS);
+    check('turning one off keeps what v171 had typed into that list, untouched',
+        elder.call('transportSetVehicleOff', 'tv_03', DAY) === true
+        && JSON.stringify(JSON.parse(elder.raw(SETTINGS)).areas) === JSON.stringify(JSON.parse(V171_SETTINGS).areas)
+        && JSON.stringify(JSON.parse(elder.raw(SETTINGS)).workers) === JSON.stringify(JSON.parse(V171_SETTINGS).workers));
+
+    const odd = crewPhone('d_vehicle_off_odd');
+    odd.putRaw(SETTINGS, JSON.stringify({ version: 1, seeded: true, vehicles: [
+        { id: 'tv_01', name: 'א', seats: 5, active: true, off: true },
+        { id: 'tv_02', name: 'ב', seats: 5, active: true, off: '2026-13-40' },
+        { id: 'tv_03', name: 'ג', seats: 5, active: true, off: 20261110 },
+        { id: 'tv_04', name: 'ד', seats: 5, active: true, off: '' },
+        { id: 'tv_05', name: 'ה', seats: 5, active: true, off: { __proto__: null, constructor: 'x' } },
+        { id: 'tv_06', name: 'ו', seats: 5, active: true, off: '2026-11-10' }] }));
+    const read6 = reopen(odd);
+    same('only a real date is a day a vehicle can be off from: anything else is not believed, and the vehicle is ON, where it is seen',
+        read6.call('transportSettings').vehicles.map(v => ('off' in v ? v.off : 'on')), ['on', 'on', 'on', 'on', 'on', '2026-11-10']);
+    same('so five go out that day and one does not', read6.call('transportContext', DAY).vehicles.map(v => v.id),
+        ['tv_01', 'tv_02', 'tv_03', 'tv_04', 'tv_05']);
+
+    // It leaves the phone by no road: the same four doors the plans are kept from.
+    const cloud = makeCloud();
+    const device = crewPhone('d_vehicle_off_cloud');
+    device.Sync.connect(cloud.adapter);
+    const synced = await settleUntil(() => device.Sync.status === 'synced' && device.Sync.pendingCount() === 0, 5000);
+    given('the phone is connected and has sent its record', synced, device.Sync.status);
+    const attempts = cloud.attempts.length;
+    const doc = JSON.stringify(cloud.doc);
+    const fence = device.Store.fenceState();
+    evening(device);
+    device.call('transportSetVehicleOff', 'tv_01', DAY);
+    const carries = text => /"off"|farkadTransport|tv_0\d/.test(String(text));
+    given('the off vehicle is on this phone\'s list, and the detector sees it there',
+        JSON.parse(device.raw(SETTINGS)).vehicles[0].off === DAY && carries(device.raw(SETTINGS)));
+    await settle(TICK * 20);
+    same('the cloud was not written to, and holds the document it held', [cloud.attempts.length, JSON.stringify(cloud.doc)], [attempts, doc]);
+    same('the write counter did not move', device.Store.fenceState(), fence);
+    device.call('exportBackup');
+    const backup = device.downloads[device.downloads.length - 1];
+    given('the backup file was handed over', Boolean(backup && backup.text && /\.json$/.test(backup.name)));
+    check('the backup does not carry it', !carries(backup.text));
+    device.call('takeDailySnapshot');
+    const points = Object.keys(device.dump()).filter(key => key.startsWith('scheduleData:snap:'));
+    given('a restore point was taken', points.length >= 1);
+    check('no restore point carries it', points.every(key => !carries(device.raw(key))));
+    device.call('exportRecoveryData');
+    const rescue = device.downloads[device.downloads.length - 1];
+    given('the rescue file was handed over', Boolean(rescue && rescue.text && rescue.text.includes('farkad-recovery')));
+    check('nor does the rescue file', !carries(rescue.text));
+    check('the list\'s key is not one the rescue file or the queue knows',
+        device.call('isFarkadSnapshotKey', SETTINGS) === false && device.call('isFarkadRecordKey', SETTINGS) === false);
+
+    const offPhone = bare('d_vehicle_off_switch');
+    load(offPhone);
+    same('with הסעות off on this phone the switch of a vehicle is refused and counts nobody',
+        [offPhone.call('transportSetVehicleOff', 'tv_01', DAY), offPhone.call('transportSeatedIn', DAY, 'tv_01'),
+            Object.keys(offPhone.dump()).filter(key => /transport/i.test(key))], [false, 0, []]);
+});
+
+// WHAT v180 DOES WITH THE FIELD, MEASURED ON v180'S OWN BYTES OUT OF GIT. v180 is the
+// build this one was cut from, and a phone can have a window of it open beside the new
+// one. It does not know `off`.
+await block('v180, on its own bytes, opening a list with a vehicle turned off: it does not know the field, and drops it at its next write of the list', async () => {
+    const V180 = 'd3103d622677726de133526b4411e00aedc14a3b';
+    const ROOT = new URL('..', import.meta.url).pathname;
+    const git = args => execFileSync('git', ['-C', ROOT, ...args], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
+    let present = false;
+    try { present = git(['cat-file', '-t', V180]).toString().trim() === 'commit'; } catch (error) { present = false; }
+    given('the v180 commit is in this repository', present, V180);
+    const old = file => git(['show', `${V180}:${file}`]).toString('utf8');
+    const stamp = (/const APP_VERSION = '([^']+)'/.exec(old('js/app.js')) || [])[1];
+    given('that commit names itself v180', stamp === 'v180', String(stamp));
+    const OLD = { seder: old('js/ui/seder.js'), engine: old('js/model/transport.js'), screen: old('js/ui/transport.js') };
+    check('v180 really does not know the field', !/\.off\b/.test(OLD.screen) && !/transportSetVehicleOff/.test(OLD.screen));
+    same('and the engine is, byte for byte, the engine v180 had: it was not taught about an off vehicle', ENGINE, OLD.engine);
+
+    const now = threeDayPhone('d_v180_now');
+    now.call('transportSetVehicleOff', 'tv_02', DAY);
+    const list = now.raw(SETTINGS);
+    const days = threeDays(now);
+    given('this build wrote a list with the vehicle off', JSON.parse(list).vehicles[1].off === DAY);
+
+    // The same disk, opened by v180.
+    const elder = bare('d_v180_now', now.dump());
+    vm.runInContext(OLD.seder, elder.ctx, { filename: 'v180/js/ui/seder.js' });
+    vm.runInContext(OLD.engine, elder.ctx, { filename: 'v180/js/model/transport.js' });
+    vm.runInContext(OLD.screen, elder.ctx, { filename: 'v180/js/ui/transport.js' });
+    elder.State.load();
+    const seen = elder.call('transportSettings').vehicles;
+    same('v180 reads the list whole: seven vehicles, none lost, nothing said to be unreadable',
+        [seen.map(v => v.id).join(), elder.call('transportSawUnreadable')], ['tv_01,tv_02,tv_03,tv_04,tv_05,tv_06,tv_07', false]);
+    check('IT DOES NOT SEE THE SWITCH: in a v180 window the vehicle is on, and is one of the day\'s vehicles',
+        !('off' in seen[1]) && elder.call('transportContext', DAY).vehicles.some(v => v.id === 'tv_02'));
+    same('so there its men are drawn in their seats - which they can be, because no day was rewritten',
+        carOn(elder, DAY, 'tv_02'), 'w_01 - - w_02 -');
+    elder.call('transportSummaryText', DAY);
+    elder.call('transportPrune', DAY);
+    same('LOOKING, v180 writes nothing: the list on the disk still carries the field', elder.raw(SETTINGS), list);
+    check('a change to a DAY on v180 does not touch the list either',
+        elder.call('transportPlace', DAY, 'w_03', 'tv_01', 3) === true && elder.raw(SETTINGS) === list);
+    check('ITS NEXT WRITE OF THE LIST DROPS THE FIELD: a vehicle renamed on v180',
+        elder.call('transportRenameVehicle', 'tv_06', 'סוואנה') === true && !/"off"/.test(elder.raw(SETTINGS)));
+    same('and nothing else of the list is lost by it', JSON.parse(elder.raw(SETTINGS)).vehicles.map(v => `${v.id}/${v.seats}/${v.active}`),
+        JSON.parse(list).vehicles.map(v => `${v.id}/${v.seats}/${v.active}`));
+    same('the two days v180 did not change are byte for byte what they were', [elder.raw(dayKeyOf(PREV)), elder.raw(dayKeyOf(NEXT))], [days[0], days[2]]);
+
+    // Back on this build: the off state has been forgotten, and nothing else.
+    const back = reopen(elder);
+    same('back on this build after that: the vehicle is on again - forgotten, not broken - and the day v180 wrote reads',
+        ['off' in back.call('transportSettings').vehicles[1], carOn(back, DAY, 'tv_02'), carOn(back, DAY, 'tv_01'),
+            carOn(back, NEXT, 'tv_02'), back.call('transportSawUnreadable')],
+        [false, 'w_01 - - w_02 -', 'w_04 - w_03 - -', 'w_03 - w_04 - -', false]);
+});
+
 // MOVED IN v174, and the move is the point: the owner sent v171's planner back, so every
 // word of its four tabs, its pickup areas, its "may drive", its suggestion, its locks, its
 // acceptance, its versions and its «סימנתי שנשלח» is REMOVED from the block and from here
@@ -1282,6 +1584,18 @@ await block('the words, every one of them, and no other', async () => {
         retireTitle: [['סוואנה'], 'להוציא את סוואנה מהרשימה?'],
         retireLead: 'הרכב לא יופיע עוד בשיבוץ.',
         save: 'שמירה',
+        // A vehicle turned off and on again. The first four are the roster's own words
+        // for a worker (js/ui/roster.js) and are compared with that file below; the rest
+        // are PROPOSED.
+        vehicleOn: 'פעיל',
+        vehicleOff: 'כבוי',
+        turnOffLabel: [['סוואנה'], 'הסתר זמנית את סוואנה'],
+        turnOnLabel: [['סוואנה'], 'הפעל את סוואנה'],
+        offVehicles: [[2], 'רכבים כבויים (2)'],
+        offFrom: [['10/11/2026'], 'כבוי החל מ-10/11/2026'],
+        allOff: 'כל הרכבים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.',
+        offToldTitle: [['סוואנה'], 'הרכב כבוי: סוואנה'],
+        offReturned: [[3], '3 עובדים שישבו בו חזרו לממתינים.'],
         openWhatsapp: 'פתיחה בוואטסאפ',
         opened: 'נפתח בוואטסאפ',
         noPhone: 'אין מספר טלפון תקין',
@@ -1348,6 +1662,13 @@ await block('the words, every one of them, and no other', async () => {
     same('one day is said as one day, in each of the four places a number of days is said',
         [T.rCount(1), T.rIn(1), T.rMissing(1), T.rUnreadable(1)],
         ['יום אחד', 'ביום אחד', 'ביום אחד אין שיבוץ שמור במכשיר הזה.', 'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.']);
+    same('one man is said as one man', T.offReturned(1), 'עובד אחד שישב בו חזר לממתינים.');
+    // The switch is said as the roster says a worker's: the same four words, read out of
+    // that file, so a change there is seen here.
+    const ROSTER = read('../js/ui/roster.js');
+    check('the switch\'s words are the roster\'s own for a worker: «פעיל», «כבוי», «הסתר זמנית את», «הפעל את»',
+        ROSTER.includes(`enabled ? '${T.vehicleOn}' : '${T.vehicleOff}'`)
+        && ROSTER.includes(`enabled ? '${T.turnOffLabel('').trim()}' : '${T.turnOnLabel('').trim()}'`));
     check('and no word of the report says «נשלח»', !Object.keys(T).some(key =>
         String(typeof T[key] === 'function' ? T[key]('x', 'y', 'z') : T[key]).includes('נשלח')));
     check('«ממתין» is nowhere in the words', !Object.keys(T).some(key =>

@@ -128,6 +128,24 @@ const TRANSPORT_TEXT = Object.freeze({
     retireLead: 'הרכב לא יופיע עוד בשיבוץ.',
     save: 'שמירה',
 
+    // --- a vehicle turned off, and on again: the lasting switch, beside its name in the
+    // list. The first four are THE ROSTER'S OWN WORDS for a worker (js/ui/roster.js: the
+    // «פעיל» / «כבוי» switch and its two spoken labels) - the owner asked for "like the
+    // workers I turn off in צוות", so it is said as it is said there. The rest are new,
+    // and two of them follow the roster's sentences word for word («עובדים כבויים (N)»,
+    // «כל העובדים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.»).
+    vehicleOn: 'פעיל',
+    vehicleOff: 'כבוי',
+    turnOffLabel: v => `הסתר זמנית את ${v}`,
+    turnOnLabel: v => `הפעל את ${v}`,
+    offVehicles: n => `רכבים כבויים (${n})`,
+    offFrom: date => `כבוי החל מ-${date}`,
+    allOff: 'כל הרכבים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.',
+    // said once, in the app's own dialog, when the vehicle turned off had men in it on
+    // the day on the screen
+    offToldTitle: v => `הרכב כבוי: ${v}`,
+    offReturned: n => (n === 1 ? 'עובד אחד שישב בו חזר לממתינים.' : `${n} עובדים שישבו בו חזרו לממתינים.`),
+
     // --- the driver's message: the button, and what the card says after it
     openWhatsapp: 'פתיחה בוואטסאפ',
     opened: 'נפתח בוואטסאפ',
@@ -344,6 +362,11 @@ function transportReadVehicle(item) {
     const seats = item.seats;
     if (!name || !Number.isInteger(seats) || seats < 2 || seats > TRANSPORT_MAX_SEATS) return null;
     const vehicle = { id: item.id, name, seats, active: item.active !== false };
+    // TURNED OFF, AND FROM WHICH DAY (below, "a vehicle turned off"). A list written by
+    // v171-v180 has no such field and every vehicle on it is on. Only a real date is
+    // believed: anything else is not a day a vehicle can be off from, and the vehicle is
+    // on - shown, where somebody will see it, rather than hidden by bytes nobody typed.
+    if (isRealDate(item.off)) vehicle.off = item.off;
     if (Array.isArray(item.rows) && item.rows.every(n => Number.isInteger(n) && n > 0)
         && item.rows.reduce((sum, n) => sum + n, 0) === seats) vehicle.rows = item.rows.slice();
     return vehicle;
@@ -569,11 +592,38 @@ function transportContext(date) {
         .map(worker => ({ id: worker.id, name: worker.name, phone: worker.phone }));
     return {
         workers,
-        vehicles: settings.vehicles.filter(vehicle => vehicle.active),
+        vehicles: settings.vehicles.filter(vehicle => vehicle.active && !transportVehicleOffOn(vehicle, date)),
         sites: (schedule.places || []).filter(place => place && place.active !== false)
             .map(place => ({ id: place.id, name: place.name })),
         attendance
     };
+}
+
+// A VEHICLE TURNED OFF. The owner, 2026-11-10, having tried the screen: "sometimes cars
+// break down, or I don't want them to show in the list. Like I have workers whom I turn
+// off from the list and turn back on in the צוות page - because sometimes the car sits for
+// more than a day." «לא זמין היום» is one day's answer and has to be given again every
+// morning; this is the lasting one.
+//
+// WHAT IS KEPT is one field on the vehicle, in the list this phone already keeps:
+// `off: '<date>'` - THE DAY IT IS OFF FROM, which is the day that was on the screen when
+// it was turned off. Absent means on. From that day forward the vehicle is not one of the
+// day's vehicles: it is filtered out HERE, before the engine sees the list, so the engine
+// (js/model/transport.js, unchanged) draws no car for it, and the summary, the driver's
+// message, a drop and the report - which all read through transportContext - have none
+// either. A day BEFORE it is history and reads as it was stored: the car went out that
+// morning, and the report of a period goes on counting it.
+//
+// TURNING IT OFF OR ON WRITES THE LIST AND NOTHING ELSE. No day is rewritten - not the
+// day on the screen and not tomorrow's plan. The men a stored plan has in that car are
+// drawn as waiting, because the car is not there to draw them in (the same reading that
+// puts a retired vehicle's men back in the tray); their seats are still in that day's
+// bytes. So turned on again, a day nobody changed in between shows them where they sat.
+// A day somebody DID change in between was rewritten by that change, as the picture then
+// read (transportKeep - v174's rule), and the picture had no such car: that day has let
+// go of it, which is what stops a man who was given another seat from jumping back.
+function transportVehicleOffOn(vehicle, date) {
+    return Boolean(vehicle && vehicle.off) && !(isRealDate(date) && date < vehicle.off);
 }
 
 function transportFind(list, id) {
@@ -878,6 +928,32 @@ function transportRetireVehicle(vehicleId) {
     return true;
 }
 
+// On or off, lastingly (above, "a vehicle turned off"). `from` is the day it is off
+// from; nothing brings it back. Refused, with nothing changed: a vehicle that is not on
+// the list, a day that is not one, and the state it is already in - a vehicle that is
+// off keeps the day it has been off from.
+function transportSetVehicleOff(vehicleId, from) {
+    if (!transportEnabled()) return false;
+    const vehicle = transportFind(transportSettings().vehicles, vehicleId);
+    if (!vehicle || !vehicle.active) return false;
+    if (from === null || from === undefined) {
+        if (!vehicle.off) return false;
+        delete vehicle.off;
+    } else {
+        if (!isRealDate(from) || vehicle.off) return false;
+        vehicle.off = from;
+    }
+    transportSaveSettings();
+    return true;
+}
+
+// How many men are drawn in a vehicle on a day - what somebody turning it off is told.
+function transportSeatedIn(date, vehicleId) {
+    if (!transportEnabled() || !isRealDate(date)) return 0;
+    const seats = TransportEngine.layout(transportContext(date), transportDayOf(date)).cars[vehicleId];
+    return seats ? seats.filter(Boolean).length : 0;
+}
+
 // ================================================================== the screen
 
 let transportDate = null;        // the day the open panel is about; fixed while it is open
@@ -967,6 +1043,9 @@ function closeTransport() {
     const back = transportReturnFocus;
     transportReturnFocus = null;
     if (back && document.contains(back) && back.focus) back.focus({ preventScroll: true });
+    // Inside the seder's journey this screen is a station, and leaving it is a step back
+    // (js/ui/journey.js). Absent, or with no journey on the screen, this is nothing.
+    if (typeof journeyTransportClosed === 'function') journeyTransportClosed();
 }
 
 // The settings sheet's contract (js/ui/settings.js), by the pieces js/ui/modal.js already
@@ -1116,6 +1195,8 @@ function renderTransport() {
         const again = [...parts.panel.querySelectorAll('[data-tk]')].find(node => node.dataset.tk === focused);
         if (again && !again.disabled && again !== document.activeElement) again.focus({ preventScroll: true });
     }
+    // The journey's bar above the list says what this picture says (js/ui/journey.js).
+    if (typeof journeyTransportDrawn === 'function') journeyTransportDrawn();
 }
 
 function transportView(ctx, day, date, picture, waiting) {
@@ -1139,7 +1220,12 @@ function transportView(ctx, day, date, picture, waiting) {
     // about a man who is drawn on that card.
     const issues = TransportEngine.validate(ctx, { unavailable: day.unavailable, status: day.status,
         trips: TransportEngine.tripsOf(ctx, picture.cars) });
-    if (ctx.vehicles.length === 0) root.appendChild(el('p', 'empty-hint', T.noVehicles));
+    // No vehicle goes out: because the list is empty, or because every one on it is off
+    // - and then it says which, and where they are turned on again.
+    if (ctx.vehicles.length === 0) {
+        root.appendChild(el('p', 'empty-hint',
+            transportSettings().vehicles.some(vehicle => vehicle.active) ? T.allOff : T.noVehicles));
+    }
     ctx.vehicles.forEach(vehicle => {
         root.appendChild(transportCard(ctx, date, vehicle, picture.cars[vehicle.id] || null, issues));
     });
@@ -1480,45 +1566,12 @@ function transportFleet() {
     const T = TRANSPORT_TEXT;
     const fold = transportFold('transportFleet', 'fleet', T.vehiclesRow, transportFleetOpen,
         open => { transportFleetOpen = open; });
-    const vehicles = transportSettings().vehicles.filter(vehicle => vehicle.active);
-    if (vehicles.length === 0) fold.appendChild(el('p', 'empty-hint', T.noVehicles));
-    vehicles.forEach(vehicle => {
-        const item = el('div', 'transport-fleet-item');
-        item.dataset.vehicle = vehicle.id;
-        const titles = el('div', 'transport-row');
-        titles.appendChild(el('div', 'transport-name transport-grow', vehicle.name));
-        titles.appendChild(el('div', 'transport-sub', T.seats(vehicle.seats)));
-        item.appendChild(titles);
-        const more = document.createElement('details');
-        more.className = 'transport-more';
-        const handle = el('summary', null, T.editVehicle);
-        handle.dataset.tk = 'more:' + vehicle.id;
-        handle.setAttribute('aria-label', `${T.editVehicle}: ${transportRli(vehicle.name)}`);
-        more.appendChild(handle);
-        const tools = el('div', 'transport-row transport-wrap');
-        tools.appendChild(transportButton(T.renameVehicle, 'rename:' + vehicle.id, () => {
-            transportAskVehicleName(vehicle).then(name => {
-                if (name) transportRenameVehicle(vehicle.id, name);
-                renderTransportIfOpen();
-            });
-        }));
-        tools.appendChild(transportButton(T.changeSeats, 'seats:' + vehicle.id, () => {
-            transportAskSeats(vehicle.name, vehicle.seats).then(seats => {
-                if (seats) transportSetVehicleSeats(vehicle.id, seats);
-                renderTransportIfOpen();
-            });
-        }));
-        tools.appendChild(transportButton(T.retireVehicle, 'retire:' + vehicle.id, () => {
-            askConfirm({ title: T.retireTitle(transportRli(vehicle.name)), message: T.retireLead,
-                ok: T.retireVehicle, cancel: T.cancel }).then(yes => {
-                if (yes) transportRetireVehicle(vehicle.id);
-                renderTransportIfOpen();
-            });
-        }));
-        more.appendChild(tools);
-        item.appendChild(more);
-        fold.appendChild(item);
-    });
+    const listed = transportSettings().vehicles.filter(vehicle => vehicle.active);
+    const on = listed.filter(vehicle => !vehicle.off);
+    const off = listed.filter(vehicle => vehicle.off);
+    if (listed.length === 0) fold.appendChild(el('p', 'empty-hint', T.noVehicles));
+    else if (on.length === 0) fold.appendChild(el('p', 'empty-hint', T.allOff));
+    on.forEach(vehicle => fold.appendChild(transportFleetItem(vehicle)));
     const add = transportButton(T.addVehicle, 'addVehicle', () => {
         transportAskVehicleName(null).then(name => {
             if (!name) return null;
@@ -1531,7 +1584,98 @@ function transportFleet() {
     add.id = 'transportAddVehicle';
     add.classList.add('transport-wide');
     fold.appendChild(add);
+    // THE ONES THAT ARE OFF: a quiet group of their own under everything else, as the
+    // roster keeps its «עובדים כבויים» - they are not part of the working list, and each
+    // has its switch beside its name, so one touch brings it back.
+    if (off.length > 0) {
+        const group = el('div', 'transport-fleet-off');
+        group.id = 'transportFleetOff';
+        group.appendChild(el('h4', 'transport-sub', T.offVehicles(off.length)));
+        off.forEach(vehicle => group.appendChild(transportFleetItem(vehicle)));
+        fold.appendChild(group);
+    }
     return fold;
+}
+
+// One vehicle of the list: its name and seats, ITS SWITCH, and its three tools behind a
+// row of their own. The switch is the roster's (js/ui/roster.js, the worker's «פעיל» /
+// «כבוי»): a real switch to a screen reader, said with the roster's two labels.
+function transportFleetItem(vehicle) {
+    const T = TRANSPORT_TEXT;
+    const off = Boolean(vehicle.off);
+    const item = el('div', 'transport-fleet-item' + (off ? ' transport-fleet-item-off' : ''));
+    item.dataset.vehicle = vehicle.id;
+    const titles = el('div', 'transport-row');
+    titles.appendChild(el('div', 'transport-name transport-grow', vehicle.name));
+    titles.appendChild(el('div', 'transport-sub', T.seats(vehicle.seats)));
+    item.appendChild(titles);
+    const toggle = transportButton(off ? T.vehicleOff : T.vehicleOn, 'onoff:' + vehicle.id,
+        () => transportToggleVehicle(vehicle.id));
+    toggle.classList.add('transport-quiet', 'transport-onoff');
+    toggle.dataset.onoff = vehicle.id;
+    toggle.setAttribute('role', 'switch');
+    toggle.setAttribute('aria-checked', off ? 'false' : 'true');
+    toggle.setAttribute('aria-label', (off ? T.turnOnLabel : T.turnOffLabel)(transportRli(vehicle.name)));
+    item.appendChild(toggle);
+    // Since when, said on the row: the day it is off from is the day that was on the
+    // screen, and a day before it still draws the car.
+    if (off) {
+        item.appendChild(el('div', 'transport-sub transport-off-from',
+            T.offFrom(formatFullDate(parseLocalDate(vehicle.off)))));
+    }
+    const more = document.createElement('details');
+    more.className = 'transport-more';
+    const handle = el('summary', null, T.editVehicle);
+    handle.dataset.tk = 'more:' + vehicle.id;
+    handle.setAttribute('aria-label', `${T.editVehicle}: ${transportRli(vehicle.name)}`);
+    more.appendChild(handle);
+    const tools = el('div', 'transport-row transport-wrap');
+    tools.appendChild(transportButton(T.renameVehicle, 'rename:' + vehicle.id, () => {
+        transportAskVehicleName(vehicle).then(name => {
+            if (name) transportRenameVehicle(vehicle.id, name);
+            renderTransportIfOpen();
+        });
+    }));
+    tools.appendChild(transportButton(T.changeSeats, 'seats:' + vehicle.id, () => {
+        transportAskSeats(vehicle.name, vehicle.seats).then(seats => {
+            if (seats) transportSetVehicleSeats(vehicle.id, seats);
+            renderTransportIfOpen();
+        });
+    }));
+    tools.appendChild(transportButton(T.retireVehicle, 'retire:' + vehicle.id, () => {
+        askConfirm({ title: T.retireTitle(transportRli(vehicle.name)), message: T.retireLead,
+            ok: T.retireVehicle, cancel: T.cancel }).then(yes => {
+            if (yes) transportRetireVehicle(vehicle.id);
+            renderTransportIfOpen();
+        });
+    }));
+    more.appendChild(tools);
+    item.appendChild(more);
+    return item;
+}
+
+// The switch, touched. OFF: from the day on the screen, and if men are drawn in that
+// vehicle on that day they are now waiting - so it SAYS how many, in the app's own
+// dialog, after the list has been redrawn behind it. Nothing was asked first: it is one
+// touch back, and nothing was written but the list (above, "a vehicle turned off").
+// ON: at once, and it says nothing - the car is back on the glass.
+function transportToggleVehicle(vehicleId) {
+    const T = TRANSPORT_TEXT;
+    const date = transportDate;
+    const vehicle = transportFind(transportSettings().vehicles, vehicleId);
+    if (!vehicle || !date) return;
+    if (vehicle.off) {
+        transportAct(() => transportSetVehicleOff(vehicleId, null));
+        return;
+    }
+    const seated = transportSeatedIn(date, vehicleId);
+    const done = transportSetVehicleOff(vehicleId, date);
+    if (done && seated > 0) transportSaid = T.offReturned(seated);
+    renderTransport();
+    if (done && seated > 0) {
+        askTell({ title: T.offToldTitle(transportRli(vehicle.name)), message: T.offReturned(seated) })
+            .then(renderTransportIfOpen);
+    }
 }
 
 // ------------------------------------------------------------------ the door to WhatsApp
@@ -1579,6 +1723,9 @@ function transportDoor(date, vehicleId, number, text) {
 // (TransportEngine.layout) against the day record AS IT IS NOW and the list of vehicles
 // AS IT IS NOW. So a vehicle since taken off the list is not in the report, and a man
 // whose day was changed after he was seated still counts where he sits - as on the screen.
+// A vehicle that is turned OFF is on the list still: the days before the day it is off
+// from are counted as they were stored, and from that day on it did not go out
+// (transportContext, per day - the same reading the screen makes of each of them).
 //
 // IT IS A READING AND NOTHING ELSE: transportPeekDay for the days, the engine for the
 // picture. Nothing here writes, marks, prunes or remembers; tests/transport.test.mjs
