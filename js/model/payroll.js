@@ -2987,9 +2987,13 @@ function paybookIndexRowProblems(id, row) {
         }
     });
     if (row.s !== 'statement' && row.s !== 'legacy') out.push('an index row of a closure nobody answered for');
-    if (!Array.isArray(row.a) || !row.a.every(one => Array.isArray(one) && one.length === 3 && safe(one[0])
-        && typeof one[1] === 'number' && Number.isFinite(one[1])
-        && (one[2] === null || (typeof one[2] === 'number' && Number.isFinite(one[2]))))) {
+    // `a` is a MAP here - { advanceId: [amount, balanceAfter] } - where paybookIndexFrom
+    // derives a list of triples. Firestore refuses a list inside a list (measured on the
+    // emulator: `invalid-argument`, and the drop that carried one never landed), so the
+    // stored row keys each deduction by its advance instead. Same three facts.
+    if (!isPlainObject(row.a) || !Object.keys(row.a).every(id => safe(id) && Array.isArray(row.a[id])
+        && row.a[id].length === 2 && typeof row.a[id][0] === 'number' && Number.isFinite(row.a[id][0])
+        && (row.a[id][1] === null || (typeof row.a[id][1] === 'number' && Number.isFinite(row.a[id][1]))))) {
         out.push('an index row whose advance deductions cannot be read');
     }
     ['e', 'd'].forEach(key => {
@@ -3006,6 +3010,31 @@ function paybookIndexRowProblems(id, row) {
             : paybookLegacyId(periodArtifactId(row.w, row.f));
         if (String(id) !== want || !isSafeId(String(id))) out.push('an index row filed under another name');
     }
+    return out;
+}
+
+// A derived row (paybookIndexFrom) in the shape that is STORED: the same facts, with the
+// advance deductions keyed by advance. Null when two deductions name one advance - which
+// no closure this build writes can do, and which a map could not hold.
+function paybookStoredRow(row) {
+    const out = paybookClone(row);
+    const by = {};
+    let twice = false;
+    (Array.isArray(row.a) ? row.a : []).forEach(one => {
+        if (ownsKey(by, String(one[0]))) twice = true;
+        putKey(by, String(one[0]), [one[1], one[2]]);
+    });
+    if (twice) return null;
+    out.a = by;
+    return out;
+}
+
+// And back: a stored row as paybookIndexFolds reads one.
+function paybookDerivedRow(row) {
+    const out = paybookClone(row);
+    out.a = Object.keys(row.a).sort().map(id => [id, row.a[id][0], row.a[id][1]]);
+    delete out.e;
+    delete out.d;
     return out;
 }
 
@@ -3029,7 +3058,7 @@ function paybookStoredIndex(schedule) {
 // row's own pay entry, and the other pay entries it lists.
 function paybookRowPaths(id, row) {
     return [ledgerPath(periodArtifactId(row.w, row.f))]
-        .concat(row.a.map(one => ledgerPath(closureId(one[0], row.f))))
+        .concat(Object.keys(row.a).sort().map(advance => ledgerPath(closureId(advance, row.f))))
         .concat([paybookPath(String(id))])
         .concat((row.e || []).map(one => paybookPath(one)));
 }
@@ -3190,7 +3219,7 @@ function planArchive(schedule, today, options) {
         if (fold.conflicts.some(one => one.workerIds.indexOf(bundle.workerId) !== -1)) return held('disputed');
         if (of.overpaid !== 0) return held('overpaid');
         if (of.due !== 0) return held('owed');
-        const row = ownsKey(derived, rowId) ? paybookClone(derived[rowId]) : null;
+        const row = ownsKey(derived, rowId) ? paybookStoredRow(derived[rowId]) : null;
         if (!row) return held('irregular');
         const entries = bundle.paths.filter(path => !isPaybookPath(path)).map(path => path.split('.')[2]);
         if (Object.keys(ledger).some(id => ledger[id] && String(ledger[id].kind) === 'reversed'

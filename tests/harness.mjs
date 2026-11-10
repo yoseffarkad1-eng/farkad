@@ -788,6 +788,15 @@ export function makeCloud(options = {}) {
                 }
                 const said = protocolProblem(patch, false);
                 if (said) throw said;
+                // Firestore refuses a list directly inside a list, anywhere in a write.
+                // The first shape of the index row had one, and only the emulator said so.
+                const nested = value => (Array.isArray(value) ? value.some(one => Array.isArray(one) || nested(one))
+                    : (value && typeof value === 'object' ? Object.keys(value).some(key => nested(value[key])) : false));
+                if (nested(patch)) {
+                    const invalid = new Error('Nested arrays are not supported');
+                    invalid.code = 'invalid-argument';
+                    throw invalid;
+                }
                 const stable = value => {
                     if (value === null || value === undefined || typeof value !== 'object') {
                         return JSON.stringify(value === undefined ? null : value);

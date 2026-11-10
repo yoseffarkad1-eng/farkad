@@ -157,10 +157,16 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
     same('the row stands for exactly those paths', a.call('paybookRowPaths', khaled.rowId, khaled.row).sort(), KHALED_PATHS);
     same('and is a row this build reads back', a.call('paybookIndexRowProblems', khaled.rowId, khaled.row), []);
     same('it carries the figures of the closure: whose, the period, the wage, each advance, the net, owed and paid',
-        [khaled.row.w, khaled.row.f, khaled.row.t, khaled.row.g, khaled.row.a.map(one => one.slice(0, 2)).sort(), khaled.row.n,
+        [khaled.row.w, khaled.row.f, khaled.row.t, khaled.row.g, Object.keys(khaled.row.a).map(id => [id, khaled.row.a[id][0]]).sort(), khaled.row.n,
             khaled.row.o, khaled.row.p, khaled.row.s, khaled.row.e],
         ['w_khaled', '2026-10-02', '2026-10-15', 4400, [[K1, 500], [K2, 100]].sort(), 3800, 3800, 3800, 'statement',
             ['pp_ps_w_khaled_20261002']]);
+    same('no list sits inside a list anywhere in a row: Firestore refuses one (measured on the emulator)',
+        (() => { const nested = value => (Array.isArray(value) ? value.some(one => Array.isArray(one) || nested(one))
+            : (value && typeof value === 'object' ? Object.keys(value).some(key => nested(value[key])) : false));
+            return [drawn.bundles.filter(bundle => bundle.row).some(bundle => nested(bundle.row)), nested({ a: [[1]] })]; })(), [false, true]);
+    same('and the stored row turns back into the row the index folds read, fact for fact',
+        canonical(a.call('paybookDerivedRow', khaled.row)), canonical(a.call('paybookIndexFrom', S).rows[KHALED]));
     same('an older closure answered «שולם» is ready too, under the answer\'s id',
         [by['w_ahmad 2026-10-02'].rowId, by['w_ahmad 2026-10-02'].source], [AHMAD, 'legacy']);
     same('a young closure waits when a horizon is given - and is ready past it',
@@ -198,7 +204,7 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
 
     // rows this build cannot read
     const bad = clone(indexed);
-    bad.payIndex.rows.ps_w_ghost_20260101 = { w: 'w_ghost', f: 'yesterday', a: [], s: 'statement' };
+    bad.payIndex.rows.ps_w_ghost_20260101 = { w: 'w_ghost', f: 'yesterday', a: {}, s: 'statement' };
     bad.payIndex.rows[SALIM] = Object.assign({}, bad.payIndex.rows[SALIM], { invented: 1 });
     same('a row this build could not have written is named unreadable, and reads as no row',
         [a.call('paybookStoredIndex', bad).unreadable, Object.keys(a.call('paybookStoredIndex', bad).rows)],
@@ -286,7 +292,7 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
         const size = sizeOf(cloud.doc);
         const result = await a.Sync.archiveClosed({ today: TODAY, only: [KHALED] });
         same('a closed document that holds ANOTHER figure for an entry: the closure stays, and it is said',
-            [result.ok, result.moved, result.failed], [false, [], [{ rowId: KHALED, reason: 'copy-differs' }]]);
+            [result.ok, result.moved, result.failed], [false, [], [{ rowId: KHALED, reason: 'copy-differs', detail: null }]]);
         same('nothing left the live document', [sizeOf(cloud.doc) === size, rowsOf(cloud.doc), Boolean(at(cloud.doc, 'pay.' + KHALED))], [true, [], true]);
     }
     {

@@ -76,7 +76,7 @@
     "test:bootstrap": "firebase emulators:exec --project demo-farkad --only firestore \"node tests/bootstrap.emulator.test.mjs\"",
     "test:money-concurrency": "firebase emulators:exec --project demo-farkad --only firestore \"node tests/money.concurrency.test.mjs\"",
     "test:bootstrap-rules": "firebase emulators:exec --project demo-farkad --only firestore \"node tests/bootstrap.rules.test.mjs\"",
-    "test:emulator": "npm run test:rules && npm run test:cas-emulator && npm run test:rollout && npm run test:bootstrap && npm run test:bootstrap-rules && npm run test:money-concurrency && npm run test:rollout-matrix && npm run test:reminders-emulator && npm run test:paybook-emulator && npm run test:paybook-split-emulator",
+    "test:emulator": "npm run test:rules && npm run test:cas-emulator && npm run test:rollout && npm run test:bootstrap && npm run test:bootstrap-rules && npm run test:money-concurrency && npm run test:rollout-matrix && npm run test:reminders-emulator && npm run test:paybook-emulator && npm run test:paybook-split-emulator && npm run test:paybook-archive-emulator",
     "serve": "python3 -m http.server 8802",
     "shot": "node tests/shot.mjs",
     "browsers": "playwright install chromium",
@@ -141,6 +141,7 @@
     "test:paybook-sync": "node tests/paybook.sync.test.mjs",
     "test:paybook-oldbuilds": "node tests/paybook.oldbuilds.test.mjs",
     "test:paybook-emulator": "firebase emulators:exec --project demo-farkad --only firestore \"node tests/paybook.emulator.test.mjs\"",
+    "test:paybook-archive-emulator": "firebase emulators:exec --project demo-farkad --only firestore \"node tests/paybook.archive.emulator.test.mjs\"",
     "test:paybook-split-emulator": "firebase emulators:exec --project demo-farkad --only firestore \"node tests/paybook.split.emulator.test.mjs\""
   },
   "devDependencies": {

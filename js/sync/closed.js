@@ -203,7 +203,7 @@ Object.assign(FarkadSync, {
             if (at >= todo.length || failed.length > 0) return Promise.resolve();
             return this.archiveOne(todo[at], 0).then(result => {
                 if (result.ok) moved.push(todo[at].rowId);
-                else failed.push({ rowId: todo[at].rowId, reason: result.reason });
+                else failed.push({ rowId: todo[at].rowId, reason: result.reason, detail: result.detail || null });
                 if (typeof want.progress === 'function') {
                     try { want.progress({ moved: moved.slice(), failed: failed.slice(), of: todo.length }); } catch (error) { /* a screen */ }
                 }
@@ -216,6 +216,22 @@ Object.assign(FarkadSync, {
                 left: ready.length - moved.length - failed.length };
         };
         return step(0).then(finish, error => { this._archiving = false; throw error; });
+    },
+
+    // A READ CAN BE A MOMENT BEHIND THE COMMIT IT FOLLOWS (measured on the emulator at
+    // Phase 3, and again here: the read straight after a drop that had committed handed
+    // back the revision before it, the move concluded it had not landed, tried again on
+    // a spent revision, and reported «busy» about a closure that was already out). So a
+    // look that follows a write this phone knows of waits for a document at least that
+    // new - a bounded number of times - before it is believed.
+    readLiveAtLeast(revision, tried) {
+        const round = tried || 0;
+        return Promise.resolve().then(() => this.adapter.read()).then(live => {
+            if (!Number.isInteger(revision) || round >= 30
+                || (live && Number.isInteger(live.revision) && live.revision >= revision)) return live;
+            return new Promise(resolve => setTimeout(resolve, 100))
+                .then(() => this.readLiveAtLeast(revision, round + 1));
+        });
     },
 
     archiveEnvelope(kind, rowId, revision) {
@@ -236,8 +252,10 @@ Object.assign(FarkadSync, {
     // One bundle: read the server, and do the next thing it calls for.
     //   { ok: true, already }      it is out of the live document, and this phone knows
     //   { ok: false, reason }      offline | differs | copy-differs | row | server | busy
-    archiveOne(bundle, round) {
-        const fail = reason => ({ ok: false, reason });
+    archiveOne(bundle, round, atLeast, last) {
+        // `detail`: what the step before this one was told, for whoever has to work out
+        // why a move stopped. Never shown as a sentence.
+        const fail = reason => ({ ok: false, reason, detail: last || null });
         const same = (one, two) => canonicalJson(one === undefined ? null : one) === canonicalJson(two === undefined ? null : two);
         const adapter = this.adapter;
         if (!adapter) return Promise.resolve(fail('offline'));
@@ -246,11 +264,14 @@ Object.assign(FarkadSync, {
         // race the rules answered in their own words (see failedPayIntent); a second
         // time running it is a refusal, and is said as one.
         const next = result => {
-            if (result === 'again') return this.archiveOne(bundle, round + 1);
-            if (result === 'denied') return round < 2 ? this.archiveOne(bundle, round + 1) : fail('server');
-            return fail(result);
+            const word = result && typeof result === 'object' ? result.word : result;
+            const floor = result && typeof result === 'object' ? result.revision : undefined;
+            const said = result && typeof result === 'object' ? (result.said || null) : null;
+            if (word === 'again') return this.archiveOne(bundle, round + 1, floor, said);
+            if (word === 'denied') return round < 2 ? this.archiveOne(bundle, round + 1, floor, said) : fail('server');
+            return fail(word);
         };
-        return Promise.resolve().then(() => adapter.read()).then(live => {
+        return this.readLiveAtLeast(atLeast).then(live => {
             if (!live || !Number.isInteger(live.revision)) return fail('offline');
             const stored = paybookStoredIndex(live);
             if (ownsKey(stored.rows, bundle.rowId)) {
@@ -325,12 +346,14 @@ Object.assign(FarkadSync, {
         const document = paybookClosedDocument({ closedId: target, kind: 'history',
             workerId: bundle.workerId, entries }, patch.lastOpId, patch.revision);
         return this.cloudWrite(() => this.adapter.transact(patch, [{ id: target, data: document }]))
-            .then(() => 'again', error => {
+            .then(() => ({ word: 'again', revision: patch.revision, said: 'copied' }), error => {
                 const code = error && error.code;
                 // Moved under it, or somebody made the same copy first: both are answered
-                // by looking again.
-                if (code === 'conflict' || code === 'closed-exists') return 'again';
-                if (code === 'permission-denied') return 'denied';
+                // by looking again - at a document at least as new as the one that said so.
+                if (code === 'conflict' || code === 'closed-exists') {
+                    return { word: 'again', revision: Number.isInteger(error.revision) ? error.revision : undefined, said: code };
+                }
+                if (code === 'permission-denied') return { word: 'denied', said: code };
                 return error && error.unsent === true && code === 'unavailable' ? 'offline' : 'server';
             });
     },
@@ -344,13 +367,21 @@ Object.assign(FarkadSync, {
         patch['payIndex.v'] = PAYBOOK_INDEX_VERSION;
         patch['payIndex.rows.' + bundle.rowId] = row;
         return this.cloudWrite(() => this.adapter.archiveClosed(patch, bundle.paths.slice(), docs.slice()))
-            .then(() => 'again', error => {
+            .then(() => ({ word: 'again', revision: patch.revision, said: 'dropped' }), error => {
                 const code = error && error.code;
-                if (code === 'conflict') return 'again';
-                if (code === 'permission-denied') return 'denied';
+                if (code === 'conflict') {
+                    return { word: 'again', revision: Number.isInteger(error.revision) ? error.revision : undefined, said: code };
+                }
+                if (code === 'permission-denied') return { word: 'denied', said: code };
                 if (code === 'closed-unconfirmed') return 'copy-differs';
+                // The server would not take it as written, and will not the next time
+                // either. Said once, as what it is.
+                if (['invalid-argument', 'failed-precondition', 'not-found', 'out-of-range',
+                    'unauthenticated', 'no-closed-document'].indexOf(code) !== -1) return { word: 'server', said: code };
                 // No answer: it may have landed. The next look says.
-                if (!(error && error.unsent === true)) return 'again';
+                if (!(error && error.unsent === true)) {
+                    return { word: 'again', said: String(code || (error && error.message) || 'no answer').slice(0, 120) };
+                }
                 return code === 'unavailable' ? 'offline' : 'server';
             });
     },
