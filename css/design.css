@@ -347,17 +347,24 @@ input, select, textarea { border-radius: 12px; }
 .sheet-actions .sheet-fwd { background: var(--accent) !important; color: var(--on-accent) !important; border-color: transparent !important; }
 .sheet-actions .sheet-fwd * { color: inherit !important; }
 
-/* ---- הסעות (v171), js/ui/transport.js -------------------------------------------------
-   The transport planner: a panel over the whole screen, on a phone that turned it on.
-   Its element also carries .settings-panel (index.html says why), so being fixed, being
-   absent on paper and coming down with a stuck iPhone frame are app.css's rules and are
-   not repeated here; this block is only what the panel looks like.
+/* ---- הסעות, js/ui/transport.js (v171; the picture since v174) -------------------------
+   A panel over the whole screen, on a phone that turned it on. Its element also carries
+   .settings-panel (index.html says why), so being fixed, being absent on paper and coming
+   down with a stuck iPhone frame are app.css's rules and are not repeated here; this
+   block is only what the panel looks like.
 
-   The same four button looks as every other screen: ONE filled button per view (the
-   bare <button>, .transport-primary), tonal for everything else, and WhatsApp's green
-   for the link that opens WhatsApp and for nothing else. A site is drawn in the site's
-   own colour and no control borrows it. Every target is 44px both ways and every field
-   17px; the edges the panel meets are padded by env(), never by a number. */
+   v174: ONE SCREEN THAT IS A PICTURE. The men still waiting in a tray that stays at the
+   top; under it each vehicle drawn from above, its seats big tiles in their real rows.
+   No filled button anywhere on it - the picture is the thing - tonal controls, and
+   WhatsApp's green for the link that opens WhatsApp and for nothing else. A site is a
+   dot or an edge in the site's own colour and no control borrows it.
+
+   SUNLIGHT: the car's outline and every seat's border are --ink-3 (8:1 on a dark
+   surface, 9:1 on a light one - the floor asked for was 3:1) and a name is --ink on
+   --surface-2 (15:1 and up). tests/transport.browser.mjs measures both in both schemes.
+
+   Every target is 44px both ways, a seat at least 56; the edges the panel meets are
+   padded by env(), never by a number. */
 .transport-panel { color: var(--ink); }
 .transport-panel.open { inset: 0 !important; width: auto !important; max-height: none !important; margin: 0 !important; }
 .transport-panel button,
@@ -376,14 +383,6 @@ input, select, textarea { border-radius: 12px; }
 .transport-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .transport-context { margin: 2px 0 0; color: var(--ink-2); font-size: 16px; font-weight: 600; }
 .transport-close { flex: none; }
-.transport-tabs {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
-    padding: 4px calc(16px + env(safe-area-inset-left, 0px)) 8px calc(16px + env(safe-area-inset-right, 0px));
-}
-.transport-tabs .transport-tab { padding: 8px 2px; min-width: 0; text-align: center; }
-.transport-tab[aria-selected="true"] { background: var(--accent-soft) !important; color: var(--accent) !important; box-shadow: inset 0 -3px 0 var(--accent); }
 .transport-note {
     margin: 0 16px 8px;
     padding: 10px 12px;
@@ -403,83 +402,181 @@ input, select, textarea { border-radius: 12px; }
 }
 .transport-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .transport-view { display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin: 0 auto; font-size: 17px; line-height: 1.45; overflow-wrap: anywhere; }
-.transport-view h3, .transport-view h4, .transport-view p, .transport-view ul { margin: 0; padding: 0; }
-.transport-view ul { list-style: none; }
+.transport-view h3, .transport-view h4, .transport-view p { margin: 0; padding: 0; }
 .transport-view h3 { font-size: 18px; line-height: 1.3; }
-.transport-view h4 { font-size: 17px; }
-.transport-lead { color: var(--ink-2); font-size: 16px; }
-.transport-card { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border-radius: 14px; padding: 12px; }
+.transport-hint { color: var(--ink-2); font-size: 16px; }
 .transport-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .transport-wrap { flex-wrap: wrap; }
 .transport-grow { flex: 1 1 auto; min-width: 0; }
 .transport-wide { width: 100%; }
 .transport-name { font-weight: 700; }
 .transport-sub { color: var(--ink-2); font-size: 15px; }
-.transport-warn-text { color: var(--warn); font-size: 15px; font-weight: 700; }
-.transport-error { color: var(--danger); font-weight: 700; }
-.transport-status strong { display: block; font-size: 18px; }
-.transport-status[data-state="accepted"] strong { color: var(--ok); }
-.transport-status[data-state="changed"] strong { color: var(--warn); }
-.transport-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.transport-primary { background: var(--accent) !important; color: var(--on-accent) !important; border-color: transparent !important; }
-.transport-box { border-radius: 14px; padding: 12px; }
-.transport-box h3 { margin-bottom: 6px; }
-.transport-box li { padding: 3px 0; }
-.transport-box-err { background: var(--danger-bg); }
-.transport-box-err h3 { color: var(--danger); }
-.transport-box-warn { background: var(--warn-bg); }
-.transport-box-warn h3 { color: var(--warn); }
 .transport-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 8px; background: var(--surface-2); color: var(--ink); font-size: 15px; font-weight: 700; }
-.transport-card > .transport-badge { align-self: flex-start; }
 .transport-badge-bad { background: var(--danger-bg); color: var(--danger); }
 .transport-badge-ok { background: var(--ok-bg); color: var(--ok); }
-.transport-badge-lock { background: var(--warn-bg); color: var(--warn); }
-.transport-site { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 9px; border-radius: 8px; font-size: 14px; font-weight: 700; line-height: 1.5; }
-.transport-site .site-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.transport-person { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; width: 100%; text-align: start; padding: 8px 12px; }
-.transport-person .transport-name { flex: 1 1 auto; min-width: 0; }
-.transport-tags { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
-.transport-person[aria-pressed="true"] { background: var(--accent-soft) !important; box-shadow: inset 0 0 0 3px var(--accent); }
-.transport-missing { background: var(--danger-bg) !important; color: var(--danger) !important; }
-.transport-toggle { flex: none; }
-.transport-toggle[aria-pressed="true"] { background: var(--warn-bg) !important; color: var(--warn) !important; }
-.transport-toggle-ok[aria-pressed="true"] { background: var(--ok-bg) !important; color: var(--ok) !important; }
-.transport-drives .transport-toggle[aria-pressed="true"] { background: var(--ok-bg) !important; color: var(--ok) !important; }
-.transport-move-here { width: 100%; background: var(--accent-soft) !important; color: var(--accent) !important; }
-.transport-picker { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; background: var(--paper); }
-.transport-select {
-    width: 100%;
-    min-height: 48px;
-    font-size: 17px;
-    font-family: inherit;
-    color: var(--ink);
-    background-color: var(--surface-2);
-    border: 0;
-    border-radius: 12px;
-    padding: 10px 12px;
+.transport-quiet { flex: none; padding: 6px 12px; font-size: 15px !important; color: var(--ink-2) !important; }
+
+/* THE TRAY. Sticky inside the panel's own scroller - not fixed, so it is no new layer
+   for a stuck iPhone frame to leave behind - and opaque, so the cars pass UNDER it and a
+   man can always be reached, and a seated man always has somewhere to be dropped out. */
+.transport-tray {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-inline: -4px;
+    padding: 6px 4px 8px;
+    background: var(--paper);
+    border-bottom: 2px solid var(--line);
 }
-.transport-more > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--ink-2); padding: 0 4px; list-style: none; }
-.transport-more > summary::-webkit-details-marker { display: none; }
-/* The row's own mark, drawn: display:flex takes the browser's triangle away, and a row
-   with no mark is a sentence, not something to tap. A drawn corner has no bidi class to
-   mirror (js/ui/dom.js, chevronIcon, says what the typed ones cost). */
-.transport-more > summary::before {
-    content: '';
+.transport-tray-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; }
+.transport-tray-title { font-size: 17px !important; font-weight: 800; }
+.transport-chips {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-block: 2px;
+}
+.transport-chips::-webkit-scrollbar { display: none; }
+/* touch-action: none ON THE MAN AND NOWHERE ELSE. It is what lets a finger carry him the
+   moment it moves - and it is why js/ui/transport.js slides the tray itself when the
+   movement is level: the browser was told to keep out of gestures that start here. The
+   rest of the page is not told that, so it scrolls with an ordinary swipe.
+   No selection and no iOS callout: a long press on a name must lift the man, not offer
+   to copy him. */
+.transport-draggable { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+.transport-chip {
     flex: none;
-    width: 8px;
-    height: 8px;
-    border-inline-start: 2px solid currentColor;
-    border-bottom: 2px solid currentColor;
-    transform: rotate(-45deg);
-    margin-block-end: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 240px;
+    min-height: 48px !important;
+    padding: 6px 14px;
+    border-radius: 24px !important;
+    background: var(--surface-2) !important;
+    color: var(--ink) !important;
+    touch-action: none !important;
 }
-.transport-more[open] > summary::before { transform: rotate(135deg); margin-block-end: -4px; }
-.transport-more[open] > summary { margin-bottom: 8px; }
-.transport-card.transport-more > * + * { margin-top: 10px; }
-.transport-area { min-height: 44px; }
-.transport-version + .transport-version { border-top: 1px solid var(--line-soft); padding-top: 10px; }
-.transport-version { display: flex; flex-direction: column; gap: 4px; }
-.transport-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 12px; padding: 12px; font: inherit; font-size: 16px; }
+.transport-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transport-chip[aria-pressed="true"] { background: var(--accent-soft) !important; box-shadow: inset 0 0 0 3px var(--accent); }
+.transport-dot {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--seat-site, var(--ink-3));
+    color: #fff;
+    font-size: 9px;
+    line-height: 1;
+}
+
+/* ONE VEHICLE. */
+.transport-card { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border-radius: 14px; padding: 10px; }
+.transport-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.transport-card-folded .transport-vehicle-name { color: var(--ink-2); }
+.transport-toggle[aria-pressed="true"] { background: var(--ok-bg) !important; color: var(--ok) !important; }
+.transport-card-line { padding: 8px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-size: 16px; font-weight: 700; }
+
+/* THE CAR, FROM ABOVE, FRONT AT THE TOP. Laid out left-to-right by its own dir attribute
+   (js/ui/transport.js, transportCar, says why a mirrored car is a wrong car). A rounded
+   shell, rounder at the nose; a windscreen; four wheels standing out of the sides. */
+.transport-car { position: relative; width: 100%; max-width: 380px; margin: 0 auto; padding: 0 7px; }
+.transport-car-body {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 8px 12px;
+    border: 3px solid var(--ink-3);
+    border-radius: 46px 46px 22px 22px / 54px 54px 22px 22px;
+    background: var(--surface);
+}
+.transport-windscreen {
+    height: 16px;
+    margin: 0 15% 2px;
+    border: 2px solid var(--ink-3);
+    border-radius: 16px 16px 5px 5px / 14px 14px 5px 5px;
+    background: var(--surface-2);
+}
+.transport-wheel { position: absolute; width: 9px; height: 46px; border-radius: 5px; background: var(--ink-3); }
+.transport-wheel-fl, .transport-wheel-fr { top: 58px; }
+.transport-wheel-rl, .transport-wheel-rr { bottom: 30px; }
+.transport-wheel-fl, .transport-wheel-rl { left: 0; }
+.transport-wheel-fr, .transport-wheel-rr { right: 0; }
+.transport-seat-row { display: grid; gap: 6px; }
+.transport-seat {
+    position: relative;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0 !important;
+    min-height: 64px !important;
+    padding: 6px 4px 10px !important;
+    border: 2px solid var(--ink-3) !important;
+    border-radius: 14px 14px 10px 10px !important;
+    background: var(--surface-2) !important;
+    color: var(--ink) !important;
+    font-size: 16px !important;
+    line-height: 1.2;
+    text-align: center;
+    overflow: hidden;
+}
+.transport-seat-empty { border-style: dashed !important; background: transparent !important; color: var(--ink-2) !important; font-size: 15px !important; }
+.transport-seat-label { display: block; }
+/* Two lines of a name, and the ellipsis only after that; the whole name is the tile's
+   accessible name either way. */
+.transport-seat-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    max-width: 100%;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+.transport-seat-taken { box-shadow: inset 0 -7px 0 var(--seat-site, transparent); }
+.transport-seat-attn { border-color: var(--warn) !important; background: var(--warn-bg) !important; }
+.transport-glyph { flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.transport-seat-driver.transport-seat-empty .transport-glyph-wheel { width: 26px; height: 26px; }
+.transport-seat-driver.transport-seat-taken .transport-glyph-wheel { position: absolute; top: 4px; left: 5px; width: 16px; height: 16px; color: var(--ink-2); }
+/* The seat a carried man is over, and the man being carried. */
+.transport-over { outline: 4px solid var(--accent); outline-offset: -2px; }
+.transport-seat.transport-over { background: var(--accent-soft) !important; }
+.transport-lifted { opacity: .45; }
+.transport-ghost {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 260px;
+    padding: 10px 16px;
+    border-radius: 24px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 17px;
+    font-weight: 800;
+    white-space: nowrap;
+    box-shadow: var(--shadow-lift);
+    pointer-events: none;
+    will-change: transform;
+}
+.transport-ghost .transport-dot { box-shadow: 0 0 0 2px var(--on-accent); }
+
+.transport-door-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.transport-card > .transport-mark { align-self: flex-start; }
 .transport-wa {
     display: inline-flex;
     align-items: center;
@@ -491,22 +588,31 @@ input, select, textarea { border-radius: 12px; }
     color: var(--on-wa);
     text-decoration: none;
 }
-/* The man being moved: named at the bottom of the list, where the thumb is, with what
-   can be done to him. Sticky inside the panel's own scroller - not fixed, so it is no
-   new layer for a stuck iPhone frame to leave behind. */
-.transport-movebar {
-    position: sticky;
-    bottom: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-inline: -8px;
-    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-    background: var(--surface-2);
-    border-radius: 16px 16px 0 0;
-    box-shadow: var(--shadow-lift);
+
+/* THE TWO FOLDED LINES AT THE BOTTOM - the men who do not ride with us, and the list of
+   vehicles - and the row inside the list that holds one vehicle's tools. */
+.transport-fold > summary,
+.transport-more > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--ink-2); padding: 0 4px; list-style: none; }
+.transport-fold > summary::-webkit-details-marker,
+.transport-more > summary::-webkit-details-marker { display: none; }
+/* The row's own mark, drawn: display:flex takes the browser's triangle away, and a row
+   with no mark is a sentence, not something to tap. A drawn corner has no bidi class to
+   mirror (js/ui/dom.js, chevronIcon, says what the typed ones cost). */
+.transport-fold > summary::before,
+.transport-more > summary::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-inline-start: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg);
+    margin-block-end: 4px;
 }
-.transport-movebar button, .transport-movebar .transport-select { background-color: var(--surface) !important; }
+.transport-fold[open] > summary::before,
+.transport-more[open] > summary::before { transform: rotate(135deg); margin-block-end: -4px; }
+.transport-more[open] > summary { margin-bottom: 8px; }
+.transport-fleet-item { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 #shareModal .modal-actions .transport-entry { grid-column: 1 / -1; }
 .transport-switch .btn-secondary { align-self: flex-start; }
 

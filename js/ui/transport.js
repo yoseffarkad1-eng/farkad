@@ -1,10 +1,20 @@
-// הסעות (v171): who rides to work in which vehicle, and a message to each driver - the
-// screen, and the store it keeps its own things in.
+// הסעות: who rides to work in which vehicle, and a message to each driver - the screen,
+// and the store it keeps its own things in.
 //
-// The owner, 2026-11-09: seven vehicles, a pickup area per worker, he decides who may
-// drive what, the morning ride only - and FIRST ON HIS PHONE ONLY. The other two phones
-// come later, in a step of their own. So this file is built to be absent everywhere it
-// was not asked for:
+// v174 - THE SCREEN IS A PICTURE. The owner tried v171's four-tab planner on his phone
+// and sent it back on 2026-11-10: "very hard and complicated and it will take us a lot of
+// time. I want the car DRAWN, as if photographed from above, and on every seat written
+// 'add worker', and I take the worker, drag him with my finger and distribute them over
+// the cars." So there is ONE screen now: the men still waiting in a tray that stays at
+// the top, and under it each vehicle that goes out today drawn from above with its seats
+// in their rows. A man is put in a seat by dragging him there, by touching him and then
+// the seat, or by touching the seat and choosing him. WHOEVER IS IN THE DRIVER'S SEAT IS
+// THE DRIVER. There is no suggestion, no pickup area, no "may drive", no lock, nothing to
+// accept and no version: every change is the plan, kept at once.
+//
+// The owner, 2026-11-09: seven vehicles, the morning ride only - and FIRST ON HIS PHONE
+// ONLY. The other two phones come later, in a step of their own. So this file is built
+// to be absent everywhere it was not asked for:
 //
 //   - IT IS OFF UNTIL THIS PHONE TURNS IT ON. One preference in Store
 //     (farkadTransport:enabled), set from a card in ⋯. While it is off no entry is drawn,
@@ -14,19 +24,17 @@
 //   - IT READS THE DAY AND NEVER WRITES IT. Who works where comes from the day record
 //     through sederCrew (js/ui/seder.js) - the same reading the seder to each worker
 //     makes, so a man is on this list exactly when he is under a site in the group
-//     message. A man on two sites that day rides to the FIRST one his day holds; the
-//     other is said on his card and not routed. No function here calls State.commit,
-//     State.save or anything in js/sync/.
+//     message. A man on two sites that day rides to the FIRST one his day holds. No
+//     function here calls State.commit, State.save or anything in js/sync/.
 //   - WHAT IT KEEPS IS THIS PHONE'S OWN, under keys of its own:
-//       farkadTransport:settings       the vehicles, the pickup areas, and per worker his
-//                                      area and whether (and what) he may drive - these
-//                                      are NOT roster fields, and no other phone has them
-//       farkadTransport:day:<date>     that day's draft, its accepted versions, and which
-//                                      driver's message was opened or marked sent
+//       farkadTransport:settings       the vehicles
+//       farkadTransport:day:<date>     who sits where that day, which vehicles stay, who
+//                                      gets there another way, and which driver's
+//                                      message was opened
 //     None of it is in the record, so nothing that carries the record - the outbox, the
 //     cloud, a backup file, a restore point - can carry it, and the rescue file takes
 //     named records only (js/recovery.js). THE PRICE, said in docs/releases.md: a lost
-//     phone loses the plans and the per-worker transport settings.
+//     phone loses the plans and the list of vehicles.
 //   - A DAMAGED TRANSPORT RECORD CANNOT HOLD THE DAY. Recovery is not involved and
 //     farkadWritesBlocked() is never raised from here: a ride plan that will not parse
 //     must not stop anybody recording who worked. What will not read is copied aside,
@@ -42,12 +50,12 @@
 //
 // EVERY HEBREW STRING THIS FEATURE SHOWS OR SENDS, AND NOTHING ELSE, IN ONE BLOCK.
 // PROPOSED, NOT APPROVED WORD BY WORD: the owner gave blanket approval of professional
-// wording on 2026-11-09 and corrects on sight (docs/releases.md, v171, lists them all).
+// wording on 2026-11-09 and corrects on sight (docs/releases.md, v174, lists them all).
 // Hebrew strings are product decisions (CLAUDE.md, law 6): tests/transport.test.mjs pins
 // every one, word for word, and changing one here moves the pinned line there in the
 // same commit. A name in a template is already bidi-isolated by the caller.
 const TRANSPORT_TEXT = Object.freeze({
-    // --- the switch, in ⋯: the last row of «כללי» (v172; under «מכשיר ועזרה» until then)
+    // --- the switch, in ⋯: the last row of «כללי»
     switchTitle: 'הסעות',
     switchSub: 'שיבוץ עובדים לרכבים',
     switchLead: 'שיבוץ העובדים לרכבים והודעה לכל נהג. פועל במכשיר הזה בלבד: לא מסונכרן, לא משותף עם הטלפונים האחרים, ולא נכלל בגיבוי.',
@@ -62,20 +70,49 @@ const TRANSPORT_TEXT = Object.freeze({
     // --- the frame
     title: 'הסעות',
     back: 'חזרה',
-    tabPlan: 'שיבוץ',
-    tabVehicles: 'רכבים',
-    tabWorkers: 'עובדים',
-    tabMessages: 'הודעות',
     notKept: 'השינוי לא נשמר במכשיר. אם האפליקציה תיסגר, הוא יאבד.',
     unreadable: 'נתוני הסעות שנשמרו במכשיר לא נקראו. מתחילים מרשימה ריקה, והעותק שלא נקרא נשמר בצד.',
     nobody: 'אין ביום הזה עובדים עם אתר עבודה.',
 
-    // --- vehicles: which go out today, and the list itself
-    vehiclesLead: 'אילו רכבים יוצאים היום?',
-    vehiclesSummary: (n, total, seats) => `זמינים ${n} מתוך ${total} · ${seats} מושבים`,
-    seats: n => `${n} מושבים`,
+    // --- the tray: the men who work today and are in no seat yet
+    waiting: n => `ממתינים לשיבוץ (${n})`,
+    allSeated: 'כל העובדים משובצים',
+    hint: 'גוררים עובד אל מושב, או נוגעים בעובד ואז במושב. עובד שכבר יושב מזיזים בלחיצה ארוכה וגרירה.',
+    // said to a screen reader, and to nobody else
+    picked: name => `${name} נבחר. נוגעים במושב.`,
+    seatedIn: (name, v) => `${name} שובץ ב${v}`,
+    returned: name => `${name} חזר לממתינים`,
+
+    // --- a seat
+    addWorker: 'הוספת עובד',
+    driverSeat: 'נהג',
+    driver: name => `נהג: ${name}`,
+    chooseTitle: 'מי יושב כאן?',
+    driverDialogTitle: v => `מי נוהג ב${v}?`,
+    removeFromVehicle: 'הוצאה מהרכב',
+    cancel: 'ביטול',
+
+    // --- one vehicle
+    occupancy: (a, b) => `${a} מתוך ${b}`,
     available: 'זמין היום',
     unavailable: 'לא זמין היום',
+    driverNone: 'בלי נהג',
+    notWorking: w => `${w} משובץ ברכב אבל אין לו אתר ברישום היום`,
+    deletedWorker: 'עובד שנמחק',
+
+    // --- the men who do not ride with us
+    notRiding: 'לא בהסעה שלנו',
+    notRidingCount: n => `לא בהסעה שלנו (${n})`,
+    notRidingTitle: 'מי לא נוסע בהסעה שלנו?',
+    statusLabel: name => `איך ${name} מגיע`,
+    statusPrivate: 'רכב פרטי',
+    statusContractor: 'נוסע עם קבלן אחר',
+    statusOther: 'אחר',
+    bringBack: 'החזרה להסעה',
+
+    // --- the list of vehicles: setup, at the bottom, not daily work
+    vehiclesRow: 'רכבים',
+    seats: n => `${n} מושבים`,
     noVehicles: 'אין רכבים ברשימה.',
     editVehicle: 'עריכת הרכב',
     addVehicle: 'הוספת רכב',
@@ -88,153 +125,31 @@ const TRANSPORT_TEXT = Object.freeze({
     seatsTitle: name => `כמה מושבים יש ב${name}? כולל הנהג.`,
     seatsBad: 'מספר בין 2 ל-20',
     retireTitle: name => `להוציא את ${name} מהרשימה?`,
-    retireLead: 'הרכב לא יוצע עוד לשיבוץ. גרסאות שכבר אושרו אינן משתנות.',
+    retireLead: 'הרכב לא יופיע עוד בשיבוץ.',
     save: 'שמירה',
 
-    // --- workers: how each man gets there, where he is picked up, what he may drive
-    workersLead: 'מי צריך הסעה היום? הרשימה נקראת מרישום היום ואינה משנה אותו.',
-    statusLabel: name => `איך ${name} מגיע`,
-    statusRide: 'בהסעה שלנו',
-    statusPrivate: 'רכב פרטי',
-    statusContractor: 'נוסע עם קבלן אחר',
-    statusOther: 'אחר',
-    areaLabel: name => `אזור האיסוף של ${name}`,
-    noArea: 'בלי אזור',
-    alsoAt: sites => `רשום היום גם ב${sites}. ההסעה לאתר הראשון.`,
-    canDrive: 'רשאי לנהוג',
-    cannotDrive: 'לא נוהג',
-    drivesAll: 'כל הרכבים',
-    drivesSome: n => (n === 1 ? 'רכב אחד' : `${n} רכבים`),
-    drivesNone: 'לא נבחר רכב',
-    drivesLabel: name => `באילו רכבים ${name} רשאי לנהוג`,
-    notWorkingToday: n => (n === 1 ? 'עובד אחד בלי אתר היום – אינו בהסעות'
-        : `${n} עובדים בלי אתר היום – אינם בהסעות`),
-    areasTitle: n => `אזורי איסוף (${n})`,
-    areasLead: 'האזורים שמהם אוספים עובדים. לכל עובד אזור אחד קבוע.',
-    noAreas: 'עדיין אין אזורים. מוסיפים אזור, ואז בוחרים אזור לכל עובד.',
-    addArea: 'הוספת אזור',
-    renameArea: 'שינוי שם',
-    removeArea: 'מחיקה',
-    areaNameTitle: 'שם האזור',
-    areaNameTaken: 'כבר יש אזור בשם הזה',
-    removeAreaTitle: name => `למחוק את האזור ${name}?`,
-    removeAreaLead: 'עובדים ששויכו לאזור הזה יישארו בלי אזור.',
-
-    // --- the plan
-    suggest: 'הצעת שיבוץ',
-    accept: 'אישור התוכנית',
-    draft: 'טיוטה – עדיין לא אושרה',
-    acceptedVersion: n => `גרסה ${n} מאושרת`,
-    changedSince: n => `יש שינויים שלא אושרו מאז גרסה ${n}`,
-    recordChanged: 'רישום היום השתנה מאז שאושרה הגרסה',
-    seatedCount: (a, b) => `משובצים ${a} מתוך ${b}`,
-    planOk: 'התוכנית מלאה',
-    errorsTitle: n => (n === 1 ? 'דבר אחד לתיקון' : `${n} דברים לתיקון`),
-    warnTitle: 'לתשומת לב',
-    unseatedTitle: n => `בלי מקום ברכב (${n})`,
-    suggestDone: n => (n === 0 ? 'הוצע שיבוץ לכולם' : `הוצע שיבוץ. ${n} נשארו בלי מקום`),
-
-    // --- what is wrong with a plan
-    noDriver: v => `${v}: אין נהג`,
-    driverNotEligible: (v, w) => `${v}: ${w} אינו רשאי לנהוג ברכב הזה`,
-    overCapacity: (v, n) => `${v}: ${n} יותר ממספר המושבים`,
-    twice: w => `${w} משובץ בשני רכבים`,
-    hasStatus: (w, s) => `${w} משובץ ברכב אבל מסומן «${s}»`,
-    notWorking: w => `${w} משובץ ברכב אבל אין לו אתר ברישום היום`,
-    vehicleUnavailable: v => `${v} מסומן לא זמין היום ויש בו נוסעים`,
-    unknownVehicle: 'רכב שהוצא מהרשימה ויש בו נוסעים',
-    noSeat: w => `${w} בלי מקום ברכב`,
-    badSeat: (v, w) => `${v}: המושב של ${w} אינו תקין`,
-    otherArea: (v, w) => `${w} נאסף מאזור אחר מזה של ${v}`,
-    deletedWorker: 'עובד שנמחק',
-    deletedVehicle: 'רכב שהוצא מהרשימה',
-
-    // --- one vehicle
-    occupancy: (a, b) => `${a} מתוך ${b}`,
-    notUsed: 'לא בשימוש',
-    lockVehicle: 'נעילת הרכב',
-    unlockVehicle: 'שחרור הרכב',
-    vehicleLocked: 'הרכב נעול',
-    pickup: 'אזור איסוף',
-    destinations: 'יעדים',
-    driver: name => `נהג: ${name}`,
-    chooseDriver: 'בחירת נהג',
-    driverDialogTitle: v => `מי נוהג ב${v}?`,
-    driverDialogLead: 'מוצגים רק עובדים שרשאים לנהוג ברכב הזה.',
-    driverNone: 'בלי נהג',
-    noEligible: 'אין היום עובד שרשאי לנהוג ברכב הזה',
-    lockWorker: name => `נעילת השיבוץ של ${name}`,
-    unlockWorker: name => `שחרור השיבוץ של ${name}`,
-    lock: 'נעילה',
-    locked: 'נעול',
-    moveHere: 'העברה לכאן',
-    full: 'הרכב מלא',
-
-    // --- moving a man
-    moving: name => `מעבירים את ${name} – בוחרים רכב`,
-    workerLockedNote: name => `${name} נעול – משחררים כדי להעביר`,
-    cancel: 'ביטול',
-    removeFromVehicle: 'הוצאה מהרכב',
-    seat: 'מושב',
-    seatNone: 'בלי מושב קבוע',
-    seatFront: 'קדמי, ליד הנהג',
-    seatRearRight: 'אחורי ימין',
-    seatRearMiddle: 'אחורי אמצע',
-    seatRearLeft: 'אחורי שמאל',
-    seatRow: (row, place) => `שורה ${row}, מושב ${place}`,
-    seatNumber: n => `מושב ${n}`,
-
-    // --- accepting
-    acceptTitle: 'אישור התוכנית',
-    acceptComplete: 'התוכנית מלאה. לאשר אותה?',
-    acceptIncomplete: n => (n === 1 ? 'התוכנית חלקית: דבר אחד לא סגור. אפשר לאשר רק עם סיבה.'
-        : `התוכנית חלקית: ${n} דברים לא סגורים. אפשר לאשר רק עם סיבה.`),
-    reasonLabel: 'למה מאשרים תוכנית חלקית?',
-    reasonNeeded: 'צריך לכתוב סיבה',
-    acceptYes: 'אישור',
-    acceptPartial: 'אישור כתוכנית חלקית',
-    nothingToAccept: 'אין שינויים לאשר',
-
-    // --- versions
-    historyTitle: 'היסטוריית גרסאות',
-    noVersions: 'עדיין אין גרסה מאושרת',
-    versionLine: (n, time) => `גרסה ${n} · ${time}`,
-    complete: 'מלאה',
-    partial: reason => `חלקית – ${reason}`,
-    moved: (n, prev) => (n === 1 ? `עובד אחד שונה לעומת גרסה ${prev}` : `${n} עובדים שונו לעומת גרסה ${prev}`),
-    tripLine: (vehicle, driver, n) => `${vehicle}: ${driver} + ${n} נוסעים`,
-
-    // --- messages to the drivers
-    messagesLead: 'הודעה לכל נהג. וואטסאפ נפתח עם ההודעה מוכנה, ושם לוחצים על שליחה.',
-    noAccepted: 'אין תוכנית מאושרת. מאשרים את השיבוץ, ואז שולחים לנהגים.',
-    draftDiffers: n => `ההודעות לפי גרסה ${n}. יש שינויים שלא אושרו.`,
+    // --- the driver's message: the button, and what the card says after it
     openWhatsapp: 'פתיחה בוואטסאפ',
-    notOpened: 'עדיין לא נפתח',
     opened: 'נפתח בוואטסאפ',
-    confirmSent: 'סימנתי שנשלח',
-    sentMarked: time => `סומן כנשלח ב-${time}`,
-    unmarkSent: 'ביטול הסימון',
-    changedSinceMark: 'ההודעה השתנתה מאז שסומנה – כדאי לשלוח שוב',
     noPhone: 'אין מספר טלפון תקין',
 
     // --- the message a driver receives
     //   שלום סאמר,
     //   הסעה ליום שלישי 10/11/2026:
     //   רכב: טויוטה קורולה 2016
-    //   איסוף: ערערה
     //   נוסעים (2):
     //   - ראמי – חדרה
     //   - דוד – חיפה
     //   יעדים: חיפה, חדרה
-    // From the second accepted version on, a line «עדכון מספר N לתוכנית.» follows the
-    // heading. No emoji: the proposal had none, and the owner may ask for the seder's.
+    // No pickup line and no «עדכון מספר N» line any more: areas and versions are gone
+    // (v174). No emoji: the proposal had none, and the owner may ask for the seder's.
     mHello: name => `שלום ${name},`,
     mHeading: (day, date) => `הסעה ל${day} ${date}:`,
-    mUpdate: n => `עדכון מספר ${n - 1} לתוכנית.`,
     mVehicle: v => `רכב: ${v}`,
-    mPickup: a => `איסוף: ${a}`,
     mPassengers: n => `נוסעים (${n}):`,
     mPassenger: (name, site) => `- ${name} – ${site}`,
+    // a passenger with no site in today's record: named, and no site invented for him
+    mPassengerOnly: name => `- ${name}`,
     mAlone: 'בלי נוסעים.',
     mDestinations: sites => `יעדים: ${sites}`
 });
@@ -310,13 +225,19 @@ function transportCleanName(value) {
     return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, TRANSPORT_NAME_MAX) : '';
 }
 
+// `areas` and `workers` are what v171's planner kept here - the pickup areas, and per
+// worker his area and what he might drive. Nothing reads them any more (v174). They are
+// carried through a save untouched rather than dropped: a list of vehicles renamed
+// tonight is no reason to delete what the owner typed last week.
 function transportEmptySettings() {
     return { version: 1, seeded: false, vehicles: [], areas: [], workers: transportMap() };
 }
 
+// What a day keeps (v174): which vehicles stay home, who gets there another way, who
+// sits where, and which driver's message was opened.
 function transportEmptyDay() {
     return { version: 1, unavailable: transportMap(), status: transportMap(), trips: transportMap(),
-        workerLocks: transportMap(), accepted: [], marks: transportMap() };
+        marks: transportMap() };
 }
 
 // JSON that is an object of this version, or null. Everything inside is then read
@@ -369,6 +290,8 @@ function transportReadSettings(parsed) {
     return out;
 }
 
+// A trip as it is kept: the driver (seat 1), the passengers, and the seat number of each.
+// v171 kept a pickup area and a lock beside these; they are not read.
 function transportReadTrip(item) {
     if (!isPlainObject(item)) return null;
     const passengers = [];
@@ -381,17 +304,23 @@ function transportReadTrip(item) {
             if (isSafeId(id) && Number.isInteger(item.seats[id])) seats[id] = item.seats[id];
         });
     }
-    return { driver: isSafeId(item.driver) ? item.driver : null, passengers,
-        area: isSafeId(item.area) ? item.area : null, locked: item.locked === true, seats };
+    return { driver: isSafeId(item.driver) ? item.driver : null, passengers, seats };
 }
 
-function transportReadPlan(parsed, out) {
-    const flags = (source, target) => {
-        if (!isPlainObject(source)) return;
-        Object.keys(source).forEach(id => { if (isSafeId(id) && source[id] === true) target[id] = true; });
-    };
-    flags(parsed.unavailable, out.unavailable);
-    flags(parsed.workerLocks, out.workerLocks);
+// A DAY WRITTEN BY v171 OR v172 OPENS HERE AS IT IS. What still means something is read:
+// the vehicles kept home, the statuses, each trip's driver, passengers and seat numbers,
+// and a message's «opened» mark. What the picture has no use for - accepted versions,
+// worker locks, a trip's lock and pickup area, the «sent» mark - is NOT READ, and is not
+// touched on the disk either: reading writes nothing, so those bytes stay exactly as
+// they were until somebody changes that day, and the first change writes the day in the
+// shape above without them (transportKeep; docs/releases.md, v174).
+function transportReadDay(parsed) {
+    const out = transportEmptyDay();
+    if (isPlainObject(parsed.unavailable)) {
+        Object.keys(parsed.unavailable).forEach(id => {
+            if (isSafeId(id) && parsed.unavailable[id] === true) out.unavailable[id] = true;
+        });
+    }
     if (isPlainObject(parsed.status)) {
         Object.keys(parsed.status).forEach(id => {
             // «ממתין» was in the proposal and is not a status (the owner, 2026-11-09): a
@@ -407,34 +336,12 @@ function transportReadPlan(parsed, out) {
             if (trip) out.trips[id] = trip;
         });
     }
-    return out;
-}
-
-function transportReadDay(parsed) {
-    const out = transportReadPlan(parsed, transportEmptyDay());
-    (Array.isArray(parsed.accepted) ? parsed.accepted : []).forEach(item => {
-        if (!isPlainObject(item) || !isFiniteNumber(item.at) || typeof item.sig !== 'string') return;
-        const plan = transportReadPlan(item, transportEmptyDay());
-        const attendance = transportMap();
-        if (isPlainObject(item.attendance)) {
-            Object.keys(item.attendance).forEach(id => {
-                if (isSafeId(id) && isSafeId(item.attendance[id])) attendance[id] = item.attendance[id];
-            });
-        }
-        // Numbered by where it stands, never by what the bytes claim: versions are
-        // append-only and a number read off a damaged record could repeat one.
-        out.accepted.push({ n: out.accepted.length + 1, at: item.at, complete: item.complete === true,
-            errors: Number.isInteger(item.errors) ? item.errors : 0,
-            reason: typeof item.reason === 'string' ? item.reason.slice(0, 300) : '',
-            sig: item.sig, moved: Number.isInteger(item.moved) ? item.moved : null,
-            unavailable: plan.unavailable, status: plan.status, trips: plan.trips, attendance });
-    });
     if (isPlainObject(parsed.marks)) {
         Object.keys(parsed.marks).forEach(id => {
             const mark = parsed.marks[id];
-            if (!isSafeId(id) || !isPlainObject(mark) || typeof mark.sig !== 'string') return;
-            out.marks[id] = { sig: mark.sig, openedAt: isFiniteNumber(mark.openedAt) ? mark.openedAt : null,
-                sentAt: isFiniteNumber(mark.sentAt) ? mark.sentAt : null };
+            if (!isSafeId(id) || !isPlainObject(mark) || typeof mark.sig !== 'string'
+                || !isFiniteNumber(mark.openedAt)) return;
+            out.marks[id] = { sig: mark.sig, openedAt: mark.openedAt };
         });
     }
     return out;
@@ -528,36 +435,30 @@ function transportPrune(today) {
     return removed;
 }
 
+
 // ================================================================== what the day says
 //
 // The engine's input, read at the moment it is needed and never kept: the roster, the
 // active sites, who is on which site (sederCrew - the one reading of "who is working"
-// this app has for a message), and this phone's transport settings laid over the roster.
+// this app has for a message), and this phone's vehicles.
 function transportContext(date) {
     const settings = transportSettings();
     const schedule = State.schedule || {};
     const crew = sederCrew(schedule, date, State.layer);
     const attendance = transportMap();
-    const also = transportMap();
     crew.forEach(row => {
         if (!isSafeId(row.workerId)) return;
-        // A man on two sites rides to the first his day holds; the rest are told, not routed.
+        // A man on two sites rides to the first his day holds.
         attendance[row.workerId] = row.sites[0].placeId;
-        if (row.sites.length > 1) also[row.workerId] = row.sites.slice(1).map(site => site.name);
     });
-    const workers = (schedule.workers || []).filter(worker => worker && isSafeId(worker.id)).map(worker => {
-        const own = settings.workers[worker.id] || {};
-        return { id: worker.id, name: worker.name, phone: worker.phone, area: own.area || null,
-            canDrive: own.canDrive === true, drives: own.drives === 'all' ? 'all' : (own.drives || []).slice() };
-    });
+    const workers = (schedule.workers || []).filter(worker => worker && isSafeId(worker.id))
+        .map(worker => ({ id: worker.id, name: worker.name, phone: worker.phone }));
     return {
         workers,
         vehicles: settings.vehicles.filter(vehicle => vehicle.active),
         sites: (schedule.places || []).filter(place => place && place.active !== false)
             .map(place => ({ id: place.id, name: place.name })),
-        areas: settings.areas,
-        attendance,
-        also
+        attendance
     };
 }
 
@@ -581,119 +482,51 @@ function transportWorkerName(ctx, id) {
     return worker ? worker.name : TRANSPORT_TEXT.deletedWorker;
 }
 
-// Every vehicle the list has ever had, retired ones too: an accepted version names the
-// car it was accepted with.
-function transportVehicleName(id) {
-    const vehicle = transportFind(transportSettings().vehicles, id);
-    return vehicle ? vehicle.name : TRANSPORT_TEXT.deletedVehicle;
-}
-
 function transportSiteName(ctx, id) {
+    if (!id) return '';
     const site = transportFind(ctx.sites, id);
     if (site) return site.name;
     const place = ((State.schedule && State.schedule.places) || []).find(one => one && one.id === id);
     return place ? place.name : '';
 }
 
-function transportAreaName(ctx, id) {
-    const area = transportFind(ctx.areas, id);
-    return area ? area.name : '';
-}
-
-// The vehicles of a plan in the order of the list - never the order the trips happen to
-// have been written in, which is whatever order a suggestion opened them.
-function transportTripOrder(trips) {
-    const rank = transportMap();
-    transportSettings().vehicles.forEach((vehicle, index) => { rank[vehicle.id] = index; });
-    const at = id => (rank[id] === undefined ? 1e9 : rank[id]);
-    return Object.keys(trips).sort((a, b) => (at(a) - at(b)) || (a < b ? -1 : a > b ? 1 : 0));
-}
-
-function transportClock(ms) {
-    const at = new Date(ms);
-    return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
-}
-
 function transportStatusText(status) {
     return { private: TRANSPORT_TEXT.statusPrivate, contractor: TRANSPORT_TEXT.statusContractor,
-        other: TRANSPORT_TEXT.statusOther }[status] || TRANSPORT_TEXT.statusRide;
-}
-
-function transportSeatText(vehicle, n) {
-    const seat = TransportEngine.seatPlan(vehicle).find(one => one.n === n);
-    if (!seat) return '';
-    return { front: TRANSPORT_TEXT.seatFront, rearRight: TRANSPORT_TEXT.seatRearRight,
-        rearMiddle: TRANSPORT_TEXT.seatRearMiddle, rearLeft: TRANSPORT_TEXT.seatRearLeft,
-        row: TRANSPORT_TEXT.seatRow(seat.row, seat.place) }[seat.kind] || TRANSPORT_TEXT.seatNumber(n);
-}
-
-function transportIssueText(ctx, day, issue) {
-    const T = TRANSPORT_TEXT;
-    const v = issue.vehicle ? transportRli(transportVehicleName(issue.vehicle)) : '';
-    const w = issue.worker ? isolate(transportWorkerName(ctx, issue.worker)) : '';
-    switch (issue.code) {
-    case 'noDriver': return T.noDriver(v);
-    case 'driverNotEligible': return T.driverNotEligible(v, w);
-    case 'overCapacity': return T.overCapacity(v, issue.n);
-    case 'twice': return T.twice(w);
-    case 'hasStatus': return T.hasStatus(w, transportStatusText(day.status[issue.worker]));
-    case 'notWorking': case 'unknownWorker': return T.notWorking(w);
-    case 'vehicleUnavailable': return T.vehicleUnavailable(v);
-    case 'unknownVehicle': return T.unknownVehicle;
-    case 'noSeat': return T.noSeat(w);
-    case 'badSeat': return T.badSeat(v, w);
-    case 'otherArea': return T.otherArea(v, w);
-    default: return String(issue.code);
-    }
+        other: TRANSPORT_TEXT.statusOther }[status] || '';
 }
 
 // ================================================================== the plan, changed
 //
-// Every change is made to this session's copy of the day, tidied, and written to the
-// day's own key. Each answers whether it did anything; none of them touches the record.
+// Every change is made to this session's copy of the day and written to the day's own
+// key at once - there is nothing to accept. Each answers whether it did anything; none
+// of them touches the record.
 
-function transportTidy(day) {
-    Object.keys(day.trips).forEach(vehicleId => {
-        const trip = day.trips[vehicleId];
-        Object.keys(trip.seats).forEach(id => { if (trip.passengers.indexOf(id) === -1) delete trip.seats[id]; });
-        if (!trip.locked && TransportEngine.occupants(trip).length === 0) delete day.trips[vehicleId];
+// THE FIRST CHANGE TO A DAY IS WHAT REWRITES IT. What is kept from then on is the
+// picture as TransportEngine.layout reads it - every seated man with a seat number, no
+// trip for a vehicle that stays or has left the list - so whatever v171 stored beside
+// that (versions, locks, a trip's pickup area, a «sent» mark) is on the disk until this
+// runs for that day, and gone after (docs/releases.md, v174).
+function transportKeep(date, day, trips) {
+    const kept = transportMap();
+    Object.keys(trips).forEach(vehicleId => {
+        const trip = transportReadTrip(trips[vehicleId]);
+        if (trip) kept[vehicleId] = trip;
     });
-    Object.keys(day.workerLocks).forEach(id => {
-        if (!TransportEngine.seatOf(day, id)) delete day.workerLocks[id];
+    day.trips = kept;
+    // A mark belongs to a driver's message; with no driver there is no message.
+    Object.keys(day.marks).forEach(vehicleId => {
+        if (!kept[vehicleId] || !kept[vehicleId].driver) delete day.marks[vehicleId];
     });
-}
-
-function transportTrip(day, vehicleId, make) {
-    if (!day.trips[vehicleId] && make) {
-        day.trips[vehicleId] = { driver: null, passengers: [], area: null, locked: false, seats: transportMap() };
-    }
-    return day.trips[vehicleId] || null;
-}
-
-function transportVehicleLockedFor(day, workerId) {
-    const at = TransportEngine.seatOf(day, workerId);
-    return Boolean(at && day.trips[at].locked);
-}
-
-// Locked himself, or sitting in a locked vehicle: either way he does not move until a
-// person unlocks - that is what a lock is for.
-function transportFrozen(day, workerId) {
-    return Boolean(day.workerLocks[workerId]) || transportVehicleLockedFor(day, workerId);
-}
-
-function transportUnseatIn(day, workerId) {
-    const at = TransportEngine.seatOf(day, workerId);
-    if (!at) return;
-    const trip = day.trips[at];
-    if (trip.driver === workerId) trip.driver = null;
-    trip.passengers = trip.passengers.filter(id => id !== workerId);
-    delete trip.seats[workerId];
-}
-
-function transportDone(date, day) {
-    transportTidy(day);
     transportSaveDay(date);
     return true;
+}
+
+// After a vehicle is kept home or a man is marked as getting there another way: the
+// picture as it now reads, written down - so the men that left it are waiting on the
+// disk as well as on the glass.
+function transportRedrawn(date, day) {
+    const ctx = transportContext(date);
+    return transportKeep(date, day, TransportEngine.tripsOf(ctx, TransportEngine.layout(ctx, day).cars));
 }
 
 function transportSetAvailable(date, vehicleId, available) {
@@ -701,211 +534,63 @@ function transportSetAvailable(date, vehicleId, available) {
     const day = transportDayOf(date);
     if (available) delete day.unavailable[vehicleId];
     else day.unavailable[vehicleId] = true;
-    return transportDone(date, day);
+    return transportRedrawn(date, day);
 }
 
+// `status` is one of TransportEngine.STATUSES, or nothing to bring the man back to the
+// tray. A man given one leaves his seat: the mark is the newer fact.
 function transportSetStatus(date, workerId, status) {
     if (!transportEnabled() || !isSafeId(workerId)) return false;
     const day = transportDayOf(date);
     if (status && TransportEngine.STATUSES.indexOf(status) === -1) return false;
-    if (status) {
-        day.status[workerId] = status;
-        // Out of his seat - unless a person locked the vehicle he is in: then the lock
-        // wins, and validation says the two disagree.
-        if (!transportVehicleLockedFor(day, workerId)) transportUnseatIn(day, workerId);
-    } else delete day.status[workerId];
-    return transportDone(date, day);
+    if (status) day.status[workerId] = status;
+    else delete day.status[workerId];
+    return transportRedrawn(date, day);
 }
 
-function transportSuggest(date) {
-    if (!transportEnabled()) return null;
-    const day = transportDayOf(date);
-    const result = TransportEngine.suggest(transportContext(date), day);
-    const trips = transportMap();
-    Object.keys(result.trips).forEach(vehicleId => {
-        trips[vehicleId] = transportReadTrip(result.trips[vehicleId]);
-    });
-    day.trips = trips;
-    transportDone(date, day);
-    return result;
-}
-
-function transportMove(date, workerId, vehicleId) {
+// A man onto seat `n` of a vehicle; seat 1 is the driver's, and whoever is put there
+// drives. The rules - swap, the displaced man back to the tray, what is refused - are
+// the engine's (TransportEngine.place), so a drag, a tap and a test all get the same.
+function transportPlace(date, workerId, vehicleId, n) {
     if (!transportEnabled() || !isSafeId(workerId) || !isSafeId(vehicleId)) return false;
     const day = transportDayOf(date);
-    const ctx = transportContext(date);
-    const vehicle = transportFind(ctx.vehicles, vehicleId);
-    if (!vehicle || transportFrozen(day, workerId)) return false;
-    if (TransportEngine.seatOf(day, workerId) === vehicleId) return false;
-    const existing = transportTrip(day, vehicleId, false);
-    if (existing && (existing.locked || TransportEngine.occupants(existing).length >= vehicle.seats)) return false;
-    transportUnseatIn(day, workerId);
-    const target = transportTrip(day, vehicleId, true);
-    target.passengers.push(workerId);
-    const worker = transportFind(ctx.workers, workerId);
-    if (!target.area && worker) target.area = worker.area;
-    return transportDone(date, day);
+    const result = TransportEngine.place(transportContext(date), day, workerId, vehicleId, n);
+    return result ? transportKeep(date, day, result.trips) : false;
 }
 
 function transportUnseat(date, workerId) {
     if (!transportEnabled() || !isSafeId(workerId)) return false;
     const day = transportDayOf(date);
-    if (transportFrozen(day, workerId) || !TransportEngine.seatOf(day, workerId)) return false;
-    transportUnseatIn(day, workerId);
-    return transportDone(date, day);
-}
-
-// The driver of a vehicle. ONLY a man who may drive it: the list on the screen offers
-// nobody else, and this refuses anybody else whoever asks - a hand-made plan is the one
-// place an ineligible driver could otherwise get in. `null` takes the driver out.
-function transportSetDriver(date, vehicleId, workerId) {
-    if (!transportEnabled() || !isSafeId(vehicleId)) return false;
-    const day = transportDayOf(date);
-    const ctx = transportContext(date);
-    const vehicle = transportFind(ctx.vehicles, vehicleId);
-    if (!vehicle) return false;
-    const existing = transportTrip(day, vehicleId, false);
-    if (existing && existing.locked) return false;
-    if (workerId) {
-        const worker = transportFind(ctx.workers, workerId);
-        if (!TransportEngine.mayDrive(worker, vehicle) || !TransportEngine.isRider(ctx, day, workerId)) return false;
-        if (transportFrozen(day, workerId) && TransportEngine.seatOf(day, workerId) !== vehicleId) return false;
-        transportUnseatIn(day, workerId);
-    }
-    const trip = transportTrip(day, vehicleId, true);
-    const old = trip.driver;
-    // The man who was driving stays in the car, as a passenger.
-    if (old && old !== workerId) { trip.driver = null; trip.passengers.push(old); }
-    trip.driver = workerId || null;
-    if (workerId) {
-        // He leaves from his own home: the pickup area starts as the driver's.
-        const worker = transportFind(ctx.workers, workerId);
-        if (!trip.area || TransportEngine.occupants(trip).length === 1) trip.area = worker.area;
-    }
-    return transportDone(date, day);
-}
-
-function transportSetTripArea(date, vehicleId, areaId) {
-    if (!transportEnabled()) return false;
-    const day = transportDayOf(date);
-    const trip = transportTrip(day, vehicleId, false);
-    if (!trip || trip.locked) return false;
-    trip.area = areaId && transportFind(transportSettings().areas, areaId) ? areaId : null;
-    return transportDone(date, day);
-}
-
-function transportSetSeat(date, workerId, n) {
-    if (!transportEnabled()) return false;
-    const day = transportDayOf(date);
-    const at = TransportEngine.seatOf(day, workerId);
-    const trip = at ? day.trips[at] : null;
-    if (!trip || trip.locked || trip.driver === workerId) return false;
-    if (n) {
-        const vehicle = transportFind(transportSettings().vehicles, at);
-        if (!vehicle || !TransportEngine.seatPlan(vehicle).some(seat => seat.n === n)) return false;
-        Object.keys(trip.seats).forEach(other => { if (trip.seats[other] === n) delete trip.seats[other]; });
-        trip.seats[workerId] = n;
-    } else delete trip.seats[workerId];
-    return transportDone(date, day);
-}
-
-function transportToggleVehicleLock(date, vehicleId) {
-    if (!transportEnabled() || !isSafeId(vehicleId)) return false;
-    const day = transportDayOf(date);
-    const trip = transportTrip(day, vehicleId, true);
-    trip.locked = !trip.locked;
-    return transportDone(date, day);
-}
-
-function transportToggleWorkerLock(date, workerId) {
-    if (!transportEnabled() || !isSafeId(workerId)) return false;
-    const day = transportDayOf(date);
-    if (!TransportEngine.seatOf(day, workerId) || transportVehicleLockedFor(day, workerId)) return false;
-    if (day.workerLocks[workerId]) delete day.workerLocks[workerId];
-    else day.workerLocks[workerId] = true;
-    return transportDone(date, day);
-}
-
-function transportLastVersion(date) {
-    const accepted = transportDayOf(date).accepted;
-    return accepted.length ? accepted[accepted.length - 1] : null;
-}
-
-function transportSignature(date) {
-    return TransportEngine.planSignature(transportContext(date), transportDayOf(date));
-}
-
-function transportErrors(date) {
-    return TransportEngine.validate(transportContext(date), transportDayOf(date))
-        .filter(issue => issue.level === 'error');
-}
-
-// Accepting makes a version: a frozen copy of the plan and of who was on which site
-// when it was accepted. Versions are append-only on this phone - never edited, never
-// removed, except with their whole day when it ages out.
-//   { ok: true, n }  |  { ok: false, error: 'unchanged' | 'reason' | 'off' }
-// AN INCOMPLETE PLAN IS ACCEPTED ONLY WITH A TYPED REASON. The evening a car is short
-// is a real evening and the plan still has to go out - but "partial" with no word why
-// is what the next person to open it cannot act on.
-function transportAccept(date, reason) {
-    if (!transportEnabled() || !isRealDate(date)) return { ok: false, error: 'off' };
-    const day = transportDayOf(date);
-    const ctx = transportContext(date);
-    const sig = TransportEngine.planSignature(ctx, day);
-    const last = transportLastVersion(date);
-    if (last && last.sig === sig) return { ok: false, error: 'unchanged' };
-    const errors = TransportEngine.validate(ctx, day).filter(issue => issue.level === 'error').length;
-    const why = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
-    if (errors > 0 && why.length < 2) return { ok: false, error: 'reason' };
-    const frozen = transportReadPlan(JSON.parse(JSON.stringify(
-        { unavailable: day.unavailable, status: day.status, trips: day.trips })), transportEmptyDay());
-    const attendance = transportMap();
-    Object.keys(ctx.attendance).forEach(id => { attendance[id] = ctx.attendance[id]; });
-    day.accepted.push({ n: day.accepted.length + 1, at: Date.now(), complete: errors === 0, errors,
-        reason: errors === 0 ? '' : why, sig,
-        moved: last ? TransportEngine.movedBetween(ctx, last, day) : null,
-        unavailable: frozen.unavailable, status: frozen.status, trips: frozen.trips, attendance });
-    transportSaveDay(date);
-    return { ok: true, n: day.accepted.length };
-}
-
-// Whether the day record has moved since a version was accepted - a man taken off a
-// site, another put on one. The version is not changed by that (it is frozen); the
-// screen says the two no longer agree.
-function transportRecordChanged(date, version) {
-    const now = transportContext(date).attendance;
-    const ids = Object.keys(now);
-    return ids.length !== Object.keys(version.attendance).length
-        || ids.some(id => version.attendance[id] !== now[id]);
+    const trips = TransportEngine.remove(transportContext(date), day, workerId);
+    return trips ? transportKeep(date, day, trips) : false;
 }
 
 // ================================================================== the driver's message
 
-// What one driver is sent for one accepted version. Names are read from the roster and
-// the vehicle list as they are NOW; who sits where and who goes to which site are the
-// version's own, frozen. Every name isolated - a person's by isolate(), a vehicle's by
-// transportRli() (above).
-function transportDriverMessage(date, version, vehicleId) {
+// What the driver of one vehicle is sent, composed from the picture as it is NOW - there
+// is no accepted version to send from any more. Passengers in the order of their seats.
+// Every name isolated - a person's by isolate(), a vehicle's by transportRli() (above).
+function transportDriverMessage(date, vehicleId) {
     const T = TRANSPORT_TEXT;
     const ctx = transportContext(date);
-    const trip = version.trips[vehicleId];
-    if (!trip || !trip.driver) return '';
+    const vehicle = transportFind(ctx.vehicles, vehicleId);
+    const seats = TransportEngine.layout(ctx, transportDayOf(date)).cars[vehicleId];
+    if (!vehicle || !seats || !seats[1]) return '';
     const parsed = parseLocalDate(date);
-    const siteOf = id => isolate(transportSiteName(ctx, version.attendance[id]));
-    const lines = [T.mHello(isolate(transportWorkerName(ctx, trip.driver))),
-        T.mHeading(hebrewDayName(parsed), formatFullDate(parsed))];
-    if (version.n > 1) lines.push(T.mUpdate(version.n));
-    lines.push(T.mVehicle(transportRli(transportVehicleName(vehicleId))));
-    const area = transportAreaName(ctx, trip.area);
-    if (area) lines.push(T.mPickup(isolate(area)));
-    if (trip.passengers.length === 0) lines.push(T.mAlone);
+    const passengers = seats.slice(2).filter(Boolean);
+    const lines = [T.mHello(isolate(transportWorkerName(ctx, seats[1]))),
+        T.mHeading(hebrewDayName(parsed), formatFullDate(parsed)),
+        T.mVehicle(transportRli(vehicle.name))];
+    if (passengers.length === 0) lines.push(T.mAlone);
     else {
-        lines.push(T.mPassengers(trip.passengers.length));
-        trip.passengers.forEach(id => {
-            lines.push(T.mPassenger(isolate(transportWorkerName(ctx, id)), siteOf(id)));
+        lines.push(T.mPassengers(passengers.length));
+        passengers.forEach(id => {
+            const name = isolate(transportWorkerName(ctx, id));
+            const site = transportSiteName(ctx, ctx.attendance[id]);
+            lines.push(site ? T.mPassenger(name, isolate(site)) : T.mPassengerOnly(name));
         });
     }
-    const sites = TransportEngine.tripSites({ sites: ctx.sites, attendance: version.attendance }, trip)
+    const sites = TransportEngine.tripSites(ctx, { driver: seats[1], passengers })
         .map(id => isolate(transportSiteName(ctx, id)));
     if (sites.length) lines.push(T.mDestinations(sites.join(', ')));
     return lines.join('\n');
@@ -914,9 +599,10 @@ function transportDriverMessage(date, version, vehicleId) {
 // The driver's number as wa.me takes it - the seder's own rule, not a second one: only a
 // plain Israeli mobile, and anything else is NO NUMBER rather than a guess that opens a
 // chat with a stranger (js/ui/seder.js, sederWaNumber).
-function transportDriverNumber(date, version, vehicleId) {
-    const trip = version.trips[vehicleId];
-    const worker = trip && trip.driver ? transportFind(transportContext(date).workers, trip.driver) : null;
+function transportDriverNumber(date, vehicleId) {
+    const ctx = transportContext(date);
+    const seats = TransportEngine.layout(ctx, transportDayOf(date)).cars[vehicleId];
+    const worker = seats && seats[1] ? transportFind(ctx.workers, seats[1]) : null;
     return worker ? sederWaNumber(worker.phone) : '';
 }
 
@@ -925,49 +611,32 @@ function transportMessageSig(number, text) {
     return sederSig({ number }, text);
 }
 
-// 'nophone' | 'none' | 'opened' | 'sent' | 'changed'. A MARK IS BELIEVED ONLY WHILE THE
-// MESSAGE IS THE ONE IT WAS MADE ON: a later version that changes this driver's words,
-// a corrected number, a renamed passenger - each is a different fingerprint, and the
-// card stops saying a message went out that is not the message there is.
+// 'nodriver' | 'nophone' | 'none' | 'opened'. A MARK IS BELIEVED ONLY WHILE THE MESSAGE
+// IS THE ONE IT WAS MADE ON: a man moved into or out of that car, another driver, a
+// corrected number, a renamed passenger - each is a different fingerprint, and the card
+// stops saying a message was opened that is not the message there is.
 function transportMarkState(date, vehicleId) {
-    const version = transportLastVersion(date);
-    if (!version) return 'none';
-    const number = transportDriverNumber(date, version, vehicleId);
+    const text = transportDriverMessage(date, vehicleId);
+    if (!text) return 'nodriver';
+    const number = transportDriverNumber(date, vehicleId);
     if (!number) return 'nophone';
     const mark = transportDayOf(date).marks[vehicleId];
-    if (!mark) return 'none';
-    if (mark.sig !== transportMessageSig(number, transportDriverMessage(date, version, vehicleId))) return 'changed';
-    return mark.sentAt ? 'sent' : 'opened';
-}
-
-function transportMark(date, vehicleId, change) {
-    if (!transportEnabled() || !isSafeId(vehicleId)) return false;
-    const version = transportLastVersion(date);
-    const number = version ? transportDriverNumber(date, version, vehicleId) : '';
-    if (!number) return false;
-    const day = transportDayOf(date);
-    const sig = transportMessageSig(number, transportDriverMessage(date, version, vehicleId));
-    const old = day.marks[vehicleId];
-    const mark = old && old.sig === sig ? old : { sig, openedAt: null, sentAt: null };
-    change(mark);
-    if (mark.openedAt === null && mark.sentAt === null) delete day.marks[vehicleId];
-    else day.marks[vehicleId] = mark;
-    transportSaveDay(date);
-    return true;
+    return mark && mark.sig === transportMessageSig(number, text) ? 'opened' : 'none';
 }
 
 // The link was tapped. The app cannot see whether send was pressed in WhatsApp, so this
 // says "opened" and never "sent".
 function transportMarkOpened(date, vehicleId) {
-    return transportMark(date, vehicleId, mark => { mark.openedAt = Date.now(); });
+    if (!transportEnabled() || !isSafeId(vehicleId)) return false;
+    const text = transportDriverMessage(date, vehicleId);
+    const number = text ? transportDriverNumber(date, vehicleId) : '';
+    if (!number) return false;
+    transportDayOf(date).marks[vehicleId] = { sig: transportMessageSig(number, text), openedAt: Date.now() };
+    transportSaveDay(date);
+    return true;
 }
 
-// «סימנתי שנשלח» is the PERSON'S statement, made by his own tap, and is worded as his.
-function transportMarkSent(date, vehicleId, sent) {
-    return transportMark(date, vehicleId, mark => { mark.sentAt = sent ? Date.now() : null; });
-}
-
-// ================================================================== the lists, changed
+// ================================================================== the list of vehicles, changed
 
 function transportNameProblem(name, list, selfId, taken) {
     if (!name) return TRANSPORT_TEXT.nameNeeded;
@@ -1002,16 +671,16 @@ function transportSetVehicleSeats(vehicleId, seats) {
     const vehicle = transportFind(transportSettings().vehicles, vehicleId);
     if (!vehicle || !Number.isInteger(seats) || seats < 2 || seats > TRANSPORT_MAX_SEATS) return false;
     // A row layout belongs to the seat count it was drawn for. A different count and the
-    // rows would name seats the vehicle does not have, so they go, and the seats are
-    // numbered until somebody says how they are arranged.
+    // rows would draw seats the vehicle does not have, so they go, and the car is drawn
+    // two in front and rows of three behind until somebody says otherwise.
     if (vehicle.seats !== seats) delete vehicle.rows;
     vehicle.seats = seats;
     transportSaveSettings();
     return true;
 }
 
-// Retired, not removed: it is no longer offered or suggested, and an accepted version
-// that named it still does.
+// Retired, not removed: it is no longer drawn, and the men a plan had in it are waiting
+// again (TransportEngine.layout draws only the vehicles on the list).
 function transportRetireVehicle(vehicleId) {
     if (!transportEnabled()) return false;
     const vehicle = transportFind(transportSettings().vehicles, vehicleId);
@@ -1021,81 +690,21 @@ function transportRetireVehicle(vehicleId) {
     return true;
 }
 
-function transportAddArea(name) {
-    if (!transportEnabled()) return null;
-    const settings = transportSettings();
-    const clean = transportCleanName(name);
-    if (transportNameProblem(clean, settings.areas, null, TRANSPORT_TEXT.areaNameTaken)) return null;
-    const area = { id: newEntityId('ta'), name: clean };
-    settings.areas.push(area);
-    transportSaveSettings();
-    return area.id;
-}
-
-function transportRenameArea(areaId, name) {
-    if (!transportEnabled()) return false;
-    const settings = transportSettings();
-    const area = transportFind(settings.areas, areaId);
-    const clean = transportCleanName(name);
-    if (!area || transportNameProblem(clean, settings.areas, areaId, TRANSPORT_TEXT.areaNameTaken)) return false;
-    area.name = clean;
-    transportSaveSettings();
-    return true;
-}
-
-function transportRemoveArea(areaId) {
-    if (!transportEnabled()) return false;
-    const settings = transportSettings();
-    if (!transportFind(settings.areas, areaId)) return false;
-    settings.areas = settings.areas.filter(area => area.id !== areaId);
-    Object.keys(settings.workers).forEach(id => {
-        if (settings.workers[id].area === areaId) settings.workers[id].area = null;
-    });
-    transportSaveSettings();
-    return true;
-}
-
-// One worker's transport settings on this phone: { area, canDrive, drives }. Keyed by
-// the roster's id and nothing of the roster is copied - no name, no phone, no rate - so
-// renaming or deleting a man is never blocked by a plan that names him, and nothing
-// here can bring him back.
-function transportSetWorker(workerId, patch) {
-    if (!transportEnabled() || !isSafeId(workerId) || !isPlainObject(patch)) return false;
-    const settings = transportSettings();
-    const own = settings.workers[workerId] || { area: null, canDrive: false, drives: [] };
-    if (Object.prototype.hasOwnProperty.call(patch, 'area')) {
-        own.area = patch.area && transportFind(settings.areas, patch.area) ? patch.area : null;
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, 'canDrive')) {
-        own.canDrive = patch.canDrive === true;
-        // Turned on with nothing chosen is "every vehicle": the common case, one tap.
-        if (own.canDrive && own.drives !== 'all' && own.drives.length === 0) own.drives = 'all';
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, 'drives')) {
-        own.drives = patch.drives === 'all' ? 'all'
-            : (Array.isArray(patch.drives) ? patch.drives.filter(id => transportFind(settings.vehicles, id)) : []);
-    }
-    settings.workers[workerId] = own;
-    transportSaveSettings();
-    return true;
-}
-
 // ================================================================== the screen
 
 let transportDate = null;        // the day the open panel is about; fixed while it is open
-let transportTab = 'plan';
-let transportSelected = null;    // the man being moved
-let transportPicking = null;     // the vehicle whose driver list is open
+let transportPicked = null;      // the waiting man who was touched, until a seat is
 let transportSaid = '';
 let transportReturnFocus = null;
 let transportLastKey = null;     // the last control used on the panel, by its data-tk
-let transportAreasOpen = false; // the areas editor, left open or shut across redraws
+let transportAwayOpen = false;   // the two folded lines at the bottom, left open or shut
+let transportFleetOpen = false;  // across redraws - and shut again at every opening
 
 function transportParts() {
     const get = id => document.getElementById(id);
     return { panel: get('transportPanel'), title: get('transportTitle'), context: get('transportContext'),
-        close: get('transportClose'), tabs: get('transportTabs'), note: get('transportNote'),
-        body: get('transportBody'), live: get('transportLive') };
+        close: get('transportClose'), note: get('transportNote'), body: get('transportBody'),
+        live: get('transportLive') };
 }
 
 function transportIsOpen() {
@@ -1108,10 +717,10 @@ function openTransport(date) {
     const parts = transportParts();
     if (!parts.panel || !parts.body) return false;
     transportDate = isRealDate(date) ? date : State.date;
-    transportTab = 'plan';
-    transportSelected = null;
-    transportPicking = null;
+    transportPicked = null;
     transportSaid = '';
+    transportAwayOpen = false;
+    transportFleetOpen = false;
     transportPrune(todayStr());
     // One dialog at a time: the WhatsApp dialog this was entered from steps aside.
     if (typeof closeShareModal === 'function') closeShareModal();
@@ -1122,11 +731,20 @@ function openTransport(date) {
     document.addEventListener('keydown', transportKeydown);
     if (!parts.panel.dataset.watched) {
         parts.panel.dataset.watched = '1';
-        // Which control was last used, recorded as it happens: after one of the app's own
-        // questions closes, js/ui/modal.js gives the keyboard back to the button that
-        // asked - and that button has just been redrawn, so the node it remembers is no
-        // longer in the page. The redraw finds its successor by this key instead.
         parts.panel.addEventListener('click', event => {
+            // The click a browser makes out of the end of a drag (a mouse always does; a
+            // finger does after a hold that never moved) is not a tap on what it landed
+            // on: without this, a man dropped on a seat also opened that seat's question.
+            if (Date.now() < transportSwallowUntil) {
+                transportSwallowUntil = 0;
+                event.stopPropagation();
+                event.preventDefault();
+                return;
+            }
+            // Which control was last used, recorded as it happens: after one of the app's
+            // own questions closes, js/ui/modal.js gives the keyboard back to the button
+            // that asked - and that button has just been redrawn, so the node it remembers
+            // is no longer in the page. The redraw finds its successor by this key instead.
             const node = event.target && event.target.closest ? event.target.closest('[data-tk]') : null;
             if (node) transportLastKey = node.dataset.tk;
         }, true);
@@ -1150,37 +768,40 @@ function openTransport(date) {
 function closeTransport() {
     const parts = transportParts();
     if (!parts.panel || !transportIsOpen()) return;
+    transportDragEnd(false);
     parts.panel.classList.remove('open');
     parts.panel.setAttribute('aria-hidden', 'true');
     document.removeEventListener('keydown', transportKeydown);
     transportDate = null;
-    transportSelected = null;
-    transportPicking = null;
+    transportPicked = null;
     const back = transportReturnFocus;
     transportReturnFocus = null;
     if (back && document.contains(back) && back.focus) back.focus({ preventScroll: true });
 }
 
 // The settings sheet's contract (js/ui/settings.js), by the pieces js/ui/modal.js already
-// has: Escape steps back one thing at a time - the man being moved, the driver list, then
-// the panel - and Tab stays inside. While one of the app's own dialogs is up over this
-// panel (a question from js/ui/ask.js), the keyboard is that dialog's and this stands by.
+// has: Escape steps back one thing at a time - the man being carried, the man who was
+// touched, then the panel - and Tab stays inside. While one of the app's own dialogs is up
+// over this panel (a question from js/ui/ask.js), the keyboard is that dialog's and this
+// stands by.
 //
 // `defaultPrevented` is how an Escape that has ALREADY closed such a dialog is told from
 // one that has not. js/ui/modal.js listens on the same document and was registered first:
 // by the time this runs it has closed the question and no dialog is open any more - so
 // asking "is a dialog open?" alone let one Escape answer the question AND close the panel
-// behind it, and the plan somebody was in the middle of accepting was gone from the
-// screen. modal.js marks the key it handled; a key it marked is not this panel's.
+// behind it. modal.js marks the key it handled; a key it marked is not this panel's.
 function transportKeydown(event) {
     if (event.defaultPrevented) return;
     if (typeof openModals === 'function' && openModals().length > 0) return;
     const parts = transportParts();
     if (event.key === 'Escape') {
         event.preventDefault();
-        if (transportSelected || transportPicking) {
-            transportSelected = null;
-            transportPicking = null;
+        if (transportDrag) {
+            transportDragEnd(true);
+            renderTransport();
+        } else if (transportPicked) {
+            transportPicked = null;
+            transportSaid = '';
             renderTransport();
         } else closeTransport();
         return;
@@ -1192,45 +813,13 @@ function renderTransportIfOpen() {
     if (transportIsOpen() && transportEnabled()) renderTransport();
 }
 
-// A button of this panel. Tonal unless it is THE button of the view (`primary`): the
-// base <button> of css/app.css is the filled one, and a screen where every button is
-// filled has no first button. `key` is what the keyboard is given back by after a redraw.
-function transportButton(text, key, onClick, primary) {
-    const node = button(text, primary ? 'transport-primary' : 'btn-secondary', onClick);
+// A button of this panel, tonal: this screen has no filled button at all - the picture
+// is the thing, and the one coloured control on it is WhatsApp's. `key` is what the
+// keyboard is given back by after a redraw.
+function transportButton(text, key, onClick) {
+    const node = button(text, 'btn-secondary', onClick);
     if (key) node.dataset.tk = key;
     return node;
-}
-
-function transportToggle(text, key, pressed, onClick) {
-    const node = transportButton(text, key, onClick, false);
-    node.classList.add('transport-toggle');
-    node.setAttribute('aria-pressed', pressed ? 'true' : 'false');
-    return node;
-}
-
-function transportSelect(key, label, options, value, onChange) {
-    const select = document.createElement('select');
-    select.className = 'transport-select';
-    select.dataset.tk = key;
-    select.setAttribute('aria-label', label);
-    options.forEach(([optionValue, text]) => {
-        const option = document.createElement('option');
-        option.value = optionValue;
-        option.textContent = text;
-        if (optionValue === value) option.selected = true;
-        select.appendChild(option);
-    });
-    select.addEventListener('change', () => onChange(select.value));
-    return select;
-}
-
-// A site, in the site's own fixed colour (js/ui/sitecolor.js) - the colour that already
-// means that site on the day screen. No button here borrows it.
-function transportSiteChip(ctx, siteId) {
-    const chip = el('span', 'transport-site');
-    paintSite(chip, siteId);
-    appendSiteName(chip, siteId, transportSiteName(ctx, siteId));
-    return chip;
 }
 
 function transportBadge(text, kind) {
@@ -1242,49 +831,74 @@ function transportAct(change) {
     renderTransport();
 }
 
+// A site's own fixed colour (js/ui/sitecolor.js), handed to the stylesheet as a custom
+// property: a dot on a waiting man, an edge on a seated one. The colour that already
+// means that site on the day screen, and never a new one; no control borrows it.
+function transportPaint(node, siteId) {
+    if (siteId) node.style.setProperty('--seat-site', siteColorVar(siteId));
+    return node;
+}
+
+function transportDot(siteId) {
+    // Past ten sites the palette repeats, and the second lap carries the same mark it
+    // carries everywhere else.
+    return transportPaint(el('span', 'transport-dot', siteId ? siteMark(siteId) : ''), siteId);
+}
+
+// Drawn, not typed: a steering wheel for the driver's seat and a plus for an empty one.
+// Strokes in the current colour, so both palettes and both states get them for free.
+function transportGlyph(kind) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', `transport-glyph transport-glyph-${kind}`);
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    const shapes = kind === 'wheel'
+        ? [['circle', { cx: 12, cy: 12, r: 9 }], ['circle', { cx: 12, cy: 12, r: 2.5 }],
+            ['path', { d: 'M3 12h6.5M14.5 12H21M12 14.5V21' }]]
+        : [['path', { d: 'M12 5v14M5 12h14' }]];
+    shapes.forEach(([tag, attributes]) => {
+        const shape = document.createElementNS(NS, tag);
+        Object.keys(attributes).forEach(name => shape.setAttribute(name, String(attributes[name])));
+        svg.appendChild(shape);
+    });
+    return svg;
+}
+
 function renderTransport() {
     const parts = transportParts();
     if (!parts.body || !transportDate) return;
+    // NOT WHILE A FINGER IS DOWN ON A MAN. A redraw replaces every node on the panel, and
+    // the node under the finger is the one the browser is sending the gesture to: taken
+    // out of the page it loses the pointer, and the man being carried is dropped wherever
+    // a snapshot from another phone happened to arrive. The redraw waits for the finger.
+    if (transportDrag) { transportDrag.redraw = true; return; }
     const T = TRANSPORT_TEXT;
     const date = transportDate;
     const parsed = parseLocalDate(date);
     const ctx = transportContext(date);
     const day = transportDayOf(date);
-    if (transportSelected && !ctx.attendance[transportSelected]) transportSelected = null;
+    const picture = TransportEngine.layout(ctx, day);
+    const waiting = TransportEngine.riders(ctx, day).filter(id => !picture.where[id]);
+    if (transportPicked && waiting.indexOf(transportPicked) === -1) transportPicked = null;
 
     // The whole body is rebuilt; the control that had the keyboard gets it back, and the
-    // list stays where it was scrolled to.
+    // list and the tray stay where they were scrolled to.
     const active = document.activeElement;
     const asking = typeof openModals === 'function' && openModals().length > 0;
     const focused = active && parts.panel.contains(active) ? (active.dataset.tk || null)
         : (!asking && transportIsOpen() ? transportLastKey : null);
     const scrolled = parts.body.scrollTop;
+    const chipsBefore = document.getElementById('transportChips');
+    const slid = chipsBefore ? chipsBefore.scrollLeft : 0;
 
     parts.title.textContent = T.title;
     parts.context.textContent = `${hebrewDayName(parsed)} ${formatFullDate(parsed)}`;
     parts.close.textContent = T.back;
 
-    clear(parts.tabs);
-    [['plan', T.tabPlan], ['vehicles', T.tabVehicles], ['workers', T.tabWorkers], ['messages', T.tabMessages]]
-        .forEach(([id, label]) => {
-            const tab = transportButton(label, 'tab:' + id, () => {
-                transportTab = id;
-                transportSelected = null;
-                transportPicking = null;
-                transportSaid = '';
-                renderTransport();
-                parts.body.scrollTop = 0;
-            }, false);
-            tab.classList.add('transport-tab');
-            tab.setAttribute('role', 'tab');
-            tab.setAttribute('aria-selected', transportTab === id ? 'true' : 'false');
-            parts.tabs.appendChild(tab);
-        });
-
     clear(parts.body);
-    const draw = { plan: transportPlanView, vehicles: transportVehiclesView, workers: transportWorkersView,
-        messages: transportMessagesView }[transportTab];
-    parts.body.appendChild(draw(ctx, day, date));
+    parts.body.appendChild(transportView(ctx, day, date, picture, waiting));
 
     // After the view is drawn: reading a record is what finds out it will not read.
     const notes = [];
@@ -1299,6 +913,8 @@ function renderTransport() {
     else if (parts.live.textContent !== transportSaid) parts.live.textContent = transportSaid;
 
     parts.body.scrollTop = scrolled;
+    const chipsAfter = document.getElementById('transportChips');
+    if (chipsAfter) chipsAfter.scrollLeft = slid;
     // Found by comparing values, never by a selector built from an id.
     if (focused) {
         const again = [...parts.panel.querySelectorAll('[data-tk]')].find(node => node.dataset.tk === focused);
@@ -1306,338 +922,328 @@ function renderTransport() {
     }
 }
 
-// ------------------------------------------------------------------ שיבוץ
-
-function transportPersonRow(ctx, day, workerId, seatText) {
-    const T = TRANSPORT_TEXT;
-    const row = transportButton('', 'w:' + workerId, () => transportAct(() => {
-        transportSelected = transportSelected === workerId ? null : workerId;
-        transportPicking = null;
-    }), false);
-    row.classList.add('transport-person');
-    row.setAttribute('aria-pressed', transportSelected === workerId ? 'true' : 'false');
-    row.appendChild(el('span', 'transport-name', transportWorkerName(ctx, workerId)));
-    const tags = el('span', 'transport-tags');
-    if (seatText) tags.appendChild(transportBadge(seatText));
-    if (day.workerLocks[workerId]) tags.appendChild(transportBadge(T.locked, 'lock'));
-    if (ctx.attendance[workerId]) tags.appendChild(transportSiteChip(ctx, ctx.attendance[workerId]));
-    row.appendChild(tags);
-    return row;
-}
-
-function transportDriverPicker(ctx, day, date, vehicle) {
-    const T = TRANSPORT_TEXT;
-    const trip = day.trips[vehicle.id] || null;
-    const box = el('div', 'transport-picker');
-    box.appendChild(el('h4', 'transport-picker-title', T.driverDialogTitle(transportRli(vehicle.name))));
-    box.appendChild(el('p', 'hint', T.driverDialogLead));
-    // ONLY the men who may drive THIS vehicle and are riding today. Nobody else is on
-    // the list to be tapped by mistake.
-    const eligible = TransportEngine.riders(ctx, day)
-        .filter(id => TransportEngine.mayDrive(transportFind(ctx.workers, id), vehicle));
-    if (eligible.length === 0) box.appendChild(el('p', 'transport-error', T.noEligible));
-    eligible.forEach(id => {
-        const at = TransportEngine.seatOf(day, id);
-        const current = Boolean(trip && trip.driver === id);
-        const blocked = !current && transportFrozen(day, id) && at !== vehicle.id;
-        const pick = transportButton('', 'pick:' + id, () => transportAct(() => {
-            transportSetDriver(date, vehicle.id, id);
-            transportPicking = null;
-        }), false);
-        pick.classList.add('transport-person');
-        pick.dataset.pick = id;
-        pick.disabled = blocked;
-        pick.setAttribute('aria-pressed', current ? 'true' : 'false');
-        pick.appendChild(el('span', 'transport-name', transportWorkerName(ctx, id)));
-        const tags = el('span', 'transport-tags');
-        if (blocked) tags.appendChild(transportBadge(T.locked, 'lock'));
-        if (at && at !== vehicle.id) tags.appendChild(transportBadge(transportVehicleName(at)));
-        tags.appendChild(transportSiteChip(ctx, ctx.attendance[id]));
-        pick.appendChild(tags);
-        box.appendChild(pick);
-    });
-    const foot = el('div', 'transport-row');
-    if (trip && trip.driver) {
-        const none = transportButton(T.driverNone, 'pick:none', () => transportAct(() => {
-            transportSetDriver(date, vehicle.id, null);
-            transportPicking = null;
-        }), false);
-        none.dataset.pick = '';
-        foot.appendChild(none);
-    }
-    foot.appendChild(transportButton(T.cancel, 'pick:cancel', () => transportAct(() => { transportPicking = null; }), false));
-    box.appendChild(foot);
-    return box;
-}
-
-function transportVehicleCard(ctx, day, date, vehicle) {
-    const T = TRANSPORT_TEXT;
-    const trip = day.trips[vehicle.id] || null;
-    const people = trip ? TransportEngine.occupants(trip) : [];
-    const locked = Boolean(trip && trip.locked);
-    const card = el('section', 'transport-card');
-    card.dataset.vehicle = vehicle.id;
-
-    const head = el('div', 'transport-row');
-    const titles = el('div', 'transport-grow');
-    titles.appendChild(el('h3', 'transport-vehicle-name', vehicle.name));
-    const sub = el('div', 'transport-row transport-wrap');
-    sub.appendChild(transportBadge(people.length ? T.occupancy(people.length, vehicle.seats) : T.notUsed,
-        people.length > vehicle.seats ? 'bad' : ''));
-    if (locked) sub.appendChild(transportBadge(T.vehicleLocked, 'lock'));
-    titles.appendChild(sub);
-    head.appendChild(titles);
-    const lock = transportToggle(locked ? T.unlockVehicle : T.lockVehicle, 'lockV:' + vehicle.id, locked,
-        () => transportAct(() => transportToggleVehicleLock(date, vehicle.id)));
-    lock.dataset.lockVehicle = vehicle.id;
-    head.appendChild(lock);
-    card.appendChild(head);
-
-    if (people.length > 0) {
-        if (ctx.areas.length > 0) {
-            const options = [['', `${T.pickup}: ${T.noArea}`]]
-                .concat(ctx.areas.map(area => [area.id, `${T.pickup}: ${area.name}`]));
-            const area = transportSelect('area:' + vehicle.id, `${T.pickup} – ${vehicle.name}`, options,
-                trip.area && transportFind(ctx.areas, trip.area) ? trip.area : '',
-                value => transportAct(() => transportSetTripArea(date, vehicle.id, value || null)));
-            area.disabled = locked;
-            card.appendChild(area);
-        }
-        const sites = TransportEngine.tripSites(ctx, trip);
-        if (sites.length > 0) {
-            const line = el('div', 'transport-row transport-wrap');
-            line.appendChild(el('span', 'transport-sub', `${T.destinations}:`));
-            sites.forEach(siteId => line.appendChild(transportSiteChip(ctx, siteId)));
-            card.appendChild(line);
-        }
-    }
-
-    const driverRow = el('div', 'transport-row');
-    const driverBtn = transportButton('', 'driver:' + vehicle.id, () => transportAct(() => {
-        transportPicking = transportPicking === vehicle.id ? null : vehicle.id;
-        transportSelected = null;
-    }), false);
-    driverBtn.classList.add('transport-person', 'transport-grow');
-    if (people.length > 0 && !(trip && trip.driver)) driverBtn.classList.add('transport-missing');
-    driverBtn.dataset.driver = vehicle.id;
-    driverBtn.disabled = locked;
-    driverBtn.setAttribute('aria-expanded', transportPicking === vehicle.id ? 'true' : 'false');
-    driverBtn.appendChild(el('span', 'transport-name', trip && trip.driver
-        ? T.driver(isolate(transportWorkerName(ctx, trip.driver))) : T.chooseDriver));
-    if (trip && trip.driver && ctx.attendance[trip.driver]) {
-        const tags = el('span', 'transport-tags');
-        tags.appendChild(transportSiteChip(ctx, ctx.attendance[trip.driver]));
-        driverBtn.appendChild(tags);
-    }
-    driverRow.appendChild(driverBtn);
-    if (trip && trip.driver) {
-        const driverLocked = Boolean(day.workerLocks[trip.driver]);
-        const name = isolate(transportWorkerName(ctx, trip.driver));
-        const lockDriver = transportToggle(driverLocked ? T.locked : T.lock, 'lockW:' + trip.driver, driverLocked,
-            () => transportAct(() => transportToggleWorkerLock(date, trip.driver)));
-        lockDriver.setAttribute('aria-label', driverLocked ? T.unlockWorker(name) : T.lockWorker(name));
-        lockDriver.disabled = locked;
-        driverRow.appendChild(lockDriver);
-    }
-    card.appendChild(driverRow);
-    if (transportPicking === vehicle.id && !locked) card.appendChild(transportDriverPicker(ctx, day, date, vehicle));
-
-    if (trip) {
-        trip.passengers.forEach(id => {
-            card.appendChild(transportPersonRow(ctx, day, id,
-                trip.seats[id] ? transportSeatText(vehicle, trip.seats[id]) : ''));
-        });
-    }
-    if (transportSelected && TransportEngine.seatOf(day, transportSelected) !== vehicle.id) {
-        const isFull = people.length >= vehicle.seats;
-        const here = transportButton(locked ? T.vehicleLocked : isFull ? T.full : T.moveHere, 'moveTo:' + vehicle.id,
-            () => transportAct(() => {
-                if (transportMove(date, transportSelected, vehicle.id)) transportSelected = null;
-            }), false);
-        here.classList.add('transport-move-here');
-        here.dataset.moveTo = vehicle.id;
-        here.disabled = locked || isFull || transportFrozen(day, transportSelected);
-        card.appendChild(here);
-    }
-    return card;
-}
-
-// A trip in a vehicle the list no longer has (retired after the plan was drawn). Its men
-// are still shown, and can be tapped and moved out; nothing can be moved in.
-function transportOrphanCard(ctx, day, vehicleId) {
-    const card = el('section', 'transport-card');
-    card.dataset.vehicle = vehicleId;
-    card.appendChild(el('h3', 'transport-vehicle-name', transportVehicleName(vehicleId)));
-    card.appendChild(transportBadge(TRANSPORT_TEXT.deletedVehicle, 'bad'));
-    TransportEngine.occupants(day.trips[vehicleId]).forEach(id => card.appendChild(transportPersonRow(ctx, day, id, '')));
-    return card;
-}
-
-function transportMoveBar(ctx, day, date) {
-    const T = TRANSPORT_TEXT;
-    const id = transportSelected;
-    const name = isolate(transportWorkerName(ctx, id));
-    const at = TransportEngine.seatOf(day, id);
-    const trip = at ? day.trips[at] : null;
-    const inLockedVehicle = transportVehicleLockedFor(day, id);
-    const bar = el('div', 'transport-movebar');
-    bar.setAttribute('role', 'region');
-    bar.setAttribute('aria-label', T.moving(name));
-    bar.appendChild(el('p', 'transport-name', inLockedVehicle ? T.vehicleLocked
-        : day.workerLocks[id] ? T.workerLockedNote(name) : T.moving(name)));
-
-    const vehicle = at ? transportFind(ctx.vehicles, at) : null;
-    if (trip && vehicle && trip.driver !== id && !trip.locked) {
-        const options = [['', `${T.seat}: ${T.seatNone}`]].concat(TransportEngine.seatPlan(vehicle)
-            .map(seat => [String(seat.n), `${T.seat}: ${transportSeatText(vehicle, seat.n)}`]));
-        bar.appendChild(transportSelect('seat', `${T.seat} – ${name}`, options,
-            trip.seats[id] ? String(trip.seats[id]) : '',
-            value => transportAct(() => transportSetSeat(date, id, Number(value) || 0))));
-    }
-    const buttons = el('div', 'transport-row transport-wrap');
-    buttons.appendChild(transportButton(T.cancel, 'cancelMove', () => transportAct(() => { transportSelected = null; }), false));
-    if (at && !inLockedVehicle) {
-        const isLocked = Boolean(day.workerLocks[id]);
-        buttons.appendChild(transportToggle(isLocked ? T.unlockWorker(name) : T.lockWorker(name), 'lockSel', isLocked,
-            () => transportAct(() => transportToggleWorkerLock(date, id))));
-        if (!isLocked) {
-            buttons.appendChild(transportButton(T.removeFromVehicle, 'unseat', () => transportAct(() => {
-                if (transportUnseat(date, id)) transportSelected = null;
-            }), false));
-        }
-    }
-    bar.appendChild(buttons);
-    return bar;
-}
-
-// An incomplete plan is accepted only with a typed reason: the question stays open, with
-// the error under the field, until something is written or the person backs out.
-function transportAskAccept(date) {
-    const T = TRANSPORT_TEXT;
-    const ctx = transportContext(date);
-    const day = transportDayOf(date);
-    const errors = transportErrors(date);
-    const done = reason => {
-        const result = transportAccept(date, reason);
-        if (result.ok) transportSaid = T.acceptedVersion(result.n);
-        renderTransportIfOpen();
-    };
-    if (errors.length === 0) {
-        return askConfirm({ title: T.acceptTitle, message: T.acceptComplete, ok: T.acceptYes, cancel: T.cancel })
-            .then(yes => { if (yes) done(''); });
-    }
-    return askText({
-        title: T.acceptTitle,
-        message: [T.acceptIncomplete(errors.length)]
-            .concat(errors.map(issue => `• ${transportIssueText(ctx, day, issue)}`), ['', T.reasonLabel]).join('\n'),
-        ok: T.acceptPartial,
-        validate: value => (transportCleanName(value).length < 2 ? T.reasonNeeded : null)
-    }).then(reason => { if (reason) done(reason); });
-}
-
-function transportPlanView(ctx, day, date) {
+function transportView(ctx, day, date, picture, waiting) {
     const T = TRANSPORT_TEXT;
     const root = el('div', 'transport-view');
-    const issues = TransportEngine.validate(ctx, day);
-    const errors = issues.filter(issue => issue.level === 'error');
-    const warns = issues.filter(issue => issue.level === 'warn');
-    const riders = TransportEngine.riders(ctx, day);
-    const seated = riders.filter(id => TransportEngine.seatOf(day, id));
-    const last = transportLastVersion(date);
-    const unchanged = Boolean(last) && last.sig === TransportEngine.planSignature(ctx, day);
-    const anybody = Object.keys(day.trips).some(id => TransportEngine.occupants(day.trips[id]).length > 0);
-
-    const status = el('div', 'transport-card transport-status');
-    status.id = 'transportPlanStatus';
-    status.dataset.state = !last ? 'draft' : unchanged ? 'accepted' : 'changed';
-    status.appendChild(el('strong', null, !last ? T.draft : unchanged ? T.acceptedVersion(last.n) : T.changedSince(last.n)));
-    status.appendChild(el('span', 'transport-sub',
-        T.seatedCount(seated.length, riders.length) + (errors.length === 0 && riders.length > 0 ? ` · ${T.planOk}` : '')));
-    if (last && transportRecordChanged(date, last)) status.appendChild(el('span', 'transport-warn-text', T.recordChanged));
-    root.appendChild(status);
-
-    if (riders.length === 0 && Object.keys(ctx.attendance).length === 0) {
-        root.appendChild(el('p', 'empty-hint', T.nobody));
+    root.appendChild(transportTray(ctx, date, waiting));
+    // How it is done, said once: while nobody at all is seated. After the first man it
+    // is a sentence in the way of the picture.
+    if (waiting.length > 0 && Object.keys(picture.where).length === 0) {
+        const hint = el('p', 'transport-hint', T.hint);
+        hint.id = 'transportHint';
+        root.appendChild(hint);
     }
-
-    // ONE filled button at a time: «הצעת שיבוץ» while nobody is seated, «אישור התוכנית»
-    // once there is a plan that has not been accepted.
-    const actions = el('div', 'transport-actions');
-    const suggest = transportButton(T.suggest, 'suggest', () => transportAct(() => {
-        const result = transportSuggest(date);
-        transportSelected = null;
-        transportPicking = null;
-        if (result) transportSaid = T.suggestDone(result.unseated.length);
-    }), !anybody);
-    suggest.id = 'transportSuggest';
-    const accept = transportButton(unchanged ? T.nothingToAccept : T.accept, 'accept',
-        () => { transportAskAccept(date); }, anybody && !unchanged);
-    accept.id = 'transportAccept';
-    accept.disabled = unchanged;
-    actions.appendChild(suggest);
-    actions.appendChild(accept);
-    root.appendChild(actions);
-
-    const box = (id, kind, title, list) => {
-        const node = el('div', `transport-box transport-box-${kind}`);
-        node.id = id;
-        node.appendChild(el('h3', null, title));
-        const items = el('ul');
-        list.forEach(issue => items.appendChild(el('li', null, transportIssueText(ctx, day, issue))));
-        node.appendChild(items);
-        return node;
-    };
-    if (errors.length > 0) root.appendChild(box('transportErrors', 'err', T.errorsTitle(errors.length), errors));
-    if (warns.length > 0) root.appendChild(box('transportWarnings', 'warn', T.warnTitle, warns));
-
-    const unseated = riders.filter(id => !TransportEngine.seatOf(day, id));
-    if (unseated.length > 0) {
-        const tray = el('section', 'transport-card');
-        tray.id = 'transportUnseated';
-        tray.appendChild(el('h3', null, T.unseatedTitle(unseated.length)));
-        unseated.forEach(id => tray.appendChild(transportPersonRow(ctx, day, id, '')));
-        root.appendChild(tray);
-    }
-
+    // What is wrong is asked of the plan as the picture reads it, so a line on a card is
+    // about a man who is drawn on that card.
+    const issues = TransportEngine.validate(ctx, { unavailable: day.unavailable, status: day.status,
+        trips: TransportEngine.tripsOf(ctx, picture.cars) });
+    if (ctx.vehicles.length === 0) root.appendChild(el('p', 'empty-hint', T.noVehicles));
     ctx.vehicles.forEach(vehicle => {
-        const trip = day.trips[vehicle.id];
-        if (day.unavailable[vehicle.id] && !(trip && TransportEngine.occupants(trip).length > 0)) return;
-        root.appendChild(transportVehicleCard(ctx, day, date, vehicle));
+        root.appendChild(transportCard(ctx, date, vehicle, picture.cars[vehicle.id] || null, issues));
     });
-    Object.keys(day.trips).forEach(vehicleId => {
-        if (!transportFind(ctx.vehicles, vehicleId) && TransportEngine.occupants(day.trips[vehicleId]).length > 0) {
-            root.appendChild(transportOrphanCard(ctx, day, vehicleId));
-        }
-    });
-
-    const history = el('section', 'transport-card');
-    history.id = 'transportHistory';
-    history.appendChild(el('h3', null, T.historyTitle));
-    if (day.accepted.length === 0) history.appendChild(el('p', 'hint', T.noVersions));
-    day.accepted.slice().reverse().forEach(version => {
-        const item = el('div', 'transport-version');
-        item.dataset.version = String(version.n);
-        const line = el('div', 'transport-row transport-wrap');
-        line.appendChild(el('span', 'transport-name', T.versionLine(version.n, transportClock(version.at))));
-        line.appendChild(transportBadge(version.complete ? T.complete : T.partial(version.reason),
-            version.complete ? 'ok' : 'bad'));
-        item.appendChild(line);
-        if (version.moved !== null) item.appendChild(el('p', 'transport-sub', T.moved(version.moved, version.n - 1)));
-        transportTripOrder(version.trips).forEach(vehicleId => {
-            const trip = version.trips[vehicleId];
-            if (TransportEngine.occupants(trip).length === 0) return;
-            item.appendChild(el('p', 'transport-sub', T.tripLine(transportRli(transportVehicleName(vehicleId)),
-                trip.driver ? isolate(transportWorkerName(ctx, trip.driver)) : T.driverNone, trip.passengers.length)));
-        });
-        history.appendChild(item);
-    });
-    root.appendChild(history);
-
-    if (transportSelected) root.appendChild(transportMoveBar(ctx, day, date));
+    const away = ctx.workers.filter(worker => ctx.attendance[worker.id] && day.status[worker.id]);
+    if (away.length > 0) root.appendChild(transportAway(ctx, day, date, away));
+    root.appendChild(transportFleet());
     return root;
 }
 
-// ------------------------------------------------------------------ רכבים
+// ------------------------------------------------------------------ the tray
+
+// The men who work today and are in no seat, kept at the top of the list while the cars
+// scroll under it - sticky inside the panel's own scroller, not fixed, so it is no new
+// layer for a stuck iPhone frame to leave behind. It is also where a seated man is
+// dropped to take him out of his car.
+function transportTray(ctx, date, waiting) {
+    const T = TRANSPORT_TEXT;
+    const tray = el('section', 'transport-tray');
+    tray.id = 'transportTray';
+    const head = el('div', 'transport-tray-head');
+    const nobody = Object.keys(ctx.attendance).length === 0;
+    const title = el('h3', 'transport-tray-title',
+        nobody ? T.nobody : waiting.length === 0 ? T.allSeated : T.waiting(waiting.length));
+    title.id = 'transportTrayTitle';
+    head.appendChild(title);
+    if (waiting.length > 0) {
+        // One quiet control for the man who does not ride with us: touched after a man
+        // (or with a man dropped on it) it asks how he gets there; touched alone it asks
+        // who first.
+        const away = transportButton(T.notRiding, 'notRiding', () => transportAskAway(date, transportPicked));
+        away.id = 'transportNotRiding';
+        away.classList.add('transport-quiet');
+        head.appendChild(away);
+    }
+    tray.appendChild(head);
+    if (waiting.length > 0) {
+        const chips = el('div', 'transport-chips');
+        chips.id = 'transportChips';
+        waiting.forEach(id => chips.appendChild(transportChip(ctx, id)));
+        tray.appendChild(chips);
+    }
+    return tray;
+}
+
+function transportChip(ctx, workerId) {
+    const T = TRANSPORT_TEXT;
+    const name = transportWorkerName(ctx, workerId);
+    const site = ctx.attendance[workerId];
+    const chip = transportButton('', 'chip:' + workerId, () => transportAct(() => {
+        transportPicked = transportPicked === workerId ? null : workerId;
+        transportSaid = transportPicked ? T.picked(isolate(name)) : '';
+    }));
+    chip.classList.add('transport-chip');
+    chip.dataset.worker = workerId;
+    chip.setAttribute('aria-pressed', transportPicked === workerId ? 'true' : 'false');
+    chip.setAttribute('aria-label', [name, transportSiteName(ctx, site)].filter(Boolean).join(' · '));
+    // On the chip itself, so the copy that floats under a finger can take it from there.
+    transportPaint(chip, site);
+    chip.appendChild(transportDot(site));
+    chip.appendChild(el('span', 'transport-chip-name', name));
+    transportDragBind(chip, workerId, 'tray');
+    return chip;
+}
+
+// ------------------------------------------------------------------ one vehicle
+
+function transportCard(ctx, date, vehicle, seats, issues) {
+    const T = TRANSPORT_TEXT;
+    const out = Boolean(seats);
+    const card = el('section', 'transport-card' + (out ? '' : ' transport-card-folded'));
+    card.dataset.car = vehicle.id;
+    const head = el('div', 'transport-card-head');
+    const titles = el('div', 'transport-grow');
+    titles.appendChild(el('h3', 'transport-vehicle-name', vehicle.name));
+    if (out) {
+        titles.appendChild(el('div', 'transport-sub transport-occupancy',
+            T.occupancy(seats.filter(Boolean).length, vehicle.seats)));
+    }
+    head.appendChild(titles);
+    // The one thing said about a vehicle every day: does it go out. Kept home, the card
+    // folds to this line and its men are waiting again.
+    const toggle = transportButton(out ? T.available : T.unavailable, 'avail:' + vehicle.id,
+        () => transportAct(() => transportSetAvailable(date, vehicle.id, !out)));
+    toggle.classList.add('transport-quiet', 'transport-toggle');
+    toggle.dataset.avail = vehicle.id;
+    toggle.setAttribute('aria-pressed', out ? 'true' : 'false');
+    toggle.setAttribute('aria-label', `${transportRli(vehicle.name)}: ${out ? T.available : T.unavailable}`);
+    head.appendChild(toggle);
+    card.appendChild(head);
+    if (!out) return card;
+
+    // AT MOST ONE CALM LINE: a man seated who has no site in today's record (the day
+    // changed under the plan - he is drawn as needing attention and can be taken out),
+    // or else passengers with nobody in the driver's seat.
+    const wrong = issues.filter(issue => issue.vehicle === vehicle.id);
+    const lost = wrong.find(issue => issue.code === 'notWorking' || issue.code === 'unknownWorker');
+    const line = lost ? T.notWorking(isolate(transportWorkerName(ctx, lost.worker)))
+        : (wrong.some(issue => issue.code === 'noDriver') ? T.driverNone : '');
+    if (line) card.appendChild(el('p', 'transport-card-line', line));
+
+    card.appendChild(transportCar(ctx, date, vehicle, seats));
+
+    const state = transportMarkState(date, vehicle.id);
+    card.dataset.mark = state;
+    if (state === 'nophone') {
+        const none = transportBadge(T.noPhone, 'bad');
+        none.classList.add('transport-mark');
+        card.appendChild(none);
+    } else if (state !== 'nodriver') {
+        const row = el('div', 'transport-door-row');
+        row.appendChild(transportDoor(date, vehicle.id, transportDriverNumber(date, vehicle.id),
+            transportDriverMessage(date, vehicle.id)));
+        if (state === 'opened') {
+            const mark = transportBadge(T.opened, 'ok');
+            mark.classList.add('transport-mark');
+            row.appendChild(mark);
+        }
+        card.appendChild(row);
+    }
+    return card;
+}
+
+// THE CAR, SEEN FROM ABOVE WITH ITS FRONT AT THE TOP. It is a picture, not text, and the
+// page's right-to-left direction MUST NOT MIRROR IT: Israel drives on the right, so the
+// wheel is on the LEFT of the car, and in a mirrored drawing the driver would sit on the
+// passenger's side - on every card, with nothing looking wrong. So the drawing is laid
+// out left-to-right by its own `dir`, whatever the document says, and the rows come from
+// TransportEngine.seatRows already in left-to-right order. The names inside the seats
+// are text again and take their own direction.
+function transportCar(ctx, date, vehicle, seats) {
+    const car = el('div', 'transport-car');
+    car.dir = 'ltr';
+    car.setAttribute('role', 'group');
+    car.setAttribute('aria-label', transportRli(vehicle.name));
+    ['fl', 'fr', 'rl', 'rr'].forEach(corner => {
+        const wheel = el('span', `transport-wheel transport-wheel-${corner}`);
+        wheel.setAttribute('aria-hidden', 'true');
+        car.appendChild(wheel);
+    });
+    const shell = el('div', 'transport-car-body');
+    const glass = el('div', 'transport-windscreen');
+    glass.setAttribute('aria-hidden', 'true');
+    shell.appendChild(glass);
+    TransportEngine.seatRows(vehicle).forEach(row => {
+        const line = el('div', 'transport-seat-row');
+        line.style.gridTemplateColumns = `repeat(${row.length}, minmax(0, 1fr))`;
+        row.forEach(n => line.appendChild(transportSeat(ctx, date, vehicle, n, seats[n] || null)));
+        shell.appendChild(line);
+    });
+    car.appendChild(shell);
+    return car;
+}
+
+function transportSeat(ctx, date, vehicle, n, sitting) {
+    const T = TRANSPORT_TEXT;
+    const tile = transportButton('', `seat:${vehicle.id}:${n}`, () => transportSeatTap(date, vehicle, n, sitting));
+    tile.classList.add('transport-seat');
+    tile.dataset.vehicle = vehicle.id;
+    tile.dataset.seat = String(n);
+    if (n === 1) {
+        tile.classList.add('transport-seat-driver');
+        tile.appendChild(transportGlyph('wheel'));
+    }
+    if (!sitting) {
+        tile.classList.add('transport-seat-empty');
+        if (n !== 1) tile.appendChild(transportGlyph('plus'));
+        tile.appendChild(el('span', 'transport-seat-label', n === 1 ? T.driverSeat : T.addWorker));
+        return tile;
+    }
+    const name = transportWorkerName(ctx, sitting);
+    const site = ctx.attendance[sitting];
+    tile.dataset.worker = sitting;
+    tile.classList.add('transport-seat-taken');
+    // No site in today's record: the day changed under the plan. He stays drawn, marked,
+    // and can be dragged or tapped out - the card's line says why.
+    if (!site) tile.classList.add('transport-seat-attn');
+    transportPaint(tile, site);
+    const label = el('span', 'transport-seat-name', name);
+    label.dir = 'auto';
+    tile.appendChild(label);
+    // The whole name and the site, whatever the tile had room to draw.
+    tile.setAttribute('aria-label', [n === 1 ? T.driver(isolate(name)) : name, transportSiteName(ctx, site)]
+        .filter(Boolean).join(' · '));
+    transportDragBind(tile, sitting, 'seat');
+    return tile;
+}
+
+function transportSayPlaced(date, workerId, vehicle, placed) {
+    if (!placed || !vehicle) return;
+    transportSaid = TRANSPORT_TEXT.seatedIn(isolate(transportWorkerName(transportContext(date), workerId)),
+        transportRli(vehicle.name));
+}
+
+// One of the app's own questions (js/ui/ask.js), listing men. Each row is a name and a
+// site; two rows that would read the same are numbered, because the answer comes back as
+// the row's words and two men called the same must not be one answer.
+function transportChoose(title, ctx, ids) {
+    const T = TRANSPORT_TEXT;
+    const byLabel = transportMap();
+    const labels = ids.map(id => {
+        const base = [transportWorkerName(ctx, id), transportSiteName(ctx, ctx.attendance[id])].filter(Boolean).join(' · ');
+        let label = base;
+        for (let k = 2; byLabel[label] || label === T.cancel; k += 1) label = `${base} (${k})`;
+        byLabel[label] = id;
+        return label;
+    });
+    return askChoice({ title, choices: labels.concat([T.cancel]) })
+        .then(answer => (answer && byLabel[answer]) || null);
+}
+
+// A touch on a seat. With a man already touched in the tray it is where he goes; on an
+// empty seat it asks who; on a taken one it offers the one thing that needs no
+// explaining - out of the car.
+function transportSeatTap(date, vehicle, n, sitting) {
+    const T = TRANSPORT_TEXT;
+    if (transportPicked) {
+        const id = transportPicked;
+        transportPicked = null;
+        transportSaid = '';
+        transportAct(() => transportSayPlaced(date, id, vehicle, transportPlace(date, id, vehicle.id, n)));
+        return;
+    }
+    const ctx = transportContext(date);
+    if (sitting) {
+        const name = transportWorkerName(ctx, sitting);
+        askChoice({ title: name, choices: [T.removeFromVehicle, T.cancel] }).then(answer => {
+            if (answer === T.removeFromVehicle && transportUnseat(date, sitting)) transportSaid = T.returned(isolate(name));
+            renderTransportIfOpen();
+        });
+        return;
+    }
+    const waiting = TransportEngine.waiting(ctx, transportDayOf(date));
+    if (waiting.length === 0) {
+        // A TAP THAT CHANGES NOTHING SAYS WHY, ON THE GLASS. On v171 the suggest button
+        // did nothing the owner could see (nobody had been marked as allowed to drive)
+        // and he took it for broken. An empty seat with nobody left to put in it is the
+        // one tap here that cannot do anything - so it answers in a sentence.
+        askTell({ title: T.allSeated }).then(renderTransportIfOpen);
+        return;
+    }
+    transportChoose(n === 1 ? T.driverDialogTitle(transportRli(vehicle.name)) : T.chooseTitle, ctx, waiting).then(id => {
+        if (id) transportSayPlaced(date, id, vehicle, transportPlace(date, id, vehicle.id, n));
+        renderTransportIfOpen();
+    });
+}
+
+// ------------------------------------------------------------------ not with us
+
+// How a man who does not ride with us gets there. `workerId` when it is already known
+// who (he was touched, or dropped on the control); otherwise the waiting men are listed
+// first.
+function transportAskAway(date, workerId) {
+    const T = TRANSPORT_TEXT;
+    const ctx = transportContext(date);
+    const day = transportDayOf(date);
+    const who = workerId && TransportEngine.isRider(ctx, day, workerId) ? Promise.resolve(workerId)
+        : transportChoose(T.notRidingTitle, ctx, TransportEngine.waiting(ctx, day));
+    return who.then(id => {
+        if (!id) return null;
+        const options = [[T.statusPrivate, 'private'], [T.statusContractor, 'contractor'], [T.statusOther, 'other']];
+        return askChoice({ title: T.statusLabel(isolate(transportWorkerName(ctx, id))),
+            choices: options.map(option => option[0]).concat([T.cancel]) }).then(answer => {
+            const chosen = options.find(option => option[0] === answer);
+            if (!chosen) return;
+            transportSetStatus(date, id, chosen[1]);
+            if (transportPicked === id) { transportPicked = null; transportSaid = ''; }
+        });
+    }).then(renderTransportIfOpen);
+}
+
+function transportFold(id, key, title, open, onToggle) {
+    const fold = document.createElement('details');
+    fold.className = 'transport-card transport-fold';
+    fold.id = id;
+    fold.open = open;
+    fold.addEventListener('toggle', () => onToggle(fold.open));
+    const handle = el('summary', null, title);
+    handle.dataset.tk = key;
+    fold.appendChild(handle);
+    return fold;
+}
+
+// The men marked as getting there another way: one folded line at the bottom, and from
+// inside it each can be brought back to the tray.
+function transportAway(ctx, day, date, away) {
+    const T = TRANSPORT_TEXT;
+    const fold = transportFold('transportAway', 'away', T.notRidingCount(away.length), transportAwayOpen,
+        open => { transportAwayOpen = open; });
+    away.forEach(worker => {
+        const row = el('div', 'transport-row');
+        row.dataset.away = worker.id;
+        const titles = el('div', 'transport-grow');
+        titles.appendChild(el('div', 'transport-name', worker.name));
+        titles.appendChild(el('div', 'transport-sub', transportStatusText(day.status[worker.id])));
+        row.appendChild(titles);
+        const back = transportButton(T.bringBack, 'back:' + worker.id,
+            () => transportAct(() => transportSetStatus(date, worker.id, null)));
+        back.classList.add('transport-quiet');
+        back.setAttribute('aria-label', `${T.bringBack}: ${isolate(worker.name)}`);
+        row.appendChild(back);
+        fold.appendChild(row);
+    });
+    return fold;
+}
+
+// ------------------------------------------------------------------ the list of vehicles
 
 function transportAskSeats(name, value) {
     const T = TRANSPORT_TEXT;
@@ -1657,40 +1263,27 @@ function transportAskVehicleName(vehicle) {
     });
 }
 
-function transportVehiclesView(ctx, day, date) {
+// The list is the owner's to keep, and keeping it is rare: SETUP, not daily work, so it
+// is one folded row at the very bottom of the screen, and inside it each vehicle's three
+// tools are behind a row of their own.
+function transportFleet() {
     const T = TRANSPORT_TEXT;
-    const root = el('div', 'transport-view');
-    const out = ctx.vehicles.filter(vehicle => !day.unavailable[vehicle.id]);
-    root.appendChild(el('p', 'transport-lead', T.vehiclesLead));
-    const summary = el('p', 'transport-name', T.vehiclesSummary(out.length, ctx.vehicles.length,
-        out.reduce((sum, vehicle) => sum + vehicle.seats, 0)));
-    summary.id = 'transportVehiclesSummary';
-    root.appendChild(summary);
-    if (ctx.vehicles.length === 0) root.appendChild(el('p', 'empty-hint', T.noVehicles));
-
-    ctx.vehicles.forEach(vehicle => {
-        const isOut = !day.unavailable[vehicle.id];
-        const card = el('section', 'transport-card');
-        card.dataset.vehicle = vehicle.id;
-        const head = el('div', 'transport-row');
-        const titles = el('div', 'transport-grow');
-        titles.appendChild(el('h3', 'transport-vehicle-name', vehicle.name));
+    const fold = transportFold('transportFleet', 'fleet', T.vehiclesRow, transportFleetOpen,
+        open => { transportFleetOpen = open; });
+    const vehicles = transportSettings().vehicles.filter(vehicle => vehicle.active);
+    if (vehicles.length === 0) fold.appendChild(el('p', 'empty-hint', T.noVehicles));
+    vehicles.forEach(vehicle => {
+        const item = el('div', 'transport-fleet-item');
+        item.dataset.vehicle = vehicle.id;
+        const titles = el('div', 'transport-row');
+        titles.appendChild(el('div', 'transport-name transport-grow', vehicle.name));
         titles.appendChild(el('div', 'transport-sub', T.seats(vehicle.seats)));
-        head.appendChild(titles);
-        const toggle = transportToggle(isOut ? T.available : T.unavailable, 'avail:' + vehicle.id, isOut,
-            () => transportAct(() => transportSetAvailable(date, vehicle.id, !isOut)));
-        toggle.classList.add('transport-toggle-ok');
-        toggle.dataset.avail = vehicle.id;
-        toggle.setAttribute('aria-label', `${transportRli(vehicle.name)}: ${isOut ? T.available : T.unavailable}`);
-        head.appendChild(toggle);
-        card.appendChild(head);
-
-        // The list is the owner's to keep, and keeping it is rare: behind one row, so the
-        // daily question - which cars go out - is the only thing on the card.
+        item.appendChild(titles);
         const more = document.createElement('details');
         more.className = 'transport-more';
         const handle = el('summary', null, T.editVehicle);
         handle.dataset.tk = 'more:' + vehicle.id;
+        handle.setAttribute('aria-label', `${T.editVehicle}: ${transportRli(vehicle.name)}`);
         more.appendChild(handle);
         const tools = el('div', 'transport-row transport-wrap');
         tools.appendChild(transportButton(T.renameVehicle, 'rename:' + vehicle.id, () => {
@@ -1698,25 +1291,24 @@ function transportVehiclesView(ctx, day, date) {
                 if (name) transportRenameVehicle(vehicle.id, name);
                 renderTransportIfOpen();
             });
-        }, false));
+        }));
         tools.appendChild(transportButton(T.changeSeats, 'seats:' + vehicle.id, () => {
             transportAskSeats(vehicle.name, vehicle.seats).then(seats => {
                 if (seats) transportSetVehicleSeats(vehicle.id, seats);
                 renderTransportIfOpen();
             });
-        }, false));
+        }));
         tools.appendChild(transportButton(T.retireVehicle, 'retire:' + vehicle.id, () => {
             askConfirm({ title: T.retireTitle(transportRli(vehicle.name)), message: T.retireLead,
                 ok: T.retireVehicle, cancel: T.cancel }).then(yes => {
                 if (yes) transportRetireVehicle(vehicle.id);
                 renderTransportIfOpen();
             });
-        }, false));
+        }));
         more.appendChild(tools);
-        card.appendChild(more);
-        root.appendChild(card);
+        item.appendChild(more);
+        fold.appendChild(item);
     });
-
     const add = transportButton(T.addVehicle, 'addVehicle', () => {
         transportAskVehicleName(null).then(name => {
             if (!name) return null;
@@ -1725,135 +1317,14 @@ function transportVehiclesView(ctx, day, date) {
                 renderTransportIfOpen();
             });
         });
-    }, false);
+    });
     add.id = 'transportAddVehicle';
     add.classList.add('transport-wide');
-    root.appendChild(add);
-    return root;
+    fold.appendChild(add);
+    return fold;
 }
 
-// ------------------------------------------------------------------ עובדים
-
-function transportAreasEditor(ctx) {
-    const T = TRANSPORT_TEXT;
-    const box = document.createElement('details');
-    box.className = 'transport-card transport-more';
-    box.id = 'transportAreas';
-    // Open while the list is empty: the first evening, this is the first thing to do.
-    box.open = ctx.areas.length === 0 || transportAreasOpen;
-    box.addEventListener('toggle', () => { transportAreasOpen = box.open; });
-    const handle = el('summary', null, T.areasTitle(ctx.areas.length));
-    handle.dataset.tk = 'areas';
-    box.appendChild(handle);
-    box.appendChild(el('p', 'hint', ctx.areas.length === 0 ? T.noAreas : T.areasLead));
-    const ask = area => askText({
-        title: T.areaNameTitle, value: area ? area.name : '', ok: T.save,
-        validate: text => transportNameProblem(transportCleanName(text), transportSettings().areas,
-            area ? area.id : null, T.areaNameTaken)
-    });
-    ctx.areas.forEach(area => {
-        const row = el('div', 'transport-row transport-area');
-        row.dataset.area = area.id;
-        row.appendChild(el('span', 'transport-name transport-grow', area.name));
-        row.appendChild(transportButton(T.renameArea, 'areaRename:' + area.id, () => {
-            ask(area).then(name => {
-                if (name) transportRenameArea(area.id, name);
-                renderTransportIfOpen();
-            });
-        }, false));
-        row.appendChild(transportButton(T.removeArea, 'areaRemove:' + area.id, () => {
-            askConfirm({ title: T.removeAreaTitle(isolate(area.name)), message: T.removeAreaLead,
-                ok: T.removeArea, cancel: T.cancel }).then(yes => {
-                if (yes) transportRemoveArea(area.id);
-                renderTransportIfOpen();
-            });
-        }, false));
-        box.appendChild(row);
-    });
-    const add = transportButton(T.addArea, 'addArea', () => {
-        ask(null).then(name => {
-            if (name) transportAddArea(name);
-            renderTransportIfOpen();
-        });
-    }, false);
-    add.id = 'transportAddArea';
-    add.classList.add('transport-wide');
-    box.appendChild(add);
-    return box;
-}
-
-function transportWorkersView(ctx, day, date) {
-    const T = TRANSPORT_TEXT;
-    const root = el('div', 'transport-view');
-    root.appendChild(el('p', 'transport-lead', T.workersLead));
-    root.appendChild(transportAreasEditor(ctx));
-
-    let off = 0;
-    ctx.workers.forEach(worker => {
-        if (!ctx.attendance[worker.id]) { off += 1; return; }
-        const name = isolate(worker.name);
-        const card = el('section', 'transport-card');
-        card.dataset.worker = worker.id;
-        const head = el('div', 'transport-row transport-wrap');
-        head.appendChild(el('span', 'transport-name transport-grow', worker.name));
-        head.appendChild(transportSiteChip(ctx, ctx.attendance[worker.id]));
-        card.appendChild(head);
-        if (ctx.also[worker.id]) {
-            card.appendChild(el('p', 'transport-sub', T.alsoAt(ctx.also[worker.id].map(isolate).join(', '))));
-        }
-
-        card.appendChild(transportSelect('status:' + worker.id, T.statusLabel(name),
-            [['', T.statusRide]].concat(TransportEngine.STATUSES.map(status => [status, transportStatusText(status)])),
-            day.status[worker.id] || '',
-            value => transportAct(() => transportSetStatus(date, worker.id, value || null))));
-
-        const area = transportSelect('workerArea:' + worker.id, T.areaLabel(name),
-            [['', `${T.pickup}: ${T.noArea}`]].concat(ctx.areas.map(one => [one.id, `${T.pickup}: ${one.name}`])),
-            worker.area && transportFind(ctx.areas, worker.area) ? worker.area : '',
-            value => transportAct(() => transportSetWorker(worker.id, { area: value || null })));
-        area.dataset.workerArea = worker.id;
-        card.appendChild(area);
-
-        const all = worker.drives === 'all';
-        const drive = transportToggle(!worker.canDrive ? T.cannotDrive
-            : `${T.canDrive} · ${all ? T.drivesAll : worker.drives.length ? T.drivesSome(worker.drives.length) : T.drivesNone}`,
-        'drive:' + worker.id, worker.canDrive,
-        () => transportAct(() => transportSetWorker(worker.id, { canDrive: !worker.canDrive })));
-        drive.classList.add('transport-wide', 'transport-toggle-ok');
-        drive.dataset.drive = worker.id;
-        card.appendChild(drive);
-
-        if (worker.canDrive) {
-            // WHICH vehicles. «כל הרכבים», or each one by name - the 9-seater is the one a
-            // man may not be allowed, and it is the owner who says.
-            const which = el('div', 'transport-row transport-wrap transport-drives');
-            which.setAttribute('role', 'group');
-            which.setAttribute('aria-label', T.drivesLabel(name));
-            const everything = transportToggle(T.drivesAll, 'drivesAll:' + worker.id, all,
-                () => transportAct(() => transportSetWorker(worker.id, { drives: all ? [] : 'all' })));
-            everything.dataset.drivesAll = worker.id;
-            which.appendChild(everything);
-            if (!all) {
-                ctx.vehicles.forEach(vehicle => {
-                    const on = worker.drives.indexOf(vehicle.id) !== -1;
-                    const one = transportToggle(vehicle.name, `drives:${worker.id}:${vehicle.id}`, on,
-                        () => transportAct(() => transportSetWorker(worker.id, {
-                            drives: on ? worker.drives.filter(id => id !== vehicle.id) : worker.drives.concat(vehicle.id)
-                        })));
-                    one.dataset.drives = vehicle.id;
-                    which.appendChild(one);
-                });
-            }
-            card.appendChild(which);
-        }
-        root.appendChild(card);
-    });
-    if (Object.keys(ctx.attendance).length === 0) root.appendChild(el('p', 'empty-hint', T.nobody));
-    if (off > 0) root.appendChild(el('p', 'hint', T.notWorkingToday(off)));
-    return root;
-}
-
-// ------------------------------------------------------------------ הודעות
+// ------------------------------------------------------------------ the door to WhatsApp
 
 // A real link with the whole address already on it, so the tap IS the navigation: iOS
 // opens nothing for a navigation that does not come from a tap (js/ui/seder.js, where
@@ -1876,78 +1347,273 @@ function transportDoor(date, vehicleId, number, text) {
     return door;
 }
 
-function transportMessagesView(ctx, day, date) {
-    const T = TRANSPORT_TEXT;
-    const root = el('div', 'transport-view');
-    root.appendChild(el('p', 'transport-lead', T.messagesLead));
-    const last = transportLastVersion(date);
-    // ONLY an accepted version is ever sent. A draft is somebody still thinking.
-    if (!last) {
-        const none = el('div', 'transport-card');
-        none.id = 'transportNoAccepted';
-        none.appendChild(el('p', null, T.noAccepted));
-        root.appendChild(none);
-        return root;
+// ================================================================== carrying a man
+//
+// POINTER EVENTS, and never the HTML5 drag-and-drop API: on an iPhone that API starts
+// only after its own long press, shows its own lifted picture, and inside a home-screen
+// app is the thing most likely to do nothing at all. What is carried is a copy of the
+// name floating over the finger; the seat under the finger is lit; the drop is one call
+// to the same transportPlace a tap makes.
+//
+// TWO WAYS A MAN IS LIFTED, because the two places he is lifted from are not alike:
+//
+//   FROM THE TRAY, AT ONCE. A waiting man's chip has `touch-action: none` (css/design.css),
+//   so the browser never takes the gesture for its own and every movement arrives here.
+//   Past TRANSPORT_SLOP it is a drag - unless the movement is nearly level and the tray
+//   has more men than fit, in which case it is the tray being slid sideways, and this
+//   file slides it (the browser was told to keep out, so nobody else will). A finger
+//   that goes down and comes up inside the slop is a tap, and the click is left alone.
+//
+//   FROM A SEAT, AFTER A HOLD. A filled car is mostly seats. If a seated man could be
+//   lifted the instant a finger moved on him, the swipe that scrolls the list - which
+//   starts on a seat more often than not - would carry a man off and drop him on
+//   whatever seat the finger left the glass over: a plan changed by scrolling, with
+//   nothing said. So a seat is left to the browser (`touch-action: manipulation`: it
+//   scrolls), and a man is lifted from it only by a finger that stays put for
+//   TRANSPORT_HOLD_MS. From then on this file's non-passive touchmove listener on that
+//   one tile cancels the browser's scroll, and the gesture is a drag. The listener is on
+//   the tile and nowhere else, and does nothing until a man is lifted, so the list
+//   scrolls with passive handling everywhere a scroll can start. A mouse has no scroll
+//   to confuse a drag with and lifts a seated man at once, like a waiting one.
+//
+// `pointercancel` - the browser took the gesture, a call came in, the app went to the
+// background - puts everything back and changes nothing.
+const TRANSPORT_SLOP = 8;            // px a finger may wander and still be a tap
+const TRANSPORT_HOLD_MS = 300;       // a finger still on a seated man this long has lifted him
+const TRANSPORT_EDGE = 64;           // px inside the top or bottom of the list where carrying scrolls it
+const TRANSPORT_EDGE_STEP = 14;      // px a frame at the very edge
+const TRANSPORT_EDGE_REST = 250;     // ms a finger must rest in that strip before it scrolls
+const TRANSPORT_LEVEL = 2.5;         // across at least this many times down is the tray being slid
+
+let transportDrag = null;
+let transportSwallowUntil = 0;       // until when the click that ends a drag is not a tap
+
+function transportDragBind(node, workerId, from) {
+    node.classList.add('transport-draggable');
+    node.addEventListener('pointerdown', event => transportDragDown(event, node, workerId, from));
+    node.addEventListener('pointermove', transportDragMove);
+    node.addEventListener('pointerup', transportDragUp);
+    node.addEventListener('pointercancel', transportDragCancel);
+    // A long press is how a man is lifted, so it must not ALSO be the browser's own long
+    // press: no menu, and no native drag of the button's picture.
+    node.addEventListener('contextmenu', event => event.preventDefault());
+    node.addEventListener('dragstart', event => event.preventDefault());
+    if (from === 'seat') {
+        node.addEventListener('touchmove', event => {
+            const drag = transportDrag;
+            if (drag && drag.node === node && drag.phase === 'drag' && event.cancelable) event.preventDefault();
+        }, { passive: false });
     }
-    if (last.sig !== TransportEngine.planSignature(ctx, day)) {
-        const differs = el('div', 'transport-box transport-box-warn');
-        differs.id = 'transportDraftDiffers';
-        differs.appendChild(el('h3', null, T.draftDiffers(last.n)));
-        root.appendChild(differs);
-    } else root.appendChild(el('p', 'transport-name', T.acceptedVersion(last.n)));
-    if (transportRecordChanged(date, last)) root.appendChild(el('p', 'transport-warn-text', T.recordChanged));
+}
 
-    transportTripOrder(last.trips).forEach(vehicleId => {
-        const trip = last.trips[vehicleId];
-        const people = TransportEngine.occupants(trip);
-        if (people.length === 0) return;
-        const vehicle = transportFind(transportSettings().vehicles, vehicleId);
-        const card = el('section', 'transport-card');
-        card.dataset.message = vehicleId;
-        const head = el('div', 'transport-row transport-wrap');
-        const titles = el('div', 'transport-grow');
-        titles.appendChild(el('div', 'transport-name', trip.driver ? transportWorkerName(ctx, trip.driver) : T.driverNone));
-        titles.appendChild(el('div', 'transport-sub', `${transportRli(transportVehicleName(vehicleId))} · `
-            + T.occupancy(people.length, vehicle ? vehicle.seats : people.length)));
-        head.appendChild(titles);
-        card.appendChild(head);
-        if (!trip.driver) {
-            card.dataset.mark = 'nodriver';
-            card.appendChild(transportBadge(T.driverNone, 'bad'));
-            root.appendChild(card);
-            return;
+function transportDragDown(event, node, workerId, from) {
+    if ((event.pointerType === 'mouse' && event.button !== 0) || event.isPrimary === false) return;
+    // A press that never got its release (the node was replaced under it) must not make
+    // every later press a no-op.
+    if (transportDrag && transportDrag.phase === 'down') transportDragEnd(false);
+    if (transportDrag) return;
+    const drag = { id: workerId, from, node, pointer: event.pointerId, touch: event.pointerType === 'touch',
+        x0: event.clientX, y0: event.clientY, x: event.clientX, y: event.clientY, phase: 'down',
+        timer: 0, frame: 0, ghost: null, over: null, overNode: null, redraw: false, chips: null, slide0: 0,
+        speed: 0, movedAt: 0, zone: 0, zoneSince: 0 };
+    transportDrag = drag;
+    try { node.setPointerCapture(event.pointerId); } catch (error) { /* a pointer that has already gone */ }
+    if (from === 'seat' && drag.touch) {
+        drag.timer = setTimeout(() => {
+            if (transportDrag === drag && drag.phase === 'down') transportDragLift(drag);
+        }, TRANSPORT_HOLD_MS);
+    }
+}
+
+function transportDragMove(event) {
+    const drag = transportDrag;
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const dx = event.clientX - drag.x0;
+    const dy = event.clientY - drag.y0;
+    if (drag.phase === 'down') {
+        if (Math.hypot(dx, dy) <= TRANSPORT_SLOP) return;
+        // A finger that moved on a seated man before the hold was up is scrolling the
+        // list. It is the browser's from here, and nobody is lifted.
+        if (drag.from === 'seat' && drag.touch) { transportDragEnd(false); return; }
+        const chips = document.getElementById('transportChips');
+        if (drag.from === 'tray' && chips && chips.scrollWidth > chips.clientWidth + 1
+            && Math.abs(dx) >= TRANSPORT_LEVEL * Math.abs(dy)) {
+            drag.phase = 'slide';
+            drag.chips = chips;
+            drag.slide0 = chips.scrollLeft + dx;
+        } else transportDragLift(drag);
+    }
+    if (drag.phase === 'slide') {
+        const now = Date.now();
+        if (drag.movedAt) drag.speed = (event.clientX - drag.x) / Math.max(1, now - drag.movedAt);
+        drag.movedAt = now;
+        drag.x = event.clientX;
+        // The men follow the finger: the same subtraction whichever way the tray's own
+        // numbers run in a right-to-left page.
+        drag.chips.scrollLeft = drag.slide0 - dx;
+        return;
+    }
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    if (drag.phase === 'drag') transportDragTrack(drag);
+}
+
+function transportDragLift(drag) {
+    clearTimeout(drag.timer);
+    drag.phase = 'drag';
+    const parts = transportParts();
+    drag.node.classList.add('transport-lifted');
+    parts.panel.classList.add('transport-dragging');
+    // The copy under the finger. Inside the panel and positioned by it, NOT fixed: every
+    // fixed layer of this page is counted and brought down with a stuck iPhone frame
+    // (css/app.css, body.frame-lowered), and this one would have been one more to forget.
+    const ghost = el('div', 'transport-ghost');
+    ghost.setAttribute('aria-hidden', 'true');
+    const dot = el('span', 'transport-dot', '');
+    const colour = drag.node.style.getPropertyValue('--seat-site');
+    if (colour) dot.style.setProperty('--seat-site', colour);
+    ghost.appendChild(dot);
+    ghost.appendChild(el('span', null, transportWorkerName(transportContext(transportDate), drag.id)));
+    parts.panel.appendChild(ghost);
+    drag.ghost = ghost;
+    transportDragTrack(drag);
+    drag.frame = requestAnimationFrame(now => transportDragScroll(drag, now));
+}
+
+// What a man released at this point would land on: a seat, the control for men who do
+// not ride with us, the tray - or nothing, and then nothing changes.
+function transportDropAt(x, y) {
+    const panel = transportParts().panel;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || !panel || !panel.contains(hit) || !hit.closest) return null;
+    const seat = hit.closest('.transport-seat');
+    if (seat) return { kind: 'seat', node: seat, vehicle: seat.dataset.vehicle, n: Number(seat.dataset.seat) };
+    const away = hit.closest('#transportNotRiding');
+    if (away) return { kind: 'away', node: away };
+    const tray = hit.closest('#transportTray');
+    return tray ? { kind: 'tray', node: tray } : null;
+}
+
+function transportDragTrack(drag) {
+    const frame = transportParts().panel.getBoundingClientRect();
+    // Above the finger, so the name is read and not covered.
+    drag.ghost.style.transform = `translate(${Math.round(drag.x - frame.left)}px, ${Math.round(drag.y - frame.top)}px) translate(-50%, -135%)`;
+    const over = transportDropAt(drag.x, drag.y);
+    const node = over ? over.node : null;
+    if (drag.overNode !== node) {
+        if (drag.overNode) drag.overNode.classList.remove('transport-over');
+        if (node) node.classList.add('transport-over');
+        drag.overNode = node;
+    }
+    drag.over = over;
+}
+
+// A man carried to the bottom of the list (or to just under the tray) scrolls it, faster
+// the nearer the edge, so he can be taken to a car that was off the screen. One frame at
+// a time, and the seat under the finger is looked up again after each step - the finger
+// has not moved, the seats have.
+//
+// ONLY A FINGER THAT STAYS IN THE ZONE SCROLLS. Every man carried out of the tray passes
+// through the strip just under it on his way to a seat; when that strip scrolled at once,
+// a list that was not at its top slid under the finger in mid-carry and the man landed
+// beside the seat he was being taken to (measured at 375x667). So the zone has to be
+// rested in for TRANSPORT_EDGE_REST first; passing through it does nothing.
+function transportDragScroll(drag, time) {
+    if (transportDrag !== drag || drag.phase !== 'drag') return;
+    const body = transportParts().body;
+    const box = body.getBoundingClientRect();
+    const tray = document.getElementById('transportTray');
+    const top = tray ? tray.getBoundingClientRect().bottom : box.top;
+    let step = 0;
+    if (drag.y > box.bottom - TRANSPORT_EDGE) {
+        step = Math.ceil(TRANSPORT_EDGE_STEP * Math.min(1, (drag.y - (box.bottom - TRANSPORT_EDGE)) / TRANSPORT_EDGE));
+    } else if (drag.y > top && drag.y < top + TRANSPORT_EDGE) {
+        step = -Math.ceil(TRANSPORT_EDGE_STEP * Math.min(1, (top + TRANSPORT_EDGE - drag.y) / TRANSPORT_EDGE));
+    }
+    const zone = Math.sign(step);
+    if (zone !== drag.zone) { drag.zone = zone; drag.zoneSince = time; }
+    if (step && time - drag.zoneSince >= TRANSPORT_EDGE_REST) {
+        const before = body.scrollTop;
+        body.scrollTop = before + step;
+        if (body.scrollTop !== before) transportDragTrack(drag);
+    }
+    drag.frame = requestAnimationFrame(now => transportDragScroll(drag, now));
+}
+
+// Everything a gesture put on the page, taken off it. `swallow`: the click the browser
+// is about to make out of this release is not a tap.
+function transportDragEnd(swallow) {
+    const drag = transportDrag;
+    if (!drag) return;
+    transportDrag = null;
+    clearTimeout(drag.timer);
+    if (drag.frame) cancelAnimationFrame(drag.frame);
+    try { drag.node.releasePointerCapture(drag.pointer); } catch (error) { /* already released */ }
+    drag.node.classList.remove('transport-lifted');
+    if (drag.overNode) drag.overNode.classList.remove('transport-over');
+    if (drag.ghost && drag.ghost.parentNode) drag.ghost.parentNode.removeChild(drag.ghost);
+    const panel = transportParts().panel;
+    if (panel) panel.classList.remove('transport-dragging');
+    if (swallow) transportSwallowUntil = Date.now() + 400;
+    // The redraw that waited for the finger.
+    if (drag.redraw) renderTransportIfOpen();
+}
+
+function transportDragUp(event) {
+    const drag = transportDrag;
+    if (!drag || event.pointerId !== drag.pointer) return;
+    if (drag.phase === 'slide') {
+        const chips = drag.chips;
+        let speed = drag.speed;
+        transportDragEnd(true);
+        // The tray keeps going for a moment, the way a list the browser scrolls does.
+        const glide = () => {
+            if (Math.abs(speed) < 0.05 || !chips.isConnected) return;
+            chips.scrollLeft -= speed * 16;
+            speed *= 0.92;
+            requestAnimationFrame(glide);
+        };
+        glide();
+        return;
+    }
+    if (drag.phase !== 'drag') { transportDragEnd(false); return; }
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    transportDragTrack(drag);
+    const over = drag.over;
+    // A mouse always clicks after its release; a finger does only when it never moved.
+    transportDragEnd(!drag.touch || Math.hypot(drag.x - drag.x0, drag.y - drag.y0) <= TRANSPORT_SLOP);
+    transportDrop(drag, over);
+}
+
+function transportDragCancel(event) {
+    const drag = transportDrag;
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const lifted = drag.phase === 'drag';
+    transportDragEnd(false);
+    if (lifted) renderTransportIfOpen();
+}
+
+// Released. On a seat: he sits there (and the man who sat there changes places with him,
+// or goes back to wait). On the tray, from a seat: he is out of the car. On the control
+// for men who do not ride with us: it asks how he gets there. Anywhere else: nothing.
+function transportDrop(drag, over) {
+    const date = transportDate;
+    if (!date || !transportIsOpen()) return;
+    const T = TRANSPORT_TEXT;
+    if (over && over.kind === 'seat') {
+        const vehicle = transportFind(transportSettings().vehicles, over.vehicle);
+        transportSayPlaced(date, drag.id, vehicle, transportPlace(date, drag.id, over.vehicle, over.n));
+    } else if (over && over.kind === 'tray' && drag.from === 'seat') {
+        if (transportUnseat(date, drag.id)) {
+            transportSaid = T.returned(isolate(transportWorkerName(transportContext(date), drag.id)));
         }
-
-        const state = transportMarkState(date, vehicleId);
-        const mark = day.marks[vehicleId];
-        card.dataset.mark = state;
-        const badge = state === 'nophone' ? transportBadge(T.noPhone, 'bad')
-            : state === 'sent' ? transportBadge(T.sentMarked(transportClock(mark.sentAt)), 'ok')
-                : state === 'opened' ? transportBadge(T.opened, 'ok')
-                    : state === 'changed' ? transportBadge(T.changedSinceMark, 'bad')
-                        : transportBadge(T.notOpened);
-        badge.classList.add('transport-mark');
-        card.appendChild(badge);
-
-        const text = transportDriverMessage(date, last, vehicleId);
-        const shown = el('pre', 'transport-message', text);
-        shown.dir = 'rtl';
-        card.appendChild(shown);
-
-        const number = transportDriverNumber(date, last, vehicleId);
-        if (number) {
-            const buttons = el('div', 'transport-row transport-wrap');
-            buttons.appendChild(transportDoor(date, vehicleId, number, text));
-            const sent = state === 'sent'
-                ? transportButton(T.unmarkSent, 'sent:' + vehicleId, () => transportAct(() => transportMarkSent(date, vehicleId, false)), false)
-                : transportButton(T.confirmSent, 'sent:' + vehicleId, () => transportAct(() => transportMarkSent(date, vehicleId, true)), false);
-            sent.dataset.sent = vehicleId;
-            buttons.appendChild(sent);
-            card.appendChild(buttons);
-        }
-        root.appendChild(card);
-    });
-    return root;
+    } else if (over && over.kind === 'away'
+        && TransportEngine.isRider(transportContext(date), transportDayOf(date), drag.id)) {
+        transportAskAway(date, drag.id);
+        return;
+    }
+    renderTransport();
 }
 
 // ================================================================== the way in, and the switch
@@ -2015,11 +1681,13 @@ function transportRenderSwitch() {
     state.textContent = on ? TRANSPORT_TEXT.switchStateOn : TRANSPORT_TEXT.switchStateOff;
 }
 
-// Back from WhatsApp, the marks are brought up to date.
+// Back from WhatsApp, the marks are brought up to date. Gone to the background with a
+// man in the air: he is put down where he was - the release will never arrive.
 function transportWatch() {
     if (typeof document === 'undefined' || !document.addEventListener) return;
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') renderTransportIfOpen();
+        if (document.visibilityState !== 'visible') transportDragEnd(false);
+        else renderTransportIfOpen();
     });
 }
 

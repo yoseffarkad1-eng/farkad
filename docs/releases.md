@@ -1,8 +1,260 @@
-## v172 — the settings sheet in strict order (candidate, not served)
+## v174 — הסעות as a picture: the cars drawn from above, men dragged to their seats (candidate, not served)
 
-**Not served. Not merged. On no phone.** One commit of shipped files on `b640c5a` (v171 on
-v169). No gate result is written here: validation is recorded against the exact clean commit,
-and no count is carried over.
+**Not served. Not merged. On no phone.** Built on `8c943fa` (v172). No gate result is written
+here: validation is recorded against the exact clean commit, and no count is carried over.
+v173 is the number of another branch that has not been published.
+
+**The owner tried v171 on his phone and sent the screen back** (2026-11-10, his words,
+translated): *"Very hard and complicated and it will take us a lot of time. I want the CAR
+DRAWN, as if photographed from above, and on every seat written 'add worker', and I take the
+worker, drag him with my finger and distribute them over the cars. The way it is now is very
+hard."* He also said that on v171 «הצעת שיבוץ» "did nothing": nobody had been marked as
+allowed to drive, so no vehicle could be opened, and the screen did not say so.
+
+So the four-tab planner is gone and there is ONE screen, which is a picture.
+
+**What the screen is now.**
+
+- **The head**: «הסעות», the day and date, «חזרה».
+- **The tray**, which stays at the top while the cars scroll under it: «ממתינים לשיבוץ (7)»
+  and a chip for every man who works that day and is in no seat yet - his name, and a dot in
+  his site's own fixed colour. It scrolls sideways when the men do not fit. When nobody is
+  waiting it is one line: «כל העובדים משובצים».
+- **One card for each vehicle that goes out today**, the car DRAWN FROM ABOVE with its front at
+  the top: a rounded outline, a windscreen, four wheels, and the seats as big tiles in their
+  real rows - five-seaters two and three, the Volkswagen 2-2-2-3, any other count two in front
+  and rows of up to three. The driver's seat is on the LEFT (Israel drives on the right) with
+  a drawn steering wheel; the drawing has its own left-to-right direction so the page's
+  right-to-left does not mirror the car. An empty seat says «הוספת עובד», the driver's «נהג»;
+  a taken one shows the man's name (two lines at most) over an edge in his site's colour. No
+  image, no emoji: shapes and two inline SVG glyphs.
+- **A man is put in a seat three ways.** Dragged there by a finger; touched in the tray and
+  then the seat touched; or the empty seat touched and the man chosen from the app's own list
+  of those still waiting. Dropped on a taken seat he changes places with the man in it - or,
+  if he came from the tray, the man who sat there goes back to it. Dropped on the tray he is
+  out of his car. Released anywhere else, nothing changes. A touch on a taken seat offers
+  «הוצאה מהרכב» and nothing else.
+- **WHOEVER IS IN THE DRIVER'S SEAT IS THE DRIVER.** Nobody is "allowed" or "not allowed".
+- **Every change is kept at once.** There is nothing to accept.
+- **A vehicle that does not go out today**: its «זמין היום» button; the card folds to one line
+  («לא זמין היום») and its men are waiting again.
+- **A man who does not ride with us**: the quiet «לא בהסעה שלנו» at the end of the tray's
+  head - after touching a man, or with a man dropped on it, it asks «רכב פרטי / נוסע עם קבלן
+  אחר / אחר»; touched alone it asks who first. Such men leave the tray and are one folded
+  line at the bottom, «לא בהסעה שלנו (2)», from which each is brought back.
+- **The driver's message**: on a card whose driver's seat is taken, one WhatsApp-green
+  «פתיחה בוואטסאפ» - a real `<a href="https://wa.me/<number>?text=…" target="_blank"
+  rel="noopener noreferrer">`, the seder's own rule for what is a usable number. After the tap
+  the card says «נפתח בוואטסאפ» until that car's message changes. A driver with no usable
+  number: «אין מספר טלפון תקין», and no link.
+- **«רכבים»**, one folded row at the very bottom: the list the owner keeps (add, rename, seats,
+  retire). Setup, not daily work.
+- **At most one calm line on a card**: a seated man who no longer has a site in today's record
+  (he stays drawn, marked, and can be taken out), or else passengers with nobody at the wheel
+  («בלי נהג»).
+- **No tap does nothing.** The one tap that cannot change anything - an empty seat when nobody
+  is waiting - answers «כל העובדים משובצים».
+
+**How a finger carries a man** (`js/ui/transport.js`, "carrying a man"). Pointer Events with
+pointer capture; never the HTML5 drag-and-drop API. A copy of the name floats above the
+finger, the seat under it is lit, and a finger resting near the bottom of the list (or just
+under the tray) for a quarter of a second scrolls it, so a man can be taken to a car that was
+off the screen. `pointercancel` puts everything back. Two things were decided against the
+letter of the request, and are said here so they can be argued with:
+
+- **A man in a SEAT is lifted by holding him for 300 ms, not at once.** A filled car is mostly
+  seats, and the swipe that scrolls the list starts on a seat more often than not. Lifted at
+  once, that swipe would carry a man off and drop him on whatever seat the finger left the
+  glass over - a plan changed by scrolling, with nothing said. So a seat scrolls like the rest
+  of the page (`touch-action: manipulation`) and only a resting finger lifts; from then on a
+  non-passive `touchmove` listener on that one tile cancels the browser's scroll. A man in the
+  TRAY is lifted the moment the finger moves 8 px (`touch-action: none` on the chip, and on
+  nothing else). A mouse lifts either at once.
+- **A level swipe on the waiting men slides the tray.** `touch-action: none` on the chips means
+  the browser will not scroll a tray that is full of chips, so when the first 8 px are nearly
+  level (across at least 2.5 times down) and the tray overflows, the app slides it itself.
+
+**What was REMOVED from the feature, and why.** The owner's verdict was on the whole planner,
+not on a tab:
+
+| removed | why |
+|---|---|
+| the four tabs (שיבוץ / רכבים / עובדים / הודעות) | one screen |
+| pickup areas - the list, a man's area, a trip's area, the «איסוף:» line of the message | he asked to place men himself; an area was only an input to the suggestion |
+| "may drive" and which vehicles | the driver is whoever he puts in the driver's seat. This is also what made «הצעת שיבוץ» do nothing on his phone |
+| «הצעת שיבוץ» and the whole suggestion engine | he distributes the men by hand |
+| locks, on a vehicle and on a man | they existed to protect a hand edit from the next suggestion |
+| «אישור התוכנית», the typed reason for a partial plan, versions and their history, «עדכון מספר N» | every change is the plan; the message is composed from the picture as it is |
+| «סימנתי שנשלח» | he asked for less; the card says «נפתח בוואטסאפ» after the tap and the link stays |
+| the list of what is wrong, with its count | one line on the card it is about |
+| "also on site X" on a man's card | the card it was on is gone - see what is not covered |
+
+`js/model/transport.js` is now the geometry and the three rules of a seat (`seatRows`,
+`layout`, `tripsOf`, `waiting`, `place`, `remove`, `validate`); `suggest`, `mayDrive`,
+`planSignature`, `movedBetween` and `seatPlan` are deleted, with their tests.
+
+**What happens to data written by v171 or v172.** It opens as it is.
+
+- A day (`farkadTransport:day:<date>`): the vehicles marked unavailable, the statuses, each
+  trip's driver, passengers and seat numbers are read, and an «opened» mark (which will not be
+  believed - the message is composed differently now, so the link is simply offered again).
+  A passenger v171 gave no seat is drawn on the first free one. A man v171 left in a locked
+  car that was marked unavailable is waiting again. A rear seat v171 called «אחורי ימין» is
+  drawn on the right.
+- **Reading rewrites nothing.** The bytes stay exactly as v171 wrote them until somebody
+  changes that day. **The first change to a day drops from it**: its accepted versions
+  (`accepted`), worker locks (`workerLocks`), each trip's `locked` and `area`, each mark's
+  `sentAt`, and any trip for a vehicle that stays home or has left the list. They are not
+  kept anywhere else.
+- The list (`farkadTransport:settings`): the vehicles are read. The pickup areas and each
+  worker's area and driving rights are NOT read, and ARE carried through every save untouched.
+- A day v174 writes still has `version: 1` and the same trip fields, so v171 or v172 opening
+  it again (an older window, a rolled-back build) reads it as a draft with no version.
+
+**What it reads and writes is otherwise what v171 did**: who works where through `sederCrew`
+and never the record; the per-phone switch in ⋯ and the one entry in the WhatsApp dialog,
+unchanged; the same three kinds of key through `Store`, optional and verified, with the same
+sentence when a write is refused; nothing in the schedule, the outbox, the cloud, a backup, a
+restore point or the rescue file; 35 days kept. Nothing in `js/sync`, `js/model/schema.js`,
+`js/model/money.js`, `js/model/ledger.js`, `js/state.js`, `js/store.js`, `js/recovery.js` or
+`firestore.rules` changed.
+
+**What this build is known NOT to cover.**
+
+- **THE DRAG HAS NEVER BEEN TRIED ON A REAL iPhone OR GALAXY.** Every drag in
+  `tests/transport.browser.mjs` is a real touch sequence through Chromium's input pipeline
+  (`Input.dispatchTouchEvent`, with `hasTouch` and `isMobile`), at 440x956 and 375x667 - and
+  that is desktop Chromium with emulated touch, nothing else. Not measured, and for the owner's
+  phone to say: whether iOS Safari in a home-screen app honours `touch-action: none` on the
+  chips and lets a `touchmove` be cancelled after a 300 ms hold (both are documented behaviour;
+  neither was seen); whether its long-press callout or text selection appears over a held name
+  despite `-webkit-touch-callout: none` and `user-select: none`; whether Android's long-press
+  vibration or context menu interferes (`contextmenu` is prevented on a man); rubber-band
+  scrolling at the ends of the list while carrying; and how the hold FEELS - 300 ms was chosen,
+  not tried. If a held man does not lift on a phone, nothing is changed by trying, and the
+  other two ways of seating a man, and «הוצאה מהרכב», need no drag at all.
+- **A seated man is lifted only after a hold**, and the screen says so once, in the hint that
+  is shown while nobody is seated. After that nothing on the screen says it.
+- **Dragging is not reachable from a keyboard or a screen reader**; touching a man and then a
+  seat is (every chip and seat is a button), and each move is announced in a live region. A
+  man already seated cannot be moved to another seat without a pointer except by taking him
+  out and seating him again.
+- **Which vehicles go out is asked every day.** All seven are drawn on a new day; the ones that
+  stay are folded by hand each time.
+- **A man on two sites that day** rides to the first his day holds, and nothing on this screen
+  says he has a second.
+- **The first man in the app's list is the filled button** (it is `askChoice`'s look), which
+  can read as a suggestion. It is the first man waiting, in roster order, and nothing more.
+- The message has no pickup line and no seat numbers; passengers are listed in the order of
+  their seats.
+- Local to one phone, in no backup, a lost phone loses the plans and the list of vehicles - as
+  v171.
+- An update that reloads the page while the panel is open closes it; the plan is on the disk.
+- Text at 200%, a 320px phone, landscape, a screen reader and paper were not measured for this
+  panel. A vehicle with more than nine seats is drawn (rows of three) and was measured only at
+  seven and twelve seats' row counts, not on the glass beyond seven.
+
+**Every Hebrew string - PROPOSED, the owner corrects on sight.** He gave standing approval of
+professional wording on 2026-11-09. All of them are in one block at the top of
+`js/ui/transport.js` and pinned word for word in `tests/transport.test.mjs`; a correction
+moves both, in one commit. Ninety-odd strings of v171's planner were removed from both. The
+message a driver receives:
+
+```
+שלום סמיר,
+הסעה ליום שלישי 10/11/2026:
+רכב: BYD סיל U 2025
+נוסעים (2):
+- אחמד – הרצליה
+- יוסי – חיפה
+יעדים: הרצליה, חיפה
+```
+
+| key | proposed Hebrew | note |
+|---|---|---|
+| `switchTitle` | הסעות |  |
+| `switchSub` | שיבוץ עובדים לרכבים |  |
+| `switchLead` | שיבוץ העובדים לרכבים והודעה לכל נהג. פועל במכשיר הזה בלבד: לא מסונכרן, לא משותף עם הטלפונים האחרים, ולא נכלל בגיבוי. |  |
+| `switchStateOn` | מופעל במכשיר הזה |  |
+| `switchStateOff` | כבוי |  |
+| `switchOn` | הפעלת הסעות במכשיר הזה |  |
+| `switchOff` | כיבוי הסעות במכשיר הזה |  |
+| `entry` | הסעות – שיבוץ לרכבים |  |
+| `title` | הסעות |  |
+| `back` | חזרה |  |
+| `notKept` | השינוי לא נשמר במכשיר. אם האפליקציה תיסגר, הוא יאבד. |  |
+| `unreadable` | נתוני הסעות שנשמרו במכשיר לא נקראו. מתחילים מרשימה ריקה, והעותק שלא נקרא נשמר בצד. |  |
+| `nobody` | אין ביום הזה עובדים עם אתר עבודה. |  |
+| `waiting` | ממתינים לשיבוץ (7) | new in v174; template; sample values |
+| `allSeated` | כל העובדים משובצים | new in v174 |
+| `hint` | גוררים עובד אל מושב, או נוגעים בעובד ואז במושב. עובד שכבר יושב מזיזים בלחיצה ארוכה וגרירה. | new in v174 |
+| `picked` | אחמד נבחר. נוגעים במושב. | new in v174; template; sample values |
+| `seatedIn` | אחמד שובץ בקורולה 2016 | new in v174; template; sample values |
+| `returned` | אחמד חזר לממתינים | new in v174; template; sample values |
+| `addWorker` | הוספת עובד | new in v174 |
+| `driverSeat` | נהג | new in v174 |
+| `driver` | נהג: אחמד | template; sample values |
+| `chooseTitle` | מי יושב כאן? | new in v174 |
+| `driverDialogTitle` | מי נוהג בקורולה 2016? | template; sample values |
+| `removeFromVehicle` | הוצאה מהרכב |  |
+| `cancel` | ביטול |  |
+| `occupancy` | 3 מתוך 5 | template; sample values |
+| `available` | זמין היום |  |
+| `unavailable` | לא זמין היום |  |
+| `driverNone` | בלי נהג |  |
+| `notWorking` | אחמד משובץ ברכב אבל אין לו אתר ברישום היום | template; sample values |
+| `deletedWorker` | עובד שנמחק |  |
+| `notRiding` | לא בהסעה שלנו | new in v174 |
+| `notRidingCount` | לא בהסעה שלנו (2) | new in v174; template; sample values |
+| `notRidingTitle` | מי לא נוסע בהסעה שלנו? | new in v174 |
+| `statusLabel` | איך אחמד מגיע | template; sample values |
+| `statusPrivate` | רכב פרטי |  |
+| `statusContractor` | נוסע עם קבלן אחר |  |
+| `statusOther` | אחר |  |
+| `bringBack` | החזרה להסעה | new in v174 |
+| `vehiclesRow` | רכבים | changed |
+| `seats` | 5 מושבים | template; sample values |
+| `noVehicles` | אין רכבים ברשימה. |  |
+| `editVehicle` | עריכת הרכב |  |
+| `addVehicle` | הוספת רכב |  |
+| `renameVehicle` | שינוי שם |  |
+| `changeSeats` | שינוי מושבים |  |
+| `retireVehicle` | הוצאה מהרשימה |  |
+| `vehicleNameTitle` | שם הרכב |  |
+| `nameNeeded` | צריך לכתוב שם |  |
+| `vehicleNameTaken` | כבר יש רכב בשם הזה |  |
+| `seatsTitle` | כמה מושבים יש בקורולה 2016? כולל הנהג. | template; sample values |
+| `seatsBad` | מספר בין 2 ל-20 |  |
+| `retireTitle` | להוציא את קורולה 2016 מהרשימה? | template; sample values |
+| `retireLead` | הרכב לא יופיע עוד בשיבוץ. | changed |
+| `save` | שמירה |  |
+| `openWhatsapp` | פתיחה בוואטסאפ |  |
+| `opened` | נפתח בוואטסאפ |  |
+| `noPhone` | אין מספר טלפון תקין |  |
+| `mHello` | שלום אחמד, | template; sample values |
+| `mHeading` | הסעה ליום שלישי 10/11/2026: | template; sample values |
+| `mVehicle` | רכב: קורולה 2016 | template; sample values |
+| `mPassengers` | נוסעים (2): | template; sample values |
+| `mPassenger` | - אחמד – חדרה | template; sample values |
+| `mPassengerOnly` | - אחמד | new in v174; template; sample values |
+| `mAlone` | בלי נוסעים. |  |
+| `mDestinations` | יעדים: חיפה, חדרה | template; sample values |
+
+`new in v174` marks a string the picture needed; `changed` one whose words moved
+(`retireLead` spoke of accepted versions; `vehiclesRow` is v171's `tabVehicles`, the same
+word on a row instead of a tab). Everything else is v171's, unchanged.
+
+The seven vehicle names are data, seeded once and then the owner's to edit: טויוטה קורולה 2013,
+טויוטה קורולה 2016, BYD סיל U 2025, BYD אטו 3 2025, פולקסווגן 2018, סוואנה 2010, ליפמוטור C10 2026.
+
+## v172 — the settings sheet in strict order (served 2026-11-10)
+
+**Served.** Merged into `main` as `8c943fa` (PR #57) on 2026-11-10 and deployed by GitHub
+Pages run 42739198406, which concluded `success` at 01:57 UTC. As with v169 and v171, the
+served page itself could not be read from the container that built it: "served" means Pages
+reported the deployment of that commit. It was built as one commit of shipped files on
+`b640c5a` (v171 on v169); its gate results are recorded on the PR, against that commit, and
+no count is carried over here.
 
 The owner's request of 2026-11-09, in his words: the settings page is a mess, not only in
 looks but in ORDER - strict, firm, serious order; shake it out and re-arrange it. He liked the

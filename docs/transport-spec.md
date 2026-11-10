@@ -1,10 +1,83 @@
 # פרקד — vehicle dispatch (הסעות): what exists, the architecture, the plan
 
-**Status, 2026-11-09: phase 1 is built as the v171 candidate** (`js/model/transport.js`,
-`js/ui/transport.js`, `tests/transport.test.mjs`, `tests/transport.browser.mjs`;
-`docs/releases.md`, v171). It is on no phone. This document is the design it was built from,
-brought up to date with the owner's answers; where the build differs from the first proposal,
-§0 says how, and the sections below have been corrected to match.
+**Status, 2026-11-10: the screen was rebuilt as a picture (v174 candidate).** v171 was served
+on 2026-11-09 with the four-tab planner this document designed; the owner tried it on his
+phone the next day and sent the screen back. What is built now is described in "The screen
+as built" directly below, and in `docs/releases.md` (v174). §0 onward is the v171 design and
+its reasoning, kept because the storage decisions in it still hold - **but §4 (the
+suggestion), §5 (most of validation), §6 (the UI flow) and §7 (the strings) describe a
+planner that no longer exists.**
+
+## The screen as built (v174)
+
+The owner, 2026-11-10: *"Very hard and complicated and it will take us a lot of time. I want
+the car drawn, as if photographed from above, and on every seat written 'add worker', and I
+take the worker, drag him with my finger and distribute them over the cars."*
+
+**One scrolling screen** (`js/ui/transport.js`, `renderTransport` → `transportView`):
+
+| part | what it is | where |
+|---|---|---|
+| head | «הסעות», the day, «חזרה» | `index.html`, `#transportPanel` (still `.settings-panel`) |
+| tray | sticky at the top of the panel's own scroller; a chip per man with a site today and no seat; «ממתינים לשיבוץ (n)» / «כל העובדים משובצים»; the quiet «לא בהסעה שלנו» | `transportTray`, `transportChip` |
+| a car | one card per active vehicle: name, «3 מתוך 5», «זמין היום» toggle; the drawing; at most one calm line; the WhatsApp door when the driver's seat is taken | `transportCard`, `transportCar`, `transportSeat` |
+| folded lines | «לא בהסעה שלנו (n)» (bring a man back), and «רכבים» (the list editor) | `transportAway`, `transportFleet` |
+
+**The drawing.** `TransportEngine.seatRows(vehicle)` returns the rows front to back, each
+from the LEFT of the car to its right: `[[1,2],[5,4,3]]` for a five-seater,
+`[[1,2],[4,3],[6,5],[9,8,7]]` for the Volkswagen (`rows: [2,2,2,3]`), two in front and rows of
+up to three for anything else. Seat 1 is the driver's, on the left. Rear rows are numbered
+from the right because v171 called seat 3 «אחורי ימין». The car element has `dir="ltr"` so the
+page's direction cannot mirror it. CSS shapes for the body, windscreen and wheels; two inline
+SVG glyphs (steering wheel, plus); the design tokens of `css/design.css`.
+
+**The rules of a seat** are the engine's, pure, and the same for a drag, a tap and a test:
+
+- `layout(ctx, day)` is the ONE reading of a stored plan: a vehicle that stays home or left
+  the list has no car; a man with a status is in no seat; a man named twice sits where the
+  list reaches him first; a passenger with a good seat number keeps it and any other gets the
+  first free seat; nobody is squeezed in. A seated man with no site today stays drawn.
+- `place(ctx, day, worker, vehicle, n)` → `{trips, displaced}` or `null`: an empty seat is
+  taken; on a taken seat a seated man changes places and a waiting man displaces; seat 1 is
+  the driver. Refused: a vehicle that stays home, a seat it does not have, a man who is not
+  riding with us, his own seat.
+- `remove`, `waiting`, `tripsOf` (the picture written down), `validate`.
+
+**Three ways to seat a man** (all in `js/ui/transport.js`):
+
+1. **Drag** - "carrying a man": Pointer Events with capture, a floating copy positioned
+   inside the panel (not a new fixed layer), the seat under the finger lit, the list scrolled
+   by a finger resting 250 ms within 64 px of its top or bottom, `pointercancel` restoring. A
+   man in the tray lifts after 8 px (`touch-action: none` on the chip only; a level swipe
+   slides the tray instead). A man in a seat lifts after a 300 ms hold, so that a swipe that
+   starts on a seat scrolls the list and moves nobody.
+2. **Tap then tap** - `transportChip` sets `transportPicked`; `transportSeatTap` places him.
+3. **Tap the seat** - `transportSeatTap` → `transportChoose` (the app's `askChoice`).
+
+A tap on a taken seat offers «הוצאה מהרכב». A tap on an empty seat with nobody waiting says
+«כל העובדים משובצים» - no tap does nothing.
+
+**Storage** is §3's, narrowed. `farkadTransport:day:<date>` is
+`{version: 1, unavailable, status, trips: {<vehicle>: {driver, passengers, seats}}, marks:
+{<vehicle>: {sig, openedAt}}}`. Reading a day written by v171 writes nothing; the first change
+writes it in this shape, dropping `accepted`, `workerLocks`, a trip's `locked` and `area` and
+a mark's `sentAt`. `farkadTransport:settings` keeps the vehicles; v171's `areas` and
+`workers` are carried through a save, unread.
+
+**The driver's message** is composed from the picture as it is (no accepted version): hello,
+the day, the vehicle, the passengers in seat order with their sites, the destinations.
+
+**Tests**: `tests/transport.test.mjs` (the engine's geometry and seat rules, a v171 day and
+list opening cleanly, the message, the words, the store's isolation) and
+`tests/transport.browser.mjs` (real touch sequences through Chromium's input pipeline at
+440x956 and 375x667, both schemes). **Not tested on any real phone.**
+
+---
+
+**The v171 design follows.** Its status line at the time: phase 1 built as the v171 candidate
+(`js/model/transport.js`, `js/ui/transport.js`, `tests/transport.test.mjs`,
+`tests/transport.browser.mjs`; `docs/releases.md`, v171). Where that build differed from the
+first proposal, §0 says how.
 
 ## 0. The owner's decisions (2026-11-09), and what the build did with them
 

@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v172">
+<meta name="farkad-build" content="v174">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -363,8 +363,8 @@
     <div class="reorder-foot" id="reorderFoot"></div>
 </div>
 
-<!-- v171, הסעות: the vehicle-dispatch planner, on a phone that turned it on in ⋯ and on no
-     other. A panel over the whole screen, on the settings sheet's tier and ABOVE the ask
+<!-- הסעות (v171; one screen since v174 - the cars drawn from above, no tabs): on a phone
+     that turned it on in ⋯ and on no other. A panel over the whole screen, on the settings sheet's tier and ABOVE the ask
      dialog in this file, so the app's own questions open over it. It carries the
      settings-panel class on purpose: that class is what makes a layer fixed, what hides
      it on paper, and what brings it down with the rest of the frame on a stuck iPhone
@@ -380,7 +380,6 @@
         </div>
         <button type="button" class="btn-secondary transport-close" id="transportClose" onclick="closeTransport()"></button>
     </div>
-    <div class="transport-tabs" id="transportTabs" role="tablist"></div>
     <p class="transport-note" id="transportNote" role="status" hidden></p>
     <div class="transport-body" id="transportBody"></div>
     <!-- Outside the body, which is rebuilt on every change: a live region that is

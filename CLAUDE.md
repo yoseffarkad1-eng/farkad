@@ -125,7 +125,7 @@ downloading anything. The emulator suites need Java and run through
 Financial suites cover both enabled operation and explicit legacy-client fixtures
 with both financial gates closed. The v116 release candidate enables the financial
 pair by owner request; deployment remains held until cloud rules and device readiness
-are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. v167 adds the seder to each worker (js/ui/seder.js), entered from the WhatsApp dialog and from nowhere on the day screen: the men with a site that day, each opened in WhatsApp with his own message by the person's own tap - never sent by the app, and never marked "sent". It writes nothing to the record; its progress is a per-date preference in Store. Its Hebrew words are the owner's, approved 2026-11-07 and pinned word for word in tests/seder.test.mjs (docs/releases.md, v167). v169 is the one look (css/design.css, js/ui/icons.js): a restyle that moves no control, changes no label and touches no data path (docs/releases.md, v169). v171 adds הסעות (js/model/transport.js, js/ui/transport.js): who rides to work in which vehicle and a message to each driver, on a phone that turned it on in ⋯ and on no other - its own Store keys (farkadTransport:…), never the record, the outbox, the cloud, a backup or the rescue file, so a lost phone loses the plans; it reads the day through the seder's own list and never writes it; its Hebrew is proposed, not approved word by word, and pinned in tests/transport.test.mjs (docs/releases.md, v171; docs/transport-spec.md). It is not the retired vehicles feature and shares nothing with it. v172 puts the ⋯ sheet in strict order: three sections of three cards, every card but ענן וסנכרון a row (`<details>`) that opens in place, גיבוי open and the rest shut at every opening, a row opening by itself only for the reasons listed in settingsFoldReasons (js/ui/settings.js) and never shut or opened by a redraw; no control, word or handler changed, and nothing about it is stored (docs/releases.md, v172). Test-only overrides are
+are verified. Vehicles stay off. v119 enables owner-requested deletion of unused workers: shared names require completed protocol sync, work and financial history block deletion, and late work reinstates the identity as inactive. v120 permits canonical empty day placeholders to be removed in the same journal and cloud transaction as an unused worker. v166 adds the Rima count, `days.<date>.rima.<placeId>`: another company's men, counted per site, never named and never in pay, but billed to the client as one worker-site day each (owner's ruling, 2026-11-01); v145/v165 phones drop it from their own copy, so a whole-document restore must not be run from one of them (docs/releases.md, v166). THE ROLLOUT RULE there: every phone on v166 before the first Rima count is typed; until then no rescue file, backup, restore point or cloud copy is restored across builds, in either direction, no window of an older build stays open beside a v166 one, and client invoices come only from an updated phone. v167 adds the seder to each worker (js/ui/seder.js), entered from the WhatsApp dialog and from nowhere on the day screen: the men with a site that day, each opened in WhatsApp with his own message by the person's own tap - never sent by the app, and never marked "sent". It writes nothing to the record; its progress is a per-date preference in Store. Its Hebrew words are the owner's, approved 2026-11-07 and pinned word for word in tests/seder.test.mjs (docs/releases.md, v167). v169 is the one look (css/design.css, js/ui/icons.js): a restyle that moves no control, changes no label and touches no data path (docs/releases.md, v169). v171 adds הסעות (js/model/transport.js, js/ui/transport.js): who rides to work in which vehicle and a message to each driver, on a phone that turned it on in ⋯ and on no other - its own Store keys (farkadTransport:…), never the record, the outbox, the cloud, a backup or the rescue file, so a lost phone loses the plans; it reads the day through the seder's own list and never writes it; its Hebrew is proposed, not approved word by word, and pinned in tests/transport.test.mjs (docs/releases.md, v171; docs/transport-spec.md). It is not the retired vehicles feature and shares nothing with it. v174 rebuilds the הסעות screen as a picture, because the owner tried v171's four-tab planner and sent it back (2026-11-10: draw the car from above, write "add worker" on every seat, let him drag the men): ONE screen - a sticky tray of the men with a site and no seat, each vehicle drawn from above with the driver's seat on the LEFT (its own `dir="ltr"`; RTL must not mirror a car), seats as tiles in their real rows; a man is seated by a finger's drag (Pointer Events, never the HTML5 drag API; a waiting man lifts at once, a SEATED man only after a 300ms hold so that a swipe on a filled car scrolls and moves nobody), by touching him and then the seat, or by touching the seat and choosing; whoever is in seat 1 is the driver; every change is kept at once. Pickup areas, "may drive", suggest, locks, accept, versions and «סימנתי שנשלח» are REMOVED. A day written by v171/v172 opens as it is and is rewritten only by its first change, which drops its versions, locks, areas and «sent» marks; the store, the switch, the one entry and the isolation from the record are v171's, unchanged. Its Hebrew is proposed and pinned in tests/transport.test.mjs. THE DRAG HAS NEVER BEEN TRIED ON A REAL PHONE - only with emulated touch in Chromium (docs/releases.md, v174). v172 puts the ⋯ sheet in strict order: three sections of three cards, every card but ענן וסנכרון a row (`<details>`) that opens in place, גיבוי open and the rest shut at every opening, a row opening by itself only for the reasons listed in settingsFoldReasons (js/ui/settings.js) and never shut or opened by a redraw; no control, word or handler changed, and nothing about it is stored (docs/releases.md, v172). Test-only overrides are
 provided before scripts load, never defined by the production shell.
 
 ## The culture
@@ -148,8 +148,10 @@ written down so it cannot happen twice.
     js/model/schema.js         the v2 model, validators, field paths; pure functions
     js/model/money.js          what a day was worth: payroll, invoice, the advances walk, the closed period
     js/model/migrate.js        v1→v2; never guesses; ambiguous cells become decisions, not data
-    js/model/transport.js      הסעות (v171), the pure half: suggest, validate, the seat layout; no DOM, no storage,
-                               no clock - the same day gives the same plan. NOT the retired vehicles model
+    js/model/transport.js      הסעות, the pure half (v174: the picture): the rows of a vehicle with the driver on
+                               the left, the one reading of a stored plan (layout), and the rules of a seat -
+                               first free seat, swap, seat 1 is the driver; no DOM, no storage, no clock.
+                               v171's suggest/areas/may-drive/locks are gone. NOT the retired vehicles model
     js/model/ledger.js         the v80 advances ledger: entries, fold, closed gate, mirror migration, parity check;
                                the repayment and period-closure kinds, both behind the writer gate
     js/sync/sync.js            the durable queue: outbox, journal, replay, receipts, provenance; the one accessor pair
@@ -181,11 +183,13 @@ written down so it cannot happen twice.
                                date in Store (farkadSederProgress) - never the record, never synced, never in
                                a backup; every Hebrew word of it in one block, approved by the owner
                                on 2026-11-07 and pinned word for word in tests/seder.test.mjs
-    js/ui/transport.js         הסעות (v171), the screen and its store: off until this phone turns it on in ⋯;
-                               one entry in the WhatsApp dialog; reads the day through sederCrew and never
-                               writes it; keeps its plans, vehicles, areas and who may drive under
-                               farkadTransport:* through Store - never the record, never synced, never in a
-                               backup; every Hebrew word of it in one block (proposed, the owner corrects)
+    js/ui/transport.js         הסעות, the screen and its store: off until this phone turns it on in ⋯; one
+                               entry in the WhatsApp dialog; reads the day through sederCrew and never
+                               writes it; keeps its plans and vehicles under farkadTransport:* through
+                               Store - never the record, never synced, never in a backup. v174: ONE screen,
+                               the cars drawn from above; "carrying a man" is the drag (pointer events, the
+                               hold on a seated man, the tray slid by hand, the edge scroll); every Hebrew
+                               word of it in one block (proposed, the owner corrects)
     js/ui/backup.js            snapshots, the backup file, the four restore doors, the rescue file
     js/ui/printout.js          the table as a PNG, read off the DOM, for the phone where window.print()
                                opens nothing: the 1.5s heuristic, the share sheet, the download
@@ -271,13 +275,17 @@ written down so it cannot happen twice.
                                every button's words unchanged beside its glyph, a relabel dressed again, the
                                message textarea untouched, both palettes' contrast, no site colour moved,
                                44px and 16px on five screens in both schemes
-    tests/transport.test.mjs   v171: the engine (not enough seats, a locked vehicle, no eligible driver, no
-                               area yet, determinism), every word, the driver's message, the store's isolation
-                               from the record, the fence, the cloud, a backup and the rescue file, a damaged
-                               transport record not blocking the day, pruning, and the switch
-    tests/transport.browser.mjs v171 in Chromium: off by default, the switch in ⋯, the one entry, the whole
-                               evening at 440x956 and 375x667 in both schemes, the driver's link read and not
-                               followed, the marks, the record byte for byte, 44px and 16px
+    tests/transport.test.mjs   v174: the engine (the rows, first free seat, swap, seat 1 is the driver, what
+                               is refused), a day and a list written by v171 opening cleanly and not rewritten
+                               until changed, every word, the driver's message, the store's isolation from the
+                               record, the fence, the cloud, a backup and the rescue file, a damaged transport
+                               record not blocking the day, pruning, and the switch
+    tests/transport.browser.mjs v174 in Chromium with a touch screen: REAL touch drags (chip to seat, to the
+                               driver's seat, onto a taken seat, car to car, back to the tray, released
+                               outside, cancelled, past the edge to a car off the screen), a swipe scrolling
+                               and moving nobody, tap-then-tap, the chooser, a vehicle kept home, a man not
+                               riding, the driver on the LEFT in an RTL page, 2-2-2-3, 56px seats at 375,
+                               the link read and not followed, the record byte for byte. NOT a real phone
     tests/settings-order.browser.mjs v172 in Chromium: the three sections and nine cards by title, what is
                                open on opening and after reopening, a redraw and an adopted snapshot leaving
                                the rows alone, every self-opening reason, the v171 sheet's controls and

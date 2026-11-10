@@ -1,17 +1,21 @@
-// הסעות (v171): who rides to work in which vehicle, and a message to each driver - on one
-// phone, by its own switch, in a store of its own.
+// הסעות: who rides to work in which vehicle, and a message to each driver - on one phone,
+// by its own switch, in a store of its own. Since v174 the plan is a PICTURE: the cars
+// drawn from above and the men put on their seats.
 //
 //   node tests/transport.test.mjs
 //
-// The owner, 2026-11-09: seven vehicles (the 9-seater a Volkswagen, 2-2-2-3), one fixed
-// pickup area per worker, he decides who may drive and what, a driver leaves from his own
-// home, the morning ride only, no «ממתין» - and FIRST ON HIS PHONE ONLY: no cloud, and
-// nothing in the record. Everything below follows from those sentences:
+// The owner, 2026-11-09: seven vehicles (the 9-seater a Volkswagen, 2-2-2-3), the morning
+// ride only, no «ממתין» - and FIRST ON HIS PHONE ONLY: no cloud, and nothing in the record.
+// The owner, 2026-11-10, having tried v171's planner: too hard - draw the car, write "add
+// worker" on every seat, and let him drag the men to them. Everything below follows:
 //
-//   the engine (js/model/transport.js) is pure and gives the same plan for the same day:
-//     not enough seats is said, never squeezed; a locked vehicle is left byte for byte; a
-//     vehicle nobody may drive is flagged and never given an ineligible driver; a man with
-//     no pickup area yet is still planned for;
+//   the engine (js/model/transport.js) is pure and is now the geometry and the three rules
+//     of a seat: the rows of each vehicle with the driver on the left; a passenger with no
+//     seat number given the first free one; a man dropped on a taken seat changing places
+//     with the man in it; whoever is in seat 1 the driver. What v171's engine did - suggest
+//     a plan, pickup areas, who may drive, locks - is gone, and so are its tests;
+//   a day and a list written by v171 open as they are, and are not rewritten until
+//     somebody changes them;
 //   the screen's words are one block, pinned here word for word, and the driver's message
 //     is composed exactly;
 //   a number is a wa.me number by the seder's own rule;
@@ -21,7 +25,8 @@
 //     pruned;
 //   and with the switch off there is no entry, and no transport key but the switch is read.
 //
-// The screen itself - the panel, the taps, the rectangles - is tests/transport.browser.mjs.
+// The screen itself - the drawing, the drags, the taps, the rectangles - is
+// tests/transport.browser.mjs.
 
 import vm from 'node:vm';
 import { readFileSync, existsSync } from 'node:fs';
@@ -64,206 +69,163 @@ async function block(name, body) {
 const engineHost = makeDevice({ deviceId: 'd_engine' });
 vm.runInContext(ENGINE, engineHost.ctx, { filename: 'js/model/transport.js' });
 const Core = engineHost.global('TransportEngine');
-given('the engine loaded', Boolean(Core && typeof Core.suggest === 'function'));
+given('the engine loaded', Boolean(Core && typeof Core.layout === 'function'));
 
-// SYNTHETIC: invented names, sites and areas. Fourteen men, thirteen with a site; w11
-// comes in his own car and w14 with another contractor, so eleven need a seat. w1, w6 and
-// w11 may drive everything; w4 and w9 only v1, v2 and v6.
+// SYNTHETIC: invented names and sites. Eight men, seven with a site (w8 has none today);
+// two five-seaters and the nine-seater.
 const Sample = (() => {
-    const areas = [{ id: 'a1', name: 'אזור א' }, { id: 'a2', name: 'אזור ב' },
-        { id: 'a3', name: 'אזור ג' }, { id: 'a4', name: 'אזור ד' }];
-    const sites = [{ id: 's1', name: 'אתר 1' }, { id: 's2', name: 'אתר 2' }, { id: 's3', name: 'אתר 3' },
-        { id: 's4', name: 'אתר 4' }, { id: 's5', name: 'אתר 5' }];
+    const sites = [{ id: 's1', name: 'אתר 1' }, { id: 's2', name: 'אתר 2' }, { id: 's3', name: 'אתר 3' }];
     const vehicles = [{ id: 'v1', name: 'רכב 1', seats: 5 }, { id: 'v2', name: 'רכב 2', seats: 5 },
-        { id: 'v3', name: 'רכב 3', seats: 5 }, { id: 'v4', name: 'רכב 4', seats: 5 },
-        { id: 'v5', name: 'רכב 5', seats: 9, rows: [2, 2, 2, 3] }, { id: 'v6', name: 'רכב 6', seats: 5 },
-        { id: 'v7', name: 'רכב 7', seats: 5 }];
-    const w = (id, area, canDrive, drives) => ({ id, name: `עובד ${id.slice(1)}`, area,
-        canDrive: canDrive === true, drives: drives || (canDrive ? 'all' : []) });
-    const workers = [w('w1', 'a1', true), w('w2', 'a1'), w('w3', 'a1'), w('w4', 'a1', true, ['v1', 'v2', 'v6']),
-        w('w5', 'a1'), w('w6', 'a2', true), w('w7', 'a2'), w('w8', 'a2'), w('w9', 'a3', true, ['v1', 'v2', 'v6']),
-        w('w10', 'a3'), w('w11', 'a3', true), w('w12', 'a4'), w('w13', 'a4'), w('w14', 'a2')];
-    const attendance = { w1: 's1', w2: 's1', w3: 's1', w4: 's2', w5: 's2', w6: 's3', w7: 's3', w8: 's1',
-        w9: 's4', w10: 's4', w11: 's5', w12: 's5', w14: 's2' };
+        { id: 'v5', name: 'רכב 5', seats: 9, rows: [2, 2, 2, 3] }];
+    const workers = ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8'].map(id => ({ id, name: `עובד ${id.slice(1)}` }));
+    const attendance = { w1: 's1', w2: 's1', w3: 's2', w4: 's2', w5: 's3', w6: 's3', w7: 's1' };
     return {
-        ctx: () => JSON.parse(JSON.stringify({ workers, vehicles, sites, areas, attendance })),
-        day: () => ({ unavailable: {}, status: { w11: 'private', w14: 'contractor' }, trips: {}, workerLocks: {} })
+        ctx: () => JSON.parse(JSON.stringify({ workers, vehicles, sites, attendance })),
+        day: trips => ({ unavailable: {}, status: {}, trips: trips || {} })
     };
 })();
 
-const apply = (day, result) => Object.assign({}, day, { trips: result.trips });
 const short = trips => Object.keys(trips).sort()
     .map(v => `${v}=${trips[v].driver || '?'}+[${trips[v].passengers.join(',')}]`).join(' ');
+// A car as it is drawn: seat 1 first, «-» for an empty seat.
+const drawn = (ctx, day, vehicleId) => Core.layout(ctx, day).cars[vehicleId].slice(1).map(id => id || '-').join(' ');
+const withSeats = trips => Object.keys(trips).sort().map(v => `${v}:${trips[v].driver || '-'}`
+    + trips[v].passengers.map(id => ` ${id}@${trips[v].seats[id]}`).join('')).join(' | ');
 const codes = issues => issues.map(i => i.code + (i.vehicle ? ':' + i.vehicle : '') + (i.worker ? ':' + i.worker : '')).sort();
-const noDouble = trips => {
-    const seen = {};
-    let ok = true;
-    Object.values(trips).forEach(t => Core.occupants(t).forEach(id => { if (seen[id]) ok = false; seen[id] = 1; }));
-    return ok;
-};
+const plain = value => JSON.parse(JSON.stringify(value));
 
-await block('the engine: the sample day is planned whole, and the same on every run', async () => {
-    const ctx = Sample.ctx();
-    const day = Sample.day();
-    const a = Core.suggest(ctx, day);
-    const b = Core.suggest(Sample.ctx(), Sample.day());
-    same('two runs give the same bytes', JSON.stringify(a), JSON.stringify(b));
-    same('the pinned plan', short(a.trips), 'v1=w4+[w1,w2,w3,w5] v2=w6+[w7,w8] v6=w9+[w10,w12]');
-    same('nobody is left without a seat', a.unseated, []);
-    same('one warning - a man riding from another area - and no error',
-        codes(Core.validate(ctx, apply(day, a))), ['otherArea:v6:w12']);
-    check('the input was not mutated', JSON.stringify(day) === JSON.stringify(Sample.day()));
-    check('the men coming another way are not seated',
-        !Core.seatOf(apply(day, a), 'w11') && !Core.seatOf(apply(day, a), 'w14'));
-    same('suggest on its own output is the same plan (idempotent)',
-        short(Core.suggest(ctx, apply(day, a)).trips), short(a.trips));
-    same('a pickup area starts as the driver\'s own',
-        Object.keys(a.trips).sort().map(v => a.trips[v].area), ['a1', 'a2', 'a3']);
-});
-
-await block('the engine: not enough seats is said, never squeezed', async () => {
-    const ctx = Sample.ctx();
-    const day = Sample.day();
-    ['v2', 'v3', 'v4', 'v5', 'v6', 'v7'].forEach(v => { day.unavailable[v] = true; });
-    const r = Core.suggest(ctx, day);
-    const issues = Core.validate(ctx, apply(day, r));
-    same('one vehicle, full; of two drivers with one option each, the one whose site has more riders drives',
-        short(r.trips), 'v1=w1+[w2,w3,w4,w5]');
-    same('six men are left without a seat, in roster order', r.unseated, ['w6', 'w7', 'w8', 'w9', 'w10', 'w12']);
-    same('each of them is an error', codes(issues),
-        ['noSeat:w10', 'noSeat:w12', 'noSeat:w6', 'noSeat:w7', 'noSeat:w8', 'noSeat:w9']);
-    check('the plan is incomplete', Core.isComplete(issues) === false);
-    check('and the vehicle carries no more than it seats', Core.occupants(r.trips.v1).length <= 5);
-});
-
-await block('the engine: a locked vehicle is left exactly as a person left it', async () => {
-    const ctx = Sample.ctx();
-    const day = Sample.day();
-    day.trips.v5 = { driver: 'w1', passengers: ['w3', 'w2', 'w12'], area: 'a1', locked: true, seats: { w3: 2 } };
-    const before = JSON.stringify(day.trips.v5);
-    const r = Core.suggest(ctx, day);
-    const issues = Core.validate(ctx, apply(day, r));
-    check('the locked vehicle is byte-identical - order and seat included', JSON.stringify(r.trips.v5) === before);
-    check('nobody sits twice', noDouble(r.trips));
-    same('nobody is left without a seat', r.unseated, []);
-    same('the rest is planned around it', short(r.trips),
-        'v1=w4+[w5] v2=w6+[w7,w8] v5=w1+[w3,w2,w12] v6=w9+[w10]');
-    check('and the plan is complete (warnings only)', Core.isComplete(issues), codes(issues).join(' '));
-
-    // A lock can cost seats: the only drivers of two areas frozen in the van, five seats empty.
-    const stranded = Sample.day();
-    stranded.trips.v5 = { driver: 'w6', passengers: ['w1', 'w12', 'w9'], area: 'a2', locked: true, seats: {} };
-    const rc = Core.suggest(ctx, stranded);
-    check('a locked vehicle is not filled by suggest', rc.trips.v5.passengers.join() === 'w1,w12,w9');
-    same('and the men it strands are reported, not hidden', rc.unseated, ['w7', 'w10']);
-
-    // A locked WORKER keeps his vehicle and his role.
-    const pinned = Sample.day();
-    pinned.trips.v7 = { driver: 'w1', passengers: ['w10'], area: 'a1', locked: false, seats: {} };
-    pinned.workerLocks.w10 = true;
-    const r2 = Core.suggest(ctx, pinned);
-    check('a locked worker is still a passenger of his vehicle',
-        Boolean(r2.trips.v7) && r2.trips.v7.passengers.indexOf('w10') !== -1);
-    check('which was given a driver who may drive it',
-        Boolean(r2.trips.v7) && Core.mayDrive(ctx.workers.find(w => w.id === r2.trips.v7.driver), ctx.vehicles[6]));
-    check('and nobody sits twice or is left out', noDouble(r2.trips) && r2.unseated.length === 0);
-});
-
-await block('the engine: no eligible driver is flagged, never filled with a man who may not drive', async () => {
-    const ctx = Sample.ctx();
-    const day = Sample.day();
-    ctx.workers.forEach(w => { if (w.canDrive) w.drives = ['v1', 'v2', 'v6']; });
-    day.trips.v5 = { driver: null, passengers: ['w12'], area: 'a4', locked: false, seats: {} };
-    day.workerLocks.w12 = true;
-    const r = Core.suggest(ctx, day);
-    const issues = Core.validate(ctx, apply(day, r));
-    check('the vehicle keeps its locked passenger and has NO driver',
-        r.trips.v5.driver === null && r.trips.v5.passengers.join() === 'w12');
-    check('validation names it, and the plan is incomplete',
-        codes(issues).indexOf('noDriver:v5') !== -1 && !Core.isComplete(issues), codes(issues).join(' '));
-    check('nobody else was put into the driverless vehicle', r.trips.v5.passengers.length === 1);
-
-    const nobody = Sample.ctx();
-    nobody.workers.forEach(w => { w.canDrive = false; w.drives = []; });
-    const r2 = Core.suggest(nobody, Sample.day());
-    check('when nobody may drive anything, no vehicle is opened', Object.keys(r2.trips).length === 0);
-    same('and all eleven riders are reported unseated', r2.unseated.length, 11);
-
-    const manual = Sample.day();
-    manual.trips.v3 = { driver: 'w4', passengers: [], area: 'a1', locked: false, seats: {} };
-    check('a hand-made plan with a man driving a car not on his list is an error',
-        codes(Core.validate(Sample.ctx(), manual)).indexOf('driverNotEligible:v3:w4') !== -1);
-    const missing = Sample.ctx();
-    delete missing.workers[0].canDrive;
-    check('and a man whose permission is simply missing may not drive',
-        Core.mayDrive(missing.workers[0], missing.vehicles[0]) === false);
-});
-
-await block('the engine: a driver riding as a passenger is moved to a vehicle that stands free', async () => {
-    const ctx = Sample.ctx();
-    const day = Sample.day();
-    ['v2', 'v6', 'v4', 'v5', 'v7'].forEach(v => { day.unavailable[v] = true; });
-    const r = Core.suggest(ctx, day);
-    check('both vehicles are used, each with a driver who may drive it', Boolean(r.trips.v1) && Boolean(r.trips.v3)
-        && Core.validate(ctx, apply(day, r)).every(i => i.code !== 'noDriver' && i.code !== 'driverNotEligible'));
-    check('ten seats, eleven riders: exactly one man unseated, nobody twice',
-        r.unseated.length === 1 && noDouble(r.trips), r.unseated.join(','));
-});
-
-await block('the engine: a man with no pickup area is still planned for', async () => {
-    // The first evening on a new phone: the owner has typed no area yet.
-    const ctx = Sample.ctx();
-    ctx.areas = [];
-    ctx.workers.forEach(w => { w.area = null; });
-    const day = Sample.day();
-    const r = Core.suggest(ctx, day);
-    const issues = Core.validate(ctx, apply(day, r));
-    same('with no areas at all, everybody is still seated', r.unseated, []);
-    check('nobody twice, every vehicle with an eligible driver', noDouble(r.trips) && Core.isComplete(issues),
-        codes(issues).join(' '));
-    check('and nobody is "from another area" when no area is known',
-        !issues.some(i => i.code === 'otherArea'));
-    same('two runs are the same bytes', JSON.stringify(Core.suggest(ctx, day)), JSON.stringify(r));
-
-    // Some with an area and some without, and one whose area was since removed.
-    const mixed = Sample.ctx();
-    mixed.workers.find(w => w.id === 'w12').area = null;
-    mixed.workers.find(w => w.id === 'w10').area = 'gone';
-    const r2 = Core.suggest(mixed, Sample.day());
-    same('a man with no area, and one whose area is gone, take a seat with the rest', r2.unseated, []);
-    check('nobody twice', noDouble(r2.trips));
-});
-
-await block('the engine: seats, and the statuses the owner kept', async () => {
+await block('the engine: the rows of a vehicle, the driver on the LEFT', async () => {
     same('the statuses are private, contractor and other - «ממתין» is not one',
         [...Core.STATUSES], ['private', 'contractor', 'other']);
-    const van = { id: 'v', seats: 9, rows: [2, 2, 2, 3] };
-    same('the 9-seater: seat 1 is the driver\'s, the passengers\' are 2 to 9',
-        Core.seatPlan(van).map(s => s.n), [2, 3, 4, 5, 6, 7, 8, 9]);
-    same('laid out two in front, then rows of two, two and three',
-        Core.seatPlan(van).map(s => `${s.kind}:${s.row}.${s.place}`),
-        ['front:1.2', 'row:2.1', 'row:2.2', 'row:3.1', 'row:3.2', 'row:4.1', 'row:4.2', 'row:4.3']);
-    same('a five-seater: beside the driver, then three behind',
-        Core.seatPlan({ id: 'v', seats: 5 }).map(s => `${s.n}:${s.kind}`),
-        ['2:front', '3:rearRight', '4:rearMiddle', '5:rearLeft']);
-    same('any other count is numbered, with no claim about where a seat is',
-        Core.seatPlan({ id: 'v', seats: 7 }).map(s => `${s.n}:${s.kind}`),
-        ['2:number', '3:number', '4:number', '5:number', '6:number', '7:number']);
+    same('a five-seater: two in front - the driver first, on the left - and three behind',
+        plain(Core.seatRows({ id: 'v', seats: 5 })), [[1, 2], [5, 4, 3]]);
+    same('the 9-seater: rows of two, two, two and three', plain(Core.seatRows({ id: 'v', seats: 9, rows: [2, 2, 2, 3] })),
+        [[1, 2], [4, 3], [6, 5], [9, 8, 7]]);
+    same('any other count: two in front, then rows of up to three',
+        [7, 4, 2, 12].map(seats => Core.seatRows({ id: 'v', seats }).map(row => row.length).join('-')),
+        ['2-3-2', '2-2', '2', '2-3-3-3-1']);
+    same('every seat is drawn exactly once, whatever the count', [2, 3, 5, 6, 9, 13, 20].map(seats =>
+        [].concat(...Core.seatRows({ id: 'v', seats })).sort((a, b) => a - b).join() === Array.from({ length: seats }, (_, i) => i + 1).join()),
+    [true, true, true, true, true, true, true]);
     same('rows that do not add up to the seats are not believed',
-        Core.seatPlan({ id: 'v', seats: 7, rows: [2, 2, 2, 3] }).map(s => s.kind).join(), 'number,number,number,number,number,number');
+        plain(Core.seatRows({ id: 'v', seats: 7, rows: [2, 2, 2, 3] })), [[1, 2], [5, 4, 3], [7, 6]]);
+    // v171 called seat 3 «אחורי ימין» and seat 5 «אחורי שמאל». The picture keeps that: in
+    // every row behind the front one the numbers run from the right of the car.
+    check('a rear row is numbered from the RIGHT, as v171 named its seats',
+        Core.seatRows({ id: 'v', seats: 5 })[1][0] === 5 && Core.seatRows({ id: 'v', seats: 5 })[1][2] === 3);
+    same('a vehicle with no seats draws nothing', plain(Core.seatRows({ id: 'v' })), []);
+});
 
+await block('the engine: a stored plan, read as a picture', async () => {
     const ctx = Sample.ctx();
-    const day = Sample.day();
-    day.trips.v5 = { driver: 'w1', passengers: ['w2', 'w3'], area: 'a1', locked: false, seats: { w2: 9, w3: 10 } };
-    same('a seat the vehicle does not have is an error; its last seat is not',
-        codes(Core.validate(ctx, day)).filter(c => c.startsWith('badSeat')), ['badSeat:v5:w3']);
-    day.trips.v5.seats = { w2: 4, w3: 4 };
-    same('two men on one seat is an error for the second',
-        codes(Core.validate(ctx, day)).filter(c => c.startsWith('badSeat')), ['badSeat:v5:w3']);
-    day.trips.v5.seats = {};
-    day.status.w2 = 'other';
-    check('a man marked as coming another way and seated anyway is an error',
-        codes(Core.validate(ctx, day)).indexOf('hasStatus:v5:w2') !== -1);
+    const day = Sample.day({ v1: { driver: 'w1', passengers: ['w2', 'w3', 'w4'], seats: { w3: 5 } } });
+    const before = JSON.stringify(day);
+    same('a seat number is kept; a passenger without one is given the FIRST FREE seat, in order',
+        drawn(ctx, day, 'v1'), 'w1 w2 w4 - w3');
+    same('the driver is whoever is in seat 1', plain(Core.layout(ctx, day).where.w1), { vehicle: 'v1', n: 1 });
+    same('two readings are the same bytes', JSON.stringify(Core.layout(ctx, day)), JSON.stringify(Core.layout(Sample.ctx(), JSON.parse(before))));
+    check('and reading does not change what it read', JSON.stringify(day) === before);
+    same('the men with a site and no seat are waiting, in roster order', plain(Core.waiting(ctx, day)), ['w5', 'w6', 'w7']);
+
+    const crowded = Sample.day({ v1: { driver: 'w1', passengers: ['w2', 'w3', 'w4', 'w5', 'w6', 'w7'], seats: {} } });
+    same('more men than seats: nobody is squeezed in', drawn(ctx, crowded, 'v1'), 'w1 w2 w3 w4 w5');
+    same('the men there was no seat for are waiting again', plain(Core.waiting(ctx, crowded)), ['w6', 'w7']);
+
+    const twice = Sample.day({ v1: { driver: 'w1', passengers: ['w2'], seats: {} }, v2: { driver: 'w2', passengers: ['w1', 'w3'], seats: {} } });
+    same('a man named in two vehicles sits where the list reaches him first',
+        [drawn(ctx, twice, 'v1'), drawn(ctx, twice, 'v2')], ['w1 w2 - - -', '- w3 - - -']);
+
+    const clash = Sample.day({ v1: { driver: 'w1', passengers: ['w2', 'w3', 'w4'], seats: { w2: 4, w3: 4, w4: 12 } } });
+    same('two men on one number, and a number the vehicle does not have: the first keeps it, the others get free seats',
+        drawn(ctx, clash, 'v1'), 'w1 w3 w4 w2 -');
+
+    const home = Sample.day({ v1: { driver: 'w1', passengers: ['w2'], seats: {} } });
+    home.unavailable.v1 = true;
+    check('a vehicle that stays home has no car', Core.layout(ctx, home).cars.v1 === undefined);
+    same('and the men a plan left in it are waiting', plain(Core.waiting(ctx, home)).slice(0, 2), ['w1', 'w2']);
+
+    const gone = Sample.day({ v9: { driver: 'w1', passengers: ['w2'], seats: {} } });
+    same('so are the men of a vehicle no longer on the list', plain(Core.waiting(ctx, gone)).slice(0, 2), ['w1', 'w2']);
+
+    const marked = Sample.day({ v1: { driver: 'w1', passengers: ['w2'], seats: {} } });
+    marked.status.w2 = 'private';
+    same('a man marked as getting there another way is in no seat - the mark wins', drawn(ctx, marked, 'v1'), 'w1 - - - -');
+    check('and he is not waiting either', Core.waiting(ctx, marked).indexOf('w2') === -1);
+
+    const off = Sample.day({ v1: { driver: 'w1', passengers: ['w8'], seats: {} } });
+    same('a seated man with NO site today stays drawn', drawn(ctx, off, 'v1'), 'w1 w8 - - -');
+    same('and is named', codes(Core.validate(ctx, off)), ['notWorking:v1:w8']);
+    same('the picture written down gives every passenger his seat number',
+        withSeats(Core.tripsOf(ctx, Core.layout(ctx, day).cars)), 'v1:w1 w2@2 w4@3 w3@5');
+    same('an empty vehicle is not written at all', short(Core.tripsOf(ctx, Core.layout(ctx, Sample.day()).cars)), '');
+});
+
+await block('the engine: putting a man on a seat - first free, swap, and the driver\'s seat', async () => {
+    const ctx = Sample.ctx();
+    let day = Sample.day();
+    const put = (id, vehicle, n) => {
+        const before = JSON.stringify(day);
+        const result = Core.place(ctx, day, id, vehicle, n);
+        check(`placing ${id} did not mutate the day it was handed`, JSON.stringify(day) === before);
+        if (result) day = Object.assign({}, day, { trips: result.trips });
+        return result;
+    };
+    check('a waiting man onto an empty seat', Boolean(put('w2', 'v1', 3)));
+    same('he sits there', withSeats(day.trips), 'v1:- w2@3');
+    same('with passengers and nobody in seat 1, the car has no driver', codes(Core.validate(ctx, day)), ['noDriver:v1']);
+    check('a waiting man onto the driver\'s seat', Boolean(put('w1', 'v1', 1)));
+    same('WHOEVER SITS IN SEAT 1 IS THE DRIVER - nobody is asked whether he may', withSeats(day.trips), 'v1:w1 w2@3');
+    same('and the plan has nothing wrong with it', codes(Core.validate(ctx, day)), []);
+
+    const displaced = put('w3', 'v1', 3);
+    same('a waiting man dropped on a TAKEN seat takes it, and the man who sat there goes back to wait',
+        [withSeats(day.trips), displaced.displaced, plain(Core.waiting(ctx, day))], ['v1:w1 w3@3', 'w2', ['w2', 'w4', 'w5', 'w6', 'w7']]);
+
+    put('w4', 'v2', 4);
+    const swap = put('w3', 'v2', 4);
+    same('a SEATED man dropped on a taken seat changes places with the man in it - between two cars',
+        [withSeats(day.trips), swap.displaced], ['v1:w1 w4@3 | v2:- w3@4', null]);
+    put('w4', 'v1', 1);
+    same('a passenger dropped on the driver\'s seat becomes the driver, and the driver takes his seat',
+        withSeats(day.trips), 'v1:w4 w1@3 | v2:- w3@4');
+    put('w3', 'v5', 9);
+    same('a seated man to an empty seat of another car leaves the first empty - and gone from the plan',
+        withSeats(day.trips), 'v1:w4 w1@3 | v5:- w3@9');
+
+    const frozen = JSON.stringify(day);
+    same('refused, and nothing changes: his own seat, a seat the car does not have, half a seat, a car that is not on the list',
+        [Core.place(ctx, day, 'w3', 'v5', 9), Core.place(ctx, day, 'w2', 'v1', 6), Core.place(ctx, day, 'w2', 'v1', 0),
+            Core.place(ctx, day, 'w2', 'v1', 1.5), Core.place(ctx, day, 'w2', 'v9', 2)], [null, null, null, null, null]);
+    check('a man with no site today cannot be seated', Core.place(ctx, day, 'w8', 'v1', 2) === null);
+    const away = Object.assign({}, day, { status: { w2: 'contractor' } });
+    check('nor a man marked as getting there another way', Core.place(ctx, away, 'w2', 'v1', 2) === null);
+    const home = Object.assign({}, day, { unavailable: { v2: true } });
+    check('nor anybody in a vehicle that stays home', Core.place(ctx, home, 'w2', 'v2', 2) === null);
+    check('none of those changed the day', JSON.stringify(day) === frozen);
+
+    same('a man taken out is waiting again', withSeats(Core.remove(ctx, day, 'w1')), 'v1:w4 | v5:- w3@9');
+    check('taking out a man who is in no seat is refused', Core.remove(ctx, day, 'w2') === null);
+    const off = Sample.day({ v1: { driver: 'w1', passengers: ['w8'], seats: {} } });
+    same('a seated man with no site today CAN be taken out - it is the one thing to do about him',
+        withSeats(Core.remove(ctx, off, 'w8')), 'v1:w1');
+});
+
+await block('the engine: what is wrong with a plan as it is stored', async () => {
+    const ctx = Sample.ctx();
+    const day = Sample.day({
+        v1: { driver: null, passengers: ['w1', 'w2', 'w3', 'w4', 'w5', 'w6'], seats: { w2: 9, w3: 3, w4: 3 } },
+        v2: { driver: 'w1', passengers: ['gone'], seats: {} },
+        v9: { driver: 'w7', passengers: [], seats: {} }
+    });
+    day.status.w6 = 'other';
+    day.unavailable.v2 = true;
+    same('every kind is named', codes(Core.validate(ctx, day)), ['badSeat:v1:w2', 'badSeat:v1:w4', 'hasStatus:v1:w6', 'noDriver:v1',
+        'overCapacity:v1', 'twice:v2:w1', 'unknownVehicle:v9', 'unknownWorker:v2:gone', 'vehicleUnavailable:v2']);
+    same('and the same plan read as a picture has none of them left but the missing driver',
+        codes(Core.validate(ctx, { unavailable: day.unavailable, status: day.status,
+            trips: Core.tripsOf(ctx, Core.layout(ctx, day).cars) })), ['noDriver:v1']);
+    check('the engine no longer plans, and no longer asks who may drive',
+        ['suggest', 'mayDrive', 'planSignature', 'movedBetween', 'seatPlan'].every(name => Core[name] === undefined));
 });
 
 // ================================================================== a phone
@@ -318,19 +280,6 @@ function crewPhone(id, options = {}) {
     return device;
 }
 
-// The owner's own first evening, done by hand: two areas, who is picked up where, and
-// who may drive what.
-function setUp(device) {
-    const north = device.call('transportAddArea', 'צפון');
-    const south = device.call('transportAddArea', 'דרום');
-    device.call('transportSetWorker', 'w_01', { area: north, canDrive: true });
-    device.call('transportSetWorker', 'w_02', { area: north });
-    device.call('transportSetWorker', 'w_03', { area: south });
-    device.call('transportSetWorker', 'w_04', { area: south, canDrive: true, drives: ['tv_02'] });
-    device.call('transportSetWorker', 'w_06', { area: south });
-    return { north, south };
-}
-
 function reopen(device) {
     const again = bare(device.id, device.dump());
     load(again);
@@ -340,6 +289,12 @@ function reopen(device) {
 
 const tripsOf = device => short(device.call('transportDayOf', DAY).trips);
 
+const car5 = (device, vehicleId) => {
+    const ctx = device.call('transportContext', DAY);
+    return Core.layout(plain(ctx), plain(device.call('transportDayOf', DAY))).cars[vehicleId].slice(1).map(id => id || '-').join(' ');
+};
+const keptDay = device => JSON.parse(device.raw(DAY_KEY));
+
 await block('the seven vehicles, and a list the owner keeps himself', async () => {
     const device = crewPhone('d_list');
     const settings = device.call('transportSettings');
@@ -348,7 +303,8 @@ await block('the seven vehicles, and a list the owner keeps himself', async () =
         ['tv_01 טויוטה קורולה 2013 5', 'tv_02 טויוטה קורולה 2016 5', 'tv_03 BYD סיל U 2025 5',
             'tv_04 BYD אטו 3 2025 5', 'tv_05 פולקסווגן 2018 9', 'tv_06 סוואנה 2010 5', 'tv_07 ליפמוטור C10 2026 5']);
     same('the 9-seater is laid out 2-2-2-3', settings.vehicles[4].rows, [2, 2, 2, 3]);
-    same('the list of pickup areas starts EMPTY', settings.areas, []);
+    same('and is drawn that way, the driver first',
+        plain(Core.seatRows(plain(settings.vehicles[4]))), [[1, 2], [4, 3], [6, 5], [9, 8, 7]]);
     check('looking is not a write: nothing is on the disk until something is changed',
         device.raw(SETTINGS) === null);
     check('none of the ids is the retired feature\'s v_NN', settings.vehicles.every(v => /^tv_/.test(v.id)));
@@ -364,6 +320,7 @@ await block('the seven vehicles, and a list the owner keeps himself', async () =
         && settings.vehicles[5].name === 'סוואנה');
     check('changing the seats of the 9-seater drops the row layout drawn for nine',
         device.call('transportSetVehicleSeats', 'tv_05', 8) === true && settings.vehicles[4].rows === undefined);
+    same('and it is then drawn two in front and rows of three', Core.seatRows(plain(settings.vehicles[4])).map(row => row.length), [2, 3, 3]);
     check('a retired vehicle leaves the day\'s list and stays in the settings',
         device.call('transportRetireVehicle', 'tv_07') === true
         && !device.call('transportContext', DAY).vehicles.some(v => v.id === 'tv_07')
@@ -386,128 +343,160 @@ await block('who works where is READ from the day, the way the seder reads it', 
         Object.keys(ctx.attendance), device.call('sederCrew', device.State.schedule, DAY, device.State.layer)
             .map(row => row.workerId));
     check('a man marked נעדר needs no ride', ctx.attendance.w_05 === undefined);
-    same('a second site is told, not routed', JSON.parse(JSON.stringify(ctx.also)), { w_02: ['חיפה'] });
-    same('areas and driving are this phone\'s settings laid over the roster - not roster fields',
-        [Object.keys(device.State.schedule.workers[0]).sort().join(), ctx.workers[0].canDrive, ctx.workers[0].area],
-        ['active,dailyRate,hourlyRate,id,name,phone', false, null]);
+    // MOVED IN v174: v171 also handed the screen `also` (a man's second site, said on his
+    // card in the עובדים tab) and laid `area`/`canDrive` over each roster row. That tab,
+    // pickup areas and "may drive" are gone with the planner the owner sent back, so the
+    // context carries a name and a number for each man and nothing of this phone's own.
+    same('a man is his id, his name and his number - nothing of the roster is copied but those, and nothing is added',
+        [Object.keys(device.State.schedule.workers[0]).sort().join(), Object.keys(ctx.workers[0]).sort().join(), Object.keys(ctx).sort().join()],
+        ['active,dailyRate,hourlyRate,id,name,phone', 'id,name,phone', 'attendance,sites,vehicles,workers']);
+    same('the waiting men are the men with a site, in roster order',
+        plain(Core.waiting(plain(ctx), plain(device.call('transportDayOf', DAY)))), ['w_01', 'w_02', 'w_03', 'w_04', 'w_06']);
 });
 
-await block('the plan: suggest, move, driver, locks - and never the record', async () => {
+// REPLACES v171's «the plan: suggest, move, driver, locks» and «accepting: … versions»
+// blocks. There is no suggestion, no lock, nothing to accept and no version any more
+// (the owner, 2026-11-10); what a person does now is put a man on a seat, and that is
+// what is measured - through the same functions a drag and a tap call.
+await block('the plan: a man on a seat, kept at once - and never the record', async () => {
     const device = crewPhone('d_plan');
-    const { north, south } = setUp(device);
     const schedule = JSON.stringify(device.State.schedule);
     const disk = device.raw('scheduleData:v2');
 
-    ['tv_03', 'tv_04', 'tv_05', 'tv_06', 'tv_07'].forEach(v => device.call('transportSetAvailable', DAY, v, false));
-    const result = device.call('transportSuggest', DAY);
-    same('two cars: each area\'s driver takes his own', tripsOf(device), 'tv_01=w_01+[w_02] tv_02=w_04+[w_03,w_06]');
-    same('nobody left out', result.unseated, []);
-    same('each car\'s pickup area is its driver\'s',
-        [device.call('transportDayOf', DAY).trips.tv_01.area, device.call('transportDayOf', DAY).trips.tv_02.area],
-        [north, south]);
-    same('the plan is whole', device.call('transportErrors', DAY).length, 0);
-    same('and suggesting again changes nothing', (device.call('transportSuggest', DAY), tripsOf(device)),
-        'tv_01=w_01+[w_02] tv_02=w_04+[w_03,w_06]');
+    check('nothing is kept before anything is done', device.raw(DAY_KEY) === null);
+    check('a waiting man is put on the driver\'s seat', device.call('transportPlace', DAY, 'w_01', 'tv_01', 1) === true);
+    same('and that is on the disk at once - there is nothing to accept',
+        plain(keptDay(device).trips), { tv_01: { driver: 'w_01', passengers: [], seats: {} } });
+    same('what a day keeps: these and no more', Object.keys(keptDay(device)).sort(), ['marks', 'status', 'trips', 'unavailable', 'version']);
+    device.call('transportPlace', DAY, 'w_02', 'tv_01', 5);
+    device.call('transportPlace', DAY, 'w_03', 'tv_01', 3);
+    same('two passengers, each on the seat he was put on', car5(device, 'tv_01'), 'w_01 - w_03 - w_02');
+    check('a waiting man dropped on a taken seat takes it', device.call('transportPlace', DAY, 'w_04', 'tv_01', 5) === true);
+    same('and the man who sat there is waiting again', [car5(device, 'tv_01'), tripsOf(device)],
+        ['w_01 - w_03 - w_04', 'tv_01=w_01+[w_03,w_04]']);
+    device.call('transportPlace', DAY, 'w_02', 'tv_02', 1);
+    check('a seated man dropped on a taken seat of another car', device.call('transportPlace', DAY, 'w_04', 'tv_02', 1) === true);
+    same('changes places with the man in it - and so becomes that car\'s driver',
+        [car5(device, 'tv_01'), car5(device, 'tv_02')], ['w_01 - w_03 - w_02', 'w_04 - - - -']);
+    same('refused, with nothing changed: his own seat, a seat the car does not have, a man marked נעדר, an unknown car',
+        [device.call('transportPlace', DAY, 'w_04', 'tv_02', 1), device.call('transportPlace', DAY, 'w_06', 'tv_02', 6),
+            device.call('transportPlace', DAY, 'w_05', 'tv_02', 2), device.call('transportPlace', DAY, 'w_06', 'tv_99', 2), tripsOf(device)],
+        [false, false, false, false, 'tv_01=w_01+[w_03,w_02] tv_02=w_04+[]']);
 
-    check('a man is moved to another car', device.call('transportMove', DAY, 'w_06', 'tv_01') === true);
-    same('and sits there', tripsOf(device), 'tv_01=w_01+[w_02,w_06] tv_02=w_04+[w_03]');
-    check('a man who may NOT drive this car is refused as its driver, whoever asks',
-        device.call('transportSetDriver', DAY, 'tv_01', 'w_04') === false
-        && device.call('transportSetDriver', DAY, 'tv_01', 'w_02') === false);
-    same('and nothing moved', tripsOf(device), 'tv_01=w_01+[w_02,w_06] tv_02=w_04+[w_03]');
-    check('a man who may drive it is accepted', device.call('transportSetDriver', DAY, 'tv_02', 'w_01') === true);
-    same('the old driver stays in the car as a passenger', tripsOf(device), 'tv_01=?+[w_02,w_06] tv_02=w_01+[w_03,w_04]');
-    same('and the car left without a driver is named', device.call('transportErrors', DAY).map(i => i.code), ['noDriver']);
+    check('a man is taken out of his car', device.call('transportUnseat', DAY, 'w_03') === true
+        && device.call('transportUnseat', DAY, 'w_03') === false);
+    same('and is waiting', car5(device, 'tv_01'), 'w_01 - - - w_02');
 
-    device.call('transportSuggest', DAY);
-    check('a vehicle is locked', device.call('transportToggleVehicleLock', DAY, 'tv_02') === true);
-    check('nobody can be moved into it, out of it, or made its driver',
-        device.call('transportMove', DAY, 'w_02', 'tv_02') === false
-        && device.call('transportUnseat', DAY, 'w_03') === false
-        && device.call('transportSetDriver', DAY, 'tv_02', null) === false);
-    device.call('transportMove', DAY, 'w_02', 'tv_03');
-    device.call('transportSetAvailable', DAY, 'tv_03', true);
-    device.call('transportMove', DAY, 'w_02', 'tv_03');
-    const locked = JSON.stringify(device.call('transportDayOf', DAY).trips.tv_02);
-    device.call('transportSuggest', DAY);
-    same('suggest leaves the locked vehicle byte for byte',
-        JSON.stringify(device.call('transportDayOf', DAY).trips.tv_02), locked);
-    check('a seated man is locked, and then he does not move',
-        device.call('transportToggleWorkerLock', DAY, 'w_02') === true
-        && device.call('transportMove', DAY, 'w_02', 'tv_03') === false
-        && device.call('transportUnseat', DAY, 'w_02') === false);
+    check('a vehicle is kept home', device.call('transportSetAvailable', DAY, 'tv_01', false) === true);
+    same('its men are waiting again - on the disk too, not only on the glass',
+        [tripsOf(device), plain(keptDay(device).unavailable), plain(keptDay(device).trips.tv_01 || null)],
+        ['tv_02=w_04+[]', { tv_01: true }, null]);
+    check('nobody can be put in it', device.call('transportPlace', DAY, 'w_01', 'tv_01', 1) === false);
+    check('and it goes out again, empty', device.call('transportSetAvailable', DAY, 'tv_01', true) === true
+        && car5(device, 'tv_01') === '- - - - -');
 
-    check('a status takes a man out of his seat', device.call('transportToggleWorkerLock', DAY, 'w_02') === true
-        && device.call('transportSetStatus', DAY, 'w_02', 'private') === true
-        && device.call('transportDayOf', DAY).status.w_02 === 'private'
-        && Core.seatOf(device.call('transportDayOf', DAY), 'w_02') === null);
+    check('a status takes a man out of his seat', device.call('transportSetStatus', DAY, 'w_04', 'private') === true
+        && device.call('transportDayOf', DAY).status.w_04 === 'private' && tripsOf(device) === '');
+    check('he cannot be seated while he has it', device.call('transportPlace', DAY, 'w_04', 'tv_02', 1) === false);
+    check('brought back, he is waiting and can be', device.call('transportSetStatus', DAY, 'w_04', null) === true
+        && device.call('transportPlace', DAY, 'w_04', 'tv_02', 1) === true);
     check('«ממתין» is not a status that can be set', device.call('transportSetStatus', DAY, 'w_03', 'waiting') === false);
+
+    const again = reopen(device);
+    same('the plan survives the app being closed', [tripsOf(again), car5(again, 'tv_02')], ['tv_02=w_04+[]', 'w_04 - - - -']);
+
+    // The day changes under the plan: the driver is marked נעדר after he was seated.
+    again.call('transportPlace', DAY, 'w_06', 'tv_02', 2);
+    again.State.commit(again.call('markAbsent', again.State.schedule, DAY, 'w_04', 'actual'));
+    same('a seated man who no longer has a site today stays drawn, and is named',
+        [car5(again, 'tv_02'), codes(Core.validate(plain(again.call('transportContext', DAY)), plain(again.call('transportDayOf', DAY))))],
+        ['w_04 w_06 - - -', ['notWorking:tv_02:w_04']]);
+    check('he cannot be moved to another seat, only out', again.call('transportPlace', DAY, 'w_04', 'tv_01', 1) === false
+        && again.call('transportUnseat', DAY, 'w_04') === true && car5(again, 'tv_02') === '- w_06 - - -');
 
     same('through all of it the schedule in memory is byte for byte what it was',
         JSON.stringify(device.State.schedule), schedule);
     same('and so is the record on the disk', device.raw('scheduleData:v2'), disk);
 });
 
-await block('accepting: a whole plan, a partial one only with a typed reason, and versions', async () => {
-    const device = crewPhone('d_accept');
-    setUp(device);
-    ['tv_02', 'tv_03', 'tv_04', 'tv_05', 'tv_06', 'tv_07'].forEach(v => device.call('transportSetAvailable', DAY, v, false));
-    device.call('transportSuggest', DAY);
-    same('one car for five men: it is full, and nobody else has a seat', tripsOf(device), 'tv_01=w_01+[w_02,w_03,w_04,w_06]');
-    device.call('transportUnseat', DAY, 'w_06');
-    same('with a man taken out, the plan is incomplete', device.call('transportErrors', DAY).map(i => `${i.code}:${i.worker}`),
-        ['noSeat:w_06']);
-    same('an incomplete plan is refused with no reason',
-        JSON.parse(JSON.stringify(device.call('transportAccept', DAY, ''))), { ok: false, error: 'reason' });
-    same('and with a reason of nothing but spaces',
-        JSON.parse(JSON.stringify(device.call('transportAccept', DAY, '   '))), { ok: false, error: 'reason' });
-    same('no version was made', device.call('transportDayOf', DAY).accepted.length, 0);
-    same('with a typed reason it is accepted, as partial',
-        JSON.parse(JSON.stringify(device.call('transportAccept', DAY, ' רכב אחד בלבד היום '))), { ok: true, n: 1 });
-    const v1 = device.call('transportLastVersion', DAY);
-    same('version 1 says so, and why', [v1.n, v1.complete, v1.errors, v1.reason, v1.moved],
-        [1, false, 1, 'רכב אחד בלבד היום', null]);
-    same('accepting again with nothing changed is refused',
-        JSON.parse(JSON.stringify(device.call('transportAccept', DAY, 'x'))), { ok: false, error: 'unchanged' });
+// A phone that had v171 or v172 on it. These are the bytes those builds wrote: a draft
+// with a pickup area and a lock on each trip, a seat for one passenger only, a locked
+// worker, an accepted version, and a message marked opened and sent; and the settings
+// with two pickup areas and who may drive what.
+const V171_DAY = JSON.stringify({ version: 1, unavailable: { tv_03: true }, status: { w_06: 'contractor' },
+    trips: { tv_01: { driver: 'w_01', passengers: ['w_02', 'w_03'], area: 'ta_n', locked: true, seats: { w_03: 5 } },
+        tv_03: { driver: null, passengers: ['w_04'], area: null, locked: true, seats: {} } },
+    workerLocks: { w_02: true },
+    accepted: [{ n: 1, at: 1794000000000, complete: true, errors: 0, reason: '', sig: '[]', moved: null,
+        unavailable: {}, status: {}, trips: { tv_01: { driver: 'w_01', passengers: ['w_02'], area: 'ta_n', locked: false, seats: {} } },
+        attendance: { w_01: 'p_01', w_02: 'p_01' } }],
+    marks: { tv_01: { sig: 'deadbeef', openedAt: 1794000000001, sentAt: 1794000000002 } } });
+const V171_SETTINGS = JSON.stringify({ version: 1, seeded: true,
+    vehicles: [{ id: 'tv_01', name: 'טויוטה קורולה 2013', seats: 5, active: true },
+        { id: 'tv_03', name: 'BYD סיל U 2025', seats: 5, active: true },
+        { id: 'tv_05', name: 'פולקסווגן 2018', seats: 9, active: true, rows: [2, 2, 2, 3] }],
+    areas: [{ id: 'ta_n', name: 'צפון' }, { id: 'ta_s', name: 'דרום' }],
+    workers: { w_01: { area: 'ta_n', canDrive: true, drives: 'all' }, w_04: { area: 'ta_s', canDrive: true, drives: ['tv_03'] } } });
 
-    device.call('transportSetAvailable', DAY, 'tv_02', true);
-    device.call('transportMove', DAY, 'w_06', 'tv_02');
-    device.call('transportMove', DAY, 'w_04', 'tv_02');
-    device.call('transportSetDriver', DAY, 'tv_02', 'w_04');
-    same('after an edit the plan is whole', device.call('transportErrors', DAY).length, 0);
-    same('and is accepted with no reason asked', JSON.parse(JSON.stringify(device.call('transportAccept', DAY, ''))),
-        { ok: true, n: 2 });
-    const day = device.call('transportDayOf', DAY);
-    same('version 2 is whole and counts the two men who moved',
-        [day.accepted[1].n, day.accepted[1].complete, day.accepted[1].reason, day.accepted[1].moved], [2, true, '', 2]);
-    same('version 1 is still what it was', short(day.accepted[0].trips), 'tv_01=w_01+[w_02,w_03,w_04]');
-    device.call('transportMove', DAY, 'w_03', 'tv_02');
-    same('a later edit of the draft does not touch an accepted version',
-        short(day.accepted[1].trips), 'tv_01=w_01+[w_02,w_03] tv_02=w_04+[w_06]');
+await block('a day and a list written by v171 open cleanly, and are not rewritten until changed', async () => {
+    const old = crewPhone('d_v171');
+    old.putRaw(DAY_KEY, V171_DAY);
+    old.putRaw(SETTINGS, V171_SETTINGS);
+    const device = reopen(old);
 
-    const again = reopen(device);
-    same('versions and the draft survive the app being closed - a man moved by hand sits where he was put',
-        [again.call('transportDayOf', DAY).accepted.map(v => `${v.n}:${v.complete}:${v.reason}`).join(' | '), tripsOf(again)],
-        ['1:false:רכב אחד בלבד היום | 2:true:', 'tv_01=w_01+[w_02] tv_02=w_04+[w_06,w_03]']);
+    same('the list is the three vehicles that phone had - not seeded over',
+        device.call('transportSettings').vehicles.map(v => v.id), ['tv_01', 'tv_03', 'tv_05']);
+    same('the car is drawn as v171 left it: the driver, the man with a seat on his seat («אחורי שמאל» was 5), the other on the first free one',
+        car5(device, 'tv_01'), 'w_01 w_02 - - w_03');
+    check('the vehicle v171 had marked unavailable is still kept home, and the man a lock had left in it is waiting',
+        device.call('transportDayOf', DAY).unavailable.tv_03 === true
+        && plain(Core.waiting(plain(device.call('transportContext', DAY)), plain(device.call('transportDayOf', DAY)))).join() === 'w_04');
+    same('the status is read', device.call('transportDayOf', DAY).status.w_06, 'contractor');
+    same('a mark made on v171\'s message is not believed for the message there is now',
+        device.call('transportMarkState', DAY, 'tv_01'), 'none');
+    check('nothing was said to be unreadable', device.call('transportSawUnreadable') === false);
+    device.call('transportDriverMessage', DAY, 'tv_01');
+    device.call('transportPrune', DAY);
+    same('READING REWRITES NOTHING: the day is byte for byte what v171 wrote', device.raw(DAY_KEY), V171_DAY);
+    same('and so is the list', device.raw(SETTINGS), V171_SETTINGS);
+
+    check('the first change to that day', device.call('transportPlace', DAY, 'w_04', 'tv_01', 3) === true);
+    const kept = keptDay(device);
+    same('writes the picture: every passenger with his seat, nothing for the vehicle that stays home',
+        plain(kept.trips), { tv_01: { driver: 'w_01', passengers: ['w_02', 'w_04', 'w_03'], seats: { w_02: 2, w_04: 3, w_03: 5 } } });
+    same('and what the picture has no use for is gone from that day: versions, locks, pickup areas, the «sent» mark',
+        [Object.keys(kept).sort(), /accepted|workerLocks|locked|area|sentAt/.test(device.raw(DAY_KEY))],
+        [['marks', 'status', 'trips', 'unavailable', 'version'], false]);
+    same('what still means something is still there', [plain(kept.unavailable), plain(kept.status)], [{ tv_03: true }, { w_06: 'contractor' }]);
+    same('a change to a DAY does not touch the list', device.raw(SETTINGS), V171_SETTINGS);
+
+    device.call('transportRenameVehicle', 'tv_05', 'פולקסווגן');
+    const list = JSON.parse(device.raw(SETTINGS));
+    same('a change to the list keeps what v171 had typed into it - the pickup areas and who may drive - unread and untouched',
+        [list.vehicles[2].name, list.areas, list.workers],
+        ['פולקסווגן', [{ id: 'ta_n', name: 'צפון' }, { id: 'ta_s', name: 'דרום' }],
+            { w_01: { area: 'ta_n', canDrive: true, drives: 'all' }, w_04: { area: 'ta_s', canDrive: true, drives: ['tv_03'] } }]);
+    check('a day v174 wrote is one v171 would still have read: the same version, the same trip fields',
+        kept.version === 1 && Object.keys(kept.trips.tv_01).sort().join() === 'driver,passengers,seats');
 });
 
-await block('the driver\'s message, composed exactly, and the marks', async () => {
+await block('the driver\'s message, composed exactly, and the mark', async () => {
     const device = crewPhone('d_message');
-    const { south } = setUp(device);
-    device.call('transportRenameArea', south, 'כפר קרע');
-    ['tv_01', 'tv_02', 'tv_04', 'tv_05', 'tv_06', 'tv_07'].forEach(v => device.call('transportSetAvailable', DAY, v, false));
-    device.call('transportSetWorker', 'w_04', { drives: 'all' });
-    device.call('transportSetWorker', 'w_01', { canDrive: false });
-    device.call('transportSuggest', DAY);
-    same('everybody rides in the BYD, driven by the one man who may', tripsOf(device), 'tv_03=w_04+[w_01,w_02,w_03,w_06]');
-    device.call('transportAccept', DAY, '');
-    const v1 = device.call('transportLastVersion', DAY);
-    const text = device.call('transportDriverMessage', DAY, v1, 'tv_03');
+    same('a car with nobody in the driver\'s seat has no message', [device.call('transportDriverMessage', DAY, 'tv_03'),
+        device.call('transportMarkState', DAY, 'tv_03'), device.call('transportMarkOpened', DAY, 'tv_03')], ['', 'nodriver', false]);
+    device.call('transportPlace', DAY, 'w_06', 'tv_03', 5);
+    device.call('transportPlace', DAY, 'w_03', 'tv_03', 4);
+    device.call('transportPlace', DAY, 'w_02', 'tv_03', 3);
+    device.call('transportPlace', DAY, 'w_01', 'tv_03', 2);
+    same('passengers and no driver: still no message', device.call('transportMarkState', DAY, 'tv_03'), 'nodriver');
+    device.call('transportPlace', DAY, 'w_04', 'tv_03', 1);
+    const text = device.call('transportDriverMessage', DAY, 'tv_03');
+    // MOVED IN v174: the «איסוף: …» line is gone with pickup areas, and the passengers are
+    // listed in the order of their SEATS (they were put in back to front above).
     same('the message, line for line', text.split('\n'), [
         `שלום ${named('סמיר')},`,
         'הסעה ליום שלישי 10/11/2026:',
         `רכב: ${car('BYD סיל U 2025')}`,
-        `איסוף: ${named('כפר קרע')}`,
         'נוסעים (4):',
         `- ${named('אחמד')} – ${named('הרצליה')}`,
         `- ${named('מוחמד')} – ${named('הרצליה')}`,
@@ -517,48 +506,49 @@ await block('the driver\'s message, composed exactly, and the marks', async () =
     ]);
     check('the vehicle\'s name is held right-to-left, not first-strong: it begins with a Latin letter',
         text.includes(`${RLI}BYD`) && !text.includes(`${FSI}BYD`));
-    same('the number is the seder\'s own rule', device.call('transportDriverNumber', DAY, v1, 'tv_03'), '972501112233');
+    same('the number is the seder\'s own rule', device.call('transportDriverNumber', DAY, 'tv_03'), '972501112233');
     same('and so is the address a tap is given',
-        device.call('sederUrl', device.call('transportDriverNumber', DAY, v1, 'tv_03'), text),
+        device.call('sederUrl', device.call('transportDriverNumber', DAY, 'tv_03'), text),
         `https://wa.me/972501112233?text=${encodeURIComponent(text)}`);
 
     same('nothing is marked to begin with', device.call('transportMarkState', DAY, 'tv_03'), 'none');
     device.call('transportMarkOpened', DAY, 'tv_03');
     same('a tap on the link is "opened" - never "sent"', device.call('transportMarkState', DAY, 'tv_03'), 'opened');
-    device.call('transportMarkSent', DAY, 'tv_03', true);
-    same('«סימנתי שנשלח» is the person\'s own mark', device.call('transportMarkState', DAY, 'tv_03'), 'sent');
-    same('it survives the app being closed', reopen(device).call('transportMarkState', DAY, 'tv_03'), 'sent');
-    device.call('transportMarkSent', DAY, 'tv_03', false);
-    same('and can be taken back', device.call('transportMarkState', DAY, 'tv_03'), 'opened');
-    device.call('transportMarkSent', DAY, 'tv_03', true);
+    check('there is no "sent" anywhere in what is kept', !/sent/i.test(device.raw(DAY_KEY)));
+    same('it survives the app being closed', reopen(device).call('transportMarkState', DAY, 'tv_03'), 'opened');
 
-    // A later version that changes this driver's words: the mark is no longer believed.
-    device.call('transportSetStatus', DAY, 'w_06', 'contractor');
-    device.call('transportAccept', DAY, '');
-    const v2 = device.call('transportLastVersion', DAY);
-    const text2 = device.call('transportDriverMessage', DAY, v2, 'tv_03');
-    same('the second version says it is an update, and carries one man fewer', text2.split('\n').slice(1, 6), [
-        'הסעה ליום שלישי 10/11/2026:', 'עדכון מספר 1 לתוכנית.', `רכב: ${car('BYD סיל U 2025')}`,
-        `איסוף: ${named('כפר קרע')}`, 'נוסעים (3):']);
-    same('a mark made on the old words is not believed for the new ones',
-        device.call('transportMarkState', DAY, 'tv_03'), 'changed');
+    // The car's message changes: the mark is no longer believed.
+    device.call('transportUnseat', DAY, 'w_06');
+    same('with a man out of the car the message carries one man fewer',
+        device.call('transportDriverMessage', DAY, 'tv_03').split('\n').slice(3, 4), ['נוסעים (3):']);
+    same('and a mark made on the old words is not believed for the new ones', device.call('transportMarkState', DAY, 'tv_03'), 'none');
     device.call('transportMarkOpened', DAY, 'tv_03');
-    same('opening the new message is a new mark, and not a sent one', device.call('transportMarkState', DAY, 'tv_03'), 'opened');
+    same('opening the new message is a new mark', device.call('transportMarkState', DAY, 'tv_03'), 'opened');
     device.State.schedule.workers.find(w => w.id === 'w_04').phone = '0501112234';
-    same('a corrected number un-believes it too', device.call('transportMarkState', DAY, 'tv_03'), 'changed');
+    same('a corrected number un-believes it too', device.call('transportMarkState', DAY, 'tv_03'), 'none');
     device.State.schedule.workers.find(w => w.id === 'w_04').phone = 'אין';
     same('and a driver with no usable number is said to have none', device.call('transportMarkState', DAY, 'tv_03'), 'nophone');
-    check('for him nothing can be marked', device.call('transportMarkSent', DAY, 'tv_03', true) === false);
+    check('for him nothing can be marked', device.call('transportMarkOpened', DAY, 'tv_03') === false);
+    device.State.schedule.workers.find(w => w.id === 'w_04').phone = '0501112233';
+    device.call('transportMarkOpened', DAY, 'tv_03');
+    device.call('transportPlace', DAY, 'w_01', 'tv_03', 1);
+    same('another man in the driver\'s seat is another message to another number',
+        [device.call('transportDriverNumber', DAY, 'tv_03'), device.call('transportMarkState', DAY, 'tv_03'),
+            device.call('transportDriverMessage', DAY, 'tv_03').split('\n')[0]], ['972528841930', 'none', `שלום ${named('אחמד')},`]);
+    device.call('transportUnseat', DAY, 'w_01');
+    check('and with the driver\'s seat empty the mark is gone from the disk', keptDay(device).marks.tv_03 === undefined);
 
-    // A driver alone, with no area chosen: no pickup line, no passengers, his own site.
+    // A driver alone: no passengers, his own site.
     const lone = crewPhone('d_alone');
-    lone.call('transportSetWorker', 'w_06', { canDrive: true });
-    ['w_01', 'w_02', 'w_03', 'w_04'].forEach(id => lone.call('transportSetStatus', DAY, id, 'private'));
-    lone.call('transportSuggest', DAY);
-    lone.call('transportAccept', DAY, '');
-    same('a driver alone', lone.call('transportDriverMessage', DAY, lone.call('transportLastVersion', DAY), 'tv_01').split('\n'),
+    lone.call('transportPlace', DAY, 'w_06', 'tv_01', 1);
+    same('a driver alone', lone.call('transportDriverMessage', DAY, 'tv_01').split('\n'),
         [`שלום ${named('Ali Hassan')},`, 'הסעה ליום שלישי 10/11/2026:', `רכב: ${car('טויוטה קורולה 2013')}`,
             'בלי נוסעים.', `יעדים: ${named('פרדסיה')}`]);
+    // A passenger whose site left the day after he was seated: named, and no site made up.
+    lone.call('transportPlace', DAY, 'w_03', 'tv_01', 2);
+    lone.State.commit(lone.call('markAbsent', lone.State.schedule, DAY, 'w_03', 'actual'));
+    same('a passenger with no site today is named with no site', lone.call('transportDriverMessage', DAY, 'tv_01').split('\n').slice(3),
+        ['נוסעים (1):', `- ${named('יוסי')}`, `יעדים: ${named('פרדסיה')}`]);
 });
 
 await block('a number becomes a wa.me number only by the seder\'s rule', async () => {
@@ -576,6 +566,16 @@ await block('a number becomes a wa.me number only by the seder\'s rule', async (
     same('nothing is no number', number(''), '');
 });
 
+// An evening's worth of what the screen can do, by the functions its drags and taps call.
+function evening(device) {
+    device.call('transportPlace', DAY, 'w_01', 'tv_01', 1);
+    device.call('transportPlace', DAY, 'w_02', 'tv_01', 2);
+    device.call('transportPlace', DAY, 'w_04', 'tv_05', 1);
+    device.call('transportPlace', DAY, 'w_03', 'tv_05', 9);
+    device.call('transportSetStatus', DAY, 'w_06', 'private');
+    device.call('transportSetAvailable', DAY, 'tv_07', false);
+}
+
 await block('none of it is the record: not the schedule, not the outbox, not the fence', async () => {
     const device = crewPhone('d_record');
     const schedule = JSON.stringify(device.State.schedule);
@@ -584,13 +584,10 @@ await block('none of it is the record: not the schedule, not the outbox, not the
     const fence = device.Store.fenceState();
     given('the record is on the disk and the fence can be read', disk !== null && fence !== null);
 
-    setUp(device);
+    evening(device);
     device.call('transportAddVehicle', 'מיניבוס', 12);
-    device.call('transportSetAvailable', DAY, 'tv_07', false);
-    device.call('transportSuggest', DAY);
-    device.call('transportAccept', DAY, 'סיבה');
     device.call('transportMarkOpened', DAY, 'tv_01');
-    device.call('transportMarkSent', DAY, 'tv_01', true);
+    device.call('transportUnseat', DAY, 'w_03');
     device.call('transportPrune', DAY);
     device.call('transportSetEnabled', false);
     device.call('transportSetEnabled', true);
@@ -618,10 +615,10 @@ await block('none of it leaves the phone: no cloud, no backup, no restore point,
     const attempts = cloud.attempts.length;
     const doc = JSON.stringify(cloud.doc);
 
-    setUp(device);
-    device.call('transportSuggest', DAY);
-    device.call('transportAccept', DAY, 'סיבה');
+    evening(device);
+    device.call('transportAddVehicle', 'מיניבוס', 12);
     device.call('transportMarkOpened', DAY, 'tv_01');
+    given('the plan is on this phone', device.raw(DAY_KEY) !== null && device.raw(SETTINGS) !== null);
     await settle(TICK * 20);
     same('the cloud was not written to', cloud.attempts.length, attempts);
     same('and holds the document it held', JSON.stringify(cloud.doc), doc);
@@ -635,7 +632,8 @@ await block('none of it leaves the phone: no cloud, no backup, no restore point,
     check('and what it sent has no word of transport either',
         !/transport|tv_0|ta_/i.test(JSON.stringify(cloud.doc)) && !/transport|tv_0/i.test(JSON.stringify(cloud.attempts)));
 
-    const foreign = text => /farkadTransport|tv_0\d|"ta_|canDrive|workerLocks/.test(String(text));
+    const foreign = text => /farkadTransport|tv_0\d|"ta_|"passengers"|"unavailable"|openedAt/.test(String(text));
+    given('the detector would see a plan if one were there', foreign(device.raw(DAY_KEY)) && foreign(device.raw(SETTINGS)));
     device.call('exportBackup');
     const backup = device.downloads[device.downloads.length - 1];
     given('the backup file was handed over', Boolean(backup && backup.text && /\.json$/.test(backup.name)),
@@ -658,8 +656,8 @@ await block('none of it leaves the phone: no cloud, no backup, no restore point,
 
 await block('a transport record that will not read cannot block the day', async () => {
     const device = crewPhone('d_broken');
-    setUp(device);
-    device.call('transportSuggest', DAY);
+    evening(device);
+    device.call('transportAddVehicle', 'מיניבוס', 12);
     const brokenSettings = '{"version":1,"vehicles":[{"id":"tv_01","na';
     const brokenDay = '{"version":1,"trips":{"tv_01":{"driver":"w_0';
     device.putRaw(SETTINGS, brokenSettings);
@@ -668,8 +666,7 @@ await block('a transport record that will not read cannot block the day', async 
     const again = reopen(device);
     check('loading the screen\'s file did not throw, and the app is not held',
         again.call('farkadWritesBlocked') === false);
-    same('unreadable settings start from the seven, with no areas',
-        [again.call('transportSettings').vehicles.length, again.call('transportSettings').areas.length], [7, 0]);
+    same('unreadable settings start from the seven', again.call('transportSettings').vehicles.length, 7);
     same('an unreadable day starts empty', Object.keys(again.call('transportDayOf', DAY).trips).length, 0);
     check('and the screen is told to say so', again.call('transportSawUnreadable') === true);
     same('the bytes that would not read are kept aside, both of them',
@@ -684,8 +681,10 @@ await block('a transport record that will not read cannot block the day', async 
         again.raw('scheduleData:v2') !== before
         && JSON.parse(again.raw('scheduleData:v2')).days[DAY].actual.w_05.entries.length === 1);
     check('and the plan then counts the man it added', again.call('transportContext', DAY).attendance.w_05 === 'p_03');
+    // MOVED IN v174: the change used to be «הוספת אזור». Areas are gone; a vehicle added
+    // to the list is the same kind of write to the same key.
     check('the next change writes a readable record over the broken one - the copy is aside',
-        again.call('transportAddArea', 'צפון') !== null && JSON.parse(again.raw(SETTINGS)).areas.length === 1
+        again.call('transportAddVehicle', 'טנדר', 5) !== null && JSON.parse(again.raw(SETTINGS)).vehicles.length === 8
         && again.raw(`${SETTINGS}:unreadable`) === brokenSettings);
 
     // No room to keep the copy: then nothing is written over the only copy there is.
@@ -695,9 +694,9 @@ await block('a transport record that will not read cannot block the day', async 
     tight.setQuota(key => /^farkadTransport:/.test(key));
     tight.call('transportSettings');
     check('with no room for a copy, a change is NOT written over the unreadable bytes',
-        tight.call('transportAddArea', 'צפון') !== null && tight.raw(SETTINGS) === brokenSettings);
+        tight.call('transportAddVehicle', 'טנדר', 5) !== null && tight.raw(SETTINGS) === brokenSettings);
     check('and the screen is told it was not kept', tight.call('transportWasKept') === false);
-    check('while the session still holds the change', tight.call('transportSettings').areas.length === 1);
+    check('while the session still holds the change', tight.call('transportSettings').vehicles.length === 8);
 
     // Poison: names that would land on a prototype are not ids.
     const poisoned = crewPhone('d_poison');
@@ -705,17 +704,19 @@ await block('a transport record that will not read cannot block the day', async 
         + '{"id":"tv_ok","name":"טנדר","seats":5},{"id":"v_01","name":"ישן","seats":5}],"areas":[{"id":"constructor","name":"y"}],'
         + '"workers":{"__proto__":{"canDrive":true,"drives":"all"},"constructor":{"canDrive":true},"w_01":{"canDrive":true,"drives":"all"}}}');
     poisoned.putRaw(DAY_KEY, '{"version":1,"status":{"__proto__":"private","w_01":"waiting","w_02":"other"},'
-        + '"trips":{"__proto__":{"driver":"w_01","passengers":[]},"tv_ok":{"driver":"constructor","passengers":["w_02","w_02","__proto__"]}}}');
+        + '"trips":{"__proto__":{"driver":"w_01","passengers":[]},"tv_ok":{"driver":"constructor","passengers":["w_02","w_02","__proto__"],'
+        + '"seats":{"__proto__":2,"w_02":"3"}}},"marks":{"__proto__":{"sig":"x","openedAt":1},"tv_ok":{"sig":"y","openedAt":"soon"}}}');
     const safe = reopen(poisoned);
     const settings = safe.call('transportSettings');
-    same('a poisoned name is not a vehicle, an area or a worker - and the retired feature\'s v_NN is not one of ours',
+    same('a poisoned name is not a vehicle - and the retired feature\'s v_NN is not one of ours; what is carried for v171 is carried clean',
         [settings.vehicles.map(v => v.id), settings.areas.length, Object.keys(settings.workers)], [['tv_ok'], 0, ['w_01']]);
     const day = safe.call('transportDayOf', DAY);
-    same('nor a status or a seat; «ממתין» left over from the proposal is dropped',
-        [Object.keys(day.status), Object.keys(day.trips), day.trips.tv_ok.driver, day.trips.tv_ok.passengers],
-        [['w_02'], ['tv_ok'], null, ['w_02']]);
+    same('nor a status, a trip, a seat or a mark; «ממתין» left over from the proposal is dropped',
+        [Object.keys(day.status), Object.keys(day.trips), day.trips.tv_ok.driver, day.trips.tv_ok.passengers,
+            Object.keys(day.trips.tv_ok.seats), Object.keys(day.marks)],
+        [['w_02'], ['tv_ok'], null, ['w_02'], [], []]);
     check('and nothing landed on a prototype', ({}).canDrive === undefined && ({}).driver === undefined
-        && safe.global('Object').prototype.canDrive === undefined);
+        && safe.global('Object').prototype.canDrive === undefined && safe.global('Object').prototype.sig === undefined);
 });
 
 await block('a disk that refuses it keeps the session going, says so, and spends no restore point', async () => {
@@ -723,17 +724,17 @@ await block('a disk that refuses it keeps the session going, says so, and spends
     device.Store.set('scheduleData:snap:2026-11-01', JSON.stringify(device.State.schedule));
     given('there is a restore point a full disk could be tempted to spend',
         device.raw('scheduleData:snap:2026-11-01') !== null && typeof device.Store.reclaim === 'function');
-    check('a disk that takes it says it was kept', device.call('transportAddArea', 'צפון') !== null
+    check('a disk that takes it says it was kept', device.call('transportPlace', DAY, 'w_01', 'tv_01', 1) === true
         && device.call('transportWasKept') === true);
 
     device.setQuota(key => /^farkadTransport:/.test(key));
     check('a change the disk refuses is still made for this session',
-        device.call('transportAddArea', 'דרום') !== null && device.call('transportSettings').areas.length === 2);
+        device.call('transportPlace', DAY, 'w_02', 'tv_01', 2) === true && tripsOf(device) === 'tv_01=w_01+[w_02]');
     same('and is said not to have been kept', device.call('transportWasKept'), false);
     check('no restore point was spent making room for it', device.raw('scheduleData:snap:2026-11-01') !== null);
     check('nor was the record touched', device.raw('scheduleData:v2') !== null
         && JSON.parse(device.raw('scheduleData:v2')).days[DAY].actual.w_01.entries.length === 1);
-    same('after a reopen only what reached the disk is there', reopen(device).call('transportSettings').areas.length, 1);
+    same('after a reopen only what reached the disk is there', tripsOf(reopen(device)), 'tv_01=w_01+[]');
 });
 
 await block('it keeps five weeks of days, not every day for ever', async () => {
@@ -770,15 +771,16 @@ await block('the switch: off is no entry, no reads and no writes', async () => {
 
     same('it is off until this phone turns it on', device.call('transportEnabled'), false);
     check('opening it does nothing', device.call('openTransport', DAY) === false);
+    // MOVED IN v174 with the functions themselves: areas, per-worker settings, suggest,
+    // move, set-driver and accept no longer exist; place and unseat are what a person does.
     const refused = [
-        device.call('transportAddArea', 'צפון'), device.call('transportAddVehicle', 'רכב', 5),
-        device.call('transportSetWorker', 'w_01', { canDrive: true }), device.call('transportSetAvailable', DAY, 'tv_01', false),
-        device.call('transportSetStatus', DAY, 'w_01', 'private'), device.call('transportSuggest', DAY),
-        device.call('transportMove', DAY, 'w_01', 'tv_01'), device.call('transportSetDriver', DAY, 'tv_01', 'w_01'),
+        device.call('transportAddVehicle', 'רכב', 5), device.call('transportRenameVehicle', 'tv_01', 'רכב'),
+        device.call('transportSetVehicleSeats', 'tv_01', 7), device.call('transportRetireVehicle', 'tv_01'),
+        device.call('transportSetAvailable', DAY, 'tv_01', false), device.call('transportSetStatus', DAY, 'w_01', 'private'),
+        device.call('transportPlace', DAY, 'w_01', 'tv_01', 1), device.call('transportUnseat', DAY, 'w_01'),
         device.call('transportMarkOpened', DAY, 'tv_01'), device.call('transportPrune', DAY),
         device.call('transportSaveDay', DAY)];
-    same('every change is refused', refused, [null, null, false, false, false, null, false, false, false, 0, false]);
-    same('accepting is refused', JSON.parse(JSON.stringify(device.call('transportAccept', DAY, 'x'))), { ok: false, error: 'off' });
+    same('every change is refused', refused, [null, false, false, false, false, false, false, false, false, 0, false]);
     device.call('renderTransportIfOpen');
     device.call('transportInstallEntry');
     same('the only transport key that was ever read is the switch itself',
@@ -790,8 +792,8 @@ await block('the switch: off is no entry, no reads and no writes', async () => {
     same('and has the seven', device.call('transportSettings').vehicles.length, 7);
     check('it stays on across the app being closed', reopen(device).call('transportEnabled') === true);
     check('turned off again, the preference is removed and the plans stay on the disk',
-        (device.call('transportAddArea', 'צפון'), device.call('transportSetEnabled', false)) === false
-        && device.raw(ENABLED) === null && device.raw(SETTINGS) !== null);
+        (device.call('transportPlace', DAY, 'w_01', 'tv_01', 1), device.call('transportSetEnabled', false)) === false
+        && device.raw(ENABLED) === null && device.raw(DAY_KEY) !== null);
     check('and after a reopen it is off', reopen(device).call('transportEnabled') === false);
 
     // The entry is a row in the WhatsApp dialog: drawn while the switch is on, taken out
@@ -830,8 +832,7 @@ await block('the retired «רכבים» feature is not touched, and nothing here
     same('the vehicles flag is as shipped: off', device.global('FARKAD_FLAGS').vehicles, false);
     check('there is no transport flag: the gate is the per-phone switch',
         !Object.prototype.hasOwnProperty.call(device.global('FARKAD_FLAGS'), 'transport'));
-    setUp(device);
-    device.call('transportSuggest', DAY);
+    evening(device);
     same('the schedule\'s own vehicles list is as it was', JSON.stringify(device.State.schedule.vehicles || []), '[]');
     check('no day of the record gained a transport or vehicle layer',
         !/transport|vehicleRuns/.test(device.raw('scheduleData:v2')));
@@ -840,11 +841,27 @@ await block('the retired «רכבים» feature is not touched, and nothing here
     check('and never asks with the browser\'s own dialogs', !/\b(alert|confirm|prompt)\s*\(/.test(SCREEN.replace(/askConfirm\(/g, '')));
     check('the engine touches no storage, no document and no clock',
         !/Store\.|localStorage|document\.|Date\.now|new Date|Math\.random/.test(ENGINE));
+    // v174: a man is carried with Pointer Events. The HTML5 drag-and-drop API does nothing
+    // useful under a finger on an iPhone, and the only mention of it allowed in the
+    // screen's code is the line that stops the browser starting one of its own.
+    const code = SCREEN.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
+    check('the screen carries a man with pointer events, and has no HTML5 drag-and-drop in it',
+        /addEventListener\('pointerdown'/.test(code) && /addEventListener\('pointercancel'/.test(code)
+        && /setPointerCapture/.test(code) && !/dataTransfer|'dragover'|'drop'|'dragenter'|\.draggable\s*=/.test(code));
+    check('and what v171\'s planner was made of is not in it any more',
+        !/transportSuggest|transportAccept|transportSetDriver|transportToggle\w*Lock|transportSetWorker|transportAddArea|transportMarkSent/.test(SCREEN));
 });
 
 // Every word the feature shows or sends. PROPOSED: the owner gave blanket approval of the
 // wording on 2026-11-09 and corrects on sight - and a correction moves the line here, in
 // the same commit (CLAUDE.md, law 6).
+//
+// MOVED IN v174, and the move is the point: the owner sent v171's planner back, so every
+// word of its four tabs, its pickup areas, its "may drive", its suggestion, its locks, its
+// acceptance, its versions and its «סימנתי שנשלח» is REMOVED from the block and from here
+// (ninety-odd keys), the words of the picture are added, and two are changed:
+// `tabVehicles` is now `vehiclesRow` (the same word, on a row instead of a tab), and
+// `retireLead` no longer speaks of accepted versions, because there are none.
 await block('the words, every one of them, and no other', async () => {
     const T = crewPhone('d_words').global('TRANSPORT_TEXT');
     const W = {
@@ -858,18 +875,38 @@ await block('the words, every one of them, and no other', async () => {
         entry: 'הסעות – שיבוץ לרכבים',
         title: 'הסעות',
         back: 'חזרה',
-        tabPlan: 'שיבוץ',
-        tabVehicles: 'רכבים',
-        tabWorkers: 'עובדים',
-        tabMessages: 'הודעות',
         notKept: 'השינוי לא נשמר במכשיר. אם האפליקציה תיסגר, הוא יאבד.',
         unreadable: 'נתוני הסעות שנשמרו במכשיר לא נקראו. מתחילים מרשימה ריקה, והעותק שלא נקרא נשמר בצד.',
         nobody: 'אין ביום הזה עובדים עם אתר עבודה.',
-        vehiclesLead: 'אילו רכבים יוצאים היום?',
-        vehiclesSummary: [[6, 7, 34], 'זמינים 6 מתוך 7 · 34 מושבים'],
-        seats: [[5], '5 מושבים'],
+        waiting: [[7], 'ממתינים לשיבוץ (7)'],
+        allSeated: 'כל העובדים משובצים',
+        hint: 'גוררים עובד אל מושב, או נוגעים בעובד ואז במושב. עובד שכבר יושב מזיזים בלחיצה ארוכה וגרירה.',
+        picked: [['אחמד'], 'אחמד נבחר. נוגעים במושב.'],
+        seatedIn: [['אחמד', 'סוואנה'], 'אחמד שובץ בסוואנה'],
+        returned: [['אחמד'], 'אחמד חזר לממתינים'],
+        addWorker: 'הוספת עובד',
+        driverSeat: 'נהג',
+        driver: [['אחמד'], 'נהג: אחמד'],
+        chooseTitle: 'מי יושב כאן?',
+        driverDialogTitle: [['סוואנה'], 'מי נוהג בסוואנה?'],
+        removeFromVehicle: 'הוצאה מהרכב',
+        cancel: 'ביטול',
+        occupancy: [[3, 5], '3 מתוך 5'],
         available: 'זמין היום',
         unavailable: 'לא זמין היום',
+        driverNone: 'בלי נהג',
+        notWorking: [['אחמד'], 'אחמד משובץ ברכב אבל אין לו אתר ברישום היום'],
+        deletedWorker: 'עובד שנמחק',
+        notRiding: 'לא בהסעה שלנו',
+        notRidingCount: [[2], 'לא בהסעה שלנו (2)'],
+        notRidingTitle: 'מי לא נוסע בהסעה שלנו?',
+        statusLabel: [['אחמד'], 'איך אחמד מגיע'],
+        statusPrivate: 'רכב פרטי',
+        statusContractor: 'נוסע עם קבלן אחר',
+        statusOther: 'אחר',
+        bringBack: 'החזרה להסעה',
+        vehiclesRow: 'רכבים',
+        seats: [[5], '5 מושבים'],
         noVehicles: 'אין רכבים ברשימה.',
         editVehicle: 'עריכת הרכב',
         addVehicle: 'הוספת רכב',
@@ -882,123 +919,17 @@ await block('the words, every one of them, and no other', async () => {
         seatsTitle: [['סוואנה'], 'כמה מושבים יש בסוואנה? כולל הנהג.'],
         seatsBad: 'מספר בין 2 ל-20',
         retireTitle: [['סוואנה'], 'להוציא את סוואנה מהרשימה?'],
-        retireLead: 'הרכב לא יוצע עוד לשיבוץ. גרסאות שכבר אושרו אינן משתנות.',
+        retireLead: 'הרכב לא יופיע עוד בשיבוץ.',
         save: 'שמירה',
-        workersLead: 'מי צריך הסעה היום? הרשימה נקראת מרישום היום ואינה משנה אותו.',
-        statusLabel: [['אחמד'], 'איך אחמד מגיע'],
-        statusRide: 'בהסעה שלנו',
-        statusPrivate: 'רכב פרטי',
-        statusContractor: 'נוסע עם קבלן אחר',
-        statusOther: 'אחר',
-        areaLabel: [['אחמד'], 'אזור האיסוף של אחמד'],
-        noArea: 'בלי אזור',
-        alsoAt: [['חיפה'], 'רשום היום גם בחיפה. ההסעה לאתר הראשון.'],
-        canDrive: 'רשאי לנהוג',
-        cannotDrive: 'לא נוהג',
-        drivesAll: 'כל הרכבים',
-        drivesSome: [[3], '3 רכבים'],
-        drivesNone: 'לא נבחר רכב',
-        drivesLabel: [['אחמד'], 'באילו רכבים אחמד רשאי לנהוג'],
-        notWorkingToday: [[2], '2 עובדים בלי אתר היום – אינם בהסעות'],
-        areasTitle: [[3], 'אזורי איסוף (3)'],
-        areasLead: 'האזורים שמהם אוספים עובדים. לכל עובד אזור אחד קבוע.',
-        noAreas: 'עדיין אין אזורים. מוסיפים אזור, ואז בוחרים אזור לכל עובד.',
-        addArea: 'הוספת אזור',
-        renameArea: 'שינוי שם',
-        removeArea: 'מחיקה',
-        areaNameTitle: 'שם האזור',
-        areaNameTaken: 'כבר יש אזור בשם הזה',
-        removeAreaTitle: [['צפון'], 'למחוק את האזור צפון?'],
-        removeAreaLead: 'עובדים ששויכו לאזור הזה יישארו בלי אזור.',
-        suggest: 'הצעת שיבוץ',
-        accept: 'אישור התוכנית',
-        draft: 'טיוטה – עדיין לא אושרה',
-        acceptedVersion: [[2], 'גרסה 2 מאושרת'],
-        changedSince: [[2], 'יש שינויים שלא אושרו מאז גרסה 2'],
-        recordChanged: 'רישום היום השתנה מאז שאושרה הגרסה',
-        seatedCount: [[10, 11], 'משובצים 10 מתוך 11'],
-        planOk: 'התוכנית מלאה',
-        errorsTitle: [[3], '3 דברים לתיקון'],
-        warnTitle: 'לתשומת לב',
-        unseatedTitle: [[2], 'בלי מקום ברכב (2)'],
-        suggestDone: [[2], 'הוצע שיבוץ. 2 נשארו בלי מקום'],
-        noDriver: [['סוואנה'], 'סוואנה: אין נהג'],
-        driverNotEligible: [['סוואנה', 'אחמד'], 'סוואנה: אחמד אינו רשאי לנהוג ברכב הזה'],
-        overCapacity: [['סוואנה', 1], 'סוואנה: 1 יותר ממספר המושבים'],
-        twice: [['אחמד'], 'אחמד משובץ בשני רכבים'],
-        hasStatus: [['אחמד', 'רכב פרטי'], 'אחמד משובץ ברכב אבל מסומן «רכב פרטי»'],
-        notWorking: [['אחמד'], 'אחמד משובץ ברכב אבל אין לו אתר ברישום היום'],
-        vehicleUnavailable: [['סוואנה'], 'סוואנה מסומן לא זמין היום ויש בו נוסעים'],
-        unknownVehicle: 'רכב שהוצא מהרשימה ויש בו נוסעים',
-        noSeat: [['אחמד'], 'אחמד בלי מקום ברכב'],
-        badSeat: [['סוואנה', 'אחמד'], 'סוואנה: המושב של אחמד אינו תקין'],
-        otherArea: [['סוואנה', 'אחמד'], 'אחמד נאסף מאזור אחר מזה של סוואנה'],
-        deletedWorker: 'עובד שנמחק',
-        deletedVehicle: 'רכב שהוצא מהרשימה',
-        occupancy: [[3, 5], '3 מתוך 5'],
-        notUsed: 'לא בשימוש',
-        lockVehicle: 'נעילת הרכב',
-        unlockVehicle: 'שחרור הרכב',
-        vehicleLocked: 'הרכב נעול',
-        pickup: 'אזור איסוף',
-        destinations: 'יעדים',
-        driver: [['אחמד'], 'נהג: אחמד'],
-        chooseDriver: 'בחירת נהג',
-        driverDialogTitle: [['סוואנה'], 'מי נוהג בסוואנה?'],
-        driverDialogLead: 'מוצגים רק עובדים שרשאים לנהוג ברכב הזה.',
-        driverNone: 'בלי נהג',
-        noEligible: 'אין היום עובד שרשאי לנהוג ברכב הזה',
-        lockWorker: [['אחמד'], 'נעילת השיבוץ של אחמד'],
-        unlockWorker: [['אחמד'], 'שחרור השיבוץ של אחמד'],
-        lock: 'נעילה',
-        locked: 'נעול',
-        moveHere: 'העברה לכאן',
-        full: 'הרכב מלא',
-        moving: [['אחמד'], 'מעבירים את אחמד – בוחרים רכב'],
-        workerLockedNote: [['אחמד'], 'אחמד נעול – משחררים כדי להעביר'],
-        cancel: 'ביטול',
-        removeFromVehicle: 'הוצאה מהרכב',
-        seat: 'מושב',
-        seatNone: 'בלי מושב קבוע',
-        seatFront: 'קדמי, ליד הנהג',
-        seatRearRight: 'אחורי ימין',
-        seatRearMiddle: 'אחורי אמצע',
-        seatRearLeft: 'אחורי שמאל',
-        seatRow: [[4, 3], 'שורה 4, מושב 3'],
-        seatNumber: [[7], 'מושב 7'],
-        acceptTitle: 'אישור התוכנית',
-        acceptComplete: 'התוכנית מלאה. לאשר אותה?',
-        acceptIncomplete: [[2], 'התוכנית חלקית: 2 דברים לא סגורים. אפשר לאשר רק עם סיבה.'],
-        reasonLabel: 'למה מאשרים תוכנית חלקית?',
-        reasonNeeded: 'צריך לכתוב סיבה',
-        acceptYes: 'אישור',
-        acceptPartial: 'אישור כתוכנית חלקית',
-        nothingToAccept: 'אין שינויים לאשר',
-        historyTitle: 'היסטוריית גרסאות',
-        noVersions: 'עדיין אין גרסה מאושרת',
-        versionLine: [[2, '21:40'], 'גרסה 2 · 21:40'],
-        complete: 'מלאה',
-        partial: [['חסר נהג'], 'חלקית – חסר נהג'],
-        moved: [[3, 1], '3 עובדים שונו לעומת גרסה 1'],
-        tripLine: [['סוואנה', 'אחמד', 3], 'סוואנה: אחמד + 3 נוסעים'],
-        messagesLead: 'הודעה לכל נהג. וואטסאפ נפתח עם ההודעה מוכנה, ושם לוחצים על שליחה.',
-        noAccepted: 'אין תוכנית מאושרת. מאשרים את השיבוץ, ואז שולחים לנהגים.',
-        draftDiffers: [[2], 'ההודעות לפי גרסה 2. יש שינויים שלא אושרו.'],
         openWhatsapp: 'פתיחה בוואטסאפ',
-        notOpened: 'עדיין לא נפתח',
         opened: 'נפתח בוואטסאפ',
-        confirmSent: 'סימנתי שנשלח',
-        sentMarked: [['21:45'], 'סומן כנשלח ב-21:45'],
-        unmarkSent: 'ביטול הסימון',
-        changedSinceMark: 'ההודעה השתנתה מאז שסומנה – כדאי לשלוח שוב',
         noPhone: 'אין מספר טלפון תקין',
         mHello: [['אחמד'], 'שלום אחמד,'],
         mHeading: [['יום שלישי', '10/11/2026'], 'הסעה ליום שלישי 10/11/2026:'],
-        mUpdate: [[2], 'עדכון מספר 1 לתוכנית.'],
         mVehicle: [['סוואנה'], 'רכב: סוואנה'],
-        mPickup: [['ערערה'], 'איסוף: ערערה'],
         mPassengers: [[2], 'נוסעים (2):'],
         mPassenger: [['ראמי', 'חדרה'], '- ראמי – חדרה'],
+        mPassengerOnly: [['ראמי'], '- ראמי'],
         mAlone: 'בלי נוסעים.',
         mDestinations: [['חיפה, חדרה'], 'יעדים: חיפה, חדרה']
     };
@@ -1008,15 +939,12 @@ await block('the words, every one of them, and no other', async () => {
         if (Array.isArray(want)) same(`${key}(${want[0].join(', ')})`, typeof T[key] === 'function' ? T[key](...want[0]) : T[key], want[1]);
         else same(key, T[key], want);
     });
-    // The second form of each word that has two.
-    same('one seat-less man', T.suggestDone(0), 'הוצע שיבוץ לכולם');
-    same('one thing to fix', T.errorsTitle(1), 'דבר אחד לתיקון');
-    same('one thing open', T.acceptIncomplete(1), 'התוכנית חלקית: דבר אחד לא סגור. אפשר לאשר רק עם סיבה.');
-    same('one man moved', T.moved(1, 2), 'עובד אחד שונה לעומת גרסה 2');
-    same('one man off', T.notWorkingToday(1), 'עובד אחד בלי אתר היום – אינו בהסעות');
-    same('one vehicle', T.drivesSome(1), 'רכב אחד');
     check('«ממתין» is nowhere in the words', !Object.keys(T).some(key =>
         String(typeof T[key] === 'function' ? T[key]('x', 'y', 'z') : T[key]).includes('ממתין')));
+    // What the owner was shown on v171 and sent back must not come back by a side door.
+    const all = Object.keys(T).map(key => String(typeof T[key] === 'function' ? T[key]('x', 'y', 'z') : T[key])).join('\n');
+    same('and nothing of the planner he sent back is in them',
+        ['הצעת שיבוץ', 'אישור התוכנית', 'גרסה', 'נעיל', 'אזור', 'רשאי לנהוג', 'סימנתי שנשלח', 'טיוטה'].filter(word => all.includes(word)), []);
     // No Hebrew outside the block: a word typed straight into the screen's code is a word
     // this suite does not pin. (The seven vehicle names are the owner's data, pinned above.)
     const code = SCREEN.slice(SCREEN.indexOf('// ================================================================== the store'))
