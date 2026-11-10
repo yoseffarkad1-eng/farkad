@@ -211,7 +211,51 @@ const ACC_TEXT = Object.freeze({
     legacyDueAmount: 'כמה נשאר לשלם?',
     legacySave: 'רשום',
     legacyDone: 'התשובה נרשמה.',
-    legacyEmpty: 'אין סגירות ישנות לבדיקה.'
+    legacyEmpty: 'אין סגירות ישנות לבדיקה.',
+    // PHASE 5. What was typed into a closure, kept across a reload
+    draftRestored: 'מה שהוקלד לפני שהעמוד נטען מחדש שוחזר. בדוק את הסכומים לפני האישור.',
+    draftContinue: 'המשך סגירה שהתחלת',
+    // what «לבדיקה» is about
+    lookAction: 'מה לבדוק?',
+    lookLead: 'הסכומים שבמסכים הם אלה שהשרת מחזיק. שום דבר לא נמחק. עד שזה ייפתר אי אפשר לרשום לעובד הזה סגירה או תשלום.',
+    lookConflict: 'שני טלפונים רשמו את אותו רישום בסכומים שונים',
+    lookCounted: 'נספר - מה שהשרת מחזיק',
+    lookBeside: 'נשמר בצד, לא נספר',
+    lookHeld: 'רישום שלא נספר',
+    lookOverpaid: 'שולם יותר מהמגיע',
+    lookOverpaidAdvance: 'הוחזר או קוזז יותר ממה שניתן במקדמה',
+    lookNoFix: 'עדיין אין פתרון מהמסך הזה. הראה את המסך הזה למי שמתחזק את האפליקציה.',
+    lookNothing: 'אין מה לבדוק לעובד הזה.',
+    lookAmount: 'סכום',
+    lookDate: 'תאריך',
+    lookBy: 'נרשם במכשיר',
+    kindPayment: 'תשלום',
+    kindDeduction: 'ניכוי נוסף',
+    kindLegacy: 'תשובה על סגירה ישנה',
+    // closures leaving the live record for the archive on the server
+    archiveEntry: 'ארכיון סגירות',
+    archiveLead: 'סגירה ששולמה במלואה עוברת מהרישום החי לארכיון בשרת, כדי שהרישום לא יתמלא. שום דבר לא נמחק: הסגירה נשארת במכשיר הזה ובהיסטוריה בדיוק כמו שהיא.',
+    archiveReady: 'מוכנות להעברה',
+    archiveHeld: 'נשארות ברישום',
+    archiveDone: 'כבר בארכיון',
+    archiveSizeNow: 'גודל הרישום בשרת',
+    archiveSizeAfter: 'אחרי ההעברה',
+    archiveRun: 'העבר לארכיון',
+    archiveRunning: 'מעביר…',
+    archiveNone: 'אין סגירות שמוכנות להעברה.',
+    archiveMoved: 'הועברו לארכיון',
+    archiveStopped: 'ההעברה נעצרה. מה שכבר הועבר נמצא בארכיון, ושום דבר לא אבד. אפשר לנסות שוב.',
+    archiveOffline: 'אין חיבור לשרת. ההעברה נעשית רק כשיש חיבור. שום דבר לא השתנה.',
+    archiveDiffers: 'הסגירה בשרת אינה זהה למה שבמכשיר הזה. היא נשארת ברישום.',
+    archiveCopyDiffers: 'העותק שבארכיון אינו זהה לסגירה. היא נשארת ברישום.',
+    archiveServer: 'השרת לא קיבל את ההעברה. שום דבר לא השתנה. נסה שוב.',
+    archiveBusy: 'הרישום בשרת השתנה כמה פעמים בזמן ההעברה. נסה שוב בעוד רגע.',
+    whyOwed: 'עוד לא שולם במלואו',
+    whyCorrected: 'יש תיקון למקדמה שקוזזה בסגירה הזאת',
+    whyIrregular: 'רישום ישן שאי אפשר להעביר',
+    // a phone that lacks the detail of a closure in the archive
+    closedWaiting: 'במכשיר הזה חסר הפירוט של סגירות שכבר בארכיון. עד שהוא יירד מהשרת המכשיר לא מתעדכן, ואי אפשר לרשום ממנו סגירה או תשלום. זה קורה מעצמו כשיש חיבור.',
+    closedBroken: 'סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה.'
 });
 
 // EVERY REFUSAL CODE THE MODEL CAN ANSWER WITH, as the sentence a person reads. The model
@@ -307,8 +351,70 @@ const ACC = {
     correct: null,
     legacyLeft: {},
     closed: {},
-    watch: null
+    watch: null,
+    look: null,
+    archive: null
 };
+
+// ---------------------------------------------------------------- a draft, across a reload
+//
+// WHAT WAS TYPED INTO A CLOSURE AND NOT YET CONFIRMED, kept on this phone only (Phase 5).
+// Phase 4 kept it in memory on purpose - "a draft of a closure is not a closure, and one
+// that survived a reload would be offered again a week later against a different account"
+// - and that reason stands. So the draft carries a MARK of the account it was typed
+// against (the wage, each open advance and what is left on it, what he is already owed)
+// and the day; it is put back only into a review of the same man, the same period, on
+// the same day, whose account still reads exactly so. Anything else, and it is thrown
+// away without a word: the page shows what it would have shown.
+//
+// It is one Store key of its own, written only after a person has typed or tapped
+// (opening a page still writes nothing). It is never the record, never the outbox, never
+// the cloud, never a backup and never the rescue file - a lost phone loses a draft.
+// NOTHING IS A CLOSURE UNTIL THE SERVER SAYS SO; a draft is typing.
+const ACC_DRAFT_KEY = 'farkadPayDraft';
+
+function accDraftRead() {
+    let held = null;
+    try { held = JSON.parse(Store.get(ACC_DRAFT_KEY) || 'null'); } catch (error) { held = null; }
+    const text = value => typeof value === 'string';
+    if (!held || typeof held !== 'object' || held.v !== 1 || !text(held.workerId) || !text(held.from)
+        || !text(held.to) || !text(held.day) || !text(held.mark) || !held.alloc || typeof held.alloc !== 'object'
+        || !Array.isArray(held.extras) || ['full', 'partial', 'none'].indexOf(held.paidMode) === -1
+        || !text(held.paidText) || ['cash', 'transfer'].indexOf(held.method) === -1) return null;
+    if (!Object.keys(held.alloc).every(id => text(held.alloc[id]))) return null;
+    if (!held.extras.every(extra => extra && text(extra.amount) && text(extra.reason)
+        && ['agreed', 'settlement', 'other'].indexOf(extra.category) !== -1)) return null;
+    return held;
+}
+
+function accDraftClear() {
+    try { Store.remove(ACC_DRAFT_KEY); } catch (error) { /* a draft, not the record */ }
+}
+
+// The account a draft was typed against, as one short string. Read off the model's own
+// review - nothing is computed here.
+function accDraftMark(review) {
+    return paybookHash(JSON.stringify([review.gross, review.wageDueBefore, review.counts,
+        review.advances.map(row => [row.advanceId, row.left, row.offered])]));
+}
+
+function accDraftSave(form) {
+    if (!form.touched || !form.mark) return;
+    const draft = { v: 1, workerId: form.workerId, from: form.from, to: form.to, day: todayStr(), mark: form.mark,
+        alloc: Object.assign({}, form.alloc), extras: form.extras.map(extra => ({ amount: String(extra.amount),
+            category: extra.category, reason: String(extra.reason) })),
+        paidMode: form.paidMode, paidText: String(form.paidText), method: form.method };
+    try { Store.set(ACC_DRAFT_KEY, JSON.stringify(draft), { optional: true }); } catch (error) { /* a draft */ }
+}
+
+// The draft for THIS review, or null - and a draft for this very account that no longer
+// fits it is removed here, so it cannot be offered again.
+function accDraftFor(form, review) {
+    const held = accDraftRead();
+    if (!held || held.workerId !== form.workerId || held.from !== form.from || held.to !== form.to) return null;
+    if (held.day !== todayStr() || held.mark !== accDraftMark(review)) { accDraftClear(); return null; }
+    return held;
+}
 
 function accountsOpen() {
     return typeof paybookWritesEnabled === 'function' && paybookWritesEnabled() === true;
@@ -546,7 +652,22 @@ function accPaintBanner(box) {
         }));
         box.appendChild(note);
     }
+    // A PHONE THAT LACKS THE DETAIL SAYS SO (js/sync/closed.js). The server's document
+    // names a closure whose entries this phone could not fetch yet; it has NOT been
+    // adopted, so every figure here is from the record this phone already had.
+    const lacking = sync && typeof sync.closedWaiting === 'function' ? sync.closedWaiting() : null;
+    if (lacking) {
+        box.appendChild(el('p', 'acc-note acc-note-warn acc-closed-waiting',
+            lacking.broken.length > 0 ? ACC_TEXT.closedBroken : ACC_TEXT.closedWaiting));
+    }
     if (ACC.flash) box.appendChild(el('p', 'acc-note acc-note-ok', ACC.flash));
+}
+
+// Called by the sync layer when what it is waiting for changes, so the sentence above
+// appears and goes without a tap.
+function renderAccountsNotice() {
+    if (!accountsOpen() || typeof currentView === 'undefined' || currentView !== 'advances') return;
+    if (typeof render === 'function') render();
 }
 
 // IT RESOLVES BY ITSELF. While an intent stands, look again every few seconds: the sync
@@ -586,6 +707,12 @@ function accSend(plan, form, after) {
         form.busy = false;
         if (answer && answer.ok && (answer.state === 'closed' || answer.state === 'done')) {
             after(answer);
+            // The connection is known good and the queue is empty: the moment to let the
+            // closures that have been settled long enough leave the live record. A few
+            // at a time, refused quietly if anything is in the way; never awaited.
+            if (typeof FarkadSync.archiveDue === 'function') {
+                Promise.resolve().then(() => FarkadSync.archiveDue(todayStr())).catch(() => undefined);
+            }
             return;
         }
         const state = answer ? answer.state : 'refused';
@@ -653,7 +780,7 @@ function renderAccounts(root) {
     const draw = {
         list: accDrawList, review: accDrawReview, pay: accDrawPay, group: accDrawGroup,
         summary: accDrawSummary, history: accDrawHistory, statement: accDrawStatement,
-        correct: accDrawCorrect, legacy: accDrawLegacy
+        correct: accDrawCorrect, legacy: accDrawLegacy, look: accDrawLook, archive: accDrawArchive
     }[ACC.screen] || accDrawList;
     draw(node);
 }
@@ -709,6 +836,13 @@ function accDrawList(node) {
     links.appendChild(button(ACC_OWNER.history, 'acc-link', () => accGo('history', { flash: '' })));
     const legacy = button('', 'acc-link', () => accGo('legacy', { flash: '' }));
     links.appendChild(legacy);
+    const archive = button('', 'acc-link acc-archive-link', () => accGo('archive', { flash: '', archive: null }));
+    links.appendChild(archive);
+    const draftLink = button('', 'acc-link acc-draft-link', () => {
+        const held = accDraftRead();
+        if (held && State.worker(held.workerId)) accOpenReview(held.workerId, { from: held.from, to: held.to });
+    });
+    links.appendChild(draftLink);
     node.appendChild(links);
 
     node.appendChild(accChoice(ACC_TEXT.filterAll, [['all', ACC_TEXT.filterAll],
@@ -732,6 +866,15 @@ function accDrawList(node) {
         const waiting = accLegacyRows().filter(row => !ACC.legacyLeft[row.artifactId]).length;
         legacy.textContent = `${ACC_TEXT.legacyEntry} (${waiting})`;
         legacy.hidden = accLegacyRows().length === 0;
+        // The archive is offered once there is anything it could say: a closure that
+        // may leave, or one that already has.
+        const moving = planArchive(State.schedule, todayStr()).totals;
+        archive.textContent = `${ACC_TEXT.archiveEntry} (${moving.ready})`;
+        archive.hidden = moving.ready === 0 && moving.archived === 0;
+        const draft = accDraftRead();
+        const drafted = draft && draft.day === todayStr() ? State.worker(draft.workerId) : null;
+        draftLink.textContent = drafted ? `${ACC_TEXT.draftContinue}: ${isolate(drafted.name)}` : '';
+        draftLink.hidden = !drafted;
         clear(list);
         const found = accountsList(State.schedule, todayStr(), { cycle: ACC.filter });
         const rows = found.rows.map((row, at) => ({ row, at }))
@@ -797,6 +940,10 @@ function accRow(row) {
     });
 
     const actions = el('div', 'acc-row-actions');
+    if (row.status === 'review') {
+        actions.appendChild(button(ACC_TEXT.lookAction, 'btn-secondary acc-look',
+            () => accGo('look', { flash: '', look: { workerId: row.workerId } })));
+    }
     const target = accTargetPeriod(row);
     if (target) {
         actions.appendChild(button(ACC_OWNER.closeOne, 'btn-secondary acc-close',
@@ -836,9 +983,22 @@ function accReviewPlan(form) {
     const period = { from: form.from, to: form.to };
     const probe = planClosure(State.schedule, form.workerId, period, {}, stamp);
     const rows = probe.review ? probe.review.advances : [];
+    form.mark = probe.review ? accDraftMark(probe.review) : '';
     if (probe.review && !form.suggested) {
-        const suggested = paybookSuggestAllocations(probe.review);
-        rows.forEach(row => { form.alloc[row.advanceId] = moneyText(suggested[row.advanceId] || 0); });
+        const draft = accDraftFor(form, probe.review);
+        if (draft) {
+            // What he had typed, put back - against the account it was typed against.
+            rows.forEach(row => { if (draft.alloc[row.advanceId] !== undefined) form.alloc[row.advanceId] = draft.alloc[row.advanceId]; });
+            form.extras = draft.extras.map(extra => Object.assign({}, extra));
+            form.paidMode = draft.paidMode;
+            form.paidText = draft.paidText;
+            form.method = draft.method;
+            form.restored = true;
+            form.touched = true;
+        } else {
+            const suggested = paybookSuggestAllocations(probe.review);
+            rows.forEach(row => { form.alloc[row.advanceId] = moneyText(suggested[row.advanceId] || 0); });
+        }
         form.suggested = true;
     }
     const allocations = {};
@@ -911,6 +1071,7 @@ function accDrawReview(node) {
     node.appendChild(extraError);
     node.appendChild(button(ACC_TEXT.addExtra, 'btn-secondary acc-add-extra', () => {
         form.extras.push({ amount: '', category: 'agreed', reason: '' });
+        form.touched = true;
         drawExtras();
         paint();
     }));
@@ -929,13 +1090,13 @@ function accDrawReview(node) {
     node.appendChild(el('h3', 'acc-h3', ACC_TEXT.paidTitle));
     node.appendChild(accChoice(ACC_TEXT.paidTitle, [['full', ACC_TEXT.paidFull],
         ['partial', ACC_OWNER.partial], ['none', ACC_TEXT.paidNone]], form.paidMode,
-        value => { form.paidMode = value; paint(); if (value === 'partial') paidInput.focus(); }));
+        value => { form.paidMode = value; form.touched = true; paint(); if (value === 'partial') paidInput.focus(); }));
     const paidInput = accInput(ACC_TEXT.paidAmount, form.paidText);
     const paidField = accField(ACC_TEXT.paidAmount, paidInput);
     node.appendChild(paidField);
     const methodBox = el('div', 'acc-method');
     methodBox.appendChild(accChoice(ACC_TEXT.methodTitle, [['cash', ACC_TEXT.methodCash],
-        ['transfer', ACC_TEXT.methodTransfer]], form.method, value => { form.method = value; paint(); }));
+        ['transfer', ACC_TEXT.methodTransfer]], form.method, value => { form.method = value; form.touched = true; paint(); }));
     node.appendChild(methodBox);
     const paidError = accError('');
     node.appendChild(paidError);
@@ -973,6 +1134,7 @@ function accDrawReview(node) {
             return;
         }
         accSend(plan, form, () => {
+            accDraftClear();
             const said = `${isolate(worker.name)}: ${ACC_TEXT.closedDone}`;
             if (form.group && ACC.group) {
                 ACC.group.results[accItemKey(form)] = { state: 'done' };
@@ -986,7 +1148,7 @@ function accDrawReview(node) {
     node.appendChild(confirm);
 
     let timer = null;
-    const soon = () => { clearTimeout(timer); timer = setTimeout(paint, 180); };
+    const soon = () => { form.touched = true; clearTimeout(timer); timer = setTimeout(paint, 180); };
     paidInput.addEventListener('input', () => { form.paidText = paidInput.value; soon(); });
 
     let drawnIds = null;
@@ -1004,7 +1166,7 @@ function accDrawReview(node) {
             const info = el('p', 'acc-adv-info');
             card.appendChild(info);
             const input = accInput(ACC_TEXT.advanceField, form.alloc[row.advanceId]);
-            const set = text => { input.value = text; form.alloc[row.advanceId] = text; paint(); };
+            const set = text => { input.value = text; form.alloc[row.advanceId] = text; form.touched = true; paint(); };
             input.addEventListener('input', () => { form.alloc[row.advanceId] = input.value; soon(); });
             const line = el('div', 'acc-adv-line');
             line.appendChild(accField(ACC_TEXT.advanceField, input));
@@ -1038,7 +1200,7 @@ function accDrawReview(node) {
                 kind.appendChild(option);
             });
             kind.value = extra.category;
-            kind.addEventListener('change', () => { extra.category = kind.value; paint(); });
+            kind.addEventListener('change', () => { extra.category = kind.value; form.touched = true; paint(); });
             const reason = accInput(ACC_TEXT.extraReason, extra.reason, 'text');
             reason.maxLength = 300;
             reason.addEventListener('input', () => { extra.reason = reason.value; soon(); });
@@ -1049,6 +1211,7 @@ function accDrawReview(node) {
             card.appendChild(accField(ACC_TEXT.extraReason, reason));
             card.appendChild(button(ACC_TEXT.removeExtra, 'btn-secondary', () => {
                 form.extras.splice(at, 1);
+                form.touched = true;
                 drawExtras();
                 paint();
             }));
@@ -1065,6 +1228,9 @@ function accDrawReview(node) {
         plan.reasons.filter(code => ACC_FIELD_CODES.indexOf(code) === -1)
             .map(accRefusalText).filter((text, at, list) => list.indexOf(text) === at)
             .forEach(text => page.appendChild(el('p', 'acc-note acc-note-warn', text)));
+        if (form.restored) page.appendChild(el('p', 'acc-note acc-draft-restored', ACC_TEXT.draftRestored));
+        // Kept as it is typed - but only once somebody HAS typed: opening a page writes nothing.
+        if (!form.busy) accDraftSave(form);
         accPaintBusy(confirm, form, ACC_TEXT.confirm);
         // "A field needs fixing" is true only until it is fixed.
         if (form.message === ACC_TEXT.fixFirst && plan.ok) form.message = '';
@@ -2049,4 +2215,205 @@ function accDrawLegacy(node) {
     }
     ACC.live = paint;
     paint();
+}
+
+// ---------------------------------------------------------------- «לבדיקה»: what to look at
+//
+// A man reads «לבדיקה» when something of his is held, disputed or over-settled, and until
+// Phase 5 nothing said what. This page SHOWS it - both bodies of a disagreement side by
+// side, which one every phone counts, each entry the fold holds out and why it has no
+// place, and what was paid beyond what was owed.
+//
+// IT DOES NOT SETTLE ANYTHING, and says so. Choosing between two bodies is a new record
+// (a void or an adjustment beside the one that stands, and the retirement of the other),
+// and that is a model change this phase does not make. Every figure here is the model's.
+function accEntryLines(card, entry) {
+    if (!entry || typeof entry !== 'object') return;
+    const kinds = { statement: ACC_OWNER.closure, payment: ACC_TEXT.kindPayment, deduction: ACC_TEXT.kindDeduction,
+        'void': ACC_TEXT.voidAction, adjustment: ACC_TEXT.adjustAction, legacy: ACC_TEXT.kindLegacy,
+        opening: ACC_TEXT.openingDay };
+    card.appendChild(el('strong', 'acc-look-kind', kinds[String(entry.kind)] || String(entry.kind || '')));
+    const sum = ['amount', 'netDue', 'delta', 'due'].filter(key => typeof entry[key] === 'number')[0];
+    if (sum) card.appendChild(accLine(ACC_TEXT.lookAmount, accMoney(entry[sum])));
+    if (typeof entry.date === 'string') card.appendChild(accLine(ACC_TEXT.lookDate, accDay(entry.date)));
+    if (typeof entry.by === 'string') card.appendChild(accLine(ACC_TEXT.lookBy, entry.by));
+}
+
+function accDrawLook(node) {
+    const form = ACC.look;
+    const worker = form && State.worker(form.workerId);
+    if (!form || !worker) { accGo('list'); return; }
+    const sub = el('p', 'acc-sub');
+    sub.appendChild(el('strong', 'acc-name', isolate(worker.name)));
+    accHead(node, ACC_TEXT.statusReview, sub, () => accGo('list'));
+    const banner = accBanner();
+    node.appendChild(banner);
+    const body = el('div', 'acc-look-body');
+    node.appendChild(body);
+
+    function paint() {
+        accPaintBanner(banner);
+        clear(body);
+        const account = accountFor(State.schedule, worker, todayStr());
+        const book = State.schedule.pay || {};
+        const beside = State.schedule.payConflicted || {};
+        const any = account.conflicts.length > 0 || account.held.length > 0 || account.wageOverpaid > 0
+            || overpaidAdvances(State.schedule, worker.id).length > 0;
+        if (!any) { body.appendChild(emptyHint(ACC_TEXT.lookNothing)); return; }
+        body.appendChild(el('p', 'acc-note acc-note-warn', ACC_TEXT.lookLead));
+        account.conflicts.forEach(row => {
+            const card = el('section', 'acc-look acc-look-conflict');
+            card.dataset.entry = row.id;
+            card.appendChild(el('h3', 'acc-h3', ACC_TEXT.lookConflict));
+            const counted = el('div', 'acc-look-side acc-look-counted');
+            counted.appendChild(el('p', 'acc-hint', ACC_TEXT.lookCounted));
+            accEntryLines(counted, book[row.id]);
+            card.appendChild(counted);
+            const others = Array.isArray(beside[row.id]) ? beside[row.id] : [beside[row.id]];
+            others.forEach(other => {
+                const side = el('div', 'acc-look-side acc-look-beside');
+                side.appendChild(el('p', 'acc-hint', ACC_TEXT.lookBeside));
+                accEntryLines(side, other);
+                card.appendChild(side);
+            });
+            body.appendChild(card);
+        });
+        account.held.forEach(row => {
+            const card = el('section', 'acc-look acc-look-held');
+            card.dataset.entry = row.id;
+            card.appendChild(el('h3', 'acc-h3', ACC_TEXT.lookHeld));
+            accEntryLines(card, book[row.id]);
+            card.appendChild(el('p', 'acc-hint acc-look-id', String(row.id)));
+            body.appendChild(card);
+        });
+        if (account.wageOverpaid > 0) {
+            const card = el('section', 'acc-look acc-look-overpaid');
+            card.appendChild(accLine(ACC_TEXT.lookOverpaid, accMoney(account.wageOverpaid), 'acc-line-strong'));
+            body.appendChild(card);
+        }
+        overpaidAdvances(State.schedule, worker.id).forEach(row => {
+            const card = el('section', 'acc-look acc-look-advance');
+            card.appendChild(accLine(ACC_TEXT.lookOverpaidAdvance, accMoney(row.overpaid), 'acc-line-strong'));
+            body.appendChild(card);
+        });
+        body.appendChild(el('p', 'acc-hint acc-look-nofix', ACC_TEXT.lookNoFix));
+    }
+    ACC.live = paint;
+    paint();
+}
+
+// ---------------------------------------------------------------- the archive
+//
+// WHAT WOULD MOVE, READ BEFORE ANYTHING MOVES - and then the move. The page is the
+// model's dry run (planArchive): every closed period with whether it may leave the live
+// record for the archive on the server, and if not, why; how large the server's record
+// is and how large it would be. «העבר לארכיון» hands the ready ones to
+// FarkadSync.archiveClosed, which copies, reads back, compares and only then drops - and
+// can be pressed again after any interruption: it continues from what the server holds.
+//
+// Nothing here is a closure and nothing here changes a figure: the phone keeps every
+// entry. Sizes are the model's byte counts, shown in whole kilobytes.
+function accArchiveWord(reasons) {
+    const code = (reasons || [])[0];
+    const words = { offline: ACC_TEXT.archiveOffline, differs: ACC_TEXT.archiveDiffers,
+        'copy-differs': ACC_TEXT.archiveCopyDiffers, row: ACC_TEXT.archiveCopyDiffers, server: ACC_TEXT.archiveServer,
+        busy: ACC_TEXT.archiveBusy, waiting: ACC_TEXT.closedWaiting, gate: ACC_REFUSALS.gate };
+    return Object.prototype.hasOwnProperty.call(words, code) ? words[code] : accServerText(reasons);
+}
+
+function accDrawArchive(node) {
+    const form = ACC.archive || (ACC.archive = { busy: false, message: '', moved: null });
+    accHead(node, ACC_TEXT.archiveEntry, null, () => accGo('list', { archive: null }));
+    const banner = accBanner();
+    node.appendChild(banner);
+    node.appendChild(el('p', 'acc-hint acc-archive-lead', ACC_TEXT.archiveLead));
+    const sizes = el('div', 'acc-result acc-archive-sizes');
+    const now = accLine(ACC_TEXT.archiveSizeNow, '', '', 'size-now');
+    const then = accLine(ACC_TEXT.archiveSizeAfter, '', '', 'size-after');
+    sizes.appendChild(now);
+    sizes.appendChild(then);
+    node.appendChild(sizes);
+    const message = accError('');
+    message.classList.add('acc-message');
+    const list = el('div', 'acc-archive-list');
+    node.appendChild(list);
+    node.appendChild(message);
+    const run = accPrimary(ACC_TEXT.archiveRun, () => {
+        if (form.busy) return;
+        form.busy = true;
+        form.message = '';
+        form.moved = null;
+        paint();
+        const done = answer => {
+            form.busy = false;
+            form.moved = answer && Array.isArray(answer.moved) ? answer.moved.length : 0;
+            if (!answer || answer.state === 'refused') form.message = accArchiveWord(answer ? answer.reasons : ['server']);
+            else if (answer.failed.length > 0) {
+                form.message = `${accArchiveWord([answer.failed[0].reason])} ${ACC_TEXT.archiveStopped}`;
+            }
+            render();
+        };
+        let sent;
+        try { sent = FarkadSync.archiveClosed({ today: todayStr() }); } catch (error) { sent = Promise.reject(error); }
+        Promise.resolve(sent).then(done, () => done({ state: 'refused', reasons: ['server'], moved: [], failed: [] }));
+    });
+    node.appendChild(run);
+
+    const kb = bytes => `${Math.ceil(bytes / 1024).toLocaleString('en-US')} KB`;
+    const why = { owed: ACC_TEXT.whyOwed, unanswered: ACC_TEXT.statusUnknown, overpaid: ACC_TEXT.lookOverpaid,
+        disputed: ACC_TEXT.statusReview, corrected: ACC_TEXT.whyCorrected, irregular: ACC_TEXT.whyIrregular };
+    function paint() {
+        accPaintBanner(banner);
+        const drawn = planArchive(State.schedule, todayStr());
+        const totals = drawn.totals;
+        now.lastChild.textContent = `${kb(totals.liveBytes)} ${ACC_TEXT.groupOf} ${kb(totals.limitBytes)}`;
+        then.lastChild.textContent = kb(totals.liveBytesAfter);
+        then.hidden = totals.ready === 0;
+        clear(list);
+        [['ready', ACC_TEXT.archiveReady], ['held', ACC_TEXT.archiveHeld], ['archived', ACC_TEXT.archiveDone]].forEach(([state, title]) => {
+            const rows = drawn.bundles.filter(bundle => bundle.state === state);
+            if (rows.length === 0) return;
+            const group = el('section', 'acc-archive-group acc-archive-' + state);
+            group.appendChild(el('h3', 'acc-h3', `${title} (${rows.length})`));
+            rows.forEach(bundle => {
+                const line = el('div', 'acc-archive-row');
+                line.dataset.row = bundle.rowId || '';
+                line.appendChild(el('strong', 'acc-name', isolate(bundle.name)));
+                line.appendChild(el('span', 'acc-row-period', accPeriod(bundle.periodFrom, bundle.periodTo || bundle.periodFrom)));
+                if (state === 'held') line.appendChild(el('span', 'acc-hint acc-archive-why', why[bundle.why] || ''));
+                group.appendChild(line);
+            });
+            list.appendChild(group);
+        });
+        if (totals.ready === 0 && !form.busy && form.moved === null) list.appendChild(emptyHint(ACC_TEXT.archiveNone));
+        if (form.moved !== null && form.moved > 0) {
+            list.insertBefore(el('p', 'acc-note acc-note-ok acc-archive-moved', `${ACC_TEXT.archiveMoved}: ${form.moved}`), list.firstChild);
+        }
+        message.textContent = form.message || '';
+        run.textContent = form.busy ? ACC_TEXT.archiveRunning : ACC_TEXT.archiveRun;
+        run.disabled = Boolean(form.busy);
+        run.setAttribute('aria-busy', form.busy ? 'true' : 'false');
+        run.hidden = totals.ready === 0 && !form.busy;
+    }
+    ACC.live = paint;
+    paint();
+}
+
+// ---------------------------------------------------------------- «נסגר» on «לפי עובד»
+//
+// The owner's answer of 2026-11-10: the old report is not restructured; a week of a
+// weekly man that has been closed is MARKED «נסגר» - his word, the model's label. The
+// weekly breakdown has just appended one line per week; the mark goes on the lines of the
+// weeks that are whole and closed, and on nothing else. Called from one guarded line in
+// js/ui/reports.js, so with the gate shut that report is what it was.
+function accountsMarkClosedWeeks(fold, workerId, weeks) {
+    if (!accountsOpen() || !fold || !Array.isArray(weeks)) return;
+    const lines = [...fold.querySelectorAll('.report-weekly-line')].slice(-weeks.length);
+    weeks.forEach((week, at) => {
+        const line = lines[at];
+        if (!line || !week.whole || frozenPeriodFor(State.schedule, workerId, week.from, week.to) === undefined) return;
+        line.classList.add('report-weekly-closed');
+        const when = line.querySelector('.report-weekly-when');
+        (when || line).appendChild(el('span', 'acc-chip acc-chip-closed report-weekly-mark', PAYBOOK_STATUS_LABELS.closed));
+    });
 }

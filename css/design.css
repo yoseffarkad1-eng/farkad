@@ -763,4 +763,19 @@ button.acc-row { border: 0 !important; text-align: start; align-items: stretch; 
     .acc-row-wage, .acc-line-net > .acc-num { font-size: 26px; }
 }
 
+/* Phase 5: what «לבדיקה» is about, and the archive. Rows of text and one filled button;
+   nothing here is a bar and nothing is fixed. */
+.acc-look-body, .acc-archive-list { display: flex; flex-direction: column; gap: 10px; }
+.acc-look, .acc-archive-group { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
+.acc-look-side { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.acc-look-counted { border-inline-start: 4px solid var(--ok); }
+.acc-look-beside { border-inline-start: 4px solid var(--warn); }
+.acc-look-kind { font-size: 17px; }
+.acc-look-id { direction: ltr; text-align: end; overflow-wrap: anywhere; font-size: 13px; }
+.acc-archive-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 0; border-top: 1px solid var(--line-soft); }
+.acc-archive-row > .acc-name { overflow-wrap: anywhere; }
+.acc-archive-why { flex-basis: 100%; }
+.acc-draft-restored { background: var(--surface-2); }
+.report-weekly-mark { margin-inline-start: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 13px; font-weight: 700; white-space: nowrap; }
+
 }

@@ -192,7 +192,47 @@ const WANT_TEXT = {
     legacyDueAmount: 'כמה נשאר לשלם?',
     legacySave: 'רשום',
     legacyDone: 'התשובה נרשמה.',
-    legacyEmpty: 'אין סגירות ישנות לבדיקה.'
+    legacyEmpty: 'אין סגירות ישנות לבדיקה.',
+    draftRestored: 'מה שהוקלד לפני שהעמוד נטען מחדש שוחזר. בדוק את הסכומים לפני האישור.',
+    draftContinue: 'המשך סגירה שהתחלת',
+    lookAction: 'מה לבדוק?',
+    lookLead: 'הסכומים שבמסכים הם אלה שהשרת מחזיק. שום דבר לא נמחק. עד שזה ייפתר אי אפשר לרשום לעובד הזה סגירה או תשלום.',
+    lookConflict: 'שני טלפונים רשמו את אותו רישום בסכומים שונים',
+    lookCounted: 'נספר - מה שהשרת מחזיק',
+    lookBeside: 'נשמר בצד, לא נספר',
+    lookHeld: 'רישום שלא נספר',
+    lookOverpaid: 'שולם יותר מהמגיע',
+    lookOverpaidAdvance: 'הוחזר או קוזז יותר ממה שניתן במקדמה',
+    lookNoFix: 'עדיין אין פתרון מהמסך הזה. הראה את המסך הזה למי שמתחזק את האפליקציה.',
+    lookNothing: 'אין מה לבדוק לעובד הזה.',
+    lookAmount: 'סכום',
+    lookDate: 'תאריך',
+    lookBy: 'נרשם במכשיר',
+    kindPayment: 'תשלום',
+    kindDeduction: 'ניכוי נוסף',
+    kindLegacy: 'תשובה על סגירה ישנה',
+    archiveEntry: 'ארכיון סגירות',
+    archiveLead: 'סגירה ששולמה במלואה עוברת מהרישום החי לארכיון בשרת, כדי שהרישום לא יתמלא. שום דבר לא נמחק: הסגירה נשארת במכשיר הזה ובהיסטוריה בדיוק כמו שהיא.',
+    archiveReady: 'מוכנות להעברה',
+    archiveHeld: 'נשארות ברישום',
+    archiveDone: 'כבר בארכיון',
+    archiveSizeNow: 'גודל הרישום בשרת',
+    archiveSizeAfter: 'אחרי ההעברה',
+    archiveRun: 'העבר לארכיון',
+    archiveRunning: 'מעביר…',
+    archiveNone: 'אין סגירות שמוכנות להעברה.',
+    archiveMoved: 'הועברו לארכיון',
+    archiveStopped: 'ההעברה נעצרה. מה שכבר הועבר נמצא בארכיון, ושום דבר לא אבד. אפשר לנסות שוב.',
+    archiveOffline: 'אין חיבור לשרת. ההעברה נעשית רק כשיש חיבור. שום דבר לא השתנה.',
+    archiveDiffers: 'הסגירה בשרת אינה זהה למה שבמכשיר הזה. היא נשארת ברישום.',
+    archiveCopyDiffers: 'העותק שבארכיון אינו זהה לסגירה. היא נשארת ברישום.',
+    archiveServer: 'השרת לא קיבל את ההעברה. שום דבר לא השתנה. נסה שוב.',
+    archiveBusy: 'הרישום בשרת השתנה כמה פעמים בזמן ההעברה. נסה שוב בעוד רגע.',
+    whyOwed: 'עוד לא שולם במלואו',
+    whyCorrected: 'יש תיקון למקדמה שקוזזה בסגירה הזאת',
+    whyIrregular: 'רישום ישן שאי אפשר להעביר',
+    closedWaiting: 'במכשיר הזה חסר הפירוט של סגירות שכבר בארכיון. עד שהוא יירד מהשרת המכשיר לא מתעדכן, ואי אפשר לרשום ממנו סגירה או תשלום. זה קורה מעצמו כשיש חיבור.',
+    closedBroken: 'סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה.'
 };
 
 const WANT_REFUSALS = {
@@ -360,7 +400,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
     const shipped = SCHEMA.slice(start, SCHEMA.indexOf('};', start));
     check('the shipped flag is false', /\n\s*paybook: false,/.test(shipped) && !/paybook: true/.test(shipped));
 
-    // THE FOUR HOOKS, and nothing else, are what js/ui/reports.js gained. Taken out, the
+    // THE FIVE HOOKS (four at Phase 4, one more at Phase 5), and nothing else, are what js/ui/reports.js gained. Taken out, the
     // file is byte for byte main's at v174 - so with the hooks answering false, the
     // «מקדמות» tab, «קיזוז מהשכר» and the old closure dialog are built by the same code.
     const HOOKS = [
@@ -378,6 +418,11 @@ const plain = value => JSON.parse(JSON.stringify(value));
 `,
         `    // v176, SHUT: with the pay book open this block is one button to the review page.
     if (typeof accountsClosureDoor === 'function' && accountsOpen()) return accountsClosureDoor(worker);
+`,
+        // PHASE 5, the fifth: the owner's answer of 2026-11-10 - a closed week of the old
+        // «לפי עובד» report is marked «נסגר». One line after the weeks are drawn.
+        `        // v176 (Phase 5), SHUT: with the pay book open a closed week is marked «נסגר».
+        if (typeof accountsMarkClosedWeeks === 'function' && accountsOpen()) accountsMarkClosedWeeks(fold, item.row.workerId, item.weeks);
 `
     ];
     let without = REPORTS;
@@ -385,7 +430,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
         given('a hook is in js/ui/reports.js exactly once', without.split(hook).length === 2, hook.slice(0, 60));
         without = without.replace(hook, '');
     });
-    same('js/ui/reports.js without its four hooks is main\'s file at 893def8 (v174), byte for byte',
+    same('js/ui/reports.js without its five hooks is main\'s file at 893def8 (v174), byte for byte',
         without === git(['show', '893def8:js/ui/reports.js']), true);
     check('every hook asks the gate before it does anything', HOOKS.every(hook =>
         /accountsTakesTab\(\)|accountsRoutesClosure\(|accountsOpen\(\)/.test(hook) && /typeof \w+ === 'function'/.test(hook)));
@@ -439,7 +484,21 @@ const plain = value => JSON.parse(JSON.stringify(value));
     same('the one ordinary commit is the carry approval, by the ledger\'s own writer',
         [(code.match(/State\.commitMany\(/g) || []).length, (code.match(/recordCarryApproval\(/g) || []).length], [1, 1]);
     same('the old closure writer is not called from here', code.match(/closePeriodChanges|planPeriodClosure|recordPeriodClosed/g), null);
-    same('nothing is kept in storage: a draft of a closure is not a closure', code.match(/localStorage|Store\.\w+/g), null);
+    // MOVED AT PHASE 5, deliberately. Phase 4 pinned «nothing is kept in storage»: what was
+    // typed into a closure lived in memory and a reload lost it. The owner's list asks for
+    // a draft that survives a reload, so there is now exactly ONE key, of this file's own,
+    // read, written and removed in one place each - and still no closure in it: a draft is
+    // typing, it is saved only after somebody has typed, and it is put back only against
+    // the account it was typed against, on the day it was typed.
+    same('ONE thing is kept in storage - the draft - under one key of its own, through Store',
+        [code.match(/localStorage/g), (code.match(/Store\.\w+\([^)]*/g) || []).sort()],
+        [null, ['Store.get(ACC_DRAFT_KEY', 'Store.remove(ACC_DRAFT_KEY', 'Store.set(ACC_DRAFT_KEY, JSON.stringify(draft']]);
+    same('that key is the draft\'s and nothing else\'s', /const ACC_DRAFT_KEY = '(\w+)';/.exec(code)[1], 'farkadPayDraft');
+    check('a draft is written only after somebody typed or tapped: opening a page writes nothing',
+        /function accDraftSave\(form\) \{\n    if \(!form\.touched \|\| !form\.mark\) return;/.test(code));
+    check('and is put back only for the same man, period, day and account - else it is removed',
+        /held\.workerId !== form\.workerId \|\| held\.from !== form\.from \|\| held\.to !== form\.to\) return null;\n    if \(held\.day !== todayStr\(\) \|\| held\.mark !== accDraftMark\(review\)\) \{ accDraftClear\(\); return null; \}/.test(code));
+    check('a closure that went through takes its draft with it', /accSend\(plan, form, \(\) => \{\n            accDraftClear\(\);/.test(code));
     // NO MONEY ARITHMETIC. The only minus sign applied to a figure flips the sign of one
     // the model already computed, for display; sums are the model's paybookSum.
     const arithmetic = code.split('\n').filter(lineText => /\b(gross|netDue|due|paid|amount|left|debt|wageDue|deducted)\b[^;\n]*[^=!<>-][+*/][^+=/*]/.test(lineText)

@@ -38,6 +38,7 @@ window.FarkadSync.connect({
     transact: (patch, closed) => call('transact', [patch, closed]),
     readClosed: id => call('readClosed', [id]),
     readReceipt: id => call('readReceipt', [id]),
+    archiveClosed: (patch, removals, ids) => call('archiveClosed', [patch, removals, ids]),
     archive: () => Promise.resolve(),
     archiveDates: () => Promise.resolve([]),
     archiveRead: () => Promise.resolve(null),
@@ -78,14 +79,14 @@ export function makeBrowserCloud(options = {}) {
             }
             if (!phone.online) {
                 const fields = { code: 'unavailable' };
-                if (['update', 'save', 'transact'].includes(method)) fields.unsent = true;
+                if (['update', 'save', 'transact', 'archiveClosed'].includes(method)) fields.unsent = true;
                 return { error: { message: 'client is offline', fields } };
             }
             try {
                 return { value: await cloud.adapter[method](...(args || [])) };
             } catch (error) {
                 const fields = {};
-                ['code', 'unsent', 'revision', 'document', 'closed'].forEach(key => {
+                ['code', 'unsent', 'revision', 'document', 'closed', 'paths'].forEach(key => {
                     if (error && error[key] !== undefined) fields[key] = error[key];
                 });
                 return { error: { message: String((error && error.message) || error), fields } };

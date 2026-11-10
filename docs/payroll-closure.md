@@ -186,7 +186,7 @@ string in `index.html` and a pinned expectation in several suites; it was not do
 | שולם | status `paid` (model: `PAYBOOK_STATUS_LABELS`) |
 | יתרה פתוחה | status `open` (model: `PAYBOOK_STATUS_LABELS`) |
 
-#### Proposed: the screens (155)
+#### Proposed: the screens (195)
 
 Existing words reused as they are: «מקדמות», «חיפוש עובד», «לא נמצא עובד.», «מזומן», «העברה», «הבנתי», «כבוי», «אשר את המעבר», «אין מקדמות פתוחות לעובד הזה.» and the filter's «שבועי» / «דו־שבועי».
 
@@ -347,6 +347,46 @@ Existing words reused as they are: «מקדמות», «חיפוש עובד», «
 | `legacySave` | רשום | first run and the older closures |
 | `legacyDone` | התשובה נרשמה. | first run and the older closures |
 | `legacyEmpty` | אין סגירות ישנות לבדיקה. | first run and the older closures |
+| `draftRestored` | מה שהוקלד לפני שהעמוד נטען מחדש שוחזר. בדוק את הסכומים לפני האישור. | Phase 5: a draft kept across a reload |
+| `draftContinue` | המשך סגירה שהתחלת | Phase 5: a draft kept across a reload |
+| `lookAction` | מה לבדוק? | Phase 5: what «לבדיקה» is about |
+| `lookLead` | הסכומים שבמסכים הם אלה שהשרת מחזיק. שום דבר לא נמחק. עד שזה ייפתר אי אפשר לרשום לעובד הזה סגירה או תשלום. | Phase 5: what «לבדיקה» is about |
+| `lookConflict` | שני טלפונים רשמו את אותו רישום בסכומים שונים | Phase 5: what «לבדיקה» is about |
+| `lookCounted` | נספר - מה שהשרת מחזיק | Phase 5: what «לבדיקה» is about |
+| `lookBeside` | נשמר בצד, לא נספר | Phase 5: what «לבדיקה» is about |
+| `lookHeld` | רישום שלא נספר | Phase 5: what «לבדיקה» is about |
+| `lookOverpaid` | שולם יותר מהמגיע | Phase 5: what «לבדיקה» is about |
+| `lookOverpaidAdvance` | הוחזר או קוזז יותר ממה שניתן במקדמה | Phase 5: what «לבדיקה» is about |
+| `lookNoFix` | עדיין אין פתרון מהמסך הזה. הראה את המסך הזה למי שמתחזק את האפליקציה. | Phase 5: what «לבדיקה» is about |
+| `lookNothing` | אין מה לבדוק לעובד הזה. | Phase 5: what «לבדיקה» is about |
+| `lookAmount` | סכום | Phase 5: what «לבדיקה» is about |
+| `lookDate` | תאריך | Phase 5: what «לבדיקה» is about |
+| `lookBy` | נרשם במכשיר | Phase 5: what «לבדיקה» is about |
+| `kindPayment` | תשלום | Phase 5: what «לבדיקה» is about |
+| `kindDeduction` | ניכוי נוסף | Phase 5: what «לבדיקה» is about |
+| `kindLegacy` | תשובה על סגירה ישנה | Phase 5: what «לבדיקה» is about |
+| `archiveEntry` | ארכיון סגירות | Phase 5: the archive |
+| `archiveLead` | סגירה ששולמה במלואה עוברת מהרישום החי לארכיון בשרת, כדי שהרישום לא יתמלא. שום דבר לא נמחק: הסגירה נשארת במכשיר הזה ובהיסטוריה בדיוק כמו שהיא. | Phase 5: the archive |
+| `archiveReady` | מוכנות להעברה | Phase 5: the archive |
+| `archiveHeld` | נשארות ברישום | Phase 5: the archive |
+| `archiveDone` | כבר בארכיון | Phase 5: the archive |
+| `archiveSizeNow` | גודל הרישום בשרת | Phase 5: the archive |
+| `archiveSizeAfter` | אחרי ההעברה | Phase 5: the archive |
+| `archiveRun` | העבר לארכיון | Phase 5: the archive |
+| `archiveRunning` | מעביר… | Phase 5: the archive |
+| `archiveNone` | אין סגירות שמוכנות להעברה. | Phase 5: the archive |
+| `archiveMoved` | הועברו לארכיון | Phase 5: the archive |
+| `archiveStopped` | ההעברה נעצרה. מה שכבר הועבר נמצא בארכיון, ושום דבר לא אבד. אפשר לנסות שוב. | Phase 5: the archive |
+| `archiveOffline` | אין חיבור לשרת. ההעברה נעשית רק כשיש חיבור. שום דבר לא השתנה. | Phase 5: the archive |
+| `archiveDiffers` | הסגירה בשרת אינה זהה למה שבמכשיר הזה. היא נשארת ברישום. | Phase 5: the archive |
+| `archiveCopyDiffers` | העותק שבארכיון אינו זהה לסגירה. היא נשארת ברישום. | Phase 5: the archive |
+| `archiveServer` | השרת לא קיבל את ההעברה. שום דבר לא השתנה. נסה שוב. | Phase 5: the archive |
+| `archiveBusy` | הרישום בשרת השתנה כמה פעמים בזמן ההעברה. נסה שוב בעוד רגע. | Phase 5: the archive |
+| `whyOwed` | עוד לא שולם במלואו | Phase 5: the archive |
+| `whyCorrected` | יש תיקון למקדמה שקוזזה בסגירה הזאת | Phase 5: the archive |
+| `whyIrregular` | רישום ישן שאי אפשר להעביר | Phase 5: the archive |
+| `closedWaiting` | במכשיר הזה חסר הפירוט של סגירות שכבר בארכיון. עד שהוא יירד מהשרת המכשיר לא מתעדכן, ואי אפשר לרשום ממנו סגירה או תשלום. זה קורה מעצמו כשיש חיבור. | Phase 5: a phone that lacks the detail |
+| `closedBroken` | סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה. | Phase 5: a phone that lacks the detail |
 
 #### Proposed: one sentence per refusal code (47)
 
@@ -402,7 +442,7 @@ Existing words reused as they are: «מקדמות», «חיפוש עובד», «
 | `done` | כבר נרשם |
 | `server-first` | רישום כזה נעשה רק מול השרת. |
 
-In all: **202 proposed strings** (155 + 47), beside the owner's fourteen.
+In all: **242 proposed strings** (195 + 47), beside the owner's fourteen.
 
 ## Phase 3 — one debt, the server-first closure, and the split (v175)
 

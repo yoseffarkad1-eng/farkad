@@ -987,6 +987,8 @@ function renderWeeklyBreakdown(rows) {
             dateRange(formatShortDate(parseLocalDate(week.from)),
                 formatShortDate(parseLocalDate(week.to))),
             facts(week))));
+        // v176 (Phase 5), SHUT: with the pay book open a closed week is marked «נסגר».
+        if (typeof accountsMarkClosedWeeks === 'function' && accountsOpen()) accountsMarkClosedWeeks(fold, item.row.workerId, item.weeks);
         const sum = pick => item.weeks.reduce((total, week) => total + Number(pick(week) || 0), 0);
 
         // A WEEK'S WAGE CAN BE UNKNOWN, AND UNKNOWN IS NOT NOTHING.
