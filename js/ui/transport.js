@@ -128,6 +128,24 @@ const TRANSPORT_TEXT = Object.freeze({
     retireLead: 'הרכב לא יופיע עוד בשיבוץ.',
     save: 'שמירה',
 
+    // --- a vehicle turned off, and on again: the lasting switch, beside its name in the
+    // list. The first four are THE ROSTER'S OWN WORDS for a worker (js/ui/roster.js: the
+    // «פעיל» / «כבוי» switch and its two spoken labels) - the owner asked for "like the
+    // workers I turn off in צוות", so it is said as it is said there. The rest are new,
+    // and two of them follow the roster's sentences word for word («עובדים כבויים (N)»,
+    // «כל העובדים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.»).
+    vehicleOn: 'פעיל',
+    vehicleOff: 'כבוי',
+    turnOffLabel: v => `הסתר זמנית את ${v}`,
+    turnOnLabel: v => `הפעל את ${v}`,
+    offVehicles: n => `רכבים כבויים (${n})`,
+    offFrom: date => `כבוי החל מ-${date}`,
+    allOff: 'כל הרכבים כבויים כרגע. אפשר להפעיל אותם בכפתור ליד השם.',
+    // said once, in the app's own dialog, when the vehicle turned off had men in it on
+    // the day on the screen
+    offToldTitle: v => `הרכב כבוי: ${v}`,
+    offReturned: n => (n === 1 ? 'עובד אחד שישב בו חזר לממתינים.' : `${n} עובדים שישבו בו חזרו לממתינים.`),
+
     // --- the driver's message: the button, and what the card says after it
     openWhatsapp: 'פתיחה בוואטסאפ',
     opened: 'נפתח בוואטסאפ',
@@ -189,7 +207,57 @@ const TRANSPORT_TEXT = Object.freeze({
     sNoneSeated: 'אף עובד לא שובץ לרכב.',
     sWaiting: n => `ממתינים לשיבוץ (${n}):`,
     sEmpty: list => `רכבים ריקים: ${list}`,
-    sHome: list => `רכבים שלא זמינים היום: ${list}`
+    sHome: list => `רכבים שלא זמינים היום: ${list}`,
+
+    // --- the report of a period: the button on the screen, and its dialog. The four
+    // ranges are the pay report's own words (js/ui/reports.js); the dialog's four buttons
+    // are the summary's (`summarySend`, `summaryCopy`, `summaryPicture`, `summaryClose`).
+    reportButton: 'דוח הסעות לתקופה',
+    reportTitle: 'דוח הסעות',
+    reportRanges: 'בחירת תקופה',
+    reportThisWeek: 'השבוע',
+    reportLastWeek: 'שבוע קודם',
+    reportThisMonth: 'החודש',
+    reportLastMonth: 'חודש שעבר',
+    reportLabel: 'תצוגה מקדימה של הדוח',
+    // the name of the picture's file; the dates as the record writes them
+    reportFile: (from, to) => `farkad-דוח-הסעות-${from}_${to}.png`,
+
+    // --- the report itself. It borrows nothing but the buttons.
+    //   דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:
+    //
+    //   ימים עם שיבוץ שמור במכשיר הזה: 3 מתוך 7
+    //   ב-4 ימים אין שיבוץ שמור במכשיר הזה.
+    //
+    //   רכב: טויוטה קורולה 2016 – יצא ב-3 ימים
+    //   נהג: סאמר – 2 ימים
+    //   נהג: ראמי – יום אחד
+    //   מושבים תפוסים: 11 בסך הכול, 3.7 בממוצע ליום
+    //
+    //   רכבים בלי עובדים בימים עם שיבוץ: סוואנה 2010
+    //
+    //   נהגים בתקופה:
+    //   - סאמר – 3 ימים: טויוטה קורולה 2016 (2), פולקסווגן 2018 (1)
+    // A DAY WITH NO STORED PLAN IS SAID TO HAVE NONE. It is never counted as a day a
+    // vehicle stayed home: this phone not having a plan is a fact about the phone.
+    // As in the summary, a vehicle's name never starts a line.
+    rCount: n => (n === 1 ? 'יום אחד' : `${n} ימים`),
+    rIn: n => (n === 1 ? 'ביום אחד' : `ב-${n} ימים`),
+    rHeading: (range, from, to) => `דוח הסעות – ${range}, ${from} עד ${to}:`,
+    rDays: (a, b) => `ימים עם שיבוץ שמור במכשיר הזה: ${a} מתוך ${b}`,
+    rMissing: n => (n === 1 ? 'ביום אחד אין שיבוץ שמור במכשיר הזה.' : `ב-${n} ימים אין שיבוץ שמור במכשיר הזה.`),
+    rPruned: (days, date, keep) => `מתוכם ${days} לפני ${date}: שיבוצים ישנים מ-${keep} ימים נמחקים מהמכשיר הזה.`,
+    rUnreadable: n => (n === 1 ? 'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.'
+        : `שיבוצים של ${n} ימים שמורים במכשיר ולא נקראו, ולא נספרו.`),
+    rVehicle: (v, days) => `רכב: ${v} – יצא ${days}`,
+    rDriverDays: (name, days) => `נהג: ${name} – ${days}`,
+    rNoDriverDays: days => `בלי נהג – ${days}`,
+    rSeats: (total, average) => `מושבים תפוסים: ${total} בסך הכול, ${average} בממוצע ליום`,
+    rNoneOut: 'בימים עם שיבוץ אף רכב לא יצא עם עובדים.',
+    rIdle: list => `רכבים בלי עובדים בימים עם שיבוץ: ${list}`,
+    rDriversTitle: 'נהגים בתקופה:',
+    rDriver: (name, days, vehicles) => `- ${name} – ${days}: ${vehicles}`,
+    rDriverVehicle: (v, n) => `${v} (${n})`
 });
 
 // ================================================================== the store
@@ -294,6 +362,11 @@ function transportReadVehicle(item) {
     const seats = item.seats;
     if (!name || !Number.isInteger(seats) || seats < 2 || seats > TRANSPORT_MAX_SEATS) return null;
     const vehicle = { id: item.id, name, seats, active: item.active !== false };
+    // TURNED OFF, AND FROM WHICH DAY (below, "a vehicle turned off"). A list written by
+    // v171-v180 has no such field and every vehicle on it is on. Only a real date is
+    // believed: anything else is not a day a vehicle can be off from, and the vehicle is
+    // on - shown, where somebody will see it, rather than hidden by bytes nobody typed.
+    if (isRealDate(item.off)) vehicle.off = item.off;
     if (Array.isArray(item.rows) && item.rows.every(n => Number.isInteger(n) && n > 0)
         && item.rows.reduce((sum, n) => sum + n, 0) === seats) vehicle.rows = item.rows.slice();
     return vehicle;
@@ -447,6 +520,32 @@ function transportDayOf(date) {
     return transportDays[date];
 }
 
+// A DAY LOOKED AT, NOT LOADED - for the report of a period, which reads a month of days
+// and must leave every one of them exactly as it found it. transportDayOf above is the
+// wrong tool for that twice over: it copies bytes that will not read to a key of their
+// own (a write), and it keeps every day it is asked about in this session's memory.
+// This one asks the disk for the bytes and answers one of three things:
+//   'plan'        somebody is seated in it. The session's own copy is preferred when
+//                 there is one, so the report says what the screen says about a change
+//                 the disk refused;
+//   'unreadable'  there are bytes and they will not read. Left where they are;
+//   'none'        no key - or a key in which nobody sits: a day somebody opened, or
+//                 emptied again, holds no plan to count.
+// It writes nothing and remembers nothing.
+function transportPeekDay(date) {
+    if (!transportEnabled() || !isRealDate(date)) return { state: 'none', day: null };
+    let raw = null;
+    try { raw = Store.get(TRANSPORT_DAY_PREFIX + date); } catch (error) { raw = null; }
+    let day = transportDays[date] || null;
+    if (raw !== null && raw !== undefined) {
+        const parsed = transportJson(raw);
+        if (!parsed) return { state: 'unreadable', day: null };
+        if (!day) day = transportReadDay(parsed);
+    }
+    const seated = day && Object.keys(day.trips).some(id => TransportEngine.occupants(day.trips[id]).length > 0);
+    return seated ? { state: 'plan', day } : { state: 'none', day: null };
+}
+
 function transportSaveDay(date) {
     if (!transportEnabled() || !isRealDate(date)) return false;
     return transportWrite(TRANSPORT_DAY_PREFIX + date, transportDayOf(date));
@@ -493,11 +592,38 @@ function transportContext(date) {
         .map(worker => ({ id: worker.id, name: worker.name, phone: worker.phone }));
     return {
         workers,
-        vehicles: settings.vehicles.filter(vehicle => vehicle.active),
+        vehicles: settings.vehicles.filter(vehicle => vehicle.active && !transportVehicleOffOn(vehicle, date)),
         sites: (schedule.places || []).filter(place => place && place.active !== false)
             .map(place => ({ id: place.id, name: place.name })),
         attendance
     };
+}
+
+// A VEHICLE TURNED OFF. The owner, 2026-11-10, having tried the screen: "sometimes cars
+// break down, or I don't want them to show in the list. Like I have workers whom I turn
+// off from the list and turn back on in the צוות page - because sometimes the car sits for
+// more than a day." «לא זמין היום» is one day's answer and has to be given again every
+// morning; this is the lasting one.
+//
+// WHAT IS KEPT is one field on the vehicle, in the list this phone already keeps:
+// `off: '<date>'` - THE DAY IT IS OFF FROM, which is the day that was on the screen when
+// it was turned off. Absent means on. From that day forward the vehicle is not one of the
+// day's vehicles: it is filtered out HERE, before the engine sees the list, so the engine
+// (js/model/transport.js, unchanged) draws no car for it, and the summary, the driver's
+// message, a drop and the report - which all read through transportContext - have none
+// either. A day BEFORE it is history and reads as it was stored: the car went out that
+// morning, and the report of a period goes on counting it.
+//
+// TURNING IT OFF OR ON WRITES THE LIST AND NOTHING ELSE. No day is rewritten - not the
+// day on the screen and not tomorrow's plan. The men a stored plan has in that car are
+// drawn as waiting, because the car is not there to draw them in (the same reading that
+// puts a retired vehicle's men back in the tray); their seats are still in that day's
+// bytes. So turned on again, a day nobody changed in between shows them where they sat.
+// A day somebody DID change in between was rewritten by that change, as the picture then
+// read (transportKeep - v174's rule), and the picture had no such car: that day has let
+// go of it, which is what stops a man who was given another seat from jumping back.
+function transportVehicleOffOn(vehicle, date) {
+    return Boolean(vehicle && vehicle.off) && !(isRealDate(date) && date < vehicle.off);
 }
 
 function transportFind(list, id) {
@@ -802,6 +928,32 @@ function transportRetireVehicle(vehicleId) {
     return true;
 }
 
+// On or off, lastingly (above, "a vehicle turned off"). `from` is the day it is off
+// from; nothing brings it back. Refused, with nothing changed: a vehicle that is not on
+// the list, a day that is not one, and the state it is already in - a vehicle that is
+// off keeps the day it has been off from.
+function transportSetVehicleOff(vehicleId, from) {
+    if (!transportEnabled()) return false;
+    const vehicle = transportFind(transportSettings().vehicles, vehicleId);
+    if (!vehicle || !vehicle.active) return false;
+    if (from === null || from === undefined) {
+        if (!vehicle.off) return false;
+        delete vehicle.off;
+    } else {
+        if (!isRealDate(from) || vehicle.off) return false;
+        vehicle.off = from;
+    }
+    transportSaveSettings();
+    return true;
+}
+
+// How many men are drawn in a vehicle on a day - what somebody turning it off is told.
+function transportSeatedIn(date, vehicleId) {
+    if (!transportEnabled() || !isRealDate(date)) return 0;
+    const seats = TransportEngine.layout(transportContext(date), transportDayOf(date)).cars[vehicleId];
+    return seats ? seats.filter(Boolean).length : 0;
+}
+
 // ================================================================== the screen
 
 let transportDate = null;        // the day the open panel is about; fixed while it is open
@@ -882,6 +1034,7 @@ function closeTransport() {
     if (!parts.panel || !transportIsOpen()) return;
     transportDragEnd(false);
     closeTransportSummary();
+    closeTransportReport();
     parts.panel.classList.remove('open');
     parts.panel.setAttribute('aria-hidden', 'true');
     document.removeEventListener('keydown', transportKeydown);
@@ -890,6 +1043,9 @@ function closeTransport() {
     const back = transportReturnFocus;
     transportReturnFocus = null;
     if (back && document.contains(back) && back.focus) back.focus({ preventScroll: true });
+    // Inside the seder's journey this screen is a station, and leaving it is a step back
+    // (js/ui/journey.js). Absent, or with no journey on the screen, this is nothing.
+    if (typeof journeyTransportClosed === 'function') journeyTransportClosed();
 }
 
 // The settings sheet's contract (js/ui/settings.js), by the pieces js/ui/modal.js already
@@ -1029,6 +1185,7 @@ function renderTransport() {
     // changed under it (a snapshot from another phone moved a man's site) changes its
     // words too.
     transportSummaryRefresh();
+    transportReportRefresh();
 
     parts.body.scrollTop = scrolled;
     const chipsAfter = document.getElementById('transportChips');
@@ -1038,6 +1195,8 @@ function renderTransport() {
         const again = [...parts.panel.querySelectorAll('[data-tk]')].find(node => node.dataset.tk === focused);
         if (again && !again.disabled && again !== document.activeElement) again.focus({ preventScroll: true });
     }
+    // The journey's bar above the list says what this picture says (js/ui/journey.js).
+    if (typeof journeyTransportDrawn === 'function') journeyTransportDrawn();
 }
 
 function transportView(ctx, day, date, picture, waiting) {
@@ -1061,10 +1220,23 @@ function transportView(ctx, day, date, picture, waiting) {
     // about a man who is drawn on that card.
     const issues = TransportEngine.validate(ctx, { unavailable: day.unavailable, status: day.status,
         trips: TransportEngine.tripsOf(ctx, picture.cars) });
-    if (ctx.vehicles.length === 0) root.appendChild(el('p', 'empty-hint', T.noVehicles));
+    // No vehicle goes out: because the list is empty, or because every one on it is off
+    // - and then it says which, and where they are turned on again.
+    if (ctx.vehicles.length === 0) {
+        root.appendChild(el('p', 'empty-hint',
+            transportSettings().vehicles.some(vehicle => vehicle.active) ? T.allOff : T.noVehicles));
+    }
     ctx.vehicles.forEach(vehicle => {
         root.appendChild(transportCard(ctx, date, vehicle, picture.cars[vehicle.id] || null, issues));
     });
+    // The report of a period: the same kind of button, UNDER THE LAST CAR. It is looked
+    // at once a week or once a month, so it does not take a row of the first screen from
+    // the cars - on the 375px phone that row is the second car's name. Above the two
+    // folded lines, which are setup; this is not.
+    const period = transportButton(T.reportButton, 'report', () => openTransportReport());
+    period.id = 'transportReportOpen';
+    period.classList.add('transport-wide');
+    root.appendChild(period);
     const away = ctx.workers.filter(worker => ctx.attendance[worker.id] && day.status[worker.id]);
     if (away.length > 0) root.appendChild(transportAway(ctx, day, date, away));
     root.appendChild(transportFleet());
@@ -1394,45 +1566,12 @@ function transportFleet() {
     const T = TRANSPORT_TEXT;
     const fold = transportFold('transportFleet', 'fleet', T.vehiclesRow, transportFleetOpen,
         open => { transportFleetOpen = open; });
-    const vehicles = transportSettings().vehicles.filter(vehicle => vehicle.active);
-    if (vehicles.length === 0) fold.appendChild(el('p', 'empty-hint', T.noVehicles));
-    vehicles.forEach(vehicle => {
-        const item = el('div', 'transport-fleet-item');
-        item.dataset.vehicle = vehicle.id;
-        const titles = el('div', 'transport-row');
-        titles.appendChild(el('div', 'transport-name transport-grow', vehicle.name));
-        titles.appendChild(el('div', 'transport-sub', T.seats(vehicle.seats)));
-        item.appendChild(titles);
-        const more = document.createElement('details');
-        more.className = 'transport-more';
-        const handle = el('summary', null, T.editVehicle);
-        handle.dataset.tk = 'more:' + vehicle.id;
-        handle.setAttribute('aria-label', `${T.editVehicle}: ${transportRli(vehicle.name)}`);
-        more.appendChild(handle);
-        const tools = el('div', 'transport-row transport-wrap');
-        tools.appendChild(transportButton(T.renameVehicle, 'rename:' + vehicle.id, () => {
-            transportAskVehicleName(vehicle).then(name => {
-                if (name) transportRenameVehicle(vehicle.id, name);
-                renderTransportIfOpen();
-            });
-        }));
-        tools.appendChild(transportButton(T.changeSeats, 'seats:' + vehicle.id, () => {
-            transportAskSeats(vehicle.name, vehicle.seats).then(seats => {
-                if (seats) transportSetVehicleSeats(vehicle.id, seats);
-                renderTransportIfOpen();
-            });
-        }));
-        tools.appendChild(transportButton(T.retireVehicle, 'retire:' + vehicle.id, () => {
-            askConfirm({ title: T.retireTitle(transportRli(vehicle.name)), message: T.retireLead,
-                ok: T.retireVehicle, cancel: T.cancel }).then(yes => {
-                if (yes) transportRetireVehicle(vehicle.id);
-                renderTransportIfOpen();
-            });
-        }));
-        more.appendChild(tools);
-        item.appendChild(more);
-        fold.appendChild(item);
-    });
+    const listed = transportSettings().vehicles.filter(vehicle => vehicle.active);
+    const on = listed.filter(vehicle => !vehicle.off);
+    const off = listed.filter(vehicle => vehicle.off);
+    if (listed.length === 0) fold.appendChild(el('p', 'empty-hint', T.noVehicles));
+    else if (on.length === 0) fold.appendChild(el('p', 'empty-hint', T.allOff));
+    on.forEach(vehicle => fold.appendChild(transportFleetItem(vehicle)));
     const add = transportButton(T.addVehicle, 'addVehicle', () => {
         transportAskVehicleName(null).then(name => {
             if (!name) return null;
@@ -1445,7 +1584,98 @@ function transportFleet() {
     add.id = 'transportAddVehicle';
     add.classList.add('transport-wide');
     fold.appendChild(add);
+    // THE ONES THAT ARE OFF: a quiet group of their own under everything else, as the
+    // roster keeps its «עובדים כבויים» - they are not part of the working list, and each
+    // has its switch beside its name, so one touch brings it back.
+    if (off.length > 0) {
+        const group = el('div', 'transport-fleet-off');
+        group.id = 'transportFleetOff';
+        group.appendChild(el('h4', 'transport-sub', T.offVehicles(off.length)));
+        off.forEach(vehicle => group.appendChild(transportFleetItem(vehicle)));
+        fold.appendChild(group);
+    }
     return fold;
+}
+
+// One vehicle of the list: its name and seats, ITS SWITCH, and its three tools behind a
+// row of their own. The switch is the roster's (js/ui/roster.js, the worker's «פעיל» /
+// «כבוי»): a real switch to a screen reader, said with the roster's two labels.
+function transportFleetItem(vehicle) {
+    const T = TRANSPORT_TEXT;
+    const off = Boolean(vehicle.off);
+    const item = el('div', 'transport-fleet-item' + (off ? ' transport-fleet-item-off' : ''));
+    item.dataset.vehicle = vehicle.id;
+    const titles = el('div', 'transport-row');
+    titles.appendChild(el('div', 'transport-name transport-grow', vehicle.name));
+    titles.appendChild(el('div', 'transport-sub', T.seats(vehicle.seats)));
+    item.appendChild(titles);
+    const toggle = transportButton(off ? T.vehicleOff : T.vehicleOn, 'onoff:' + vehicle.id,
+        () => transportToggleVehicle(vehicle.id));
+    toggle.classList.add('transport-quiet', 'transport-onoff');
+    toggle.dataset.onoff = vehicle.id;
+    toggle.setAttribute('role', 'switch');
+    toggle.setAttribute('aria-checked', off ? 'false' : 'true');
+    toggle.setAttribute('aria-label', (off ? T.turnOnLabel : T.turnOffLabel)(transportRli(vehicle.name)));
+    item.appendChild(toggle);
+    // Since when, said on the row: the day it is off from is the day that was on the
+    // screen, and a day before it still draws the car.
+    if (off) {
+        item.appendChild(el('div', 'transport-sub transport-off-from',
+            T.offFrom(formatFullDate(parseLocalDate(vehicle.off)))));
+    }
+    const more = document.createElement('details');
+    more.className = 'transport-more';
+    const handle = el('summary', null, T.editVehicle);
+    handle.dataset.tk = 'more:' + vehicle.id;
+    handle.setAttribute('aria-label', `${T.editVehicle}: ${transportRli(vehicle.name)}`);
+    more.appendChild(handle);
+    const tools = el('div', 'transport-row transport-wrap');
+    tools.appendChild(transportButton(T.renameVehicle, 'rename:' + vehicle.id, () => {
+        transportAskVehicleName(vehicle).then(name => {
+            if (name) transportRenameVehicle(vehicle.id, name);
+            renderTransportIfOpen();
+        });
+    }));
+    tools.appendChild(transportButton(T.changeSeats, 'seats:' + vehicle.id, () => {
+        transportAskSeats(vehicle.name, vehicle.seats).then(seats => {
+            if (seats) transportSetVehicleSeats(vehicle.id, seats);
+            renderTransportIfOpen();
+        });
+    }));
+    tools.appendChild(transportButton(T.retireVehicle, 'retire:' + vehicle.id, () => {
+        askConfirm({ title: T.retireTitle(transportRli(vehicle.name)), message: T.retireLead,
+            ok: T.retireVehicle, cancel: T.cancel }).then(yes => {
+            if (yes) transportRetireVehicle(vehicle.id);
+            renderTransportIfOpen();
+        });
+    }));
+    more.appendChild(tools);
+    item.appendChild(more);
+    return item;
+}
+
+// The switch, touched. OFF: from the day on the screen, and if men are drawn in that
+// vehicle on that day they are now waiting - so it SAYS how many, in the app's own
+// dialog, after the list has been redrawn behind it. Nothing was asked first: it is one
+// touch back, and nothing was written but the list (above, "a vehicle turned off").
+// ON: at once, and it says nothing - the car is back on the glass.
+function transportToggleVehicle(vehicleId) {
+    const T = TRANSPORT_TEXT;
+    const date = transportDate;
+    const vehicle = transportFind(transportSettings().vehicles, vehicleId);
+    if (!vehicle || !date) return;
+    if (vehicle.off) {
+        transportAct(() => transportSetVehicleOff(vehicleId, null));
+        return;
+    }
+    const seated = transportSeatedIn(date, vehicleId);
+    const done = transportSetVehicleOff(vehicleId, date);
+    if (done && seated > 0) transportSaid = T.offReturned(seated);
+    renderTransport();
+    if (done && seated > 0) {
+        askTell({ title: T.offToldTitle(transportRli(vehicle.name)), message: T.offReturned(seated) })
+            .then(renderTransportIfOpen);
+    }
 }
 
 // ------------------------------------------------------------------ the door to WhatsApp
@@ -1469,6 +1699,274 @@ function transportDoor(date, vehicleId, number, text) {
         setTimeout(renderTransportIfOpen, 1500);
     });
     return door;
+}
+
+// ================================================================== the report of a period
+//
+// The owner, 2026-11-10: "is there a report for the cars?" v179 answered for one day and
+// said a week and a month could follow. This is that: over a range, each vehicle - on how
+// many days it went out, who drove it and on how many days each, how many seats were
+// filled - and each driver - how many days, in which vehicles.
+//
+// WHAT IT CAN KNOW IS WHAT THIS PHONE KEPT, AND IT SAYS SO.
+//   - The plans are this phone's own and are in no record, cloud or backup. A day this
+//     phone has no plan for is COUNTED AND SAID («ב-4 ימים אין שיבוץ שמור במכשיר הזה»)
+//     and adds nothing to any vehicle: "no plan here" is never shown as "stayed home".
+//   - The store keeps TRANSPORT_KEEP_DAYS (35) days and removes older ones whenever the
+//     screen is opened (transportPrune). So «חודש שעבר» is whole only in the first days
+//     of a month; on any other day its beginning is gone, and the report names the date
+//     before which nothing is kept and how many of the missing days fall there. The
+//     horizon itself is NOT changed here: that is a decision about deletion.
+//   - A day whose bytes will not read is said, and neither counted nor touched.
+//
+// "WENT OUT" is: somebody is drawn in it, by the one reading of a stored plan there is
+// (TransportEngine.layout) against the day record AS IT IS NOW and the list of vehicles
+// AS IT IS NOW. So a vehicle since taken off the list is not in the report, and a man
+// whose day was changed after he was seated still counts where he sits - as on the screen.
+// A vehicle that is turned OFF is on the list still: the days before the day it is off
+// from are counted as they were stored, and from that day on it did not go out
+// (transportContext, per day - the same reading the screen makes of each of them).
+//
+// IT IS A READING AND NOTHING ELSE: transportPeekDay for the days, the engine for the
+// picture. Nothing here writes, marks, prunes or remembers; tests/transport.test.mjs
+// compares every key on the disk before and after.
+
+const TRANSPORT_REPORT_RANGES = Object.freeze(['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth']);
+
+function transportReportRangeLabel(key) {
+    const T = TRANSPORT_TEXT;
+    return { thisWeek: T.reportThisWeek, lastWeek: T.reportLastWeek, thisMonth: T.reportThisMonth,
+        lastMonth: T.reportLastMonth }[key] || '';
+}
+
+// { from, to } for one of the four ranges, or null. The week is the app's own - Friday
+// through Thursday, cut by snapToWeekStart (js/dates.js) like the week grid and the pay
+// report; the month is the calendar's. Local dates, built at noon, never toISOString.
+function transportReportRange(key, today) {
+    const now = isRealDate(today) ? parseLocalDate(today) : null;
+    if (!now) return null;
+    if (key === 'thisWeek' || key === 'lastWeek') {
+        const start = toLocalDateStr(snapToWeekStart(now));
+        const from = key === 'thisWeek' ? start : addDays(start, -7);
+        return { from, to: addDays(from, 6) };
+    }
+    if (key === 'thisMonth' || key === 'lastMonth') {
+        const month = now.getMonth() + (key === 'thisMonth' ? 0 : -1);
+        return { from: toLocalDateStr(new Date(now.getFullYear(), month, 1, 12, 0, 0, 0)),
+            to: toLocalDateStr(new Date(now.getFullYear(), month + 1, 0, 12, 0, 0, 0)) };
+    }
+    return null;
+}
+
+// Every day of the range, as this phone has it: { date, state } and, for a day with a
+// plan, what the engine needs to draw it. Never more than a month and a bit.
+function transportReportDays(from, to) {
+    const days = [];
+    if (!transportEnabled() || !isRealDate(from) || !isRealDate(to)) return days;
+    for (let date = from; date && date <= to && days.length < 62; date = addDays(date, 1)) {
+        const seen = transportPeekDay(date);
+        if (seen.state === 'plan') days.push({ date, state: 'plan', ctx: transportContext(date), day: seen.day });
+        else days.push({ date, state: seen.state });
+    }
+    return days;
+}
+
+// PURE. The counting, with no word in it:
+//   { total, planned, missing, unreadable,
+//     vehicles: [{ id, name, days, seats, noDriver, drivers: [{ id, name, days }] }],   list order
+//     drivers:  [{ id, name, days, vehicles: [{ id, name, days }] }] }                 most days first
+// A vehicle is here whether it went out or not (days: 0), so the text can name the ones
+// that did not. Drivers with the same number of days are in roster order.
+function transportReportCount(days) {
+    const out = { total: days.length, planned: 0, missing: 0, unreadable: 0, vehicles: [], drivers: [] };
+    const cars = transportMap();
+    const men = transportMap();
+    const rank = transportMap();
+    const tally = (list, index, id, name) => {
+        if (!index[id]) { index[id] = { id, name, days: 0 }; list.push(index[id]); }
+        index[id].name = name;
+        index[id].days += 1;
+    };
+    days.forEach(one => {
+        if (one.state === 'unreadable') { out.unreadable += 1; return; }
+        if (one.state !== 'plan') { out.missing += 1; return; }
+        out.planned += 1;
+        one.ctx.workers.forEach((worker, i) => { rank[worker.id] = i; });
+        const picture = TransportEngine.layout(one.ctx, one.day);
+        one.ctx.vehicles.forEach(vehicle => {
+            if (!cars[vehicle.id]) {
+                cars[vehicle.id] = { car: { id: vehicle.id, name: vehicle.name, days: 0, seats: 0, noDriver: 0, drivers: [] },
+                    by: transportMap() };
+                out.vehicles.push(cars[vehicle.id].car);
+            }
+            const entry = cars[vehicle.id];
+            entry.car.name = vehicle.name;
+            const seats = picture.cars[vehicle.id];
+            const riding = seats ? seats.filter(Boolean).length : 0;
+            if (riding === 0) return;
+            entry.car.days += 1;
+            entry.car.seats += riding;
+            const driver = seats[1];
+            if (!driver) { entry.car.noDriver += 1; return; }
+            const name = transportWorkerName(one.ctx, driver);
+            tally(entry.car.drivers, entry.by, driver, name);
+            if (!men[driver]) {
+                men[driver] = { man: { id: driver, name, days: 0, vehicles: [] }, by: transportMap() };
+                out.drivers.push(men[driver].man);
+            }
+            men[driver].man.name = name;
+            men[driver].man.days += 1;
+            tally(men[driver].man.vehicles, men[driver].by, vehicle.id, vehicle.name);
+        });
+    });
+    const place = id => (rank[id] === undefined ? 1e9 : rank[id]);
+    const order = (a, b) => b.days - a.days || place(a.id) - place(b.id) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    out.vehicles.forEach(car => car.drivers.sort(order));
+    out.drivers.sort(order);
+    const listed = transportMap();
+    out.vehicles.forEach((car, i) => { listed[car.id] = i; });
+    out.drivers.forEach(man => man.vehicles.sort((a, b) => listed[a.id] - listed[b.id]));
+    return out;
+}
+
+// PURE. The report as blocks of lines, from `spec`:
+//   { label, from, to, days (transportReportDays), cutoff, keep }
+// `cutoff` is the date before which the store keeps nothing (today less `keep` days).
+function transportReportBlocks(spec) {
+    const T = TRANSPORT_TEXT;
+    const full = date => formatFullDate(parseLocalDate(date));
+    const count = transportReportCount(spec.days);
+    const blocks = [[T.rHeading(spec.label, full(spec.from), full(spec.to))]];
+
+    const said = [T.rDays(count.planned, count.total)];
+    if (count.missing > 0) said.push(T.rMissing(count.missing));
+    const gone = isRealDate(spec.cutoff)
+        ? spec.days.filter(one => one.state === 'none' && one.date < spec.cutoff).length : 0;
+    if (gone > 0) said.push(T.rPruned(T.rCount(gone), full(spec.cutoff), spec.keep));
+    if (count.unreadable > 0) said.push(T.rUnreadable(count.unreadable));
+    blocks.push(said);
+    if (count.planned === 0) return blocks;
+
+    const out = count.vehicles.filter(car => car.days > 0);
+    if (out.length === 0) blocks.push([T.rNoneOut]);
+    out.forEach(car => {
+        const lines = [T.rVehicle(transportRli(car.name), T.rIn(car.days))];
+        car.drivers.forEach(man => lines.push(T.rDriverDays(isolate(man.name), T.rCount(man.days))));
+        if (car.noDriver > 0) lines.push(T.rNoDriverDays(T.rCount(car.noDriver)));
+        lines.push(T.rSeats(car.seats, String(Math.round(car.seats / car.days * 10) / 10)));
+        blocks.push(lines);
+    });
+    // With no vehicle out at all the line above has said so; the whole list adds nothing.
+    const idle = count.vehicles.filter(car => car.days === 0);
+    if (out.length > 0 && idle.length > 0) blocks.push([T.rIdle(idle.map(car => transportRli(car.name)).join(', '))]);
+    if (count.drivers.length > 0) {
+        blocks.push([T.rDriversTitle].concat(count.drivers.map(man => T.rDriver(isolate(man.name), T.rCount(man.days),
+            man.vehicles.map(car => T.rDriverVehicle(transportRli(car.name), car.days)).join(', ')))));
+    }
+    return blocks;
+}
+
+// The report as the text that is shown, sent and copied. `today` decides what "this
+// week" is and where the store's horizon lies.
+function transportReportText(key, today) {
+    if (!transportEnabled()) return '';
+    const range = transportReportRange(key, today);
+    if (!range) return '';
+    return transportReportBlocks({ label: transportReportRangeLabel(key), from: range.from, to: range.to,
+        days: transportReportDays(range.from, range.to), cutoff: addDays(today, -TRANSPORT_KEEP_DAYS),
+        keep: TRANSPORT_KEEP_DAYS }).map(block => block.join('\n')).join('\n\n');
+}
+
+// ------------------------------------------------------------------ the report's dialog
+//
+// The summary's dialog over again (index.html, #transportReportModal - a `.modal`, so
+// Escape, the Tab trap and the focus return are js/ui/modal.js's), with four buttons
+// above the field that choose the range. The same three ways out: shareTextOut and
+// copyTextOut (js/ui/share.js) and sharePrintout('transport') (js/ui/printout.js), whose
+// reader (readTransportPrintout, below) reads whichever of the two dialogs is open.
+let transportReportKey = 'thisWeek';
+
+function transportReportParts() {
+    const get = id => document.getElementById(id);
+    return { modal: get('transportReportModal'), title: get('transportReportTitle'), ranges: get('transportReportRanges'),
+        label: get('transportReportLabel'), text: get('transportReportText'), send: get('transportReportSend'),
+        copy: get('transportReportCopy'), picture: get('transportReportPicture'), close: get('transportReportClose'),
+        status: get('transportReportStatus') };
+}
+
+function transportReportIsOpen() {
+    const modal = typeof document !== 'undefined' && document.getElementById
+        ? document.getElementById('transportReportModal') : null;
+    return Boolean(modal && modal.style && modal.style.display === 'flex');
+}
+
+// The field, and which of the four buttons is the pressed one.
+function transportReportShow() {
+    const parts = transportReportParts();
+    if (!parts.text) return;
+    const now = transportReportText(transportReportKey, todayStr());
+    if (parts.text.value !== now) { parts.text.value = now; parts.text.scrollTop = 0; }
+    [...parts.ranges.querySelectorAll('button')].forEach(node => {
+        node.textContent = transportReportRangeLabel(node.dataset.range);
+        node.setAttribute('aria-pressed', node.dataset.range === transportReportKey ? 'true' : 'false');
+    });
+}
+
+// Only from the open screen, so only on a phone that turned הסעות on. It opens on this
+// week, every time: which range was looked at last is not kept anywhere.
+function openTransportReport() {
+    if (!transportEnabled() || !transportIsOpen()) return false;
+    const parts = transportReportParts();
+    if (!parts.modal || !parts.text) return false;
+    const T = TRANSPORT_TEXT;
+    transportReportKey = 'thisWeek';
+    parts.title.textContent = T.reportTitle;
+    parts.ranges.setAttribute('aria-label', T.reportRanges);
+    parts.label.textContent = T.reportLabel;
+    parts.send.textContent = T.summarySend;
+    parts.copy.textContent = T.summaryCopy;
+    parts.picture.textContent = T.summaryPicture;
+    parts.close.textContent = T.summaryClose;
+    parts.status.textContent = '';
+    transportReportShow();
+    parts.modal.style.display = 'flex';
+    parts.text.scrollTop = 0;
+    return true;
+}
+
+function closeTransportReport() {
+    if (typeof document === 'undefined' || !document.getElementById) return;
+    const modal = document.getElementById('transportReportModal');
+    if (modal && modal.style) modal.style.display = 'none';
+}
+
+function transportReportPick(key) {
+    if (!transportReportIsOpen() || TRANSPORT_REPORT_RANGES.indexOf(key) === -1) return;
+    transportReportKey = key;
+    transportReportParts().status.textContent = '';
+    transportReportShow();
+}
+
+function transportReportRefresh() {
+    if (transportReportIsOpen()) transportReportShow();
+}
+
+function transportReportSend() {
+    if (!transportReportIsOpen()) return;
+    const parts = transportReportParts();
+    shareTextOut(parts.text.value, parts.status, closeTransportReport);
+}
+
+function transportReportCopy() {
+    if (!transportReportIsOpen()) return;
+    const parts = transportReportParts();
+    copyTextOut(parts.text, parts.status);
+}
+
+// Inside the tap, with nothing awaited before it (js/ui/printout.js, the top of the file).
+function transportReportPicture() {
+    if (!transportReportIsOpen()) return;
+    sharePrintout('transport');
 }
 
 // ================================================================== the summary's dialog
@@ -1562,14 +2060,21 @@ function transportSummaryPicture() {
 // A person's name loses its FSI…PDI (printoutText's rule: canvas lays text out by the
 // same algorithm and the marks add nothing there); a vehicle's RLI…PDI stays, as a date
 // range's isolate stays in the week's picture, because that one changes what is read.
+//
+// The report of a period is read the same way off ITS dialog's field; only one of the two
+// can be open at a time, both being opened from the panel they cover.
 function readTransportPrintout() {
-    if (!transportSummaryIsOpen() || !transportDate) return null;
-    const field = transportSummaryParts().text;
+    const report = transportReportIsOpen();
+    if (!report && (!transportSummaryIsOpen() || !transportDate)) return null;
+    const range = report ? transportReportRange(transportReportKey, todayStr()) : null;
+    if (report && !range) return null;
+    const field = report ? transportReportParts().text : transportSummaryParts().text;
     const clean = line => line.replace(/\u2068([^\u2066-\u2069]*)\u2069/g, '$1').replace(/\s+/g, ' ').trim();
     const blocks = String((field && field.value) || '').split(/\n{2,}/)
         .map(block => block.split('\n').map(clean).filter(Boolean)).filter(block => block.length > 0);
     if (blocks.length === 0) return null;
-    return { title: blocks[0].join(' '), name: TRANSPORT_TEXT.summaryFile(transportDate), blocks: blocks.slice(1) };
+    const name = report ? TRANSPORT_TEXT.reportFile(range.from, range.to) : TRANSPORT_TEXT.summaryFile(transportDate);
+    return { title: blocks[0].join(' '), name, blocks: blocks.slice(1) };
 }
 
 // Sizes in CSS pixels, everything from the RIGHT edge. A fixed width a phone's chat

@@ -446,5 +446,50 @@ const conflictOf = async promise => {
         stale ? stale.code : 'accepted');
 }
 
+// ------------------------------------------------ «עובדי יוסף גבס» (v183), on the real rules
+//
+// days.<date>.yosefGeves.<placeId>: the second count per site, and a second layer the rules
+// have never heard of. The same claim, measured the same way: an ordinary protocol write
+// admits it with NO rules change, beside a Rima count and a worker-day in one write, and a
+// cleared count leaves through deleteField() - by the production adapter's own rule, which
+// names this layer too - without touching the Rima count on the same site.
+{
+    suite('a «עובדי יוסף גבס» count is an ordinary field write the published rules admit');
+    await reset();
+    const ops = opsFor(as(ALLOWED));
+    const stamp = (revision, id) => ({ protocol: 1, revision, lastOpId: id, opFingerprint: 'f_' + id });
+    const wrote = await conflictOf(ops.update({
+        ...stamp(2, 'op_geves_set'),
+        'days.2026-11-10.yosefGeves.p_01': 2,
+        'days.2026-11-10.rima.p_01': 3,
+        'days.2026-11-10.actual.w_01': { entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } }
+    }));
+    check('the rules accept the count beside a Rima count and a worker-day in one write', wrote === null,
+        wrote ? `${wrote.code}: ${wrote.message}` : 'accepted');
+    const set = await readDoc();
+    check('the cloud holds it as a number, under the day, in its own layer, by site',
+        set.days['2026-11-10'].yosefGeves.p_01 === 2 && set.days['2026-11-10'].rima.p_01 === 3,
+        JSON.stringify(set.days['2026-11-10']));
+
+    const alone = await conflictOf(ops.update({ ...stamp(3, 'op_geves_alone'), 'days.2026-11-11.yosefGeves.p_02': 7 }));
+    check('and a day carrying that count and nothing else', alone === null,
+        alone ? `${alone.code}: ${alone.message}` : 'accepted');
+
+    const cleared = await conflictOf(ops.update({ ...stamp(4, 'op_geves_clear'), 'days.2026-11-10.yosefGeves.p_01': null }));
+    check('a clear is accepted', cleared === null, cleared ? `${cleared.code}: ${cleared.message}` : 'accepted');
+    const after = await readDoc();
+    check('and the production adapter removes the field rather than storing null',
+        !Object.hasOwn(after.days['2026-11-10'].yosefGeves || {}, 'p_01'), JSON.stringify(after.days['2026-11-10']));
+    check('the Rima count on the same site and the worker-day beside it are untouched',
+        after.days['2026-11-10'].rima.p_01 === 3
+        && JSON.stringify(after.days['2026-11-10'].actual.w_01)
+            === JSON.stringify({ entries: [{ placeId: 'p_01' }], rates: { daily: 400, hourly: 0 } }),
+        JSON.stringify(after.days['2026-11-10']));
+    check('and the day that holds only the count keeps it', after.days['2026-11-11'].yosefGeves.p_02 === 7);
+    const stale = await conflictOf(ops.update({ ...stamp(4, 'op_geves_stale'), 'days.2026-11-11.yosefGeves.p_02': 9 }));
+    check('a stale write of it is refused by the same compare-and-set as any other', stale?.code === 'conflict',
+        stale ? stale.code : 'accepted');
+}
+
 await env.cleanup();
 report();

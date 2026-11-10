@@ -64,9 +64,11 @@ export function patchToUpdateArgs(patch) {
         // Remove empty worker-day placeholders without leaving nulls that older
         // readers reject. Roster nulls still travel as permanent tombstones. A cleared
         // Rima count (v166) is removed the same way: a null left under `rima` would be a
-        // field every phone carries for ever saying nothing.
+        // field every phone carries for ever saying nothing. And a cleared «עובדי יוסף גבס»
+        // count (v183), the second count per site, on exactly the same terms.
         const removeDay = patch[path] === null && parts.length === 4 && parts[0] === 'days'
-            && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima');
+            && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima'
+                || parts[2] === 'yosefGeves');
         args.push(new FieldPath(...parts), removeDay ? deleteField() : patch[path]);
     });
     return args;

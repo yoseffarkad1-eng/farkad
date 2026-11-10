@@ -477,7 +477,8 @@ function poisonedContainers(raw) {
             const day = days[date];
             if (!isPlainObject(day)) return;
             look(day, `days.${date}`);
-            ['plan', 'actual', RIMA_LAYER].forEach(layer => look(day[layer], `days.${date}.${layer}`));
+            ['plan', 'actual', RIMA_LAYER, YOSEF_GEVES_LAYER]
+                .forEach(layer => look(day[layer], `days.${date}.${layer}`));
         });
     }
     look(raw && raw.advances, 'advances');
@@ -911,9 +912,12 @@ function dayProblems(raw, known) {
         // rimaProblems. A build before v166 refuses it here, which is the right answer
         // for that build: a v166 backup opened on an older phone is refused out loud
         // rather than restored with the counts silently stripped off it.
+        // `yosefGeves` (v183) is the second count per site - see yosefGevesProblems - and
+        // every build before v183 refuses it here in exactly the same way, v166-v180
+        // included: this list names what a build knows, and none of them names it.
         const extra = Object.keys(day).filter(key =>
             key !== 'plan' && key !== 'actual' && key !== 'vehiclesOff' && key !== 'vehicleRuns'
-            && key !== RIMA_LAYER);
+            && key !== RIMA_LAYER && key !== YOSEF_GEVES_LAYER);
         if (extra.length > 0) {
             problems.push('ליום ' + date + ' יש שכבה שאינה מוכרת: ' + extra[0] + '.');
             return;
@@ -922,6 +926,13 @@ function dayProblems(raw, known) {
             const rima = rimaProblems(day.rima, date, known);
             if (rima.length > 0) {
                 rima.forEach(problem => problems.push(problem));
+                return;
+            }
+        }
+        if (day[YOSEF_GEVES_LAYER] !== undefined) {
+            const geves = yosefGevesProblems(day[YOSEF_GEVES_LAYER], date, known);
+            if (geves.length > 0) {
+                geves.forEach(problem => problems.push(problem));
                 return;
             }
         }
@@ -939,7 +950,10 @@ function dayProblems(raw, known) {
         }
         // A day with only a Rima count on it is a real day: the owner's crew can be
         // elsewhere, or off, while the other company's men are on his site.
-        if (day.plan === undefined && day.actual === undefined && day.rima === undefined) {
+        // And so is a day with only a «עובדי יוסף גבס» count (v183): it is a record of that
+        // day, whatever it is not counted in.
+        if (day.plan === undefined && day.actual === undefined && day.rima === undefined
+            && day[YOSEF_GEVES_LAYER] === undefined) {
             problems.push('ליום ' + date + ' אין רישום כלל.');
             return;
         }
@@ -1285,6 +1299,14 @@ function journalEntryProblems(path, value) {
             if (value === null) return [];
             return isRimaCount(value) ? [] : ['a Rima count that is not a whole number from 1 to '
                 + RIMA_MAX];
+        }
+        // days.<date>.yosefGeves.<placeId> (v183) - the second count per site, judged
+        // exactly as the first: a whole number, or a null that is its clear.
+        if (parts[2] === YOSEF_GEVES_LAYER) {
+            if (!isSafeSegment(parts[3])) return ['a Yosef Geves path with an unusable site id'];
+            if (value === null) return [];
+            return isYosefGevesCount(value) ? [] : ['a Yosef Geves count that is not a whole number from 1 to '
+                + YOSEF_GEVES_MAX];
         }
         if (parts[2] !== 'plan' && parts[2] !== 'actual') return ['a layer nobody wrote'];
         if (!isSafeSegment(parts[3])) return ['a day path with an unusable worker id'];
@@ -1802,6 +1824,16 @@ function referencedEntityIds(schedule) {
             if (isSafeId(placeId) && isRimaCount(rima[placeId])) places.add(String(placeId));
         });
     });
+    // And a site with a «עובדי יוסף גבס» count on it (v183), for the second of those two
+    // reasons alone: nobody is billed for it, but it is somebody's record of a site, and
+    // the restore gate refuses a count naming a site the roster has not got.
+    Object.values(days).forEach(day => {
+        const geves = day && isPlainObject(day[YOSEF_GEVES_LAYER]) ? day[YOSEF_GEVES_LAYER] : null;
+        if (!geves) return;
+        Object.keys(geves).forEach(placeId => {
+            if (isSafeId(placeId) && isYosefGevesCount(geves[placeId])) places.add(String(placeId));
+        });
+    });
     return { workers, places };
 }
 
@@ -1845,6 +1877,11 @@ function unlistedPlaceIds(schedule, fromDate, toDate) {
                 });
                 return;
             }
+            // «עובדי יוסף גבס» (v183) is keyed by site too, and is DELIBERATELY not read
+            // here: this list numbers the unlisted sites on the client's invoice
+            // («אתר שאינו ברשימה N»), and a count that is in no account must not renumber one.
+            // Its own table names such a site by placeLabelFrom's fallback.
+            if (layer === YOSEF_GEVES_LAYER) return;
             Object.keys(byWorker).forEach(workerId => {
                 const record = byWorker[workerId];
                 const entries = (record && record.entries) || [];
@@ -3451,6 +3488,266 @@ function rimaReport(schedule, fromDate, toDate, onlyPlaceId) {
 
     // The roster's order, which is the order every other surface draws sites in; a site
     // the roster has not got goes after them, in the order its id sorts.
+    const order = ((schedule && schedule.places) || []).map(place => String(place.id));
+    const places = order.filter(id => byPlace.has(id)).map(id => byPlace.get(id))
+        .concat([...byPlace.keys()].filter(id => order.indexOf(id) === -1).sort()
+            .map(id => byPlace.get(id)));
+
+    return {
+        dates: Array.from(dates).sort(),
+        places,
+        countAt(placeId, date) {
+            const row = byPlace.get(String(placeId));
+            return (row && row.byDate[date]) || 0;
+        },
+        dayTotal(date) {
+            return places.reduce((sum, row) => sum + (row.byDate[date] || 0), 0);
+        },
+        total: places.reduce((sum, row) => sum + row.total, 0)
+    };
+}
+
+// ---------------------------------------------------------------- עובדי יוסף גבס (v183)
+//
+// The owner, 2026-11-10: "next to the Rima workers, workers who are OUTSIDE ANY ACCOUNT.
+// A list of their own that has nothing to do with any account, but I want them recorded
+// with me. The list's name is «עובדי יוסף גבס», at every project like the Rima workers.
+// I just write their NUMBER and that's it."
+//
+//   days["2026-11-10"].yosefGeves["p_herzliya"] = 2
+//
+// A SECOND COUNT PER SITE PER DAY, stored, validated, journalled, synced, held and cleared
+// exactly as the Rima count above - one field path per edit, a whole number from 1 to 99,
+// a clear that is a deleted field - WITH ONE DIFFERENCE, AND IT IS THE WHOLE POINT:
+//
+//   IT IS IN NO ARITHMETIC AT ALL. Not in pay, like Rima - and NOT ON THE CLIENT'S
+//   INVOICE EITHER, unlike Rima. No function in js/model/money.js reads this layer; the
+//   one function that adds a site's count to a billed day (invoiceReport) reads `rima` by
+//   name and nothing else. yosefGevesReport below is the ONLY reader that adds these
+//   numbers up, and what it returns goes to its own table and its own sheet.
+//   tests/yosefgeves.test.mjs measures that: every money surface, the invoice, the Rima
+//   table, every sheet, every message, byte for byte with and without these counts.
+//
+// THE KEY IS `yosefGeves`: ASCII letters only, so it is one Firestore field-path segment
+// with no quoting and passes isSafeSegment; camelCase like the day's other two extra keys
+// (vehiclesOff, vehicleRuns); and it is the LIST'S OWN NAME, not a description of what the
+// list means ("outside", "unbilled", "other") - the meaning is the owner's to change, the
+// name is his. It does not begin with, end with or contain `rima`, so no search for one
+// layer finds the other.
+//
+// Its own layer under the DAY, like `rima`, and for the same reason: every build before
+// v183 - v166 to v180 included - rebuilds a day from the layers it knows, so it does not
+// keep this one in its OWN copy; it never writes it off the cloud by an ordinary edit
+// (one field path each); and handed a v183 backup or cloud copy to restore, its day check
+// refuses the unknown layer out loud. See docs/releases.md, v183, THE ROLLOUT RULE.
+//
+// The functions are written against a LAYER where the sync layer asks (a count is a count
+// to it, whatever it is counted in); the Rima functions above are left exactly as v166
+// served them.
+const YOSEF_GEVES_LAYER = 'yosefGeves';
+
+// The same cap as RIMA_MAX, for the same reason: a three-digit count on one site is a typo.
+const YOSEF_GEVES_MAX = 99;
+
+// Said when a count is refused. PROPOSED - RIMA_REFUSED with the name changed.
+const YOSEF_GEVES_REFUSED = 'אפשר לרשום ליוסף גבס רק מספר שלם בין 0 ל-99.';
+
+// Every per-site count layer a day can carry, in the order the day screen draws them.
+const SITE_COUNT_LAYERS = [RIMA_LAYER, YOSEF_GEVES_LAYER];
+
+function isYosefGevesCount(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value)
+        && value >= 1 && value <= YOSEF_GEVES_MAX;
+}
+
+function yosefGevesPath(date, placeId) {
+    return `days.${date}.${YOSEF_GEVES_LAYER}.${placeId}`;
+}
+
+function isYosefGevesFieldPath(path) {
+    const parts = String(path).split('.');
+    return parts.length === 4 && parts[0] === 'days' && parts[2] === YOSEF_GEVES_LAYER;
+}
+
+// WHICH COUNT LAYER A FIELD PATH BELONGS TO - `rima`, `yosefGeves`, or null for anything
+// that is not one site's count on one day. The sync layer asks isSiteCountFieldPath
+// wherever a count has to be told apart from a worker's day (a count is cleared by
+// deleting its field, a day by a placeholder value), and that question has nothing to do
+// with what the count is counted in: the two layers are handled by the same rules.
+function siteCountLayerOf(path) {
+    const parts = String(path).split('.');
+    if (parts.length !== 4 || parts[0] !== 'days') return null;
+    return SITE_COUNT_LAYERS.indexOf(parts[2]) === -1 ? null : parts[2];
+}
+
+function isSiteCountFieldPath(path) {
+    return siteCountLayerOf(path) !== null;
+}
+
+// Whether `value` is a count the layer accepts. Both layers accept the same numbers
+// today; asked through the layer so that stays a fact about each.
+function isSiteCountValue(layer, value) {
+    if (layer === RIMA_LAYER) return isRimaCount(value);
+    if (layer === YOSEF_GEVES_LAYER) return isYosefGevesCount(value);
+    return false;
+}
+
+// How many were recorded under `layer` for one site on one day. 0 means nothing recorded.
+function siteCountAt(schedule, layer, date, placeId) {
+    if (SITE_COUNT_LAYERS.indexOf(layer) === -1) return 0;
+    const day = dayRecord(schedule, date);
+    const map = day && isPlainObject(day[layer]) ? day[layer] : null;
+    const id = String(placeId);
+    if (!map || !Object.prototype.hasOwnProperty.call(map, id)) return 0;
+    return isSiteCountValue(layer, map[id]) ? map[id] : 0;
+}
+
+// sameRimaLayers, for any count layer: the same counts under `layer`, every day and every
+// site. `skip(date, placeId)` names the sites not compared at all.
+function sameSiteCountLayer(one, other, layer, skip) {
+    const daysOf = schedule => (schedule && isPlainObject(schedule.days) ? schedule.days : {});
+    const mapOf = (schedule, date) => {
+        const day = daysOf(schedule)[date];
+        return day && typeof day === 'object' ? day[layer] : undefined;
+    };
+    const countIn = (map, placeId) => (Object.prototype.hasOwnProperty.call(map, placeId)
+        && map[placeId] !== null ? map[placeId] : undefined);
+    const dates = new Set(Object.keys(daysOf(one)).concat(Object.keys(daysOf(other))));
+    for (const date of dates) {
+        const mine = mapOf(one, date);
+        const theirs = mapOf(other, date);
+        // A map that is not a map is somebody's unreadable record, never "no counts".
+        if ((mine !== undefined && !isPlainObject(mine))
+            || (theirs !== undefined && !isPlainObject(theirs))) {
+            if (JSON.stringify(mine) !== JSON.stringify(theirs)) return false;
+            continue;
+        }
+        const left = mine || {};
+        const right = theirs || {};
+        const sites = new Set(Object.keys(left).concat(Object.keys(right)));
+        for (const placeId of sites) {
+            if (typeof skip === 'function' && skip(date, placeId)) continue;
+            if (countIn(left, placeId) !== countIn(right, placeId)) return false;
+        }
+    }
+    return true;
+}
+
+function sameYosefGevesLayers(one, other, skip) {
+    return sameSiteCountLayer(one, other, YOSEF_GEVES_LAYER, skip);
+}
+
+// What is wrong with one day's map, in sentences for a person. Empty means none. `known`
+// is the roster on a whole-document replacement and null on a stored record. PROPOSED -
+// rimaProblems' four sentences with the name changed.
+function yosefGevesProblems(map, date, known) {
+    if (!isPlainObject(map)) return ['ליום ' + date + ' יש רישום יוסף גבס שאינו תקין.'];
+    const problems = [];
+    Object.keys(map).forEach(placeId => {
+        if (!isSafeId(placeId)) {
+            problems.push('ביום ' + date + ' יש רישום יוסף גבס תחת מזהה שאינו תקין.');
+            return;
+        }
+        if (!isYosefGevesCount(map[placeId])) {
+            problems.push('ביום ' + date + ' יש מספר עובדי יוסף גבס שאינו תקין באתר ' + placeId + '.');
+            return;
+        }
+        if (known && !known.places.has(String(placeId))) {
+            problems.push('ביום ' + date + ' יש רישום יוסף גבס באתר ' + placeId + ' שאינו ברשימה.');
+        }
+    });
+    return problems;
+}
+
+// The same question asked of a document arriving from the cloud. Nulls are tolerated here
+// and nowhere else: on the wire a null is a clear in flight, never a count.
+function yosefGevesWireProblems(raw) {
+    const days = raw && isPlainObject(raw.days) ? raw.days : {};
+    const problems = [];
+    Object.keys(days).forEach(date => {
+        const day = days[date];
+        if (!isPlainObject(day) || day[YOSEF_GEVES_LAYER] === undefined) return;
+        const map = day[YOSEF_GEVES_LAYER];
+        if (!isPlainObject(map)) {
+            problems.push('רישום יוסף גבס אינו תקין.');
+            return;
+        }
+        Object.keys(map).forEach(placeId => {
+            // A poisoned name is held by poisonedContainers with its own evidence.
+            if (POISON_SEGMENTS.indexOf(placeId) !== -1) return;
+            const value = map[placeId];
+            if (value === null) return;
+            if (!isSafeId(placeId) || !isYosefGevesCount(value)) problems.push('רישום יוסף גבס אינו תקין.');
+        });
+    });
+    return problems;
+}
+
+function yosefGevesCount(schedule, date, placeId) {
+    return siteCountAt(schedule, YOSEF_GEVES_LAYER, date, placeId);
+}
+
+// Sets - or clears, with 0, null or an empty field - one site's count on one day. Returns
+// the one field path it changed, or a refusal State.commit says out loud. setRimaCount,
+// line for line, on the other layer.
+function setYosefGevesCount(schedule, date, placeId, count) {
+    const id = String(placeId);
+    const value = (count === 0 || count === null || count === undefined || count === '')
+        ? null : count;
+    if (!isRealDate(date) || !isSafeId(id) || (value !== null && !isYosefGevesCount(value))) {
+        return { refused: true, reason: YOSEF_GEVES_REFUSED };
+    }
+    if (!schedule.days) schedule.days = {};
+    const day = schedule.days[date];
+    // A map this build cannot read is somebody's record, not an empty one. Nothing is
+    // written over it; Recovery is what holds it.
+    if (day && day[YOSEF_GEVES_LAYER] !== undefined && !isPlainObject(day[YOSEF_GEVES_LAYER])) {
+        return { refused: true, reason: YOSEF_GEVES_REFUSED };
+    }
+    if (value === null) {
+        if (day && isPlainObject(day[YOSEF_GEVES_LAYER])) {
+            delete day[YOSEF_GEVES_LAYER][id];
+            if (Object.keys(day[YOSEF_GEVES_LAYER]).length === 0) delete day[YOSEF_GEVES_LAYER];
+        }
+        return { path: yosefGevesPath(date, id), value: null };
+    }
+    if (!day) schedule.days[date] = { plan: {}, actual: {} };
+    if (!schedule.days[date][YOSEF_GEVES_LAYER]) schedule.days[date][YOSEF_GEVES_LAYER] = {};
+    schedule.days[date][YOSEF_GEVES_LAYER][id] = value;
+    return { path: yosefGevesPath(date, id), value };
+}
+
+// THE «עובדי יוסף גבס» TABLE over a span: one row per date that HAS a count, one column
+// per site that has one. rimaReport's shape exactly, read off the other layer - and the
+// only place in the app where these numbers are added to anything, which is each other.
+//
+// `onlyPlaceId` narrows it to one site. A site the roster has not got is named by
+// placeLabelFrom's fallback and never numbered: the numbering belongs to the invoice.
+function yosefGevesReport(schedule, fromDate, toDate, onlyPlaceId) {
+    const labels = placeLabelsIn(schedule, fromDate, toDate);
+    const days = (schedule && schedule.days) || {};
+    const only = onlyPlaceId === undefined || onlyPlaceId === null ? null : String(onlyPlaceId);
+    const byPlace = new Map();
+    const dates = new Set();
+
+    Object.keys(days).filter(date => date >= fromDate && date <= toDate).sort().forEach(date => {
+        const map = days[date] && isPlainObject(days[date][YOSEF_GEVES_LAYER])
+            ? days[date][YOSEF_GEVES_LAYER] : null;
+        if (!map) return;
+        Object.keys(map).forEach(placeId => {
+            if (only !== null && placeId !== only) return;
+            if (!isSafeId(placeId) || !isYosefGevesCount(map[placeId])) return;
+            dates.add(date);
+            if (!byPlace.has(placeId)) {
+                byPlace.set(placeId, { placeId, name: placeLabelFrom(labels, placeId),
+                    total: 0, byDate: {} });
+            }
+            const row = byPlace.get(placeId);
+            row.byDate[date] = map[placeId];
+            row.total += map[placeId];
+        });
+    });
+
     const order = ((schedule && schedule.places) || []).map(place => String(place.id));
     const places = order.filter(id => byPlace.has(id)).map(id => byPlace.get(id))
         .concat([...byPlace.keys()].filter(id => order.indexOf(id) === -1).sort()

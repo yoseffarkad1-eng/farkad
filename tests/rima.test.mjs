@@ -299,7 +299,9 @@ function heldCards(box) {
     const fake = layersIn(source('tests/harness.mjs'), "if (value === null && parts.length === 4 && parts[0] === 'days'");
     given('each of the three is found where it is written', Boolean(adapter && sync && fake),
         JSON.stringify([adapter, sync, fake]));
-    same('the production adapter deletes a cleared plan, actual and Rima field', adapter, ['actual', 'plan', 'rima']);
+    // v183 MOVED: the second count per site, «עובדי יוסף גבס», is cleared the same way.
+    same('the production adapter deletes a cleared plan, actual, Rima and Yosef Geves field', adapter,
+        ['actual', 'plan', 'rima', 'yosefGeves']);
     same('and the sync layer and the fake cloud say exactly the same', [sync, fake], [adapter, adapter]);
     // And each copy ACTS on what it names. A rule computed and then not used names the
     // right layers and deletes nothing: the adapter would send a null under `rima` again,

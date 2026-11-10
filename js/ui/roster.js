@@ -86,6 +86,19 @@ function renderWorkerList() {
     const clearSearch = document.getElementById('rosterSearchClear');
     if (clearSearch) clearSearch.hidden = !query;
 
+    // WITH NOBODY ON THE LIST there is nothing to search and nothing to put in order, so
+    // the field and the reorder button are not drawn; and with no site either, the two
+    // shortcuts that jump between the lists have nowhere to jump. What stays is what
+    // starts a crew: «+ הוסף עובד» on the heading and «הדבק רשימה» under it. Hidden,
+    // never removed - the nodes are the page's own, and they come back with the first man.
+    const nobody = State.schedule.workers.length === 0;
+    const searchBox = document.querySelector('#rosterView .crew-search');
+    if (searchBox) searchBox.hidden = nobody;
+    const reorder = document.getElementById('reorderOpenBtn');
+    if (reorder) reorder.hidden = nobody;
+    const shortcuts = document.querySelector('#rosterView .crew-shortcuts');
+    if (shortcuts) shortcuts.hidden = nobody && State.schedule.places.length === 0;
+
     if (State.schedule.workers.length === 0) {
         container.appendChild(emptyHint('אין עובדים. הוסף עובד כדי להתחיל.'));
         return;
@@ -136,6 +149,21 @@ function workerRow(worker, archiveAdvances) {
     row.dataset.workerId = worker.id;
 
     const details = el('div', 'roster-details');
+    // כרטיס עובד: the one way into his card (js/ui/workercard.js), worded. It is the FIRST
+    // thing in his details and floats at their far end, beside his name and his cycle -
+    // the two short lines - so it takes no width from the line with his phone and rates,
+    // adds no height to the row (tests/roster.browser.mjs holds a row to 125px, and the
+    // first place this was put broke that), and leaves the switch and «עוד ⋯» exactly
+    // where three people's thumbs already know them. On an archived row too: the money a
+    // man left with is the usual reason to look him up. Feature-detected like the ledger
+    // readers are: a build where that file did not load still has a crew screen.
+    if (typeof openWorkerCard === 'function') {
+        const card = button(WORKER_CARD_TEXT.title, 'btn-secondary worker-card-open',
+            () => openWorkerCard(worker.id),
+            `${WORKER_CARD_TEXT.openFor} ${isolate(worker.name)}`);
+        card.setAttribute('aria-haspopup', 'dialog');
+        details.appendChild(card);
+    }
     details.appendChild(el('strong', null, worker.name));
     const cycle = payCycleAt(worker, todayStr());
     details.appendChild(el('span', 'crew-cycle', cycle === 'weekly' ? 'תשלום שבועי' : 'תשלום כל שבועיים'));

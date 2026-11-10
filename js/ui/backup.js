@@ -1140,6 +1140,64 @@ function renderBackupAge() {
     }
 
     line.className = days === null || days >= 7 ? 'hint hint-warn' : 'hint';
+
+    // THE ROW ITSELF, which is what is on the glass when the row is shut. The sentence
+    // above lives inside the fold; shut, the sheet said nothing at all about how old the
+    // last file is. So the row's own head repeats that sentence, word for word, while it
+    // is shut - open, the original is right under it and one of the two would be noise.
+    //
+    // And after two weeks, one quiet line on the row, open or shut. Not a banner and not
+    // a dialog: it blocks nothing, asks nothing, and is gone with the next file.
+    //
+    // Both lines are PUT ON the row when they have something to say and TAKEN OFF when
+    // they do not, rather than left there hidden: an empty line in a row's head is still
+    // a line to everything that reads the sheet - a screen reader's row name, and the
+    // suite that holds the sheet's sentences one by one.
+    const fold = document.getElementById('settingsFoldBackup');
+    const head = fold && fold.querySelector ? fold.querySelector(':scope > summary > div') : null;
+    if (!head) return;
+    const lines = backupRowLines(last, today, line.textContent, Boolean(fold.open));
+    placeBackupRowLine(head, 'backupReminder', 'hint settings-row-reminder', lines.reminder);
+    placeBackupRowLine(head, 'backupAgeRow', 'hint settings-row-age', lines.age);
+    // The row is opened and shut by a finger, not by a redraw, so the row tells us.
+    if (!fold.dataset.ageWatched) {
+        fold.dataset.ageWatched = '1';
+        fold.addEventListener('toggle', renderBackupAge);
+    }
+}
+
+// The age goes above the reminder, whichever of them arrived first.
+function placeBackupRowLine(head, id, className, text) {
+    let node = document.getElementById(id);
+    if (!text) { if (node) node.remove(); return; }
+    if (!node) {
+        node = el('p', className);
+        node.id = id;
+        head.insertBefore(node, id === 'backupAgeRow' ? document.getElementById('backupReminder') : null);
+    }
+    if (node.textContent !== text) node.textContent = text;
+}
+
+// Pure: what the row's head says. `age` only while the row is shut; `reminder` only for
+// an age this phone actually knows - a phone with no record of a file already says so in
+// the age sentence, and an unreadable date is not a count of days. '' means no line.
+function backupRowLines(last, today, ageSentence, open) {
+    return {
+        age: open ? '' : String(ageSentence || ''),
+        reminder: backupReminderDue(last, today) ? BACKUP_REMINDER : ''
+    };
+}
+
+// PROPOSED Hebrew. It says what this phone knows - no new file was handed over from it -
+// and not that there is no backup: a copy made on another phone is invisible from here.
+const BACKUP_REMINDER = 'שבועיים ויותר בלי קובץ גיבוי חדש מהמכשיר הזה.';
+const BACKUP_REMINDER_DAYS = 14;
+
+// Pure: the two dates in, yes or no out. A missing, malformed or future date is not an
+// age, so it is never "due" - the age line has its own words for each of those.
+function backupReminderDue(last, today) {
+    if (!isRealDate(last) || !isRealDate(today) || last > today) return false;
+    return daysBetween(last, today) >= BACKUP_REMINDER_DAYS;
 }
 
 function daysBetween(from, to) {
@@ -1342,6 +1400,14 @@ function recoveryFacts(schedule) {
             Object.keys(rima).forEach(placeId => put(`rima:${date}:${placeId}`, rima[placeId]));
         } else if (rima !== undefined) {
             put(`rimaUnreadable:${date}`, rima);
+        }
+        // And the «עובדי יוסף גבס» counts (v183), for the same reason: a capture that lost
+        // them must not pass for one that holds everything.
+        const geves = (days[date] || {}).yosefGeves;
+        if (geves && typeof geves === 'object' && !Array.isArray(geves)) {
+            Object.keys(geves).forEach(placeId => put(`yosefGeves:${date}:${placeId}`, geves[placeId]));
+        } else if (geves !== undefined) {
+            put(`yosefGevesUnreadable:${date}`, geves);
         }
     });
 

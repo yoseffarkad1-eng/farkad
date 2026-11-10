@@ -319,7 +319,7 @@ Object.assign(FarkadSync, {
             }
         };
         const said = options || {};
-        const rima = isRimaFieldPath(path);
+        const rima = isSiteCountFieldPath(path);
         const inherit = mark => {
             if (rima && said.handedOver && mark === VALUE_ABSENT) return;
             add(mark);
@@ -343,7 +343,7 @@ Object.assign(FarkadSync, {
     // A write lands at the revision it claims, so a base at or above every such claim
     // carries the write or something after it; one below may be from before it.
     baseBelowAttempt(path) {
-        if (this._baseDoc === null || !isRimaFieldPath(path)) return false;
+        if (this._baseDoc === null || !isSiteCountFieldPath(path)) return false;
         const claim = this.claimAt(path);
         if (claim === null) return false;
         const revision = Number(this._baseDoc.revision);
@@ -361,7 +361,7 @@ Object.assign(FarkadSync, {
         // write goes out against no revision, the server answers with its document, and
         // the conflict branch asks this question of that answer.
         if (!document || typeof document !== 'object') return false;
-        const rima = isRimaFieldPath(path);
+        const rima = isSiteCountFieldPath(path);
         // A COUNT, AND A BASE OLDER THAN THIS DEVICE'S OWN UNANSWERED ATTEMPT AT IT (v166).
         // That base cannot say what the server holds now - the attempt may have landed
         // after it - so it decides nothing, exactly like no base at all: the write claims
@@ -382,7 +382,7 @@ Object.assign(FarkadSync, {
         // any value: a write built on having seen nothing there - a new count, one typed
         // after the clear arrived - still goes, and so does this phone's own clear, which
         // is the same nothing.
-        if (marks[0] === VALUE_ABSENT && !isRimaFieldPath(path)) return false;
+        if (marks[0] === VALUE_ABSENT && !isSiteCountFieldPath(path)) return false;
         // Nor is a path the server already holds THIS VALUE at. An earlier attempt whose
         // answer was lost landed it, and the retry is answered from its receipt; or
         // another phone recorded the same thing. Either way, sending it changes nothing
@@ -554,7 +554,7 @@ Object.assign(FarkadSync, {
                     // a nothing there now is its own - see movedUnder. Under THIS name a
                     // refusal is itself the proof that the batch never landed: the server
                     // answers a batch it has from the receipt, before any revision.
-                    const name = isRimaFieldPath(path) ? this.triedNameFor(queued) : null;
+                    const name = isSiteCountFieldPath(path) ? this.triedNameFor(queued) : null;
                     const elsewhere = name !== null && name !== String(opId);
                     this._sendBase[path] = {
                         seen: elsewhere ? queued.seen.filter(mark => mark !== VALUE_ABSENT)
@@ -728,6 +728,15 @@ Object.assign(FarkadSync, {
         // hand edit, not a state the app produces.
         if (typeof rimaWireProblems === 'function') {
             rimaWireProblems(raw).forEach(problem => ledger.push(problem));
+        }
+        // AND A «עובדי יוסף גבס» COUNT this build cannot read (v183), refused at the same
+        // door for the second of those reasons alone - nobody is billed from it, but
+        // adopted it would be a record dayProblems refuses at the next open. The sentence
+        // the person is shown is the existing one, which calls the record financial; this
+        // one is not, and a sentence of its own is the owner's to word (docs/releases.md,
+        // v183).
+        if (typeof yosefGevesWireProblems === 'function') {
+            yosefGevesWireProblems(raw).forEach(problem => ledger.push(problem));
         }
         if (ledger.length > 0) {
             // Keep the whole snapshot: valid payments beside the malformed one are
@@ -990,12 +999,16 @@ Object.assign(FarkadSync, {
         // have laid it back was skipped as this phone's echo: the held count gone from the
         // screen and the Rima table, the line saying contested over nothing visible, until
         // somebody decided it in ⋯ or the other phone wrote.
+        //
+        // AND THE SAME «עובדי יוסף גבס» COUNTS (v183), layer by layer and for every one of
+        // those reasons: a phone that wrote last on ANY build before v183 carries a copy
+        // that never kept `yosefGeves`, under exactly the cloud's stamps.
         const owed = this._outbox;
-        const owes = (date, placeId) => {
-            const item = owed.get(`days.${date}.rima.${placeId}`);
+        const owes = layer => (date, placeId) => {
+            const item = owed.get(`days.${date}.${layer}.${placeId}`);
             if (!item || item.sent) return false;
-            const wanted = isRimaCount(item.value) ? item.value : 0;
-            return rimaCount(State.schedule, date, placeId) === wanted;
+            const wanted = isSiteCountValue(layer, item.value) ? item.value : 0;
+            return siteCountAt(State.schedule, layer, date, placeId) === wanted;
         };
         //
         // AND NOTHING IN THE PAY BOOK THIS COPY LACKS (v173) - the same trap, one map
@@ -1009,7 +1022,8 @@ Object.assign(FarkadSync, {
         // work, which is what an echo looks like, and adopting changes nothing about it.
         if (remote.updatedAt === State.schedule.updatedAt
             && remote.updatedBy === syncDeviceId()
-            && sameRimaLayers(remote, State.schedule, owes)
+            && sameRimaLayers(remote, State.schedule, owes(RIMA_LAYER))
+            && sameYosefGevesLayers(remote, State.schedule, owes(YOSEF_GEVES_LAYER))
             && (typeof paybookCovers !== 'function' || paybookCovers(State.schedule, remote))
             // AND NO MONTH THIS COPY DOES NOT KNOW HAS LEFT (Phase 6) - the same trap once
             // more: a copy written by a build that never kept `monthIndex`, under the
@@ -1665,11 +1679,12 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 if (!schedule.days[date]) schedule.days[date] = { plan: {}, actual: {} };
                 // A cleared Rima count is a deletion, like a worker-day removal - and the
                 // map goes with its last count, the way setRimaCount leaves it.
-                if (value === null && layer === 'rima') {
-                    const rima = schedule.days[date].rima;
-                    if (rima && typeof rima === 'object') {
-                        delete rima[workerId];
-                        if (Object.keys(rima).length === 0) delete schedule.days[date].rima;
+                // «עובדי יוסף גבס» (v183) is cleared the same way, on its own layer.
+                if (value === null && (layer === 'rima' || layer === 'yosefGeves')) {
+                    const counts = schedule.days[date][layer];
+                    if (counts && typeof counts === 'object') {
+                        delete counts[workerId];
+                        if (Object.keys(counts).length === 0) delete schedule.days[date][layer];
                     }
                     return;
                 }
@@ -1848,7 +1863,8 @@ function scheduleHoldsEntry(schedule, path, value) {
         const [, date, layer, workerId] = parts;
         const day = (schedule.days || {})[date];
         const held = day && day[layer] ? day[layer][workerId] : undefined;
-        if (value === null && (layer === 'plan' || layer === 'actual' || layer === 'rima')) {
+        if (value === null && (layer === 'plan' || layer === 'actual' || layer === 'rima'
+            || layer === 'yosefGeves')) {
             return held === undefined;
         }
         return same(held, value);

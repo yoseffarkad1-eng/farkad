@@ -1340,10 +1340,12 @@ function writeFieldPath(target, path, value) {
     }
 
     const last = parts[parts.length - 1];
-    // Only worker-day and Rima-count nulls become deleteField() in the production
-    // adapter. Roster nulls are persistent tombstones, including when creating a document.
+    // Only worker-day and count nulls (Rima's, and since v183 «עובדי יוסף גבס») become
+    // deleteField() in the production adapter. Roster nulls are persistent tombstones,
+    // including when creating a document.
     if (value === null && parts.length === 4 && parts[0] === 'days'
-        && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima')) delete node[last];
+        && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima'
+            || parts[2] === 'yosefGeves')) delete node[last];
     else node[last] = value;
 }
 
@@ -1707,7 +1709,7 @@ const FarkadSync = {
         // the path has been handed to the cloud, or answered for. What that operation had
         // seen - the nothing before it - is not what the server held after it; and the
         // claim of one still unanswered passes to the operation that supersedes it.
-        const handedOver = path => isRimaFieldPath(path)
+        const handedOver = path => isSiteCountFieldPath(path)
             && all.some(op => op.path === path && (op.sent || this.tryMarkOf(op) !== null));
         // A PAY BOOK ENTRY IS CREATED ONCE AND NEVER REWRITTEN (v173), and this is the
         // one place that can be made true for every caller at once.
@@ -1807,7 +1809,7 @@ const FarkadSync = {
                     handedOver: handedOver(entry.path),
                     decided: this._decidedAt.has(String(entry.path))
                 }) : null;
-            if (isRimaFieldPath(entry.path)) {
+            if (isSiteCountFieldPath(entry.path)) {
                 const claim = this.claimAt(entry.path);
                 if (claim !== null) inherited.set(entry.path, claim);
             }
@@ -1933,7 +1935,7 @@ const FarkadSync = {
     noteHandedOver(sent, batchName, claim) {
         const fresh = [];
         if (!sent || sent.size === 0 || typeof batchName !== 'string') return fresh;
-        if (![...sent.keys()].some(path => isRimaFieldPath(path))) return fresh;
+        if (![...sent.keys()].some(path => isSiteCountFieldPath(path))) return fresh;
         const live = this._outbox;
         sent.forEach((entry, path) => {
             const op = live.get(path);
@@ -1969,7 +1971,7 @@ const FarkadSync = {
     noteClaimed(patch) {
         if (!patch || !Number.isSafeInteger(patch.revision)) return;
         Object.keys(patch).forEach(path => {
-            if (!isRimaFieldPath(path)) return;
+            if (!isSiteCountFieldPath(path)) return;
             const op = this._outbox.get(path);
             const mark = this.tryMarkOf(op);
             if (!mark || mark.claim >= patch.revision) return;
@@ -2305,7 +2307,7 @@ const FarkadSync = {
                 // snapshot brings it back (receive's own-echo rule compares the counts).
                 // replacesWhole itself is unchanged: the pre-send hold and the seen marks
                 // need a count to be a value that replaces what is there.
-                if (isRimaFieldPath(op.path)) return;
+                if (isSiteCountFieldPath(op.path)) return;
                 if (!this.keepConfirmed(op)) this.noteKeptIncomplete(op.path);
             });
 
@@ -3020,9 +3022,12 @@ const FarkadSync = {
                 && monthArchivedPath(this._baseDoc, path)) row.archived = true;
             // A COUNT (v166) carries the cloud's counts for its whole day: a move is two
             // paths and a hold names one, so the panel shows the day's other sites beside it.
-            if (isRimaFieldPath(path)) {
+            // Its OWN layer's counts: a held Rima count is drawn beside the day's other Rima
+            // counts, a held «עובדי יוסף גבס» count beside the day's others of those (v183).
+            if (isSiteCountFieldPath(path)) {
                 row.cloudDay = heard
-                    ? cloneValue(this.baseValueAt(`days.${String(path).split('.')[1]}.rima`)) : undefined;
+                    ? cloneValue(this.baseValueAt(
+                        `days.${String(path).split('.')[1]}.${siteCountLayerOf(path)}`)) : undefined;
             }
             rows.push(row);
         });

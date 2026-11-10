@@ -20,11 +20,17 @@ const MODAL_CLOSERS = {
     placePickerModal: () => closePlacePicker(),
     workerFormModal: () => closeWorkerForm(),
     workerDaysModal: () => closeWorkerDays(),
+    // The worker's card (js/ui/workercard.js): closing it forgets whose it was.
+    workerCardModal: () => closeWorkerCard(),
     shareModal: () => closeShareModal(),
     // Closing it on purpose is what stops a reload bringing it back (js/ui/seder.js).
     sederModal: () => closeSederList(),
     // The summary of the day's rides (v179, js/ui/transport.js).
     transportSummaryModal: () => closeTransportSummary(),
+    // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.
+    dayCheckModal: () => closeDayCheck(),
+    // The report of a period's rides (js/ui/transport.js).
+    transportReportModal: () => closeTransportReport(),
     migrationModal: () => closeMigrationModal(),
     // The one .modal that had no entry here, so Escape fell through to the bare
     // `display = 'none'` below and never reached closeSignInModal - which exists, and

@@ -124,6 +124,23 @@ function workerAdvanceSummary(workerId) {
     return summary;
 }
 
+// Nothing left to give back, and nothing to look at: the one case that is drawn quieter.
+// An overpaid account also has `left` 0, and it is the opposite of quiet.
+function advanceSettledQuiet(summary) {
+    return !(summary.left > 0) && !(summary.overpaid > 0);
+}
+
+// The empty crew, said the way the roster says it, with the roster's own button. The
+// button goes to the roster first - the same two steps the day's setup card takes - so
+// the man who was added is on the screen when the form closes.
+const NO_WORKERS_YET = 'אין עובדים. הוסף עובד כדי להתחיל.';
+const ADD_WORKER_LABEL = '+ הוסף עובד';
+function appendNoWorkersYet(root) {
+    root.appendChild(emptyHint(NO_WORKERS_YET));
+    root.appendChild(button(ADD_WORKER_LABEL, 'btn-add empty-action',
+        () => { showView('roster'); showAddWorkerModal(); }));
+}
+
 function showWorkerAdvances(id) {
     ADVANCE_WORKER = id;
     const root = document.getElementById('advancesView');
@@ -176,6 +193,10 @@ function renderAdvances() {
         root.appendChild(el('h2', null, `מקדמות · ${worker.name}`));
         const summary = workerAdvanceSummary(worker.id);
         const balance = el('div', 'advance-balance');
+        // A man who owes nothing reads quieter than one who owes: the same words in the
+        // same place, in weaker ink and without the accent (css/design.css). Never for an
+        // account that asks to be looked at - that one is not settled, it is in question.
+        if (advanceSettledQuiet(summary)) balance.classList.add('advance-balance-zero');
         balance.appendChild(el('span', null, summary.overpaid > 0 ? 'החשבון דורש בדיקה' : 'נשאר להחזיר'));
         balance.appendChild(el('strong', null, `${moneyText(summary.left)} ₪`));
         balance.appendChild(el('p', null, `נמסר: ${moneyText(summary.given)} ₪ · הוחזר וקוזז: ${moneyText(summary.repaid + summary.deducted)} ₪`));
@@ -216,6 +237,14 @@ function renderAdvances() {
         return;
     }
     root.appendChild(el('h2', null, 'מקדמות'));
+    // NOBODY TO CHOOSE. The line under the heading says "choose a worker" and the field
+    // under it searches them; with no workers both act on nothing, and the search's own
+    // answer - «לא נמצא עובד» - reads as a search that failed rather than a crew that was
+    // never entered. One sentence (the roster's own) and the button that mends it.
+    if (State.schedule.workers.length === 0) {
+        appendNoWorkersYet(root);
+        return;
+    }
     if (State.schedule.workers.length > 1) {
         root.appendChild(button('סידור', 'btn-secondary', openAdvanceOrder, 'סידור עמוד המקדמות'));
     }
@@ -230,6 +259,8 @@ function renderAdvances() {
         advanceWorkersInOrder().filter(w => w.name.includes(ADVANCE_SEARCH)).forEach(w => {
             const summary = workerAdvanceSummary(w.id);
             const card = button('', 'advance-worker-card btn-secondary', () => showWorkerAdvances(w.id));
+            // Same row, same words, same place in the order - only quieter (design.css).
+            if (advanceSettledQuiet(summary)) card.classList.add('advance-worker-zero');
             card.appendChild(el('strong', null, w.name + (w.active === false ? ' · כבוי' : '')));
             card.appendChild(el('span', null, summary.overpaid > 0 ? 'דורש בדיקה'
                 : `${moneyText(summary.left)} ₪ נשארו`));
@@ -1625,8 +1656,15 @@ function renderInvoiceTable() {
 
     // A day with Rima's men and none of the owner's is on the invoice too (see
     // invoiceReport), so an empty invoice is a range with no Rima either.
+    //
+    // «עובדי יוסף גבס» (v183) is on NO invoice, so a range holding only those counts is
+    // still an empty invoice and still says so - and the list is drawn under that line,
+    // because it is recorded and this is the page it is read on. (The picture of such a
+    // page is the list alone: it draws the empty sentence only when there is no table.)
     if (all.places.length === 0) {
         section.appendChild(emptyHint('אין רישומים בטווח הזה.'));
+        const alone = renderYosefGevesSection();
+        if (alone) section.appendChild(alone);
         return section;
     }
 
@@ -1690,6 +1728,9 @@ function renderInvoiceTable() {
     if (withoutRima) section.appendChild(withoutRima);
     const rima = renderRimaSection();
     if (rima) section.appendChild(rima);
+    // And last, apart from all three: the list that is in no account (v183).
+    const yosefGeves = renderYosefGevesSection();
+    if (yosefGeves) section.appendChild(yosefGeves);
     return section;
 }
 
@@ -1759,6 +1800,73 @@ function renderRimaSection() {
     // NOT .hint: .hint is hidden on paper, and this line is the one that says the Rima
     // total is already inside the invoice above and is nobody's pay.
     wrap.appendChild(el('p', 'report-rima-note', RIMA_NOTE));
+    return wrap;
+}
+
+// ---------------------------------------------------------------- עובדי יוסף גבס (v183)
+//
+// The owner, 2026-11-10: "a list of their own that has nothing to do with any account, but
+// I want them recorded with me ... without touching any other list. I just write their
+// number." So: a table of its own at the END of this page, after «רישום לרימא» - its own
+// heading (the owner's words), its own dates (only the days that HAD a count), its own
+// columns (only the sites that had one), its own total, and one line saying what it is not
+// in. It is built from yosefGevesReport and from nothing else, and NOTHING ELSE ON THIS
+// PAGE READS THAT LAYER: the invoice above, «בלי עובדי רימא», the Rima table, the bars and
+// the pay sheet are byte for byte what they are without it (tests/yosefgeves.test.mjs).
+//
+// ON THE SCREEN, ON PAPER AND IN THE PICTURE. It was first built for the screen and the
+// workbook alone; the owner was asked and answered (2026-11-10): "I want it in print too,
+// but as a separate list that does not enter any other list's account." So the same
+// element is the screen and the paper - the print stylesheet shows it as it is, as it does
+// the Rima table - and the picture reads it as one more group, the last
+// (readReportPrintout in js/ui/printout.js). Nothing above it on the paper or in the
+// picture moves: tests/yosefgeves.browser.mjs compares both with the list taken away. In
+// the workbook it is a last sheet of the FULL export only - never of the one-client file
+// and never of a chosen-workers export.
+//
+// The list's name is the OWNER'S, verbatim. The other three are PROPOSED - Rima's words
+// with the name changed, and the note saying the one thing Rima's cannot.
+const YOSEF_GEVES_TITLE = 'עובדי יוסף גבס';
+const YOSEF_GEVES_TOTAL = 'סה״כ עובדי יוסף גבס';
+const YOSEF_GEVES_NOTE = 'עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.';
+const YOSEF_GEVES_SHEET = 'עובדי יוסף גבס';
+
+// The table in scope: the report's range, narrowed to the one site when one is chosen on
+// the billing side - the Rima table's own predicate, so the two lists follow the same site.
+function yosefGevesInScope() {
+    const client = scopedExportPlace();
+    return yosefGevesReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to,
+        client ? client.placeId : null);
+}
+
+// Null when there is nothing to show: no heading over an empty table.
+function renderYosefGevesSection() {
+    const counted = yosefGevesInScope();
+    if (counted.places.length === 0) return null;
+
+    const wrap = el('div', 'report-yosefgeves');
+    wrap.appendChild(el('h3', 'report-group report-yosefgeves-title', YOSEF_GEVES_TITLE));
+
+    const headers = ['תאריך'].concat(counted.places.map(place => place.name)).concat(['סה״כ']);
+    const body = counted.dates.map(date => {
+        const parsed = parseLocalDate(date);
+        return [`${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`]
+            .concat(counted.places.map(place => counted.countAt(place.placeId, date)))
+            .concat([counted.dayTotal(date)]);
+    });
+    const table = buildTable(headers, body);
+    table.classList.add('yosefgeves-table');
+    table.appendChild(totalRow(
+        [YOSEF_GEVES_TOTAL].concat(counted.places.map(place => place.total)).concat([counted.total]),
+        headers
+    ));
+
+    const group = el('div', 'report-yosefgeves-group');
+    group.appendChild(scrollWrap(table));
+    wrap.appendChild(group);
+    // NOT .hint: .hint is hidden on paper, and this line is the one that says the list is
+    // in no pay and in no billing.
+    wrap.appendChild(el('p', 'report-yosefgeves-note', YOSEF_GEVES_NOTE));
     return wrap;
 }
 
@@ -3853,6 +3961,24 @@ function rimaSheetRows() {
     return rows;
 }
 
+// THE «עובדי יוסף גבס» SHEET (v183): the list's table, shaped like the רימא sheet - a date
+// per row, a site per column, every count a real number, zeros included, full dates - then
+// one empty row and the note in the first column alone. Null, and no sheet, when the range
+// has no count. Built from yosefGevesInScope and from nothing else.
+function yosefGevesSheetRows() {
+    const counted = yosefGevesInScope();
+    if (counted.places.length === 0) return null;
+    const rows = [['תאריך'].concat(counted.places.map(place => place.name)).concat(['סה״כ'])];
+    counted.dates.forEach(date => {
+        rows.push([date].concat(counted.places.map(place => counted.countAt(place.placeId, date)))
+            .concat([counted.dayTotal(date)]));
+    });
+    rows.push([YOSEF_GEVES_TOTAL].concat(counted.places.map(place => place.total)).concat([counted.total]));
+    rows.push([]);
+    rows.push([YOSEF_GEVES_NOTE]);
+    return rows;
+}
+
 // THE «בלי עובדי רימא» SHEET (v167): the חיוב sheet's own dates and sites, his men only, every
 // count a real number, zeros included. Full dates, like every exported sheet. Null - and no
 // sheet - when the range in scope has no Rima. See withoutRimaInScope.
@@ -3899,7 +4025,13 @@ function reportSheets() {
     if (REPORT_SECTION === 'workers' && REPORT_WORKERS !== null) {
         return { payroll: payrollSheetRows(), detail: detailRows() };
     }
-    return withRima({ payroll: payrollSheetRows(), invoice: invoiceSheetRows(), detail: detailRows() });
+    // «עובדי יוסף גבס» (v183): the LAST sheet of the full export, and of no other file -
+    // not the client's (it is in no account of his) and not a chosen-workers export. Added
+    // after every other key, so every sheet before it is at the index it always had.
+    const full = withRima({ payroll: payrollSheetRows(), invoice: invoiceSheetRows(), detail: detailRows() });
+    const yosefGeves = yosefGevesSheetRows();
+    if (yosefGeves) full.yosefGeves = yosefGeves;
+    return full;
 }
 
 // Every worker-day in the range, one row each. The two summary sheets answer "how much";
@@ -4072,6 +4204,7 @@ async function exportReports() {
         if (sheets.withoutRima) hand(sheets.withoutRima, `farkad-invoice-without-rima_${stamp}.csv`);
         if (sheets.detail) hand(sheets.detail, `farkad-detail_${stamp}.csv`);
         if (sheets.rima) hand(sheets.rima, `farkad-rima_${stamp}.csv`);
+        if (sheets.yosefGeves) hand(sheets.yosefGeves, `farkad-yosef-geves_${stamp}.csv`);
 
         if (refused.length > 0) {
             askTell(downloadRefusedNotice(refused, handed));
@@ -4118,6 +4251,9 @@ async function exportReports() {
         }
         if (sheets.rima) {
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.rima), RIMA_SHEET);
+        }
+        if (sheets.yosefGeves) {
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.yosefGeves), YOSEF_GEVES_SHEET);
         }
         // NAMED LATIN-FIRST, like the backup (farkad-<date>.json) and the picture
         // (farkad-דוח-…png). The names were דוחות_<from>_<to>.xlsx and שכר_/חיוב_/פירוט_
