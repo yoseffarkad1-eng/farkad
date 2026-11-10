@@ -289,3 +289,25 @@ the tested artifact, not the live ones; publishing them is a human operation per
 deliberately, and this file describes what will happen when someone does. No rules were
 published from the session that wrote this paragraph, and none can be: every rules suite
 runs through `firebase emulators:exec` against a local emulator.
+
+## Which rules are live, and a record that is on (v186, Phase 8)
+
+Two additions to the rules of the pay book's branch, neither published:
+
+- **`schedules/{doc}/probe/{generation}`** - nothing is ever stored there. `get` of
+  `probe/paybook-8` is allowed to the people on the list and every other operation on the
+  collection is refused; under any rules published before these the read is refused,
+  because they have no such block. `adapter.probeRules(generation)` answers true, false,
+  or throws when it could not ask, and `FarkadSync.activationRefusal()` turns that into
+  `rules`, `offline` or nothing. It is how a phone asks "are the new rules live" before it
+  turns the pay book on for a record - by reading. The generation's name moves only when
+  the rules a client must not run without move.
+- **`activatedNeedsPaybook`** - once the document holds a pay book at all, a write of any
+  shape that does not speak protocol 2 is refused. A record with a pay book is a record
+  that is on (its first pay entry is the opening); a build from before the pay book
+  speaks protocol 1, reads the old arithmetic and could close an account the old way with
+  no signal. Its writes are stopped; nothing is erased; it does not say synced. With no
+  pay book on the document the rule is vacuous. Measured on v180, v183 and v184 in
+  `tests/activation.emulator.test.mjs`.
+
+Protocol 2 itself did not change.

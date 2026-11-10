@@ -252,6 +252,18 @@ control writes.
 deductions (`js/model/payroll.js`). The map itself is stored, merged and sent by every
 v173 phone with the gate off; `docs/payroll-closure.md` has the whole of it.
 
+**And since v186 that gate is not how the pay book is turned on (Phase 8).** `paybook`,
+`months` and `cold` stay false in every build. The pay book is on for a RECORD that holds
+its opening (`pay.po_open`), written once by a server transaction only the new rules
+accept, from a screen a person reads first. `paybookOn(schedule)` in `js/model/schema.js`
+is the one reader of the three flags - the flag through the test seam, or the record's
+entry - and every gate hands it the record: the one-debt ruling, the planners, both
+archive moves, the cold store's writer, the screens. So the answer is the same on every
+phone that holds the record, and a phone cannot be half on. `paybookActivation: true` is
+the shipped flag that says this build offers that step and honours that entry; `false` is
+the way back, safe until the first closure. The order in which it is done is
+`docs/payroll-activation.md`.
+
 `ledgerWritesEnabled()` now also honours `FARKAD_FLAGS.ledgerWrites`. The const
 stays where iron law 1 puts it and its shipped value is unchanged; what it gains is
 the seam every other gate has, so a suite can measure the build somebody eventually

@@ -24,6 +24,7 @@
 //   V8  a phone that had not heard closes an account the old way: it is not lost, not
 //       silent, and not a second arithmetic
 //   V9  a build from before the pay book, on an activated record: its writes are refused
+//   V9b the same with the REAL BYTES of v180, v183 and v184, out of Git, on the fake rules
 //   V10 the months and the cold store follow the same switch - the whole of Phases 5 to 7
 //       on a build with every flag false
 //   V11 the one function: no other line reads the three flags
@@ -33,9 +34,10 @@
 // are in tests/activation.emulator.test.mjs.
 
 import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeCloud, makeDevice, settle, settleUntil } from './harness.mjs';
+import { makeCloud, makeDevice, settle, settleUntil, loadOrder, sourceRoot } from './harness.mjs';
 import { makeIndexedDB } from './fake-indexeddb.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { CREW, SITES, W1, W2, FORTNIGHT, WEEK1, WEEK2, clone, stamp, canonical } from './paybook.world.mjs';
@@ -518,6 +520,89 @@ let ACTIVATED = null;
     same('a protocol-1 whole document (its restore) is refused', await tried('save', whole), 'permission-denied');
     same('and the server\'s document is exactly what it was', canonical(cloud.doc) === stood, true);
     same('a protocol-2 day is accepted', await tried('update', Object.assign(head('op9e', 2), { 'days.2026-10-17.actual.w_salim': { entries: [{ placeId: 'p_a' }] } })), 'accepted');
+}
+
+// ------------------------------------------------------------------------------------
+// The builds a phone may still be on when the owner presses the button: v180 and v183 were
+// served on 2026-11-10; v184 is what this branch was merged with. Their own files, out of
+// Git, in this build's load order less the six files only this branch has. (The same
+// builds meet the REAL rules, through their own adapter, in the emulator suite.)
+{
+    const git = args => execFileSync('git', ['-C', sourceRoot()].concat(args), { maxBuffer: 64 * 1024 * 1024 });
+    const NOT_ON_MAIN = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
+        'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
+    const order = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1);
+    const answers = {};
+    for (const [name, sha] of [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4']]) {
+        suite(`V9b: ${name}, its real bytes out of Git, on a record that is turned on beside it`);
+
+        let present = false;
+        try { present = git(['cat-file', '-t', sha]).toString().trim() === 'commit'; } catch (error) { present = false; }
+        given(`the ${name} commit is in this repository`, present, sha);
+        const files = order.filter(file => { try { git(['cat-file', '-e', `${sha}:${file}`]); return true; } catch (error) { return false; } });
+        given(`${name} has every file this build loads that it could have had`, files.length === order.length, `${files.length} of ${order.length}`);
+        const sources = files.map(file => ({ file, code: git(['show', `${sha}:${file}`]).toString('utf8') }));
+        const said = (/const APP_VERSION = '([^']+)'/.exec(git(['show', `${sha}:js/app.js`]).toString('utf8')) || [])[1];
+        given(`the older build names itself ${name}`, said === name, String(said));
+        given(`${name} has never heard of the pay book`, !sources.some(source => /payConflicted|paybookOn|layPaybookEntry/.test(source.code)));
+
+        const base = seed({ id: `d_v9b_${name}`, carry: true });
+        const cloud = cloudFor(base);
+        const mine = join_(`d_new_${name}`, base, cloud);
+        // Its own disk as such a phone has it: v180 never kept «עובדי יוסף גבס» (v183's layer)
+        // in its own copy, and reads a disk that holds one as damaged. The CLOUD holds it.
+        const itsDisk = clone(base.State.schedule);
+        Object.keys(itsDisk.days).forEach(date => { delete itsDisk.days[date].yosefGeves; });
+        const old = makeDevice({ sources, appVersion: name, deviceId: `d_old_${name}`, storage: { [SCHEDULE]: JSON.stringify(itsDisk) } });
+        old.setToday(TODAY);
+        old.ctx.askTell = () => Promise.resolve();
+        old.ctx.askConfirm = () => Promise.resolve(true);
+        old.Sync.pushDelayMs = 5;
+        old.State.load();
+        old.Sync.connect(cloud.adapter);
+        await settled([mine, old]);
+        const put = (device, date, worker) => device.State.commit(device.call('assignPlace', device.State.schedule, date, worker, 'actual', 'p_a', undefined, 0)) === true;
+
+        given('before: the old phone records a day', put(old, '2026-10-16', 'w_salim'));
+        await settled([mine, old]);
+        const cell = answers[name] = {};
+        cell.dayBefore = Boolean(cloud.doc.days['2026-10-16']) && old.Sync.status === 'synced';
+        same('BEFORE the record is on it records a day under these rules, and says synced', cell.dayBefore, true);
+
+        given('this build turns the record on', (await activate(mine)).state === 'closed');
+        await settled([mine]);
+        await settle(120);
+        const stood = canonical(cloud.doc);
+        cell.adopts = [old.Sync.status, Boolean(old.State.schedule.pay && old.State.schedule.pay.po_open),
+            old.call('advanceCarryInto', old.State.schedule, 'w_khaled', FORTNIGHT.from)];
+        same('MEASURED, what cannot be changed from here: it adopts the document, keeps no pay book in its own copy, and still reads the old walk (Khaled carries 0)',
+            cell.adopts.slice(1), [false, 0]);
+
+        given('after: a day is typed on the old phone', put(old, '2026-10-18', 'w_salim'));
+        await settle(600);
+        cell.dayRefused = !cloud.doc.days['2026-10-18'] && canonical(cloud.doc) === stood;
+        same('AFTER: ITS DAY IS REFUSED - not on the server, and the server\'s document is exactly what it was', cell.dayRefused, true);
+        cell.says = old.Sync.status;
+        check('IT DOES NOT SAY SYNCED, and it still holds the day', old.Sync.status !== 'synced' && old.Sync.pendingCount() > 0
+            && Boolean(old.State.schedule.days['2026-10-18'].actual.w_salim), `${old.Sync.status} / ${old.Sync.pendingCount()}`);
+        const closing = old.call('closePeriodChanges', old.State.schedule, 'w_salim', FORTNIGHT.from, FORTNIGHT.to, '2026-10-16T12:00:00.000Z', old.id, 0);
+        given('a closure is made on it the old way', closing.length > 0 && old.State.commitMany(closing) === true);
+        await settle(600);
+        cell.closeRefused = canonical(cloud.doc) === stood;
+        same('A CLOSURE MADE THE OLD WAY ON IT never reaches the server', cell.closeRefused, true);
+        const restoring = old.Sync.replaceEverything(old.call('normaliseSchedule', clone(old.State.schedule)));
+        await Promise.race([restoring.catch(() => null), settle(1500)]);
+        await settle(300);
+        cell.restoreRefused = canonical(cloud.doc) === stood;
+        same('ITS RESTORE IS REFUSED: the opening, the closed document and the revision exactly where they were',
+            [cell.restoreRefused, Object.keys(cloud.doc.pay), cloud.closed.size], [true, ['po_open'], 1]);
+        same('and this build, beside it, goes on recording', (put(mine, '2026-10-19', 'w_nasser'), await settled([mine]), Boolean(cloud.doc.days['2026-10-19'])), true);
+    }
+    suite('V9b: every one of them answers the same way');
+    same('v180, v183 and v184: a day before, yes; a day, an old-style closure and a restore after, refused',
+        Object.keys(answers).map(name => [name, answers[name].dayBefore, answers[name].dayRefused, answers[name].closeRefused, answers[name].restoreRefused]),
+        [['v180', true, true, true, true], ['v183', true, true, true, true], ['v184', true, true, true, true]]);
+    console.log('  measured, what each older phone says of itself after its write is refused: ' + JSON.stringify(Object.keys(answers).map(name => [name, answers[name].says])));
 }
 
 // ------------------------------------------------------------------------------------

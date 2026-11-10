@@ -245,6 +245,41 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
 
 // =====================================================================================
 {
+    suite('with the pay book on, one man\'s advances page is the existing one: a repayment and «תיקון טעות» through the real forms');
+
+    // tests/simple-advances.browser.mjs holds this for the build with the pay book shut,
+    // by tapping a man's card on the «מקדמות» tab. With the pay book on that tab is the
+    // accounts home (the suite stops at its third step under tests/gate-open.preload.mjs,
+    // by design), and the way to the same page is the «מקדמות» button on his row. The
+    // same forms, the same writers - held here, in a gate, for the build that is on.
+    await showAccounts(a.page);
+    await tapText(a.page, 'מקדמות', row('w_khaled'));
+    same('«מקדמות» on his row opens HIS advances page - the existing one, not an accounts screen',
+        await a.page.evaluate(() => [ADVANCE_WORKER, document.querySelectorAll('#advancesView .acc-screen').length,
+            Boolean(document.querySelector('#advancesView .advance-balance'))]), ['w_khaled', 0, true]);
+    await a.page.getByRole('button', { name: 'העובד החזיר כסף', exact: true }).click();
+    await a.page.locator('.advance-form input[type=text]').first().fill('200');
+    await a.page.locator('.advance-form').getByRole('button', { name: 'שמור', exact: true }).click();
+    await a.page.waitForTimeout(250);
+    same('A REPAYMENT THROUGH THE REAL FORM: 200 back, 300 left of the 500', await a.page.evaluate(() => workerAdvanceSummary('w_khaled').left), 300);
+    await a.page.getByRole('button', { name: 'תיקון טעות', exact: true }).click();
+    await a.page.locator('.advance-form input[type=text]').first().fill('100');
+    await a.page.locator('.advance-form input[type=text]').nth(1).fill('טעות בהקלדה');
+    await a.page.getByRole('button', { name: 'שמור תיקון', exact: true }).click();
+    await a.page.waitForTimeout(250);
+    same('«תיקון טעות» THROUGH THE REAL FORM: 100 of the advance never moved, 200 left - as the same form answers with the pay book shut', await a.page.evaluate(() => workerAdvanceSummary('w_khaled').left), 200);
+    await settled(a.page);
+    await a.page.locator(`${V} button`, { hasText: 'חזרה לכל העובדים' }).click();
+    await a.page.waitForTimeout(200);
+    same('and the way back is the accounts home, where his row now reads the debt the forms left',
+        [await screen(a.page), await all(a.page, `${row('w_khaled')} .acc-sum-debt`)], ['list', [`${T.debt}200 ₪`]]);
+    await b.page.waitForFunction(() => workerAdvanceSummary('w_khaled').left === 200, null, { timeout: 20000 });
+    await b.page.waitForTimeout(300);
+    same('the other phone reads the same', await all(b.page, `${row('w_khaled')} .acc-sum-debt`), [`${T.debt}200 ₪`]);
+}
+
+// =====================================================================================
+{
     suite('«יתרת זכות»: the credit named on the accounts row and on the review page (decision 67)');
 
     // Nasser takes 1,000 on the 3rd and hands back 1,500 on the 4th: 500 is his.
