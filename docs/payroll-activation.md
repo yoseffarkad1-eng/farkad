@@ -250,13 +250,17 @@ file, right after the receipts block. **The owner pastes ONE file holding both.*
   `probe/` and before the brace that closes `match /schedules/{docId}`** — a sibling of
   the four, sharing no function and no field with them (`tests/activation.test.mjs`, V12,
   pins that place).
-- **How it is built, not typed:** `combine-rules.py <this branch's firestore.rules>
-  <main's file> <the transport branch's file> <out>` (in the session scratchpad,
-  `p8/combine-rules.py`). It refuses unless the transport change is one insertion into
-  main's file after the receipts block, and unless no function name is declared twice.
-- **The file as built on 2026-11-10:**
-  `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/payroll/firestore.rules.combined`
-  — this branch's rules plus the 67 lines of the transport block, 41,260 bytes.
+- **How it is built, not typed:** by a script, not by hand - take the transport branch's
+  file, diff it against main's, require that the difference is ONE insertion after the
+  receipts block and that no function name it declares exists in this branch's file, and
+  insert those lines at the place above. (The script that did this on 2026-11-10,
+  `combine-rules.py`, was a working file of that session and is not in the repository;
+  the four checks in this bullet are the whole of it.)
+- **The file as built on 2026-11-10** (a working file of that session, handed over with
+  the branch, not committed): this branch's rules plus the 67 lines of the transport
+  block. Every emulator suite of this branch is to be run with it in place of
+  `firestore.rules` before it is pasted - see «What was NOT verified» for whether that
+  was done.
 - **Whichever branch is merged second** carries the combined file as its
   `firestore.rules`, so that the file in the repository is again exactly what is live.
   The probe's name does **not** move for the transport block: no client refuses to run

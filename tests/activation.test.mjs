@@ -434,6 +434,36 @@ let ACTIVATED = null;
 
 // ------------------------------------------------------------------------------------
 {
+    suite('V7b: an opening that disagrees can only come from a FILE - and then the server\'s stands, on every phone, and nothing is locked');
+
+    // Through the screens two openings cannot both land (V7). The one other way a second
+    // body can reach a record is a restore of a file from ANOTHER state of it - and a
+    // restore unions the pay book, the live copy standing (docs/payroll-closure.md, the
+    // restore rule). Asked of the model's own union, the one every door calls.
+    const d = seed({ id: 'd_v7b', carry: true });
+    const opening = d.call('planOpening', S(d), OPENING, at(d));
+    const live = d.call('paybookApply', S(d), opening.changes).schedule;
+    const file = clone(live);
+    file.pay.po_open = Object.assign({}, file.pay.po_open, { date: '2026-09-18', by: 'd_other' });
+    const united = d.call('paybookUnion', live, file);
+    const record = Object.assign(clone(live), { pay: united.pay, payConflicted: united.payConflicted });
+    same('the live opening STANDS and the file\'s is kept beside it, verbatim - nothing merged, nothing chosen by a clock',
+        [united.clashes, record.pay.po_open.date, record.payConflicted.po_open.map(body => body.date)], [['po_open'], OPENING, ['2026-09-18']]);
+    same('the record is still on, from the standing day, and the disagreement is in the fold', [d.call('paybookOn', record),
+        d.call('paybookFold', record).opening.date, d.call('paybookFold', record).conflicts.map(one => one.id)], [true, OPENING, ['po_open']]);
+    same('NOBODY IS LOCKED BY IT: an opening belongs to no man, so every man\'s account reads as it did and a closure can be planned',
+        [canonical(d.call('accountsList', record, TODAY).rows.map(row => [row.workerId, row.status]))
+            === canonical(d.call('accountsList', live, TODAY).rows.map(row => [row.workerId, row.status])),
+            d.call('planClosure', record, 'w_nasser', FORTNIGHT, { allocations: {}, paid: 0 }, at(d)).ok], [true, true]);
+    // KNOWN, and said in the docs (Phase 8, «settling a disagreement»): this one
+    // disagreement is on no screen - «מה לבדוק?» is a page per man. Every phone that has
+    // heard the server computes from the same opening, so no figure differs anywhere.
+    same('KNOWN: it is listed on no man\'s «לבדיקה» - there is no man to list it under',
+        d.call('accountsList', record, TODAY).rows.filter(row => (row.conflicts || []).length > 0).length, 0);
+}
+
+// ------------------------------------------------------------------------------------
+{
     suite('V8: a phone that had not heard closes an account the old way - not lost, not silent, not a second arithmetic');
 
     const base = seed({ id: 'd_v8seed', carry: true });

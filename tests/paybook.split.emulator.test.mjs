@@ -470,16 +470,28 @@ for (const [name, sha] of OLDER) {
         const n = phone(`d_n_${name}`, envNew);
         await reached(() => quiet(n));
         given('this build closes Khaled\'s account', (await n.Sync.transactPaybook(khaled(n))).state === 'closed');
-        const before = canonical((await server(envNew)).pay);
+        const stood = await server(envNew);
+        const before = canonical(stood.pay);
         const old = oldPhone(name, sources, `d_o_${name}`, envNew);
         await reached(() => quiet(old));
         day(old, 'w_nasser', '2026-10-18');
-        await reached(() => old.Sync.pendingCount() === 0, 20000);
+        await settle(3500);
         const landed = await server(envNew);
-        cell.dayUnderNew = dayOn(landed) && canonical(landed.pay) === before;
-        check('IT STILL RECORDS A DAY: the day is on the server, signed by it, and the pay book is byte for byte unchanged',
-            cell.dayUnderNew && landed.updatedBy === old.id, JSON.stringify([dayOn(landed), landed.updatedBy]));
-        same('and it says synced', old.Sync.status, 'synced');
+        // MOVED AT PHASE 8, deliberately. Until then an older build went on recording days
+        // beside a pay book it could not read («IT STILL RECORDS A DAY»), and only its
+        // restore was refused. A record with a pay book is now a record that has been
+        // TURNED ON: its debts are read under the one-debt ruling and its accounts are
+        // closed through the pay book - and an older build does neither, and could still
+        // close an account the old way with no signal and send it later. So the rules
+        // stop every write of a build below protocol 2 once a pay book exists
+        // (activatedNeedsPaybook); tests/activation.emulator.test.mjs measures it on
+        // v180, v183 and v184. What did not move: nothing is erased, nothing is lost.
+        cell.dayUnderNew = dayOn(landed);
+        cell.dayRefusedWhole = !dayOn(landed) && canonical(landed.pay) === before && landed.revision === stood.revision;
+        check('ITS DAY IS REFUSED: not on the server, the revision has not moved, and the pay book is byte for byte unchanged',
+            cell.dayRefusedWhole, JSON.stringify([dayOn(landed), landed.revision, stood.revision]));
+        check('it does NOT say synced, and the day is still on that phone', old.Sync.status !== 'synced'
+            && Boolean(old.State.schedule.days['2026-10-18'].actual.w_nasser), old.Sync.status);
 
         const revision = landed.revision;
         const restoring = old.Sync.replaceEverything(old.call('normaliseSchedule', clone(old.State.schedule)));
@@ -578,13 +590,15 @@ for (const [name, sha] of OLDER) {
 
     const olds = OLDER.map(([name]) => found[name]);
     same('every older build answers every question the same way',
-        olds.map(cell => [cell.dayUnderNew, cell.restoreRefused, cell.dayNoPay, cell.restoreNoPay, cell.oldRulesErase]),
-        OLDER.map(() => [true, true, true, true, true]));
-    // 1. Publishing the new rules FIRST breaks no phone: an older build records days under
-    //    them with or without a pay book on the document, and restores as before while
-    //    there is none.
+        olds.map(cell => [cell.dayUnderNew, cell.dayRefusedWhole, cell.restoreRefused, cell.dayNoPay, cell.restoreNoPay, cell.oldRulesErase]),
+        OLDER.map(() => [false, true, true, true, true, true]));
+    // 1. Publishing the new rules FIRST breaks no phone: while there is no pay book on the
+    //    document an older build records days under them and restores as before.
+    //    (Phase 8: "with or without a pay book" became "while there is none" - see below.)
     check('1. the new rules can be published while every phone is still on an older build: nobody working is refused',
-        olds.every(cell => cell.dayUnderNew && cell.dayNoPay && cell.restoreNoPay));
+        olds.every(cell => cell.dayNoPay && cell.restoreNoPay));
+    check('1b. (Phase 8) and from the first pay entry an older build writes nothing at all - which is why every phone updates before the record is turned on',
+        olds.every(cell => cell.dayRefusedWhole && cell.restoreRefused));
     // 2. This build works under either set of rules for everything but the pay book.
     check('2. the phones can then update in any order: this build records and restores under the old rules and the new',
         found.newDayUnderOld && found.newDayUnderNew && found.newRestoreUnderNew);

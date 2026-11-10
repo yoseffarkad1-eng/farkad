@@ -1,4 +1,4 @@
-# Worker accounts, closure and payment — the design as built (Phases 0 to 7)
+# Worker accounts, closure and payment — the design as built (Phases 0 to 8)
 
 Status: **the model, its storage and sync, the server-first closure, the rules for it, the
 screens, and closed accounts leaving the live document — shipped shut, on a development
@@ -15,6 +15,15 @@ is now the first wall and a blocker of the gate. **Phase 7 comes first of all**:
 phone's cold store, which is the answer to that wall, behind a third flag (`cold`,
 shipped `false`), built on this branch merged with main at v180 (`d3103d6`).
 
+**Phase 8 is the activation candidate, and it changes what the paragraph above means.**
+The three flags are still `false` and stay false - but they are no longer how the pay book
+is turned on. It is turned on for ONE RECORD, by a person, from the app: an entry in the
+shared record (the opening) written by a server transaction only the new rules accept.
+Wherever a phase below says "the gate may not be opened" or "the commit that opens the
+gate", read it against [Phase 8](#phase-8--the-activation-candidate-v186): there is no
+such commit any more, and the order in which it is done is
+[`docs/payroll-activation.md`](payroll-activation.md).
+
 Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
 Phase 2 merged with main at v172 (`8c943fa`); Phase 4 on Phase 3 merged with main at
 v174 (`893def8`); Phase 5 on Phase 4 (`1981c5e`). The specification was the audit and design
@@ -26,7 +35,336 @@ wrong](#where-the-audit-and-the-design-were-wrong).
     node tests/paybook.store.test.mjs       # one phone: the gate, the commit, the disk, the files, capacity
     node tests/paybook.sync.test.mjs        # two and three phones on the fake cloud (the old queue door, opened by name)
     node tests/paybook.oldbuilds.test.mjs   # v167, v169 and v171, out of Git, beside this build
+    node tests/activation.test.mjs          # Phase 8: turning it on for one record, on the build as it ships
     npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
+
+## Phase 8 — the activation candidate (v186)
+
+**Development branch. Not served, not merged, on no phone; no real record was read and no
+rules were published. `paybook`, `months` and `cold` are `false` in everything committed,
+and stay false: they are no longer how the pay book is turned on.** This phase merged main
+at v184 (`990f5b4`), closed the gaps between Phase 7 and a safe first use, and built the
+way the pay book is turned on for a real record. The runbook - who does what, in which
+order, and what to do when a check fails - is [`docs/payroll-activation.md`](payroll-activation.md).
+
+    node tests/activation.test.mjs              # the record's own switch, on the build as it ships (fake cloud)
+    npm run -s test:activation-browser          # turning it on from the app, in Chromium
+    npm run -s test:activation-emulator         # the real rules, the production adapter, v180 / v183 / v184 out of Git
+    npm run -s test:gate-open                   # every existing suite with the gates open, against a hand-kept list (in no gate)
+
+### The decision of this phase: the record turns it on, not the build
+
+Until now "open the gate" meant a commit with `paybook: true` - on for everybody who
+updates, at the moment each phone happens to update, with three phones on two arithmetics
+in between. That is not built. What is built:
+
+| | |
+|---|---|
+| **what turns it on** | one entry in the shared record: the opening, `pay.po_open` - "tracking begins on this day" (Phase 1's `planOpening`). It was already the first thing the pay book needs, already append-only on the wire and in the rules, and every build that keeps `pay` already carries it. A second entry beside it would be a second fact that could disagree with the first |
+| **who** | a person, from the app: ⋯ → «פנקס שכר - הכנה והפעלה», a screen that is read first, one button, the app's own confirmation |
+| **the one function** | `paybookOn(schedule)` in `js/model/schema.js`: the build's flag (the test seam - false in everything a person installs) **or** a record that holds a readable opening. `monthsOn` and `coldOn` beside it. Every reader of the three flags now hands over the record: the one-debt ruling (`advanceDebtStays(schedule)`), the planners, `planArchive`, `planMonths`, the two archive moves, the cold store's writer, the screens. `tests/activation.test.mjs` V11 reads the source and lists every remaining read of the three flags: the three predicates and the fallback beside each of their three callers |
+| **a new shipped flag** | `paybookActivation: true` - this build OFFERS the step and HONOURS the entry. It is not a second way to turn anything on. `false` is the way back (below) |
+| **all phones together** | there is no setting, no local key and no per-phone answer. The same record gives the same answer on every phone that holds it; a phone that has not heard is on the old arithmetic for the WHOLE record until it has, and then on the new for the whole record (V4) |
+
+**With the step offered and nobody having taken it, the build is the build main serves
+plus one row in ⋯.** Not argued: every suite of `npm test` and `test:all` that is not about
+the pay book runs on the build as it ships, on records with no opening, and says what it
+said (the stamp checks apart, on this branch).
+
+### The step, in order - and each stage can be the last with nothing lost
+
+`accDrawActivate` in `js/ui/accounts.js`; the same sequence is run by hand in the suites.
+
+1. **The screen** is `planActivation(schedule, day, stamp)` drawn - see the next section.
+   Reading it writes nothing and asks the server nothing (measured in Chromium).
+2. **The confirmation**: the app's own dialog, saying the step applies to every phone on
+   the record and cannot be turned off from the app, and from which day. Declined: nothing.
+3. **The server is asked which rules it runs** - `FarkadSync.activationRefusal()`:
+   everything `payTransactRefusal` refuses (no signal, unsent work, a restore outstanding,
+   an operation in doubt), `protocol` for a build below 2, and **`rules`** when the server
+   still runs older rules. The question is a READ of `schedules/{doc}/probe/paybook-8`,
+   which the rules of this branch allow and every published set of rules before them
+   refuses (they have no such block). Asking changes nothing anywhere. "Could not ask" is
+   never read as "may" (`offline`).
+4. **The carry approval**, if this record carries none: the entry the existing review in
+   ⋯ writes (`cm_carry`), by the ordinary path. It is not a pay entry. The opening may not
+   be sent over unsent work, so the screen waits for the queue and goes on by itself.
+5. **The opening**, through the server-first door: one transaction, one create-once
+   closed document, or nothing.
+
+**If a build ever sent the opening without asking:** the rules published today refuse it
+whole (they have no `closed/`): `refused: server`, nothing queued, nothing in doubt, no
+closed document, the record not on - measured on the fake cloud (V3) and on the emulator
+with the production adapter (T). So the question in stage 3 is a courtesy, not the lock.
+
+### Why an activation always approves the carry
+
+Measured in `tests/workercard.test.mjs` (Job A, duty 2): the worker's card (v184) reads
+`openAdvanceBalance`; the accounts page reads the pay book's own fold. Over twelve seeded
+records they are one figure, to the agora, **once the carry is approved** - and before it,
+the card says «מקדמות רשומות», what was handed over, and 5 of 23 men read another figure
+there than on the accounts page. So `planOpening`, when it is the activation, answers
+`carry-approval-needed` whenever the record carries no approval **at all** - not only when
+the carry is "needed" - and the step writes it first. After an activation there is no
+record on which the two can part. (On the real record it is very likely there already.)
+
+### What the screen shows - the dry runs, as one report
+
+`planActivation` computes on the record **as it will read** (`paybookActivationView`: a
+copy of the top level and the pay map with the opening laid in, never written anywhere),
+by the functions that already existed:
+
+| on the screen | from |
+|---|---|
+| «חוב מקדמות שיוצג אחרת» - each man whose open debt reads differently: «היום», «אחרי ההפעלה» | `planDebtRuling` |
+| «סגירות ישנות» - how many closures have no payment record | `planPayMigration().paymentUnknown` |
+| the carry line, only when the record has no approval | `paybookCarryApproval` |
+| «גודל הרישום והארכיון» - the server's document in KB out of 1,024, and what leaves it later, with the sentence that a day of an archived month can no longer be changed | `planArchive().totals` |
+| «יום תחילת המעקב» | the field; default the first day of the fortnight that holds today |
+| «לפני שמפעילים» - three things to check, and that it cannot be turned off | words |
+
+`planMonths` is in the report (`report.months`) and is not drawn here: on a record just
+turned on no month can be ready, and its own page («ארכיון חודשים») draws it when one can.
+`planHistoryMove` is what `planArchive` is built on.
+
+### The rules, as they now stand on this branch
+
+Two additions; **nothing was published**. The file is the published one with lines added
+and not one removed or changed (V12).
+
+- **`activatedNeedsPaybook`: once the document holds a pay book at all, a writer below
+  protocol 2 may not write.** Until this phase an older build could go on recording days
+  beside a pay book and only its restore was refused. But a record with a pay book is now
+  a record that is ON: it reads debts under the ruling and closes through the pay book,
+  and an older build does neither - and could still close an account the old way, with no
+  signal, through field paths the rules do not look inside, and send it later. Its screens
+  cannot be made right from here; its writes can be stopped.
+- **`match /probe/{generation}`**: `get` allowed for `paybook-8` and nothing else, ever.
+
+**This changes one cell of Phase 3's rollout table**, deliberately: «older | new | with a
+pay book | records a day» was **yes** and is **REFUSED**. Publishing the rules first is
+still safe - with no pay book on the document both additions are vacuous.
+
+### Older builds, measured on their real bytes
+
+`tests/activation.emulator.test.mjs`, O: v180 (`d3103d6`), v183 (`1af6729`) and v184
+(`990f5b4`), their own files and their own adapter out of Git, under the rules of this
+branch. *(The table is filled from the run on the final commit; see «Not verified» if the
+emulator was not available.)*
+
+| | before the record is on | after |
+|---|---|---|
+| records a day | **yes**, synced | **REFUSED** - not on the server, the revision does not move, the phone does not say synced, the day stays on that phone |
+| a closure made the old way | (yes) | **REFUSED** - never reaches the server |
+| its restore | **yes** | **REFUSED** - the opening and the revision exactly where they were |
+| what it shows | today's arithmetic | **still today's arithmetic** - it drops `pay` from its own copy and reads the old walk. This cannot be changed from here; it is why every phone updates first, and why its writes are stopped |
+| under the rules PUBLISHED TODAY, on a record that is on | | its restore is accepted and **the opening is gone** - so the new rules are never rolled back once a closure exists |
+
+"Stopped loudly" for a build already in the field means exactly this: every write refused,
+a sync error instead of «מסונכרן», the work kept on the phone. Nothing gives such a build
+a sentence it does not already have.
+
+### The point of no return, and the way back before it
+
+**It is the first closure, payment or answer recorded through the pay book - not the
+button.** Between the two the record has gained `pay.po_open`, `cm_carry` if it lacked
+one, and the opening's closed document; every day, advance, ledger entry, wage, invoice
+line and count is what it was, and the only figure that reads differently is what a man
+is said to owe going into an account (V5, field for field).
+
+- **Before it:** serve this build with `paybookActivation: false`. A phone on that build
+  reads the activated record exactly as it read before the button - every figure (V6; on
+  the emulator, W) - keeps the opening in its own copy, records days at protocol 2, and
+  refuses a closure with `gate`. **The rules stay.**
+- **After it:** no way back. A closure through the pay book is a frozen payslip and
+  deductions a person chose under the ruling.
+
+### A phone that had not heard
+
+V8. The owner turns the record on; a second phone, on this build, has no signal and closes
+an account with the old dialog's writer. When it hears: both phones are on, nobody is
+stopped, nothing is held, the closure is CLOSED on both (the pay book will not close that
+account a second time), and it is on «סגירות ישנות לבדיקה» on both, where a person answers
+it once. Not lost, not silent, not a second arithmetic.
+
+### Two phones at once
+
+V7, and N on the emulator with the production adapter: two phones turn the record on in
+the same minute with different days - exactly one opening lands, the other phone is told
+(`stale`, `opened`) and adopts it; one closed document; no intent, no queued write and
+nothing kept beside on either. The same day on both: one opening, both told it is done.
+
+### Settling a pay-book disagreement (decision 49) - DESIGNED, NOT BUILT
+
+**What exists:** «מה לבדוק?» shows both bodies of a disagreement and which one is counted
+(Phase 5). Nothing lets a person choose.
+
+**Why it was not built in this phase:** choosing which body is counted changes the fold of
+money, on every phone, for a closed account. That is a phase with its own proofs, and
+items 1 to 4 of this one came first.
+
+**Why its absence does not block a first use.** A disagreement cannot arise through the
+screens: every pay entry is one server transaction under an id two phones cannot both
+hold, and the loser is told (`tests/paybook.transact.test.mjs`; for the opening, V7). The
+old door through the queue is shut in every build. What is left is a **file**: a backup,
+rescue file or restore point from ANOTHER state of the record, restored - the pay book is
+unioned, the live body stands, the file's is kept beside it. The runbook forbids nothing
+new here; it says who to call.
+
+**The one disagreement that is on no screen:** a disputed OPENING (V7b). It belongs to no
+man, and «מה לבדוק?» is a page per man. The server's opening stands on every phone, the
+record stays on from that day, nobody is locked, and no figure differs anywhere - so it
+is harmless, and it is invisible. Pinned as KNOWN.
+
+**The design**, for the phase that builds it:
+
+- **A new pay entry kind, `resolution`**, id `pr_<disputedId>` - one per disputed id, so
+  two phones settling it differently are one path and the second is told. Fields beyond
+  the common ones: `targetId`, `workerId` (absent for the opening), `stands`
+  (`counted` or `beside`), `digest` (of the body chosen, so that every phone knows which
+  of several kept bodies is meant), `reason` (mandatory).
+- **Written by the server-first door**, with its own create-once closed document: the
+  rules need nothing new - it is a pay entry, and `payGuard` already binds it.
+- **Nothing is rewritten.** `pay.<id>` keeps the bytes the server holds and
+  `payConflicted.<id>` keeps the others. The FOLD reads a standing resolution: `counted`
+  takes the id off the list of disputes; `beside` makes the fold read the chosen kept
+  body IN PLACE of the standing one, by digest. The man leaves «לבדיקה» when no dispute of
+  his is unresolved.
+- **The held queued write** of the phone that lost is retired with the existing
+  `answerHold(opId, 'cloud')`.
+- **What it does not settle:** two closures of one account with different DEDUCTIONS. That
+  is a ledger disagreement (`le_close_*`) as well, and it stops the losing phone through
+  Recovery as it always has.
+- **The rollout it needs:** a build that does not know the kind reads a `resolution` as an
+  unreadable pay entry and stops writing until told (law 10) - loud, not wrong. So every
+  phone updates before the first one is written, and the probe's name moves to the next
+  generation so that the button can ask.
+
+### The screens of this phase
+
+| | |
+|---|---|
+| the row in ⋯ | drawn by `js/ui/accounts.js` (`accountsActivationRow`) into a box of its own beside the carry review; asked for by `js/ui/settings.js` in one guarded line; `index.html` holds no element for it. Not on: one sentence and the button. On: the sentence that it is on, and since which day |
+| «פנקס שכר - הכנה והפעלה» | drawn in the «מקדמות» tab's own page, as every accounts screen is - only while it is up, only on a record that is not on. «חזרה» gives the tab back to the advances list. The dry runs are drawn once per record and day, not once per repaint |
+| «יתרת זכות» (decision 67) | a third small figure on the accounts row and a line on the review page, each only when above zero. The figure is `accountFor().credit` and `planClosure().review.creditBefore` - no arithmetic in the screen |
+| «ארכיון חודשים» (decision 57) | reached from «ארכיון סגירות». Phase 6's dry run in Phase 6's own words (`monthsPlanLines`), then one button and the app's own confirmation naming the months and that their days can no longer be changed; then `FarkadSync.archiveMonths`, which can be pressed again after any interruption. Reading the page writes nothing |
+
+Seen in Chromium for the first time in this phase (they were Node-only): the refusal
+dialog of an edit of an archived day, and the month dry run.
+
+### Job A - main at v184 merged in
+
+A real merge commit (`11622a7`), two parents. Main gained v181 (polish), v182 (the day's
+check, the rides' period report), v183 («עובדי יוסף גבס», a second count per site) and v184
+(the seder as a journey, the worker's card, a vehicle turned off).
+
+| conflict | resolved as |
+|---|---|
+| `js/state.js`, `lostFields` | both tests: main's wider «a site count is never a loss to put back» (`isSiteCountFieldPath`), then the branch's «nor a field the cold store keeps» |
+| `js/sync/receive.js`, the echo test | main's two count layers (`owes(layer)`), then the branch's three conditions (the pay book covered, the month index covered, nothing missing from the cold store) |
+| `index.html`, `sw.js` | both scripts: `js/ui/accounts.js`, then `js/ui/workercard.js` |
+| `package.json` | the union of both chains and both sets of scripts |
+| `CLAUDE.md`, `docs/releases.md` | both sides; the branch's own "v181" is named as the branch's stamp, since main has a v181 now |
+| the three stamps | v186 |
+
+**Duty 1 - «עובדי יוסף גבס» travels with an archived month.** No shipped byte changed: the
+move was already layer-blind. Measured by name: the base record of the months, cold and
+emulator suites carries the count beside Rima's, so every «byte for byte» is asked with
+the layer in the day; `tests/months.test.mjs` M12 (the month documents hold it; the digest
+of a counts-only month is of the days WITH it; a phone installed afterwards is made whole
+with it; an edit, a clear and a first count on an archived day are refused in the
+archive's sentence; the rules refuse the path; an edit queued before the phone heard is
+held and retired by a person; a restore that disagrees keeps the archive's counts);
+`tests/cold.test.mjs` K8 (to the cold store and back; a changed cold copy is missing, not
+believed).
+
+**Duty 2 - the worker's card beside the accounts page:** above («Why an activation always
+approves the carry»).
+
+**Duty 3 - `js/ui/daycheck.js` and `js/ui/journey.js` with the gates open:** their suites
+(`test:daycheck`, `test:journey`, and the two browser suites) are in the matrix below.
+
+### The existing suites with the gates open - the whole picture
+
+`npm run test:gate-open` (`tests/gate-open.matrix.mjs`): every suite of `npm test` and of
+`test:all`, run through `tests/gate-open.preload.mjs` with `paybook`, `months` and `cold`
+open through the test seam, and compared BOTH WAYS with a hand-kept list
+(`tests/gate-open.expected.mjs`): a difference not on the list fails it, and so does an
+entry on the list that no longer differs. In no gate, on purpose.
+
+Seventeen suites are not run by it, by name: their subject IS the gate, and each opens and
+shuts it itself. **The seam is not the activation**: a device opened through the seam has
+the flags and whatever record its suite built, usually with no opening - so under this
+instrument the «מקדמות» tab is the first-run card, not the accounts list. The activated
+record itself is measured, on the build as it ships, in `tests/activation.test.mjs` and
+`tests/activation.browser.mjs`.
+
+@GATE_OPEN_TABLE@
+
+**One real defect was found by this run** - in this phase's own work: a literal
+`check(..., true)` in the new emulator suite, caught by `tests/nonassertions.test.mjs`. It
+is a real comparison now.
+
+**There is no second calculator for the one-debt ruling.** `tests/oracle.mjs` implements
+the documented rule of main. With the ruling on, the app and that calculator part by
+design; the gate-open arithmetic is held by `tests/debt.ruling.test.mjs` (one invariant
+over 60 seeded records: the carry into any account is the sum of what is left on each
+advance) and by fixtures. Stated as a shortfall, not papered over.
+
+### Pinned expectations this phase moved
+
+None was weakened. Each moved in the commit that moved it, with its reason beside the
+check.
+
+| suite | was | is | why |
+|---|---|---|---|
+| `tests/gate.integrity.test.mjs` | what is OPEN in the shipped build: `permanentDeletion`, `carryAdvances` | + `paybookActivation` | the line that had never moved. The flag opens nothing by itself: it offers the step and honours the entry |
+| `tests/gate.integrity.test.mjs` | seven shipped flags | eight | the same flag |
+| `tests/gate.integrity.test.mjs` | `HELPERS` | + `gate-open.matrix.mjs`, `gate-open.expected.mjs` | the instrument, in no gate |
+| `tests/accounts.test.mjs` | «reports.js without its five hooks is main's file», «index.html gained no element» - asked of `d3103d6` (v180) | asked of `990f5b4` (v184) | the merge base moved |
+| `tests/accounts.test.mjs` | ONE ordinary commit in the screens (the carry approval) | TWO, both the carry approval | the activation step writes it too |
+| `tests/accounts.test.mjs` | no other shipped script calls into the screens | + one named entry: the row, asked for by `settings.js` | the one way to the activation screen |
+| `tests/accounts.test.mjs` | the strings | + `credit`, and 41 for the activation and the months page | |
+| `tests/paybook.world.mjs` | `payDevice()`: the flags named; `shipped: true`: no flags | the same, **and the record's switch not honoured** unless `activation: true` | nearly every record in those suites holds an opening, which now turns a build on. The suites go on measuring a BUILD with the flags named |
+| `tests/payroll.test.mjs` | «HISTORY (the gate shut)» on an opened record, asked of a device with no flags | asked of a build that does not honour the opening; the build as it ships is asserted beside it (on) | the same |
+| `tests/paybook.split.emulator.test.mjs` | an older build beside a pay book «STILL RECORDS A DAY» | «ITS DAY IS REFUSED» | `activatedNeedsPaybook` - see The rules |
+| `tests/yosefgeves.test.mjs` | an older tree is asked for every file this build loads | less the six only this branch has (`NOT_ON_MAIN`, named) | the merge |
+| `css/design.css` | - | the accounts styles are again the LAST block of the screen-only layer | main appended blocks after them; no rule changed |
+
+### Hebrew in Phase 8
+
+All **proposed**; in the existing block (`ACC_TEXT` in `js/ui/accounts.js`), pinned word for
+word in `tests/accounts.test.mjs`, and tabled in [Hebrew in Phase 4](#hebrew-in-phase-4)
+with the phase beside each: `credit` («יתרת זכות» - v180's own word), 33 strings of the
+activation (`activation…`) and 8 of the months page (`months…`). The months' dry run and
+the refusal of an edit are Phase 6's strings, unchanged.
+
+### What is still NOT built after Phase 8
+
+1. **Settling a pay-book disagreement** (decision 49) - designed above.
+2. **No real phone, no real record.** Unchanged. The runbook's step 4 is the first reading
+   of the dry runs on the real record.
+3. **A second calculator for the ruling** - above.
+4. **The activation screen does not draw the months plan**, nor the list of the carry's
+   rows (it says how many; the rows are in ⋯ as they always were).
+5. **A disputed opening is on no screen** (V7b).
+6. **A restore into a new, empty project** still does not carry the pay book (decision 47).
+7. **The Phase 7 list**: no screen beyond the sentence for a phone whose cold store is
+   missing units; the marks are not compacted; the index of closures is not bounded.
+8. **Firestore's 40,000 index entries** - not measurable here (Phase 6); in the runbook.
+
+### Decisions for the owner (71 to 78)
+
+| # | the question | recommended default |
+|---|---|---|
+| 71 | The build that is served OFFERS the step: one row in ⋯ on every phone, on a record that is not on. Nothing happens until somebody opens it, reads the screen, presses the button and confirms - and the server must already run the new rules. | **As built** (`paybookActivation: true`): otherwise the dry runs cannot be read on the real record before the gate opens, and turning it on needs a second served build. The alternative is one line (`false`), a build that shows nothing, and a second build on the day. |
+| 72 | All three accounts can press the button (as all three may close and pay, rule 8). | **As built**, with the confirmation. If only the owner should: say so - it is a list of who may activate, in one constant, and a sentence for the other two. |
+| 73 | An activation always writes the carry approval if the record has none. | **As built.** Without it the worker's card and the accounts page can show two figures for one man. |
+| 74 | From the moment the record is on, a phone on an older build cannot write even a day (it keeps the work and shows a sync error). Before this phase it could go on recording days. | **As built.** It could otherwise close an account the old way with no signal. Every phone updates first - the runbook's step 3. |
+| 75 | The day tracking begins: the screen offers the first day of the fortnight that holds today. | **That day.** Earlier only if he wants an earlier period closed through the new screens; it cannot be changed afterwards. |
+| 76 | Men on the screen's debt list whose advance was in fact settled by hand in a period nobody closed. | **He notes them at step 4 and records a «החזר» for each after turning it on.** The app cannot know which were. |
+| 77 | Settling a disagreement between two bodies of one pay entry (decision 49) is designed and not built. | **Go ahead without it**: it cannot arise through the screens. Build it before any restore from a file is expected in anger. |
+| 78 | Every proposed string of this phase. | The owner reads the table; the activation screen's are the ones he will read first. |
 
 ## Phase 7 — the phone's cold store (design, then as built)
 
@@ -1301,7 +1639,7 @@ string in `index.html` and a pinned expectation in several suites; it was not do
 | שולם | status `paid` (model: `PAYBOOK_STATUS_LABELS`) |
 | יתרה פתוחה | status `open` (model: `PAYBOOK_STATUS_LABELS`) |
 
-#### Proposed: the screens (195)
+#### Proposed: the screens (237)
 
 Existing words reused as they are: «מקדמות», «חיפוש עובד», «לא נמצא עובד.», «מזומן», «העברה», «הבנתי», «כבוי», «אשר את המעבר», «אין מקדמות פתוחות לעובד הזה.» and the filter's «שבועי» / «דו־שבועי».
 
@@ -1599,7 +1937,7 @@ Existing words reused as they are: «מקדמות», «חיפוש עובד», «
 | `done` | כבר נרשם |
 | `server-first` | רישום כזה נעשה רק מול השרת. |
 
-In all: **242 proposed strings** (195 + 47), beside the owner's fourteen.
+In all: **284 proposed strings** (237 + 47), beside the owner's fourteen. (Phase 8 added 42 of the 237: `credit`, 33 for the activation, 8 for the months page.)
 
 ## Phase 3 — one debt, the server-first closure, and the split (v175)
 
@@ -1926,7 +2264,7 @@ three older builds answer every question the same way.
 | client | rules | document | records a day | restores | closes an account |
 |---|---|---|---|---|---|
 | older | new | no pay book (today's) | **yes** | **yes** | — |
-| older | new | with a pay book | **yes**, pay book unchanged | **REFUSED** — pay book and revision exactly where they were; the phone says `error`, not synced; days it records afterwards wait on that phone behind the refused restore until it is updated | — |
+| older | new | with a pay book | ~~yes, pay book unchanged~~ **REFUSED since Phase 8** (`activatedNeedsPaybook`): a record with a pay book is a record that is on, and an older build may write nothing to it | **REFUSED** — pay book and revision exactly where they were; the phone says `error`, not synced; days it records afterwards wait on that phone behind the refused restore until it is updated | — |
 | older | today's | with a pay book | yes | **accepted, and the pay book is GONE** | — |
 | this build | today's | either | **yes** (protocol 2 is accepted) | yes | **REFUSED whole** — no `closed/` in those rules; nothing queued, nothing in doubt |
 | this build | new | no pay book | **yes** | **yes** | — |

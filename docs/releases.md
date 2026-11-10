@@ -1,3 +1,45 @@
+## v186 — the pay book's activation candidate: main at v184 merged in; the record turns it on, by a person (development branch, NOT served)
+
+**Not served. Not merged. On no phone. No real record was read and no rules were
+published.** `paybook`, `months` and `cold` are `false`. No gate result is written here:
+validation is recorded against the exact clean commit, and no count is carried over.
+
+**The merge.** `990f5b4` (v184) into the pay book's branch, as a merge commit. The one
+data-model change main made since v180 - v183's «עובדי יוסף גבס», a second count per site -
+is measured travelling with an archived month, to the cold store and back, and refused
+for edit on an archived day exactly as a Rima count is.
+
+**What turns the pay book on.** Not a flag in a build. One entry in the shared record -
+the opening, `pay.po_open` - written by one server transaction that only the new rules
+accept, from a screen a person reads first (⋯ → «פנקס שכר - הכנה והפעלה»). Every phone
+that holds the record is on from that entry and from nothing else; a phone on a build from
+before the pay book can then write nothing until it is updated. `paybookActivation: true`
+is a new shipped flag: this build offers that step and honours that entry. On a record
+nobody has turned on it is v184 plus one row in ⋯.
+
+**The point of no return** is the first closure or payment through the pay book, not the
+button. Before it the way back is this build with `paybookActivation: false`.
+
+**Also in it:** «יתרת זכות» named on the accounts row and the review page; the months page
+(«ארכיון חודשים»), the dry run first; `npm run test:gate-open`, every existing suite with
+the gates open against a hand-kept list, in no gate.
+
+**The rules** on this branch gained two things - a writer below protocol 2 may not write
+once a pay book exists; and `probe/paybook-8`, a path whose `get` only these rules allow -
+and are otherwise the published file with lines added and none removed.
+
+**Read before doing anything:** `docs/payroll-activation.md` (the order, the checks, the
+way back) and `docs/payroll-closure.md`, Phase 8.
+
+**Known limits.**
+- No real phone and no real record: every screen was driven in Chromium with emulated
+  touch, every dry run read on synthetic records.
+- Settling a disagreement between two bodies of one pay entry is designed, not built. It
+  cannot arise through the screens.
+- There is no second calculator for the one-debt ruling: `tests/oracle.mjs` is main's
+  documented rule, and parts from the app by design once the ruling is on.
+- Every Hebrew string of the activation is proposed.
+
 ## the pay book's branch at Phase 7 (stamped v181 there; NOT main's v181) — main at v180 merged into the pay book's branch; the phone's cold store, shipped shut (development branch, NOT served)
 
 **Not served. Not merged. On no phone. No real record was read and no rules were
