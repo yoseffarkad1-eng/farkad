@@ -1,3 +1,68 @@
+## v176 — worker accounts: the screens, shipped shut (development branch, NOT served)
+
+**Not served. Not merged. On no phone. No real record was read, migrated or written, and
+no rules were published.** Built on Phase 3 (`239ff66`, v175) merged with main at v174
+(`893def8`). No gate result is written here: validation is recorded against the exact clean
+commit, and no count is carried over.
+
+**What it is.** Phase 4 of the worker-accounts work (`docs/payroll-closure.md` has all of
+it: the screens, the taps, every string). **The gate is still shut** -
+`FARKAD_FLAGS.paybook` is `false` - and with it shut this build looks and behaves as v174
+does: `js/ui/reports.js` without its four guarded lines is main's file byte for byte
+(asserted against `git show 893def8`), the tab bar is main's, and `index.html` gained one
+script tag and no element.
+
+- **`js/ui/accounts.js`** (new) and its styles at the end of `css/design.css`: the
+  accounts home on the «מקדמות» tab, the review page («סגירת חשבון ואיפוס»), the later
+  payment («תשלום בפועל»), the group walk with its summary («סגירת חשבונות עובדים» /
+  «סגירת חשבון דו-שבועי»), the history («היסטוריית סגירות חשבון») with each closure's
+  statement and its linked corrections, the one-time activation and the older closures'
+  review. Every figure is the model's; every write is `FarkadSync.transactPaybook`; a
+  refusal is a sentence beside the field that caused it.
+- **With the gate open** (a test, and nothing else) the old closure dialog and «קיזוז
+  מהשכר» lead to the review page: one way to close.
+- **`js/model/payroll.js`** gained one pure function, `paybookSuggestAllocations` (what
+  the review page pre-fills). Nothing else under `js/model/` or `js/sync/` changed;
+  `firestore.rules`, `.github/` and `functions/` were not touched.
+- **Tests:** `tests/accounts.test.mjs` (node: every word pinned, every refusal code a
+  sentence, the gate shut) and `tests/accounts.browser.mjs` (Chromium, the gate opened
+  through the test seam, the cloud played by the harness's fake - `tests/accounts.cloud.mjs`).
+- **202 Hebrew strings are proposed**, not approved: the owner's own labels are used
+  verbatim and everything else is his to correct.
+
+**Known NOT covered.**
+
+- **No real phone, and the gate has never been open outside a test.** Every screen was
+  measured in desktop Chromium with emulated touch at 440x956 and 375x667. Not measured:
+  the iPhone's keyboard over the review page (the field is scrolled to the middle on
+  focus; whether that is enough on a stuck frame is unknown), the native date control in
+  the phone's own locale, Safari's text zoom (200% was forced by doubling every computed
+  font size), a home-screen app, sunlight.
+- **The server is played.** The browser suite's cloud is the node harness's fake Firestore,
+  bridged to the page. The rules are not run by it; the real rules and the production
+  adapter are measured by the emulator suites of Phase 3, which do not drive a screen. No
+  suite puts a screen in front of the emulator.
+- **A slow or flaky connection between the tap and the answer** is covered for three
+  shapes only - no signal, the answer lost with the server unreachable, and a document
+  that moved - each produced on purpose. A request that takes thirty seconds was not tried.
+- **Every existing browser suite ran with the gate SHUT.** With it open, the suites that
+  open the «מקדמות» tab or the old closure dialog will fail by design (the tab is then the
+  accounts home); they were not run that way, and moving them is Phase 5's, in the commit
+  that opens the gate.
+- **Two phones closing in the same instant** is measured on the emulator in Phase 3, not
+  through the screens: here the second phone's closure lands first and the first phone's
+  snapshots are held back by the suite.
+- **A pay-book disagreement, an unreadable intent, an unreadable pay entry** have no
+  fixture in the browser suite: the screens say «לבדיקה» / «פעולה קודמת עדיין לא אושרה»
+  by construction, and nobody has looked at them on the glass.
+- **Not built** (the list is in `docs/payroll-closure.md`): «נסגר» on the «לפי עובד»
+  report, a screen to settle a disagreement, a date for the payment made at the closing,
+  a partial void, and everything Phase 3 left - nothing leaves the live document yet,
+  backups do not carry closed documents, and the document still fills in about seven
+  months once people close with it. **The gate may not be opened on this build.**
+- **Large crews.** Five men in the fixtures. The list re-plans every man on each redraw;
+  twenty men over a year of history was not timed in a browser.
+
 ## v175 — one debt, the server-first closure and the rules for it, shipped shut (development branch, NOT served)
 
 **Not served. Not merged. On no phone. No real record was read, migrated or written, and

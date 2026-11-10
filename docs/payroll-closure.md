@@ -1,15 +1,17 @@
-# Worker accounts, closure and payment — the design as built (Phases 0 to 3)
+# Worker accounts, closure and payment — the design as built (Phases 0 to 4)
 
-Status: **the model, its storage and sync, the server-first closure and the rules for it —
-shipped shut, on a development branch.** `FARKAD_FLAGS.paybook` is `false`: every planner
-refuses with `gate`, nothing in the app creates a pay entry, and the one-debt ruling the
-owner approved is behind the same gate. There is still no screen. **v175 is not served and
-not merged; nothing here has touched a real record, and no rules were published.** Phase 3
-as built comes first below; **the gate may still not be opened**, and
+Status: **the model, its storage and sync, the server-first closure, the rules for it and
+the screens — shipped shut, on a development branch.** `FARKAD_FLAGS.paybook` is `false`:
+every planner refuses with `gate`, nothing in the app creates a pay entry, the one-debt
+ruling the owner approved is behind the same gate, and the screens of Phase 4 are reached
+by nothing. **v176 is not served and not merged; nothing here has touched a real record,
+no rules were published, and the gate has never been open outside a test.** Phase 4 as
+built comes first below, then Phase 3; **the gate may still not be opened**, and
 [What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut) says exactly why.
 
 Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
-Phase 2 merged with main at v172 (`8c943fa`). The specification was the audit and design
+Phase 2 merged with main at v172 (`8c943fa`); Phase 4 on Phase 3 merged with main at
+v174 (`893def8`). The specification was the audit and design
 written against `b640c5a`; where the code disagreed with either, the code won, and every
 such place is in [Where the audit and the design were
 wrong](#where-the-audit-and-the-design-were-wrong).
@@ -19,6 +21,388 @@ wrong](#where-the-audit-and-the-design-were-wrong).
     node tests/paybook.sync.test.mjs        # two and three phones on the fake cloud (the old queue door, opened by name)
     node tests/paybook.oldbuilds.test.mjs   # v167, v169 and v171, out of Git, beside this build
     npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
+
+## Phase 4 — the screens (v176)
+
+**Development branch. Not served, not merged, on no phone; no real record was read. The
+gate (`paybook`) is still `false` in everything committed, and with it shut the app is
+v174's: no new entry point, no new sentence, no moved pixel.** The gate has never been
+open outside a test. Everything in [What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut)
+still stands, so after this phase the gate still may not be opened.
+
+    node tests/accounts.test.mjs          # every word pinned, every refusal a sentence, the gate shut
+    npm run -s test:accounts-browser      # the owner's examples through the screens (Chromium, a played cloud)
+
+### What was built
+
+One file, `js/ui/accounts.js`, its styles at the end of `css/design.css` (inside
+`@media screen`, every class `acc-…`), and four guarded lines in `js/ui/reports.js`. The
+screens draw INSIDE the «מקדמות» tab's own page (`#advancesView`) — not a new fixed layer —
+so the tab bar, the top strip, the keyboard and the stuck-frame rules are the ones every
+tab already has, and paper never sees them.
+
+| # | screen | what it is |
+|---|---|---|
+| 1 | entry | With the gate open the «מקדמות» tab is the accounts home. **The tab's label is unchanged** («מקדמות») and the tab bar has its five tabs. One man's advances page is the existing one, unchanged, reached from his row («מקדמות»), and is still how an advance is given or handed back. |
+| 2 | the list | `accountsList`: a card a man — name, «עובד שבועי» / «עובד דו-שבועי», the status, his OPEN period's wage as the one big number with its dates, and only when non-zero two separate small figures: «יתרת שכר לתשלום» (green) and «חוב מקדמות» (amber). An earlier unclosed period is a quiet «ממתין לסגירה» line of its own, never summed. Filter (הכול / שבועי / דו־שבועי), search by name. Top: «סגירת חשבונות עובדים» (the one filled button), «סגירת חשבון דו-שבועי», and the «היסטוריית סגירות חשבון» link. |
+| 3 | the review page | «סגירת חשבון ואיפוס» on his row. Period, days, regular / double / extra hours, sites, the day list folded; the wage; «יתרת שכר לתשלום» from earlier closures apart; each open advance a row (date, given, left) with its own field pre-filled by `paybookSuggestAllocations`, «הכול» and «0» one tap each, and a live «יישאר אחרי הסגירה»; extra deductions (amount, category, reason); the net; paid — «שולם הכול» / «שולם חלקית» / «עוד לא שולם» — and how; the balance after. One filled button: «אישור סגירה». |
+| 4 | later payment | «תשלום בפועל» on his row or on a closure's statement: amount (the whole balance offered), date, method. The payment's id is minted when the form opens. |
+| 5 | the group walk | «סגירת חשבונות עובדים» / «סגירת חשבון דו-שבועי»: every waiting account in scope with its status and «3 מתוך 8 · נשארו 5»; «התחל» / «המשך» walks them one by one (confirm → next, «דלג» → next, the skipped ones come back last); tick several and «הכן סגירה לנבחרים» shows a summary — wage, advances, net, paid per man and the four column totals — before anything is written; then one transaction per man, a result on each row, and «נסה שוב לנכשלים», which never repeats the ones done. |
+| 6 | history | «היסטוריית סגירות חשבון», `closureHistory`: search by name, cycle, payment status, closure dates, work-period dates. A record opens its statement: the frozen wage and day list, each advance deducted with what remained then and what is left today, extras, payments, corrections under what they correct. «תשלום בפועל» when still owed; «תיקון לסגירה» and «ביטול רישום» with a mandatory reason, each a NEW linked entry. |
+| 7 | first run | Until an `opening` exists the tab shows one sentence, the day (default: the first day of the fortnight containing today) and «התחל מעקב». Older closures with no payment record are «סגירות ישנות לבדיקה (N)» on the list: «שולם» / «נשאר חוב» (+ a sum) / «לא ידוע» each, answerable any time, never in the way. |
+| 8 | the old dialog | With the gate open `openWorkerSettlement`, «קיזוז מהשכר» and the closure block of the worker-days dialog all lead to the review page (decision 29's default): one way to close. With the gate shut they are untouched. |
+
+**Taps, the common case** — close one biweekly worker with two advances, paid in full:
+**three.** «סגירת חשבון ואיפוס» on his row → (both advances are already answered by the
+suggestion) «שולם הכול» → «אישור סגירה». Changing one advance's amount is typing it;
+"deduct nothing from this one" is one more tap («0»). No dialog asks "are you sure": the
+review page IS the confirmation, and a closure is corrected by a linked record, not undone.
+
+### The rules the screens keep
+
+- **No money is computed in the screen.** Every figure is a field of a plan or a fold.
+  The review page asks `planClosure` again on every change (180 ms after the last key);
+  «שולם הכול» is the plan's own `netDue`; the summary's column totals are the model's
+  `paybookSum`. The suite reads the source for arithmetic on a money field and finds none.
+- **One door.** `FarkadSync.transactPaybook(plan)` and nothing else writes a pay entry.
+  The one ordinary commit in the file is the carry approval, by the ledger's own writer.
+- **Opening a page writes nothing** — measured: the disk and the cloud's write log are
+  what they were.
+- **A refusal is a sentence beside the field that caused it.** A blank advance field is
+  `allocation-missing` on that row (after the first attempt to confirm — not while
+  typing); over an advance, over the wage and over the net are said at once, on the row,
+  under the net and beside the paid field. A refusal about the account itself (too early,
+  already closed, no rate) is a line at the top of the page. No control is ever disabled
+  for a reason the page does not say.
+- **The server's answers, as built:**
+
+| answer | the person sees |
+|---|---|
+| `closed` / `done` | back to the list (or the next man), his row updated, one calm line |
+| `refused: offline` | «אין חיבור לשרת. סגירת חשבון ותשלום נרשמים רק כשיש חיבור. לא נרשם דבר.» — the page stays, the entries stay, nothing is written or queued (measured: every key on the disk byte for byte, no attempt on the cloud) |
+| `refused: unsent-work` / `busy` / `pending` / `restoring` / `unsupported` / `storage` / `server` | each its own sentence (the table below) |
+| `stale` | «החשבון השתנה בזמן האישור…»; the page is re-planned from the record the phone has just adopted, with what was typed kept — a new advance appears as an unanswered row. If the account was closed by another phone: «החשבון כבר נסגר בטלפון אחר…» and the numbers it was closed on |
+| `unknown` | «הרישום נשלח, ועדיין לא ידוע אם השרת קיבל אותו. אל תרשום שוב…» on the page and at the top of every accounts screen; the screens ask the sync layer to look again every three seconds, and when it is settled say which way («…התקבל בשרת» / «…לא התקבל…») until «הבנתי» |
+
+- **The carry approval** (`carry-approval-needed`) is one sentence and «אשר את המעבר»,
+  right above the button that needed it — on the review page or on the activation screen.
+  Measured on a record nobody approved: with the gate open the ruling makes the carry
+  needed at once, so the FIRST thing a person meets is that question, on the activation
+  screen. That is decision 28 answering itself: the approval and the opening day are one
+  step in practice.
+- **The order of the list** is the one decision in it that is this file's: (0) «לבדיקה»,
+  (1) a period that has ENDED and is not closed, (2) wage still owed from a closure,
+  (3) the open period still running, (4) only an advance debt, (5) settled, (6) nothing.
+  Inside a rank the roster's order stands. The existing «סידור» of the advances page is
+  not reachable while the gate is open.
+- **Geometry**, measured at 440×956 and 375×667, dark and light: every target 44px in both
+  dimensions, every field 16px or more with `inputmode="decimal"` on amounts, no sideways
+  scroll, exactly one filled button on a screen that has a primary action, and at 200%
+  text no amount, name or status clipped. No bar height and no inset is written in the
+  styles; nothing is `position: fixed`.
+
+### One addition to the model
+
+`paybookSuggestAllocations(review)` in `js/model/payroll.js`: what the review page
+pre-fills — all of each advance, oldest first, for as long as the wage (and the account
+walk's `walkRoom`) allows, and an explicit 0 for the rest. Pure, in agorot, reads only
+`planClosure`'s own review, writes nothing. It is in the model so that the screen does not
+subtract. Pinned in `tests/accounts.test.mjs`. No other file under `js/model/` or
+`js/sync/` changed, and `firestore.rules` was not touched.
+
+### What is NOT built in Phase 4
+
+1. **«נסגר» on the «לפי עובד» report** for closed weeks (the owner's answer of
+   2026-11-10). The reports are unchanged.
+2. **A screen to settle a pay-book disagreement** (`payConflicted`). Such a man reads
+   «לבדיקה», his planners refuse with `conflict` and its sentence, and nothing lets a
+   person choose.
+3. **The wording of «late since close»** on a closed row under the ruling (decision 26).
+4. **A date for the payment made AT the closing.** It is dated today; a different day is a
+   later payment.
+5. **A partial void.** «ביטול רישום» voids the whole payment or extra deduction; the
+   model's `amount` option is not offered.
+6. **An advance deduction is not reversed from the statement.** That is the ledger's
+   existing «תיקון טעות», on the man's advances page.
+7. **Drafts.** What is typed into a review is in memory only; a reload loses it, on
+   purpose — a draft of a closure offered a week later would be against another account.
+8. **The absent detail is not fetched into a backup**, and the «detail not on this phone»
+   sentence can only be produced in a test today, because nothing has left the live
+   document (Phase 3, item 1).
+9. **The stale «שולח» status line** after a batch settled against the server's copy
+   (pre-existing, `js/sync/send.js`).
+
+### What Phase 5 (activation on real data) must do
+
+Unchanged in substance from Phase 3's list, with what this phase learned:
+
+1. Build Phase 3's [What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut),
+   items 1–5 (the folds reading the index, dropping the live copy, the index's own bound,
+   the days leaving, backups carrying closed documents) and re-measure Capacity.
+2. The owner reads `planDebtRuling`, `planPayMigration` and `planHistoryMove` on his real
+   record.
+3. The rollout order: save the published rules, publish the new ones, update every phone,
+   check each in ⋯.
+4. One commit: `paybook: true`, with the eight expectations the ruling moves
+   (`repayment`, `ledger.truth`, `paycycle.completion`) — and, new, **every browser suite
+   that opens the «מקדמות» tab or the old closure dialog** (`simple-advances-browser`,
+   `forms`, `reports-browser`, `navigation-browser`, `mobile`, `design-browser`, `smoke`):
+   with the gate open that tab is the accounts home and the old dialog is a door to the
+   review page, so their expectations move in that commit, deliberately.
+5. On each phone, the first open of the tab: the carry approval (if the record needs it),
+   the opening day, then «סגירות ישנות לבדיקה».
+6. Moving existing history, settled bundles only, copy → read back → compare → drop.
+7. **A real phone.** Nothing here has been on one: the keyboard over the review page, the
+   date control in the iPhone's locale, a slow signal between the tap and the answer.
+
+### Hebrew in Phase 4
+
+**Verbatim (the owner's):** in `ACC_OWNER` and, for the five statuses, the model's
+`PAYBOOK_STATUS_LABELS`. **Everything else is proposed**, in `ACC_TEXT` and
+`ACC_REFUSALS` at the top of `js/ui/accounts.js`, pinned word for word in
+`tests/accounts.test.mjs`, and listed here. The suite fails if a string in the file is
+missing from this table.
+
+**The tab's label is not changed.** «מקדמות» stays on the tab bar while the page under it
+is «חשבונות עובדים» — a proposed title. If the owner wants the tab renamed, that is one
+string in `index.html` and a pinned expectation in several suites; it was not done here.
+
+#### The owner's labels, verbatim
+
+| string | where |
+|---|---|
+| סגירת חשבון ואיפוס | the per-worker close button on his row |
+| יתרת שכר לתשלום | list figure, review, payment, statement |
+| סגירת חשבונות עובדים | list, the filled button; title of the walk |
+| סגירת חשבון דו-שבועי | list, second button; title of the walk |
+| היסטוריית סגירות חשבון | the history link and its title |
+| סגירת חשבון | title of the review page and of a statement |
+| תשלום בפועל | the payment button and its title |
+| עובד שבועי | cycle mark |
+| עובד דו-שבועי | cycle mark |
+| שולם חלקית | status; the middle "paid" choice on the review page |
+| ממתין לסגירה | status `waiting`; the earlier-period line; a waiting item of the walk (model: `PAYBOOK_STATUS_LABELS`) |
+| נסגר | status `closed`; a finished item of the walk (model: `PAYBOOK_STATUS_LABELS`) |
+| שולם | status `paid` (model: `PAYBOOK_STATUS_LABELS`) |
+| יתרה פתוחה | status `open` (model: `PAYBOOK_STATUS_LABELS`) |
+
+#### Proposed: the screens (155)
+
+Existing words reused as they are: «מקדמות», «חיפוש עובד», «לא נמצא עובד.», «מזומן», «העברה», «הבנתי», «כבוי», «אשר את המעבר», «אין מקדמות פתוחות לעובד הזה.» and the filter's «שבועי» / «דו־שבועי».
+
+| key | string | where |
+|---|---|---|
+| `title` | חשבונות עובדים | the list |
+| `back` | חזרה | the list |
+| `backToList` | חזרה לרשימה | the list |
+| `understood` | הבנתי | the list |
+| `filterAll` | הכול | the list |
+| `filterWeekly` | שבועי | the list |
+| `filterBiweekly` | דו־שבועי | the list |
+| `search` | חיפוש עובד | the list |
+| `notFound` | לא נמצא עובד. | the list |
+| `advances` | מקדמות | the list |
+| `debt` | חוב מקדמות | the list |
+| `statusReview` | לבדיקה | the list |
+| `statusNone` | אין חשבון פתוח | the list |
+| `statusUnknown` | לא ידוע אם שולם | the list |
+| `inactiveMark` | כבוי | the list |
+| `unpriced` | חסר תעריף - אי אפשר לחשב שכר | the list |
+| `workDays` | ימי עבודה | the review page |
+| `regularDays` | ימים רגילים | the review page |
+| `doubleDays` | ימים כפולים | the review page |
+| `extraHours` | שעות נוספות | the review page |
+| `absentDays` | ימי היעדרות | the review page |
+| `dayList` | פירוט הימים | the review page |
+| `absent` | נעדר | the review page |
+| `gross` | שכר התקופה | the review page |
+| `wageDueBefore` | מסגירות קודמות. לא נכלל בסגירה הזאת. | the review page |
+| `advancesTitle` | מקדמות לקיזוז | the review page |
+| `advanceGiven` | ניתנה | the review page |
+| `advanceLeft` | נשאר | the review page |
+| `advanceField` | כמה לקזז מהמקדמה הזאת? | the review page |
+| `all` | הכול | the review page |
+| `zero` | 0 | the review page |
+| `leftAfter` | יישאר אחרי הסגירה | the review page |
+| `noAdvances` | אין מקדמות פתוחות לעובד הזה. | the review page |
+| `laterAdvance` | מקדמה מאוחרת - תקוזז מהתקופה הבאה | the review page |
+| `extrasTitle` | ניכויים נוספים | the review page |
+| `addExtra` | + ניכוי נוסף | the review page |
+| `extraAmount` | סכום הניכוי | the review page |
+| `extraCategory` | סוג הניכוי | the review page |
+| `extraReason` | סיבת הניכוי | the review page |
+| `removeExtra` | הסר ניכוי | the review page |
+| `categoryAgreed` | ניכוי מוסכם | the review page |
+| `categorySettlement` | הסדר | the review page |
+| `categoryOther` | אחר | the review page |
+| `advanceDeducted` | קיזוז מקדמות | the review page |
+| `netDue` | נטו לתשלום | the review page |
+| `paidTitle` | שולם בפועל | the review page |
+| `paidFull` | שולם הכול | the review page |
+| `paidNone` | עוד לא שולם | the review page |
+| `paidAmount` | כמה שולם? | the review page |
+| `methodTitle` | איך שולם? | the review page |
+| `methodCash` | מזומן | the review page |
+| `methodTransfer` | העברה | the review page |
+| `balanceAfter` | יתרה אחרי הסגירה | the review page |
+| `debtAfter` | חוב מקדמות אחרי הסגירה | the review page |
+| `confirm` | אישור סגירה | the review page |
+| `busy` | רושם בשרת… | the review page |
+| `closedDone` | החשבון נסגר ונרשם. | the review page |
+| `fixFirst` | יש שדה שצריך לתקן. הוא מסומן למעלה. | the review page |
+| `carryButton` | אשר את המעבר | the review page |
+| `carryDone` | המעבר אושר. אפשר להמשיך. | the review page |
+| `carryFailed` | האישור לא נשמר. נסה שוב. | the review page |
+| `freshClosed` | כך נסגר החשבון: | the review page |
+| `offline` | אין חיבור לשרת. סגירת חשבון ותשלום נרשמים רק כשיש חיבור. לא נרשם דבר. | the server's answers |
+| `unsentWork` | יש במכשיר הזה רישומים שעוד לא נשלחו לשרת. חכה שיישלחו ונסה שוב. לא נרשם דבר. | the server's answers |
+| `busyElsewhere` | פעולה אחרת עדיין נרשמת. חכה רגע. | the server's answers |
+| `pending` | פעולה קודמת עדיין לא אושרה מהשרת. אי אפשר לרשום עוד עד שיתברר מה קרה איתה. | the server's answers |
+| `restoring` | שחזור נתונים עוד לא הסתיים. נסה שוב אחריו. לא נרשם דבר. | the server's answers |
+| `unsupported` | הגרסה במכשיר הזה לא יכולה לרשום סגירת חשבון. עדכן את האפליקציה. | the server's answers |
+| `nothingToWrite` | אין מה לרשום. בדוק את הסכומים. | the server's answers |
+| `storage` | אין מקום לשמור במכשיר. לא נרשם דבר. | the server's answers |
+| `server` | השרת לא קיבל את הרישום. לא נרשם דבר. נסה שוב. | the server's answers |
+| `stale` | החשבון השתנה בזמן האישור. לא נשמר דבר. בדוק את הסכומים ואשר שוב. | the server's answers |
+| `staleClosed` | החשבון כבר נסגר בטלפון אחר. לא נרשם דבר נוסף. | the server's answers |
+| `unknown` | הרישום נשלח, ועדיין לא ידוע אם השרת קיבל אותו. אל תרשום שוב - הבדיקה תיעשה מעצמה כשיהיה חיבור. | the server's answers |
+| `outcomeCommitted` | הרישום שהיה בבדיקה התקבל בשרת. | the server's answers |
+| `outcomeNothing` | הרישום שהיה בבדיקה לא התקבל. לא נרשם דבר - אפשר לרשום שוב. | the server's answers |
+| `payFor` | עבור התקופה | later payment |
+| `payOwed` | נשאר לתשלום | later payment |
+| `payAmount` | סכום התשלום | later payment |
+| `payDate` | תאריך התשלום | later payment |
+| `paySave` | רשום תשלום | later payment |
+| `payDone` | התשלום נרשם. | later payment |
+| `payAlready` | כבר נרשם | later payment |
+| `payNothing` | אין יתרת שכר לתשלום לעובד הזה. | later payment |
+| `groupStart` | התחל | the group walk and its summary |
+| `groupResume` | המשך | the group walk and its summary |
+| `groupOf` | מתוך | the group walk and its summary |
+| `groupLeft` | נשארו | the group walk and its summary |
+| `skip` | דלג | the group walk and its summary |
+| `skipped` | דולג | the group walk and its summary |
+| `notClosed` | לא נסגר | the group walk and its summary |
+| `notEnded` | התקופה מסתיימת ב־ | the group walk and its summary |
+| `prepare` | הכן סגירה לנבחרים | the group walk and its summary |
+| `select` | בחירה | the group walk and its summary |
+| `needSelection` | בחר עובדים קודם: סמן את התיבה ליד כל עובד. | the group walk and its summary |
+| `groupEmpty` | אין חשבונות שממתינים לסגירה. | the group walk and its summary |
+| `groupAllDone` | כל החשבונות שאפשר לסגור נסגרו. | the group walk and its summary |
+| `summaryTitle` | סיכום לפני אישור | the group walk and its summary |
+| `colWage` | שכר | the group walk and its summary |
+| `colAdvances` | מקדמות | the group walk and its summary |
+| `colNet` | נטו | the group walk and its summary |
+| `colPaid` | שולם | the group walk and its summary |
+| `total` | סה״כ | the group walk and its summary |
+| `batchUnpaid` | התשלום לא נרשם: כל החשבונות ייסגרו כ״עוד לא שולם״. אפשר לרשום תשלום אחר כך. | the group walk and its summary |
+| `batchPaid` | כל החשבונות יירשמו כ״שולם הכול״ במזומן. | the group walk and its summary |
+| `batchConfirm` | אישור סגירה לכל הרשימה | the group walk and its summary |
+| `batchRunning` | סוגר | the group walk and its summary |
+| `batchNone` | אין ברשימה חשבון שאפשר לסגור. | the group walk and its summary |
+| `retry` | נסה שוב לנכשלים | the group walk and its summary |
+| `openRow` | פתח ועדכן | the group walk and its summary |
+| `historySearch` | חיפוש לפי שם | history, the statement, corrections |
+| `statusAll` | כל המצבים | history, the statement, corrections |
+| `statusFilter` | מצב התשלום | history, the statement, corrections |
+| `dateFilters` | סינון לפי תאריכים | history, the statement, corrections |
+| `closedFrom` | נסגר מתאריך | history, the statement, corrections |
+| `closedTo` | נסגר עד תאריך | history, the statement, corrections |
+| `periodFrom` | תקופת עבודה מתאריך | history, the statement, corrections |
+| `periodTo` | תקופת עבודה עד תאריך | history, the statement, corrections |
+| `historyEmpty` | לא נמצאו סגירות. | history, the statement, corrections |
+| `closedOn` | נסגר ב־ | history, the statement, corrections |
+| `deducted` | קוזז | history, the statement, corrections |
+| `leftThen` | נשאר במקדמה אחרי הסגירה | history, the statement, corrections |
+| `leftNow` | נשאר היום | history, the statement, corrections |
+| `payments` | תשלומים | history, the statement, corrections |
+| `noPayments` | לא נרשם תשלום. | history, the statement, corrections |
+| `corrections` | תיקונים | history, the statement, corrections |
+| `voided` | בוטל | history, the statement, corrections |
+| `voidAction` | ביטול רישום | history, the statement, corrections |
+| `voidReason` | סיבת הביטול | history, the statement, corrections |
+| `adjustAction` | תיקון לסגירה | history, the statement, corrections |
+| `adjustAdd` | להוסיף לעובד | history, the statement, corrections |
+| `adjustSub` | להפחית | history, the statement, corrections |
+| `adjustAmount` | סכום התיקון | history, the statement, corrections |
+| `adjustReason` | סיבת התיקון | history, the statement, corrections |
+| `correctionLead` | תיקון הוא רישום חדש שנשאר ליד המקורי. שום דבר לא נמחק. | history, the statement, corrections |
+| `saveCorrection` | רשום תיקון | history, the statement, corrections |
+| `correctionDone` | התיקון נרשם. | history, the statement, corrections |
+| `detailAbsent` | הפירוט המלא של הסגירה הזאת עדיין לא במכשיר הזה. הסכומים נכונים; הפירוט יופיע כשיהיה חיבור. | history, the statement, corrections |
+| `owed` | מגיע לעובד | history, the statement, corrections |
+| `paidSoFar` | שולם עד היום | history, the statement, corrections |
+| `legacyUnknown` | נסגר לפני שנרשמו תשלומים - לא ידוע אם שולם | history, the statement, corrections |
+| `openingLead` | מהיום שתבחר, כל סגירת חשבון ותשלום נרשמים כאן. מה שנסגר לפני כן לא משתנה. | first run and the older closures |
+| `openingDay` | יום תחילת המעקב | first run and the older closures |
+| `openingConfirm` | התחל מעקב | first run and the older closures |
+| `openingDone` | המעקב התחיל. | first run and the older closures |
+| `legacyEntry` | סגירות ישנות לבדיקה | first run and the older closures |
+| `legacyTitle` | סגירות ישנות - האם שולם? | first run and the older closures |
+| `legacyLead` | סגירות שנעשו לפני שנרשמו תשלומים. ענה מתי שנוח - זה לא עוצר שום דבר. | first run and the older closures |
+| `legacyPaid` | שולם | first run and the older closures |
+| `legacyDue` | נשאר חוב | first run and the older closures |
+| `legacyLeave` | לא ידוע | first run and the older closures |
+| `legacyDueAmount` | כמה נשאר לשלם? | first run and the older closures |
+| `legacySave` | רשום | first run and the older closures |
+| `legacyDone` | התשובה נרשמה. | first run and the older closures |
+| `legacyEmpty` | אין סגירות ישנות לבדיקה. | first run and the older closures |
+
+#### Proposed: one sentence per refusal code (47)
+
+`closed` and `statement` share a sentence, as do `amount` and `delta`.
+
+| code | sentence |
+|---|---|
+| `worker` | העובד לא נמצא ברשימה. |
+| `stamp` | השעון או זיהוי המכשיר חסרים. פתח את האפליקציה מחדש. |
+| `gate` | רישום סגירות חשבון לא פעיל במכשיר הזה. |
+| `carry-approval-needed` | כדי לקזז רק חלק ממקדמה צריך לאשר פעם אחת שיתרת מקדמה עוברת לחשבון הבא. |
+| `permission` | למשתמש הזה אין הרשאה לסגור חשבונות. |
+| `inactive` | עוד לא נקבע יום תחילת המעקב. קבע אותו בעמוד החשבונות. |
+| `before-tracking` | התקופה הזאת לפני יום תחילת המעקב. |
+| `period` | התקופה אינה תקופת התשלום של העובד הזה. |
+| `closed` | החשבון כבר נסגר. |
+| `overlap` | התקופה חופפת לתקופה שכבר נסגרה לעובד הזה. |
+| `statement` | החשבון כבר נסגר. |
+| `conflict` | שני טלפונים רשמו סכומים שונים לעובד הזה. צריך לבדוק לפני שממשיכים. |
+| `early` | אי אפשר לסגור לפני היום האחרון של התקופה. |
+| `unpriced` | יש יום עבודה בלי תעריף. קבע תעריף לעובד ואז סגור. |
+| `overpaid` | יש עודף בהחזרי המקדמות של העובד הזה. תקן קודם, ואז סגור. |
+| `allocation` | הסכום אינו תקין. הכנס מספר, גם 0 אפשרי. |
+| `allocation-missing` | לא נבחר סכום למקדמה הזאת. הכנס סכום, גם 0 אפשרי. |
+| `over-advance` | אי אפשר לקזז יותר ממה שנשאר במקדמה. |
+| `over-wage` | הניכויים גבוהים מהשכר של התקופה. |
+| `deduction` | אי אפשר לקזז את הסכום הזה מהתקופה הזאת. |
+| `clock` | השעון של הטלפון הזה מפגר אחרי תנועה שכבר רשומה בחשבון. תקן את השעון ונסה שוב. |
+| `extra` | בניכוי נוסף חסר סכום או סיבה. |
+| `paid` | סכום התשלום אינו תקין. |
+| `overpay` | אי אפשר לרשום תשלום גבוה מהסכום לתשלום. |
+| `unpaid` | צריך לרשום תשלום כדי לסגור. |
+| `note` | ההערה ארוכה מדי. |
+| `unsafe-id` | מזהה העובד אינו תקין. אי אפשר לרשום לו סגירה. |
+| `rejected` | הרישום לא עבר בדיקה פנימית. לא נרשם דבר. |
+| `target` | הרישום לא נמצא, או שכבר אין בו יתרה. |
+| `payment-id` | הטופס נפתח לא נכון. סגור ופתח אותו שוב. |
+| `amount` | הכנס סכום גדול מ־0. |
+| `date` | התאריך אינו תקין, או שעוד לא הגיע. |
+| `method` | בחר מזומן או העברה. |
+| `reason` | חובה לכתוב סיבה. |
+| `over-target` | אי אפשר לבטל יותר מהסכום שנרשם. |
+| `voided` | הרישום הזה כבר בוטל. |
+| `delta` | הכנס סכום גדול מ־0. |
+| `below-zero` | התיקון יוריד את הסכום מתחת למה שכבר שולם. |
+| `opened` | יום תחילת המעקב כבר נקבע. |
+| `state` | בחר תשובה. |
+| `due` | הסכום אינו תקין, או גבוה מהנטו של אותה סגירה. |
+| `answered` | כבר נרשמה תשובה לסגירה הזאת. |
+| `cycle` | העובד אינו במחזור הזה. |
+| `twice` | העובד נבחר פעמיים. |
+| `stale` | החשבון השתנה בזמן האישור. לא נשמר דבר. בדוק את הסכומים ואשר שוב. |
+| `done` | כבר נרשם |
+| `server-first` | רישום כזה נעשה רק מול השרת. |
+
+In all: **202 proposed strings** (155 + 47), beside the owner's fourteen.
 
 ## Phase 3 — one debt, the server-first closure, and the split (v175)
 
@@ -1100,6 +1484,28 @@ Every other string is **proposed** and needs his word before it is pinned (iron 
 defaults 1 to 8, and items 9, 10 (the debt stays; built behind the gate), 11 (the carry:
 never silently locked - `carry-approval-needed`), 17, 20, 21. What follows is the list as
 it stood, kept for the items that are still open: 12 to 16, 18, 19 and 22 to 25.
+
+**New, from Phase 4** - each answerable in one line; what is built is said:
+
+33. The tab's label stays «מקדמות» while its page is «חשבונות עובדים» (built). Rename the
+    tab? Recommended: keep it until he has used the screens.
+34. At a closure the payment starts at «עוד לא שולם» and he taps «שולם הכול» (built): the
+    app never assumes money was handed over. Recommended: keep.
+35. No "are you sure?" before «אישור סגירה» (built): the review page is the confirmation.
+    Recommended: keep - a closure is corrected by a linked record.
+36. The list puts the men who need him first (built) instead of the roster's order.
+    Recommended: keep; the alternative is one line.
+37. Each advance field is pre-filled with all of it, oldest first, up to the wage (built).
+    The alternative is blank fields he must fill. Recommended: keep.
+38. A prepared batch closes as «עוד לא שולם» unless he switches the whole batch to «שולם
+    הכול», which records cash for every man (built). Recommended: keep the switch.
+39. The payment made at the closing is dated today (built); another day is a later
+    payment. Recommended: keep.
+40. «לא ידוע» on an older closure writes nothing and is asked again after a reload
+    (built). Recommended: keep - "unknown" is not an answer to store.
+41. While the pay book is open the advances page's «סידור» is not reachable (built).
+    Recommended: accept; the accounts list has its own order.
+42. Every proposed string in [Hebrew in Phase 4](#hebrew-in-phase-4).
 
 **New, from Phase 3** - each answerable in one line; the default built or recommended is
 said:

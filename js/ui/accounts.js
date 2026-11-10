@@ -65,8 +65,8 @@ const ACC_TEXT = Object.freeze({
     statusReview: 'לבדיקה',
     statusNone: 'אין חשבון פתוח',
     statusUnknown: 'לא ידוע אם שולם',
+    inactiveMark: 'כבוי',
     unpriced: 'חסר תעריף - אי אפשר לחשב שכר',
-    openWage: 'שכר התקופה הפתוחה',
     // the review page
     workDays: 'ימי עבודה',
     regularDays: 'ימים רגילים',
@@ -752,7 +752,7 @@ function accRow(row) {
     card.dataset.rank = String(accRank(row));
 
     const head = el('div', 'acc-row-head');
-    head.appendChild(el('strong', 'acc-name', isolate(row.name) + (row.active ? '' : ' · כבוי')));
+    head.appendChild(el('strong', 'acc-name', isolate(row.name) + (row.active ? '' : ` · ${ACC_TEXT.inactiveMark}`)));
     head.appendChild(accCycleMark(row.cycle));
     head.appendChild(accChip(row.status));
     card.appendChild(head);
